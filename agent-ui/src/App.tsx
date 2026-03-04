@@ -1,8 +1,10 @@
 import {
+  createContext,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useContext,
   type FC,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -17,6 +19,7 @@ import {
   useLocalRuntime,
   unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
   type ChatModelAdapter,
+  type EmptyMessagePartProps,
   type ThreadMessage
 } from "@assistant-ui/react";
 import {
@@ -161,8 +164,11 @@ type TimelineRow = {
   at?: string;
 };
 
+const DEFAULT_MODEL = "gpt-5.3-codex";
+const DEFAULT_WORKSPACE = ".";
+
 const MODEL_OPTIONS = [
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex（推荐）" },
+  { value: DEFAULT_MODEL, label: "GPT-5.3 Codex（推荐）" },
   { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
   { value: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
   { value: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
@@ -198,6 +204,9 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
 ];
 
 const DEFAULT_CONTEXT_LIMIT_TOKENS = 262_144;
+const DEFAULT_RUNNING_STAGE_TEXT = "正在等待模型响应";
+const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
+
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gpt-5.3-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
   "gpt-5.2-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
@@ -212,14 +221,6 @@ const AssistantMarkdownText = makeMarkdownText();
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
-}
-
-function normalizeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value ?? null);
-  } catch {
-    return String(value);
-  }
 }
 
 function shorten(text: string, max = 1000): string {
@@ -497,6 +498,16 @@ function buildCodexRunConfig(cfg: AppliedConfig): Record<string, unknown> {
   return runConfig;
 }
 
+function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
+  const model = cfg.model.trim() || DEFAULT_MODEL;
+  const workspace = cfg.workspace.trim() || DEFAULT_WORKSPACE;
+  return {
+    ...cfg,
+    model,
+    workspace
+  };
+}
+
 function formatProcessStatus(status: string | undefined): string {
   if (!status) return "";
   if (status === "in_progress") return "进行中";
@@ -557,6 +568,52 @@ function formatCompactTokens(tokens: number): string {
     return `${inK.toFixed(inK < 10 ? 1 : 0).replace(/\.0$/, "")}k`;
   }
   return String(tokens);
+}
+
+function ellipsizeSingleLine(value: string, max = 32): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max)}...`;
+}
+
+function stageTextForCodexItem(
+  itemType: string,
+  lifecycle: "started" | "completed",
+  item: Record<string, unknown> | null
+): string {
+  if (lifecycle === "started") {
+    if (itemType === "reasoning") return "正在思考解决方案";
+    if (itemType === "command_execution") {
+      const command = typeof item?.command === "string" ? ellipsizeSingleLine(item.command, 28) : "";
+      return command ? `正在执行命令：${command}` : "正在执行命令";
+    }
+    if (itemType === "mcp_tool_call") {
+      const server = typeof item?.server === "string" ? item.server.trim() : "";
+      const tool = typeof item?.tool === "string" ? item.tool.trim() : "";
+      const toolName = [server, tool].filter(Boolean).join(".");
+      return toolName ? `正在调用工具：${ellipsizeSingleLine(toolName, 30)}` : "正在调用工具";
+    }
+    if (itemType === "web_search") {
+      const query = typeof item?.query === "string" ? ellipsizeSingleLine(item.query, 20) : "";
+      return query ? `正在检索资料：${query}` : "正在检索资料";
+    }
+    if (itemType === "todo_list") return "正在更新执行计划";
+    if (itemType === "file_change") return "正在写入文件变更";
+    if (itemType === "agent_message") return "正在生成回复";
+    if (itemType === "error") return "正在处理异常信息";
+    return "正在执行步骤";
+  }
+
+  if (itemType === "reasoning") return "思考完成，继续处理中";
+  if (itemType === "command_execution") return "命令执行完成";
+  if (itemType === "mcp_tool_call") return "工具调用完成";
+  if (itemType === "web_search") return "检索完成，整理结果";
+  if (itemType === "todo_list") return "执行计划已更新";
+  if (itemType === "file_change") return "文件变更已写入";
+  if (itemType === "agent_message") return "正在生成回复";
+  if (itemType === "error") return "检测到执行错误";
+  return "步骤完成，继续处理中";
 }
 
 function messageTextForTitle(messages: readonly ThreadMessage[]): string {
@@ -842,6 +899,30 @@ const SourcePart: FC<any> = ({ url, title }) => {
 
 const HiddenToolFallback: FC<any> = () => null;
 
+const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
+  const runningStageText = useContext(RunningStageTextContext);
+  if (status.type !== "running") return null;
+
+  return (
+    <div
+      className="assistant-running-card"
+      role="status"
+      aria-live="polite"
+      aria-label={`助手正在处理中：${runningStageText}`}
+    >
+      <div className="assistant-running-head">
+        <span className="assistant-running-spinner" aria-hidden="true" />
+        <span className="assistant-running-title">正在处理请求</span>
+        <span className="assistant-running-chip">实时</span>
+      </div>
+      <p className="assistant-running-phase">{runningStageText}</p>
+      <div className="assistant-running-track" aria-hidden="true">
+        <span className="assistant-running-track-bar" />
+      </div>
+    </div>
+  );
+};
+
 const ProcessDataFallback: FC<any> = ({
   name,
   data
@@ -1021,6 +1102,7 @@ const AgentAssistantMessage: FC = () => {
       <AssistantMessage.Content
         components={{
           Text: AssistantMarkdownText,
+          Empty: RunningMessagePlaceholder as any,
           Reasoning: ReasoningPart as any,
           Source: SourcePart as any,
           data: { Fallback: ProcessDataFallback as any }
@@ -1298,8 +1380,8 @@ const AgentRuntimeAdapterProvider: FC<
 
 export default function App() {
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
-    workspace: ".",
-    model: "gpt-5.3-codex",
+    workspace: DEFAULT_WORKSPACE,
+    model: DEFAULT_MODEL,
     reasoningEffort: "high",
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
@@ -1308,18 +1390,9 @@ export default function App() {
     additionalDirectoriesRaw: ""
   });
 
-  const [draftWorkspace, setDraftWorkspace] = useState(appliedConfig.workspace);
-  const [draftModel, setDraftModel] = useState(appliedConfig.model);
-  const [draftReasoning, setDraftReasoning] = useState<ReasoningEffort>(appliedConfig.reasoningEffort);
-  const [draftSandboxMode, setDraftSandboxMode] = useState<SandboxMode>(appliedConfig.sandboxMode);
-  const [draftApprovalPolicy, setDraftApprovalPolicy] = useState<ApprovalPolicy>(appliedConfig.approvalPolicy);
-  const [draftNetworkAccessEnabled, setDraftNetworkAccessEnabled] = useState(appliedConfig.networkAccessEnabled);
-  const [draftWebSearchMode, setDraftWebSearchMode] = useState<WebSearchMode>(appliedConfig.webSearchMode);
-  const [draftAdditionalDirectoriesRaw, setDraftAdditionalDirectoriesRaw] = useState(appliedConfig.additionalDirectoriesRaw);
-
   const [statusText, setStatusText] = useState("就绪");
+  const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [errorText, setErrorText] = useState("");
-  const [applyingConfig, setApplyingConfig] = useState(false);
   const [showProcessTrace, setShowProcessTrace] = useState(true);
   const [showSessionDebug, setShowSessionDebug] = useState(false);
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
@@ -1341,6 +1414,7 @@ export default function App() {
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
+  const runningStageTextRef = useRef(runningStageText);
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1348,53 +1422,17 @@ export default function App() {
   showProcessTraceRef.current = showProcessTrace;
   showSessionDebugRef.current = showSessionDebug;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
+  runningStageTextRef.current = runningStageText;
 
-  const draftDirty = useMemo(() => {
-    const draftNormalized = normalizeJson({
-      workspace: draftWorkspace.trim(),
-      model: draftModel.trim(),
-      reasoning: draftReasoning,
-      sandboxMode: draftSandboxMode,
-      approvalPolicy: draftApprovalPolicy,
-      networkAccessEnabled: draftNetworkAccessEnabled,
-      webSearchMode: draftWebSearchMode,
-      additionalDirectoriesRaw: draftAdditionalDirectoriesRaw.trim()
-    });
-
-    const appliedNormalized = normalizeJson({
-      workspace: appliedConfig.workspace,
-      model: appliedConfig.model,
-      reasoning: appliedConfig.reasoningEffort,
-      sandboxMode: appliedConfig.sandboxMode,
-      approvalPolicy: appliedConfig.approvalPolicy,
-      networkAccessEnabled: appliedConfig.networkAccessEnabled,
-      webSearchMode: appliedConfig.webSearchMode,
-      additionalDirectoriesRaw: appliedConfig.additionalDirectoriesRaw.trim()
-    });
-
-    return draftNormalized !== appliedNormalized;
-  }, [
-    appliedConfig.additionalDirectoriesRaw,
-    appliedConfig.approvalPolicy,
-    appliedConfig.model,
-    appliedConfig.networkAccessEnabled,
-    appliedConfig.reasoningEffort,
-    appliedConfig.sandboxMode,
-    appliedConfig.webSearchMode,
-    appliedConfig.workspace,
-    draftAdditionalDirectoriesRaw,
-    draftApprovalPolicy,
-    draftModel,
-    draftNetworkAccessEnabled,
-    draftReasoning,
-    draftSandboxMode,
-    draftWebSearchMode,
-    draftWorkspace
-  ]);
+  const updateRunningStage = (next: string) => {
+    if (!next || runningStageTextRef.current === next) return;
+    runningStageTextRef.current = next;
+    setRunningStageText(next);
+  };
 
   const additionalDirectoriesList = useMemo(
-    () => parseDirectories(draftAdditionalDirectoriesRaw) || [],
-    [draftAdditionalDirectoriesRaw]
+    () => parseDirectories(appliedConfig.additionalDirectoriesRaw) || [],
+    [appliedConfig.additionalDirectoriesRaw]
   );
 
   const contextUsageView = useMemo(() => {
@@ -1408,7 +1446,8 @@ export default function App() {
       };
     }
 
-    const usedTokens = contextUsage.inputTokens + contextUsage.cachedInputTokens;
+    const nonCachedInputTokens = Math.max(0, contextUsage.inputTokens - contextUsage.cachedInputTokens);
+    const usedTokens = nonCachedInputTokens;
     const safeLimit = Math.max(1, contextUsage.contextLimit);
     const usedPercent = Math.min(100, Math.max(0, Math.round((usedTokens / safeLimit) * 100)));
     const leftPercent = Math.max(0, 100 - usedPercent);
@@ -1469,9 +1508,9 @@ export default function App() {
   const openDirectoryPicker = (target: DirectoryPickerTarget) => {
     setPickerTarget(target);
     setPickerOpen(true);
-    const firstAdditional = parseDirectories(draftAdditionalDirectoriesRaw)?.[0];
+    const firstAdditional = parseDirectories(appliedConfig.additionalDirectoriesRaw)?.[0];
     const initialPath =
-      target === "workspace" ? draftWorkspace.trim() : (firstAdditional || draftWorkspace).trim();
+      target === "workspace" ? appliedConfig.workspace.trim() : (firstAdditional || appliedConfig.workspace).trim();
     setPickerPathInput(initialPath);
     cancelPickerAutoJump();
     void loadDirectoryTree(initialPath || undefined, { syncInput: true });
@@ -1525,21 +1564,27 @@ export default function App() {
     const normalized = selectedPath.trim();
     if (!normalized) return;
     if (pickerTarget === "workspace") {
-      setDraftWorkspace(normalized);
+      setAppliedConfig((prev) => ({ ...prev, workspace: normalized }));
       setPickerOpen(false);
       return;
     }
-    setDraftAdditionalDirectoriesRaw((prev) => {
-      const list = parseDirectories(prev) || [];
-      return formatDirectories([...list, normalized]);
+    setAppliedConfig((prev) => {
+      const list = parseDirectories(prev.additionalDirectoriesRaw) || [];
+      return {
+        ...prev,
+        additionalDirectoriesRaw: formatDirectories([...list, normalized])
+      };
     });
     setStatusText(`已添加附加目录：${normalized}`);
   };
 
   const removeAdditionalDirectory = (pathToRemove: string) => {
-    setDraftAdditionalDirectoriesRaw((prev) => {
-      const list = parseDirectories(prev) || [];
-      return formatDirectories(list.filter((item) => item !== pathToRemove));
+    setAppliedConfig((prev) => {
+      const list = parseDirectories(prev.additionalDirectoriesRaw) || [];
+      return {
+        ...prev,
+        additionalDirectoriesRaw: formatDirectories(list.filter((item) => item !== pathToRemove))
+      };
     });
   };
 
@@ -1557,7 +1602,7 @@ export default function App() {
         };
       },
       async initialize(threadId: string) {
-        const cfg = appliedConfigRef.current;
+        const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const created = await api<ThreadCreateOut>("/api/threads", {
           method: "POST",
           json: {
@@ -1680,7 +1725,7 @@ export default function App() {
           throw new Error("无法识别当前线程 ID（请先创建或切换会话后重试）");
         }
 
-        const cfg = appliedConfigRef.current;
+        const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
           method: "POST",
           json: {
@@ -1694,6 +1739,7 @@ export default function App() {
 
         setErrorText("");
         setStatusText("生成中...");
+        updateRunningStage("请求已提交，等待模型响应");
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -1801,6 +1847,7 @@ export default function App() {
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "请求失败";
               setErrorText(detail);
+              updateRunningStage("执行失败");
               if (processEnabled) {
                 updates.push({
                   type: "data",
@@ -1826,6 +1873,7 @@ export default function App() {
             if (event === "done") {
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
+              updateRunningStage("回复生成完成");
               if (!hasTextUpdate && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
               }
@@ -1854,6 +1902,7 @@ export default function App() {
             }
 
             if (event === "meta") {
+              updateRunningStage("会话已建立，开始执行");
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
@@ -1919,6 +1968,9 @@ export default function App() {
 
             const isStarted = eventType === "item.started";
             const isCompleted = eventType === "item.completed";
+            if (itemType && (isStarted || isCompleted)) {
+              updateRunningStage(stageTextForCodexItem(itemType, isStarted ? "started" : "completed", item));
+            }
 
             if (itemType === "reasoning" && isCompleted && processEnabled) {
               const reasoningText =
@@ -2159,6 +2211,7 @@ export default function App() {
           }
         } finally {
           setStatusText("就绪");
+          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT);
         }
       }
     }),
@@ -2172,39 +2225,10 @@ export default function App() {
     }
   });
 
-  const applyConfig = async () => {
-    setApplyingConfig(true);
-    setErrorText("");
-
-    try {
-      const model = draftModel.trim();
-      const workspace = draftWorkspace.trim();
-      if (!model) throw new Error("模型不能为空");
-      if (!workspace) throw new Error("工作目录不能为空");
-
-      const nextApplied: AppliedConfig = {
-        model,
-        workspace,
-        reasoningEffort: draftReasoning,
-        sandboxMode: draftSandboxMode,
-        approvalPolicy: draftApprovalPolicy,
-        networkAccessEnabled: draftNetworkAccessEnabled,
-        webSearchMode: draftWebSearchMode,
-        additionalDirectoriesRaw: draftAdditionalDirectoriesRaw.trim()
-      };
-      setAppliedConfig(nextApplied);
-      setStatusText("配置已应用（下一轮自动生效）");
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "应用配置失败";
-      setErrorText(detail);
-    } finally {
-      setApplyingConfig(false);
-    }
-  };
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="agent-shell two-col">
+      <RunningStageTextContext.Provider value={runningStageText}>
+        <div className="agent-shell two-col">
         <aside className="agent-sidebar">
           <div className="sidebar-header">
             <h1>Agent Studio</h1>
@@ -2228,16 +2252,17 @@ export default function App() {
           <section className="panel">
             <div className="panel-title-row">
               <h2>运行配置</h2>
-              <button type="button" className="apply-btn" onClick={applyConfig} disabled={!draftDirty || applyingConfig}>
-                {applyingConfig ? "应用中..." : "应用配置"}
-              </button>
             </div>
 
             <div className="section-title">基础配置</div>
 
             <label className="field">
               <span className="field-label">模型</span>
-              <select className="field-input" value={draftModel} onChange={(e) => setDraftModel(e.target.value)}>
+              <select
+                className="field-input"
+                value={appliedConfig.model}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, model: e.target.value }))}
+              >
                 {MODEL_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
@@ -2249,7 +2274,11 @@ export default function App() {
 
             <label className="field">
               <span className="field-label">思考深度</span>
-              <select className="field-input" value={draftReasoning} onChange={(e) => setDraftReasoning(e.target.value as ReasoningEffort)}>
+              <select
+                className="field-input"
+                value={appliedConfig.reasoningEffort}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, reasoningEffort: e.target.value as ReasoningEffort }))}
+              >
                 {REASONING_OPTIONS.map((level) => (
                   <option key={level.value} value={level.value}>
                     {level.label}
@@ -2264,8 +2293,14 @@ export default function App() {
               <div className="field-path-row">
                 <input
                   className="field-input"
-                  value={draftWorkspace}
-                  onChange={(e) => setDraftWorkspace(e.target.value)}
+                  value={appliedConfig.workspace}
+                  onChange={(e) => setAppliedConfig((prev) => ({ ...prev, workspace: e.target.value }))}
+                  onBlur={(e) =>
+                    setAppliedConfig((prev) => ({
+                      ...prev,
+                      workspace: e.target.value.trim() || DEFAULT_WORKSPACE
+                    }))
+                  }
                   placeholder="例如 . 或 /data/kb"
                 />
                 <button
@@ -2315,7 +2350,11 @@ export default function App() {
 
             <label className="field">
               <span className="field-label">沙箱模式</span>
-              <select className="field-input" value={draftSandboxMode} onChange={(e) => setDraftSandboxMode(e.target.value as SandboxMode)}>
+              <select
+                className="field-input"
+                value={appliedConfig.sandboxMode}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, sandboxMode: e.target.value as SandboxMode }))}
+              >
                 {SANDBOX_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
@@ -2327,7 +2366,11 @@ export default function App() {
 
             <label className="field">
               <span className="field-label">审批策略</span>
-              <select className="field-input" value={draftApprovalPolicy} onChange={(e) => setDraftApprovalPolicy(e.target.value as ApprovalPolicy)}>
+              <select
+                className="field-input"
+                value={appliedConfig.approvalPolicy}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, approvalPolicy: e.target.value as ApprovalPolicy }))}
+              >
                 {APPROVAL_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
@@ -2339,7 +2382,11 @@ export default function App() {
 
             <label className="field">
               <span className="field-label">Web 搜索</span>
-              <select className="field-input" value={draftWebSearchMode} onChange={(e) => setDraftWebSearchMode(e.target.value as WebSearchMode)}>
+              <select
+                className="field-input"
+                value={appliedConfig.webSearchMode}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, webSearchMode: e.target.value as WebSearchMode }))}
+              >
                 {WEB_SEARCH_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
@@ -2353,8 +2400,8 @@ export default function App() {
               <span className="field-label">允许网络访问</span>
               <input
                 type="checkbox"
-                checked={draftNetworkAccessEnabled}
-                onChange={(e) => setDraftNetworkAccessEnabled(e.target.checked)}
+                checked={appliedConfig.networkAccessEnabled}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, networkAccessEnabled: e.target.checked }))}
               />
               <span className="field-help">仅控制运行环境网络开关，不等同于 Web 搜索模式。</span>
             </label>
@@ -2363,8 +2410,8 @@ export default function App() {
               <span className="field-label">附加目录（可选）</span>
               <textarea
                 className="field-input textarea"
-                value={draftAdditionalDirectoriesRaw}
-                onChange={(e) => setDraftAdditionalDirectoriesRaw(e.target.value)}
+                value={appliedConfig.additionalDirectoriesRaw}
+                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, additionalDirectoriesRaw: e.target.value }))}
                 placeholder="每行一个目录，或逗号分隔"
               />
               <div className="field-actions-row">
@@ -2396,7 +2443,7 @@ export default function App() {
                 <strong>状态：</strong>
                 {statusText}
               </p>
-              {draftDirty ? <p className="warn-text">检测到未应用配置更改。</p> : null}
+              <p className="field-help">运行配置修改后将自动在下一轮对话生效。</p>
               {errorText ? <p className="err-text">{errorText}</p> : null}
             </div>
           </section>
@@ -2414,7 +2461,6 @@ export default function App() {
                   type="button"
                   className="context-usage-trigger"
                   aria-label={contextUsageView.ariaLabel}
-                  title={`${contextUsageView.summaryLine}\n${contextUsageView.detailLine}`}
                 >
                   <span className="context-usage-battery" aria-hidden="true">
                     <span className="context-usage-fill" style={{ width: `${contextUsageView.usedPercent}%` }} />
@@ -2466,10 +2512,10 @@ export default function App() {
             </ComposerPrimitive.AttachmentDropzone>
           </div>
         </main>
-      </div>
-      {pickerOpen ? (
-        <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
-          <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
+        </div>
+        {pickerOpen ? (
+          <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
+            <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
             <div className="dir-modal-head">
               <h3>{pickerTarget === "workspace" ? "选择工作目录" : "选择附加目录"}</h3>
               <button type="button" className="picker-btn" onClick={() => setPickerOpen(false)}>
@@ -2564,9 +2610,10 @@ export default function App() {
                 </ul>
               ) : null}
             </div>
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </RunningStageTextContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
