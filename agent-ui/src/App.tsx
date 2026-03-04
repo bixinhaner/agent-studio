@@ -1,0 +1,1884 @@
+import { useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren } from "react";
+import {
+  AssistantRuntimeProvider,
+  RuntimeAdapterProvider,
+  ThreadListItemPrimitive,
+  useAui,
+  useLocalRuntime,
+  unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
+  type ChatModelAdapter,
+  type ThreadMessage
+} from "@assistant-ui/react";
+import {
+  AssistantActionBar,
+  AssistantMessage,
+  BranchPicker,
+  Thread,
+  ThreadList,
+  makeMarkdownText
+} from "@assistant-ui/react-ui";
+import { ArchiveIcon, Trash2Icon } from "lucide-react";
+import { createAssistantStream, type AssistantStream } from "assistant-stream";
+import {
+  CompositeAttachmentAdapter,
+  SimpleImageAttachmentAdapter,
+  SimpleTextAttachmentAdapter,
+  type ExportedMessageRepository,
+  type ExportedMessageRepositoryItem,
+  type RemoteThreadListAdapter,
+  type ThreadHistoryAdapter
+} from "@assistant-ui/core";
+import { useAuiState } from "@assistant-ui/store";
+
+import { api, apiBase, authHeaders } from "./lib/api";
+import { iterateSSE } from "./lib/sse";
+
+type SessionOut = {
+  session_id: string;
+  model: string;
+  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  workspace: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ThreadOut = {
+  id: string;
+  status: "regular" | "archived";
+  title?: string;
+  external_id?: string;
+  model: string;
+  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  workspace: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ThreadListOut = {
+  threads: ThreadOut[];
+};
+
+type ThreadOneOut = {
+  thread: ThreadOut;
+};
+
+type ThreadCreateOut = {
+  thread: ThreadOut;
+  session?: SessionOut;
+};
+
+type ThreadSessionOut = {
+  session: SessionOut;
+};
+
+type ThreadMessagesOut = {
+  head_id?: string | null;
+  messages: Array<{
+    parent_id?: string | null;
+    message: unknown;
+    run_config?: Record<string, unknown>;
+  }>;
+};
+
+type SuggestionsOut = {
+  suggestions: Array<{ prompt: string }>;
+};
+
+type DirectoryBrowseOut = {
+  roots: string[];
+  cwd: string;
+  parent: string | null;
+  directories: Array<{
+    name: string;
+    path: string;
+  }>;
+};
+
+type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
+type WebSearchMode = "disabled" | "cached" | "live";
+type DirectoryPickerTarget = "workspace" | "additional";
+
+type AppliedConfig = {
+  workspace: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  sandboxMode: SandboxMode;
+  approvalPolicy: ApprovalPolicy;
+  networkAccessEnabled: boolean;
+  webSearchMode: WebSearchMode;
+  additionalDirectoriesRaw: string;
+};
+
+type ProcessData = {
+  kind: "debug" | "meta" | "process" | "done" | "error";
+  at: string;
+  title: string;
+  detail?: string;
+  event?: string;
+  item_type?: string;
+  status?: string;
+};
+
+type ThreadIdentity = {
+  remoteId?: string;
+  localId?: string;
+};
+
+type TimelineRow = {
+  id: string;
+  kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
+  title: string;
+  detail?: string;
+  at?: string;
+};
+
+const MODEL_OPTIONS = [
+  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex（推荐）" },
+  { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
+  { value: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
+  { value: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
+  { value: "gpt-5-codex", label: "GPT-5 Codex" },
+  { value: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini" }
+];
+
+const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: "minimal", label: "minimal（最快）" },
+  { value: "low", label: "low（偏快）" },
+  { value: "medium", label: "medium（均衡）" },
+  { value: "high", label: "high（更深入）" },
+  { value: "xhigh", label: "xhigh（最深入）" }
+];
+
+const SANDBOX_OPTIONS: Array<{ value: SandboxMode; label: string }> = [
+  { value: "workspace-write", label: "workspace-write（推荐：可读写工作区）" },
+  { value: "read-only", label: "read-only（只读）" },
+  { value: "danger-full-access", label: "danger-full-access（完全权限）" }
+];
+
+const APPROVAL_OPTIONS: Array<{ value: ApprovalPolicy; label: string }> = [
+  { value: "never", label: "never（不请求审批）" },
+  { value: "on-request", label: "on-request（按需审批）" },
+  { value: "on-failure", label: "on-failure（失败时审批）" },
+  { value: "untrusted", label: "untrusted（不可信操作审批）" }
+];
+
+const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
+  { value: "disabled", label: "disabled（关闭）" },
+  { value: "cached", label: "cached（缓存搜索）" },
+  { value: "live", label: "live（实时搜索）" }
+];
+
+const AssistantMarkdownText = makeMarkdownText();
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return String(value);
+  }
+}
+
+function shorten(text: string, max = 1000): string {
+  const normalized = text.trim();
+  if (!normalized) return "";
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max)}\n...（已截断）`;
+}
+
+function detailFromUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseDirectories(raw: string): string[] | undefined {
+  const items = raw
+    .split(/[\n,]/g)
+    .map((it) => it.trim())
+    .filter(Boolean);
+  return items.length ? Array.from(new Set(items)) : undefined;
+}
+
+function formatDirectories(items: string[]): string {
+  const normalized = items.map((it) => it.trim()).filter(Boolean);
+  return Array.from(new Set(normalized)).join("\n");
+}
+
+function buildCodexRunConfig(cfg: AppliedConfig): Record<string, unknown> {
+  const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
+  const runConfig: Record<string, unknown> = {
+    sandboxMode: cfg.sandboxMode,
+    approvalPolicy: cfg.approvalPolicy,
+    networkAccessEnabled: cfg.networkAccessEnabled,
+    webSearchMode: cfg.webSearchMode
+  };
+  if (additionalDirectories) {
+    runConfig.additionalDirectories = additionalDirectories;
+  }
+  return runConfig;
+}
+
+function formatProcessStatus(status: string | undefined): string {
+  if (!status) return "";
+  if (status === "in_progress") return "进行中";
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "失败";
+  return status;
+}
+
+function normalizeProcessTime(value: string | undefined): string {
+  if (!value) return "";
+  return value.replace("T", " ").replace("Z", "").slice(0, 19);
+}
+
+function timelineKindLabel(kind: TimelineRow["kind"]): string {
+  if (kind === "reasoning") return "思考";
+  if (kind === "tool") return "工具";
+  if (kind === "source") return "来源";
+  if (kind === "meta") return "准备";
+  if (kind === "done") return "完成";
+  if (kind === "error") return "错误";
+  if (kind === "debug") return "调试";
+  return "步骤";
+}
+
+function messageTextForTitle(messages: readonly ThreadMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || msg.role !== "user") continue;
+    const text = msg.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        if (part.type !== "text") return "";
+        return typeof part.text === "string" ? part.text : "";
+      })
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function guessThreadTitle(messages: readonly ThreadMessage[]): string {
+  const text = messageTextForTitle(messages).replace(/\s+/g, " ").trim();
+  if (!text) return "新对话";
+  return text.length <= 22 ? text : `${text.slice(0, 22)}...`;
+}
+
+function isLikelyHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function extractSources(value: unknown): Array<{ id: string; url: string; title?: string }> {
+  const results: Array<{ id: string; url: string; title?: string }> = [];
+  const seen = new Set<string>();
+
+  const push = (url: string, title?: string) => {
+    const normalized = url.trim();
+    if (!normalized || !isLikelyHttpUrl(normalized)) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    results.push({
+      id: `src-${results.length + 1}-${Math.random().toString(36).slice(2, 8)}`,
+      url: normalized,
+      title: title?.trim() || undefined
+    });
+  };
+
+  const walk = (input: unknown, depth = 0) => {
+    if (depth > 4 || results.length >= 8) return;
+    if (Array.isArray(input)) {
+      for (const item of input) walk(item, depth + 1);
+      return;
+    }
+    if (!input || typeof input !== "object") return;
+    const obj = input as Record<string, unknown>;
+    const url =
+      (typeof obj.url === "string" && obj.url) ||
+      (typeof obj.link === "string" && obj.link) ||
+      (typeof obj.href === "string" && obj.href) ||
+      "";
+    const title = typeof obj.title === "string" ? obj.title : typeof obj.name === "string" ? obj.name : undefined;
+    if (url) push(url, title);
+
+    for (const key of ["results", "sources", "items", "references", "data", "content", "value"]) {
+      if (key in obj) walk(obj[key], depth + 1);
+    }
+  };
+
+  walk(value);
+  return results;
+}
+
+function extractLatestPrompt(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== "object") continue;
+    const role = (msg as { role?: unknown }).role;
+    if (role !== "user") continue;
+    const content = (msg as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+
+    const textParts: string[] = [];
+    const imageNames: string[] = [];
+    const fileNames: string[] = [];
+
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const type = (part as { type?: unknown }).type;
+      if (type === "text") {
+        const text = (part as { text?: unknown }).text;
+        if (typeof text === "string" && text.trim()) textParts.push(text.trim());
+      } else if (type === "image") {
+        const name = (part as { filename?: unknown }).filename;
+        imageNames.push(typeof name === "string" && name.trim() ? name.trim() : "未命名图片");
+      } else if (type === "file") {
+        const name = (part as { filename?: unknown }).filename;
+        fileNames.push(typeof name === "string" && name.trim() ? name.trim() : "未命名文件");
+      }
+    }
+
+    const mainText = textParts.join("\n").trim();
+    const attachmentHints: string[] = [];
+    if (imageNames.length > 0) {
+      attachmentHints.push(`用户上传了图片：${imageNames.join("、")}`);
+    }
+    if (fileNames.length > 0) {
+      attachmentHints.push(`用户上传了文件：${fileNames.join("、")}`);
+    }
+    const combined = [mainText, attachmentHints.join("\n")].filter(Boolean).join("\n\n").trim();
+    if (combined) return combined;
+  }
+  return "";
+}
+
+function reviveMessage(message: unknown): unknown {
+  const obj = asRecord(message);
+  if (!obj) return message;
+
+  const role = typeof obj.role === "string" ? obj.role : "";
+  const revived: Record<string, unknown> = { ...obj };
+
+  if (typeof revived.createdAt === "string" || typeof revived.createdAt === "number") {
+    revived.createdAt = new Date(revived.createdAt);
+  } else if (!(revived.createdAt instanceof Date)) {
+    revived.createdAt = new Date();
+  }
+
+  if (!Array.isArray(revived.content)) {
+    if (typeof revived.content === "string" && revived.content.trim()) {
+      revived.content = [{ type: "text", text: revived.content }];
+    } else {
+      revived.content = [];
+    }
+  }
+
+  const metadata = asRecord(revived.metadata) || {};
+  const custom = asRecord(metadata.custom) || {};
+  const fixedMetadata: Record<string, unknown> = {
+    ...metadata,
+    custom
+  };
+
+  if (role === "assistant") {
+    if (!("unstable_state" in fixedMetadata)) fixedMetadata.unstable_state = {};
+    if (!Array.isArray(fixedMetadata.unstable_annotations)) fixedMetadata.unstable_annotations = [];
+    if (!Array.isArray(fixedMetadata.unstable_data)) fixedMetadata.unstable_data = [];
+    if (!Array.isArray(fixedMetadata.steps)) fixedMetadata.steps = [];
+
+    const status = asRecord(revived.status);
+    if (!status || typeof status.type !== "string") {
+      revived.status = { type: "complete", reason: "unknown" };
+    }
+  }
+
+  if (role === "user" && !Array.isArray(revived.attachments)) {
+    revived.attachments = [];
+  }
+
+  revived.metadata = fixedMetadata;
+  return revived;
+}
+
+function messageTextForSuggestions(message: ThreadMessage): string {
+  return message.content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      if (part.type === "text" && typeof part.text === "string") return part.text;
+      if (part.type === "reasoning" && typeof part.text === "string") return part.text;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+const ReasoningPart: FC<any> = ({ text }) => {
+  const value = typeof text === "string" ? text.trim() : "";
+  if (!value) return null;
+  return (
+    <details className="process-block process-reasoning" open={false}>
+      <summary>思考摘要</summary>
+      <pre>{value}</pre>
+    </details>
+  );
+};
+
+const SourcePart: FC<any> = ({ url, title }) => {
+  const link = typeof url === "string" ? url.trim() : "";
+  if (!link) return null;
+  const label = typeof title === "string" && title.trim() ? title.trim() : link;
+  return (
+    <p className="process-source">
+      <a href={link} target="_blank" rel="noreferrer">
+        来源：{label}
+      </a>
+    </p>
+  );
+};
+
+const HiddenToolFallback: FC<any> = () => null;
+
+const ProcessDataFallback: FC<any> = ({
+  name,
+  data
+}: {
+  name?: string;
+  data?: ProcessData | unknown;
+}) => {
+  if (name === "codex_trace_batch") {
+    const payload = asRecord(data) || {};
+    const batchId = typeof payload.batch_id === "number" ? payload.batch_id : 0;
+    const batchOpen = payload.open !== false;
+    const activeRowId =
+      typeof payload.active_row_id === "string" && payload.active_row_id.trim()
+        ? payload.active_row_id.trim()
+        : "";
+    const rowsInput = Array.isArray(payload.rows) ? payload.rows : [];
+    const rows: TimelineRow[] = rowsInput
+      .map((item, index) => {
+        const obj = asRecord(item);
+        if (!obj) return null;
+        const kindRaw = typeof obj.kind === "string" ? obj.kind : "process";
+        const kind = ["reasoning", "tool", "source", "meta", "process", "done", "error", "debug"].includes(kindRaw)
+          ? (kindRaw as TimelineRow["kind"])
+          : "process";
+        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "过程事件";
+        const detail = typeof obj.detail === "string" ? obj.detail.trim() : "";
+        const at = typeof obj.at === "string" ? normalizeProcessTime(obj.at) : "";
+        return {
+          id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : `trace-batch-${index + 1}`,
+          kind,
+          title,
+          detail: detail || undefined,
+          at: at || undefined
+        } satisfies TimelineRow;
+      })
+      .filter(Boolean) as TimelineRow[];
+
+    if (rows.length === 0) return null;
+
+    const reasoningCount = rows.filter((row) => row.kind === "reasoning").length;
+    const toolCount = rows.filter((row) => row.kind === "tool").length;
+    const stepCount = rows.filter((row) => row.kind !== "reasoning" && row.kind !== "tool").length;
+    const resolvedActiveId = activeRowId || rows[rows.length - 1]?.id || "";
+
+    return (
+      <details className="trace-panel trace-panel-inline" open={batchOpen}>
+        <summary className="trace-summary">{`过程轨迹 ${rows.length} 条（思考 ${reasoningCount} / 工具 ${toolCount} / 步骤 ${stepCount}）`}</summary>
+        <ol className="trace-timeline">
+          {rows.map((row, index) => {
+            const isActiveStep = row.id === resolvedActiveId || (!resolvedActiveId && index === rows.length - 1);
+            const rowKey = `${batchId}-${row.id}-${resolvedActiveId || "none"}`;
+            return (
+              <li key={rowKey} className="trace-line">
+                <span className={`trace-node trace-node-${row.kind} ${isActiveStep ? "trace-node-active" : ""}`} />
+                <details className={`trace-card trace-step ${isActiveStep ? "trace-step-active" : ""}`} open={isActiveStep}>
+                  <summary className="trace-card-head trace-step-summary">
+                    <span className={`trace-pill trace-pill-${row.kind}`}>{timelineKindLabel(row.kind)}</span>
+                    <span className="trace-item-title">{row.title}</span>
+                    {row.at ? <span className="trace-item-time">{row.at}</span> : null}
+                  </summary>
+                  {row.detail ? <pre className="trace-item-detail">{row.detail}</pre> : null}
+                </details>
+              </li>
+            );
+          })}
+        </ol>
+      </details>
+    );
+  }
+
+  if (name !== "codex_process") {
+    return (
+      <details className="process-block process-data" open={false}>
+        <summary>数据事件</summary>
+        <pre>{shorten(detailFromUnknown(data), 1200)}</pre>
+      </details>
+    );
+  }
+  const row = (data && typeof data === "object" ? data : {}) as ProcessData;
+  const title = typeof row.title === "string" ? row.title : "过程事件";
+  const detail = typeof row.detail === "string" ? row.detail : "";
+  const kind = typeof row.kind === "string" ? row.kind : "process";
+  const at = typeof row.at === "string" ? row.at.replace("T", " ").replace("Z", "").slice(0, 19) : "";
+  return (
+    <details className={`process-block process-data process-${kind}`} open={kind === "error"}>
+      <summary>{title}</summary>
+      {at ? <p className="process-time">{at}</p> : null}
+      {detail ? <pre>{shorten(detail, 1600)}</pre> : null}
+    </details>
+  );
+};
+
+function extractTimelineRows(content: unknown): TimelineRow[] {
+  if (!Array.isArray(content)) return [];
+  const rows: TimelineRow[] = [];
+  let seq = 0;
+
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    const type = typeof p.type === "string" ? p.type : "";
+
+    if (type === "text" || type === "image" || type === "file") continue;
+
+    if (type === "reasoning") {
+      const text = typeof p.text === "string" ? p.text.trim() : "";
+      if (!text) continue;
+      rows.push({
+        id: `timeline-${++seq}`,
+        kind: "reasoning",
+        title: "思考摘要",
+        detail: shorten(text, 1200)
+      });
+      continue;
+    }
+
+    if (type === "tool-call") {
+      const toolName = typeof p.toolName === "string" ? p.toolName : "unknown";
+      const argsText = typeof p.argsText === "string" ? p.argsText : detailFromUnknown(p.args);
+      const resultText = p.result === undefined ? "" : detailFromUnknown(p.result);
+      rows.push({
+        id: `timeline-${++seq}`,
+        kind: "tool",
+        title: `工具调用 · ${toolName}`,
+        detail: [shorten(argsText, 800), shorten(resultText, 1000)].filter(Boolean).join("\n\n")
+      });
+      continue;
+    }
+
+    if (type === "source") {
+      const url = typeof p.url === "string" ? p.url.trim() : "";
+      if (!url) continue;
+      const title = typeof p.title === "string" && p.title.trim() ? p.title.trim() : "来源链接";
+      rows.push({
+        id: `timeline-${++seq}`,
+        kind: "source",
+        title,
+        detail: url
+      });
+      continue;
+    }
+
+    if (type === "data" && p.name === "codex_process" && p.data && typeof p.data === "object") {
+      const data = p.data as Record<string, unknown>;
+      const kindRaw = typeof data.kind === "string" ? data.kind : "process";
+      const kind = ["meta", "process", "done", "error", "debug"].includes(kindRaw) ? (kindRaw as TimelineRow["kind"]) : "process";
+      const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "过程事件";
+      const detail = typeof data.detail === "string" ? data.detail.trim() : "";
+      const at = typeof data.at === "string" ? normalizeProcessTime(data.at) : "";
+      rows.push({
+        id: `timeline-${++seq}`,
+        kind,
+        title,
+        detail: detail ? shorten(detail, 1400) : undefined,
+        at
+      });
+      continue;
+    }
+
+    if (type === "data") {
+      rows.push({
+        id: `timeline-${++seq}`,
+        kind: "process",
+        title: "数据事件",
+        detail: shorten(detailFromUnknown(p), 1200)
+      });
+    }
+  }
+
+  return rows;
+}
+
+const AgentAssistantMessage: FC = () => {
+  return (
+    <AssistantMessage.Root>
+      <AssistantMessage.Avatar />
+      <AssistantMessage.Content
+        components={{
+          Text: AssistantMarkdownText,
+          Reasoning: ReasoningPart as any,
+          Source: SourcePart as any,
+          data: { Fallback: ProcessDataFallback as any }
+        }}
+      />
+      <BranchPicker />
+      <AssistantActionBar />
+    </AssistantMessage.Root>
+  );
+};
+
+const AgentThreadListItem: FC = () => {
+  return (
+    <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
+      <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
+        <p className="aui-thread-list-item-title">
+          <ThreadListItemPrimitive.Title fallback="新对话" />
+        </p>
+      </ThreadListItemPrimitive.Trigger>
+      <div className="agent-thread-item-actions">
+        <ThreadListItemPrimitive.Archive
+          className="thread-item-action-btn thread-item-archive-btn"
+          title="归档会话"
+          aria-label="归档会话"
+        >
+          <ArchiveIcon size={14} />
+        </ThreadListItemPrimitive.Archive>
+        <ThreadListItemPrimitive.Delete
+          className="thread-item-action-btn thread-item-delete-btn"
+          title="删除会话"
+          aria-label="删除会话"
+          onClick={(e) => {
+            const confirmed = window.confirm("确认永久删除该会话吗？该操作不可恢复。");
+            if (!confirmed) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+        >
+          <Trash2Icon size={14} />
+        </ThreadListItemPrimitive.Delete>
+      </div>
+    </ThreadListItemPrimitive.Root>
+  );
+};
+
+const AgentRuntimeAdapterProvider: FC<
+  PropsWithChildren<{
+    onThreadIdentityChange?: (identity: ThreadIdentity) => void;
+  }>
+> = ({ children, onThreadIdentityChange }) => {
+  const aui = useAui();
+  const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const activeLocalId = useAuiState((s) => s.threadListItem.id);
+
+  useEffect(() => {
+    onThreadIdentityChange?.({
+      remoteId: typeof activeRemoteId === "string" ? activeRemoteId : undefined,
+      localId: typeof activeLocalId === "string" ? activeLocalId : undefined
+    });
+  }, [activeLocalId, activeRemoteId, onThreadIdentityChange]);
+
+  const history = useMemo<ThreadHistoryAdapter>(
+    () => ({
+      async load() {
+        const remoteId = aui.threadListItem().getState().remoteId;
+        if (!remoteId) return { messages: [] };
+        const out = await api<ThreadMessagesOut>(`/api/threads/${encodeURIComponent(remoteId)}/messages`);
+        const repository: ExportedMessageRepository = {
+          headId: out.head_id ?? null,
+          messages: (out.messages || []).map((item) => ({
+            parentId: item.parent_id ?? null,
+            message: reviveMessage(item.message) as any,
+            ...(item.run_config ? { runConfig: item.run_config } : undefined)
+          }))
+        };
+        return repository;
+      },
+      async append(item: ExportedMessageRepositoryItem) {
+        const init = await aui.threadListItem().initialize();
+        const remoteId = init.remoteId;
+        await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
+          method: "POST",
+          json: {
+            parent_id: item.parentId ?? null,
+            message: item.message,
+            run_config: item.runConfig
+          }
+        });
+      }
+    }),
+    [aui]
+  );
+
+  const suggestion = useMemo(
+    () => ({
+      async generate({ messages }: { messages: readonly ThreadMessage[] }) {
+        const remoteId = aui.threadListItem().getState().remoteId;
+        if (!remoteId) return [];
+        const compact = messages.slice(-12).map((msg) => ({
+          role: msg.role,
+          text: messageTextForSuggestions(msg)
+        }));
+        const out = await api<SuggestionsOut>(`/api/threads/${encodeURIComponent(remoteId)}/suggestions`, {
+          method: "POST",
+          json: { messages: compact }
+        });
+        return (out.suggestions || []).map((it) => ({ prompt: it.prompt })).filter((it) => it.prompt.trim());
+      }
+    }),
+    [aui]
+  );
+
+  const feedback = useMemo(
+    () => ({
+      submit(payload: { message: ThreadMessage; type: "positive" | "negative" }) {
+        const remoteId = aui.threadListItem().getState().remoteId;
+        if (!remoteId) return;
+        const preview = messageTextForSuggestions(payload.message);
+        void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
+          method: "POST",
+          json: {
+            type: payload.type,
+            message_id: payload.message.id,
+            content_preview: preview
+          }
+        }).catch(() => {});
+      }
+    }),
+    [aui]
+  );
+
+  const attachments = useMemo(
+    () =>
+      new CompositeAttachmentAdapter([
+        new SimpleTextAttachmentAdapter(),
+        new SimpleImageAttachmentAdapter()
+      ]),
+    []
+  );
+
+  const adapters = useMemo(
+    () => ({
+      history,
+      suggestion,
+      feedback,
+      attachments
+    }),
+    [attachments, feedback, history, suggestion]
+  );
+
+  return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
+};
+
+export default function App() {
+  const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
+    workspace: ".",
+    model: "gpt-5.3-codex",
+    reasoningEffort: "high",
+    sandboxMode: "workspace-write",
+    approvalPolicy: "never",
+    networkAccessEnabled: true,
+    webSearchMode: "disabled",
+    additionalDirectoriesRaw: ""
+  });
+
+  const [draftWorkspace, setDraftWorkspace] = useState(appliedConfig.workspace);
+  const [draftModel, setDraftModel] = useState(appliedConfig.model);
+  const [draftReasoning, setDraftReasoning] = useState<ReasoningEffort>(appliedConfig.reasoningEffort);
+  const [draftSandboxMode, setDraftSandboxMode] = useState<SandboxMode>(appliedConfig.sandboxMode);
+  const [draftApprovalPolicy, setDraftApprovalPolicy] = useState<ApprovalPolicy>(appliedConfig.approvalPolicy);
+  const [draftNetworkAccessEnabled, setDraftNetworkAccessEnabled] = useState(appliedConfig.networkAccessEnabled);
+  const [draftWebSearchMode, setDraftWebSearchMode] = useState<WebSearchMode>(appliedConfig.webSearchMode);
+  const [draftAdditionalDirectoriesRaw, setDraftAdditionalDirectoriesRaw] = useState(appliedConfig.additionalDirectoriesRaw);
+
+  const [statusText, setStatusText] = useState("就绪");
+  const [errorText, setErrorText] = useState("");
+  const [applyingConfig, setApplyingConfig] = useState(false);
+  const [showProcessTrace, setShowProcessTrace] = useState(true);
+  const [showSessionDebug, setShowSessionDebug] = useState(false);
+  const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState("");
+  const [pickerRoots, setPickerRoots] = useState<string[]>([]);
+  const [pickerCwd, setPickerCwd] = useState("");
+  const [pickerParent, setPickerParent] = useState<string | null>(null);
+  const [pickerDirectories, setPickerDirectories] = useState<Array<{ name: string; path: string }>>([]);
+
+  const appliedConfigRef = useRef(appliedConfig);
+  const showProcessTraceRef = useRef(showProcessTrace);
+  const showSessionDebugRef = useRef(showSessionDebug);
+  const collapseFinalTraceOnDoneRef = useRef(collapseFinalTraceOnDone);
+  const activeRemoteThreadIdRef = useRef("");
+  const activeLocalThreadIdRef = useRef("");
+
+  appliedConfigRef.current = appliedConfig;
+  showProcessTraceRef.current = showProcessTrace;
+  showSessionDebugRef.current = showSessionDebug;
+  collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
+
+  const draftDirty = useMemo(() => {
+    const draftNormalized = normalizeJson({
+      workspace: draftWorkspace.trim(),
+      model: draftModel.trim(),
+      reasoning: draftReasoning,
+      sandboxMode: draftSandboxMode,
+      approvalPolicy: draftApprovalPolicy,
+      networkAccessEnabled: draftNetworkAccessEnabled,
+      webSearchMode: draftWebSearchMode,
+      additionalDirectoriesRaw: draftAdditionalDirectoriesRaw.trim()
+    });
+
+    const appliedNormalized = normalizeJson({
+      workspace: appliedConfig.workspace,
+      model: appliedConfig.model,
+      reasoning: appliedConfig.reasoningEffort,
+      sandboxMode: appliedConfig.sandboxMode,
+      approvalPolicy: appliedConfig.approvalPolicy,
+      networkAccessEnabled: appliedConfig.networkAccessEnabled,
+      webSearchMode: appliedConfig.webSearchMode,
+      additionalDirectoriesRaw: appliedConfig.additionalDirectoriesRaw.trim()
+    });
+
+    return draftNormalized !== appliedNormalized;
+  }, [
+    appliedConfig.additionalDirectoriesRaw,
+    appliedConfig.approvalPolicy,
+    appliedConfig.model,
+    appliedConfig.networkAccessEnabled,
+    appliedConfig.reasoningEffort,
+    appliedConfig.sandboxMode,
+    appliedConfig.webSearchMode,
+    appliedConfig.workspace,
+    draftAdditionalDirectoriesRaw,
+    draftApprovalPolicy,
+    draftModel,
+    draftNetworkAccessEnabled,
+    draftReasoning,
+    draftSandboxMode,
+    draftWebSearchMode,
+    draftWorkspace
+  ]);
+
+  const additionalDirectoriesList = useMemo(
+    () => parseDirectories(draftAdditionalDirectoriesRaw) || [],
+    [draftAdditionalDirectoriesRaw]
+  );
+
+  const loadDirectoryTree = async (candidatePath?: string) => {
+    setPickerLoading(true);
+    setPickerError("");
+    try {
+      const query = new URLSearchParams();
+      if (candidatePath && candidatePath.trim()) {
+        query.set("path", candidatePath.trim());
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      const out = await api<DirectoryBrowseOut>(`/api/fs/directories${suffix}`);
+      setPickerRoots(Array.isArray(out.roots) ? out.roots : []);
+      setPickerCwd(String(out.cwd || ""));
+      setPickerParent(typeof out.parent === "string" ? out.parent : null);
+      setPickerDirectories(Array.isArray(out.directories) ? out.directories : []);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "读取目录失败";
+      setPickerError(detail);
+      setPickerDirectories([]);
+    } finally {
+      setPickerLoading(false);
+    }
+  };
+
+  const openDirectoryPicker = (target: DirectoryPickerTarget) => {
+    setPickerTarget(target);
+    setPickerOpen(true);
+    const firstAdditional = parseDirectories(draftAdditionalDirectoriesRaw)?.[0];
+    const initialPath =
+      target === "workspace" ? draftWorkspace.trim() : (firstAdditional || draftWorkspace).trim();
+    void loadDirectoryTree(initialPath || undefined);
+  };
+
+  const selectDirectory = (selectedPath: string) => {
+    const normalized = selectedPath.trim();
+    if (!normalized) return;
+    if (pickerTarget === "workspace") {
+      setDraftWorkspace(normalized);
+      setPickerOpen(false);
+      return;
+    }
+    setDraftAdditionalDirectoriesRaw((prev) => {
+      const list = parseDirectories(prev) || [];
+      return formatDirectories([...list, normalized]);
+    });
+    setStatusText(`已添加附加目录：${normalized}`);
+  };
+
+  const removeAdditionalDirectory = (pathToRemove: string) => {
+    setDraftAdditionalDirectoriesRaw((prev) => {
+      const list = parseDirectories(prev) || [];
+      return formatDirectories(list.filter((item) => item !== pathToRemove));
+    });
+  };
+
+  const threadListAdapter = useMemo<RemoteThreadListAdapter>(
+    () => ({
+      async list() {
+        const out = await api<ThreadListOut>("/api/threads");
+        return {
+          threads: (out.threads || []).map((thread) => ({
+            status: thread.status,
+            remoteId: thread.id,
+            externalId: thread.external_id,
+            title: thread.title
+          }))
+        };
+      },
+      async initialize(threadId: string) {
+        const cfg = appliedConfigRef.current;
+        const created = await api<ThreadCreateOut>("/api/threads", {
+          method: "POST",
+          json: {
+            external_id: threadId,
+            model: cfg.model,
+            reasoning_effort: cfg.reasoningEffort,
+            workspace: cfg.workspace,
+            codex_run_config: buildCodexRunConfig(cfg)
+          }
+        });
+        return {
+          remoteId: created.thread.id,
+          externalId: created.thread.external_id
+        };
+      },
+      async rename(remoteId: string, newTitle: string) {
+        await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
+          method: "PATCH",
+          json: { title: newTitle }
+        });
+      },
+      async archive(remoteId: string) {
+        await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
+          method: "PATCH",
+          json: { status: "archived" }
+        });
+      },
+      async unarchive(remoteId: string) {
+        await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
+          method: "PATCH",
+          json: { status: "regular" }
+        });
+      },
+      async delete(remoteId: string) {
+        await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
+          method: "DELETE"
+        });
+      },
+      async fetch(threadId: string) {
+        const out = await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`);
+        return {
+          status: out.thread.status,
+          remoteId: out.thread.id,
+          externalId: out.thread.external_id,
+          title: out.thread.title
+        };
+      },
+      async generateTitle(remoteId: string, messages: readonly ThreadMessage[]): Promise<AssistantStream> {
+        const title = guessThreadTitle(messages);
+        if (title.trim()) {
+          await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
+            method: "PATCH",
+            json: { title }
+          });
+        }
+        return createAssistantStream((controller) => {
+          controller.appendText(title || "新对话");
+          controller.close();
+        });
+      },
+      unstable_Provider: ({ children }: PropsWithChildren) => (
+        <AgentRuntimeAdapterProvider
+          onThreadIdentityChange={({ remoteId, localId }) => {
+            activeRemoteThreadIdRef.current = String(remoteId || "").trim();
+            activeLocalThreadIdRef.current = String(localId || "").trim();
+          }}
+        >
+          {children}
+        </AgentRuntimeAdapterProvider>
+      )
+    }),
+    []
+  );
+
+  const chatAdapter = useMemo<ChatModelAdapter>(
+    () => ({
+      run: async function* (options) {
+        const prompt = extractLatestPrompt(options.messages);
+        if (!prompt) {
+          throw new Error("未识别到用户输入文本");
+        }
+
+        let threadId = String(options.unstable_threadId || "").trim();
+        if (!threadId) {
+          threadId = String(activeRemoteThreadIdRef.current || "").trim();
+        }
+        if (!threadId) {
+          const localId = String(activeLocalThreadIdRef.current || "").trim();
+          if (localId) {
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+              const out = await api<ThreadListOut>("/api/threads");
+              const byExternal =
+                (out.threads || []).find((t) => String(t.external_id || "").trim() === localId && t.status !== "archived") ||
+                (out.threads || []).find((t) => String(t.external_id || "").trim() === localId);
+              if (byExternal?.id) {
+                threadId = byExternal.id;
+                activeRemoteThreadIdRef.current = threadId;
+                break;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 80));
+            }
+          }
+        }
+        if (!threadId) {
+          throw new Error("无法识别当前线程 ID（请先创建或切换会话后重试）");
+        }
+
+        const cfg = appliedConfigRef.current;
+        const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
+          method: "POST",
+          json: {
+            model: cfg.model,
+            reasoning_effort: cfg.reasoningEffort,
+            workspace: cfg.workspace,
+            codex_run_config: buildCodexRunConfig(cfg)
+          }
+        });
+        const session = ensured.session;
+
+        setErrorText("");
+        setStatusText("生成中...");
+
+        let hasTextUpdate = false;
+        let doneAnswer = "";
+        const orderedParts: any[] = [];
+        let activeTextPart: { type: "text"; text: string } | null = null;
+        let traceBatchSeq = 0;
+        let seq = 0;
+
+        const processEnabled = showProcessTraceRef.current;
+        const sessionDebugEnabled = showSessionDebugRef.current;
+        const collapseFinalTraceOnDoneEnabled = collapseFinalTraceOnDoneRef.current;
+
+        const appendTextPart = (chunk: string): boolean => {
+          if (!chunk) return false;
+          if (!activeTextPart) {
+            activeTextPart = { type: "text", text: "" };
+            orderedParts.push(activeTextPart);
+          }
+          activeTextPart.text += chunk;
+          hasTextUpdate = true;
+          return true;
+        };
+
+        const appendTraceBatch = (parts: any[]): boolean => {
+          if (parts.length === 0) return false;
+          const rows = extractTimelineRows(parts);
+          if (rows.length === 0) return false;
+          activeTextPart = null;
+          for (const part of orderedParts) {
+            const item = part as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_trace_batch") continue;
+            const payload = asRecord(item.data);
+            if (!payload) continue;
+            payload.open = false;
+          }
+          traceBatchSeq += 1;
+          const activeRowId = rows[rows.length - 1]?.id || "";
+          orderedParts.push({
+            type: "data",
+            name: "codex_trace_batch",
+            data: {
+              batch_id: traceBatchSeq,
+              open: true,
+              active_row_id: activeRowId,
+              rows
+            }
+          });
+          return true;
+        };
+
+        const collapseLatestTraceBatch = (): boolean => {
+          for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
+            const item = orderedParts[i] as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_trace_batch") continue;
+            const payload = asRecord(item.data);
+            if (!payload) continue;
+            payload.open = false;
+            payload.active_row_id = "";
+            return true;
+          }
+          return false;
+        };
+
+        const snapshotContent = (): any[] => {
+          return orderedParts.map((part) => ({ ...part }));
+        };
+
+        try {
+          if (sessionDebugEnabled && processEnabled) {
+            const debugParts = [
+              {
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "debug",
+                  at: new Date().toISOString(),
+                  title: "会话绑定（调试）",
+                  detail: [`thread_id: ${threadId}`, `session_id: ${session.session_id}`].join("\n")
+                } satisfies ProcessData
+              }
+            ];
+            appendTraceBatch(debugParts);
+            yield {
+              content: snapshotContent()
+            };
+          }
+
+          for await (const { event, data } of iterateSSE(`${apiBase()}/api/chat/stream`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders()
+            },
+            body: JSON.stringify({
+              session_id: session.session_id,
+              message: prompt
+            }),
+            signal: options.abortSignal
+          })) {
+            const updates: any[] = [];
+            let textChanged = false;
+            const payload = asRecord(data);
+
+            if (event === "error") {
+              const detail =
+                (payload && typeof payload.detail === "string" ? payload.detail : "") || "请求失败";
+              setErrorText(detail);
+              if (processEnabled) {
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "error",
+                    at: new Date().toISOString(),
+                    title: "执行失败",
+                    detail: shorten(detail, 1400)
+                  } satisfies ProcessData
+                });
+              }
+              const traceChanged = appendTraceBatch(updates);
+              if (traceChanged || textChanged) {
+                const content = snapshotContent();
+                if (content.length > 0) {
+                  yield { content };
+                }
+              }
+              throw new Error(detail);
+            }
+
+            if (event === "done") {
+              doneAnswer =
+                payload && typeof payload.answer === "string" ? payload.answer : "";
+              if (!hasTextUpdate && doneAnswer.trim()) {
+                textChanged = appendTextPart(doneAnswer);
+              }
+              if (processEnabled) {
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "done",
+                    at: new Date().toISOString(),
+                    title: "回答完成"
+                  } satisfies ProcessData
+                });
+              }
+              const traceChanged = appendTraceBatch(updates);
+              if (traceChanged && collapseFinalTraceOnDoneEnabled) {
+                collapseLatestTraceBatch();
+              }
+              if (traceChanged || textChanged) {
+                const content = snapshotContent();
+                if (content.length > 0) {
+                  yield { content };
+                }
+              }
+              continue;
+            }
+
+            if (event === "meta") {
+              if (processEnabled) {
+                const model = payload && typeof payload.model === "string" ? payload.model : "";
+                const reasoning =
+                  payload && typeof payload.reasoning_effort === "string" ? payload.reasoning_effort : "";
+                const workspace = payload && typeof payload.workspace === "string" ? payload.workspace : "";
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "meta",
+                    at: new Date().toISOString(),
+                    title: "会话已开始",
+                    detail: [model, reasoning, workspace].filter(Boolean).join(" / ")
+                  } satisfies ProcessData
+                });
+              }
+              const traceChanged = appendTraceBatch(updates);
+              if (traceChanged || textChanged) {
+                const content = snapshotContent();
+                if (content.length > 0) {
+                  yield { content };
+                }
+              }
+              continue;
+            }
+
+            if (event !== "codex") continue;
+
+            const eventType = typeof payload?.type === "string" ? payload.type : "unknown";
+            const delta = typeof payload?.delta === "string" ? payload.delta : "";
+            const text = typeof payload?.text === "string" ? payload.text : "";
+            const append = delta || text;
+            const raw = asRecord(payload?.raw);
+            const item = asRecord(raw?.item);
+            const itemType = typeof item?.type === "string" ? item.type : "";
+
+            const shouldAppendAgentText =
+              !!append &&
+              eventType.startsWith("item.") &&
+              itemType === "agent_message";
+
+            if (shouldAppendAgentText) {
+              textChanged = appendTextPart(append) || textChanged;
+            }
+
+            const isStarted = eventType === "item.started";
+            const isCompleted = eventType === "item.completed";
+
+            if (itemType === "reasoning" && isCompleted && processEnabled) {
+              const reasoningText =
+                (typeof item?.text === "string" ? item.text : "") ||
+                (typeof payload?.text === "string" ? payload.text : "");
+              if (reasoningText.trim()) {
+                updates.push({
+                  type: "reasoning",
+                  text: shorten(reasoningText, 1800)
+                });
+              }
+            }
+
+            if (itemType === "command_execution" && isCompleted && processEnabled) {
+              const command = typeof item?.command === "string" ? item.command : "";
+              const output = typeof item?.aggregated_output === "string" ? item.aggregated_output : "";
+              const exitCode = typeof item?.exit_code === "number" ? item.exit_code : undefined;
+              const status = typeof item?.status === "string" ? item.status : undefined;
+              const args = { command, status };
+              const result = {
+                output: shorten(output, 1800),
+                ...(exitCode !== undefined ? { exit_code: exitCode } : {})
+              };
+              updates.push({
+                type: "tool-call",
+                toolCallId: String(item?.id || `command-${Date.now()}-${++seq}`),
+                toolName: "command_execution",
+                args,
+                argsText: JSON.stringify(args),
+                result
+              });
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "process",
+                  at: new Date().toISOString(),
+                  title: `命令执行 ${formatProcessStatus(status)}`.trim(),
+                  detail: [command ? `$ ${command}` : "", exitCode !== undefined ? `exit_code=${exitCode}` : ""]
+                    .filter(Boolean)
+                    .join("\n"),
+                  event: eventType,
+                  item_type: itemType,
+                  status
+                } satisfies ProcessData
+              });
+            }
+
+            if (itemType === "mcp_tool_call" && isCompleted && processEnabled) {
+              const server = typeof item?.server === "string" ? item.server : "";
+              const tool = typeof item?.tool === "string" ? item.tool : "";
+              const args = (item?.arguments && typeof item.arguments === "object" ? item.arguments : {}) as Record<
+                string,
+                unknown
+              >;
+              const error = asRecord(item?.error);
+              const errMsg = typeof error?.message === "string" ? error.message : "";
+              const result = item?.result;
+              const toolName = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
+
+              updates.push({
+                type: "tool-call",
+                toolCallId: String(item?.id || `mcp-${Date.now()}-${++seq}`),
+                toolName,
+                args,
+                argsText: JSON.stringify(args),
+                ...(result !== undefined ? { result } : {}),
+                ...(errMsg ? { isError: true } : {})
+              });
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: errMsg ? "error" : "process",
+                  at: new Date().toISOString(),
+                  title: `工具调用 ${errMsg ? "失败" : "已完成"}`,
+                  detail: [
+                    server ? `server: ${server}` : "",
+                    tool ? `tool: ${tool}` : "",
+                    errMsg ? `error: ${shorten(errMsg, 400)}` : ""
+                  ]
+                    .filter(Boolean)
+                    .join("\n"),
+                  event: eventType,
+                  item_type: itemType
+                } satisfies ProcessData
+              });
+            }
+
+            if (itemType === "web_search" && isCompleted) {
+              const query = typeof item?.query === "string" ? item.query : "";
+              if (processEnabled) {
+                updates.push({
+                  type: "tool-call",
+                  toolCallId: String(item?.id || `web-${Date.now()}-${++seq}`),
+                  toolName: "web_search",
+                  args: { query },
+                  argsText: JSON.stringify({ query })
+                });
+              }
+              const sources = extractSources(item?.result ?? item?.results ?? raw ?? payload);
+              for (const source of sources) {
+                updates.push({
+                  type: "source",
+                  sourceType: "url",
+                  id: source.id,
+                  url: source.url,
+                  title: source.title
+                });
+              }
+              if (processEnabled && query) {
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "process",
+                    at: new Date().toISOString(),
+                    title: "Web 检索",
+                    detail: query,
+                    event: eventType,
+                    item_type: itemType
+                  } satisfies ProcessData
+                });
+              }
+            }
+
+            if (itemType === "todo_list" && processEnabled) {
+              const items = Array.isArray(item?.items) ? item.items : [];
+              const lines = items
+                .slice(0, 20)
+                .map((it) => {
+                  const obj = asRecord(it);
+                  if (!obj) return "";
+                  const text = typeof obj.text === "string" ? obj.text : "";
+                  const completed = Boolean(obj.completed);
+                  return `${completed ? "[x]" : "[ ]"} ${text}`;
+                })
+                .filter(Boolean)
+                .join("\n");
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "process",
+                  at: new Date().toISOString(),
+                  title: "执行计划（Todo）",
+                  detail: lines,
+                  event: eventType,
+                  item_type: itemType
+                } satisfies ProcessData
+              });
+            }
+
+            if (itemType === "file_change" && isCompleted && processEnabled) {
+              const changes = Array.isArray(item?.changes) ? item.changes : [];
+              const lines = changes
+                .slice(0, 30)
+                .map((it) => {
+                  const obj = asRecord(it);
+                  if (!obj) return "";
+                  const path = typeof obj.path === "string" ? obj.path : "";
+                  const kind = typeof obj.kind === "string" ? obj.kind : "update";
+                  return `${kind}: ${path}`;
+                })
+                .filter(Boolean)
+                .join("\n");
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "process",
+                  at: new Date().toISOString(),
+                  title: "文件变更",
+                  detail: lines,
+                  event: eventType,
+                  item_type: itemType
+                } satisfies ProcessData
+              });
+            }
+
+            if (itemType === "error" && processEnabled) {
+              const message = typeof item?.message === "string" ? item.message : "";
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "error",
+                  at: new Date().toISOString(),
+                  title: "执行错误",
+                  detail: shorten(message, 1200),
+                  event: eventType,
+                  item_type: itemType
+                } satisfies ProcessData
+              });
+            }
+
+            if (
+              processEnabled &&
+              !shouldAppendAgentText &&
+              itemType &&
+              (isStarted || isCompleted) &&
+              !["command_execution", "mcp_tool_call", "web_search", "todo_list", "file_change", "reasoning", "error"].includes(
+                itemType
+              )
+            ) {
+              const status = typeof item?.status === "string" ? item.status : undefined;
+              updates.push({
+                type: "data",
+                name: "codex_process",
+                data: {
+                  kind: "process",
+                  at: new Date().toISOString(),
+                  title: `过程事件 ${eventType}`,
+                  detail: shorten(detailFromUnknown(item), 800),
+                  event: eventType,
+                  item_type: itemType,
+                  status
+                } satisfies ProcessData
+              });
+            }
+
+            const traceChanged = appendTraceBatch(updates);
+            if (traceChanged || textChanged) {
+              const content = snapshotContent();
+              if (content.length > 0) {
+                yield {
+                  content
+                };
+              }
+            }
+          }
+
+          if (!hasTextUpdate && doneAnswer) {
+            appendTextPart(doneAnswer);
+            yield {
+              content: snapshotContent()
+            };
+          }
+        } finally {
+          setStatusText("就绪");
+        }
+      }
+    }),
+    []
+  );
+
+  const runtime = useRemoteThreadListRuntime({
+    adapter: threadListAdapter,
+    runtimeHook: function RuntimeHook() {
+      return useLocalRuntime(chatAdapter);
+    }
+  });
+
+  const applyConfig = async () => {
+    setApplyingConfig(true);
+    setErrorText("");
+
+    try {
+      const model = draftModel.trim();
+      const workspace = draftWorkspace.trim();
+      if (!model) throw new Error("模型不能为空");
+      if (!workspace) throw new Error("工作目录不能为空");
+
+      const nextApplied: AppliedConfig = {
+        model,
+        workspace,
+        reasoningEffort: draftReasoning,
+        sandboxMode: draftSandboxMode,
+        approvalPolicy: draftApprovalPolicy,
+        networkAccessEnabled: draftNetworkAccessEnabled,
+        webSearchMode: draftWebSearchMode,
+        additionalDirectoriesRaw: draftAdditionalDirectoriesRaw.trim()
+      };
+      setAppliedConfig(nextApplied);
+      setStatusText("配置已应用（下一轮自动生效）");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "应用配置失败";
+      setErrorText(detail);
+    } finally {
+      setApplyingConfig(false);
+    }
+  };
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div className="agent-shell two-col">
+        <aside className="agent-sidebar">
+          <div className="sidebar-header">
+            <h1>Agent Studio</h1>
+            <p>Agent Workspace</p>
+          </div>
+
+          <section className="panel">
+            <div className="panel-title-row">
+              <h2>会话</h2>
+            </div>
+            <ThreadList.Root>
+              <ThreadList.New />
+              <ThreadList.Items
+                components={{
+                  ThreadListItem: AgentThreadListItem as any
+                }}
+              />
+            </ThreadList.Root>
+          </section>
+
+          <section className="panel">
+            <div className="panel-title-row">
+              <h2>运行配置</h2>
+              <button type="button" className="apply-btn" onClick={applyConfig} disabled={!draftDirty || applyingConfig}>
+                {applyingConfig ? "应用中..." : "应用配置"}
+              </button>
+            </div>
+
+            <div className="section-title">基础配置</div>
+
+            <label className="field">
+              <span className="field-label">模型</span>
+              <select className="field-input" value={draftModel} onChange={(e) => setDraftModel(e.target.value)}>
+                {MODEL_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-help">决定回答质量与速度。一般默认 `GPT-5.3 Codex` 即可。</span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">思考深度</span>
+              <select className="field-input" value={draftReasoning} onChange={(e) => setDraftReasoning(e.target.value as ReasoningEffort)}>
+                {REASONING_OPTIONS.map((level) => (
+                  <option key={level.value} value={level.value}>
+                    {level.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-help">越高越深入，但通常更慢、成本更高。</span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">工作目录</span>
+              <div className="field-path-row">
+                <input
+                  className="field-input"
+                  value={draftWorkspace}
+                  onChange={(e) => setDraftWorkspace(e.target.value)}
+                  placeholder="例如 . 或 /data/kb"
+                />
+                <button
+                  type="button"
+                  className="picker-btn"
+                  onClick={() => openDirectoryPicker("workspace")}
+                >
+                  选择目录
+                </button>
+              </div>
+              <span className="field-help">Agent 在该目录内读取/操作文件（受后端限制约束）。</span>
+            </label>
+
+            <label className="field checkbox-field">
+              <span className="field-label">显示过程轨迹</span>
+              <input
+                type="checkbox"
+                checked={showProcessTrace}
+                onChange={(e) => setShowProcessTrace(e.target.checked)}
+              />
+              <span className="field-help">在消息中显示思考摘要、工具调用与执行步骤。</span>
+            </label>
+
+            <label className="field checkbox-field">
+              <span className="field-label">显示会话调试信息</span>
+              <input
+                type="checkbox"
+                checked={showSessionDebug}
+                onChange={(e) => setShowSessionDebug(e.target.checked)}
+                disabled={!showProcessTrace}
+              />
+              <span className="field-help">显示 `thread_id/session_id` 绑定信息，便于排查上下文继承。</span>
+            </label>
+
+            <label className="field checkbox-field">
+              <span className="field-label">完成后折叠最终步骤</span>
+              <input
+                type="checkbox"
+                checked={collapseFinalTraceOnDone}
+                onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
+                disabled={!showProcessTrace}
+              />
+              <span className="field-help">启用后，仅保留最终结论文本展开；完成轨迹默认收起。</span>
+            </label>
+
+            <div className="section-title">扩展配置</div>
+
+            <label className="field">
+              <span className="field-label">沙箱模式</span>
+              <select className="field-input" value={draftSandboxMode} onChange={(e) => setDraftSandboxMode(e.target.value as SandboxMode)}>
+                {SANDBOX_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-help">控制文件系统操作权限。</span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">审批策略</span>
+              <select className="field-input" value={draftApprovalPolicy} onChange={(e) => setDraftApprovalPolicy(e.target.value as ApprovalPolicy)}>
+                {APPROVAL_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-help">决定高风险动作何时需要人工确认。</span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">Web 搜索</span>
+              <select className="field-input" value={draftWebSearchMode} onChange={(e) => setDraftWebSearchMode(e.target.value as WebSearchMode)}>
+                {WEB_SEARCH_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <span className="field-help">需要联网检索时开启，默认关闭。</span>
+            </label>
+
+            <label className="field checkbox-field">
+              <span className="field-label">允许网络访问</span>
+              <input
+                type="checkbox"
+                checked={draftNetworkAccessEnabled}
+                onChange={(e) => setDraftNetworkAccessEnabled(e.target.checked)}
+              />
+              <span className="field-help">仅控制运行环境网络开关，不等同于 Web 搜索模式。</span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">附加目录（可选）</span>
+              <textarea
+                className="field-input textarea"
+                value={draftAdditionalDirectoriesRaw}
+                onChange={(e) => setDraftAdditionalDirectoriesRaw(e.target.value)}
+                placeholder="每行一个目录，或逗号分隔"
+              />
+              <div className="field-actions-row">
+                <button
+                  type="button"
+                  className="picker-btn"
+                  onClick={() => openDirectoryPicker("additional")}
+                >
+                  追加目录
+                </button>
+              </div>
+              {additionalDirectoriesList.length > 0 ? (
+                <div className="dir-chip-list">
+                  {additionalDirectoriesList.map((dir) => (
+                    <span key={dir} className="dir-chip" title={dir}>
+                      {dir}
+                      <button type="button" className="dir-chip-remove" onClick={() => removeAdditionalDirectory(dir)}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <span className="field-help">额外允许访问的目录列表；为空则不追加。</span>
+            </label>
+
+            <div className="status-box">
+              <p>
+                <strong>状态：</strong>
+                {statusText}
+              </p>
+              {draftDirty ? <p className="warn-text">检测到未应用配置更改。</p> : null}
+              {errorText ? <p className="err-text">{errorText}</p> : null}
+            </div>
+          </section>
+        </aside>
+
+        <main className="agent-main">
+          <div className="chat-header">
+            <h2>Studio Chat</h2>
+            <div className="config-tags">
+              <span className="tag">{appliedConfig.model}</span>
+              <span className="tag">{appliedConfig.reasoningEffort}</span>
+              <span className="tag">{appliedConfig.workspace}</span>
+            </div>
+          </div>
+
+          <div className="thread-wrap">
+            <Thread
+              strings={{
+                threadList: {
+                  new: { label: "新会话" },
+                  item: {
+                    title: { fallback: "新对话" },
+                    archive: { tooltip: "归档会话" }
+                  }
+                },
+                welcome: { message: "你好，我是 Agent Studio。请直接提问。" },
+                composer: {
+                  input: { placeholder: "直接输入问题，不做预处理；支持上传文本/图片附件" },
+                  send: { tooltip: "发送消息" },
+                  cancel: { tooltip: "停止生成" }
+                }
+              }}
+              components={{
+                AssistantMessage: AgentAssistantMessage
+              }}
+              assistantMessage={{
+                allowCopy: true,
+                allowReload: true,
+                allowFeedbackPositive: true,
+                allowFeedbackNegative: true,
+                components: {
+                  ToolFallback: HiddenToolFallback as any
+                }
+              }}
+              userMessage={{ allowEdit: true }}
+            />
+          </div>
+        </main>
+      </div>
+      {pickerOpen ? (
+        <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
+          <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="dir-modal-head">
+              <h3>{pickerTarget === "workspace" ? "选择工作目录" : "选择附加目录"}</h3>
+              <button type="button" className="picker-btn" onClick={() => setPickerOpen(false)}>
+                关闭
+              </button>
+            </div>
+            <p className="dir-modal-current">{pickerCwd || "..."}</p>
+            <div className="dir-modal-toolbar">
+              <button
+                type="button"
+                className="picker-btn"
+                onClick={() => void loadDirectoryTree(pickerParent || undefined)}
+                disabled={!pickerParent || pickerLoading}
+              >
+                上一级
+              </button>
+              <button
+                type="button"
+                className="picker-btn"
+                onClick={() => selectDirectory(pickerCwd)}
+                disabled={!pickerCwd || pickerLoading}
+              >
+                {pickerTarget === "workspace" ? "设为工作目录" : "添加当前目录"}
+              </button>
+            </div>
+            <div className="dir-root-list">
+              {pickerRoots.map((root) => (
+                <button
+                  key={root}
+                  type="button"
+                  className="dir-root-btn"
+                  onClick={() => void loadDirectoryTree(root)}
+                  title={root}
+                >
+                  {root}
+                </button>
+              ))}
+            </div>
+            {pickerError ? <p className="err-text">{pickerError}</p> : null}
+            <div className="dir-modal-list">
+              {pickerLoading ? <p className="trace-empty">目录加载中...</p> : null}
+              {!pickerLoading && pickerDirectories.length === 0 ? (
+                <p className="trace-empty">当前目录没有可进入的子目录。</p>
+              ) : null}
+              {!pickerLoading && pickerDirectories.length > 0 ? (
+                <ul className="dir-list">
+                  {pickerDirectories.map((item) => (
+                    <li key={item.path} className="dir-item">
+                      <button
+                        type="button"
+                        className="dir-enter-btn"
+                        onClick={() => void loadDirectoryTree(item.path)}
+                        title={item.path}
+                      >
+                        {item.name}
+                      </button>
+                      <button
+                        type="button"
+                        className="picker-btn"
+                        onClick={() => selectDirectory(item.path)}
+                      >
+                        选择
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </AssistantRuntimeProvider>
+  );
+}
