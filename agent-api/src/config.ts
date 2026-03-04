@@ -11,7 +11,8 @@ const schema = z.object({
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_TTL_MINUTES: z.string().default("180"),
   WORKSPACE_WHITELIST: z.string().default("."),
-  THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json")
+  THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
+  UPLOAD_TEMP_ROOT: z.string().default("./temp/session-uploads")
 });
 
 const env = schema.parse(process.env);
@@ -29,6 +30,10 @@ const threadStoreFile = path.isAbsolute(env.THREAD_STORE_FILE)
   ? env.THREAD_STORE_FILE
   : path.resolve(process.cwd(), env.THREAD_STORE_FILE);
 
+const uploadTempRoot = path.isAbsolute(env.UPLOAD_TEMP_ROOT)
+  ? env.UPLOAD_TEMP_ROOT
+  : path.resolve(process.cwd(), env.UPLOAD_TEMP_ROOT);
+
 export const appConfig = {
   port: Number(env.PORT) || 8787,
   host: env.HOST,
@@ -38,7 +43,8 @@ export const appConfig = {
   defaultWorkspace,
   sessionTtlMs: ttlMs,
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
-  threadStoreFile
+  threadStoreFile,
+  uploadTempRoot
 };
 
 export function resolveWorkspace(input?: string | null): string {

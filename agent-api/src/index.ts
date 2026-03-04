@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -70,17 +71,6 @@ const feedbackSchema = z.object({
   content_preview: z.string().optional()
 });
 
-const suggestionsSchema = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.string().optional(),
-        text: z.string().optional()
-      })
-    )
-    .optional()
-});
-
 const browseDirectoriesSchema = z.object({
   path: z.string().optional()
 });
@@ -147,12 +137,47 @@ function pickSessionOptions(input: {
   };
 }
 
+function getThreadUploadTempDir(threadId: string): string {
+  const safeThreadId = threadId.replace(/[^a-zA-Z0-9_-]/g, "_").trim() || "thread";
+  return path.join(appConfig.uploadTempRoot, safeThreadId);
+}
+
+function normalizeAdditionalDirectories(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((it) => (typeof it === "string" ? it.trim() : ""))
+    .filter(Boolean);
+}
+
+function ensureThreadUploadInRunConfig(
+  input: Record<string, unknown> | undefined,
+  uploadDir: string
+): Record<string, unknown> {
+  const next: Record<string, unknown> = input ? { ...input } : {};
+  const dirs = normalizeAdditionalDirectories(next.additionalDirectories);
+  const resolved = new Set(dirs.map((it) => path.resolve(it)));
+  const normalizedUploadDir = path.resolve(uploadDir);
+  if (!resolved.has(normalizedUploadDir)) {
+    dirs.push(normalizedUploadDir);
+  }
+  next.additionalDirectories = dirs;
+  return next;
+}
+
 async function createSession(options: SessionOptions, threadId?: string) {
+  const uploadDir = threadId ? getThreadUploadTempDir(threadId) : "";
+  const codexRunConfig = threadId
+    ? ensureThreadUploadInRunConfig(options.codexRunConfig, uploadDir)
+    : options.codexRunConfig;
+  if (threadId && uploadDir) {
+    await fs.mkdir(uploadDir, { recursive: true });
+  }
+
   const thread = await runtime.startThreadWithOptions({
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: options.codexRunConfig
+    codexRunConfig
   });
   return sessions.create({
     threadId,
@@ -160,7 +185,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: options.codexRunConfig
+    codexRunConfig
   });
 }
 
@@ -176,11 +201,13 @@ async function ensureThreadSession(
   const thread = await threads.get(threadId);
   if (!thread) throw new Error("thread 不存在");
 
+  const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
+
   const desired: SessionOptions = {
     model: (patch?.model || thread.model || appConfig.defaultModel).trim() || appConfig.defaultModel,
     reasoningEffort: patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort,
     workspace: resolveWorkspace(patch?.workspace || thread.workspace),
-    codexRunConfig: patch?.codex_run_config ?? thread.codexRunConfig
+    codexRunConfig: ensureThreadUploadInRunConfig(sourceCodexRunConfig, getThreadUploadTempDir(threadId))
   };
 
   if (patch?.model || patch?.reasoning_effort || patch?.workspace || patch?.codex_run_config) {
@@ -188,7 +215,7 @@ async function ensureThreadSession(
       model: desired.model,
       reasoningEffort: desired.reasoningEffort,
       workspace: desired.workspace,
-      codexRunConfig: desired.codexRunConfig
+      codexRunConfig: sourceCodexRunConfig
     });
   }
 
@@ -219,34 +246,40 @@ function summarizeText(text: string): string {
   return `${value.slice(0, 120)}...`;
 }
 
-function buildSuggestions(messages: Array<{ role?: string; text?: string }>): Array<{ prompt: string }> {
-  const latestUser = [...messages]
-    .reverse()
-    .find((m) => String(m.role || "").trim().toLowerCase() === "user" && String(m.text || "").trim());
-  const prompt = String(latestUser?.text || "").trim();
-  const picks = new Set<string>();
-  if (prompt) {
-    if (/配置|部署|安装|连接|对接|如何|怎么/i.test(prompt)) {
-      picks.add("请给我一个可直接执行的分步骤操作清单。");
-      picks.add("请补充关键配置项示例（含默认值和推荐值）。");
-      picks.add("请列出常见报错和对应排查命令。");
-    } else if (/报错|失败|错误|异常|问题|故障/i.test(prompt)) {
-      picks.add("请按“现象-原因-排查-修复”结构回答。");
-      picks.add("请给出最小复现步骤和验证方法。");
-      picks.add("请先给一个 5 分钟快速止血方案。");
-    } else {
-      picks.add("请给出一个简洁结论和 3 条可执行建议。");
-      picks.add("请继续展开关键步骤并补充示例。");
-      picks.add("请列出风险点和注意事项。");
-    }
+function decodeHeaderMaybeUri(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
   }
-  if (picks.size === 0) {
-    picks.add("请给出下一步建议。");
-    picks.add("请提供可执行步骤。");
-  }
-  return Array.from(picks)
-    .slice(0, 4)
-    .map((it) => ({ prompt: it }));
+}
+
+function sanitizeUploadFilename(value: string): string {
+  const raw = decodeHeaderMaybeUri(value);
+  const base = path.basename(raw).trim();
+  const normalized = base
+    .replace(/[/\\]/g, "_")
+    .replace(/[\x00-\x1f\x7f]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  const safe = normalized || "upload.bin";
+  if (safe.length <= 160) return safe;
+  const ext = path.extname(safe);
+  const name = ext ? safe.slice(0, -ext.length) : safe;
+  return `${name.slice(0, 140)}${ext.slice(0, 20)}`;
+}
+
+function normalizeMimeType(value: string): string {
+  const decoded = decodeHeaderMaybeUri(value).trim().toLowerCase();
+  if (!decoded) return "application/octet-stream";
+  if (/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(decoded)) return decoded;
+  return "application/octet-stream";
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split(path.sep).join("/");
 }
 
 function findWhitelistRoot(candidate: string): string | undefined {
@@ -269,6 +302,11 @@ async function listDirectories(cwd: string): Promise<Array<{ name: string; path:
     .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN", { numeric: true, sensitivity: "base" }));
   return directories;
 }
+
+const uploadRawParser = express.raw({
+  type: () => true,
+  limit: "128mb"
+});
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -320,6 +358,59 @@ app.get("/api/fs/directories", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "读取目录失败";
+    res.status(400).json({ detail });
+  }
+});
+
+app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Request, res: Response) => {
+  try {
+    const threadId = String(req.params.threadId || "").trim();
+    if (!threadId) {
+      res.status(400).json({ detail: "threadId 不能为空" });
+      return;
+    }
+
+    const thread = await threads.get(threadId);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
+
+    const payload = req.body;
+    if (!Buffer.isBuffer(payload) || payload.length === 0) {
+      res.status(400).json({ detail: "上传内容为空" });
+      return;
+    }
+
+    const safeName = sanitizeUploadFilename(String(req.headers["x-file-name"] || ""));
+    const mimeType = normalizeMimeType(String(req.headers["x-file-type"] || ""));
+    const expectedSize = Number(String(req.headers["x-file-size"] || "0"));
+    if (Number.isFinite(expectedSize) && expectedSize > 0 && expectedSize !== payload.length) {
+      res.status(400).json({ detail: "上传体积与文件声明不一致" });
+      return;
+    }
+
+    const uploadDir = getThreadUploadTempDir(threadId);
+    await fs.mkdir(uploadDir, { recursive: true });
+
+    const id = randomUUID().replace(/-/g, "").slice(0, 12);
+    const storedName = `${Date.now()}-${id}-${safeName}`;
+    const absolutePath = path.join(uploadDir, storedName);
+    await fs.writeFile(absolutePath, payload);
+
+    const relativePath = normalizeRelativePath(path.relative(uploadDir, absolutePath));
+    res.json({
+      attachment: {
+        name: safeName,
+        mime_type: mimeType,
+        bytes: payload.length,
+        path: absolutePath,
+        relative_path: relativePath,
+        upload_dir: uploadDir
+      }
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "上传附件失败";
     res.status(400).json({ detail });
   }
 });
@@ -427,6 +518,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
       sessions.remove(thread.sessionId);
     }
     await threads.delete(threadId);
+    await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });
     res.json({ ok: true });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "删除 thread 失败";
@@ -495,23 +587,6 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
     res.json({ ok: true });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "覆盖消息历史失败";
-    res.status(400).json({ detail });
-  }
-});
-
-app.post("/api/threads/:threadId/suggestions", async (req: Request, res: Response) => {
-  try {
-    const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.get(threadId);
-    if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
-      return;
-    }
-    const input = suggestionsSchema.parse(req.body || {});
-    const suggestions = buildSuggestions(input.messages || []);
-    res.json({ suggestions });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "生成建议失败";
     res.status(400).json({ detail });
   }
 });

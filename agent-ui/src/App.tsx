@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type FC, type PropsWithChildren } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PropsWithChildren
+} from "react";
 import {
   AssistantRuntimeProvider,
+  ComposerPrimitive,
   RuntimeAdapterProvider,
   ThreadListItemPrimitive,
   useAui,
@@ -17,12 +27,14 @@ import {
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
-import { ArchiveIcon, Trash2Icon } from "lucide-react";
+import { CheckIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
+  type AttachmentAdapter,
+  type CompleteAttachment,
   CompositeAttachmentAdapter,
-  SimpleImageAttachmentAdapter,
-  SimpleTextAttachmentAdapter,
+  type PendingAttachment,
+  type ThreadUserMessagePart,
   type ExportedMessageRepository,
   type ExportedMessageRepositoryItem,
   type RemoteThreadListAdapter,
@@ -80,10 +92,6 @@ type ThreadMessagesOut = {
   }>;
 };
 
-type SuggestionsOut = {
-  suggestions: Array<{ prompt: string }>;
-};
-
 type DirectoryBrowseOut = {
   roots: string[];
   cwd: string;
@@ -99,6 +107,10 @@ type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
 type WebSearchMode = "disabled" | "cached" | "live";
 type DirectoryPickerTarget = "workspace" | "additional";
+type DirectoryLoadOptions = {
+  syncInput?: boolean;
+  keepDirectoriesOnError?: boolean;
+};
 
 type AppliedConfig = {
   workspace: string;
@@ -120,6 +132,21 @@ type ProcessData = {
   item_type?: string;
   status?: string;
 };
+
+type TurnUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+};
+
+type ContextUsageSnapshot = TurnUsage & {
+  threadId: string;
+  model: string;
+  contextLimit: number;
+  updatedAt: string;
+};
+
+type ContextUsageTone = "idle" | "ok" | "warn" | "critical";
 
 type ThreadIdentity = {
   remoteId?: string;
@@ -170,6 +197,16 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
   { value: "live", label: "live（实时搜索）" }
 ];
 
+const DEFAULT_CONTEXT_LIMIT_TOKENS = 262_144;
+const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  "gpt-5.3-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
+  "gpt-5.2-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
+  "gpt-5.1-codex-max": DEFAULT_CONTEXT_LIMIT_TOKENS,
+  "gpt-5.1-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
+  "gpt-5-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
+  "gpt-5.1-codex-mini": DEFAULT_CONTEXT_LIMIT_TOKENS
+};
+
 const AssistantMarkdownText = makeMarkdownText();
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -215,6 +252,237 @@ function formatDirectories(items: string[]): string {
   return Array.from(new Set(normalized)).join("\n");
 }
 
+const PROMPT_TEXT_MAX_CHARS = 200_000;
+
+const TEXT_LIKE_MIME_TYPES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/xml",
+  "application/xhtml+xml",
+  "application/javascript",
+  "application/ecmascript",
+  "application/x-javascript",
+  "application/x-httpd-php",
+  "application/x-sh",
+  "application/x-shellscript",
+  "application/x-yaml",
+  "application/yaml",
+  "application/toml",
+  "application/sql"
+]);
+
+const TEXT_LIKE_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "json",
+  "jsonl",
+  "xml",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "vue",
+  "svelte",
+  "yml",
+  "yaml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "log",
+  "sh",
+  "bash",
+  "zsh",
+  "py",
+  "java",
+  "kt",
+  "kts",
+  "go",
+  "rs",
+  "rb",
+  "php",
+  "swift",
+  "c",
+  "cc",
+  "cpp",
+  "h",
+  "hpp",
+  "sql",
+  "env",
+  "properties",
+  "gradle",
+  "dockerignore",
+  "gitignore",
+  "gitattributes"
+]);
+
+const TEXT_LIKE_FILE_NAMES = new Set(["dockerfile", "makefile", "jenkinsfile", "readme", "license", "changelog"]);
+
+function truncateForPrompt(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n...（内容过长，已截断）`;
+}
+
+function fileNameFromUnknown(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
+}
+
+function fileExtensionFromName(name: string): string {
+  const idx = name.lastIndexOf(".");
+  if (idx < 0 || idx === name.length - 1) return "";
+  return name.slice(idx + 1).toLowerCase();
+}
+
+function isLikelyTextFile(file: File): boolean {
+  const mime = (file.type || "").trim().toLowerCase();
+  if (mime.startsWith("text/")) return true;
+  if (TEXT_LIKE_MIME_TYPES.has(mime)) return true;
+
+  const name = file.name.trim().toLowerCase();
+  if (TEXT_LIKE_FILE_NAMES.has(name)) return true;
+
+  const ext = fileExtensionFromName(name);
+  if (!ext) return false;
+  return TEXT_LIKE_EXTENSIONS.has(ext);
+}
+
+function guessAttachmentType(file: File): "image" | "document" | "file" {
+  const mime = (file.type || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (isLikelyTextFile(file)) return "document";
+  return "file";
+}
+
+type UploadedAttachmentMeta = {
+  name: string;
+  path: string;
+  relativePath: string;
+  mimeType: string;
+  size: number;
+};
+
+function decodeMaybeUri(value: string): string {
+  if (!value.trim()) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function uploadedMetaFromUnknown(value: unknown): UploadedAttachmentMeta {
+  const obj = asRecord(value);
+  if (!obj) {
+    throw new Error("上传响应异常：缺少 attachment");
+  }
+  const name = fileNameFromUnknown(decodeMaybeUri(String(obj.name ?? "")), "未命名文件");
+  const pathValue = String(obj.path ?? "").trim();
+  if (!pathValue) {
+    throw new Error("上传响应异常：缺少文件路径");
+  }
+  const relativePath = String(obj.relative_path ?? "").trim();
+  const mimeType = fileNameFromUnknown(decodeMaybeUri(String(obj.mime_type ?? "")), "application/octet-stream");
+  const sizeValue = Number(obj.bytes ?? 0);
+  return {
+    name,
+    path: pathValue,
+    relativePath: relativePath || pathValue,
+    mimeType,
+    size: Number.isFinite(sizeValue) && sizeValue >= 0 ? sizeValue : 0
+  };
+}
+
+async function uploadThreadAttachment(threadId: string, file: File): Promise<UploadedAttachmentMeta> {
+  const headers = new Headers({
+    ...authHeaders(),
+    "Content-Type": "application/octet-stream",
+    "X-File-Name": encodeURIComponent(fileNameFromUnknown(file.name, "upload.bin")),
+    "X-File-Type": encodeURIComponent(fileNameFromUnknown(file.type, "application/octet-stream")),
+    "X-File-Size": String(file.size)
+  });
+
+  const res = await fetch(`${apiBase()}/api/threads/${encodeURIComponent(threadId)}/attachments`, {
+    method: "POST",
+    headers,
+    body: file
+  });
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const msg = (data && typeof data.detail === "string" && data.detail) || `上传失败(${res.status})`;
+    throw new Error(msg);
+  }
+
+  return uploadedMetaFromUnknown((data as { attachment?: unknown }).attachment);
+}
+
+function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
+  return [
+    `<uploaded_file name=${JSON.stringify(meta.name)} path=${JSON.stringify(meta.path)} relativePath=${JSON.stringify(meta.relativePath)} mimeType=${JSON.stringify(meta.mimeType)} bytes=${meta.size}>`,
+    "文件已上传到工作区。请使用文件系统工具读取该路径，而不是假设内容已在上下文中。",
+    "</uploaded_file>"
+  ].join("\n");
+}
+
+class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
+  public accept = "*";
+
+  constructor(private readonly resolveThreadId: () => Promise<string>) {}
+
+  public async add(state: { file: File }): Promise<PendingAttachment> {
+    const name = fileNameFromUnknown(state.file.name, "未命名文件");
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${name}-${Date.now()}`;
+
+    return {
+      id,
+      type: guessAttachmentType(state.file),
+      name,
+      contentType: state.file.type || "application/octet-stream",
+      file: state.file,
+      status: { type: "requires-action", reason: "composer-send" }
+    };
+  }
+
+  public async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
+    const file = attachment.file;
+    const threadId = await this.resolveThreadId();
+    if (!threadId) {
+      throw new Error("当前会话初始化失败，请重试");
+    }
+    const uploaded = await uploadThreadAttachment(threadId, file);
+    const content: ThreadUserMessagePart[] = [{ type: "text", text: buildUploadedAttachmentHint(uploaded) }];
+    const type = guessAttachmentType(file);
+
+    return {
+      ...attachment,
+      type,
+      contentType: uploaded.mimeType,
+      status: { type: "complete" },
+      content
+    };
+  }
+
+  public async remove() {
+    // noop
+  }
+}
+
 function buildCodexRunConfig(cfg: AppliedConfig): Record<string, unknown> {
   const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
   const runConfig: Record<string, unknown> = {
@@ -253,8 +521,46 @@ function timelineKindLabel(kind: TimelineRow["kind"]): string {
   return "步骤";
 }
 
+function toTokenCount(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n);
+}
+
+function parseTurnUsage(value: unknown): TurnUsage | null {
+  const usage = asRecord(value);
+  if (!usage) return null;
+  const inputTokens = toTokenCount(usage.input_tokens);
+  const cachedInputTokens = toTokenCount(usage.cached_input_tokens);
+  const outputTokens = toTokenCount(usage.output_tokens);
+  if (inputTokens === null || cachedInputTokens === null || outputTokens === null) return null;
+  return {
+    inputTokens,
+    cachedInputTokens,
+    outputTokens
+  };
+}
+
+function contextLimitForModel(model: string): number {
+  const normalized = model.trim();
+  if (!normalized) return DEFAULT_CONTEXT_LIMIT_TOKENS;
+  return MODEL_CONTEXT_LIMITS[normalized] ?? DEFAULT_CONTEXT_LIMIT_TOKENS;
+}
+
+function formatCompactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const inM = tokens / 1_000_000;
+    return `${inM.toFixed(inM < 10 ? 1 : 0).replace(/\.0$/, "")}m`;
+  }
+  if (tokens >= 1_000) {
+    const inK = tokens / 1_000;
+    return `${inK.toFixed(inK < 10 ? 1 : 0).replace(/\.0$/, "")}k`;
+  }
+  return String(tokens);
+}
+
 function messageTextForTitle(messages: readonly ThreadMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < messages.length; i += 1) {
     const msg = messages[i];
     if (!msg || msg.role !== "user") continue;
     const text = msg.content
@@ -272,9 +578,32 @@ function messageTextForTitle(messages: readonly ThreadMessage[]): string {
 }
 
 function guessThreadTitle(messages: readonly ThreadMessage[]): string {
-  const text = messageTextForTitle(messages).replace(/\s+/g, " ").trim();
+  const text = messageTextForTitle(messages)
+    .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "上传文件")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!text) return "新对话";
   return text.length <= 22 ? text : `${text.slice(0, 22)}...`;
+}
+
+function userTextFromUnknownMessage(message: unknown): string {
+  const obj = asRecord(message);
+  if (!obj) return "";
+  if (obj.role !== "user") return "";
+
+  const content = Array.isArray(obj.content) ? obj.content : [];
+  const text = content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      if ((part as { type?: unknown }).type !== "text") return "";
+      return typeof (part as { text?: unknown }).text === "string" ? ((part as { text?: string }).text ?? "") : "";
+    })
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text;
 }
 
 function isLikelyHttpUrl(value: string): boolean {
@@ -322,6 +651,68 @@ function extractSources(value: unknown): Array<{ id: string; url: string; title?
   return results;
 }
 
+type PromptBucket = {
+  textParts: string[];
+  imageNames: Set<string>;
+  fileNames: Set<string>;
+};
+
+function pushPromptText(bucket: PromptBucket, value: unknown) {
+  if (typeof value !== "string") return;
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  bucket.textParts.push(truncateForPrompt(trimmed, PROMPT_TEXT_MAX_CHARS));
+}
+
+function pushPromptImageName(bucket: PromptBucket, value: unknown, fallback = "未命名图片") {
+  bucket.imageNames.add(fileNameFromUnknown(value, fallback));
+}
+
+function pushPromptFileName(bucket: PromptBucket, value: unknown, fallback = "未命名文件") {
+  bucket.fileNames.add(fileNameFromUnknown(value, fallback));
+}
+
+function pushPromptFilePart(
+  bucket: PromptBucket,
+  filePart: { filename?: unknown; mimeType?: unknown; data?: unknown },
+  fallbackName: string
+) {
+  const name = fileNameFromUnknown(filePart.filename, fallbackName);
+  pushPromptFileName(bucket, name);
+}
+
+function collectPromptPart(bucket: PromptBucket, part: unknown, fallbackName = "未命名文件") {
+  if (!part || typeof part !== "object") return;
+  const type = (part as { type?: unknown }).type;
+  if (type === "text") {
+    pushPromptText(bucket, (part as { text?: unknown }).text);
+    return;
+  }
+  if (type === "image") {
+    pushPromptImageName(bucket, (part as { filename?: unknown }).filename, fallbackName);
+    return;
+  }
+  if (type === "file") {
+    pushPromptFilePart(bucket, part as { filename?: unknown; mimeType?: unknown; data?: unknown }, fallbackName);
+  }
+}
+
+function collectPromptAttachment(bucket: PromptBucket, attachment: unknown) {
+  if (!attachment || typeof attachment !== "object") return;
+  const att = attachment as { type?: unknown; name?: unknown; content?: unknown };
+  const attachmentName = fileNameFromUnknown(att.name, "未命名文件");
+  if (att.type === "image") {
+    pushPromptImageName(bucket, attachmentName, "未命名图片");
+  } else {
+    pushPromptFileName(bucket, attachmentName, "未命名文件");
+  }
+
+  if (!Array.isArray(att.content)) return;
+  for (const part of att.content) {
+    collectPromptPart(bucket, part, attachmentName);
+  }
+}
+
 function extractLatestPrompt(messages: unknown): string {
   if (!Array.isArray(messages)) return "";
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -329,35 +720,34 @@ function extractLatestPrompt(messages: unknown): string {
     if (!msg || typeof msg !== "object") continue;
     const role = (msg as { role?: unknown }).role;
     if (role !== "user") continue;
+
+    const bucket: PromptBucket = {
+      textParts: [],
+      imageNames: new Set<string>(),
+      fileNames: new Set<string>()
+    };
+
     const content = (msg as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
-
-    const textParts: string[] = [];
-    const imageNames: string[] = [];
-    const fileNames: string[] = [];
-
-    for (const part of content) {
-      if (!part || typeof part !== "object") continue;
-      const type = (part as { type?: unknown }).type;
-      if (type === "text") {
-        const text = (part as { text?: unknown }).text;
-        if (typeof text === "string" && text.trim()) textParts.push(text.trim());
-      } else if (type === "image") {
-        const name = (part as { filename?: unknown }).filename;
-        imageNames.push(typeof name === "string" && name.trim() ? name.trim() : "未命名图片");
-      } else if (type === "file") {
-        const name = (part as { filename?: unknown }).filename;
-        fileNames.push(typeof name === "string" && name.trim() ? name.trim() : "未命名文件");
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        collectPromptPart(bucket, part);
       }
     }
 
-    const mainText = textParts.join("\n").trim();
-    const attachmentHints: string[] = [];
-    if (imageNames.length > 0) {
-      attachmentHints.push(`用户上传了图片：${imageNames.join("、")}`);
+    const attachments = (msg as { attachments?: unknown }).attachments;
+    if (Array.isArray(attachments)) {
+      for (const attachment of attachments) {
+        collectPromptAttachment(bucket, attachment);
+      }
     }
-    if (fileNames.length > 0) {
-      attachmentHints.push(`用户上传了文件：${fileNames.join("、")}`);
+
+    const mainText = bucket.textParts.join("\n").trim();
+    const attachmentHints: string[] = [];
+    if (bucket.imageNames.size > 0) {
+      attachmentHints.push(`用户上传了图片：${Array.from(bucket.imageNames).join("、")}`);
+    }
+    if (bucket.fileNames.size > 0) {
+      attachmentHints.push(`用户上传了文件：${Array.from(bucket.fileNames).join("、")}`);
     }
     const combined = [mainText, attachmentHints.join("\n")].filter(Boolean).join("\n\n").trim();
     if (combined) return combined;
@@ -643,25 +1033,142 @@ const AgentAssistantMessage: FC = () => {
 };
 
 const AgentThreadListItem: FC = () => {
+  const aui = useAui();
+  const threadItemId = useAuiState((s) => s.threadListItem.id);
+  const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setIsRenaming(false);
+    setRenameSaving(false);
+  }, [threadItemId]);
+
+  useEffect(() => {
+    if (!isRenaming) {
+      setRenameDraft(threadTitle.trim());
+    }
+  }, [isRenaming, threadTitle]);
+
+  useEffect(() => {
+    if (!isRenaming) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, [isRenaming]);
+
+  const beginRename = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (renameSaving) return;
+    setRenameDraft(threadTitle.trim());
+    setIsRenaming(true);
+  };
+
+  const cancelRename = (event?: ReactMouseEvent<HTMLElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (renameSaving) return;
+    setRenameDraft(threadTitle.trim());
+    setIsRenaming(false);
+  };
+
+  const submitRename = async () => {
+    if (renameSaving) return;
+    setRenameSaving(true);
+    try {
+      await aui.threadListItem().rename(renameDraft.trim());
+      setIsRenaming(false);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "会话重命名失败";
+      window.alert(detail);
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
+  const onRenameInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      void submitRename();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelRename();
+    }
+  };
+
   return (
     <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
-      <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
-        <p className="aui-thread-list-item-title">
-          <ThreadListItemPrimitive.Title fallback="新对话" />
-        </p>
-      </ThreadListItemPrimitive.Trigger>
+      {isRenaming ? (
+        <div className="thread-title-edit-wrap" onClick={(event) => event.stopPropagation()}>
+          <input
+            ref={renameInputRef}
+            className="thread-title-edit-input"
+            value={renameDraft}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onKeyDown={onRenameInputKeyDown}
+            placeholder="输入会话名称"
+            disabled={renameSaving}
+          />
+        </div>
+      ) : (
+        <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
+          <p className="aui-thread-list-item-title">
+            <ThreadListItemPrimitive.Title fallback="新对话" />
+          </p>
+        </ThreadListItemPrimitive.Trigger>
+      )}
       <div className="agent-thread-item-actions">
-        <ThreadListItemPrimitive.Archive
-          className="thread-item-action-btn thread-item-archive-btn"
-          title="归档会话"
-          aria-label="归档会话"
-        >
-          <ArchiveIcon size={14} />
-        </ThreadListItemPrimitive.Archive>
+        {isRenaming ? (
+          <>
+            <button
+              type="button"
+              className="thread-item-action-btn thread-item-save-btn"
+              title="保存会话名称"
+              aria-label="保存会话名称"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void submitRename();
+              }}
+              disabled={renameSaving}
+            >
+              <CheckIcon size={14} />
+            </button>
+            <button
+              type="button"
+              className="thread-item-action-btn"
+              title="取消修改"
+              aria-label="取消修改"
+              onClick={cancelRename}
+              disabled={renameSaving}
+            >
+              <XIcon size={14} />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="thread-item-action-btn"
+            title="重命名会话"
+            aria-label="重命名会话"
+            onClick={beginRename}
+          >
+            <PencilIcon size={14} />
+          </button>
+        )}
         <ThreadListItemPrimitive.Delete
           className="thread-item-action-btn thread-item-delete-btn"
           title="删除会话"
           aria-label="删除会话"
+          disabled={isRenaming}
           onClick={(e) => {
             const confirmed = window.confirm("确认永久删除该会话吗？该操作不可恢复。");
             if (!confirmed) {
@@ -685,6 +1192,7 @@ const AgentRuntimeAdapterProvider: FC<
   const aui = useAui();
   const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const activeLocalId = useAuiState((s) => s.threadListItem.id);
+  const autoTitleTriggeredRemoteIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     onThreadIdentityChange?.({
@@ -712,6 +1220,9 @@ const AgentRuntimeAdapterProvider: FC<
       async append(item: ExportedMessageRepositoryItem) {
         const init = await aui.threadListItem().initialize();
         const remoteId = init.remoteId;
+        const state = aui.threadListItem().getState();
+        const hasTitle =
+          state.remoteId === remoteId && typeof state.title === "string" && state.title.trim().length > 0;
         await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
           method: "POST",
           json: {
@@ -720,25 +1231,21 @@ const AgentRuntimeAdapterProvider: FC<
             run_config: item.runConfig
           }
         });
-      }
-    }),
-    [aui]
-  );
 
-  const suggestion = useMemo(
-    () => ({
-      async generate({ messages }: { messages: readonly ThreadMessage[] }) {
-        const remoteId = aui.threadListItem().getState().remoteId;
-        if (!remoteId) return [];
-        const compact = messages.slice(-12).map((msg) => ({
-          role: msg.role,
-          text: messageTextForSuggestions(msg)
-        }));
-        const out = await api<SuggestionsOut>(`/api/threads/${encodeURIComponent(remoteId)}/suggestions`, {
-          method: "POST",
-          json: { messages: compact }
-        });
-        return (out.suggestions || []).map((it) => ({ prompt: it.prompt })).filter((it) => it.prompt.trim());
+        const firstUserText = userTextFromUnknownMessage(item.message);
+        const shouldGenerateTitle =
+          !hasTitle &&
+          !!firstUserText &&
+          state.remoteId === remoteId &&
+          !autoTitleTriggeredRemoteIdsRef.current.has(remoteId);
+        if (shouldGenerateTitle) {
+          autoTitleTriggeredRemoteIdsRef.current.add(remoteId);
+          Promise.resolve()
+            .then(() => aui.threadListItem().generateTitle())
+            .catch(() => {
+              autoTitleTriggeredRemoteIdsRef.current.delete(remoteId);
+            });
+        }
       }
     }),
     [aui]
@@ -766,20 +1273,24 @@ const AgentRuntimeAdapterProvider: FC<
   const attachments = useMemo(
     () =>
       new CompositeAttachmentAdapter([
-        new SimpleTextAttachmentAdapter(),
-        new SimpleImageAttachmentAdapter()
+        new WorkspaceFileAttachmentAdapter(async () => {
+          const item = aui.threadListItem();
+          const current = String(item.getState().remoteId || "").trim();
+          if (current) return current;
+          const initialized = await item.initialize();
+          return String(initialized.remoteId || item.getState().remoteId || "").trim();
+        })
       ]),
-    []
+    [aui]
   );
 
   const adapters = useMemo(
     () => ({
       history,
-      suggestion,
       feedback,
       attachments
     }),
-    [attachments, feedback, history, suggestion]
+    [attachments, feedback, history]
   );
 
   return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
@@ -812,12 +1323,14 @@ export default function App() {
   const [showProcessTrace, setShowProcessTrace] = useState(true);
   const [showSessionDebug, setShowSessionDebug] = useState(false);
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
+  const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState("");
   const [pickerRoots, setPickerRoots] = useState<string[]>([]);
   const [pickerCwd, setPickerCwd] = useState("");
+  const [pickerPathInput, setPickerPathInput] = useState("");
   const [pickerParent, setPickerParent] = useState<string | null>(null);
   const [pickerDirectories, setPickerDirectories] = useState<Array<{ name: string; path: string }>>([]);
 
@@ -827,6 +1340,9 @@ export default function App() {
   const collapseFinalTraceOnDoneRef = useRef(collapseFinalTraceOnDone);
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
+  const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
+  const pickerRequestSeqRef = useRef(0);
+  const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   appliedConfigRef.current = appliedConfig;
   showProcessTraceRef.current = showProcessTrace;
@@ -881,26 +1397,72 @@ export default function App() {
     [draftAdditionalDirectoriesRaw]
   );
 
-  const loadDirectoryTree = async (candidatePath?: string) => {
+  const contextUsageView = useMemo(() => {
+    if (!contextUsage) {
+      return {
+        usedPercent: 0,
+        tone: "idle" as ContextUsageTone,
+        summaryLine: "Context usage unavailable",
+        detailLine: "Send a message to collect usage",
+        ariaLabel: "Context usage unavailable. Send a message to collect usage."
+      };
+    }
+
+    const usedTokens = contextUsage.inputTokens + contextUsage.cachedInputTokens;
+    const safeLimit = Math.max(1, contextUsage.contextLimit);
+    const usedPercent = Math.min(100, Math.max(0, Math.round((usedTokens / safeLimit) * 100)));
+    const leftPercent = Math.max(0, 100 - usedPercent);
+    const tone: ContextUsageTone = usedPercent >= 90 ? "critical" : usedPercent >= 75 ? "warn" : "ok";
+    const summaryLine = `${usedPercent}% used (${leftPercent}% left)`;
+    const detailLine = `${formatCompactTokens(usedTokens)} / ${formatCompactTokens(safeLimit)} tokens used`;
+    const ariaLabel = [
+      summaryLine,
+      detailLine,
+      `input ${contextUsage.inputTokens}`,
+      `cached ${contextUsage.cachedInputTokens}`,
+      `output ${contextUsage.outputTokens}`
+    ].join(". ");
+    return { usedPercent, tone, summaryLine, detailLine, ariaLabel };
+  }, [contextUsage]);
+
+  const cancelPickerAutoJump = () => {
+    if (pickerAutoJumpTimerRef.current !== null) {
+      clearTimeout(pickerAutoJumpTimerRef.current);
+      pickerAutoJumpTimerRef.current = null;
+    }
+  };
+
+  const loadDirectoryTree = async (candidatePath?: string, options: DirectoryLoadOptions = {}) => {
+    const requestSeq = ++pickerRequestSeqRef.current;
+    const normalizedCandidatePath = String(candidatePath || "").trim();
     setPickerLoading(true);
     setPickerError("");
     try {
       const query = new URLSearchParams();
-      if (candidatePath && candidatePath.trim()) {
-        query.set("path", candidatePath.trim());
+      if (normalizedCandidatePath) {
+        query.set("path", normalizedCandidatePath);
       }
       const suffix = query.toString() ? `?${query.toString()}` : "";
       const out = await api<DirectoryBrowseOut>(`/api/fs/directories${suffix}`);
+      if (requestSeq !== pickerRequestSeqRef.current) return;
       setPickerRoots(Array.isArray(out.roots) ? out.roots : []);
       setPickerCwd(String(out.cwd || ""));
+      if (options.syncInput !== false) {
+        setPickerPathInput(String(out.cwd || normalizedCandidatePath || ""));
+      }
       setPickerParent(typeof out.parent === "string" ? out.parent : null);
       setPickerDirectories(Array.isArray(out.directories) ? out.directories : []);
     } catch (error) {
+      if (requestSeq !== pickerRequestSeqRef.current) return;
       const detail = error instanceof Error ? error.message : "读取目录失败";
       setPickerError(detail);
-      setPickerDirectories([]);
+      if (!options.keepDirectoriesOnError) {
+        setPickerDirectories([]);
+      }
     } finally {
-      setPickerLoading(false);
+      if (requestSeq === pickerRequestSeqRef.current) {
+        setPickerLoading(false);
+      }
     }
   };
 
@@ -910,8 +1472,54 @@ export default function App() {
     const firstAdditional = parseDirectories(draftAdditionalDirectoriesRaw)?.[0];
     const initialPath =
       target === "workspace" ? draftWorkspace.trim() : (firstAdditional || draftWorkspace).trim();
-    void loadDirectoryTree(initialPath || undefined);
+    setPickerPathInput(initialPath);
+    cancelPickerAutoJump();
+    void loadDirectoryTree(initialPath || undefined, { syncInput: true });
   };
+
+  const jumpToDirectoryFromInput = () => {
+    const candidate = pickerPathInput.trim();
+    cancelPickerAutoJump();
+    if (!candidate) {
+      setPickerError("请输入目录路径");
+      return;
+    }
+    void loadDirectoryTree(candidate, { syncInput: true, keepDirectoriesOnError: true });
+  };
+
+  const onPickerPathInputChange = (rawValue: string) => {
+    setPickerPathInput(rawValue);
+    const candidate = rawValue.trim();
+    cancelPickerAutoJump();
+    if (!candidate) {
+      setPickerError("");
+      return;
+    }
+    pickerAutoJumpTimerRef.current = setTimeout(() => {
+      void loadDirectoryTree(candidate, {
+        syncInput: false,
+        keepDirectoriesOnError: true
+      });
+    }, 280);
+  };
+
+  const onPickerPathInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    jumpToDirectoryFromInput();
+  };
+
+  useEffect(() => {
+    if (pickerOpen) return;
+    cancelPickerAutoJump();
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    return () => {
+      cancelPickerAutoJump();
+    };
+  }, []);
 
   const selectDirectory = (selectedPath: string) => {
     const normalized = selectedPath.trim();
@@ -998,8 +1606,17 @@ export default function App() {
         };
       },
       async generateTitle(remoteId: string, messages: readonly ThreadMessage[]): Promise<AssistantStream> {
-        const title = guessThreadTitle(messages);
-        if (title.trim()) {
+        let existingTitle = "";
+        try {
+          const current = await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(remoteId)}`);
+          existingTitle = typeof current.thread.title === "string" ? current.thread.title.trim() : "";
+        } catch {
+          // ignore fetch errors and continue with local generation
+        }
+
+        const title = existingTitle || guessThreadTitle(messages);
+        const shouldPersist = !existingTitle && title.trim() && title !== "新对话";
+        if (shouldPersist) {
           await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
             method: "PATCH",
             json: { title }
@@ -1013,8 +1630,14 @@ export default function App() {
       unstable_Provider: ({ children }: PropsWithChildren) => (
         <AgentRuntimeAdapterProvider
           onThreadIdentityChange={({ remoteId, localId }) => {
-            activeRemoteThreadIdRef.current = String(remoteId || "").trim();
+            const normalizedRemoteId = String(remoteId || "").trim();
+            activeRemoteThreadIdRef.current = normalizedRemoteId;
             activeLocalThreadIdRef.current = String(localId || "").trim();
+            if (!normalizedRemoteId) {
+              setContextUsage(null);
+              return;
+            }
+            setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
           }}
         >
           {children}
@@ -1266,6 +1889,24 @@ export default function App() {
             const raw = asRecord(payload?.raw);
             const item = asRecord(raw?.item);
             const itemType = typeof item?.type === "string" ? item.type : "";
+
+            if (eventType === "turn.completed") {
+              const usage = parseTurnUsage(raw?.usage ?? payload?.usage);
+              if (usage) {
+                const usageModel = String(session.model || cfg.model || "").trim();
+                const snapshot: ContextUsageSnapshot = {
+                  threadId,
+                  model: usageModel || "unknown",
+                  contextLimit: contextLimitForModel(usageModel),
+                  inputTokens: usage.inputTokens,
+                  cachedInputTokens: usage.cachedInputTokens,
+                  outputTokens: usage.outputTokens,
+                  updatedAt: new Date().toISOString()
+                };
+                usageByThreadRef.current[threadId] = snapshot;
+                setContextUsage(snapshot);
+              }
+            }
 
             const shouldAppendAgentText =
               !!append &&
@@ -1768,40 +2409,61 @@ export default function App() {
               <span className="tag">{appliedConfig.model}</span>
               <span className="tag">{appliedConfig.reasoningEffort}</span>
               <span className="tag">{appliedConfig.workspace}</span>
+              <div className={`context-usage-indicator context-usage-${contextUsageView.tone}`}>
+                <button
+                  type="button"
+                  className="context-usage-trigger"
+                  aria-label={contextUsageView.ariaLabel}
+                  title={`${contextUsageView.summaryLine}\n${contextUsageView.detailLine}`}
+                >
+                  <span className="context-usage-battery" aria-hidden="true">
+                    <span className="context-usage-fill" style={{ width: `${contextUsageView.usedPercent}%` }} />
+                    <span className="context-usage-percent">{contextUsageView.usedPercent}%</span>
+                  </span>
+                  <span className="context-usage-cap" aria-hidden="true" />
+                </button>
+                <div className="context-usage-tooltip" role="tooltip">
+                  <p>{contextUsageView.summaryLine}</p>
+                  <p>{contextUsageView.detailLine}</p>
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="thread-wrap">
-            <Thread
-              strings={{
-                threadList: {
-                  new: { label: "新会话" },
-                  item: {
-                    title: { fallback: "新对话" },
-                    archive: { tooltip: "归档会话" }
-                  }
-                },
-                welcome: { message: "你好，我是 Agent Studio。请直接提问。" },
-                composer: {
-                  input: { placeholder: "直接输入问题，不做预处理；支持上传文本/图片附件" },
-                  send: { tooltip: "发送消息" },
-                  cancel: { tooltip: "停止生成" }
-                }
-              }}
-              components={{
-                AssistantMessage: AgentAssistantMessage
-              }}
-              assistantMessage={{
-                allowCopy: true,
-                allowReload: true,
-                allowFeedbackPositive: true,
-                allowFeedbackNegative: true,
-                components: {
-                  ToolFallback: HiddenToolFallback as any
-                }
-              }}
-              userMessage={{ allowEdit: true }}
-            />
+            <ComposerPrimitive.AttachmentDropzone asChild>
+              <div className="thread-dropzone">
+                <Thread
+                  strings={{
+                    threadList: {
+                      new: { label: "新会话" },
+                      item: {
+                        title: { fallback: "新对话" }
+                      }
+                    },
+                    welcome: { message: "你好，我是 Agent Studio。请直接提问。" },
+                    composer: {
+                      input: { placeholder: "直接输入问题，支持上传任意附件；可拖拽到对话窗口" },
+                      send: { tooltip: "发送消息" },
+                      cancel: { tooltip: "停止生成" }
+                    }
+                  }}
+                  components={{
+                    AssistantMessage: AgentAssistantMessage
+                  }}
+                  assistantMessage={{
+                    allowCopy: true,
+                    allowReload: true,
+                    allowFeedbackPositive: true,
+                    allowFeedbackNegative: true,
+                    components: {
+                      ToolFallback: HiddenToolFallback as any
+                    }
+                  }}
+                  userMessage={{ allowEdit: true }}
+                />
+              </div>
+            </ComposerPrimitive.AttachmentDropzone>
           </div>
         </main>
       </div>
@@ -1814,12 +2476,32 @@ export default function App() {
                 关闭
               </button>
             </div>
-            <p className="dir-modal-current">{pickerCwd || "..."}</p>
+            <div className="dir-path-input-row">
+              <input
+                className="field-input dir-path-input"
+                value={pickerPathInput}
+                onChange={(e) => onPickerPathInputChange(e.target.value)}
+                onKeyDown={onPickerPathInputKeyDown}
+                placeholder="输入目录路径，实时跳转并加载子目录"
+              />
+              <button
+                type="button"
+                className="picker-btn"
+                onClick={jumpToDirectoryFromInput}
+                disabled={pickerLoading}
+              >
+                跳转
+              </button>
+            </div>
+            <p className="dir-modal-current">当前目录：{pickerCwd || "..."}</p>
             <div className="dir-modal-toolbar">
               <button
                 type="button"
                 className="picker-btn"
-                onClick={() => void loadDirectoryTree(pickerParent || undefined)}
+                onClick={() => {
+                  cancelPickerAutoJump();
+                  void loadDirectoryTree(pickerParent || undefined, { syncInput: true });
+                }}
                 disabled={!pickerParent || pickerLoading}
               >
                 上一级
@@ -1839,7 +2521,10 @@ export default function App() {
                   key={root}
                   type="button"
                   className="dir-root-btn"
-                  onClick={() => void loadDirectoryTree(root)}
+                  onClick={() => {
+                    cancelPickerAutoJump();
+                    void loadDirectoryTree(root, { syncInput: true });
+                  }}
                   title={root}
                 >
                   {root}
@@ -1859,7 +2544,10 @@ export default function App() {
                       <button
                         type="button"
                         className="dir-enter-btn"
-                        onClick={() => void loadDirectoryTree(item.path)}
+                        onClick={() => {
+                          cancelPickerAutoJump();
+                          void loadDirectoryTree(item.path, { syncInput: true });
+                        }}
                         title={item.path}
                       >
                         {item.name}
