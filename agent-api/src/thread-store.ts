@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { v4 as uuidv4 } from "uuid";
+import type { ReasoningEffort } from "./model-config.js";
 
 export type ThreadStatus = "regular" | "archived";
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type { ReasoningEffort } from "./model-config.js";
 
 export type StoredMessageItem = {
   parentId: string | null;
@@ -254,4 +255,3 @@ export class ThreadStore {
     return feedback;
   }
 }
-

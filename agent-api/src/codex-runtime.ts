@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Codex } from "@openai/codex-sdk";
+import type { ReasoningEffort } from "./model-config.js";
 
 export type CodexStreamEvent = {
   type: string;
@@ -92,7 +93,7 @@ export class CodexRuntime {
 
   async startThreadWithOptions(options: {
     model: string;
-    reasoningEffort: "minimal" | "low" | "medium" | "high" | "xhigh";
+    reasoningEffort: ReasoningEffort;
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
   }): Promise<any> {

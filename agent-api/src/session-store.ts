@@ -1,11 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
+import type { ReasoningEffort } from "./model-config.js";
 
 export type SessionState = {
   sessionId: string;
   threadId?: string;
   thread: any;
   model: string;
-  reasoningEffort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   createdAt: string;

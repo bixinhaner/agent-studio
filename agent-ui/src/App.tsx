@@ -46,12 +46,20 @@ import {
 import { useAuiState } from "@assistant-ui/store";
 
 import { api, apiBase, authHeaders } from "./lib/api";
+import {
+  DEFAULT_MODEL,
+  MODEL_OPTIONS,
+  contextLimitForModel,
+  normalizeReasoningEffortForModel,
+  reasoningOptionsForModel,
+  type ReasoningEffort
+} from "./lib/model-config";
 import { iterateSSE } from "./lib/sse";
 
 type SessionOut = {
   session_id: string;
   model: string;
-  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning_effort: ReasoningEffort;
   workspace: string;
   created_at: string;
   updated_at: string;
@@ -63,7 +71,7 @@ type ThreadOut = {
   title?: string;
   external_id?: string;
   model: string;
-  reasoning_effort: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning_effort: ReasoningEffort;
   workspace: string;
   created_at: string;
   updated_at: string;
@@ -105,7 +113,6 @@ type DirectoryBrowseOut = {
   }>;
 };
 
-type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
 type WebSearchMode = "disabled" | "cached" | "live";
@@ -164,25 +171,7 @@ type TimelineRow = {
   at?: string;
 };
 
-const DEFAULT_MODEL = "gpt-5.3-codex";
 const DEFAULT_WORKSPACE = ".";
-
-const MODEL_OPTIONS = [
-  { value: DEFAULT_MODEL, label: "GPT-5.3 Codex（推荐）" },
-  { value: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
-  { value: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
-  { value: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
-  { value: "gpt-5-codex", label: "GPT-5 Codex" },
-  { value: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini" }
-];
-
-const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
-  { value: "minimal", label: "minimal（最快）" },
-  { value: "low", label: "low（偏快）" },
-  { value: "medium", label: "medium（均衡）" },
-  { value: "high", label: "high（更深入）" },
-  { value: "xhigh", label: "xhigh（最深入）" }
-];
 
 const SANDBOX_OPTIONS: Array<{ value: SandboxMode; label: string }> = [
   { value: "workspace-write", label: "workspace-write（推荐：可读写工作区）" },
@@ -202,19 +191,8 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
   { value: "cached", label: "cached（缓存搜索）" },
   { value: "live", label: "live（实时搜索）" }
 ];
-
-const DEFAULT_CONTEXT_LIMIT_TOKENS = 262_144;
 const DEFAULT_RUNNING_STAGE_TEXT = "正在等待模型响应";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
-
-const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "gpt-5.3-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
-  "gpt-5.2-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
-  "gpt-5.1-codex-max": DEFAULT_CONTEXT_LIMIT_TOKENS,
-  "gpt-5.1-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
-  "gpt-5-codex": DEFAULT_CONTEXT_LIMIT_TOKENS,
-  "gpt-5.1-codex-mini": DEFAULT_CONTEXT_LIMIT_TOKENS
-};
 
 const AssistantMarkdownText = makeMarkdownText();
 
@@ -504,6 +482,7 @@ function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
   return {
     ...cfg,
     model,
+    reasoningEffort: normalizeReasoningEffortForModel(model, cfg.reasoningEffort),
     workspace
   };
 }
@@ -550,12 +529,6 @@ function parseTurnUsage(value: unknown): TurnUsage | null {
     cachedInputTokens,
     outputTokens
   };
-}
-
-function contextLimitForModel(model: string): number {
-  const normalized = model.trim();
-  if (!normalized) return DEFAULT_CONTEXT_LIMIT_TOKENS;
-  return MODEL_CONTEXT_LIMITS[normalized] ?? DEFAULT_CONTEXT_LIMIT_TOKENS;
 }
 
 function formatCompactTokens(tokens: number): string {
@@ -1692,6 +1665,8 @@ export default function App() {
     []
   );
 
+  const reasoningOptions = useMemo(() => reasoningOptionsForModel(appliedConfig.model), [appliedConfig.model]);
+
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
       run: async function* (options) {
@@ -2261,7 +2236,16 @@ export default function App() {
               <select
                 className="field-input"
                 value={appliedConfig.model}
-                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, model: e.target.value }))}
+                onChange={(e) =>
+                  setAppliedConfig((prev) => {
+                    const model = e.target.value;
+                    return {
+                      ...prev,
+                      model,
+                      reasoningEffort: normalizeReasoningEffortForModel(model, prev.reasoningEffort)
+                    };
+                  })
+                }
               >
                 {MODEL_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
@@ -2269,7 +2253,7 @@ export default function App() {
                   </option>
                 ))}
               </select>
-              <span className="field-help">决定回答质量与速度。一般默认 `GPT-5.3 Codex` 即可。</span>
+              <span className="field-help">默认推荐 `GPT-5.4`。旧版 Codex 模型保留为兼容选项。</span>
             </label>
 
             <label className="field">
@@ -2279,7 +2263,7 @@ export default function App() {
                 value={appliedConfig.reasoningEffort}
                 onChange={(e) => setAppliedConfig((prev) => ({ ...prev, reasoningEffort: e.target.value as ReasoningEffort }))}
               >
-                {REASONING_OPTIONS.map((level) => (
+                {reasoningOptions.map((level) => (
                   <option key={level.value} value={level.value}>
                     {level.label}
                   </option>

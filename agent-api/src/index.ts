@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { SessionStore } from "./session-store.js";
 import { initSSE, sendSSE } from "./sse.js";
 import { ThreadStore, type ReasoningEffort, type ThreadRecord } from "./thread-store.js";
@@ -15,11 +16,12 @@ const app = express();
 const runtime = new CodexRuntime();
 const sessions = new SessionStore(appConfig.sessionTtlMs);
 const threads = new ThreadStore(appConfig.threadStoreFile);
+const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 
 const createSessionSchema = z.object({
   session_id: z.string().optional(),
   model: z.string().optional(),
-  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -33,7 +35,7 @@ const createThreadSchema = z.object({
   title: z.string().optional(),
   external_id: z.string().optional(),
   model: z.string().optional(),
-  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -42,14 +44,14 @@ const patchThreadSchema = z.object({
   title: z.string().optional(),
   status: z.enum(["regular", "archived"]).optional(),
   model: z.string().optional(),
-  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
 const ensureThreadSessionSchema = z.object({
   model: z.string().optional(),
-  reasoning_effort: z.enum(["minimal", "low", "medium", "high", "xhigh"]).optional(),
+  reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -129,9 +131,13 @@ function pickSessionOptions(input: {
   codex_run_config?: Record<string, unknown>;
 }): SessionOptions {
   const workspace = resolveWorkspace(input.workspace);
+  const model = normalizeModel(input.model || appConfig.defaultModel);
   return {
-    model: (input.model || appConfig.defaultModel).trim() || appConfig.defaultModel,
-    reasoningEffort: input.reasoning_effort || appConfig.defaultReasoningEffort,
+    model,
+    reasoningEffort: normalizeReasoningEffortForModel(
+      model,
+      input.reasoning_effort || appConfig.defaultReasoningEffort
+    ),
     workspace,
     codexRunConfig: input.codex_run_config
   };
@@ -202,15 +208,28 @@ async function ensureThreadSession(
   if (!thread) throw new Error("thread 不存在");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
+  const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
+  const desiredReasoning = normalizeReasoningEffortForModel(
+    desiredModel,
+    patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort
+  );
+  const desiredWorkspace = resolveWorkspace(patch?.workspace || thread.workspace);
+  const desiredCodexRunConfig = ensureThreadUploadInRunConfig(sourceCodexRunConfig, getThreadUploadTempDir(threadId));
 
   const desired: SessionOptions = {
-    model: (patch?.model || thread.model || appConfig.defaultModel).trim() || appConfig.defaultModel,
-    reasoningEffort: patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort,
-    workspace: resolveWorkspace(patch?.workspace || thread.workspace),
-    codexRunConfig: ensureThreadUploadInRunConfig(sourceCodexRunConfig, getThreadUploadTempDir(threadId))
+    model: desiredModel,
+    reasoningEffort: desiredReasoning,
+    workspace: desiredWorkspace,
+    codexRunConfig: desiredCodexRunConfig
   };
 
-  if (patch?.model || patch?.reasoning_effort || patch?.workspace || patch?.codex_run_config) {
+  const shouldPersistNormalizedThread =
+    thread.model !== desired.model ||
+    thread.reasoningEffort !== desired.reasoningEffort ||
+    thread.workspace !== desired.workspace ||
+    stableJson(thread.codexRunConfig) !== stableJson(sourceCodexRunConfig);
+
+  if (patch?.model || patch?.reasoning_effort || patch?.workspace || patch?.codex_run_config || shouldPersistNormalizedThread) {
     await threads.update(threadId, {
       model: desired.model,
       reasoningEffort: desired.reasoningEffort,
@@ -491,11 +510,23 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
     const threadId = String(req.params.threadId || "").trim();
     const input = patchThreadSchema.parse(req.body || {});
+    const existing = await threads.get(threadId);
+    if (!existing) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
+
     const patch: Parameters<typeof threads.update>[1] = {};
     if (input.title !== undefined) patch.title = input.title;
     if (input.status !== undefined) patch.status = input.status;
-    if (input.model !== undefined) patch.model = input.model.trim();
-    if (input.reasoning_effort !== undefined) patch.reasoningEffort = input.reasoning_effort;
+    const nextModel = input.model !== undefined ? normalizeModel(input.model) : existing.model;
+    if (input.model !== undefined) patch.model = nextModel;
+    if (input.model !== undefined || input.reasoning_effort !== undefined) {
+      patch.reasoningEffort = normalizeReasoningEffortForModel(
+        nextModel,
+        input.reasoning_effort ?? existing.reasoningEffort
+      );
+    }
     if (input.workspace !== undefined) patch.workspace = resolveWorkspace(input.workspace);
     if (input.codex_run_config !== undefined) patch.codexRunConfig = input.codex_run_config;
     const updated = await threads.update(threadId, patch);

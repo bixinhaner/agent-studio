@@ -1,13 +1,14 @@
 import "dotenv/config";
 import path from "node:path";
 import { z } from "zod";
+import { DEFAULT_MODEL, REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 
 const schema = z.object({
   PORT: z.string().default("8787"),
   HOST: z.string().default("0.0.0.0"),
   AGENT_API_TOKEN: z.string().optional(),
-  DEFAULT_MODEL: z.string().default("gpt-5"),
-  DEFAULT_REASONING_EFFORT: z.enum(["minimal", "low", "medium", "high", "xhigh"]).default("high"),
+  DEFAULT_MODEL: z.string().default(DEFAULT_MODEL),
+  DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_TTL_MINUTES: z.string().default("180"),
   WORKSPACE_WHITELIST: z.string().default("."),
@@ -20,6 +21,8 @@ const env = schema.parse(process.env);
 const ttlMinutes = Number(env.SESSION_TTL_MINUTES);
 const ttlMs = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes * 60 * 1000 : 180 * 60 * 1000;
 
+const defaultModel = normalizeModel(env.DEFAULT_MODEL);
+const defaultReasoningEffort = normalizeReasoningEffortForModel(defaultModel, env.DEFAULT_REASONING_EFFORT);
 const defaultWorkspace = path.resolve(process.cwd(), env.DEFAULT_WORKSPACE);
 const whitelist = env.WORKSPACE_WHITELIST.split(",")
   .map((item) => item.trim())
@@ -38,8 +41,8 @@ export const appConfig = {
   port: Number(env.PORT) || 8787,
   host: env.HOST,
   token: (env.AGENT_API_TOKEN || "").trim(),
-  defaultModel: env.DEFAULT_MODEL.trim() || "gpt-5",
-  defaultReasoningEffort: env.DEFAULT_REASONING_EFFORT,
+  defaultModel,
+  defaultReasoningEffort,
   defaultWorkspace,
   sessionTtlMs: ttlMs,
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
