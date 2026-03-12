@@ -55,6 +55,7 @@ import {
   type ReasoningEffort
 } from "./lib/model-config";
 import { iterateSSE } from "./lib/sse";
+import { ZendeskIntegrationPanel } from "./features/zendesk/ZendeskIntegrationPanel";
 
 type SessionOut = {
   session_id: string;
@@ -2431,6 +2432,8 @@ export default function App() {
               {errorText ? <p className="err-text">{errorText}</p> : null}
             </div>
           </section>
+
+          <ZendeskIntegrationPanel />
         </aside>
 
         <main className="agent-main">

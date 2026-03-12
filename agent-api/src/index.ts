@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { SessionStore } from "./session-store.js";
 import { initSSE, sendSSE } from "./sse.js";
@@ -16,6 +17,7 @@ const app = express();
 const runtime = new CodexRuntime();
 const sessions = new SessionStore(appConfig.sessionTtlMs);
 const threads = new ThreadStore(appConfig.threadStoreFile);
+const zendesk = new ZendeskIntegrationService();
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 
 const createSessionSchema = z.object({
@@ -328,6 +330,16 @@ const uploadRawParser = express.raw({
 });
 
 app.use(cors());
+app.post(
+  "/api/integrations/zendesk/webhook",
+  express.raw({
+    type: () => true,
+    limit: "1mb"
+  }),
+  async (req: Request, res: Response) => {
+    await handleZendeskWebhookRequest(zendesk, req, res);
+  }
+);
 app.use(express.json({ limit: "1mb" }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -347,6 +359,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
+
+app.use("/api/integrations/zendesk", createZendeskAdminRouter(zendesk));
 
 app.get("/api/fs/directories", async (req: Request, res: Response) => {
   try {
