@@ -5,20 +5,54 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 
+import { registerCommonApiRoutes } from "./app-routes.js";
+import { createAdminRouter } from "./admin/router.js";
+import { createAuthRouter } from "./auth/router.js";
+import { createCurrentUserMiddleware } from "./auth/current-user.js";
+import { createDingTalkClient } from "./auth/dingtalk.js";
+import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { getDbClient } from "./db/client.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
-import { SessionStore } from "./session-store.js";
+import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
+import { SessionRepository, type SessionRepositoryDb } from "./persistence/session-repository.js";
+import {
+  ThreadRepository,
+  type ReasoningEffort,
+  type ThreadRecord,
+  type ThreadRepositoryDb
+} from "./persistence/thread-repository.js";
+import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
+import { createPortalRouter } from "./portal/router.js";
 import { initSSE, sendSSE } from "./sse.js";
-import { ThreadStore, type ReasoningEffort, type ThreadRecord } from "./thread-store.js";
 
 const app = express();
 const runtime = new CodexRuntime();
-const sessions = new SessionStore(appConfig.sessionTtlMs);
-const threads = new ThreadStore(appConfig.threadStoreFile);
+const db = getDbClient();
+const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
+const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
+const users = new UserRepository(db as unknown as UserRepositoryDb);
 const zendesk = new ZendeskIntegrationService();
+const sessionCookies = createSessionCookieManager({
+  cookieName: appConfig.sessionCookie.name,
+  secret: appConfig.sessionCookie.secret,
+  maxAgeMs: appConfig.sessionCookie.maxAgeMs,
+  secure: appConfig.sessionCookie.secure,
+  sameSite: "lax"
+});
+const oauthStates = createOAuthStateCookieManager({
+  cookieName: `${appConfig.sessionCookie.name}_oauth_state`,
+  secret: appConfig.sessionCookie.secret,
+  maxAgeMs: 10 * 60 * 1000,
+  secure: appConfig.sessionCookie.secure,
+  sameSite: "lax"
+});
+const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
+type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
+const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
 
 const createSessionSchema = z.object({
   session_id: z.string().optional(),
@@ -81,6 +115,7 @@ const browseDirectoriesSchema = z.object({
 });
 
 type SessionOptions = {
+  userId: string;
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
@@ -132,10 +167,11 @@ function pickSessionOptions(input: {
   reasoning_effort?: ReasoningEffort;
   workspace?: string;
   codex_run_config?: Record<string, unknown>;
-}): SessionOptions {
+}, userId: string): SessionOptions {
   const workspace = resolveWorkspace(input.workspace);
   const model = normalizeModel(input.model || appConfig.defaultModel);
   return {
+    userId,
     model,
     reasoningEffort: normalizeReasoningEffortForModel(
       model,
@@ -182,23 +218,26 @@ async function createSession(options: SessionOptions, threadId?: string) {
     await fs.mkdir(uploadDir, { recursive: true });
   }
 
-  const thread = await runtime.startThreadWithOptions({
+  const liveThread = await runtime.startThreadWithOptions({
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
     codexRunConfig
   });
-  return sessions.create({
+  const session = await sessions.create({
+    userId: options.userId,
     threadId,
-    thread,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
     codexRunConfig
   });
+  liveRuntimeThreads.set(session.sessionId, liveThread);
+  return session;
 }
 
 async function ensureThreadSession(
+  userId: string,
   threadId: string,
   patch?: {
     model?: string;
@@ -207,7 +246,7 @@ async function ensureThreadSession(
     codex_run_config?: Record<string, unknown>;
   }
 ) {
-  const thread = await threads.get(threadId);
+  const thread = await threads.getOwned(threadId, userId);
   if (!thread) throw new Error("thread 不存在");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
@@ -220,6 +259,7 @@ async function ensureThreadSession(
   const desiredCodexRunConfig = ensureThreadUploadInRunConfig(sourceCodexRunConfig, getThreadUploadTempDir(threadId));
 
   const desired: SessionOptions = {
+    userId: thread.userId ?? userId,
     model: desiredModel,
     reasoningEffort: desiredReasoning,
     workspace: desiredWorkspace,
@@ -241,9 +281,10 @@ async function ensureThreadSession(
     });
   }
 
-  const active = thread.sessionId ? sessions.get(thread.sessionId) : undefined;
+  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
   const changed =
     !active ||
+    !liveRuntimeThreads.has(active.sessionId) ||
     active.model !== desired.model ||
     active.reasoningEffort !== desired.reasoningEffort ||
     active.workspace !== desired.workspace ||
@@ -254,11 +295,10 @@ async function ensureThreadSession(
   }
 
   if (active?.sessionId) {
-    sessions.remove(active.sessionId);
+    await sessions.remove(active.sessionId);
+    liveRuntimeThreads.delete(active.sessionId);
   }
-  const created = await createSession(desired, threadId);
-  await threads.update(threadId, { sessionId: created.sessionId });
-  return created;
+  return createSession(desired, threadId);
 }
 
 function summarizeText(text: string): string {
@@ -343,7 +383,7 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 
-app.use((req: Request, res: Response, next: NextFunction) => {
+function requireServiceToken(req: Request, res: Response, next: NextFunction) {
   if (!appConfig.token) {
     next();
     return;
@@ -355,13 +395,36 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return;
   }
   next();
-});
+}
 
 app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
 
-app.use("/api/integrations/zendesk", createZendeskAdminRouter(zendesk));
+registerCommonApiRoutes(app, {
+  currentUserMiddleware: createCurrentUserMiddleware({ users, cookies: sessionCookies }),
+  authRouter: createAuthRouter({
+    users,
+    cookies: sessionCookies,
+    dingtalkClient,
+    dingtalkConfig: appConfig.dingtalk,
+    oauthStates,
+    sessionCookieReady: Boolean(appConfig.sessionCookie.secret)
+  }),
+  adminRouter: createAdminRouter({
+    users,
+    threads,
+    sessions: {
+      countActive: async () => liveRuntimeThreads.size
+    }
+  }),
+  portalRouter: createPortalRouter({
+    workspaceWhitelist: appConfig.workspaceWhitelist,
+    defaultWorkspace: appConfig.defaultWorkspace
+  }),
+  serviceTokenMiddleware: requireServiceToken,
+  zendeskRouter: createZendeskAdminRouter(zendesk)
+});
 
 app.get("/api/fs/directories", async (req: Request, res: Response) => {
   try {
@@ -398,13 +461,14 @@ app.get("/api/fs/directories", async (req: Request, res: Response) => {
 
 app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
     if (!threadId) {
       res.status(400).json({ detail: "threadId 不能为空" });
       return;
     }
 
-    const thread = await threads.get(threadId);
+    const thread = await threads.getOwned(threadId, currentUser.id);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -451,14 +515,18 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
 
 app.post("/api/session", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const input = createSessionSchema.parse(req.body || {});
     const existingId = (input.session_id || "").trim();
     if (existingId) {
-      const existing = sessions.get(existingId);
+      const existing = await sessions.getOwned(existingId, currentUser.id);
       if (existing) {
-        if (input.model || input.reasoning_effort || input.workspace || input.codex_run_config) {
+        if (!liveRuntimeThreads.has(existing.sessionId)) {
+          await sessions.remove(existing.sessionId);
+          liveRuntimeThreads.delete(existing.sessionId);
+        } else if (input.model || input.reasoning_effort || input.workspace || input.codex_run_config) {
           const workspace = input.workspace ? resolveWorkspace(input.workspace) : existing.workspace;
-          const updated = sessions.update(existingId, {
+          const updated = await sessions.update(existingId, {
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
             workspace,
@@ -466,13 +534,14 @@ app.post("/api/session", async (req: Request, res: Response) => {
           });
           res.json(sessionOut(updated));
           return;
+        } else {
+          res.json(sessionOut(existing));
+          return;
         }
-        res.json(sessionOut(existing));
-        return;
       }
     }
 
-    const created = await createSession(pickSessionOptions(input));
+    const created = await createSession(pickSessionOptions(input, currentUser.id));
     res.json(sessionOut(created));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "创建 session 失败";
@@ -480,8 +549,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/threads", async (_req: Request, res: Response) => {
-  const list = await threads.list(true);
+app.get("/api/threads", async (req: Request, res: Response) => {
+  const list = await threads.listForUser(req.currentUser!.id, true);
   res.json({
     threads: list.map((thread) => threadOut(thread))
   });
@@ -489,9 +558,11 @@ app.get("/api/threads", async (_req: Request, res: Response) => {
 
 app.post("/api/threads", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const input = createThreadSchema.parse(req.body || {});
-    const options = pickSessionOptions(input);
+    const options = pickSessionOptions(input, currentUser.id);
     const createdThread = await threads.create({
+      userId: currentUser.id,
       title: input.title?.trim() || undefined,
       externalId: input.external_id?.trim() || undefined,
       model: options.model,
@@ -500,7 +571,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       codexRunConfig: options.codexRunConfig
     });
     const session = await createSession(options, createdThread.id);
-    const updated = await threads.update(createdThread.id, { sessionId: session.sessionId });
+    const updated = (await threads.get(createdThread.id)) ?? createdThread;
 
     res.json({
       thread: threadOut(updated),
@@ -513,7 +584,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
 });
 
 app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
-  const thread = await threads.get(String(req.params.threadId || "").trim());
+  const thread = await threads.getOwned(String(req.params.threadId || "").trim(), req.currentUser!.id);
   if (!thread) {
     res.status(404).json({ detail: "thread 不存在" });
     return;
@@ -523,9 +594,10 @@ app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
     const input = patchThreadSchema.parse(req.body || {});
-    const existing = await threads.get(threadId);
+    const existing = await threads.getOwned(threadId, currentUser.id);
     if (!existing) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -554,14 +626,16 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.get(threadId);
+    const thread = await threads.getOwned(threadId, currentUser.id);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
     }
     if (thread.sessionId) {
-      sessions.remove(thread.sessionId);
+      await sessions.remove(thread.sessionId);
+      liveRuntimeThreads.delete(thread.sessionId);
     }
     await threads.delete(threadId);
     await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });
@@ -574,9 +648,10 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.post("/api/threads/:threadId/session", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
     const input = ensureThreadSessionSchema.parse(req.body || {});
-    const session = await ensureThreadSession(threadId, input);
+    const session = await ensureThreadSession(currentUser.id, threadId, input);
     res.json({ session: sessionOut(session) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "确保 thread session 失败";
@@ -586,7 +661,13 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
 
 app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
     const repository = await threads.getRepository(threadId);
     res.json({
       head_id: repository.headId ?? null,
@@ -604,7 +685,13 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
 
 app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
     const input = appendMessageSchema.parse(req.body || {});
     const updated = await threads.appendMessage(threadId, {
       parentId: input.parent_id ?? null,
@@ -620,7 +707,13 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
 
 app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
     const input = replaceMessagesSchema.parse(req.body || {});
     await threads.replaceMessages(threadId, {
       headId: input.head_id ?? null,
@@ -639,7 +732,13 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
 
 app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) => {
   try {
+    const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
     const input = feedbackSchema.parse(req.body || {});
     const feedback = await threads.addFeedback(threadId, {
       type: input.type,
@@ -658,9 +757,15 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
 
   try {
+    const currentUser = req.currentUser!;
     const input = streamSchema.parse(req.body || {});
-    const session = sessions.get(input.session_id);
-    if (!session) {
+    const session = await sessions.getOwned(input.session_id, currentUser.id);
+    const liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
+    if (!session || !liveThread) {
+      if (session?.sessionId) {
+        await sessions.remove(session.sessionId);
+        liveRuntimeThreads.delete(session.sessionId);
+      }
       sendSSE(res, "error", { detail: "session 不存在或已过期" });
       res.end();
       return;
@@ -690,7 +795,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
 
     let answer = "";
-    for await (const event of runtime.runStreamed(session.thread, input.message)) {
+    for await (const event of runtime.runStreamed(liveThread, input.message)) {
       if (event.delta) answer += event.delta;
       else if (event.text) answer += event.text;
       sendSSE(res, "codex", event);
@@ -710,10 +815,31 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   }
 });
 
-setInterval(() => sessions.cleanupExpired(), 60_000).unref();
+async function cleanupExpiredSessions() {
+  const expiredSessionIds = await sessions.cleanupExpired();
+  for (const sessionId of expiredSessionIds) {
+    liveRuntimeThreads.delete(sessionId);
+  }
+}
+
+setInterval(() => {
+  void cleanupExpiredSessions();
+}, 60_000).unref();
 
 async function bootstrap() {
-  await threads.load();
+  await db.$connect();
+  const legacyThreadOwnerId = await users.findLegacyImportOwnerId(appConfig.legacyThreadOwnerId);
+  const imported = await importLegacyThreadsFromJson({
+    filePath: appConfig.threadStoreFile,
+    repository: threads,
+    defaultUserId: legacyThreadOwnerId
+  });
+  if (imported.importedCount) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `imported ${imported.importedCount} legacy thread(s) from ${appConfig.threadStoreFile}${imported.archivedPath ? ` -> ${imported.archivedPath}` : ""}`
+    );
+  }
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);

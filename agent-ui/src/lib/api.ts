@@ -1,4 +1,11 @@
 export type ApiInit = RequestInit & { json?: unknown };
+export const AUTH_INVALID_EVENT = "agent-auth-invalid";
+
+export function notifyAuthInvalidStatus(status: number) {
+  if (typeof window !== "undefined" && status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { status } }));
+  }
+}
 
 export function apiBase() {
   const configured = (import.meta.env.VITE_AGENT_API_BASE || "").trim().replace(/\/+$/, "");
@@ -21,6 +28,7 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
 
   const res = await fetch(`${apiBase()}${path}`, {
     ...init,
+    credentials: init?.credentials ?? "include",
     headers,
     body: init?.json === undefined ? init?.body : JSON.stringify(init.json)
   });
@@ -28,6 +36,7 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
+    notifyAuthInvalidStatus(res.status);
     const msg = (data && typeof data.detail === "string" && data.detail) || `请求失败(${res.status})`;
     throw new Error(msg);
   }

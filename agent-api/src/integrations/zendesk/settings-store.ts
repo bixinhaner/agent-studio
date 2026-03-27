@@ -1,15 +1,15 @@
-import path from "node:path";
-
 import { appConfig, resolveWorkspace } from "../../config.js";
+import { getDbClient } from "../../db/client.js";
 import { DEFAULT_MODEL, normalizeModel, normalizeReasoningEffortForModel } from "../../model-config.js";
-import { readJsonFile, writeJsonFile, WriteQueue } from "./storage.js";
+import {
+  IntegrationRepository,
+  type IntegrationRepositoryDb
+} from "../../persistence/integration-repository.js";
 import type {
   ZendeskIntegrationSettings,
   ZendeskPublicSettings,
   ZendeskValidatedUser
 } from "./types.js";
-
-type PersistedSettings = ZendeskIntegrationSettings;
 
 function normalizeBaseUrl(input: string): string {
   const raw = input.trim();
@@ -127,22 +127,16 @@ export function findZendeskReadinessGaps(settings: ZendeskIntegrationSettings): 
 }
 
 export class ZendeskSettingsStore {
-  private readonly filePath: string;
-  private readonly queue = new WriteQueue();
-  private cache?: ZendeskIntegrationSettings;
-
-  constructor(rootDir = path.resolve(process.cwd(), "temp", "zendesk")) {
-    this.filePath = path.join(rootDir, "settings.json");
-  }
+  constructor(
+    private readonly integrations = new IntegrationRepository(getDbClient() as unknown as IntegrationRepositoryDb)
+  ) {}
 
   async get(): Promise<ZendeskIntegrationSettings> {
-    if (this.cache) return this.cache;
-    const loaded = await readJsonFile<PersistedSettings>(this.filePath, defaultSettings());
-    this.cache = this.normalize({
+    const loaded = await this.integrations.getZendeskSettings();
+    return this.normalize({
       ...defaultSettings(),
       ...loaded
     });
-    return this.cache;
   }
 
   async update(
@@ -164,9 +158,7 @@ export class ZendeskSettingsStore {
           ? current.webhookSigningSecret
           : String(patch.webhookSigningSecret || "").trim()
     });
-    this.cache = next;
-    await this.queue.run(async () => writeJsonFile(this.filePath, next));
-    return next;
+    return this.integrations.upsertZendeskSettings(next);
   }
 
   async rememberValidation(user: ZendeskValidatedUser): Promise<ZendeskIntegrationSettings> {

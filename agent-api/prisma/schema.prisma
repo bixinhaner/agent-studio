@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String           @id @default(cuid())
+  externalId     String?          @unique @map("external_id")
+  email          String?
+  displayName    String?          @map("display_name")
+  role           String           @default("employee")
+  status         String           @default("active")
+  dingtalkOpenId String?          @map("dingtalk_open_id")
+  dingtalkUserId String?          @unique @map("dingtalk_user_id")
+  dingtalkCorpId String?          @map("dingtalk_corp_id")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  threads        Thread[]
+  runtimeSessions RuntimeSession[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Thread {
+  id              String            @id @default(cuid())
+  userId          String?           @map("user_id")
+  title           String?
+  status          ThreadStatus      @default(active)
+  model           String?
+  reasoningEffort String?           @map("reasoning_effort")
+  workspace       String?
+  codexRunConfig  Json?             @map("codex_run_config")
+  headId          String?           @map("head_id")
+  feedback        Json?             @default("[]")
+  externalId      String?           @unique @map("external_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages        Message[]
+  runtimeSessions RuntimeSession[]
+
+  @@index([userId])
+  @@map("threads")
+}
+
+model Message {
+  id         String      @id @default(cuid())
+  threadId   String      @map("thread_id")
+  externalId String?     @map("external_id")
+  role       MessageRole
+  content    Json
+  parentId   String?     @map("parent_id")
+  runConfig  Json?       @map("run_config")
+  position   Int         @default(0)
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+  thread     Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([threadId, position])
+  @@unique([threadId, externalId])
+  @@map("messages")
+}
+
+model RuntimeSession {
+  id          String        @id @default(cuid())
+  threadId    String?       @map("thread_id")
+  userId      String?       @map("user_id")
+  status      SessionStatus @default(active)
+  provider    String?       @default("codex")
+  externalId  String?       @unique @map("external_id")
+  metadata    Json?
+  startedAt   DateTime      @default(now()) @map("started_at")
+  endedAt     DateTime?     @map("ended_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  thread      Thread?       @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([threadId])
+  @@index([userId])
+  @@map("runtime_sessions")
+}
+
+model IntegrationConfig {
+  key       String   @id
+  config    Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("integration_configs")
+}
+
+enum ThreadStatus {
+  active
+  archived
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+  tool
+}
+
+enum SessionStatus {
+  active
+  ended
+  failed
+}

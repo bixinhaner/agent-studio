@@ -1,3 +1,5 @@
+import { notifyAuthInvalidStatus } from "./api";
+
 type SSEEvent = {
   event: string;
   data: unknown;
@@ -7,6 +9,7 @@ type SSEOptions = {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  credentials?: RequestCredentials;
   signal?: AbortSignal;
   onEvent: (event: SSEEvent) => void;
 };
@@ -25,9 +28,11 @@ export async function* iterateSSE(url: string, options: SSEIterateOptions): Asyn
     method: options.method || "GET",
     headers: options.headers,
     body: options.body,
+    credentials: options.credentials ?? "include",
     signal: options.signal
   });
   if (!res.ok || !res.body) {
+    notifyAuthInvalidStatus(res.status);
     throw new Error(`SSE 请求失败(${res.status})`);
   }
 

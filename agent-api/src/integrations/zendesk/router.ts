@@ -12,7 +12,12 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
   const router = express.Router();
 
   router.get("/overview", async (_req: Request, res: Response) => {
-    res.json(await service.getOverview());
+    try {
+      res.json(await service.getOverview());
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载 Zendesk 概览失败";
+      res.status(500).json({ detail });
+    }
   });
 
   router.put("/settings", async (req: Request, res: Response) => {
@@ -23,10 +28,10 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         publicBaseUrl: input.public_base_url,
         zendeskBaseUrl: input.zendesk_base_url,
         zendeskEmail: input.zendesk_email,
-        zendeskApiToken: input.zendesk_api_token ? String(input.zendesk_api_token || "").trim() : undefined,
-        webhookSigningSecret: input.webhook_signing_secret
-          ? String(input.webhook_signing_secret || "").trim()
-          : undefined,
+        zendeskApiToken:
+          input.zendesk_api_token === undefined ? undefined : String(input.zendesk_api_token || "").trim(),
+        webhookSigningSecret:
+          input.webhook_signing_secret === undefined ? undefined : String(input.webhook_signing_secret || "").trim(),
         responseMode: input.response_mode,
         fallbackMode: input.fallback_mode,
         autoStatus: input.auto_status,

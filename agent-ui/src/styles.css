@@ -23,6 +23,86 @@ body {
   overflow: hidden;
 }
 
+.auth-screen,
+.admin-shell {
+  min-height: 100vh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.auth-card,
+.admin-card {
+  width: min(720px, 100%);
+  border: 1px solid #d6e2f3;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  padding: 24px 28px;
+  backdrop-filter: blur(10px);
+}
+
+.auth-eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.auth-card h1,
+.admin-card h1 {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.08;
+}
+
+.auth-card p,
+.admin-card p {
+  margin: 12px 0 0;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.admin-card h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.admin-description {
+  max-width: 56ch;
+}
+
+.admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0 0;
+}
+
+.admin-metrics div {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  padding: 14px;
+  background: #f8fbff;
+}
+
+.admin-metrics dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.admin-metrics dd {
+  margin: 8px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .agent-shell {
   display: grid;
   gap: 12px;
