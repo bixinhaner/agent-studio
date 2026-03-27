@@ -30,6 +30,7 @@ const createSessionSchema = z.object({
 
 const streamSchema = z.object({
   session_id: z.string().min(1),
+  thread_id: z.string().min(1).optional(),
   message: z.string().min(1)
 });
 
@@ -663,6 +664,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       sendSSE(res, "error", { detail: "session 不存在或已过期" });
       res.end();
       return;
+    }
+    const requestedThreadId = String(input.thread_id || "").trim();
+    if (requestedThreadId) {
+      const boundThreadId = String(session.threadId || "").trim();
+      if (!boundThreadId) {
+        sendSSE(res, "error", { detail: "session 未绑定 thread，请刷新后重试" });
+        res.end();
+        return;
+      }
+      if (boundThreadId !== requestedThreadId) {
+        sendSSE(res, "error", { detail: "session 与 thread 不匹配，请重试" });
+        res.end();
+        return;
+      }
     }
 
     sendSSE(res, "meta", {

@@ -55,6 +55,7 @@ import {
   type ReasoningEffort
 } from "./lib/model-config";
 import { iterateSSE } from "./lib/sse";
+import { resolveRunThreadId } from "./lib/thread-id-resolver";
 import { ZendeskIntegrationPanel } from "./features/zendesk/ZendeskIntegrationPanel";
 
 type SessionOut = {
@@ -1676,30 +1677,21 @@ export default function App() {
           throw new Error("未识别到用户输入文本");
         }
 
-        let threadId = String(options.unstable_threadId || "").trim();
+        const threadId = await resolveRunThreadId({
+          unstableThreadId: String(options.unstable_threadId || "").trim(),
+          getActiveRemoteThreadId: () => String(activeRemoteThreadIdRef.current || "").trim(),
+          getActiveLocalThreadId: () => String(activeLocalThreadIdRef.current || "").trim(),
+          listThreads: async () => {
+            const out = await api<ThreadListOut>("/api/threads");
+            return out.threads || [];
+          },
+          attempts: 8,
+          waitMs: 80
+        });
         if (!threadId) {
-          threadId = String(activeRemoteThreadIdRef.current || "").trim();
+          throw new Error("无法识别当前线程 ID（线程可能仍在初始化，请稍后重试）");
         }
-        if (!threadId) {
-          const localId = String(activeLocalThreadIdRef.current || "").trim();
-          if (localId) {
-            for (let attempt = 0; attempt < 8; attempt += 1) {
-              const out = await api<ThreadListOut>("/api/threads");
-              const byExternal =
-                (out.threads || []).find((t) => String(t.external_id || "").trim() === localId && t.status !== "archived") ||
-                (out.threads || []).find((t) => String(t.external_id || "").trim() === localId);
-              if (byExternal?.id) {
-                threadId = byExternal.id;
-                activeRemoteThreadIdRef.current = threadId;
-                break;
-              }
-              await new Promise((resolve) => setTimeout(resolve, 80));
-            }
-          }
-        }
-        if (!threadId) {
-          throw new Error("无法识别当前线程 ID（请先创建或切换会话后重试）");
-        }
+        activeRemoteThreadIdRef.current = threadId;
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
@@ -1811,6 +1803,7 @@ export default function App() {
             },
             body: JSON.stringify({
               session_id: session.session_id,
+              thread_id: threadId,
               message: prompt
             }),
             signal: options.abortSignal
