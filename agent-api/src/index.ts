@@ -15,6 +15,7 @@ import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { getDbClient } from "./db/client.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
+import { ensureThreadUploadInRunConfig, replaceLiveRuntimeSession, startLiveRuntimeSession } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { SessionRepository, type SessionRepositoryDb } from "./persistence/session-repository.js";
@@ -214,50 +215,21 @@ function getThreadUploadTempDir(threadId: string): string {
   return path.join(appConfig.uploadTempRoot, safeThreadId);
 }
 
-function normalizeAdditionalDirectories(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((it) => (typeof it === "string" ? it.trim() : ""))
-    .filter(Boolean);
-}
-
-function ensureThreadUploadInRunConfig(
-  input: Record<string, unknown> | undefined,
-  uploadDir: string
-): Record<string, unknown> {
-  const next: Record<string, unknown> = input ? { ...input } : {};
-  const dirs = normalizeAdditionalDirectories(next.additionalDirectories);
-  const resolved = new Set(dirs.map((it) => path.resolve(it)));
-  const normalizedUploadDir = path.resolve(uploadDir);
-  if (!resolved.has(normalizedUploadDir)) {
-    dirs.push(normalizedUploadDir);
-  }
-  next.additionalDirectories = dirs;
-  return next;
-}
-
-function stripInternalRunConfigMetadata(input: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!input) return input;
-  const next = { ...input };
-  delete next._agentStudioKnowledgeSets;
-  return next;
-}
-
 async function createSession(options: SessionOptions, threadId?: string) {
-  const uploadDir = threadId ? getThreadUploadTempDir(threadId) : "";
-  const codexRunConfig = threadId
-    ? ensureThreadUploadInRunConfig(options.codexRunConfig, uploadDir)
-    : options.codexRunConfig;
-  if (threadId && uploadDir) {
-    await fs.mkdir(uploadDir, { recursive: true });
+  if (threadId) {
+    await fs.mkdir(getThreadUploadTempDir(threadId), { recursive: true });
   }
 
-  const liveThread = await runtime.startThreadWithOptions({
+  const started = await startLiveRuntimeSession({
+    runtime,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig)
+    codexRunConfig: options.codexRunConfig,
+    threadId,
+    getThreadUploadDir: getThreadUploadTempDir
   });
+  const codexRunConfig = started.codexRunConfig;
   const session = await sessions.create({
     userId: options.userId,
     threadId,
@@ -266,7 +238,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
     workspace: options.workspace,
     codexRunConfig
   });
-  liveRuntimeThreads.set(session.sessionId, liveThread);
+  liveRuntimeThreads.set(session.sessionId, started.liveThread);
   return session;
 }
 
@@ -644,11 +616,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
             knowledgeSetIds: input.knowledge_set_ids,
             codexRunConfig: nextSourceCodexRunConfig
           });
-          const updated = await sessions.update(existingId, {
+          const updated = await replaceLiveRuntimeSession({
+            runtime,
+            liveRuntimeThreads,
+            sessionId: existing.sessionId,
+            threadId: existing.threadId,
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
             workspace,
-            codexRunConfig: nextCodexRunConfig
+            codexRunConfig: nextCodexRunConfig,
+            getThreadUploadDir: getThreadUploadTempDir,
+            persist: async (payload) =>
+              sessions.update(existingId, {
+                model: payload.model,
+                reasoningEffort: payload.reasoningEffort,
+                workspace: payload.workspace,
+                codexRunConfig: payload.codexRunConfig
+              })
           });
           res.json(sessionOut(updated));
           return;
