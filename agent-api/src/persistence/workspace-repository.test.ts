@@ -119,7 +119,7 @@ describe("WorkspaceRepository", () => {
         slug: "newer",
         description: "Recent",
         status: null,
-        sourceType: "managed",
+        sourceType: "managed_upload",
         rootPath: null,
         createdAt: new Date("2026-03-28T00:00:00.000Z"),
         updatedAt: new Date("2026-03-28T00:00:00.000Z")

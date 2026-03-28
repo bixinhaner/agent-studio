@@ -132,19 +132,27 @@ class FakeKnowledgeSetDb {
       where,
       orderBy
     }: {
-      where: { knowledgeSetId: string };
+      where: { workspaceId?: string; knowledgeSetId?: string };
       orderBy?: { createdAt?: "asc" | "desc" };
     }) => {
-      const rows = this.bindings.filter((item) => item.knowledgeSetId === where.knowledgeSetId);
+      const rows = this.bindings.filter(
+        (item) =>
+          (where.workspaceId ? item.workspaceId === where.workspaceId : true) &&
+          (where.knowledgeSetId ? item.knowledgeSetId === where.knowledgeSetId : true)
+      );
       rows.sort((left, right) => {
         const diff = left.createdAt.getTime() - right.createdAt.getTime();
         return orderBy?.createdAt === "desc" ? -diff : diff;
       });
       return clone(rows);
     },
-    deleteMany: async ({ where }: { where: { knowledgeSetId: string } }) => {
+    deleteMany: async ({ where }: { where: { workspaceId?: string; knowledgeSetId?: string } }) => {
       const before = this.bindings.length;
-      const remaining = this.bindings.filter((item) => item.knowledgeSetId !== where.knowledgeSetId);
+      const remaining = this.bindings.filter((item) => {
+        if (where.workspaceId && item.workspaceId !== where.workspaceId) return true;
+        if (where.knowledgeSetId && item.knowledgeSetId !== where.knowledgeSetId) return true;
+        return false;
+      });
       this.bindings.splice(0, this.bindings.length, ...remaining);
       return { count: before - this.bindings.length };
     },
@@ -178,7 +186,7 @@ describe("KnowledgeSetRepository", () => {
       slug: "policies",
       description: " ",
       status: " ",
-      sourceType: "managed",
+      sourceType: "managed_upload",
       rootPath: " ",
       storageKey: " uploads/policies.zip "
     });
@@ -189,7 +197,7 @@ describe("KnowledgeSetRepository", () => {
       slug: "policies",
       description: undefined,
       status: "active",
-      sourceType: "managed",
+      sourceType: "managed_upload",
       rootPath: undefined,
       storageKey: "uploads/policies.zip",
       items: [],
@@ -207,7 +215,7 @@ describe("KnowledgeSetRepository", () => {
       slug: "policies",
       description: null,
       status: "active",
-      sourceType: "managed",
+      sourceType: "managed_upload",
       rootPath: null,
       storageKey: "uploads/policies.zip",
       createdAt: new Date("2026-03-27T00:00:00.000Z"),
@@ -288,7 +296,7 @@ describe("KnowledgeSetRepository", () => {
       slug: "policies",
       description: null,
       status: "active",
-      sourceType: "managed",
+      sourceType: "managed_upload",
       rootPath: null,
       storageKey: null,
       createdAt: new Date("2026-03-27T00:00:00.000Z"),
@@ -296,25 +304,26 @@ describe("KnowledgeSetRepository", () => {
     });
     db.bindings.push({
       id: "binding-old",
-      workspaceId: "workspace-old",
-      knowledgeSetId: "knowledge-set-1",
+      workspaceId: "workspace-1",
+      knowledgeSetId: "knowledge-set-old",
       mountType: "reference",
       createdAt: new Date("2026-03-27T00:00:00.000Z"),
       updatedAt: new Date("2026-03-27T00:00:00.000Z")
     });
     const repository = new KnowledgeSetRepository(db as never);
 
-    const record = await repository.replaceWorkspaceBindings("knowledge-set-1", [
-      { workspaceId: "workspace-a", mountType: "reference" },
-      { workspaceId: "workspace-b", mountType: "mirror" }
+    const bindings = await repository.replaceWorkspaceBindings("workspace-1", [
+      { knowledgeSetId: "knowledge-set-1", mountType: "reference" },
+      { knowledgeSetId: "knowledge-set-2", mountType: "mirror" }
     ]);
 
     expect(db.bindings).toHaveLength(2);
-    expect(db.bindings.map((item) => item.workspaceId)).toEqual(["workspace-a", "workspace-b"]);
-    expect(record.workspaceBindings).toEqual([
+    expect(db.bindings.map((item) => item.workspaceId)).toEqual(["workspace-1", "workspace-1"]);
+    expect(db.bindings.map((item) => item.knowledgeSetId)).toEqual(["knowledge-set-1", "knowledge-set-2"]);
+    expect(bindings).toEqual([
       {
         id: expect.any(String),
-        workspaceId: "workspace-a",
+        workspaceId: "workspace-1",
         knowledgeSetId: "knowledge-set-1",
         mountType: "reference",
         createdAt: expect.any(String),
@@ -322,8 +331,8 @@ describe("KnowledgeSetRepository", () => {
       },
       {
         id: expect.any(String),
-        workspaceId: "workspace-b",
-        knowledgeSetId: "knowledge-set-1",
+        workspaceId: "workspace-1",
+        knowledgeSetId: "knowledge-set-2",
         mountType: "mirror",
         createdAt: expect.any(String),
         updatedAt: expect.any(String)

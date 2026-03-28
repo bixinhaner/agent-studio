@@ -59,7 +59,7 @@ type ReplaceKnowledgeSetItemsPayload = Array<{
 }>;
 
 type ReplaceWorkspaceBindingsPayload = Array<{
-  workspaceId: string;
+  knowledgeSetId: string;
   mountType: string;
 }>;
 
@@ -112,8 +112,11 @@ type KnowledgeSetItemTable = {
 };
 
 type WorkspaceKnowledgeSetTable = {
-  findMany(args: { where: { knowledgeSetId: string }; orderBy?: { createdAt?: "asc" | "desc" } }): Promise<WorkspaceKnowledgeSetRow[]>;
-  deleteMany(args: { where: { knowledgeSetId: string } }): Promise<{ count: number }>;
+  findMany(args: {
+    where: { workspaceId?: string; knowledgeSetId?: string };
+    orderBy?: { createdAt?: "asc" | "desc" };
+  }): Promise<WorkspaceKnowledgeSetRow[]>;
+  deleteMany(args: { where: { workspaceId?: string; knowledgeSetId?: string } }): Promise<{ count: number }>;
   create(args: { data: Record<string, unknown> }): Promise<WorkspaceKnowledgeSetRow>;
 };
 
@@ -217,22 +220,29 @@ export class KnowledgeSetRepository {
   }
 
   async replaceWorkspaceBindings(
-    knowledgeSetId: string,
+    workspaceId: string,
     bindings: ReplaceWorkspaceBindingsPayload
-  ): Promise<KnowledgeSetRecord> {
+  ): Promise<WorkspaceKnowledgeSetRecord[]> {
     return this.db.$transaction(async (tx) => {
-      const record = await this.requireKnowledgeSet(tx, knowledgeSetId);
-      await tx.workspaceKnowledgeSet.deleteMany({ where: { knowledgeSetId: record.id } });
+      const normalizedWorkspaceId = trimOrUndefined(workspaceId);
+      if (!normalizedWorkspaceId) {
+        throw new Error("workspace 不存在");
+      }
+      await tx.workspaceKnowledgeSet.deleteMany({ where: { workspaceId: normalizedWorkspaceId } });
       for (const binding of bindings) {
         await tx.workspaceKnowledgeSet.create({
           data: {
-            knowledgeSetId: record.id,
-            workspaceId: binding.workspaceId,
+            knowledgeSetId: binding.knowledgeSetId,
+            workspaceId: normalizedWorkspaceId,
             mountType: binding.mountType
           }
         });
       }
-      return this.loadRecord(tx, record);
+      const rows = await tx.workspaceKnowledgeSet.findMany({
+        where: { workspaceId: normalizedWorkspaceId },
+        orderBy: { createdAt: "asc" }
+      });
+      return rows.map(mapWorkspaceKnowledgeSet);
     });
   }
 
