@@ -306,15 +306,15 @@ describe("KnowledgeSetRepository", () => {
       id: "binding-old",
       workspaceId: "workspace-1",
       knowledgeSetId: "knowledge-set-old",
-      mountType: "reference",
+      mountType: "default",
       createdAt: new Date("2026-03-27T00:00:00.000Z"),
       updatedAt: new Date("2026-03-27T00:00:00.000Z")
     });
     const repository = new KnowledgeSetRepository(db as never);
 
     const bindings = await repository.replaceWorkspaceBindings("workspace-1", [
-      { knowledgeSetId: "knowledge-set-1", mountType: "reference" },
-      { knowledgeSetId: "knowledge-set-2", mountType: "mirror" }
+      { knowledgeSetId: "knowledge-set-1", mountType: "default" },
+      { knowledgeSetId: "knowledge-set-2", mountType: "optional" }
     ]);
 
     expect(db.bindings).toHaveLength(2);
@@ -325,7 +325,7 @@ describe("KnowledgeSetRepository", () => {
         id: expect.any(String),
         workspaceId: "workspace-1",
         knowledgeSetId: "knowledge-set-1",
-        mountType: "reference",
+        mountType: "default",
         createdAt: expect.any(String),
         updatedAt: expect.any(String)
       },
@@ -333,7 +333,7 @@ describe("KnowledgeSetRepository", () => {
         id: expect.any(String),
         workspaceId: "workspace-1",
         knowledgeSetId: "knowledge-set-2",
-        mountType: "mirror",
+        mountType: "optional",
         createdAt: expect.any(String),
         updatedAt: expect.any(String)
       }
