@@ -30,7 +30,9 @@ import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persist
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
 import { createPortalRouter } from "./portal/router.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
+import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
+import { PolicyService } from "./resources/policy-service.js";
 import { initSSE, sendSSE } from "./sse.js";
 
 const app = express();
@@ -43,6 +45,7 @@ const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryD
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+const policyService = new PolicyService(resourcePolicies);
 const zendesk = new ZendeskIntegrationService();
 const sessionCookies = createSessionCookieManager({
   cookieName: appConfig.sessionCookie.name,
@@ -437,6 +440,12 @@ registerCommonApiRoutes(app, {
   portalRouter: createPortalRouter({
     workspaceWhitelist: appConfig.workspaceWhitelist,
     defaultWorkspace: appConfig.defaultWorkspace
+  }),
+  resourcesPortalRouter: createResourcesPortalRouter({
+    workspaces,
+    knowledgeSets,
+    policies: policyService,
+    listDepartmentIdsForUser: async () => []
   }),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
