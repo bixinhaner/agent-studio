@@ -23,7 +23,8 @@ const schema = z.object({
   WORKSPACE_WHITELIST: z.string().default("."),
   LEGACY_THREAD_OWNER_ID: z.string().optional(),
   THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
-  UPLOAD_TEMP_ROOT: z.string().default("./temp/session-uploads")
+  UPLOAD_TEMP_ROOT: z.string().default("./temp/session-uploads"),
+  KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets")
 });
 
 const env = schema.parse(process.env);
@@ -51,6 +52,10 @@ const threadStoreFile = path.isAbsolute(env.THREAD_STORE_FILE)
 const uploadTempRoot = path.isAbsolute(env.UPLOAD_TEMP_ROOT)
   ? env.UPLOAD_TEMP_ROOT
   : path.resolve(process.cwd(), env.UPLOAD_TEMP_ROOT);
+
+const knowledgeSetStorageRoot = path.isAbsolute(env.KNOWLEDGE_SET_STORAGE_ROOT)
+  ? env.KNOWLEDGE_SET_STORAGE_ROOT
+  : path.resolve(process.cwd(), env.KNOWLEDGE_SET_STORAGE_ROOT);
 
 function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
@@ -87,7 +92,8 @@ export const appConfig = {
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),
   threadStoreFile,
-  uploadTempRoot
+  uploadTempRoot,
+  knowledgeSetStorageRoot
 };
 
 export function resolveWorkspace(input?: string | null): string {

@@ -15,11 +15,12 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^6.6.0",
     "@openai/codex-sdk": "^0.111.0",
+    "@prisma/client": "^6.6.0",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "express": "^4.21.2",
+    "fflate": "^0.8.2",
     "pg": "^8.16.3",
     "uuid": "^11.1.0",
     "zod": "^3.24.2"
