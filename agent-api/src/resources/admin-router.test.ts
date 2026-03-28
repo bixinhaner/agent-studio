@@ -26,7 +26,7 @@ afterEach(async () => {
 
 describe("resources admin router", () => {
   it("supports workspace list, create, and update while keeping overview working", async () => {
-    const { app, cookies, adminUser } = await buildResourcesAdminApp();
+    const { app, cookies, adminUser, allowedFilesystemRoot } = await buildResourcesAdminApp();
 
     const listResponse = await request(app)
       .get("/api/admin/workspaces")
@@ -42,7 +42,7 @@ describe("resources admin router", () => {
         name: "Docs Workspace",
         slug: "docs-workspace",
         sourceType: "filesystem",
-        rootPath: "/srv/docs"
+        rootPath: path.join(allowedFilesystemRoot, "docs")
       });
 
     expect(createResponse.status).toBe(201);
@@ -50,7 +50,7 @@ describe("resources admin router", () => {
       name: "Docs Workspace",
       slug: "docs-workspace",
       sourceType: "filesystem",
-      rootPath: "/srv/docs"
+      rootPath: path.join(allowedFilesystemRoot, "docs")
     });
 
     const patchResponse = await request(app)
@@ -166,12 +166,12 @@ describe("resources admin router", () => {
   });
 
   it("rejects file and archive uploads for non-managed knowledge sets", async () => {
-    const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp();
+    const { app, cookies, adminUser, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
     const knowledgeSet = await knowledgeSets.create({
       name: "Filesystem Docs",
       slug: "filesystem-docs",
       sourceType: "filesystem",
-      rootPath: "/srv/docs"
+      rootPath: path.join(allowedFilesystemRoot, "docs")
     });
 
     const fileResponse = await request(app)
@@ -223,12 +223,12 @@ describe("resources admin router", () => {
   });
 
   it("gets and replaces workspace bindings", async () => {
-    const { app, cookies, adminUser, workspaces, knowledgeSets } = await buildResourcesAdminApp();
+    const { app, cookies, adminUser, workspaces, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
     const workspace = await workspaces.create({
       name: "Workspace",
       slug: "workspace",
       sourceType: "filesystem",
-      rootPath: "/srv/workspace"
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
     });
     const knowledgeSet = await knowledgeSets.create({
       name: "Policies",
@@ -315,6 +315,83 @@ describe("resources admin router", () => {
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ detail: "Forbidden" });
+  });
+
+  it("rejects filesystem rootPath writes outside the allowed whitelist", async () => {
+    const { app, cookies, adminUser, workspaces, knowledgeSets } = await buildResourcesAdminApp();
+
+    const createWorkspaceResponse = await request(app)
+      .post("/api/admin/workspaces")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Outside Workspace",
+        slug: "outside-workspace",
+        sourceType: "filesystem",
+        rootPath: "/outside/workspace"
+      });
+
+    expect(createWorkspaceResponse.status).toBe(400);
+    expect(createWorkspaceResponse.body).toEqual({ detail: "workspace 不在允许目录白名单中" });
+
+    const workspace = await workspaces.create({
+      name: "Inside Workspace",
+      slug: "inside-workspace",
+      sourceType: "filesystem",
+      rootPath: "/tmp/inside-workspace"
+    });
+
+    const patchWorkspaceResponse = await request(app)
+      .patch(`/api/admin/workspaces/${workspace.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ rootPath: "/outside/updated-workspace" });
+
+    expect(patchWorkspaceResponse.status).toBe(400);
+    expect(patchWorkspaceResponse.body).toEqual({ detail: "workspace 不在允许目录白名单中" });
+
+    const createKnowledgeSetResponse = await request(app)
+      .post("/api/admin/knowledge-sets")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Outside Knowledge Set",
+        slug: "outside-knowledge-set",
+        sourceType: "filesystem",
+        rootPath: "/outside/knowledge-set"
+      });
+
+    expect(createKnowledgeSetResponse.status).toBe(400);
+    expect(createKnowledgeSetResponse.body).toEqual({ detail: "workspace 不在允许目录白名单中" });
+
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Inside Knowledge Set",
+      slug: "inside-knowledge-set",
+      sourceType: "filesystem",
+      rootPath: "/tmp/inside-knowledge-set"
+    });
+
+    const patchKnowledgeSetResponse = await request(app)
+      .patch(`/api/admin/knowledge-sets/${knowledgeSet.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ rootPath: "/outside/updated-knowledge-set" });
+
+    expect(patchKnowledgeSetResponse.status).toBe(400);
+    expect(patchKnowledgeSetResponse.body).toEqual({ detail: "workspace 不在允许目录白名单中" });
+  });
+
+  it("rejects empty multipart file uploads", async () => {
+    const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp();
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Policies",
+      slug: "policies-empty",
+      sourceType: "managed_upload"
+    });
+
+    const response = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/files`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .field("note", "no files");
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ detail: "at least one file upload is required" });
   });
 });
 
@@ -681,7 +758,9 @@ async function buildResourcesAdminApp(options?: {
   const knowledgeSets = new FakeKnowledgeSetRepository(workspaces);
   const resourcePolicies = new FakeResourcePolicyRepository();
   const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "resources-admin-"));
+  const allowedFilesystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "resources-admin-workspaces-"));
   tempRoots.push(storageRoot);
+  tempRoots.push(allowedFilesystemRoot);
   const storage = new FilesystemKnowledgeSetStorage(storageRoot);
 
   const cookies = createSessionCookieManager({
@@ -746,7 +825,18 @@ async function buildResourcesAdminApp(options?: {
       workspaces: workspaces as never,
       knowledgeSets: knowledgeSets as never,
       resourcePolicies: resourcePolicies as never,
-      storage
+      storage,
+      validateFilesystemPath: (input?: string | null) => {
+        const raw = (input || "").trim();
+        const candidate = raw ? path.resolve(raw) : "";
+        if (!candidate) {
+          throw new Error("workspace 不在允许目录白名单中");
+        }
+        if (candidate === allowedFilesystemRoot || candidate.startsWith(`${allowedFilesystemRoot}${path.sep}`)) {
+          return candidate;
+        }
+        throw new Error("workspace 不在允许目录白名单中");
+      }
     }),
     portalRouter: createPortalRouter({
       workspaceWhitelist: ["/workspace/default"],
@@ -756,7 +846,17 @@ async function buildResourcesAdminApp(options?: {
     zendeskRouter: express.Router()
   });
 
-  return { app, cookies, adminUser: user, user, workspaces, knowledgeSets, resourcePolicies, storage };
+  return {
+    app,
+    cookies,
+    adminUser: user,
+    user,
+    workspaces,
+    knowledgeSets,
+    resourcePolicies,
+    storage,
+    allowedFilesystemRoot
+  };
 }
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {

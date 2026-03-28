@@ -1,5 +1,5 @@
-import express, { Router, type Request, type Response } from "express";
-import multer from "multer";
+import express, { Router, type NextFunction, type Request, type Response } from "express";
+import multer, { MulterError } from "multer";
 
 import type { ResourcePolicyRecord } from "../persistence/resource-policy-repository.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
@@ -27,7 +27,7 @@ type WorkspaceRepositoryLike = {
       rootPath?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<unknown | undefined>;
+  get(id: string): Promise<{ id: string; sourceType?: string; rootPath?: string } | undefined>;
 };
 
 type KnowledgeSetRepositoryLike = {
@@ -55,7 +55,7 @@ type KnowledgeSetRepositoryLike = {
       storageKey?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<{ id: string; sourceType?: string } | undefined>;
+  get(id: string): Promise<{ id: string; sourceType?: string; rootPath?: string } | undefined>;
   listItems(id: string): Promise<unknown[]>;
   replaceItems(
     id: string,
@@ -106,15 +106,47 @@ function toTrimmedString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 10,
+    fileSize: 5 * 1024 * 1024
+  }
+});
+
+function withMultipartFiles(fieldName: string) {
+  const middleware = upload.array(fieldName);
+  return (req: Request, res: Response, next: NextFunction) => {
+    middleware(req, res, (error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+      next();
+    });
+  };
+}
+
+function requireFilesystemRootPath(
+  validateFilesystemPath: (input?: string | null) => string,
+  sourceType: string,
+  rootPath: string | undefined
+): string | undefined {
+  if (sourceType !== "filesystem") {
+    return rootPath;
+  }
+  return validateFilesystemPath(rootPath);
+}
 
 export function createResourcesAdminRouter(options: {
   workspaces: WorkspaceRepositoryLike;
   knowledgeSets: KnowledgeSetRepositoryLike;
   resourcePolicies: ResourcePolicyRepositoryLike;
   storage: KnowledgeSetStorage;
+  validateFilesystemPath?: (input?: string | null) => string;
 }): Router {
   const router = Router();
+  const validateFilesystemPath = options.validateFilesystemPath ?? ((input?: string | null) => input?.trim() ?? "");
 
   router.get("/workspaces", async (_req: Request, res: Response) => {
     res.json({ workspaces: await options.workspaces.list() });
@@ -122,14 +154,15 @@ export function createResourcesAdminRouter(options: {
 
   router.post("/workspaces", async (req: Request, res: Response) => {
     try {
+      const sourceType = String(req.body?.sourceType ?? "");
       const workspace = await options.workspaces.create({
         organizationId: toTrimmedString(req.body?.organizationId),
         name: String(req.body?.name ?? ""),
         slug: String(req.body?.slug ?? ""),
         description: toTrimmedString(req.body?.description),
         status: toTrimmedString(req.body?.status),
-        sourceType: String(req.body?.sourceType ?? ""),
-        rootPath: toTrimmedString(req.body?.rootPath)
+        sourceType,
+        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, toTrimmedString(req.body?.rootPath))
       });
       res.status(201).json({ workspace });
     } catch (error) {
@@ -139,14 +172,20 @@ export function createResourcesAdminRouter(options: {
 
   router.patch("/workspaces/:workspaceId", async (req: Request, res: Response) => {
     try {
+      const existing = await options.workspaces.get(req.params.workspaceId);
+      if (!existing) {
+        res.status(404).json({ detail: "workspace 不存在" });
+        return;
+      }
+      const sourceType = String(req.body?.sourceType ?? existing.sourceType ?? "");
       const workspace = await options.workspaces.update(req.params.workspaceId, {
         organizationId: req.body?.organizationId,
         name: req.body?.name,
         slug: req.body?.slug,
         description: req.body?.description,
         status: req.body?.status,
-        sourceType: req.body?.sourceType,
-        rootPath: req.body?.rootPath
+        sourceType,
+        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, req.body?.rootPath ?? existing.rootPath)
       });
       res.json({ workspace });
     } catch (error) {
@@ -160,14 +199,15 @@ export function createResourcesAdminRouter(options: {
 
   router.post("/knowledge-sets", async (req: Request, res: Response) => {
     try {
+      const sourceType = String(req.body?.sourceType ?? "");
       const knowledgeSet = await options.knowledgeSets.create({
         organizationId: toTrimmedString(req.body?.organizationId),
         name: String(req.body?.name ?? ""),
         slug: String(req.body?.slug ?? ""),
         description: toTrimmedString(req.body?.description),
         status: toTrimmedString(req.body?.status),
-        sourceType: String(req.body?.sourceType ?? ""),
-        rootPath: toTrimmedString(req.body?.rootPath),
+        sourceType,
+        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, toTrimmedString(req.body?.rootPath)),
         storageKey: toTrimmedString(req.body?.storageKey)
       });
       res.status(201).json({ knowledgeSet });
@@ -178,14 +218,20 @@ export function createResourcesAdminRouter(options: {
 
   router.patch("/knowledge-sets/:knowledgeSetId", async (req: Request, res: Response) => {
     try {
+      const existing = await options.knowledgeSets.get(req.params.knowledgeSetId);
+      if (!existing) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const sourceType = String(req.body?.sourceType ?? existing.sourceType ?? "");
       const knowledgeSet = await options.knowledgeSets.update(req.params.knowledgeSetId, {
         organizationId: req.body?.organizationId,
         name: req.body?.name,
         slug: req.body?.slug,
         description: req.body?.description,
         status: req.body?.status,
-        sourceType: req.body?.sourceType,
-        rootPath: req.body?.rootPath,
+        sourceType,
+        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, req.body?.rootPath ?? existing.rootPath),
         storageKey: req.body?.storageKey
       });
       res.json({ knowledgeSet });
@@ -203,7 +249,7 @@ export function createResourcesAdminRouter(options: {
     }
   });
 
-  router.post("/knowledge-sets/:knowledgeSetId/files", upload.array("files"), async (req: Request, res: Response) => {
+  router.post("/knowledge-sets/:knowledgeSetId/files", withMultipartFiles("files"), async (req: Request, res: Response) => {
     try {
       const knowledgeSetId = req.params.knowledgeSetId;
       const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
@@ -221,6 +267,10 @@ export function createResourcesAdminRouter(options: {
         buffer: file.buffer,
         mimeType: toTrimmedString(file.mimetype)
       }));
+      if (files.length === 0) {
+        res.status(400).json({ detail: "at least one file upload is required" });
+        return;
+      }
       const result = await options.storage.saveFiles({ knowledgeSetId, files });
       await options.knowledgeSets.replaceItems(knowledgeSetId, result.items);
       res.json({
@@ -324,6 +374,14 @@ export function createResourcesAdminRouter(options: {
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
+  });
+
+  router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (error instanceof MulterError) {
+      res.status(400).json({ detail: error.code === "LIMIT_FILE_SIZE" ? "uploaded file is too large" : "multipart upload exceeds configured limits" });
+      return;
+    }
+    next(error);
   });
 
   return router;

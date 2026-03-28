@@ -431,7 +431,8 @@ registerCommonApiRoutes(app, {
     workspaces,
     knowledgeSets,
     resourcePolicies,
-    storage: knowledgeSetStorage
+    storage: knowledgeSetStorage,
+    validateFilesystemPath: resolveWorkspace
   }),
   portalRouter: createPortalRouter({
     workspaceWhitelist: appConfig.workspaceWhitelist,
