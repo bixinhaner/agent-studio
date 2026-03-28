@@ -147,6 +147,13 @@ function requireTrimmedValue(value: string | undefined, field: "subjectId" | "re
 export class ResourcePolicyRepository {
   constructor(private readonly db: ResourcePolicyRepositoryDb) {}
 
+  async listAll(): Promise<ResourcePolicyRecord[]> {
+    const rows = await this.db.resourcePolicy.findMany({
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map(mapResourcePolicy);
+  }
+
   async replacePolicies(policies: ReplaceResourcePoliciesPayload): Promise<ResourcePolicyRecord[]> {
     return this.replacePoliciesForGroups({
       groups: policies.map((policy) => ({

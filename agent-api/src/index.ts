@@ -25,7 +25,12 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
+import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
+import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
+import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
 import { createPortalRouter } from "./portal/router.js";
+import { createResourcesAdminRouter } from "./resources/admin-router.js";
+import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { initSSE, sendSSE } from "./sse.js";
 
 const app = express();
@@ -34,6 +39,10 @@ const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
+const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
+const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
+const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
+const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const zendesk = new ZendeskIntegrationService();
 const sessionCookies = createSessionCookieManager({
   cookieName: appConfig.sessionCookie.name,
@@ -417,6 +426,12 @@ registerCommonApiRoutes(app, {
     sessions: {
       countActive: async () => liveRuntimeThreads.size
     }
+  }),
+  resourcesAdminRouter: createResourcesAdminRouter({
+    workspaces,
+    knowledgeSets,
+    resourcePolicies,
+    storage: knowledgeSetStorage
   }),
   portalRouter: createPortalRouter({
     workspaceWhitelist: appConfig.workspaceWhitelist,

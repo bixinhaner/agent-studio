@@ -102,6 +102,7 @@ type WorkspaceKnowledgeSetRow = {
 
 type KnowledgeSetTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<KnowledgeSetRow | null>;
+  findMany(args?: { orderBy?: { createdAt?: "asc" | "desc"; updatedAt?: "asc" | "desc" } }): Promise<KnowledgeSetRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
 };
@@ -218,6 +219,54 @@ export class KnowledgeSetRepository {
     return row ? this.loadRecord(this.db, row) : undefined;
   }
 
+  async list(): Promise<KnowledgeSetRecord[]> {
+    const rows = await this.db.knowledgeSet.findMany({
+      orderBy: { createdAt: "asc" }
+    });
+    return Promise.all(rows.map((row) => this.loadRecord(this.db, row)));
+  }
+
+  async update(
+    id: string,
+    payload: Partial<CreateKnowledgeSetPayload>
+  ): Promise<KnowledgeSetRecord> {
+    const knowledgeSetId = trimOrUndefined(id);
+    if (!knowledgeSetId) {
+      throw new Error("knowledge set 不存在");
+    }
+    const existing = await this.db.knowledgeSet.findUnique({ where: { id: knowledgeSetId } });
+    if (!existing) {
+      throw new Error("knowledge set 不存在");
+    }
+    const updated = await this.db.knowledgeSet.update({
+      where: { id: knowledgeSetId },
+      data: {
+        organizationId:
+          payload.organizationId === undefined ? existing.organizationId : trimOrUndefined(payload.organizationId) ?? null,
+        name: payload.name ?? existing.name,
+        slug: payload.slug ?? existing.slug,
+        description:
+          payload.description === undefined ? existing.description : trimOrUndefined(payload.description) ?? null,
+        status: payload.status === undefined ? existing.status : trimOrUndefined(payload.status) ?? "active",
+        sourceType: payload.sourceType ?? existing.sourceType,
+        rootPath: payload.rootPath === undefined ? existing.rootPath : trimOrUndefined(payload.rootPath) ?? null,
+        storageKey:
+          payload.storageKey === undefined ? existing.storageKey : trimOrUndefined(payload.storageKey) ?? null,
+        updatedAt: new Date()
+      }
+    });
+    return this.loadRecord(this.db, updated);
+  }
+
+  async listItems(knowledgeSetId: string): Promise<KnowledgeSetItemRecord[]> {
+    const record = await this.requireKnowledgeSet(this.db, knowledgeSetId);
+    const rows = await this.db.knowledgeSetItem.findMany({
+      where: { knowledgeSetId: record.id },
+      orderBy: { relativePath: "asc" }
+    });
+    return rows.map(mapKnowledgeSetItem);
+  }
+
   async replaceItems(knowledgeSetId: string, items: ReplaceKnowledgeSetItemsPayload): Promise<KnowledgeSetRecord> {
     return this.db.$transaction(async (tx) => {
       const record = await this.requireKnowledgeSet(tx, knowledgeSetId);
@@ -281,6 +330,22 @@ export class KnowledgeSetRepository {
       });
       return rows.map(mapWorkspaceKnowledgeSet);
     });
+  }
+
+  async listWorkspaceBindings(workspaceId: string): Promise<WorkspaceKnowledgeSetRecord[]> {
+    const normalizedWorkspaceId = trimOrUndefined(workspaceId);
+    if (!normalizedWorkspaceId) {
+      throw new Error("workspace 不存在");
+    }
+    const workspace = await this.db.workspace.findUnique({ where: { id: normalizedWorkspaceId } });
+    if (!workspace) {
+      throw new Error("workspace 不存在");
+    }
+    const rows = await this.db.workspaceKnowledgeSet.findMany({
+      where: { workspaceId: normalizedWorkspaceId },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map(mapWorkspaceKnowledgeSet);
   }
 
   private async requireKnowledgeSet(db: KnowledgeSetRepositoryDb, knowledgeSetId: string): Promise<KnowledgeSetRow> {

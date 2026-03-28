@@ -40,6 +40,7 @@ type WorkspaceTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<WorkspaceRow | null>;
   findMany(args?: { orderBy?: { createdAt?: "asc" | "desc"; updatedAt?: "asc" | "desc" } }): Promise<WorkspaceRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<WorkspaceRow>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<WorkspaceRow>;
 };
 
 export type WorkspaceRepositoryDb = {
@@ -113,5 +114,35 @@ export class WorkspaceRepository {
       orderBy: { createdAt: "asc" }
     });
     return rows.map(mapWorkspace);
+  }
+
+  async update(
+    id: string,
+    payload: Partial<CreateWorkspacePayload>
+  ): Promise<WorkspaceRecord> {
+    const workspaceId = trimOrUndefined(id);
+    if (!workspaceId) {
+      throw new Error("workspace 不存在");
+    }
+    const existing = await this.db.workspace.findUnique({ where: { id: workspaceId } });
+    if (!existing) {
+      throw new Error("workspace 不存在");
+    }
+    const updated = await this.db.workspace.update({
+      where: { id: workspaceId },
+      data: {
+        organizationId:
+          payload.organizationId === undefined ? existing.organizationId : trimOrUndefined(payload.organizationId) ?? null,
+        name: payload.name ?? existing.name,
+        slug: payload.slug ?? existing.slug,
+        description:
+          payload.description === undefined ? existing.description : trimOrUndefined(payload.description) ?? null,
+        status: payload.status === undefined ? existing.status : trimOrUndefined(payload.status) ?? "active",
+        sourceType: payload.sourceType ?? existing.sourceType,
+        rootPath: payload.rootPath === undefined ? existing.rootPath : trimOrUndefined(payload.rootPath) ?? null,
+        updatedAt: new Date()
+      }
+    });
+    return mapWorkspace(updated);
   }
 }
