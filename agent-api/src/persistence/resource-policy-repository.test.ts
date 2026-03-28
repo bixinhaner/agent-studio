@@ -201,13 +201,81 @@ describe("ResourcePolicyRepository", () => {
         updatedAt: expect.any(String)
       }
     ]);
-    expect(db.rows).toHaveLength(4);
+    expect(db.rows).toHaveLength(5);
     expect(
       db.rows
         .filter((item) => item.subjectType === "role" && item.subjectId === "employee")
         .map((item) => `${item.resourceType}:${item.resourceId}:${item.effect}`)
-    ).toEqual(["workspace:workspace-1:allow", "workspace:workspace-3:deny"]);
+    ).toEqual([
+      "knowledge_set:knowledge-set-existing:allow",
+      "workspace:workspace-1:allow",
+      "workspace:workspace-3:deny"
+    ]);
     expect(db.rows.find((item) => item.id === "policy-other-subject")).toBeDefined();
+  });
+
+  it("only replaces the exact subject and resource-type groups present in the payload", async () => {
+    const db = new FakeResourcePolicyDb([
+      {
+        id: "policy-role-workspace",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-old",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      },
+      {
+        id: "policy-dept-workspace",
+        organizationId: null,
+        subjectType: "department",
+        subjectId: "dept-1",
+        resourceType: "workspace",
+        resourceId: "workspace-preserved",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      },
+      {
+        id: "policy-dept-knowledge",
+        organizationId: null,
+        subjectType: "department",
+        subjectId: "dept-1",
+        resourceType: "knowledge_set",
+        resourceId: "knowledge-old",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      }
+    ]);
+    const repository = new ResourcePolicyRepository(db as never);
+
+    await repository.replacePolicies([
+      {
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-new",
+        effect: "allow"
+      },
+      {
+        subjectType: "department",
+        subjectId: "dept-1",
+        resourceType: "knowledge_set",
+        resourceId: "knowledge-new",
+        effect: "deny"
+      }
+    ]);
+
+    expect(
+      db.rows.map((item) => `${item.subjectType}:${item.subjectId}:${item.resourceType}:${item.resourceId}:${item.effect}`)
+    ).toEqual([
+      "department:dept-1:workspace:workspace-preserved:allow",
+      "role:employee:workspace:workspace-new:allow",
+      "department:dept-1:knowledge_set:knowledge-new:deny"
+    ]);
   });
 
   it("lists policies matching the requested subjects and resource type", async () => {
@@ -260,5 +328,33 @@ describe("ResourcePolicyRepository", () => {
 
     expect(records.map((item) => item.id)).toEqual(["policy-1", "policy-2"]);
     expect(records.map((item) => item.effect)).toEqual(["allow", "deny"]);
+  });
+
+  it("rejects blank subject and resource ids after trimming", async () => {
+    const repository = new ResourcePolicyRepository(new FakeResourcePolicyDb() as never);
+
+    await expect(
+      repository.replacePolicies([
+        {
+          subjectType: "role",
+          subjectId: "   ",
+          resourceType: "workspace",
+          resourceId: "workspace-1",
+          effect: "allow"
+        }
+      ])
+    ).rejects.toThrow(/subjectId/i);
+
+    await expect(
+      repository.replacePolicies([
+        {
+          subjectType: "role",
+          subjectId: "employee",
+          resourceType: "workspace",
+          resourceId: "   ",
+          effect: "allow"
+        }
+      ])
+    ).rejects.toThrow(/resourceId/i);
   });
 });

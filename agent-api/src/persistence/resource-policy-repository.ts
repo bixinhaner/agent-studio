@@ -31,6 +31,10 @@ type SubjectRef = {
   subjectId: string;
 };
 
+type ReplacementGroup = SubjectRef & {
+  resourceType: ResourcePolicyResourceType;
+};
+
 type ResourcePolicyTable = {
   findMany(args: {
     where?: {
@@ -110,45 +114,74 @@ function uniqueSubjectRefs(subjectRefs: SubjectRef[]): SubjectRef[] {
   return normalized;
 }
 
-function uniqueResourceTypes(resourceTypes: ResourcePolicyResourceType[]): ResourcePolicyResourceType[] {
-  return [...new Set(resourceTypes)];
+function uniqueReplacementGroups(groups: ReplacementGroup[]): ReplacementGroup[] {
+  const seen = new Set<string>();
+  const normalized: ReplacementGroup[] = [];
+  for (const group of groups) {
+    const subjectId = trimOrUndefined(group.subjectId);
+    if (!subjectId) continue;
+    const key = `${group.subjectType}:${subjectId}:${group.resourceType}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      subjectType: group.subjectType,
+      subjectId,
+      resourceType: group.resourceType
+    });
+  }
+  return normalized;
+}
+
+function requireTrimmedValue(value: string | undefined, field: "subjectId" | "resourceId"): string {
+  if (!value) {
+    throw new Error(`resource policy ${field} is required`);
+  }
+  return value;
 }
 
 export class ResourcePolicyRepository {
   constructor(private readonly db: ResourcePolicyRepositoryDb) {}
 
   async replacePolicies(policies: ReplaceResourcePoliciesPayload): Promise<ResourcePolicyRecord[]> {
-    const subjectRefs = uniqueSubjectRefs(
-      policies.map((policy) => ({
+    const normalizedPolicies = policies.map((policy) => ({
+      organizationId: trimOrUndefined(policy.organizationId),
+      subjectType: policy.subjectType,
+      subjectId: requireTrimmedValue(trimOrUndefined(policy.subjectId), "subjectId"),
+      resourceType: policy.resourceType,
+      resourceId: requireTrimmedValue(trimOrUndefined(policy.resourceId), "resourceId"),
+      effect: policy.effect
+    }));
+    const replacementGroups = uniqueReplacementGroups(
+      normalizedPolicies.map((policy) => ({
         subjectType: policy.subjectType,
-        subjectId: policy.subjectId
+        subjectId: policy.subjectId,
+        resourceType: policy.resourceType
       }))
     );
-    const resourceTypes = uniqueResourceTypes(policies.map((policy) => policy.resourceType));
-    if (subjectRefs.length === 0) {
+    if (replacementGroups.length === 0) {
       return [];
     }
 
     return this.db.$transaction(async (tx) => {
-      for (const resourceType of resourceTypes) {
+      for (const group of replacementGroups) {
         await tx.resourcePolicy.deleteMany({
           where: {
-            resourceType,
-            OR: subjectRefs
+            resourceType: group.resourceType,
+            OR: [{ subjectType: group.subjectType, subjectId: group.subjectId }]
           }
         });
       }
 
       const created: ResourcePolicyRow[] = [];
-      for (const policy of policies) {
+      for (const policy of normalizedPolicies) {
         created.push(
           await tx.resourcePolicy.create({
             data: {
-              organizationId: trimOrUndefined(policy.organizationId) ?? null,
+              organizationId: policy.organizationId ?? null,
               subjectType: policy.subjectType,
-              subjectId: trimOrUndefined(policy.subjectId) ?? "",
+              subjectId: policy.subjectId,
               resourceType: policy.resourceType,
-              resourceId: trimOrUndefined(policy.resourceId) ?? "",
+              resourceId: policy.resourceId,
               effect: policy.effect
             }
           })
