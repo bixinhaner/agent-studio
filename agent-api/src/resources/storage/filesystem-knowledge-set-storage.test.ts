@@ -95,6 +95,43 @@ describe("FilesystemKnowledgeSetStorage", () => {
     await expect(fs.readFile(path.join(result.mountPath, "faq", "usage.txt"), "utf8")).resolves.toBe("usage");
   });
 
+  it("rejects duplicate normalized paths during batch save", async () => {
+    const rootDir = await createTempRoot();
+    const storage = new FilesystemKnowledgeSetStorage(rootDir);
+
+    await expect(
+      storage.saveFiles({
+        knowledgeSetId: "ks-1",
+        files: [
+          { name: "./faq.md", buffer: Buffer.from("first") },
+          { name: "docs/../faq.md", buffer: Buffer.from("second") }
+        ]
+      })
+    ).rejects.toThrow(/duplicate/i);
+
+    await expect(fs.access(path.join(storage.resolveReadableMountPath("ks-1"), "faq.md"))).rejects.toThrow();
+  });
+
+  it("rejects duplicate normalized paths during archive extraction", async () => {
+    const rootDir = await createTempRoot();
+    const storage = new FilesystemKnowledgeSetStorage(rootDir);
+
+    await expect(
+      storage.extractArchive({
+        knowledgeSetId: "ks-1",
+        archiveName: "duplicate.zip",
+        buffer: Buffer.from(
+          zipSync({
+            "./faq.md": strToU8("first"),
+            "docs/../faq.md": strToU8("second")
+          })
+        )
+      })
+    ).rejects.toThrow(/duplicate/i);
+
+    await expect(fs.access(path.join(storage.resolveReadableMountPath("ks-1"), "faq.md"))).rejects.toThrow();
+  });
+
   it("rejects archive entries that escape the knowledge-set root", async () => {
     const rootDir = await createTempRoot();
     const storage = new FilesystemKnowledgeSetStorage(rootDir);

@@ -46,6 +46,13 @@ function sortItems(items: KnowledgeSetStorageItem[]): KnowledgeSetStorageItem[] 
   return [...items].sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
+function assertUniqueRelativePath(relativePath: string, seenPaths: Set<string>): void {
+  if (seenPaths.has(relativePath)) {
+    throw new Error(`duplicate knowledge set path: ${relativePath}`);
+  }
+  seenPaths.add(relativePath);
+}
+
 export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
   constructor(private readonly rootDir: string) {}
 
@@ -64,8 +71,10 @@ export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
 
     try {
       const items: KnowledgeSetStorageItem[] = [];
+      const seenPaths = new Set<string>();
       for (const file of input.files) {
         const relativePath = normalizeRelativePath(file.name);
+        assertUniqueRelativePath(relativePath, seenPaths);
         const targetPath = ensureInsideRoot(stagingDir, path.join(stagingDir, relativePath));
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, file.buffer);
@@ -99,8 +108,10 @@ export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
     try {
       const archiveEntries = unzipSync(new Uint8Array(input.buffer));
       const items: KnowledgeSetStorageItem[] = [];
+      const seenPaths = new Set<string>();
       for (const [entryName, content] of Object.entries(archiveEntries)) {
         const relativePath = normalizeRelativePath(entryName);
+        assertUniqueRelativePath(relativePath, seenPaths);
         const targetPath = ensureInsideRoot(stagingDir, path.join(stagingDir, relativePath));
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, Buffer.from(content));
