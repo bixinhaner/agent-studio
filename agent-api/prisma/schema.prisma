@@ -96,6 +96,92 @@ model IntegrationConfig {
   @@map("integration_configs")
 }
 
+model Workspace {
+  id             String                 @id @default(cuid())
+  organizationId String?                @map("organization_id")
+  name           String
+  slug           String                 @unique
+  description    String?
+  status         String                 @default("active")
+  sourceType     String                 @map("source_type")
+  rootPath       String?                @map("root_path")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  bindings       WorkspaceKnowledgeSet[]
+
+  @@map("workspaces")
+}
+
+model KnowledgeSet {
+  id             String                 @id @default(cuid())
+  organizationId String?                @map("organization_id")
+  name           String
+  slug           String                 @unique
+  description    String?
+  status         String                 @default("active")
+  sourceType     String                 @map("source_type")
+  rootPath       String?                @map("root_path")
+  storageKey     String?                @map("storage_key")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+
+  items          KnowledgeSetItem[]
+  bindings       WorkspaceKnowledgeSet[]
+
+  @@map("knowledge_sets")
+}
+
+model KnowledgeSetItem {
+  id                String       @id @default(cuid())
+  knowledgeSetId    String       @map("knowledge_set_id")
+  kind              String
+  relativePath      String       @map("relative_path")
+  displayName       String       @map("display_name")
+  mimeType          String?      @map("mime_type")
+  sizeBytes         BigInt?      @map("size_bytes")
+  checksum          String?
+  sourceArchiveName String?      @map("source_archive_name")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  knowledgeSet      KnowledgeSet @relation(fields: [knowledgeSetId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeSetId, relativePath])
+  @@unique([knowledgeSetId, relativePath])
+  @@map("knowledge_set_items")
+}
+
+model WorkspaceKnowledgeSet {
+  id             String       @id @default(cuid())
+  workspaceId    String       @map("workspace_id")
+  knowledgeSetId String       @map("knowledge_set_id")
+  mountType      String       @map("mount_type")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  knowledgeSet   KnowledgeSet @relation(fields: [knowledgeSetId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, knowledgeSetId])
+  @@map("workspace_knowledge_sets")
+}
+
+model ResourcePolicy {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  subjectType    String   @map("subject_type")
+  subjectId      String   @map("subject_id")
+  resourceType   String   @map("resource_type")
+  resourceId     String   @map("resource_id")
+  effect         String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([subjectType, subjectId])
+  @@index([resourceType, resourceId])
+  @@map("resource_policies")
+}
+
 enum ThreadStatus {
   active
   archived
