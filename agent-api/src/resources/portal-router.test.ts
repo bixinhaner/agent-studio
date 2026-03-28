@@ -60,6 +60,7 @@ describe("resources portal router", () => {
         label: "Docs",
         slug: "docs",
         is_default: true,
+        runtime_workspace_path: "/workspace/default",
         default_knowledge_sets: [{ id: "ks-faq", label: "FAQ", slug: "faq" }],
         optional_knowledge_sets: [{ id: "ks-runbook", label: "Runbooks", slug: "runbooks" }]
       }
@@ -269,10 +270,38 @@ function buildPortalResourcesApp(options?: {
   users.seed(user);
 
   const workspaces = new FakeWorkspaceRepository([
-    { id: "ws-docs", name: "Docs", slug: "docs", status: "active", sourceType: "filesystem", rootPath: "/srv/docs" },
-    { id: "ws-ops", name: "Ops", slug: "ops", status: "active", sourceType: "filesystem", rootPath: "/srv/ops" },
-    { id: "ws-secret", name: "Secret", slug: "secret", status: "active", sourceType: "filesystem", rootPath: "/srv/secret" },
-    { id: "ws-inactive", name: "Inactive", slug: "inactive", status: "inactive", sourceType: "filesystem", rootPath: "/srv/inactive" }
+    {
+      id: "ws-docs",
+      name: "Docs",
+      slug: "docs",
+      status: "active",
+      sourceType: "filesystem",
+      rootPath: "/workspace/default"
+    },
+    {
+      id: "ws-ops",
+      name: "Ops",
+      slug: "ops",
+      status: "active",
+      sourceType: "filesystem",
+      rootPath: "/workspace/shared"
+    },
+    {
+      id: "ws-secret",
+      name: "Secret",
+      slug: "secret",
+      status: "active",
+      sourceType: "filesystem",
+      rootPath: "/workspace/secret"
+    },
+    {
+      id: "ws-inactive",
+      name: "Inactive",
+      slug: "inactive",
+      status: "inactive",
+      sourceType: "filesystem",
+      rootPath: "/workspace/inactive"
+    }
   ]);
 
   const knowledgeSets = new FakeKnowledgeSetRepository(

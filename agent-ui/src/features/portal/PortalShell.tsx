@@ -58,6 +58,7 @@ import { iterateSSE } from "../../lib/sse";
 import { resolveRunThreadId } from "../../lib/thread-id-resolver";
 import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
+import { resolvePortalWorkspaceResources } from "../resources/workspace-resources";
 import type { PortalResourcesResponse } from "../resources/types";
 import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel, resolveWorkspaceOptions } from "./runtime-labels";
@@ -1760,7 +1761,10 @@ export function PortalShell() {
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedWorkspaceLabel = resolveWorkspaceLabel(runtimeOptions?.workspaces ?? [], appliedConfig.workspace);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
-  const selectedWorkspaceResources = portalResources?.workspaces.find((item) => item.id === appliedConfig.workspace);
+  const selectedWorkspaceResources = resolvePortalWorkspaceResources(
+    portalResources?.workspaces ?? [],
+    appliedConfig.workspace
+  );
   const selectedOptionalKnowledgeSetIds = selectedOptionalKnowledgeSetIdsByWorkspace[appliedConfig.workspace] ?? [];
 
   const chatAdapter = useMemo<ChatModelAdapter>(

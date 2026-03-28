@@ -7,6 +7,7 @@ type WorkspaceRecord = {
   name: string;
   slug: string;
   status: string;
+  rootPath?: string | null;
 };
 
 type KnowledgeSetRecord = {
@@ -103,6 +104,7 @@ export function createResourcesPortalRouter(options: {
         label: workspace.name,
         slug: workspace.slug,
         is_default: workspaces.length === 0,
+        runtime_workspace_path: workspace.rootPath ?? null,
         default_knowledge_sets: defaultKnowledgeSets,
         optional_knowledge_sets: optionalKnowledgeSets
       });
