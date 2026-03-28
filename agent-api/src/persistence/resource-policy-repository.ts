@@ -66,6 +66,11 @@ type ReplaceResourcePoliciesPayload = Array<{
   effect: ResourcePolicyEffect;
 }>;
 
+type ReplaceResourcePolicyGroupsInput = {
+  groups: ReplacementGroup[];
+  policies: ReplaceResourcePoliciesPayload;
+};
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -143,7 +148,18 @@ export class ResourcePolicyRepository {
   constructor(private readonly db: ResourcePolicyRepositoryDb) {}
 
   async replacePolicies(policies: ReplaceResourcePoliciesPayload): Promise<ResourcePolicyRecord[]> {
-    const normalizedPolicies = policies.map((policy) => ({
+    return this.replacePoliciesForGroups({
+      groups: policies.map((policy) => ({
+        subjectType: policy.subjectType,
+        subjectId: policy.subjectId,
+        resourceType: policy.resourceType
+      })),
+      policies
+    });
+  }
+
+  async replacePoliciesForGroups(input: ReplaceResourcePolicyGroupsInput): Promise<ResourcePolicyRecord[]> {
+    const normalizedPolicies = input.policies.map((policy) => ({
       organizationId: trimOrUndefined(policy.organizationId),
       subjectType: policy.subjectType,
       subjectId: requireTrimmedValue(trimOrUndefined(policy.subjectId), "subjectId"),
@@ -151,13 +167,7 @@ export class ResourcePolicyRepository {
       resourceId: requireTrimmedValue(trimOrUndefined(policy.resourceId), "resourceId"),
       effect: policy.effect
     }));
-    const replacementGroups = uniqueReplacementGroups(
-      normalizedPolicies.map((policy) => ({
-        subjectType: policy.subjectType,
-        subjectId: policy.subjectId,
-        resourceType: policy.resourceType
-      }))
-    );
+    const replacementGroups = uniqueReplacementGroups(input.groups);
     if (replacementGroups.length === 0) {
       return [];
     }

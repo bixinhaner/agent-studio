@@ -278,6 +278,58 @@ describe("ResourcePolicyRepository", () => {
     ]);
   });
 
+  it("clears one exact replacement group with an empty policy set", async () => {
+    const db = new FakeResourcePolicyDb([
+      {
+        id: "policy-role-workspace",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-old",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      },
+      {
+        id: "policy-role-knowledge",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "knowledge_set",
+        resourceId: "knowledge-preserved",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      },
+      {
+        id: "policy-user-workspace",
+        organizationId: null,
+        subjectType: "user",
+        subjectId: "user-1",
+        resourceType: "workspace",
+        resourceId: "workspace-preserved",
+        effect: "deny",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      }
+    ]);
+    const repository = new ResourcePolicyRepository(db as never);
+
+    const records = await repository.replacePoliciesForGroups({
+      groups: [{ subjectType: "role", subjectId: "employee", resourceType: "workspace" }],
+      policies: []
+    });
+
+    expect(records).toEqual([]);
+    expect(
+      db.rows.map((item) => `${item.subjectType}:${item.subjectId}:${item.resourceType}:${item.resourceId}:${item.effect}`)
+    ).toEqual([
+      "role:employee:knowledge_set:knowledge-preserved:allow",
+      "user:user-1:workspace:workspace-preserved:deny"
+    ]);
+  });
+
   it("lists policies matching the requested subjects and resource type", async () => {
     const repository = new ResourcePolicyRepository(
       new FakeResourcePolicyDb([
