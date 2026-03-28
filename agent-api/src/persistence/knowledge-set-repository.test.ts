@@ -47,10 +47,23 @@ class FakeKnowledgeSetDb {
   private knowledgeSetCounter = 0;
   private itemCounter = 0;
   private bindingCounter = 0;
+  private workspaceCounter = 0;
 
   readonly knowledgeSets: FakeKnowledgeSetRow[] = [];
   readonly items: FakeKnowledgeSetItemRow[] = [];
   readonly bindings: FakeWorkspaceKnowledgeSetRow[] = [];
+  readonly workspaces: Array<{
+    id: string;
+    organizationId: string | null;
+    name: string;
+    slug: string;
+    description: string | null;
+    status: string | null;
+    sourceType: string;
+    rootPath: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
 
   readonly knowledgeSet = {
     findUnique: async ({ where }: { where: { id?: string; slug?: string } }) => {
@@ -77,6 +90,48 @@ class FakeKnowledgeSetDb {
         updatedAt: data.updatedAt instanceof Date ? data.updatedAt : now
       };
       this.knowledgeSets.push(row);
+      return clone(row);
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = this.knowledgeSets.find((item) => item.id === where.id);
+      if (!row) throw new Error("knowledge set not found");
+      Object.assign(row, clone(data));
+      row.updatedAt = data.updatedAt instanceof Date ? data.updatedAt : new Date();
+      return clone(row);
+    }
+  };
+
+  readonly workspace = {
+    findUnique: async ({ where }: { where: { id?: string; slug?: string } }) => {
+      const row = this.workspaces.find((item) => {
+        if (where.id) return item.id === where.id;
+        if (where.slug) return item.slug === where.slug;
+        return false;
+      });
+      return row ? clone(row) : null;
+    },
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      const now = new Date();
+      const row = {
+        id: typeof data.id === "string" ? data.id : `workspace-${++this.workspaceCounter}`,
+        organizationId: typeof data.organizationId === "string" ? data.organizationId : null,
+        name: typeof data.name === "string" ? data.name : "",
+        slug: typeof data.slug === "string" ? data.slug : "",
+        description: typeof data.description === "string" ? data.description : null,
+        status: typeof data.status === "string" ? data.status : null,
+        sourceType: typeof data.sourceType === "string" ? data.sourceType : "",
+        rootPath: typeof data.rootPath === "string" ? data.rootPath : null,
+        createdAt: data.createdAt instanceof Date ? data.createdAt : now,
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : now
+      };
+      this.workspaces.push(row);
+      return clone(row);
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = this.workspaces.find((item) => item.id === where.id);
+      if (!row) throw new Error("workspace not found");
+      Object.assign(row, clone(data));
+      row.updatedAt = data.updatedAt instanceof Date ? data.updatedAt : new Date();
       return clone(row);
     }
   };
@@ -235,6 +290,7 @@ describe("KnowledgeSetRepository", () => {
       updatedAt: new Date("2026-03-27T00:00:00.000Z")
     });
     const repository = new KnowledgeSetRepository(db as never);
+    const originalUpdatedAt = db.knowledgeSets[0]!.updatedAt.toISOString();
 
     const record = await repository.replaceItems("knowledge-set-1", [
       {
@@ -259,6 +315,8 @@ describe("KnowledgeSetRepository", () => {
 
     expect(db.items).toHaveLength(2);
     expect(db.items.map((item) => item.relativePath)).toEqual(["docs/policy.md", "docs/faq.md"]);
+    expect(db.knowledgeSets[0]!.updatedAt.toISOString()).not.toBe(originalUpdatedAt);
+    expect(record.updatedAt).toBe(db.knowledgeSets[0]!.updatedAt.toISOString());
     expect(record.items).toEqual([
       {
         id: expect.any(String),
@@ -289,6 +347,18 @@ describe("KnowledgeSetRepository", () => {
 
   it("replaces workspace bindings with the current state", async () => {
     const db = new FakeKnowledgeSetDb();
+    db.workspaces.push({
+      id: "workspace-1",
+      organizationId: null,
+      name: "Workspace",
+      slug: "workspace",
+      description: null,
+      status: "active",
+      sourceType: "filesystem",
+      rootPath: "/workspace",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    });
     db.knowledgeSets.push({
       id: "knowledge-set-1",
       organizationId: null,
@@ -311,6 +381,7 @@ describe("KnowledgeSetRepository", () => {
       updatedAt: new Date("2026-03-27T00:00:00.000Z")
     });
     const repository = new KnowledgeSetRepository(db as never);
+    const originalUpdatedAt = db.workspaces[0]!.updatedAt.toISOString();
 
     const bindings = await repository.replaceWorkspaceBindings("workspace-1", [
       { knowledgeSetId: "knowledge-set-1", mountType: "default" },
@@ -320,6 +391,7 @@ describe("KnowledgeSetRepository", () => {
     expect(db.bindings).toHaveLength(2);
     expect(db.bindings.map((item) => item.workspaceId)).toEqual(["workspace-1", "workspace-1"]);
     expect(db.bindings.map((item) => item.knowledgeSetId)).toEqual(["knowledge-set-1", "knowledge-set-2"]);
+    expect(db.workspaces[0]!.updatedAt.toISOString()).not.toBe(originalUpdatedAt);
     expect(bindings).toEqual([
       {
         id: expect.any(String),
@@ -338,5 +410,15 @@ describe("KnowledgeSetRepository", () => {
         updatedAt: expect.any(String)
       }
     ]);
+  });
+
+  it("rejects replacing workspace bindings for an unknown workspace", async () => {
+    const repository = new KnowledgeSetRepository(new FakeKnowledgeSetDb() as never);
+
+    await expect(
+      repository.replaceWorkspaceBindings("workspace-missing", [
+        { knowledgeSetId: "knowledge-set-1", mountType: "default" }
+      ])
+    ).rejects.toThrow(/workspace/i);
   });
 });

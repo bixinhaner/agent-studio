@@ -103,6 +103,7 @@ type WorkspaceKnowledgeSetRow = {
 type KnowledgeSetTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<KnowledgeSetRow | null>;
   create(args: { data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
 };
 
 type KnowledgeSetItemTable = {
@@ -120,7 +121,27 @@ type WorkspaceKnowledgeSetTable = {
   create(args: { data: Record<string, unknown> }): Promise<WorkspaceKnowledgeSetRow>;
 };
 
+type WorkspaceRow = {
+  id: string;
+  organizationId: string | null;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: string | null;
+  sourceType: string;
+  rootPath: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+type WorkspaceTable = {
+  findUnique(args: { where: { id?: string; slug?: string } }): Promise<WorkspaceRow | null>;
+  create(args: { data: Record<string, unknown> }): Promise<WorkspaceRow>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<WorkspaceRow>;
+};
+
 export type KnowledgeSetRepositoryDb = {
+  workspace: WorkspaceTable;
   knowledgeSet: KnowledgeSetTable;
   knowledgeSetItem: KnowledgeSetItemTable;
   workspaceKnowledgeSet: WorkspaceKnowledgeSetTable;
@@ -215,7 +236,13 @@ export class KnowledgeSetRepository {
           }
         });
       }
-      return this.loadRecord(tx, record);
+      const refreshed = await tx.knowledgeSet.update({
+        where: { id: record.id },
+        data: {
+          updatedAt: new Date()
+        }
+      });
+      return this.loadRecord(tx, refreshed);
     });
   }
 
@@ -228,6 +255,10 @@ export class KnowledgeSetRepository {
       if (!normalizedWorkspaceId) {
         throw new Error("workspace 不存在");
       }
+      const workspace = await tx.workspace.findUnique({ where: { id: normalizedWorkspaceId } });
+      if (!workspace) {
+        throw new Error("workspace 不存在");
+      }
       await tx.workspaceKnowledgeSet.deleteMany({ where: { workspaceId: normalizedWorkspaceId } });
       for (const binding of bindings) {
         await tx.workspaceKnowledgeSet.create({
@@ -238,6 +269,12 @@ export class KnowledgeSetRepository {
           }
         });
       }
+      await tx.workspace.update({
+        where: { id: normalizedWorkspaceId },
+        data: {
+          updatedAt: new Date()
+        }
+      });
       const rows = await tx.workspaceKnowledgeSet.findMany({
         where: { workspaceId: normalizedWorkspaceId },
         orderBy: { createdAt: "asc" }
