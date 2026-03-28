@@ -35,6 +35,7 @@ import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./per
 import { createPortalRouter } from "./portal/router.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
+import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
 import { initSSE, sendSSE } from "./sse.js";
@@ -51,6 +52,12 @@ const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRe
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
+const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
+  workspaces,
+  knowledgeSets,
+  policies: policyService,
+  storage: knowledgeSetStorage
+});
 const zendesk = new ZendeskIntegrationService();
 const sessionCookies = createSessionCookieManager({
   cookieName: appConfig.sessionCookie.name,
@@ -76,6 +83,7 @@ const createSessionSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
+  knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
@@ -91,6 +99,7 @@ const createThreadSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
+  knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
@@ -107,6 +116,7 @@ const ensureThreadSessionSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   workspace: z.string().optional(),
+  knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
@@ -253,17 +263,65 @@ async function createSession(options: SessionOptions, threadId?: string) {
   return session;
 }
 
+async function resolveKnowledgeSetRunConfig(input: {
+  currentUser: {
+    id: string;
+    role?: string;
+  };
+  workspacePath: string;
+  knowledgeSetIds?: string[];
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<Record<string, unknown> | undefined> {
+  return runtimeKnowledgeSets.mergeSelectedKnowledgeSetsIntoRunConfig({
+    userId: input.currentUser.id,
+    roleIds: [input.currentUser.role ?? "employee"],
+    departmentIds: await departmentMemberships.listIdsForUser(input.currentUser.id),
+    workspacePath: input.workspacePath,
+    knowledgeSetIds: input.knowledgeSetIds,
+    codexRunConfig: input.codexRunConfig
+  });
+}
+
+async function resolveSessionOptions(
+  input: {
+    model?: string;
+    reasoning_effort?: ReasoningEffort;
+    workspace?: string;
+    knowledge_set_ids?: string[];
+    codex_run_config?: Record<string, unknown>;
+  },
+  currentUser: {
+    id: string;
+    role?: string;
+  }
+): Promise<SessionOptions> {
+  const options = pickSessionOptions(input, currentUser.id);
+  return {
+    ...options,
+    codexRunConfig: await resolveKnowledgeSetRunConfig({
+      currentUser,
+      workspacePath: options.workspace,
+      knowledgeSetIds: input.knowledge_set_ids,
+      codexRunConfig: options.codexRunConfig
+    })
+  };
+}
+
 async function ensureThreadSession(
-  userId: string,
+  currentUser: {
+    id: string;
+    role?: string;
+  },
   threadId: string,
   patch?: {
     model?: string;
     reasoning_effort?: ReasoningEffort;
     workspace?: string;
+    knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
   }
 ) {
-  const thread = await threads.getOwned(threadId, userId);
+  const thread = await threads.getOwned(threadId, currentUser.id);
   if (!thread) throw new Error("thread 不存在");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
@@ -273,10 +331,22 @@ async function ensureThreadSession(
     patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort
   );
   const desiredWorkspace = resolveWorkspace(patch?.workspace || thread.workspace);
-  const desiredCodexRunConfig = ensureThreadUploadInRunConfig(sourceCodexRunConfig, getThreadUploadTempDir(threadId));
+  const desiredBaseCodexRunConfig =
+    patch?.knowledge_set_ids !== undefined
+      ? await resolveKnowledgeSetRunConfig({
+          currentUser,
+          workspacePath: desiredWorkspace,
+          knowledgeSetIds: patch.knowledge_set_ids,
+          codexRunConfig: sourceCodexRunConfig
+        })
+      : sourceCodexRunConfig;
+  const desiredCodexRunConfig = ensureThreadUploadInRunConfig(
+    desiredBaseCodexRunConfig,
+    getThreadUploadTempDir(threadId)
+  );
 
   const desired: SessionOptions = {
-    userId: thread.userId ?? userId,
+    userId: thread.userId ?? currentUser.id,
     model: desiredModel,
     reasoningEffort: desiredReasoning,
     workspace: desiredWorkspace,
@@ -287,14 +357,21 @@ async function ensureThreadSession(
     thread.model !== desired.model ||
     thread.reasoningEffort !== desired.reasoningEffort ||
     thread.workspace !== desired.workspace ||
-    stableJson(thread.codexRunConfig) !== stableJson(sourceCodexRunConfig);
+    stableJson(thread.codexRunConfig) !== stableJson(desiredBaseCodexRunConfig);
 
-  if (patch?.model || patch?.reasoning_effort || patch?.workspace || patch?.codex_run_config || shouldPersistNormalizedThread) {
+  if (
+    patch?.model ||
+    patch?.reasoning_effort ||
+    patch?.workspace ||
+    patch?.knowledge_set_ids ||
+    patch?.codex_run_config ||
+    shouldPersistNormalizedThread
+  ) {
     await threads.update(threadId, {
       model: desired.model,
       reasoningEffort: desired.reasoningEffort,
       workspace: desired.workspace,
-      codexRunConfig: sourceCodexRunConfig
+      codexRunConfig: desiredBaseCodexRunConfig
     });
   }
 
@@ -554,13 +631,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
         if (!liveRuntimeThreads.has(existing.sessionId)) {
           await sessions.remove(existing.sessionId);
           liveRuntimeThreads.delete(existing.sessionId);
-        } else if (input.model || input.reasoning_effort || input.workspace || input.codex_run_config) {
+        } else if (input.model || input.reasoning_effort || input.workspace || input.knowledge_set_ids || input.codex_run_config) {
           const workspace = input.workspace ? resolveWorkspace(input.workspace) : existing.workspace;
+          const nextSourceCodexRunConfig = input.codex_run_config ?? existing.codexRunConfig;
+          const nextCodexRunConfig =
+            input.knowledge_set_ids !== undefined
+              ? await resolveKnowledgeSetRunConfig({
+                  currentUser,
+                  workspacePath: workspace,
+                  knowledgeSetIds: input.knowledge_set_ids,
+                  codexRunConfig: nextSourceCodexRunConfig
+                })
+              : nextSourceCodexRunConfig;
           const updated = await sessions.update(existingId, {
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
             workspace,
-            codexRunConfig: input.codex_run_config ?? existing.codexRunConfig
+            codexRunConfig: nextCodexRunConfig
           });
           res.json(sessionOut(updated));
           return;
@@ -571,7 +658,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
       }
     }
 
-    const created = await createSession(pickSessionOptions(input, currentUser.id));
+    const created = await createSession(await resolveSessionOptions(input, currentUser));
     res.json(sessionOut(created));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "创建 session 失败";
@@ -590,7 +677,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
   try {
     const currentUser = req.currentUser!;
     const input = createThreadSchema.parse(req.body || {});
-    const options = pickSessionOptions(input, currentUser.id);
+    const options = await resolveSessionOptions(input, currentUser);
     const createdThread = await threads.create({
       userId: currentUser.id,
       title: input.title?.trim() || undefined,
@@ -681,7 +768,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const currentUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
     const input = ensureThreadSessionSchema.parse(req.body || {});
-    const session = await ensureThreadSession(currentUser.id, threadId, input);
+    const session = await ensureThreadSession(currentUser, threadId, input);
     res.json({ session: sessionOut(session) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "确保 thread session 失败";

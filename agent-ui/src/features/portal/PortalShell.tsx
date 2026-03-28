@@ -255,6 +255,10 @@ function formatDirectories(items: string[]): string {
   return Array.from(new Set(normalized)).join("\n");
 }
 
+function normalizeKnowledgeSetIds(ids: string[]): string[] {
+  return Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+}
+
 const PROMPT_TEXT_MAX_CHARS = 200_000;
 
 const TEXT_LIKE_MIME_TYPES = new Set([
@@ -1423,6 +1427,7 @@ export function PortalShell() {
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
+  const selectedOptionalKnowledgeSetIdsByWorkspaceRef = useRef(selectedOptionalKnowledgeSetIdsByWorkspace);
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1432,6 +1437,7 @@ export function PortalShell() {
   showProcessTraceRef.current = showProcessTrace;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
+  selectedOptionalKnowledgeSetIdsByWorkspaceRef.current = selectedOptionalKnowledgeSetIdsByWorkspace;
 
   useEffect(() => {
     let active = true;
@@ -1665,6 +1671,9 @@ export function PortalShell() {
       },
       async initialize(threadId: string) {
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
+        const knowledgeSetIds = normalizeKnowledgeSetIds(
+          selectedOptionalKnowledgeSetIdsByWorkspaceRef.current[cfg.workspace] ?? []
+        );
         const created = await api<ThreadCreateOut>("/api/threads", {
           method: "POST",
           json: {
@@ -1672,6 +1681,7 @@ export function PortalShell() {
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
             workspace: cfg.workspace,
+            knowledge_set_ids: knowledgeSetIds,
             codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
           }
         });
@@ -1792,12 +1802,16 @@ export function PortalShell() {
         activeRemoteThreadIdRef.current = threadId;
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
+        const knowledgeSetIds = normalizeKnowledgeSetIds(
+          selectedOptionalKnowledgeSetIdsByWorkspaceRef.current[cfg.workspace] ?? []
+        );
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
           method: "POST",
           json: {
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
             workspace: cfg.workspace,
+            knowledge_set_ids: knowledgeSetIds,
             codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
           }
         });
