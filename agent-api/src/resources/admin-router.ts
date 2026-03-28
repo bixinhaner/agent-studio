@@ -55,7 +55,7 @@ type KnowledgeSetRepositoryLike = {
       storageKey?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<{ id: string } | undefined>;
+  get(id: string): Promise<{ id: string; sourceType?: string } | undefined>;
   listItems(id: string): Promise<unknown[]>;
   replaceItems(
     id: string,
@@ -211,6 +211,10 @@ export function createResourcesAdminRouter(options: {
         res.status(404).json({ detail: "knowledge set 不存在" });
         return;
       }
+      if (knowledgeSet.sourceType !== "managed_upload") {
+        res.status(400).json({ detail: "only managed_upload knowledge sets support file uploads" });
+        return;
+      }
 
       const files = ((req.files as Express.Multer.File[] | undefined) ?? []).map((file) => ({
         name: file.originalname,
@@ -237,6 +241,10 @@ export function createResourcesAdminRouter(options: {
         const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
         if (!knowledgeSet) {
           res.status(404).json({ detail: "knowledge set 不存在" });
+          return;
+        }
+        if (knowledgeSet.sourceType !== "managed_upload") {
+          res.status(400).json({ detail: "only managed_upload knowledge sets support archive uploads" });
           return;
         }
 

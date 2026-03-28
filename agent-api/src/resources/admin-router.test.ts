@@ -101,6 +101,98 @@ describe("resources admin router", () => {
     ]);
   });
 
+  it("supports knowledge-set list, create, update, and item listing", async () => {
+    const { app, cookies, adminUser } = await buildResourcesAdminApp();
+
+    const emptyList = await request(app)
+      .get("/api/admin/knowledge-sets")
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(emptyList.status).toBe(200);
+    expect(emptyList.body.knowledgeSets).toEqual([]);
+
+    const createResponse = await request(app)
+      .post("/api/admin/knowledge-sets")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Policies",
+        slug: "policies",
+        sourceType: "managed_upload",
+        storageKey: "uploads/policies.zip"
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.knowledgeSet).toMatchObject({
+      name: "Policies",
+      slug: "policies",
+      sourceType: "managed_upload",
+      storageKey: "uploads/policies.zip"
+    });
+
+    const patchResponse = await request(app)
+      .patch(`/api/admin/knowledge-sets/${createResponse.body.knowledgeSet.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        description: "Updated policies",
+        status: "inactive"
+      });
+
+    expect(patchResponse.status).toBe(200);
+    expect(patchResponse.body.knowledgeSet).toMatchObject({
+      id: createResponse.body.knowledgeSet.id,
+      description: "Updated policies",
+      status: "inactive"
+    });
+
+    const itemsResponse = await request(app)
+      .get(`/api/admin/knowledge-sets/${createResponse.body.knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(itemsResponse.status).toBe(200);
+    expect(itemsResponse.body.items).toEqual([]);
+
+    const listResponse = await request(app)
+      .get("/api/admin/knowledge-sets")
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.knowledgeSets).toEqual([
+      expect.objectContaining({
+        id: createResponse.body.knowledgeSet.id,
+        description: "Updated policies",
+        status: "inactive"
+      })
+    ]);
+  });
+
+  it("rejects file and archive uploads for non-managed knowledge sets", async () => {
+    const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp();
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Filesystem Docs",
+      slug: "filesystem-docs",
+      sourceType: "filesystem",
+      rootPath: "/srv/docs"
+    });
+
+    const fileResponse = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/files`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .attach("files", Buffer.from("# FAQ\n"), { filename: "faq.md", contentType: "text/markdown" });
+
+    expect(fileResponse.status).toBe(400);
+    expect(fileResponse.body).toEqual({ detail: "only managed_upload knowledge sets support file uploads" });
+
+    const archiveResponse = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/archive`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .set("Content-Type", "application/zip")
+      .set("X-Archive-Name", "docs.zip")
+      .send(Buffer.from(zipSync({ "faq.md": strToU8("# FAQ\n") })));
+
+    expect(archiveResponse.status).toBe(400);
+    expect(archiveResponse.body).toEqual({ detail: "only managed_upload knowledge sets support archive uploads" });
+  });
+
   it("uploads an archive into a managed knowledge set and refreshes items", async () => {
     const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp();
     const knowledgeSet = await knowledgeSets.create({
