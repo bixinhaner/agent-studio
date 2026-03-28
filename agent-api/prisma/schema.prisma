@@ -21,9 +21,24 @@ model User {
   updatedAt      DateTime         @updatedAt @map("updated_at")
   threads        Thread[]
   runtimeSessions RuntimeSession[]
+  departmentMemberships DepartmentMembership[]
 
   @@index([email])
   @@map("users")
+}
+
+model DepartmentMembership {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  departmentId String   @map("department_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@unique([userId, departmentId])
+  @@map("department_memberships")
 }
 
 model Thread {

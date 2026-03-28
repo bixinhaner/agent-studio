@@ -7,6 +7,7 @@ import { createAdminRouter } from "../admin/router.js";
 import { createAuthRouter } from "../auth/router.js";
 import { createCurrentUserMiddleware } from "../auth/current-user.js";
 import { createSessionCookieManager } from "../auth/session-cookie.js";
+import { DepartmentMembershipRepository } from "../persistence/department-membership-repository.js";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 import { ResourcePolicyRepository } from "../persistence/resource-policy-repository.js";
 import { createPortalRouter } from "../portal/router.js";
@@ -14,6 +15,37 @@ import { PolicyService } from "./policy-service.js";
 import { createResourcesPortalRouter } from "./portal-router.js";
 
 describe("resources portal router", () => {
+  it("uses department memberships when computing visible portal resources", async () => {
+    const { app, cookies, user } = buildPortalResourcesApp({
+      departmentIdsByUser: {
+        "employee-1": ["dept-ops"]
+      },
+      policyRows: [
+        {
+          id: "policy-ws-ops-dept",
+          organizationId: null,
+          subjectType: "department",
+          subjectId: "dept-ops",
+          resourceType: "workspace",
+          resourceId: "ws-ops",
+          effect: "allow",
+          createdAt: new Date("2026-03-27T00:00:01.000Z"),
+          updatedAt: new Date("2026-03-27T00:00:01.000Z")
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get("/api/portal/resources")
+      .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(200);
+    expect(response.body.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual([
+      "ws-docs",
+      "ws-ops"
+    ]);
+  });
+
   it("returns only authorized active workspaces and separates default vs optional knowledge sets", async () => {
     const { app, cookies, user } = buildPortalResourcesApp();
 
@@ -187,13 +219,58 @@ class FakeResourcePolicyDb {
   };
 }
 
-function buildPortalResourcesApp() {
+class FakeDepartmentMembershipDb {
+  constructor(
+    readonly rows: Array<{
+      id: string;
+      userId: string;
+      departmentId: string;
+      createdAt: Date;
+    }>
+  ) {}
+
+  readonly departmentMembership = {
+    findMany: async ({
+      where,
+      orderBy
+    }: {
+      where: { userId: string };
+      orderBy?: { createdAt?: "asc" | "desc" };
+      select?: { departmentId?: boolean };
+    }) => {
+      const rows = this.rows
+        .filter((item) => item.userId === where.userId)
+        .sort((left, right) => {
+          const diff = left.createdAt.getTime() - right.createdAt.getTime();
+          return orderBy?.createdAt === "desc" ? -diff : diff;
+        })
+        .map((item) => ({ departmentId: item.departmentId }));
+      return structuredClone(rows);
+    }
+  };
+}
+
+function buildPortalResourcesApp(options?: {
+  departmentIdsByUser?: Record<string, string[]>;
+  policyRows?: Array<{
+    id: string;
+    organizationId: string | null;
+    subjectType: "role" | "department" | "user";
+    subjectId: string;
+    resourceType: "workspace" | "knowledge_set";
+    resourceId: string;
+    effect: "allow" | "deny";
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+}) {
   const users = new FakeUserRepository();
   const user = makeUser({ id: "employee-1", role: "employee" });
   users.seed(user);
 
   const workspaces = new FakeWorkspaceRepository([
     { id: "ws-docs", name: "Docs", slug: "docs", status: "active", sourceType: "filesystem", rootPath: "/srv/docs" },
+    { id: "ws-ops", name: "Ops", slug: "ops", status: "active", sourceType: "filesystem", rootPath: "/srv/ops" },
     { id: "ws-secret", name: "Secret", slug: "secret", status: "active", sourceType: "filesystem", rootPath: "/srv/secret" },
     { id: "ws-inactive", name: "Inactive", slug: "inactive", status: "inactive", sourceType: "filesystem", rootPath: "/srv/inactive" }
   ]);
@@ -210,81 +287,96 @@ function buildPortalResourcesApp() {
       { workspaceId: "ws-docs", knowledgeSetId: "ks-runbook", mountType: "optional" },
       { workspaceId: "ws-docs", knowledgeSetId: "ks-secret", mountType: "optional" },
       { workspaceId: "ws-docs", knowledgeSetId: "ks-inactive", mountType: "optional" },
+      { workspaceId: "ws-ops", knowledgeSetId: "ks-faq", mountType: "default" },
       { workspaceId: "ws-secret", knowledgeSetId: "ks-faq", mountType: "default" }
     ]
   );
 
+  const basePolicyRows = [
+    {
+      id: "policy-ws-docs",
+      organizationId: null,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: "ws-docs",
+      effect: "allow",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    },
+    {
+      id: "policy-ws-secret",
+      organizationId: null,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: "ws-secret",
+      effect: "deny",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    },
+    {
+      id: "policy-ks-faq",
+      organizationId: null,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "knowledge_set",
+      resourceId: "ks-faq",
+      effect: "allow",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    },
+    {
+      id: "policy-ks-runbook",
+      organizationId: null,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "knowledge_set",
+      resourceId: "ks-runbook",
+      effect: "allow",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    },
+    {
+      id: "policy-ks-secret",
+      organizationId: null,
+      subjectType: "user",
+      subjectId: "employee-1",
+      resourceType: "knowledge_set",
+      resourceId: "ks-secret",
+      effect: "deny",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    },
+    {
+      id: "policy-ks-inactive",
+      organizationId: null,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "knowledge_set",
+      resourceId: "ks-inactive",
+      effect: "allow",
+      createdAt: new Date("2026-03-27T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-27T00:00:00.000Z")
+    }
+  ] as const;
+
   const policies = new PolicyService(
     new ResourcePolicyRepository(
-      new FakeResourcePolicyDb([
-        {
-          id: "policy-ws-docs",
-          organizationId: null,
-          subjectType: "role",
-          subjectId: "employee",
-          resourceType: "workspace",
-          resourceId: "ws-docs",
-          effect: "allow",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        },
-        {
-          id: "policy-ws-secret",
-          organizationId: null,
-          subjectType: "role",
-          subjectId: "employee",
-          resourceType: "workspace",
-          resourceId: "ws-secret",
-          effect: "deny",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        },
-        {
-          id: "policy-ks-faq",
-          organizationId: null,
-          subjectType: "role",
-          subjectId: "employee",
-          resourceType: "knowledge_set",
-          resourceId: "ks-faq",
-          effect: "allow",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        },
-        {
-          id: "policy-ks-runbook",
-          organizationId: null,
-          subjectType: "role",
-          subjectId: "employee",
-          resourceType: "knowledge_set",
-          resourceId: "ks-runbook",
-          effect: "allow",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        },
-        {
-          id: "policy-ks-secret",
-          organizationId: null,
-          subjectType: "user",
-          subjectId: "employee-1",
-          resourceType: "knowledge_set",
-          resourceId: "ks-secret",
-          effect: "deny",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        },
-        {
-          id: "policy-ks-inactive",
-          organizationId: null,
-          subjectType: "role",
-          subjectId: "employee",
-          resourceType: "knowledge_set",
-          resourceId: "ks-inactive",
-          effect: "allow",
-          createdAt: new Date("2026-03-27T00:00:00.000Z"),
-          updatedAt: new Date("2026-03-27T00:00:00.000Z")
-        }
-      ]) as never
+      new FakeResourcePolicyDb([...(options?.policyRows ?? []), ...basePolicyRows]) as never
     )
+  );
+  const departmentMemberships = new DepartmentMembershipRepository(
+    new FakeDepartmentMembershipDb(
+      Object.entries(options?.departmentIdsByUser ?? {}).flatMap(([memberUserId, departmentIds], indexOffset) =>
+        departmentIds.map((departmentId, index) => ({
+          id: `membership-${memberUserId}-${departmentId}`,
+          userId: memberUserId,
+          departmentId,
+          createdAt: new Date(`2026-03-27T00:00:${String(indexOffset + index).padStart(2, "0")}.000Z`)
+        }))
+      )
+    ) as never
   );
 
   const cookies = createSessionCookieManager({
@@ -353,7 +445,7 @@ function buildPortalResourcesApp() {
       workspaces: workspaces as never,
       knowledgeSets: knowledgeSets as never,
       policies,
-      listDepartmentIdsForUser: async () => []
+      listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
     }),
     serviceTokenMiddleware: (_req, _res, next) => next(),
     zendeskRouter: express.Router()

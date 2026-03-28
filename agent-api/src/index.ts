@@ -25,6 +25,10 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
+import {
+  DepartmentMembershipRepository,
+  type DepartmentMembershipRepositoryDb
+} from "./persistence/department-membership-repository.js";
 import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
@@ -41,6 +45,7 @@ const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
+const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
 const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
@@ -441,12 +446,12 @@ registerCommonApiRoutes(app, {
     workspaceWhitelist: appConfig.workspaceWhitelist,
     defaultWorkspace: appConfig.defaultWorkspace
   }),
-  resourcesPortalRouter: createResourcesPortalRouter({
-    workspaces,
-    knowledgeSets,
-    policies: policyService,
-    listDepartmentIdsForUser: async () => []
-  }),
+    resourcesPortalRouter: createResourcesPortalRouter({
+      workspaces,
+      knowledgeSets,
+      policies: policyService,
+      listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+    }),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });
