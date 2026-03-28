@@ -56,6 +56,9 @@ import {
 } from "../../lib/model-config";
 import { iterateSSE } from "../../lib/sse";
 import { resolveRunThreadId } from "../../lib/thread-id-resolver";
+import { fetchPortalResources } from "../resources/api";
+import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
+import type { PortalResourcesResponse } from "../resources/types";
 import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel, resolveWorkspaceOptions } from "./runtime-labels";
 
@@ -1387,14 +1390,19 @@ export function PortalShell() {
     additionalDirectoriesRaw: ""
   });
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
+  const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
   const [runtimeMode, setRuntimeMode] = useState("standard");
 
   const [statusText, setStatusText] = useState("就绪");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [errorText, setErrorText] = useState("");
+  const [resourceErrorText, setResourceErrorText] = useState("");
   const [showProcessTrace, setShowProcessTrace] = useState(true);
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
+  const [selectedOptionalKnowledgeSetIdsByWorkspace, setSelectedOptionalKnowledgeSetIdsByWorkspace] = useState<
+    Record<string, string[]>
+  >({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -1451,6 +1459,27 @@ export function PortalShell() {
     }
 
     void loadRuntimeOptions();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPortalResources() {
+      try {
+        const next = await fetchPortalResources();
+        if (!active) return;
+        setResourceErrorText("");
+        setPortalResources(next);
+      } catch (error) {
+        if (!active) return;
+        setResourceErrorText(error instanceof Error ? error.message : "加载知识集资源失败");
+      }
+    }
+
+    void loadPortalResources();
     return () => {
       active = false;
     };
@@ -1731,6 +1760,8 @@ export function PortalShell() {
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedWorkspaceLabel = resolveWorkspaceLabel(runtimeOptions?.workspaces ?? [], appliedConfig.workspace);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
+  const selectedWorkspaceResources = portalResources?.workspaces.find((item) => item.id === appliedConfig.workspace);
+  const selectedOptionalKnowledgeSetIds = selectedOptionalKnowledgeSetIdsByWorkspace[appliedConfig.workspace] ?? [];
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2337,6 +2368,25 @@ export function PortalShell() {
               </select>
               <span className="field-help">工作目录由后端允许列表提供，前端仅展示可选策略。</span>
             </label>
+
+            <div className="knowledge-set-shell">
+              {portalResources ? (
+                <KnowledgeSetPicker
+                  defaultKnowledgeSets={selectedWorkspaceResources?.default_knowledge_sets ?? []}
+                  optionalKnowledgeSets={selectedWorkspaceResources?.optional_knowledge_sets ?? []}
+                  selectedIds={selectedOptionalKnowledgeSetIds}
+                  onChange={(ids) => {
+                    setSelectedOptionalKnowledgeSetIdsByWorkspace((prev) => ({
+                      ...prev,
+                      [appliedConfig.workspace]: ids
+                    }));
+                  }}
+                />
+              ) : (
+                <p className="field-help knowledge-set-loading">知识集资源加载中...</p>
+              )}
+              {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
+            </div>
 
             <label className="field checkbox-field">
               <span className="field-label">显示过程轨迹</span>
