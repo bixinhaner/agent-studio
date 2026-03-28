@@ -3,6 +3,69 @@ import { describe, expect, it } from "vitest";
 import { RuntimeKnowledgeSetService } from "./runtime-knowledge-set-service.js";
 
 describe("RuntimeKnowledgeSetService", () => {
+  it("always mounts default knowledge sets when no optional selection is provided", async () => {
+    const service = new RuntimeKnowledgeSetService({
+      workspaces: new FakeWorkspaceRepository([
+        {
+          id: "ws-docs",
+          status: "active",
+          rootPath: "/workspace/docs"
+        }
+      ]),
+      knowledgeSets: new FakeKnowledgeSetRepository(
+        [
+          {
+            id: "ks-faq",
+            status: "active",
+            sourceType: "filesystem",
+            rootPath: "/knowledge/faq"
+          },
+          {
+            id: "ks-runbook",
+            status: "active",
+            sourceType: "managed_upload"
+          }
+        ],
+        [
+          { workspaceId: "ws-docs", knowledgeSetId: "ks-faq", mountType: "default" },
+          { workspaceId: "ws-docs", knowledgeSetId: "ks-runbook", mountType: "optional" }
+        ]
+      ),
+      policies: new FakePolicyService({
+        workspace: ["ws-docs"],
+        knowledge_set: ["ks-faq", "ks-runbook"]
+      }),
+      storage: {
+        resolveReadableMountPath(knowledgeSetId: string) {
+          return `/managed/${knowledgeSetId}`;
+        }
+      }
+    });
+
+    const result = await service.mergeSelectedKnowledgeSetsIntoRunConfig({
+      userId: "employee-1",
+      roleIds: ["employee"],
+      departmentIds: [],
+      workspacePath: "/workspace/docs",
+      codexRunConfig: {
+        mode: "standard",
+        workspace: "/workspace/docs",
+        additionalDirectories: ["/existing"]
+      }
+    });
+
+    expect(result).toEqual({
+      mode: "standard",
+      workspace: "/workspace/docs",
+      additionalDirectories: ["/existing", "/knowledge/faq"],
+      _agentStudioKnowledgeSets: {
+        workspacePath: "/workspace/docs",
+        selectedOptionalIds: [],
+        mountPaths: ["/knowledge/faq"]
+      }
+    });
+  });
+
   it("adds authorized selected knowledge set mount paths to additionalDirectories", async () => {
     const service = new RuntimeKnowledgeSetService({
       workspaces: new FakeWorkspaceRepository([
@@ -58,7 +121,92 @@ describe("RuntimeKnowledgeSetService", () => {
     expect(result).toEqual({
       mode: "standard",
       workspace: "/workspace/docs",
-      additionalDirectories: ["/existing", "/knowledge/faq", "/managed/ks-runbook"]
+      additionalDirectories: ["/existing", "/knowledge/faq", "/managed/ks-runbook"],
+      _agentStudioKnowledgeSets: {
+        workspacePath: "/workspace/docs",
+        selectedOptionalIds: ["ks-faq", "ks-runbook"],
+        mountPaths: ["/knowledge/faq", "/managed/ks-runbook"]
+      }
+    });
+  });
+
+  it("re-resolves mounts for a new workspace and removes stale knowledge set directories", async () => {
+    const service = new RuntimeKnowledgeSetService({
+      workspaces: new FakeWorkspaceRepository([
+        {
+          id: "ws-docs",
+          status: "active",
+          rootPath: "/workspace/docs"
+        },
+        {
+          id: "ws-ops",
+          status: "active",
+          rootPath: "/workspace/ops"
+        }
+      ]),
+      knowledgeSets: new FakeKnowledgeSetRepository(
+        [
+          {
+            id: "ks-faq",
+            status: "active",
+            sourceType: "filesystem",
+            rootPath: "/knowledge/faq"
+          },
+          {
+            id: "ks-runbook",
+            status: "active",
+            sourceType: "managed_upload"
+          },
+          {
+            id: "ks-ops",
+            status: "active",
+            sourceType: "filesystem",
+            rootPath: "/knowledge/ops"
+          }
+        ],
+        [
+          { workspaceId: "ws-docs", knowledgeSetId: "ks-faq", mountType: "default" },
+          { workspaceId: "ws-docs", knowledgeSetId: "ks-runbook", mountType: "optional" },
+          { workspaceId: "ws-ops", knowledgeSetId: "ks-ops", mountType: "default" }
+        ]
+      ),
+      policies: new FakePolicyService({
+        workspace: ["ws-docs", "ws-ops"],
+        knowledge_set: ["ks-faq", "ks-runbook", "ks-ops"]
+      }),
+      storage: {
+        resolveReadableMountPath(knowledgeSetId: string) {
+          return `/managed/${knowledgeSetId}`;
+        }
+      }
+    });
+
+    const result = await service.mergeSelectedKnowledgeSetsIntoRunConfig({
+      userId: "employee-1",
+      roleIds: ["employee"],
+      departmentIds: [],
+      workspacePath: "/workspace/ops",
+      codexRunConfig: {
+        mode: "standard",
+        workspace: "/workspace/ops",
+        additionalDirectories: ["/custom", "/knowledge/faq", "/managed/ks-runbook"],
+        _agentStudioKnowledgeSets: {
+          workspacePath: "/workspace/docs",
+          selectedOptionalIds: ["ks-runbook"],
+          mountPaths: ["/knowledge/faq", "/managed/ks-runbook"]
+        }
+      }
+    });
+
+    expect(result).toEqual({
+      mode: "standard",
+      workspace: "/workspace/ops",
+      additionalDirectories: ["/custom", "/knowledge/ops"],
+      _agentStudioKnowledgeSets: {
+        workspacePath: "/workspace/ops",
+        selectedOptionalIds: [],
+        mountPaths: ["/knowledge/ops"]
+      }
     });
   });
 

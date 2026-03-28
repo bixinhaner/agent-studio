@@ -40,6 +40,14 @@ type KnowledgeSetStorageLike = {
   resolveReadableMountPath(knowledgeSetId: string): string;
 };
 
+type KnowledgeSetRuntimeMetadata = {
+  workspacePath: string;
+  selectedOptionalIds: string[];
+  mountPaths: string[];
+};
+
+const KNOWLEDGE_SET_METADATA_KEY = "_agentStudioKnowledgeSets";
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -72,24 +80,56 @@ function normalizeAdditionalDirectories(value: unknown): string[] {
   return directories;
 }
 
-function mergeAdditionalDirectories(
+function replaceManagedKnowledgeSetDirectories(
   codexRunConfig: Record<string, unknown> | undefined,
-  mountPaths: string[]
-): Record<string, unknown> | undefined {
-  if (!codexRunConfig && mountPaths.length === 0) {
-    return codexRunConfig;
-  }
+  metadata: KnowledgeSetRuntimeMetadata
+): Record<string, unknown> {
   const next = codexRunConfig ? { ...codexRunConfig } : {};
-  const merged = normalizeAdditionalDirectories(next.additionalDirectories);
+  const previousMetadata = readKnowledgeSetRuntimeMetadata(codexRunConfig);
+  const previousMountPaths = new Set(previousMetadata?.mountPaths ?? []);
+  const merged = normalizeAdditionalDirectories(next.additionalDirectories).filter(
+    (directory) => !previousMountPaths.has(directory)
+  );
   const seen = new Set(merged);
-  for (const mountPath of mountPaths) {
+  for (const mountPath of metadata.mountPaths) {
     const normalized = trimOrUndefined(mountPath);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     merged.push(normalized);
   }
   next.additionalDirectories = merged;
+  next[KNOWLEDGE_SET_METADATA_KEY] = metadata;
   return next;
+}
+
+function readKnowledgeSetRuntimeMetadata(value: unknown): KnowledgeSetRuntimeMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = (value as Record<string, unknown>)[KNOWLEDGE_SET_METADATA_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const workspacePathValue = (raw as Record<string, unknown>).workspacePath;
+  const workspacePath = trimOrUndefined(typeof workspacePathValue === "string" ? workspacePathValue : undefined);
+  if (!workspacePath) return undefined;
+  return {
+    workspacePath,
+    selectedOptionalIds: normalizeIdList((raw as Record<string, unknown>).selectedOptionalIds as string[] | undefined),
+    mountPaths: normalizeAdditionalDirectories((raw as Record<string, unknown>).mountPaths)
+  };
+}
+
+function resolveSelectedOptionalKnowledgeSetIds(input: {
+  workspacePath: string;
+  knowledgeSetIds?: string[];
+  codexRunConfig?: Record<string, unknown>;
+}): string[] {
+  if (input.knowledgeSetIds !== undefined) {
+    return normalizeIdList(input.knowledgeSetIds);
+  }
+
+  const previousMetadata = readKnowledgeSetRuntimeMetadata(input.codexRunConfig);
+  if (previousMetadata?.workspacePath === input.workspacePath) {
+    return previousMetadata.selectedOptionalIds;
+  }
+  return [];
 }
 
 export class RuntimeKnowledgeSetService {
@@ -110,11 +150,6 @@ export class RuntimeKnowledgeSetService {
     knowledgeSetIds?: string[];
     codexRunConfig?: Record<string, unknown>;
   }): Promise<Record<string, unknown> | undefined> {
-    const selectedKnowledgeSetIds = normalizeIdList(input.knowledgeSetIds);
-    if (selectedKnowledgeSetIds.length === 0) {
-      return input.codexRunConfig;
-    }
-
     const workspacePath = trimOrUndefined(input.workspacePath);
     if (!workspacePath) {
       throw new Error("workspace 不存在或无权限");
@@ -140,12 +175,21 @@ export class RuntimeKnowledgeSetService {
     }
 
     const bindings = await this.options.knowledgeSets.listWorkspaceBindings(workspace.id);
+    const defaultKnowledgeSetIds = bindings
+      .filter((binding) => binding.mountType === "default")
+      .map((binding) => binding.knowledgeSetId);
     const optionalKnowledgeSetIdSet = new Set(
       bindings.filter((binding) => binding.mountType === "optional").map((binding) => binding.knowledgeSetId)
     );
-    if (selectedKnowledgeSetIds.some((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId))) {
+    const selectedOptionalKnowledgeSetIds = resolveSelectedOptionalKnowledgeSetIds({
+      workspacePath,
+      knowledgeSetIds: input.knowledgeSetIds,
+      codexRunConfig: input.codexRunConfig
+    });
+    if (selectedOptionalKnowledgeSetIds.some((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId))) {
       throw new Error("knowledge set 未授权或未绑定到当前 workspace");
     }
+    const resolvedKnowledgeSetIds = [...defaultKnowledgeSetIds, ...selectedOptionalKnowledgeSetIds];
 
     const allowedKnowledgeSetIds = new Set(
       await this.options.policies.filterAllowedResources({
@@ -153,10 +197,10 @@ export class RuntimeKnowledgeSetService {
         roleIds: input.roleIds,
         departmentIds: input.departmentIds,
         resourceType: "knowledge_set",
-        candidateIds: selectedKnowledgeSetIds
+        candidateIds: resolvedKnowledgeSetIds
       })
     );
-    if (selectedKnowledgeSetIds.some((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId))) {
+    if (resolvedKnowledgeSetIds.some((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId))) {
       throw new Error("knowledge set 未授权或未绑定到当前 workspace");
     }
 
@@ -166,7 +210,7 @@ export class RuntimeKnowledgeSetService {
         .map((knowledgeSet) => [knowledgeSet.id, knowledgeSet] as const)
     );
 
-    const mountPaths = selectedKnowledgeSetIds.map((knowledgeSetId) => {
+    const mountPaths = resolvedKnowledgeSetIds.map((knowledgeSetId) => {
       const knowledgeSet = knowledgeSetById.get(knowledgeSetId);
       if (!knowledgeSet) {
         throw new Error("knowledge set 未授权或未绑定到当前 workspace");
@@ -181,6 +225,10 @@ export class RuntimeKnowledgeSetService {
       return mountPath;
     });
 
-    return mergeAdditionalDirectories(input.codexRunConfig, mountPaths);
+    return replaceManagedKnowledgeSetDirectories(input.codexRunConfig, {
+      workspacePath,
+      selectedOptionalIds: selectedOptionalKnowledgeSetIds,
+      mountPaths
+    });
   }
 }

@@ -236,6 +236,13 @@ function ensureThreadUploadInRunConfig(
   return next;
 }
 
+function stripInternalRunConfigMetadata(input: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!input) return input;
+  const next = { ...input };
+  delete next._agentStudioKnowledgeSets;
+  return next;
+}
+
 async function createSession(options: SessionOptions, threadId?: string) {
   const uploadDir = threadId ? getThreadUploadTempDir(threadId) : "";
   const codexRunConfig = threadId
@@ -249,7 +256,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig
+    codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig)
   });
   const session = await sessions.create({
     userId: options.userId,
@@ -331,15 +338,12 @@ async function ensureThreadSession(
     patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort
   );
   const desiredWorkspace = resolveWorkspace(patch?.workspace || thread.workspace);
-  const desiredBaseCodexRunConfig =
-    patch?.knowledge_set_ids !== undefined
-      ? await resolveKnowledgeSetRunConfig({
-          currentUser,
-          workspacePath: desiredWorkspace,
-          knowledgeSetIds: patch.knowledge_set_ids,
-          codexRunConfig: sourceCodexRunConfig
-        })
-      : sourceCodexRunConfig;
+  const desiredBaseCodexRunConfig = await resolveKnowledgeSetRunConfig({
+    currentUser,
+    workspacePath: desiredWorkspace,
+    knowledgeSetIds: patch?.knowledge_set_ids,
+    codexRunConfig: sourceCodexRunConfig
+  });
   const desiredCodexRunConfig = ensureThreadUploadInRunConfig(
     desiredBaseCodexRunConfig,
     getThreadUploadTempDir(threadId)
@@ -634,15 +638,12 @@ app.post("/api/session", async (req: Request, res: Response) => {
         } else if (input.model || input.reasoning_effort || input.workspace || input.knowledge_set_ids || input.codex_run_config) {
           const workspace = input.workspace ? resolveWorkspace(input.workspace) : existing.workspace;
           const nextSourceCodexRunConfig = input.codex_run_config ?? existing.codexRunConfig;
-          const nextCodexRunConfig =
-            input.knowledge_set_ids !== undefined
-              ? await resolveKnowledgeSetRunConfig({
-                  currentUser,
-                  workspacePath: workspace,
-                  knowledgeSetIds: input.knowledge_set_ids,
-                  codexRunConfig: nextSourceCodexRunConfig
-                })
-              : nextSourceCodexRunConfig;
+          const nextCodexRunConfig = await resolveKnowledgeSetRunConfig({
+            currentUser,
+            workspacePath: workspace,
+            knowledgeSetIds: input.knowledge_set_ids,
+            codexRunConfig: nextSourceCodexRunConfig
+          });
           const updated = await sessions.update(existingId, {
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
