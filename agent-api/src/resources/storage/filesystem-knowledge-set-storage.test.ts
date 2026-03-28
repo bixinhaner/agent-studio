@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { strToU8, zipSync } from "fflate";
 
 import { FilesystemKnowledgeSetStorage } from "./filesystem-knowledge-set-storage.js";
@@ -9,6 +9,7 @@ import { FilesystemKnowledgeSetStorage } from "./filesystem-knowledge-set-storag
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     tempRoots.splice(0, tempRoots.length).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
@@ -95,6 +96,35 @@ describe("FilesystemKnowledgeSetStorage", () => {
     await expect(fs.readFile(path.join(result.mountPath, "faq", "usage.txt"), "utf8")).resolves.toBe("usage");
   });
 
+  it("ignores explicit directory entries while extracting archives", async () => {
+    const rootDir = await createTempRoot();
+    const storage = new FilesystemKnowledgeSetStorage(rootDir);
+
+    const result = await storage.extractArchive({
+      knowledgeSetId: "ks-1",
+      archiveName: "dir.zip",
+      buffer: Buffer.from(
+        zipSync({
+          "dir/": new Uint8Array(0),
+          "dir/file.txt": strToU8("hello")
+        })
+      )
+    });
+
+    expect(result.items).toEqual([
+      {
+        kind: "file",
+        relativePath: "dir/file.txt",
+        displayName: "file.txt",
+        mimeType: undefined,
+        sizeBytes: 5n,
+        checksum: undefined,
+        sourceArchiveName: "dir.zip"
+      }
+    ]);
+    await expect(fs.readFile(path.join(result.mountPath, "dir", "file.txt"), "utf8")).resolves.toBe("hello");
+  });
+
   it("rejects duplicate normalized paths during batch save", async () => {
     const rootDir = await createTempRoot();
     const storage = new FilesystemKnowledgeSetStorage(rootDir);
@@ -151,6 +181,32 @@ describe("FilesystemKnowledgeSetStorage", () => {
 
     await expect(fs.access(path.join(rootDir, "evil.txt"))).rejects.toThrow();
     await expect(fs.access(path.join(storage.resolveReadableMountPath("ks-1"), "docs", "good.txt"))).rejects.toThrow();
+  });
+
+  it("preserves the previous mount contents when promotion fails", async () => {
+    const rootDir = await createTempRoot();
+    const storage = new FilesystemKnowledgeSetStorage(rootDir);
+    const mountPath = storage.resolveReadableMountPath("ks-1");
+    await fs.mkdir(mountPath, { recursive: true });
+    await fs.writeFile(path.join(mountPath, "existing.txt"), "existing");
+
+    const originalRename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+      if (String(from).includes(".staging-") && String(to) === mountPath) {
+        throw new Error("rename failed");
+      }
+      return originalRename(from, to);
+    });
+
+    await expect(
+      storage.saveFiles({
+        knowledgeSetId: "ks-1",
+        files: [{ name: "new.txt", buffer: Buffer.from("new") }]
+      })
+    ).rejects.toThrow(/rename failed/i);
+
+    await expect(fs.readFile(path.join(mountPath, "existing.txt"), "utf8")).resolves.toBe("existing");
+    await expect(fs.access(path.join(mountPath, "new.txt"))).rejects.toThrow();
   });
 });
 

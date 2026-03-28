@@ -42,6 +42,15 @@ function normalizeKnowledgeSetId(knowledgeSetId: string): string {
   return normalized;
 }
 
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sortItems(items: KnowledgeSetStorageItem[]): KnowledgeSetStorageItem[] {
   return [...items].sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
@@ -110,6 +119,9 @@ export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
       const items: KnowledgeSetStorageItem[] = [];
       const seenPaths = new Set<string>();
       for (const [entryName, content] of Object.entries(archiveEntries)) {
+        if (entryName.endsWith("/")) {
+          continue;
+        }
         const relativePath = normalizeRelativePath(entryName);
         assertUniqueRelativePath(relativePath, seenPaths);
         const targetPath = ensureInsideRoot(stagingDir, path.join(stagingDir, relativePath));
@@ -134,7 +146,28 @@ export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
   }
 
   private async commitStagingDir(stagingDir: string, mountPath: string): Promise<void> {
-    await fs.rm(mountPath, { recursive: true, force: true });
-    await fs.rename(stagingDir, mountPath);
+    const backupParent = await fs.mkdtemp(path.join(this.rootDir, ".backup-"));
+    const backupPath = path.join(backupParent, "previous");
+    const hasExistingMount = await pathExists(mountPath);
+
+    try {
+      if (hasExistingMount) {
+        await fs.rename(mountPath, backupPath);
+      }
+
+      try {
+        await fs.rename(stagingDir, mountPath);
+      } catch (error) {
+        if (hasExistingMount && (await pathExists(backupPath))) {
+          await fs.rename(backupPath, mountPath);
+        }
+        throw error;
+      }
+
+      await fs.rm(backupParent, { recursive: true, force: true });
+    } catch (error) {
+      await fs.rm(backupParent, { recursive: true, force: true });
+      throw error;
+    }
   }
 }
