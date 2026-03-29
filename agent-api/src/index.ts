@@ -37,6 +37,7 @@ import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence
 import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
 import { createPortalRouter } from "./portal/router.js";
+import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
@@ -60,6 +61,13 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
+const portalRuntimeOptions = new PortalRuntimeOptionService({
+  modes: agentModes,
+  workspaces,
+  runProfiles,
+  skillPackages,
+  policies: policyService
+});
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   workspaces,
   knowledgeSets,
@@ -508,8 +516,8 @@ registerCommonApiRoutes(app, {
     agentModes
   }),
   portalRouter: createPortalRouter({
-    workspaceWhitelist: appConfig.workspaceWhitelist,
-    defaultWorkspace: appConfig.defaultWorkspace
+    runtimeOptions: portalRuntimeOptions,
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
   }),
     resourcesPortalRouter: createResourcesPortalRouter({
       workspaces,

@@ -6,7 +6,7 @@ import { PortalRuntimeOptionService } from "./runtime-option-service.js";
 
 type FakeWorkspaceRecord = {
   id: string;
-  organizationId?: string;
+  organizationId?: string | null;
   name: string;
   slug: string;
   description?: string;
@@ -19,7 +19,7 @@ type FakeWorkspaceRecord = {
 
 type FakeRunProfileRecord = {
   id: string;
-  organizationId?: string;
+  organizationId?: string | null;
   name: string;
   slug: string;
   description?: string;
@@ -37,7 +37,7 @@ type FakeRunProfileRecord = {
 
 type FakeSkillPackageRecord = {
   id: string;
-  organizationId?: string;
+  organizationId?: string | null;
   name: string;
   slug: string;
   description?: string;
@@ -64,7 +64,7 @@ type FakeSkillPackageRecord = {
 
 type FakeAgentModeRecord = {
   id: string;
-  organizationId?: string;
+  organizationId?: string | null;
   name: string;
   slug: string;
   description?: string;
@@ -282,7 +282,7 @@ describe("PortalRuntimeOptionService", () => {
       policies: [
         {
           id: "policy-mode",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -293,7 +293,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "department",
           subjectId: "dept-rd",
           resourceType: "run_profile",
@@ -304,7 +304,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-skill-package",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "user",
           subjectId: "user-1",
           resourceType: "skill_package",
@@ -315,7 +315,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-workspace-primary",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "workspace",
@@ -516,7 +516,7 @@ describe("PortalRuntimeOptionService", () => {
       policies: [
         {
           id: "policy-mode-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -527,7 +527,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-mode-inactive-profile",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -538,7 +538,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-mode-unauthorized-profile",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -549,7 +549,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "run_profile",
@@ -560,7 +560,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-skill-package-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "skill_package",
@@ -571,7 +571,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-workspace-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "workspace",
@@ -582,7 +582,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile-inactive",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "run_profile",
@@ -764,7 +764,7 @@ describe("PortalRuntimeOptionService", () => {
       policies: [
         {
           id: "policy-mode-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -775,7 +775,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-mode-inactive-package",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -786,7 +786,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-mode-unauthorized-package",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "agent_mode",
@@ -797,7 +797,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "run_profile",
@@ -808,7 +808,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile-inactive-package",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "run_profile",
@@ -819,7 +819,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-profile-unauthorized-package",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "run_profile",
@@ -830,7 +830,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-workspace-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "workspace",
@@ -841,7 +841,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-skill-package-good",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "skill_package",
@@ -852,7 +852,7 @@ describe("PortalRuntimeOptionService", () => {
         },
         {
           id: "policy-skill-package-inactive",
-          organizationId: null,
+          organizationId: undefined,
           subjectType: "role",
           subjectId: "employee",
           resourceType: "skill_package",

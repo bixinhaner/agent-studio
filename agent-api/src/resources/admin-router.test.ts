@@ -839,8 +839,18 @@ async function buildResourcesAdminApp(options?: {
       }
     }),
     portalRouter: createPortalRouter({
-      workspaceWhitelist: ["/workspace/default"],
-      defaultWorkspace: "/workspace/default"
+      runtimeOptions: {
+        resolve: async () => ({
+          modes: [],
+          workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+          canUpload: true,
+          defaults: {
+            mode: "",
+            workspace: "/workspace/default"
+          }
+        })
+      },
+      listDepartmentIdsForUser: async () => []
     }),
     serviceTokenMiddleware: (_req, _res, next) => next(),
     zendeskRouter: express.Router()
