@@ -304,6 +304,10 @@ export class SyncJobRepository {
     });
   }
 
+  async touch(jobId: string): Promise<void> {
+    await this.updateJob(jobId, {});
+  }
+
   async getDetail(jobId: string): Promise<SyncJobDetail | null> {
     const row = await this.db.syncJob.findUnique({ where: { id: jobId } });
     if (!row) return null;

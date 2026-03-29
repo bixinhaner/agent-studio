@@ -134,6 +134,7 @@ const STALE_RUNNING_JOB_SUMMARY = {
   detail: "Recovered stale running org sync job after interrupted startup"
 };
 const STALE_RUNNING_JOB_AGE_MS = 15 * 60 * 1000;
+const JOB_HEARTBEAT_INTERVAL_MS = 60 * 1000;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -441,6 +442,7 @@ export class OrgSyncService {
     this.activeRun = true;
 
     let jobId = "";
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     const startedAt = new Date();
 
     try {
@@ -476,6 +478,10 @@ export class OrgSyncService {
       });
       jobId = createdJob.id;
       await this.dependencies.jobs.markRunning(jobId, startedAt);
+      heartbeatTimer = setInterval(() => {
+        void this.dependencies.jobs.touch(jobId).catch(() => undefined);
+      }, JOB_HEARTBEAT_INTERVAL_MS);
+      heartbeatTimer.unref?.();
 
       await this.dependencies.jobs.appendEvent(jobId, {
         level: "info",
@@ -568,6 +574,9 @@ export class OrgSyncService {
       }
       return { jobId, status: "failed" };
     } finally {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
       this.activeRun = false;
     }
   }
