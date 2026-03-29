@@ -120,11 +120,43 @@ describe("PortalShell knowledge set integration", () => {
   it("renders default and optional knowledge sets for the runtime workspace path", async () => {
     mockedApi
       .mockResolvedValueOnce({
-        modes: [{ id: "standard", label: "通用助手" }],
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
         workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
         canUpload: true,
         defaults: {
-          mode: "standard",
+          mode: "mode-code",
           workspace: "/workspace/default"
         }
       })
@@ -144,6 +176,9 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
+    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect(screen.getAllByText("gpt-5.4-pro").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/xhigh/i).length).toBeGreaterThan(0);
     expect(await screen.findByText("FAQ")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Runbooks" })).toBeTruthy();
   });
@@ -151,11 +186,43 @@ describe("PortalShell knowledge set integration", () => {
   it("includes selected knowledge_set_ids in thread and session creation requests", async () => {
     mockedApi
       .mockResolvedValueOnce({
-        modes: [{ id: "standard", label: "通用助手" }],
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
         workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
         canUpload: true,
         defaults: {
-          mode: "standard",
+          mode: "mode-code",
           workspace: "/workspace/default"
         }
       })
