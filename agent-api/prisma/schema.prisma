@@ -519,6 +519,179 @@ model ResourcePolicy {
   @@map("resource_policies")
 }
 
+model ResourceAccessLog {
+  id                   String   @id @default(cuid())
+  organizationId       String?  @map("organization_id")
+  userId               String?  @map("user_id")
+  departmentIdSnapshot String?  @map("department_id_snapshot")
+  threadId             String?  @map("thread_id")
+  sessionId            String?  @map("session_id")
+  resourceType         String   @map("resource_type")
+  resourceId           String   @map("resource_id")
+  actionType           String   @map("action_type")
+  resultStatus         String   @map("result_status")
+  metadata             Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([departmentIdSnapshot, createdAt])
+  @@index([threadId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@index([actionType, createdAt])
+  @@index([resultStatus, createdAt])
+  @@map("resource_access_logs")
+}
+
+model UsageEvent {
+  id                   String   @id @default(cuid())
+  organizationId       String?  @map("organization_id")
+  userId               String?  @map("user_id")
+  departmentIdSnapshot String?  @map("department_id_snapshot")
+  threadId             String?  @map("thread_id")
+  sessionId            String?  @map("session_id")
+  model                String
+  featureType          String   @map("feature_type")
+  inputTokens          Int      @default(0) @map("input_tokens")
+  cachedInputTokens    Int      @default(0) @map("cached_input_tokens")
+  outputTokens         Int      @default(0) @map("output_tokens")
+  estimatedCost        Decimal  @default(0) @db.Decimal(18, 6) @map("estimated_cost")
+  internalCost         Decimal  @default(0) @db.Decimal(18, 6) @map("internal_cost")
+  resultStatus         String   @map("result_status")
+  metadata             Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([departmentIdSnapshot, createdAt])
+  @@index([threadId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([model, createdAt])
+  @@index([featureType, createdAt])
+  @@index([resultStatus, createdAt])
+  @@map("usage_events")
+}
+
+model UsageDailyRollup {
+  id                String   @id @default(cuid())
+  organizationId    String?  @map("organization_id")
+  rollupDate        DateTime @map("rollup_date") @db.Date
+  scopeType         String   @map("scope_type")
+  scopeId           String   @map("scope_id")
+  model             String   @default("")
+  featureType       String   @default("") @map("feature_type")
+  requestCount      Int      @default(0) @map("request_count")
+  successCount      Int      @default(0) @map("success_count")
+  failureCount      Int      @default(0) @map("failure_count")
+  inputTokens       Int      @default(0) @map("input_tokens")
+  cachedInputTokens Int      @default(0) @map("cached_input_tokens")
+  outputTokens      Int      @default(0) @map("output_tokens")
+  estimatedCost     Decimal  @default(0) @db.Decimal(18, 6) @map("estimated_cost")
+  internalCost      Decimal  @default(0) @db.Decimal(18, 6) @map("internal_cost")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([rollupDate, scopeType, scopeId, model, featureType])
+  @@index([scopeType, scopeId, rollupDate])
+  @@index([model, rollupDate])
+  @@index([featureType, rollupDate])
+  @@map("usage_daily_rollups")
+}
+
+model CostProfile {
+  id                    String   @id @default(cuid())
+  /// Global profiles use organizationId = NULL and rely on a partial unique index in SQL migration.
+  organizationId        String?  @map("organization_id")
+  model                 String
+  inputTokenPrice       Decimal  @default(0) @db.Decimal(18, 6) @map("input_token_price")
+  cachedInputTokenPrice Decimal  @default(0) @db.Decimal(18, 6) @map("cached_input_token_price")
+  outputTokenPrice      Decimal  @default(0) @db.Decimal(18, 6) @map("output_token_price")
+  internalCostMultiplier Decimal @default(1) @db.Decimal(10, 4) @map("internal_cost_multiplier")
+  isActive              Boolean  @default(true) @map("is_active")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive, model])
+  @@unique([organizationId, model])
+  @@map("cost_profiles")
+}
+
+model QuotaPolicy {
+  id              String   @id @default(cuid())
+  organizationId  String?  @map("organization_id")
+  scopeType       String   @map("scope_type")
+  scopeId         String   @map("scope_id")
+  featureType     String?  @map("feature_type")
+  model           String?
+  metricType      String   @map("metric_type")
+  windowType      String   @map("window_type")
+  thresholdValue  Decimal  @db.Decimal(18, 6) @map("threshold_value")
+  enforcementMode String   @map("enforcement_mode")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([scopeType, scopeId, isActive])
+  @@index([metricType, isActive])
+  @@index([featureType, model, isActive])
+  @@map("quota_policies")
+}
+
+model AlertRule {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  scopeType      String   @map("scope_type")
+  scopeId        String   @map("scope_id")
+  ruleType       String   @map("rule_type")
+  name           String
+  description    String?
+  conditions     Json
+  channels       Json
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([scopeType, scopeId, isActive])
+  @@index([ruleType, isActive])
+  @@map("alert_rules")
+}
+
+model AlertEvent {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  alertRuleId    String?  @map("alert_rule_id")
+  scopeType      String   @map("scope_type")
+  scopeId        String   @map("scope_id")
+  severity       String
+  status         String
+  title          String
+  detail         String
+  payload        Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([alertRuleId, createdAt])
+  @@index([scopeType, scopeId, createdAt])
+  @@index([status, severity, createdAt])
+  @@map("alert_events")
+}
+
+model NotificationRecord {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  channelType    String   @map("channel_type")
+  targetRef      String   @map("target_ref")
+  eventType      String   @map("event_type")
+  status         String
+  payload        Json?
+  errorMessage   String?  @map("error_message")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([channelType, status, createdAt])
+  @@index([eventType, createdAt])
+  @@map("notification_records")
+}
+
 enum ThreadStatus {
   active
   archived
