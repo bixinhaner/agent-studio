@@ -232,4 +232,47 @@ describe("UserRepository", () => {
       syncState: "departed"
     });
   });
+
+  it("updates the legacy mirrored role without changing synced profile fields", async () => {
+    const db = new FakeUserDb([
+      {
+        id: "user-1",
+        externalId: "ding-union-1",
+        email: "agent@example.com",
+        displayName: "Ding Agent",
+        role: "employee",
+        status: "active",
+        statusSource: "sync",
+        syncState: "active",
+        manualDisabled: false,
+        adminNote: "local note",
+        lastSyncedAt: new Date("2026-03-29T00:00:00.000Z"),
+        dingtalkOpenId: "ding-open-1",
+        dingtalkUserId: "ding-user-1",
+        dingtalkCorpId: "ding-corp-1",
+        createdAt: new Date("2026-03-20T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-20T00:00:00.000Z")
+      }
+    ]);
+    const repository = new UserRepository(db as never);
+
+    const updated = await repository.updateLegacyRole({
+      userId: "user-1",
+      role: "admin"
+    });
+
+    expect(updated).toMatchObject({
+      id: "user-1",
+      displayName: "Ding Agent",
+      role: "admin",
+      status: "active"
+    });
+    expect(db.rows[0]).toMatchObject({
+      displayName: "Ding Agent",
+      adminNote: "local note",
+      role: "admin",
+      status: "active",
+      statusSource: "sync"
+    });
+  });
 });

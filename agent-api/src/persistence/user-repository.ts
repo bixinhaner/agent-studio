@@ -32,6 +32,7 @@ export interface UserRepositoryLike {
   getById(id: string): Promise<AuthenticatedUser | undefined>;
   getByExternalId(externalId: string): Promise<AuthenticatedUser | undefined>;
   upsertFromDingTalk(identity: DingTalkUserIdentity): Promise<AuthenticatedUser>;
+  updateLegacyRole?(input: { userId: string; role: string }): Promise<AuthenticatedUser>;
   updateLocalSettings(input: {
     userId: string;
     role: string;
@@ -242,5 +243,26 @@ export class UserRepository implements UserRepositoryLike {
     });
 
     return mapUserRecord(updated);
+  }
+
+  async updateLegacyRole(input: { userId: string; role: string }): Promise<AuthenticatedUser> {
+    const userId = trimOrUndefined(input.userId);
+    if (!userId) {
+      throw new Error("user 不存在");
+    }
+
+    const existing = await this.db.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      throw new Error("user 不存在");
+    }
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data: {
+        role: trimOrUndefined(input.role) ?? existing.role ?? "employee",
+        updatedAt: new Date()
+      }
+    });
+    return mapUser(updated);
   }
 }
