@@ -77,6 +77,7 @@ export class OrgSyncScheduler {
       return;
     }
 
+    void this.recoverStaleJobs().catch(() => undefined);
     const intervalMs = Math.max(1, Math.trunc(this.options.intervalMinutes)) * 60_000;
     this.timer = this.setIntervalFn(() => {
       void this.tick().catch(() => undefined);
@@ -118,6 +119,18 @@ export class OrgSyncScheduler {
   }
 
   private async hasRunningFullSync(): Promise<boolean> {
+    await this.recoverStaleJobs();
+    const db = getDb(this.jobs as unknown as { db: { syncJob: { findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>> } } });
+    const currentJobs = await db.syncJob.findMany();
+    return currentJobs.some((job) => {
+      const scopeType = String(job.scopeType ?? "");
+      const status = String(job.status ?? "");
+      const scopeExternalId = trimOrUndefined(job.scopeExternalId as string | null);
+      return scopeType === "full" && scopeExternalId === undefined && RUNNING_JOB_STATUSES.has(status);
+    });
+  }
+
+  private async recoverStaleJobs(): Promise<void> {
     const db = getDb(this.jobs as unknown as { db: { syncJob: { findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>> } } });
     const jobs = await db.syncJob.findMany();
     for (const job of jobs) {
@@ -132,12 +145,5 @@ export class OrgSyncScheduler {
         await this.jobs.markFailed(jobId, STALE_RUNNING_JOB_SUMMARY);
       }
     }
-    const currentJobs = await db.syncJob.findMany();
-    return currentJobs.some((job) => {
-      const scopeType = String(job.scopeType ?? "");
-      const status = String(job.status ?? "");
-      const scopeExternalId = trimOrUndefined(job.scopeExternalId as string | null);
-      return scopeType === "full" && scopeExternalId === undefined && RUNNING_JOB_STATUSES.has(status);
-    });
   }
 }
