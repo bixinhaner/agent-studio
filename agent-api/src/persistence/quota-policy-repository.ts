@@ -35,6 +35,18 @@ export type UpsertQuotaPolicyInput = {
   updatedAt?: string | Date;
 };
 
+export type UpdateQuotaPolicyInput = {
+  scopeType?: QuotaPolicyScopeType;
+  scopeId?: string;
+  featureType?: string;
+  model?: string;
+  metricType?: QuotaPolicyMetricType;
+  windowType?: QuotaPolicyWindowType;
+  thresholdValue?: string | number;
+  enforcementMode?: QuotaPolicyEnforcementMode;
+  isActive?: boolean;
+};
+
 export type ListQuotaPoliciesInput = {
   organizationId?: string | null;
   scopeType?: QuotaPolicyScopeType;
@@ -220,5 +232,39 @@ export class QuotaPolicyRepository {
     });
 
     return rows.map(mapQuotaPolicy);
+  }
+
+  async getById(id: string): Promise<QuotaPolicyRecord | null> {
+    const normalized = trimOrUndefined(id);
+    if (!normalized) return null;
+    const rows = await this.db.quotaPolicy.findMany({
+      orderBy: { createdAt: "desc" }
+    });
+    const row = rows.find((item) => item.id === normalized);
+    return row ? mapQuotaPolicy(row) : null;
+  }
+
+  async update(input: { id: string; changes: UpdateQuotaPolicyInput }): Promise<QuotaPolicyRecord> {
+    const existing = await this.getById(input.id);
+    if (!existing) {
+      throw new Error("quota policy 不存在");
+    }
+
+    const updated = await this.db.quotaPolicy.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.changes.scopeType !== undefined ? { scopeType: input.changes.scopeType } : {}),
+        ...(input.changes.scopeId !== undefined ? { scopeId: trimOrUndefined(input.changes.scopeId) ?? existing.scopeId } : {}),
+        ...(input.changes.featureType !== undefined ? { featureType: trimOrUndefined(input.changes.featureType) ?? null } : {}),
+        ...(input.changes.model !== undefined ? { model: trimOrUndefined(input.changes.model) ?? null } : {}),
+        ...(input.changes.metricType !== undefined ? { metricType: input.changes.metricType } : {}),
+        ...(input.changes.windowType !== undefined ? { windowType: input.changes.windowType } : {}),
+        ...(input.changes.thresholdValue !== undefined ? { thresholdValue: formatDecimal(input.changes.thresholdValue) } : {}),
+        ...(input.changes.enforcementMode !== undefined ? { enforcementMode: input.changes.enforcementMode } : {}),
+        ...(typeof input.changes.isActive === "boolean" ? { isActive: input.changes.isActive } : {}),
+        updatedAt: new Date()
+      }
+    });
+    return mapQuotaPolicy(updated);
   }
 }

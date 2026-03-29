@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
 import { createAdminRouter } from "./admin/router.js";
+import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
 import { createAuthRouter } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
@@ -659,6 +660,17 @@ registerCommonApiRoutes(app, {
     },
     syncService: orgSyncService,
     orgSyncConfig: appConfig.orgSync
+  }),
+  monitoringAdminRouter: createMonitoringRouter({
+    requirePermission,
+    resourceAccessLogs: resourceAccessLogRepository,
+    usageEvents: usageEventRepository,
+    usageRollups: usageRollupRepository,
+    quotaPolicies,
+    costProfiles,
+    alertRules,
+    alertEvents,
+    notificationRecords
   }),
   resourcesAdminRouter: createResourcesAdminRouter({
     workspaces,

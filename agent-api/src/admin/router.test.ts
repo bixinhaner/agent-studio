@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
@@ -17,6 +17,7 @@ import { DepartmentRepository } from "../persistence/department-repository.js";
 import { DepartmentMembershipRepository } from "../persistence/department-membership-repository.js";
 import { SyncJobRepository } from "../persistence/sync-job-repository.js";
 import { UserRepository } from "../persistence/user-repository.js";
+import { createMonitoringRouter } from "./monitoring-router.js";
 
 type RuntimeOptionResponse = {
   modes: Array<{
@@ -998,6 +999,12 @@ function buildAdminApp(options?: {
     },
     db,
     syncService: { run: syncRun },
+    quotaChecks: {
+      evaluate: async () => ({ decision: "allow", observedValue: 0 })
+    },
+    alerts: {
+      evaluateQuotaResult: async () => undefined
+    },
     orgSyncConfig: options?.orgSyncConfig ?? { enabled: true, intervalMinutes: 24 * 60 }
   };
 
@@ -1133,6 +1140,102 @@ describe("admin and portal routers", () => {
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ detail: "zendesk store unavailable" });
+  });
+
+  it("mounts monitoring admin routes directly from the admin router without disturbing overview", async () => {
+    const user = makeUser({ id: "admin-1", role: "admin" });
+
+    const monitoringRouter = createMonitoringRouter({
+      requirePermission: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+      resourceAccessLogs: { list: async () => [] },
+      usageEvents: { list: async () => [] },
+      usageRollups: { list: async () => [] },
+      quotaPolicies: {
+        list: async () => [],
+        upsert: async (input: Record<string, unknown>) => ({ id: "policy-1", ...input }),
+        getById: async () => null,
+        update: async ({ changes }: { id: string; changes: Record<string, unknown> }) => ({ id: "policy-1", ...changes })
+      },
+      costProfiles: {
+        listActive: async () => [],
+        upsert: async (input: Record<string, unknown>) => ({ id: "profile-1", ...input }),
+        getById: async () => null,
+        update: async ({ changes }: { id: string; changes: Record<string, unknown> }) => ({ id: "profile-1", ...changes })
+      },
+      alertRules: {
+        list: async () => [],
+        create: async (input: Record<string, unknown>) => ({ id: "rule-1", ...input }),
+        getById: async () => null,
+        update: async ({ changes }: { id: string; changes: Record<string, unknown> }) => ({ id: "rule-1", ...changes })
+      },
+      alertEvents: {
+        list: async () => [],
+        getById: async () => null,
+        update: async ({ changes }: { id: string; changes: Record<string, unknown> }) => ({ id: "event-1", ...changes })
+      },
+      notificationRecords: { list: async () => [] }
+    } as any);
+
+    const appWithMonitoring = express();
+    appWithMonitoring.use(express.json());
+    registerCommonApiRoutes(appWithMonitoring, {
+      currentUserMiddleware: (req, _res, next) => {
+        req.currentUser = {
+          id: user.id,
+          role: user.role,
+          status: user.status,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        };
+        next();
+      },
+      authRouter: Router(),
+      adminRouter: createAdminRouter({
+        users: { count: async () => 1 },
+        threads: { count: async () => 2 },
+        sessions: { countActive: async () => 3 },
+        zendesk: {
+          getOverview: async () => ({
+            ready: false,
+            missing: [],
+            settings: {
+              enabled: false,
+              publicBaseUrl: "",
+              zendeskBaseUrl: "",
+              zendeskEmail: "",
+              responseMode: "public_reply",
+              fallbackMode: "internal_note",
+              autoStatus: "pending",
+              excludedTags: [],
+              workspace: "/workspace/default",
+              model: "gpt-4.1",
+              reasoningEffort: "high",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "disabled",
+              additionalDirectories: [],
+              maxCommentHistory: 12,
+              systemPrompt: "system",
+              hasZendeskApiToken: false,
+              hasWebhookSigningSecret: false
+            },
+            setup: { webhookUrl: "", payloadExample: "", triggers: [] },
+            runs: []
+          })
+        },
+        monitoringRouter
+      }),
+      portalRouter: Router(),
+      serviceTokenMiddleware: (_req, _res, next) => next(),
+      zendeskRouter: Router()
+    });
+
+    await request(appWithMonitoring).get("/api/admin/overview").expect(200);
+    const monitoringResponse = await request(appWithMonitoring).get("/api/admin/monitoring/overview");
+
+    expect(monitoringResponse.status).toBe(200);
+    expect(monitoringResponse.body.overview.totalEstimatedCost).toBeDefined();
   });
 
   it("rejects a non-admin user from admin overview", async () => {

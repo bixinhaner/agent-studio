@@ -183,4 +183,14 @@ export class AlertEventRepository {
         return right.id.localeCompare(left.id, "en");
       });
   }
+
+  async getById(id: string): Promise<AlertEventRecord | null> {
+    const normalized = trimOrUndefined(id);
+    if (!normalized) return null;
+    const rows = await this.db.alertEvent.findMany({
+      orderBy: { createdAt: "desc" }
+    });
+    const row = rows.find((item) => item.id === normalized);
+    return row ? mapAlertEvent(row) : null;
+  }
 }

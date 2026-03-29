@@ -19,7 +19,12 @@ export const BUILTIN_PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: "org_sync.trigger", name: "Trigger org sync", category: "org_sync" },
   { key: "integration.read", name: "Read integrations", category: "integration_management" },
   { key: "integration.write", name: "Edit integrations", category: "integration_management" },
-  { key: "audit.read", name: "Read audit logs", category: "audit" }
+  { key: "audit.read", name: "Read audit logs", category: "audit" },
+  { key: "monitoring.read", name: "Read monitoring dashboards", category: "monitoring" },
+  { key: "quota.read", name: "Read quota policies", category: "quota" },
+  { key: "quota.write", name: "Edit quota policies", category: "quota" },
+  { key: "alert.read", name: "Read alerts", category: "alerting" },
+  { key: "alert.write", name: "Edit alerts", category: "alerting" }
 ];
 
 export const BUILTIN_PERMISSIONS = BUILTIN_PERMISSION_DEFINITIONS;

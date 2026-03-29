@@ -22,6 +22,15 @@ export type UpsertCostProfileInput = {
   isActive?: boolean;
 };
 
+export type UpdateCostProfileInput = {
+  model?: string;
+  inputTokenPrice?: string;
+  cachedInputTokenPrice?: string;
+  outputTokenPrice?: string;
+  internalCostMultiplier?: string;
+  isActive?: boolean;
+};
+
 type CostProfileRow = {
   id: string;
   organizationId: string | null;
@@ -171,6 +180,41 @@ export class CostProfileRepository {
     const updated = await this.db.costProfile.update({
       where: { id: existing.id },
       data: payload
+    });
+    return mapCostProfile(updated);
+  }
+
+  async getById(id: string): Promise<CostProfileRecord | null> {
+    const normalized = trimOrUndefined(id);
+    if (!normalized) return null;
+    const rows = await this.db.costProfile.findMany({
+      orderBy: { createdAt: "desc" }
+    });
+    const row = rows.find((item) => item.id === normalized);
+    return row ? mapCostProfile(row) : null;
+  }
+
+  async update(input: { id: string; changes: UpdateCostProfileInput }): Promise<CostProfileRecord> {
+    const existing = await this.getById(input.id);
+    if (!existing) {
+      throw new Error("cost profile 不存在");
+    }
+
+    const updated = await this.db.costProfile.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.changes.model !== undefined ? { model: trimOrUndefined(input.changes.model) ?? existing.model } : {}),
+        ...(input.changes.inputTokenPrice !== undefined ? { inputTokenPrice: trimOrUndefined(input.changes.inputTokenPrice) ?? existing.inputTokenPrice } : {}),
+        ...(input.changes.cachedInputTokenPrice !== undefined
+          ? { cachedInputTokenPrice: trimOrUndefined(input.changes.cachedInputTokenPrice) ?? existing.cachedInputTokenPrice }
+          : {}),
+        ...(input.changes.outputTokenPrice !== undefined ? { outputTokenPrice: trimOrUndefined(input.changes.outputTokenPrice) ?? existing.outputTokenPrice } : {}),
+        ...(input.changes.internalCostMultiplier !== undefined
+          ? { internalCostMultiplier: trimOrUndefined(input.changes.internalCostMultiplier) ?? existing.internalCostMultiplier }
+          : {}),
+        ...(typeof input.changes.isActive === "boolean" ? { isActive: input.changes.isActive } : {}),
+        updatedAt: new Date()
+      }
     });
     return mapCostProfile(updated);
   }

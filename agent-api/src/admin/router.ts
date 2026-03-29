@@ -8,6 +8,8 @@ import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb }
 import { DepartmentRepository, type DepartmentRepositoryDb, type DepartmentTreeNode } from "../persistence/department-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
+import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
+import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 
 type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
 
@@ -37,7 +39,10 @@ type AdminRouterOptions = {
   zendesk?: Pick<ZendeskIntegrationService, "getOverview">;
   db?: AdminDb;
   repositories?: AdminRepositoryBundle;
+  monitoringRouter?: Router;
   syncService?: { run(input: { scopeType: "full" | "department" | "user"; scopeExternalId?: string; triggerType: "manual" | "scheduled"; triggeredByUserId?: string }): Promise<{ jobId: string; status: "succeeded" | "failed" }> };
+  quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
+  alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   orgSyncConfig?: { enabled: boolean; intervalMinutes: number };
 };
 
@@ -343,9 +348,13 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
     createOrgSyncRouter({
       syncService: options.syncService,
       syncJobs: options.repositories?.syncJobs,
-      db: options.db
+      db: options.db,
+      quotaChecks: options.quotaChecks,
+      alerts: options.alerts
     })
   );
+
+  router.use(options.monitoringRouter ?? Router());
 
   router.get("/users", async (_req: Request, res: Response) => {
     try {
