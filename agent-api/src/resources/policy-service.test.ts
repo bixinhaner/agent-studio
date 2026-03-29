@@ -272,6 +272,75 @@ describe("PolicyService", () => {
       expect(visible).toEqual([allowedByRole, allowedByDepartment]);
     }
   );
+
+  it("replaces only the selected role subject and resource type group", async () => {
+    const { repository, service } = createPolicyServiceForTest();
+
+    await repository.replacePolicies([
+      {
+        subjectType: "role",
+        subjectId: "role-ops",
+        resourceType: "workspace",
+        resourceId: "workspace-legacy",
+        effect: "allow"
+      },
+      {
+        subjectType: "role",
+        subjectId: "role-ops",
+        resourceType: "knowledge_set",
+        resourceId: "knowledge-legacy",
+        effect: "allow"
+      },
+      {
+        subjectType: "user",
+        subjectId: "user-1",
+        resourceType: "workspace",
+        resourceId: "workspace-user",
+        effect: "allow"
+      }
+    ]);
+
+    const replaced = await service.replaceSubjectPolicies({
+      subjectType: "role",
+      subjectId: "role-ops",
+      resourceType: "workspace",
+      policies: [{ resourceId: "workspace-rd", effect: "allow" }]
+    });
+
+    expect(replaced).toEqual([
+      expect.objectContaining({
+        subjectType: "role",
+        subjectId: "role-ops",
+        resourceType: "workspace",
+        resourceId: "workspace-rd",
+        effect: "allow"
+      })
+    ]);
+
+    await expect(
+      service.listSubjectPolicies({ subjectType: "role", subjectId: "role-ops", resourceType: "workspace" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "workspace-rd"
+      })
+    ]);
+
+    await expect(
+      service.listSubjectPolicies({ subjectType: "role", subjectId: "role-ops", resourceType: "knowledge_set" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "knowledge-legacy"
+      })
+    ]);
+
+    await expect(
+      service.listSubjectPolicies({ subjectType: "user", subjectId: "user-1", resourceType: "workspace" })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        resourceId: "workspace-user"
+      })
+    ]);
+  });
 });
 
 function createPolicyServiceForTest(): {

@@ -7,8 +7,10 @@ import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
 import { createAdminRouter } from "./admin/router.js";
+import { createRbacRouter } from "./admin/rbac-router.js";
 import { createAuthRouter } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
+import { createRequirePermission } from "./auth/permission-guard.js";
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import { appConfig, resolveWorkspace } from "./config.js";
@@ -32,6 +34,11 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
+import { RoleRepository, type RoleRepositoryDb } from "./persistence/role-repository.js";
+import { PermissionRepository, type PermissionRepositoryDb } from "./persistence/permission-repository.js";
+import { UserRoleRepository, type UserRoleRepositoryDb } from "./persistence/user-role-repository.js";
+import { RolePermissionRepository, type RolePermissionRepositoryDb } from "./persistence/role-permission-repository.js";
+import { AdminAuditLogRepository, type AdminAuditLogRepositoryDb } from "./persistence/admin-audit-log-repository.js";
 import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
@@ -43,6 +50,7 @@ import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
+import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
@@ -57,6 +65,11 @@ const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
+const roles = new RoleRepository(db as unknown as RoleRepositoryDb);
+const permissions = new PermissionRepository(db as unknown as PermissionRepositoryDb);
+const userRoles = new UserRoleRepository(db as unknown as UserRoleRepositoryDb);
+const rolePermissions = new RolePermissionRepository(db as unknown as RolePermissionRepositoryDb);
+const adminAuditLogs = new AdminAuditLogRepository(db as unknown as AdminAuditLogRepositoryDb);
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
 const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
@@ -68,6 +81,12 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
+const permissionService = new PermissionService({
+  roles,
+  userRoles,
+  rolePermissions
+});
+const requirePermission = createRequirePermission(permissionService);
 const portalRuntimeOptions = new PortalRuntimeOptionService({
   modes: agentModes,
   workspaces,
@@ -514,6 +533,16 @@ registerCommonApiRoutes(app, {
     dingtalkConfig: appConfig.dingtalk,
     oauthStates,
     sessionCookieReady: Boolean(appConfig.sessionCookie.secret)
+  }),
+  rbacAdminRouter: createRbacRouter({
+    roles,
+    permissions,
+    userRoles,
+    rolePermissions,
+    audits: adminAuditLogs,
+    policies: policyService,
+    requirePermission,
+    db: db as never
   }),
   adminRouter: createAdminRouter({
     users,

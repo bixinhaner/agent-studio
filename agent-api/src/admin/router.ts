@@ -11,6 +11,18 @@ import { UserRepository, type UserRepositoryDb } from "../persistence/user-repos
 
 type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
 
+type UserRoleDbRow = {
+  roleId: string;
+  isPrimary: boolean;
+  role?: {
+    id: string;
+    slug: string;
+    name: string;
+    isSystem: boolean;
+    isActive: boolean;
+  } | null;
+};
+
 type AdminRepositoryBundle = {
   users?: UserRepository;
   departments?: DepartmentRepository;
@@ -88,6 +100,17 @@ type AdminDetailUser = {
     manualDisabled: boolean;
     adminNote: string | null;
   };
+  assignedRoles: Array<{
+    roleId: string;
+    slug: string;
+    name: string;
+    isPrimary: boolean;
+  }>;
+  primaryRole: {
+    roleId: string;
+    slug: string;
+    name: string;
+  } | null;
   effective: {
     status: string;
     statusSource: string;
@@ -145,6 +168,23 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
     }
   }
 
+  const roleAssignments = typeof (db as AdminDb & { userRole?: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole?.findMany === "function"
+    ? await (db as AdminDb & { userRole: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole.findMany({
+        where: { userId: row.id },
+        include: { role: true },
+        orderBy: { createdAt: "asc" }
+      })
+    : [];
+  const assignedRoles = roleAssignments
+    .filter((assignment) => assignment.role)
+    .map((assignment) => ({
+      roleId: assignment.roleId,
+      slug: assignment.role?.slug ?? "",
+      name: assignment.role?.name ?? "",
+      isPrimary: Boolean(assignment.isPrimary)
+    }));
+  const primaryAssignment = assignedRoles.find((assignment) => assignment.isPrimary) ?? null;
+
   return {
     id: row.id,
     synced: {
@@ -161,6 +201,14 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       manualDisabled: Boolean(row.manualDisabled),
       adminNote: trimOrUndefined(row.adminNote) ?? null
     },
+    assignedRoles,
+    primaryRole: primaryAssignment
+      ? {
+          roleId: primaryAssignment.roleId,
+          slug: primaryAssignment.slug,
+          name: primaryAssignment.name
+        }
+      : null,
     effective: {
       status: trimOrUndefined(row.status) ?? "active",
       statusSource: trimOrUndefined(row.statusSource) ?? "sync",

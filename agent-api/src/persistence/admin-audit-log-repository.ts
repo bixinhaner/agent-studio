@@ -40,6 +40,7 @@ type AdminAuditLogTable = {
   findMany(args?: {
     where?: { targetType?: string; targetId?: string | null; actorUserId?: string };
     orderBy?: { createdAt?: "asc" | "desc" };
+    take?: number;
   }): Promise<AdminAuditLogRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<AdminAuditLogRow>;
 };
@@ -103,6 +104,30 @@ export class AdminAuditLogRepository {
 
   async listForTarget(targetType: string, targetId?: string): Promise<AdminAuditLogRecord[]> {
     return this.listByTarget({ targetType, targetId });
+  }
+
+  async list(input?: {
+    targetType?: string;
+    targetId?: string;
+    actorUserId?: string;
+    take?: number;
+  }): Promise<AdminAuditLogRecord[]> {
+    const where: { targetType?: string; targetId?: string | null; actorUserId?: string } = {};
+    const targetType = trimOrUndefined(input?.targetType);
+    if (targetType) {
+      where.targetType = targetType;
+      where.targetId = trimOrUndefined(input?.targetId) ?? null;
+    }
+    const actorUserId = trimOrUndefined(input?.actorUserId);
+    if (actorUserId) {
+      where.actorUserId = actorUserId;
+    }
+    const rows = await this.db.adminAuditLog.findMany({
+      where: Object.keys(where).length > 0 ? where : undefined,
+      orderBy: { createdAt: "desc" },
+      take: input?.take
+    });
+    return rows.map(mapAuditLog);
   }
 
   async listByTarget(input: { targetType: string; targetId?: string }): Promise<AdminAuditLogRecord[]> {

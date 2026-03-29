@@ -413,6 +413,8 @@ type FakeAdminSyncDiffRow = {
 
 type FakeAdminSeed = {
   users?: FakeAdminUserRow[];
+  roles?: Array<{ id: string; slug: string; name: string; isSystem: boolean; isActive: boolean }>;
+  userRoles?: Array<{ userId: string; roleId: string; isPrimary: boolean; createdAt?: Date }>;
   departments?: FakeAdminDepartmentRow[];
   memberships?: FakeAdminMembershipRow[];
   jobs?: FakeAdminSyncJobRow[];
@@ -432,6 +434,8 @@ class FakeAdminDb {
 
   constructor(
     readonly users: FakeAdminUserRow[] = [],
+    readonly roles: Array<{ id: string; slug: string; name: string; isSystem: boolean; isActive: boolean }> = [],
+    readonly userRoles: Array<{ userId: string; roleId: string; isPrimary: boolean; createdAt: Date }> = [],
     readonly departments: FakeAdminDepartmentRow[] = [],
     readonly memberships: FakeAdminMembershipRow[] = [],
     readonly jobs: FakeAdminSyncJobRow[] = [],
@@ -443,6 +447,11 @@ class FakeAdminDb {
   static fromSeed(seed: FakeAdminSeed = {}): FakeAdminDb {
     return new FakeAdminDb(
       seed.users ? structuredClone(seed.users) : [],
+      seed.roles ? structuredClone(seed.roles) : [],
+      (seed.userRoles ?? []).map((item) => ({
+        ...structuredClone(item),
+        createdAt: item.createdAt ?? new Date("2026-03-29T00:00:00.000Z")
+      })),
       seed.departments ? structuredClone(seed.departments) : [],
       seed.memberships ? structuredClone(seed.memberships) : [],
       seed.jobs ? structuredClone(seed.jobs) : [],
@@ -507,6 +516,34 @@ class FakeAdminDb {
       Object.assign(row, structuredClone(data));
       row.updatedAt = new Date();
       return structuredClone(row);
+    }
+  };
+
+  readonly userRole = {
+    findMany: async ({
+      where,
+      include,
+      orderBy
+    }: {
+      where?: { userId?: string; roleId?: string };
+      include?: { role?: boolean };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
+      const rows = this.userRoles
+        .filter((item) => {
+          if (where?.userId && item.userId !== where.userId) return false;
+          if (where?.roleId && item.roleId !== where.roleId) return false;
+          return true;
+        })
+        .map((item) => ({
+          ...item,
+          role: include?.role ? this.roles.find((role) => role.id === item.roleId) ?? null : undefined
+        }));
+      rows.sort((left, right) => {
+        const diff = left.createdAt.getTime() - right.createdAt.getTime();
+        return orderBy?.createdAt === "desc" ? -diff : diff;
+      });
+      return structuredClone(rows);
     }
   };
 
@@ -863,6 +900,8 @@ function buildAdminApp(options?: {
   }
   const db = FakeAdminDb.fromSeed({
     users: seedUsers,
+    roles: seed.roles ?? [],
+    userRoles: seed.userRoles ?? [],
     departments: seed.departments ?? [makeAdminDepartmentSeed("department-1", "dept-1", "研发")],
     memberships:
       seed.memberships ?? [makeAdminMembershipSeed("membership-1", "user-1", "department-1", true)],
@@ -1220,8 +1259,13 @@ describe("admin and portal routers", () => {
     expect(response.body).toEqual({ detail: "role 不受支持" });
   });
 
-  it("returns persisted user detail with synced, local, and effective fields", async () => {
-    const { app, cookies, user } = buildAdminApp();
+  it("returns persisted user detail with synced, local, effective, and assigned roles", async () => {
+    const { app, cookies, user } = buildAdminApp({
+      seed: {
+        roles: [{ id: "role-admin", slug: "admin", name: "Admin", isSystem: true, isActive: true }],
+        userRoles: [{ userId: "user-1", roleId: "role-admin", isPrimary: true }]
+      }
+    });
 
     const response = await request(app)
       .get("/api/admin/users/user-1")
@@ -1230,6 +1274,8 @@ describe("admin and portal routers", () => {
     expect(response.status).toBe(200);
     expect(response.body.user).toEqual(
       expect.objectContaining({
+        assignedRoles: [{ roleId: "role-admin", slug: "admin", name: "Admin", isPrimary: true }],
+        primaryRole: { roleId: "role-admin", slug: "admin", name: "Admin" },
         synced: expect.objectContaining({
           primaryDepartmentId: "dept-1"
         }),

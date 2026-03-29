@@ -1,10 +1,66 @@
 import {
+  type ResourcePolicyEffect,
   ResourcePolicyRepository,
-  type ResourcePolicyResourceType
+  type ResourcePolicyRecord,
+  type ResourcePolicyResourceType,
+  type ResourcePolicySubjectType
 } from "../persistence/resource-policy-repository.js";
 
 export class PolicyService {
   constructor(private readonly policies: ResourcePolicyRepository) {}
+
+  async listSubjectPolicies(input: {
+    subjectType: ResourcePolicySubjectType;
+    subjectId: string;
+    resourceType?: ResourcePolicyResourceType;
+  }): Promise<ResourcePolicyRecord[]> {
+    const subjectId = input.subjectId.trim();
+    if (!subjectId) {
+      return [];
+    }
+
+    const rows = await this.policies.listAll();
+    return rows.filter((row) => {
+      if (row.subjectType !== input.subjectType || row.subjectId !== subjectId) {
+        return false;
+      }
+      if (input.resourceType && row.resourceType !== input.resourceType) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  async replaceSubjectPolicies(input: {
+    organizationId?: string;
+    subjectType: ResourcePolicySubjectType;
+    subjectId: string;
+    resourceType: ResourcePolicyResourceType;
+    policies: Array<{ resourceId: string; effect: ResourcePolicyEffect }>;
+  }): Promise<ResourcePolicyRecord[]> {
+    const subjectId = input.subjectId.trim();
+    if (!subjectId) {
+      throw new Error("resource policy subjectId is required");
+    }
+
+    return this.policies.replacePoliciesForGroups({
+      groups: [
+        {
+          subjectType: input.subjectType,
+          subjectId,
+          resourceType: input.resourceType
+        }
+      ],
+      policies: input.policies.map((policy) => ({
+        organizationId: input.organizationId,
+        subjectType: input.subjectType,
+        subjectId,
+        resourceType: input.resourceType,
+        resourceId: policy.resourceId,
+        effect: policy.effect
+      }))
+    });
+  }
 
   async filterAllowedResources(input: {
     userId: string;

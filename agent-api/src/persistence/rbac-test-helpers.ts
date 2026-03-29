@@ -158,8 +158,12 @@ export class FakeRbacDb {
     findMany: async ({
       where,
       orderBy
-    }: { where?: { slug?: string; organizationId?: string | null }; orderBy?: { createdAt?: "asc" | "desc" } } = {}) => {
+    }: {
+      where?: { id?: { in: string[] }; slug?: string; organizationId?: string | null };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
       const rows = this.roles.filter((item) => {
+        if (where?.id?.in?.length && !where.id.in.includes(item.id)) return false;
         if (where?.slug && item.slug !== where.slug) return false;
         if (where && "organizationId" in where && item.organizationId !== (where.organizationId ?? null)) return false;
         return true;
