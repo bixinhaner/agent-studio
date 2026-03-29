@@ -15,7 +15,7 @@ CREATE TABLE "departments" (
   "status" TEXT NOT NULL DEFAULT 'active',
   "last_synced_at" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "updated_at" TIMESTAMP(3) NOT NULL
 );
 
 CREATE TABLE "sync_jobs" (
@@ -31,7 +31,7 @@ CREATE TABLE "sync_jobs" (
   "finished_at" TIMESTAMP(3),
   "summary" JSONB,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  "updated_at" TIMESTAMP(3) NOT NULL
 );
 
 CREATE TABLE "sync_job_events" (

@@ -14,6 +14,8 @@ CREATE TABLE "department_memberships" (
 -- CreateIndex
 CREATE INDEX "department_memberships_user_id_created_at_idx" ON "department_memberships"("user_id", "created_at");
 CREATE INDEX "department_memberships_department_id_created_at_idx" ON "department_memberships"("department_id", "created_at");
+-- Enforce at most one primary department membership per user.
+CREATE UNIQUE INDEX "department_memberships_one_primary_per_user_idx" ON "department_memberships"("user_id") WHERE "is_primary" = true;
 
 -- AddForeignKey
 ALTER TABLE "department_memberships" ADD CONSTRAINT "department_memberships_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
