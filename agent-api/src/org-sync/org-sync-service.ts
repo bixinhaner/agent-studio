@@ -130,6 +130,10 @@ const RUNNING_JOB_STATUSES = new Set(["running"]);
 const STALE_PENDING_JOB_SUMMARY = {
   detail: "Recovered stale pending org sync job after interrupted startup"
 };
+const STALE_RUNNING_JOB_SUMMARY = {
+  detail: "Recovered stale running org sync job after interrupted startup"
+};
+const STALE_RUNNING_JOB_AGE_MS = 15 * 60 * 1000;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -197,6 +201,25 @@ function normalizeMembershipPayload(input: {
 
 function compareRecords(before: Record<string, unknown> | undefined, after: Record<string, unknown>): boolean {
   return JSON.stringify(before ?? null) === JSON.stringify(after);
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  }
+  return null;
+}
+
+function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): boolean {
+  if (String(job.status ?? "") !== "running") {
+    return false;
+  }
+  const startedAt = toTimestamp(job.startedAt) ?? toTimestamp(job.updatedAt) ?? toTimestamp(job.createdAt);
+  return startedAt !== null && now - startedAt >= STALE_RUNNING_JOB_AGE_MS;
 }
 
 function compareDepartment(before: DepartmentRow | null | undefined, after: DepartmentSnapshot): DepartmentDiff | null {
@@ -425,13 +448,18 @@ export class OrgSyncService {
       const knownJobs = await db.syncJob.findMany();
       for (const job of knownJobs) {
         if (String(job.provider ?? "dingtalk") !== "dingtalk") continue;
-        if (String(job.status ?? "") !== "pending") continue;
-        const pendingJobId = trimOrUndefined(job.id as string | null);
-        if (pendingJobId) {
-          await this.dependencies.jobs.markFailed(pendingJobId, STALE_PENDING_JOB_SUMMARY);
+        const jobId = trimOrUndefined(job.id as string | null);
+        if (!jobId) continue;
+        if (String(job.status ?? "") === "pending") {
+          await this.dependencies.jobs.markFailed(jobId, STALE_PENDING_JOB_SUMMARY);
+          continue;
+        }
+        if (isStaleRunningJob(job)) {
+          await this.dependencies.jobs.markFailed(jobId, STALE_RUNNING_JOB_SUMMARY);
         }
       }
-      const activeJob = knownJobs.find(
+      const activeJobs = await db.syncJob.findMany();
+      const activeJob = activeJobs.find(
         (job) =>
           RUNNING_JOB_STATUSES.has(String(job.status ?? "")) &&
           String(job.provider ?? "dingtalk") === "dingtalk"

@@ -14,6 +14,10 @@ const RUNNING_JOB_STATUSES = new Set(["running"]);
 const STALE_PENDING_JOB_SUMMARY = {
   detail: "Recovered stale pending org sync job before scheduler tick"
 };
+const STALE_RUNNING_JOB_SUMMARY = {
+  detail: "Recovered stale running org sync job before scheduler tick"
+};
+const STALE_RUNNING_JOB_AGE_MS = 15 * 60 * 1000;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -32,6 +36,25 @@ function getDb(repository: { [key: string]: unknown }) {
 function isOverlapError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /already running/i.test(message);
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  }
+  return null;
+}
+
+function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): boolean {
+  if (String(job.status ?? "") !== "running") {
+    return false;
+  }
+  const startedAt = toTimestamp(job.startedAt) ?? toTimestamp(job.updatedAt) ?? toTimestamp(job.createdAt);
+  return startedAt !== null && now - startedAt >= STALE_RUNNING_JOB_AGE_MS;
 }
 
 export class OrgSyncScheduler {
@@ -99,13 +122,18 @@ export class OrgSyncScheduler {
     const jobs = await db.syncJob.findMany();
     for (const job of jobs) {
       if (String(job.provider ?? "dingtalk") !== "dingtalk") continue;
-      if (String(job.status ?? "") !== "pending") continue;
       const jobId = trimOrUndefined(job.id as string | null);
-      if (jobId) {
+      if (!jobId) continue;
+      if (String(job.status ?? "") === "pending") {
         await this.jobs.markFailed(jobId, STALE_PENDING_JOB_SUMMARY);
+        continue;
+      }
+      if (isStaleRunningJob(job)) {
+        await this.jobs.markFailed(jobId, STALE_RUNNING_JOB_SUMMARY);
       }
     }
-    return jobs.some((job) => {
+    const currentJobs = await db.syncJob.findMany();
+    return currentJobs.some((job) => {
       const scopeType = String(job.scopeType ?? "");
       const status = String(job.status ?? "");
       const scopeExternalId = trimOrUndefined(job.scopeExternalId as string | null);

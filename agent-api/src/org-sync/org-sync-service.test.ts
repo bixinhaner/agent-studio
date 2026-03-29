@@ -968,11 +968,11 @@ describe("OrgSyncService", () => {
             status: "running",
             triggerType: "manual",
             triggeredByUserId: "admin-1",
-            startedAt: new Date("2026-03-29T00:00:00.000Z"),
+            startedAt: new Date(),
             finishedAt: null,
             summary: null,
-            createdAt: new Date("2026-03-29T00:00:00.000Z"),
-            updatedAt: new Date("2026-03-29T00:00:00.000Z")
+            createdAt: new Date(),
+            updatedAt: new Date()
           }
         ]
       },
@@ -1050,6 +1050,55 @@ describe("OrgSyncService", () => {
       status: "failed",
       summary: {
         detail: "Recovered stale pending org sync job after interrupted startup"
+      }
+    });
+  });
+
+  it("recovers stale running jobs before starting a new sync", async () => {
+    const staleStartedAt = new Date(Date.now() - 16 * 60 * 1000);
+    const repositories = buildRepositories(
+      {
+        jobs: [
+          {
+            id: "job-running",
+            organizationId: null,
+            provider: "dingtalk",
+            scopeType: "full",
+            scopeExternalId: null,
+            status: "running",
+            triggerType: "manual",
+            triggeredByUserId: "admin-1",
+            startedAt: staleStartedAt,
+            finishedAt: null,
+            summary: null,
+            createdAt: staleStartedAt,
+            updatedAt: staleStartedAt
+          }
+        ]
+      },
+      {
+        full: { departments: [], users: [] }
+      }
+    );
+    const service = new OrgSyncService({
+      provider: repositories.provider as never,
+      departments: repositories.departments,
+      users: repositories.users,
+      memberships: repositories.memberships,
+      jobs: repositories.jobs
+    });
+
+    const result = await service.run({
+      scopeType: "full",
+      triggerType: "manual",
+      triggeredByUserId: "admin-1"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(repositories.db.jobs.find((job) => job.id === "job-running")).toMatchObject({
+      status: "failed",
+      summary: {
+        detail: "Recovered stale running org sync job after interrupted startup"
       }
     });
   });

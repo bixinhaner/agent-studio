@@ -118,11 +118,11 @@ describe("OrgSyncScheduler", () => {
         status: "running",
         triggerType: "scheduled",
         triggeredByUserId: null,
-        startedAt: new Date("2026-03-29T00:00:00.000Z"),
+        startedAt: new Date(),
         finishedAt: null,
         summary: null,
-        createdAt: new Date("2026-03-29T00:00:00.000Z"),
-        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        createdAt: new Date(),
+        updatedAt: new Date()
       }
     ]);
     const scheduler = new OrgSyncScheduler(
@@ -223,6 +223,58 @@ describe("OrgSyncScheduler", () => {
       status: "failed",
       summary: {
         detail: "Recovered stale pending org sync job before scheduler tick"
+      }
+    });
+  });
+
+  it("recovers stale running full jobs before scheduler ticks", async () => {
+    const timers: Array<() => unknown> = [];
+    const serviceRuns: Array<Record<string, unknown>> = [];
+    const staleStartedAt = new Date(Date.now() - 16 * 60 * 1000);
+    const db = new FakeSyncJobDb([
+      {
+        id: "job-running",
+        organizationId: null,
+        provider: "dingtalk",
+        scopeType: "full",
+        scopeExternalId: null,
+        status: "running",
+        triggerType: "scheduled",
+        triggeredByUserId: null,
+        startedAt: staleStartedAt,
+        finishedAt: null,
+        summary: null,
+        createdAt: staleStartedAt,
+        updatedAt: staleStartedAt
+      }
+    ]);
+    const scheduler = new OrgSyncScheduler(
+      {
+        run: async (input: Record<string, unknown>) => {
+          serviceRuns.push(input);
+          return { jobId: "job-2", status: "succeeded" as const };
+        }
+      },
+      new SyncJobRepository(db as never),
+      {
+        enabled: true,
+        intervalMinutes: 60,
+        setIntervalFn: ((callback: () => unknown) => {
+          timers.push(callback);
+          return { unref() {} } as never;
+        }) as never
+      }
+    );
+
+    scheduler.start();
+    expect(timers).toHaveLength(1);
+    timers[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(serviceRuns).toHaveLength(1);
+    expect(db.jobs.find((job) => job.id === "job-running")).toMatchObject({
+      status: "failed",
+      summary: {
+        detail: "Recovered stale running org sync job before scheduler tick"
       }
     });
   });
