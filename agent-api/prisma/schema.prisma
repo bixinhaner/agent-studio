@@ -123,6 +123,7 @@ model Workspace {
   createdAt      DateTime               @default(now()) @map("created_at")
   updatedAt      DateTime               @updatedAt @map("updated_at")
   bindings       WorkspaceKnowledgeSet[]
+  modeWorkspaces AgentModeWorkspace[]
 
   @@map("workspaces")
 }
@@ -179,6 +180,140 @@ model WorkspaceKnowledgeSet {
 
   @@unique([workspaceId, knowledgeSetId])
   @@map("workspace_knowledge_sets")
+}
+
+model RunProfile {
+  id                     String   @id @default(cuid())
+  organizationId         String?  @map("organization_id")
+  name                   String
+  slug                   String   @unique
+  description            String?
+  status                 String   @default("active")
+  defaultModel           String   @map("default_model")
+  allowedModels          Json     @map("allowed_models")
+  defaultReasoningEffort String   @map("default_reasoning_effort")
+  sandboxMode            String   @map("sandbox_mode")
+  approvalPolicy         String   @map("approval_policy")
+  networkAccessEnabled   Boolean  @default(false) @map("network_access_enabled")
+  webSearchMode          String   @map("web_search_mode")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  agentModes             AgentMode[]
+
+  @@map("run_profiles")
+}
+
+model SkillPackage {
+  id             String                  @id @default(cuid())
+  organizationId String?                 @map("organization_id")
+  name           String
+  slug           String                  @unique
+  description    String?
+  status         String                  @default("active")
+  visibleToUsers Boolean                 @default(false) @map("visible_to_users")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  items          SkillPackageItem[]
+  modeBindings   AgentModeSkillPackage[]
+
+  @@map("skill_packages")
+}
+
+model SkillPackageItem {
+  id              String                     @id @default(cuid())
+  skillPackageId  String                     @map("skill_package_id")
+  capabilityKey   String                     @map("capability_key")
+  description     String?
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  skillPackage    SkillPackage               @relation(fields: [skillPackageId], references: [id], onDelete: Cascade)
+  runtimeBindings SkillPackageRuntimeBinding[]
+
+  @@unique([skillPackageId, capabilityKey])
+  @@map("skill_package_items")
+}
+
+model SkillPackageRuntimeBinding {
+  id                 String   @id @default(cuid())
+  skillPackageItemId String   @map("skill_package_item_id")
+  runtimeType        String   @map("runtime_type")
+  bindingType        String   @map("binding_type")
+  bindingPayload     Json     @map("binding_payload")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  skillPackageItem   SkillPackageItem @relation(fields: [skillPackageItemId], references: [id], onDelete: Cascade)
+
+  @@map("skill_package_runtime_bindings")
+}
+
+model AgentMode {
+  id                 String                     @id @default(cuid())
+  organizationId     String?                    @map("organization_id")
+  name               String
+  slug               String                     @unique
+  description        String?
+  status             String                     @default("active")
+  visibleToUsers     Boolean                    @default(true) @map("visible_to_users")
+  runProfileId       String                     @map("run_profile_id")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+
+  runProfile         RunProfile                 @relation(fields: [runProfileId], references: [id], onDelete: Restrict)
+  skillPackages      AgentModeSkillPackage[]
+  workspaces         AgentModeWorkspace[]
+  instructionSources AgentModeInstructionSource[]
+
+  @@map("agent_modes")
+}
+
+model AgentModeSkillPackage {
+  id             String   @id @default(cuid())
+  agentModeId    String   @map("agent_mode_id")
+  skillPackageId String   @map("skill_package_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  agentMode      AgentMode    @relation(fields: [agentModeId], references: [id], onDelete: Cascade)
+  skillPackage   SkillPackage @relation(fields: [skillPackageId], references: [id], onDelete: Cascade)
+
+  @@unique([agentModeId, skillPackageId])
+  @@map("agent_mode_skill_packages")
+}
+
+model AgentModeWorkspace {
+  id                      String   @id @default(cuid())
+  agentModeId             String   @map("agent_mode_id")
+  workspaceId             String   @map("workspace_id")
+  isDefault               Boolean  @default(false) @map("is_default")
+  allowDirectorySelection Boolean  @default(false) @map("allow_directory_selection")
+  directoryScope          String   @map("directory_scope")
+  loadWorkspaceAgentsMd   Boolean  @default(false) @map("load_workspace_agents_md")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  agentMode               AgentMode @relation(fields: [agentModeId], references: [id], onDelete: Cascade)
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([agentModeId, workspaceId])
+  @@map("agent_mode_workspaces")
+}
+
+model AgentModeInstructionSource {
+  id          String   @id @default(cuid())
+  agentModeId String   @map("agent_mode_id")
+  sourceType  String   @map("source_type")
+  sourceRef   String   @map("source_ref")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  agentMode   AgentMode @relation(fields: [agentModeId], references: [id], onDelete: Cascade)
+
+  @@map("agent_mode_instruction_sources")
 }
 
 model ResourcePolicy {
