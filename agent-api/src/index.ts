@@ -14,6 +14,12 @@ import { createOAuthStateCookieManager, createSessionCookieManager } from "./aut
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { getDbClient } from "./db/client.js";
+import { DepartmentRepository, type DepartmentRepositoryDb } from "./persistence/department-repository.js";
+import {
+  DepartmentMembershipRepository,
+  type DepartmentMembershipRepositoryDb
+} from "./persistence/department-membership-repository.js";
+import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
 import { ensureThreadUploadInRunConfig, replaceLiveRuntimeSession, startLiveRuntimeSession } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
@@ -26,10 +32,6 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
-import {
-  DepartmentMembershipRepository,
-  type DepartmentMembershipRepositoryDb
-} from "./persistence/department-membership-repository.js";
 import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
@@ -38,6 +40,9 @@ import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persist
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
+import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
+import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
+import { OrgSyncService } from "./org-sync/org-sync-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
@@ -53,6 +58,8 @@ const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, app
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
+const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
+const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
@@ -75,6 +82,19 @@ const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   storage: knowledgeSetStorage
 });
 const zendesk = new ZendeskIntegrationService();
+const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
+const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient);
+const orgSyncService = new OrgSyncService({
+  provider: dingtalkOrgProvider,
+  departments,
+  users,
+  memberships: departmentMemberships,
+  jobs: syncJobs
+});
+const orgSyncScheduler = new OrgSyncScheduler(orgSyncService, syncJobs, {
+  enabled: appConfig.orgSync.enabled,
+  intervalMinutes: appConfig.orgSync.intervalMinutes
+});
 const sessionCookies = createSessionCookieManager({
   cookieName: appConfig.sessionCookie.name,
   secret: appConfig.sessionCookie.secret,
@@ -89,7 +109,6 @@ const oauthStates = createOAuthStateCookieManager({
   secure: appConfig.sessionCookie.secure,
   sameSite: "lax"
 });
-const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
@@ -962,6 +981,7 @@ async function bootstrap() {
       `imported ${imported.importedCount} legacy thread(s) from ${appConfig.threadStoreFile}${imported.archivedPath ? ` -> ${imported.archivedPath}` : ""}`
     );
   }
+  orgSyncScheduler.start();
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);

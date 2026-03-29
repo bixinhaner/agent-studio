@@ -20,6 +20,8 @@ const schema = z.object({
   SESSION_COOKIE_SECRET: z.string().optional(),
   SESSION_COOKIE_MAX_AGE_DAYS: z.string().default("7"),
   SESSION_COOKIE_SECURE: z.string().optional(),
+  ORG_SYNC_ENABLED: z.string().optional(),
+  ORG_SYNC_INTERVAL_MINUTES: z.string().optional(),
   WORKSPACE_WHITELIST: z.string().default("."),
   LEGACY_THREAD_OWNER_ID: z.string().optional(),
   THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
@@ -61,6 +63,21 @@ function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
+function parseBooleanWithDefault(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) {
+    return defaultValue;
+  }
+  return parseBoolean(value);
+}
+
+function parseInteger(value: string | undefined, defaultValue: number): number {
+  if (value === undefined) {
+    return defaultValue;
+  }
+  const parsed = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+}
+
 function defaultCookieSecure(nodeEnv: string | undefined): boolean {
   const normalized = (nodeEnv || "").trim().toLowerCase();
   return normalized !== "development" && normalized !== "test";
@@ -93,7 +110,11 @@ export const appConfig = {
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),
   threadStoreFile,
   uploadTempRoot,
-  knowledgeSetStorageRoot
+  knowledgeSetStorageRoot,
+  orgSync: {
+    enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),
+    intervalMinutes: parseInteger(env.ORG_SYNC_INTERVAL_MINUTES, 24 * 60)
+  }
 };
 
 export function resolveWorkspace(input?: string | null): string {
