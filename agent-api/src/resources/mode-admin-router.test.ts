@@ -50,14 +50,14 @@ describe("mode admin router", () => {
       .set("Cookie", cookies.create(adminUser.id))
       .send({
         description: " Updated standard profile ",
-        webSearchMode: "enabled"
+        webSearchMode: "live"
       });
 
     expect(updateResponse.status).toBe(200);
     expect(updateResponse.body.runProfile).toMatchObject({
       id: createResponse.body.runProfile.id,
       description: "Updated standard profile",
-      webSearchMode: "enabled"
+      webSearchMode: "live"
     });
 
     const listResponse = await request(app).get("/api/admin/run-profiles").set("Cookie", cookies.create(adminUser.id));
@@ -240,6 +240,84 @@ describe("mode admin router", () => {
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ detail: "Forbidden" });
+  });
+
+  it("rejects invalid controlled values with a 400 response", async () => {
+    const { app, cookies, adminUser } = await buildModeAdminApp();
+
+    const runProfileResponse = await request(app)
+      .post("/api/admin/run-profiles")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Broken Profile",
+        slug: "broken-profile",
+        defaultModel: "gpt-5.4",
+        allowedModels: ["gpt-5.4"],
+        defaultReasoningEffort: "turbo",
+        sandboxMode: "unsafe-mode",
+        approvalPolicy: "sometimes",
+        networkAccessEnabled: true,
+        webSearchMode: "instant"
+      });
+
+    expect(runProfileResponse.status).toBe(400);
+    expect(runProfileResponse.body.detail).toContain("defaultReasoningEffort");
+
+    const skillPackageResponse = await request(app)
+      .post("/api/admin/skill-packages")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Code Tools",
+        slug: "code-tools"
+      });
+
+    expect(skillPackageResponse.status).toBe(201);
+
+    const runtimeBindingResponse = await request(app)
+      .put(`/api/admin/skill-packages/${skillPackageResponse.body.skillPackage.id}/runtime-bindings`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        items: [
+          {
+            capabilityKey: "filesystem.read",
+            runtimeBindings: [
+              { runtimeType: "unknown-runtime", bindingType: "bad-binding", bindingPayload: { tool: "Read" } }
+            ]
+          }
+        ]
+      });
+
+    expect(runtimeBindingResponse.status).toBe(400);
+    expect(runtimeBindingResponse.body.detail).toContain("runtimeType");
+  });
+
+  it("returns 404 when updating or replacing bindings for missing resources", async () => {
+    const { app, cookies, adminUser } = await buildModeAdminApp();
+
+    const runProfileResponse = await request(app)
+      .patch("/api/admin/run-profiles/missing-profile")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        description: "missing"
+      });
+
+    expect(runProfileResponse.status).toBe(404);
+    expect(runProfileResponse.body).toEqual({ detail: "run profile 不存在" });
+
+    const instructionSourceResponse = await request(app)
+      .put("/api/admin/agent-modes/missing-mode/instruction-sources")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        instructionSources: [
+          {
+            sourceType: "inline_text",
+            sourceRef: "Always write tests first."
+          }
+        ]
+      });
+
+    expect(instructionSourceResponse.status).toBe(404);
+    expect(instructionSourceResponse.body).toEqual({ detail: "agent mode 不存在" });
   });
 });
 

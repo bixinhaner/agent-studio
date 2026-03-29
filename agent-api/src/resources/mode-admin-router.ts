@@ -1,6 +1,13 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
+import { REASONING_EFFORT_VALUES } from "../model-config.js";
+import {
+  APPROVAL_POLICY_VALUES,
+  SANDBOX_MODE_VALUES,
+  WEB_SEARCH_MODE_VALUES
+} from "../integrations/zendesk/types.js";
+
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
@@ -17,20 +24,25 @@ function sendValidationError(res: Response, error: z.ZodError): void {
 }
 
 const stringListSchema = z.array(z.string().trim().min(1));
+const statusSchema = z.enum(["active", "inactive"]);
+const runtimeTypeSchema = z.enum(["codex", "claude_code"]);
+const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint"]);
+const directoryScopeSchema = z.enum(["workspace_only", "descendants_only"]);
+const instructionSourceTypeSchema = z.enum(["inline_text", "knowledge_set_document"]);
 
 const runProfileCreateSchema = z.object({
   organizationId: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1),
   slug: z.string().trim().min(1),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   defaultModel: z.string().trim().min(1),
   allowedModels: stringListSchema,
-  defaultReasoningEffort: z.string().trim().min(1),
-  sandboxMode: z.string().trim().min(1),
-  approvalPolicy: z.string().trim().min(1),
+  defaultReasoningEffort: z.enum(REASONING_EFFORT_VALUES),
+  sandboxMode: z.enum(SANDBOX_MODE_VALUES),
+  approvalPolicy: z.enum(APPROVAL_POLICY_VALUES),
   networkAccessEnabled: z.boolean().optional(),
-  webSearchMode: z.string().trim().min(1)
+  webSearchMode: z.enum(WEB_SEARCH_MODE_VALUES)
 });
 
 const runProfileUpdateSchema = runProfileCreateSchema.partial().extend({
@@ -38,14 +50,14 @@ const runProfileUpdateSchema = runProfileCreateSchema.partial().extend({
   name: z.string().trim().min(1).optional(),
   slug: z.string().trim().min(1).optional(),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   defaultModel: z.string().trim().min(1).optional(),
   allowedModels: stringListSchema.optional(),
-  defaultReasoningEffort: z.string().trim().min(1).optional(),
-  sandboxMode: z.string().trim().min(1).optional(),
-  approvalPolicy: z.string().trim().min(1).optional(),
+  defaultReasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
+  sandboxMode: z.enum(SANDBOX_MODE_VALUES).optional(),
+  approvalPolicy: z.enum(APPROVAL_POLICY_VALUES).optional(),
   networkAccessEnabled: z.boolean().optional(),
-  webSearchMode: z.string().trim().min(1).optional()
+  webSearchMode: z.enum(WEB_SEARCH_MODE_VALUES).optional()
 });
 
 const skillPackageCreateSchema = z.object({
@@ -53,7 +65,7 @@ const skillPackageCreateSchema = z.object({
   name: z.string().trim().min(1),
   slug: z.string().trim().min(1),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   visibleToUsers: z.boolean().optional()
 });
 
@@ -62,7 +74,7 @@ const skillPackageUpdateSchema = skillPackageCreateSchema.partial().extend({
   name: z.string().trim().min(1).optional(),
   slug: z.string().trim().min(1).optional(),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   visibleToUsers: z.boolean().optional()
 });
 
@@ -71,8 +83,8 @@ const skillPackageItemSchema = z.object({
   description: z.string().trim().optional(),
   runtimeBindings: z.array(
     z.object({
-      runtimeType: z.string().trim().min(1),
-      bindingType: z.string().trim().min(1),
+      runtimeType: runtimeTypeSchema,
+      bindingType: runtimeBindingTypeSchema,
       bindingPayload: z.unknown()
     })
   )
@@ -87,7 +99,7 @@ const agentModeCreateSchema = z.object({
   name: z.string().trim().min(1),
   slug: z.string().trim().min(1),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   visibleToUsers: z.boolean().optional(),
   runProfileId: z.string().trim().min(1)
 });
@@ -97,7 +109,7 @@ const agentModeUpdateSchema = agentModeCreateSchema.partial().extend({
   name: z.string().trim().min(1).optional(),
   slug: z.string().trim().min(1).optional(),
   description: z.string().trim().optional(),
-  status: z.string().trim().optional(),
+  status: statusSchema.optional(),
   visibleToUsers: z.boolean().optional(),
   runProfileId: z.string().trim().min(1).optional()
 });
@@ -112,7 +124,7 @@ const agentModeWorkspaceRulesReplaceSchema = z.object({
       workspaceId: z.string().trim().min(1),
       isDefault: z.boolean().optional(),
       allowDirectorySelection: z.boolean().optional(),
-      directoryScope: z.string().trim().min(1),
+      directoryScope: directoryScopeSchema,
       loadWorkspaceAgentsMd: z.boolean().optional()
     })
   )
@@ -121,7 +133,7 @@ const agentModeWorkspaceRulesReplaceSchema = z.object({
 const agentModeInstructionSourcesReplaceSchema = z.object({
   instructionSources: z.array(
     z.object({
-      sourceType: z.string().trim().min(1),
+      sourceType: instructionSourceTypeSchema,
       sourceRef: z.string().trim().min(1),
       sortOrder: z.number().int().optional()
     })
