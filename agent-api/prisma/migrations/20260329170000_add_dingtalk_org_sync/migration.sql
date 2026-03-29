@@ -10,7 +10,7 @@ CREATE TABLE "departments" (
   "organization_id" TEXT,
   "external_id" TEXT NOT NULL UNIQUE,
   "name" TEXT NOT NULL,
-  "parent_department_id" TEXT REFERENCES "departments"("id") ON DELETE SET NULL,
+  "parent_department_id" TEXT REFERENCES "departments"("id") ON DELETE SET NULL ON UPDATE CASCADE,
   "sort_order" INTEGER NOT NULL DEFAULT 0,
   "status" TEXT NOT NULL DEFAULT 'active',
   "last_synced_at" TIMESTAMP(3),
@@ -26,7 +26,7 @@ CREATE TABLE "sync_jobs" (
   "scope_external_id" TEXT,
   "status" TEXT NOT NULL DEFAULT 'pending',
   "trigger_type" TEXT NOT NULL,
-  "triggered_by_user_id" TEXT REFERENCES "users"("id") ON DELETE SET NULL,
+  "triggered_by_user_id" TEXT REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE,
   "started_at" TIMESTAMP(3),
   "finished_at" TIMESTAMP(3),
   "summary" JSONB,
@@ -36,7 +36,7 @@ CREATE TABLE "sync_jobs" (
 
 CREATE TABLE "sync_job_events" (
   "id" TEXT PRIMARY KEY,
-  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE,
+  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   "level" TEXT NOT NULL,
   "event_type" TEXT NOT NULL,
   "message" TEXT NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE "sync_job_events" (
 
 CREATE TABLE "sync_snapshots" (
   "id" TEXT PRIMARY KEY,
-  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE,
+  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   "entity_type" TEXT NOT NULL,
   "scope_type" TEXT NOT NULL,
   "scope_external_id" TEXT,
@@ -56,7 +56,7 @@ CREATE TABLE "sync_snapshots" (
 
 CREATE TABLE "sync_diffs" (
   "id" TEXT PRIMARY KEY,
-  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE,
+  "sync_job_id" TEXT NOT NULL REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   "entity_type" TEXT NOT NULL,
   "entity_external_id" TEXT,
   "change_type" TEXT NOT NULL,
