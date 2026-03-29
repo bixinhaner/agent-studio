@@ -153,6 +153,7 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       recordUsage,
       onTelemetryError
     });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(onDone).toHaveBeenCalledWith({
       answer: "hello world",
@@ -164,5 +165,49 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
     });
     expect(recordUsage).toHaveBeenCalledTimes(1);
     expect(onTelemetryError).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wait for telemetry recording before resolving", async () => {
+    const onEvent = vi.fn();
+    const onDone = vi.fn();
+    let resolveTelemetry: (() => void) | undefined;
+    const recordUsage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveTelemetry = resolve;
+        })
+    );
+
+    async function* events() {
+      yield {
+        type: "turn.completed",
+        raw: {
+          usage: {
+            input_tokens: 100,
+            cached_input_tokens: 0,
+            output_tokens: 25
+          }
+        }
+      };
+    }
+
+    let settled = false;
+    const completion = streamRuntimeCompletionWithBestEffortUsage({
+      events: events(),
+      onEvent,
+      onDone,
+      recordUsage
+    }).then(() => {
+      settled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(true);
+
+    resolveTelemetry?.();
+    await completion;
   });
 });

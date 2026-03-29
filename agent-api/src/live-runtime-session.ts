@@ -88,11 +88,11 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   });
 
   if (latestUsage && input.recordUsage) {
-    try {
-      await input.recordUsage(latestUsage);
-    } catch (error) {
-      input.onTelemetryError?.(error);
-    }
+    void Promise.resolve()
+      .then(() => input.recordUsage?.(latestUsage))
+      .catch((error) => {
+        input.onTelemetryError?.(error);
+      });
   }
 }
 
