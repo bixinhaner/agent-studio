@@ -191,8 +191,13 @@ CREATE INDEX "usage_events_feature_type_created_at_idx" ON "usage_events"("featu
 CREATE INDEX "usage_events_result_status_created_at_idx" ON "usage_events"("result_status", "created_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "usage_daily_rollups_rollup_date_scope_type_scope_id_model_feature_type_key"
-ON "usage_daily_rollups"("rollup_date", "scope_type", "scope_id", "model", "feature_type");
+CREATE UNIQUE INDEX "usage_daily_rollups_organization_id_rollup_date_scope_type_scope_id_model_feature_type_key"
+ON "usage_daily_rollups"("organization_id", "rollup_date", "scope_type", "scope_id", "model", "feature_type");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "usage_daily_rollups_global_rollup_key"
+ON "usage_daily_rollups"("rollup_date", "scope_type", "scope_id", "model", "feature_type")
+WHERE "organization_id" IS NULL;
 
 -- CreateIndex
 CREATE INDEX "usage_daily_rollups_scope_type_scope_id_rollup_date_idx" ON "usage_daily_rollups"("scope_type", "scope_id", "rollup_date");

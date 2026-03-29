@@ -573,6 +573,7 @@ model UsageEvent {
 
 model UsageDailyRollup {
   id                String   @id @default(cuid())
+  /// Global rollups use organizationId = NULL and rely on a partial unique index in SQL migration.
   organizationId    String?  @map("organization_id")
   rollupDate        DateTime @map("rollup_date") @db.Date
   scopeType         String   @map("scope_type")
@@ -590,7 +591,7 @@ model UsageDailyRollup {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  @@unique([rollupDate, scopeType, scopeId, model, featureType])
+  @@unique([organizationId, rollupDate, scopeType, scopeId, model, featureType])
   @@index([scopeType, scopeId, rollupDate])
   @@index([model, rollupDate])
   @@index([featureType, rollupDate])
