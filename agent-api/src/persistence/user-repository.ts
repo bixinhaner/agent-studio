@@ -9,7 +9,13 @@ export type AuthenticatedUser = {
   updatedAt: string;
 };
 
-export type UserRecord = AuthenticatedUser;
+export type UserRecord = AuthenticatedUser & {
+  statusSource: string;
+  syncState: string;
+  manualDisabled: boolean;
+  adminNote?: string;
+  lastSyncedAt?: string;
+};
 
 export type DingTalkUserIdentity = {
   unionId: string;
@@ -92,6 +98,17 @@ function mapUser(row: UserRow): AuthenticatedUser {
     status: trimOrUndefined(row.status) ?? "active",
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
+  };
+}
+
+function mapUserRecord(row: UserRow): UserRecord {
+  return {
+    ...mapUser(row),
+    statusSource: trimOrUndefined(row.statusSource) ?? "sync",
+    syncState: trimOrUndefined(row.syncState) ?? "active",
+    manualDisabled: Boolean(row.manualDisabled),
+    adminNote: trimOrUndefined(row.adminNote),
+    lastSyncedAt: row.lastSyncedAt ? toIsoString(row.lastSyncedAt) : undefined
   };
 }
 
@@ -224,6 +241,6 @@ export class UserRepository implements UserRepositoryLike {
       }
     });
 
-    return mapUser(updated);
+    return mapUserRecord(updated);
   }
 }

@@ -313,4 +313,68 @@ describe("SyncJobRepository", () => {
     });
     expect(olderJob.id).not.toBe(newerJob.id);
   });
+
+  it("replaces prior snapshots and diffs instead of appending to them", async () => {
+    const db = new FakeSyncJobDb();
+    const repository = new SyncJobRepository(db as never);
+    const job = await repository.create({
+      scopeType: "organization",
+      scopeExternalId: "root",
+      triggerType: "manual",
+      triggeredByUserId: null
+    });
+
+    await repository.replaceSnapshots(job.id, [
+      {
+        entityType: "department",
+        scopeType: "organization",
+        scopeExternalId: "root",
+        snapshotPayload: { total: 1 }
+      }
+    ]);
+    await repository.replaceDiffs(job.id, [
+      {
+        entityType: "user",
+        entityExternalId: "user-1",
+        changeType: "created",
+        afterPayload: { role: "employee" }
+      }
+    ]);
+
+    await repository.replaceSnapshots(job.id, [
+      {
+        entityType: "department",
+        scopeType: "organization",
+        scopeExternalId: "root",
+        snapshotPayload: { total: 2 }
+      }
+    ]);
+    await repository.replaceDiffs(job.id, [
+      {
+        entityType: "user",
+        entityExternalId: "user-2",
+        changeType: "updated",
+        beforePayload: { role: "employee" },
+        afterPayload: { role: "admin" }
+      }
+    ]);
+
+    const detail = await repository.getDetail(job.id);
+    expect(detail?.snapshots).toEqual([
+      expect.objectContaining({
+        entityType: "department",
+        snapshotPayload: { total: 2 }
+      })
+    ]);
+    expect(detail?.diffs).toEqual([
+      expect.objectContaining({
+        entityExternalId: "user-2",
+        changeType: "updated",
+        beforePayload: { role: "employee" },
+        afterPayload: { role: "admin" }
+      })
+    ]);
+    expect(db.snapshots).toHaveLength(1);
+    expect(db.diffs).toHaveLength(1);
+  });
 });

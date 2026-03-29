@@ -166,7 +166,11 @@ describe("UserRepository", () => {
       id: "user-1",
       displayName: "Ding Agent",
       role: "admin",
-      status: "disabled"
+      status: "disabled",
+      manualDisabled: true,
+      adminNote: "Locked pending review",
+      statusSource: "manual_disable",
+      syncState: "active"
     });
     expect(db.rows[0]).toMatchObject({
       displayName: "Ding Agent",
@@ -213,7 +217,11 @@ describe("UserRepository", () => {
       id: "user-1",
       displayName: "Ding Agent",
       role: "employee",
-      status: "disabled"
+      status: "disabled",
+      manualDisabled: false,
+      adminNote: undefined,
+      statusSource: "sync",
+      syncState: "departed"
     });
     expect(db.rows[0]).toMatchObject({
       role: "employee",

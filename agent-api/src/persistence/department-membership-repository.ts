@@ -14,9 +14,10 @@ type DepartmentMembershipTable = {
     where: { userId: string };
     orderBy?: { createdAt?: "asc" | "desc" };
     select?: { departmentId?: boolean; isPrimary?: boolean; source?: boolean };
-  }): Promise<Array<Pick<DepartmentMembershipRow, "departmentId" | "isPrimary" | "source">>>;
+  }): Promise<DepartmentMembershipRow[]>;
   deleteMany?(args: { where: { userId: string; source?: string } }): Promise<{ count: number }>;
   create?(args: { data: Record<string, unknown> }): Promise<DepartmentMembershipRow>;
+  update?(args: { where: { id: string }; data: Record<string, unknown> }): Promise<DepartmentMembershipRow>;
 };
 
 export type DepartmentMembershipRepositoryDb = {
@@ -44,8 +45,7 @@ export class DepartmentMembershipRepository {
 
     const rows = await this.db.departmentMembership.findMany({
       where: { userId: normalizedUserId },
-      orderBy: { createdAt: "asc" },
-      select: { departmentId: true, isPrimary: true }
+      orderBy: { createdAt: "asc" }
     });
 
     return rows
@@ -74,19 +74,64 @@ export class DepartmentMembershipRepository {
     if (incomingPrimaryCount > 1) {
       throw new Error("department memberships cannot contain multiple primary records");
     }
-    if (!this.db.departmentMembership.deleteMany || !this.db.departmentMembership.create) {
+    if (
+      !this.db.departmentMembership.deleteMany ||
+      !this.db.departmentMembership.create ||
+      !this.db.departmentMembership.update
+    ) {
       throw new Error("department membership repository does not support replacement");
     }
 
     const existingMemberships = await this.db.departmentMembership.findMany({
       where: { userId: normalizedUserId },
-      orderBy: { createdAt: "asc" },
-      select: { departmentId: true, isPrimary: true, source: true }
+      orderBy: { createdAt: "asc" }
     });
-    const preservedPrimaryCount = existingMemberships.filter(
-      (membership) => membership.source !== "sync" && membership.isPrimary
-    ).length;
-    if (preservedPrimaryCount + incomingPrimaryCount > 1) {
+
+    const incomingByDepartmentId = new Map<string, { departmentId: string; isPrimary: boolean }>();
+    for (const membership of input.memberships) {
+      const departmentId = trimOrUndefined(membership.departmentId);
+      if (!departmentId) {
+        throw new Error("department membership departmentId is required");
+      }
+      const existing = incomingByDepartmentId.get(departmentId);
+      incomingByDepartmentId.set(departmentId, {
+        departmentId,
+        isPrimary: Boolean(existing?.isPrimary) || membership.isPrimary
+      });
+    }
+
+    const finalMemberships = new Map<
+      string,
+      | { kind: "preserved"; row: DepartmentMembershipRow; isPrimary: boolean; lastSyncedAt: Date | string | null }
+      | { kind: "sync"; departmentId: string; isPrimary: boolean; lastSyncedAt: Date | null }
+    >();
+
+    for (const membership of existingMemberships) {
+      const departmentId = trimOrUndefined(membership.departmentId);
+      if (!departmentId || membership.source === "sync") continue;
+      const incoming = incomingByDepartmentId.get(departmentId);
+      finalMemberships.set(departmentId, {
+        kind: "preserved",
+        row: membership,
+        isPrimary: Boolean(membership.isPrimary) || Boolean(incoming?.isPrimary),
+        lastSyncedAt: incoming ? input.syncedAt ?? membership.lastSyncedAt ?? null : membership.lastSyncedAt ?? null
+      });
+      if (incoming) {
+        incomingByDepartmentId.delete(departmentId);
+      }
+    }
+
+    for (const membership of incomingByDepartmentId.values()) {
+      finalMemberships.set(membership.departmentId, {
+        kind: "sync",
+        departmentId: membership.departmentId,
+        isPrimary: membership.isPrimary,
+        lastSyncedAt: input.syncedAt ?? null
+      });
+    }
+
+    const finalPrimaryCount = [...finalMemberships.values()].filter((membership) => membership.isPrimary).length;
+    if (finalPrimaryCount > 1) {
       throw new Error("department memberships cannot contain multiple primary records");
     }
 
@@ -98,18 +143,26 @@ export class DepartmentMembershipRepository {
         }
       });
 
-      for (const membership of input.memberships) {
-        const departmentId = trimOrUndefined(membership.departmentId);
-        if (!departmentId) {
-          throw new Error("department membership departmentId is required");
+      for (const membership of finalMemberships.values()) {
+        if (membership.kind === "preserved") {
+          await tx.departmentMembership.update!({
+            where: { id: membership.row.id },
+            data: {
+              isPrimary: membership.isPrimary,
+              lastSyncedAt: membership.lastSyncedAt,
+              updatedAt: new Date()
+            }
+          });
+          continue;
         }
+
         await tx.departmentMembership.create!({
           data: {
             userId: normalizedUserId,
-            departmentId,
+            departmentId: membership.departmentId,
             isPrimary: membership.isPrimary,
             source: "sync",
-            lastSyncedAt: input.syncedAt ?? null
+            lastSyncedAt: membership.lastSyncedAt
           }
         });
       }

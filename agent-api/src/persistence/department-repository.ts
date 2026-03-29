@@ -132,7 +132,11 @@ export class DepartmentRepository {
         const row = rowsByExternalId.get(item.externalId);
         if (!row) continue;
 
-        const parentDepartmentId = item.parentExternalId ? rowsByExternalId.get(item.parentExternalId)?.id ?? null : null;
+        const parentDepartmentId = item.parentExternalId
+          ? rowsByExternalId.get(item.parentExternalId)?.id ??
+            (await tx.department.findUnique({ where: { externalId: item.parentExternalId } }))?.id ??
+            null
+          : null;
         await tx.department.update({
           where: { id: row.id },
           data: {

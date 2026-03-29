@@ -141,6 +141,13 @@ class FakeDepartmentDb {
       };
       this.memberships.push(row);
       return clone(row);
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = this.memberships.find((item) => item.id === where.id);
+      if (!row) throw new Error("department membership not found");
+      Object.assign(row, clone(data));
+      row.updatedAt = data.updatedAt instanceof Date ? data.updatedAt : new Date();
+      return clone(row);
     }
   };
 
@@ -176,6 +183,44 @@ describe("DepartmentRepository", () => {
     const child = await repository.getByExternalId("rd");
     expect(root).toBeTruthy();
     expect(child?.parentDepartmentId).toBe(root?.id);
+  });
+
+  it("resolves parentDepartmentId from an existing parent outside the current batch", async () => {
+    const db = new FakeDepartmentDb([
+      {
+        id: "department-root",
+        organizationId: null,
+        externalId: "root",
+        name: "总部",
+        parentDepartmentId: null,
+        sortOrder: 10,
+        status: "active",
+        lastSyncedAt: null,
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      },
+      {
+        id: "department-rd",
+        organizationId: null,
+        externalId: "rd",
+        name: "研发旧",
+        parentDepartmentId: null,
+        sortOrder: 20,
+        status: "active",
+        lastSyncedAt: null,
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      }
+    ]);
+    const repository = new DepartmentRepository(db as never);
+
+    await repository.upsertMany([{ externalId: "rd", name: "研发", parentExternalId: "root", sortOrder: 20 }]);
+
+    expect(await repository.getByExternalId("rd")).toMatchObject({
+      externalId: "rd",
+      name: "研发",
+      parentDepartmentId: "department-root"
+    });
   });
 });
 
@@ -265,5 +310,54 @@ describe("DepartmentMembershipRepository", () => {
         syncedAt: new Date("2026-03-29T00:00:00.000Z")
       })
     ).rejects.toThrow(/primary/i);
+  });
+
+  it("merges an overlapping incoming synced membership into the preserved non-sync row", async () => {
+    const db = new FakeDepartmentDb([], [
+      {
+        id: "membership-manual-overlap",
+        userId: "user-1",
+        departmentId: "dept-shared",
+        isPrimary: false,
+        source: "manual",
+        lastSyncedAt: null,
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      },
+      {
+        id: "membership-old-sync",
+        userId: "user-1",
+        departmentId: "dept-old",
+        isPrimary: false,
+        source: "sync",
+        lastSyncedAt: new Date("2026-03-28T00:00:00.000Z"),
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      }
+    ]);
+    const repository = new DepartmentMembershipRepository(db as never);
+
+    await repository.replaceSyncedMemberships({
+      userId: "user-1",
+      memberships: [
+        { departmentId: "dept-shared", isPrimary: true },
+        { departmentId: "dept-new", isPrimary: false }
+      ],
+      syncedAt: new Date("2026-03-29T00:00:00.000Z")
+    });
+
+    expect(db.memberships).toHaveLength(2);
+    expect(db.memberships.find((item) => item.id === "membership-manual-overlap")).toMatchObject({
+      id: "membership-manual-overlap",
+      departmentId: "dept-shared",
+      source: "manual",
+      isPrimary: true,
+      lastSyncedAt: new Date("2026-03-29T00:00:00.000Z")
+    });
+    expect(db.memberships.filter((item) => item.departmentId === "dept-shared")).toHaveLength(1);
+    expect(db.memberships.find((item) => item.departmentId === "dept-new")).toMatchObject({
+      source: "sync",
+      isPrimary: false
+    });
   });
 });
