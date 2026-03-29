@@ -126,7 +126,7 @@ type MembershipDiff = {
 
 type SyncDiff = DepartmentDiff | UserDiff | MembershipDiff;
 
-const RUNNING_JOB_STATUSES = new Set(["pending", "running"]);
+const RUNNING_JOB_STATUSES = new Set(["running"]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -833,7 +833,10 @@ export class OrgSyncService {
       const incomingHasPrimary = memberships.some((membership) => membership.isPrimary);
       for (const currentMembership of currentMemberships) {
         const departmentExternalId = departmentRowsById.get(currentMembership.departmentId)?.externalId;
-        if (!departmentExternalId || scopedDepartmentExternalIds.has(departmentExternalId)) {
+        if (!departmentExternalId) {
+          continue;
+        }
+        if (currentMembership.source === "sync" && scopedDepartmentExternalIds.has(departmentExternalId)) {
           continue;
         }
         if (memberships.some((membership) => membership.departmentId === departmentExternalId)) {

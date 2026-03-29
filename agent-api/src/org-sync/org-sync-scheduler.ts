@@ -10,7 +10,7 @@ type OrgSyncSchedulerOptions = {
   clearIntervalFn?: typeof clearInterval;
 };
 
-const RUNNING_JOB_STATUSES = new Set(["pending", "running"]);
+const RUNNING_JOB_STATUSES = new Set(["running"]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;

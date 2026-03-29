@@ -176,6 +176,51 @@ describe("OrgSyncScheduler", () => {
     expect(timers).toHaveLength(0);
   });
 
+  it("does not treat stale pending full jobs as active scheduler locks", async () => {
+    const timers: Array<() => unknown> = [];
+    const serviceRuns: Array<Record<string, unknown>> = [];
+    const db = new FakeSyncJobDb([
+      {
+        id: "job-pending",
+        organizationId: null,
+        provider: "dingtalk",
+        scopeType: "full",
+        scopeExternalId: null,
+        status: "pending",
+        triggerType: "scheduled",
+        triggeredByUserId: null,
+        startedAt: null,
+        finishedAt: null,
+        summary: null,
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+      }
+    ]);
+    const scheduler = new OrgSyncScheduler(
+      {
+        run: async (input: Record<string, unknown>) => {
+          serviceRuns.push(input);
+          return { jobId: "job-2", status: "succeeded" as const };
+        }
+      },
+      new SyncJobRepository(db as never),
+      {
+        enabled: true,
+        intervalMinutes: 60,
+        setIntervalFn: ((callback: () => unknown) => {
+          timers.push(callback);
+          return { unref() {} } as never;
+        }) as never
+      }
+    );
+
+    scheduler.start();
+    expect(timers).toHaveLength(1);
+    timers[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(serviceRuns).toHaveLength(1);
+  });
+
   it("swallows non-overlap tick failures so the interval callback does not reject", async () => {
     const timers: Array<() => unknown> = [];
     const scheduler = new OrgSyncScheduler(

@@ -821,6 +821,81 @@ describe("OrgSyncService", () => {
     );
   });
 
+  it("preserves manual scoped memberships in department diff targets", async () => {
+    const repositories = buildRepositories(
+      {
+        departments: [
+          makeDepartment("department-root", "root", "总部"),
+          makeDepartment("department-rd", "rd", "研发", "department-root"),
+          makeDepartment("department-sales", "sales", "销售", "department-root")
+        ],
+        users: [
+          makeUser({
+            id: "user-u2",
+            externalId: "union-2",
+            displayName: "Bob",
+            dingtalkUserId: "ding-u2"
+          })
+        ],
+        memberships: [
+          makeMembership({ id: "membership-rd-manual", userId: "user-u2", departmentId: "department-rd", isPrimary: false, source: "manual" }),
+          makeMembership({ id: "membership-sales-sync", userId: "user-u2", departmentId: "department-sales", isPrimary: true })
+        ]
+      },
+      {
+        department: {
+          departments: [
+            { externalId: "rd", name: "研发", parentExternalId: "root", sortOrder: 20 },
+            { externalId: "platform", name: "平台", parentExternalId: "rd", sortOrder: 30 }
+          ],
+          users: [
+            {
+              userId: "ding-u2",
+              unionId: "union-2",
+              displayName: "Bob",
+              departmentExternalIds: ["rd", "platform"],
+              primaryDepartmentExternalId: "rd",
+              lifecycleState: "active"
+            }
+          ]
+        }
+      }
+    );
+    const service = new OrgSyncService({
+      provider: repositories.provider as never,
+      departments: repositories.departments,
+      users: repositories.users,
+      memberships: repositories.memberships,
+      jobs: repositories.jobs
+    });
+
+    const result = await service.run({
+      scopeType: "department",
+      scopeExternalId: "rd",
+      triggerType: "manual",
+      triggeredByUserId: "admin-1"
+    });
+
+    expect(result.status).toBe("succeeded");
+    const detail = await repositories.jobs.getDetail(result.jobId);
+    expect(detail?.diffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: "membership",
+          entityExternalId: "union-2",
+          afterPayload: {
+            userId: "union-2",
+            memberships: [
+              { departmentId: "platform", isPrimary: false },
+              { departmentId: "rd", isPrimary: true },
+              { departmentId: "sales", isPrimary: false }
+            ]
+          }
+        })
+      ])
+    );
+  });
+
   it("preserves manual disables when DingTalk later reports the user active", async () => {
     const repositories = buildRepositories(
       {
@@ -926,5 +1001,50 @@ describe("OrgSyncService", () => {
         triggeredByUserId: "admin-1"
       })
     ).rejects.toThrow(/already running/i);
+  });
+
+  it("ignores stale pending jobs from a previous crashed run", async () => {
+    const repositories = buildRepositories(
+      {
+        jobs: [
+          {
+            id: "job-1",
+            organizationId: null,
+            provider: "dingtalk",
+            scopeType: "full",
+            scopeExternalId: null,
+            status: "pending",
+            triggerType: "manual",
+            triggeredByUserId: "admin-1",
+            startedAt: null,
+            finishedAt: null,
+            summary: null,
+            createdAt: new Date("2026-03-29T00:00:00.000Z"),
+            updatedAt: new Date("2026-03-29T00:00:00.000Z")
+          }
+        ]
+      },
+      {
+        full: {
+          departments: [],
+          users: []
+        }
+      }
+    );
+    const service = new OrgSyncService({
+      provider: repositories.provider as never,
+      departments: repositories.departments,
+      users: repositories.users,
+      memberships: repositories.memberships,
+      jobs: repositories.jobs
+    });
+
+    const result = await service.run({
+      scopeType: "full",
+      triggerType: "manual",
+      triggeredByUserId: "admin-1"
+    });
+
+    expect(result.status).toBe("succeeded");
   });
 });
