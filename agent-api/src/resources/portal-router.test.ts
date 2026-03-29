@@ -9,7 +9,7 @@ import { createAuthRouter } from "../auth/router.js";
 import { createCurrentUserMiddleware } from "../auth/current-user.js";
 import { createSessionCookieManager } from "../auth/session-cookie.js";
 import { DepartmentMembershipRepository } from "../persistence/department-membership-repository.js";
-import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
+import type { AuthenticatedUser, UserRecord, UserRepositoryLike } from "../persistence/user-repository.js";
 import { ResourcePolicyRepository } from "../persistence/resource-policy-repository.js";
 import { createPortalRouter } from "../portal/router.js";
 import { PolicyService } from "./policy-service.js";
@@ -187,6 +187,35 @@ class FakeUserRepository implements UserRepositoryLike {
 
   async upsertFromDingTalk(): Promise<AuthenticatedUser> {
     throw new Error("not used in portal router tests");
+  }
+
+  async updateLocalSettings(input: {
+    userId: string;
+    role: string;
+    manualDisabled: boolean;
+    adminNote?: string | null;
+  }): Promise<UserRecord> {
+    const existing = this.users.get(input.userId);
+    if (!existing) {
+      throw new Error("user 不存在");
+    }
+
+    const updated: AuthenticatedUser = {
+      ...existing,
+      role: input.role,
+      status: input.manualDisabled ? "disabled" : "active",
+      updatedAt: new Date().toISOString()
+    };
+    this.users.set(updated.id, updated);
+
+    return {
+      ...updated,
+      statusSource: input.manualDisabled ? "manual_disable" : "sync",
+      syncState: input.manualDisabled ? "disabled" : "active",
+      manualDisabled: input.manualDisabled,
+      adminNote: input.adminNote ?? undefined,
+      lastSyncedAt: undefined
+    };
   }
 
   seed(user: AuthenticatedUser): void {
