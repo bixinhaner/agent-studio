@@ -122,6 +122,13 @@ describe("createDingTalkClient", () => {
                 dept_position_list: [{ dept_id: "7", is_main: 1 }],
                 disable_status: 1,
                 active: false
+              },
+              {
+                userid: "u4",
+                name: "Dave",
+                dept_id_list: ["9"],
+                status: "active",
+                enabled: false
               }
             ]
           }
@@ -168,6 +175,13 @@ describe("createDingTalkClient", () => {
         displayName: "Carol",
         departmentExternalIds: ["6", "7"],
         primaryDepartmentExternalId: "7",
+        lifecycleState: "disabled"
+      },
+      {
+        userId: "u4",
+        displayName: "Dave",
+        departmentExternalIds: ["9"],
+        primaryDepartmentExternalId: "9",
         lifecycleState: "disabled"
       }
     ]);

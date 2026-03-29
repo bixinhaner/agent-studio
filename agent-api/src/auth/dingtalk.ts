@@ -139,15 +139,14 @@ function normalizeLifecycleState(record: Record<string, unknown> | null): "activ
   if (disableStatus === true || disableStatus === 1 || disableStatus === "1") {
     return "disabled";
   }
+  if (record?.enabled === false) {
+    return "disabled";
+  }
   if (status && ["disabled", "inactive"].includes(status)) {
     return "disabled";
   }
   if (status && ["enabled", "in-service", "in_service", "active"].includes(status)) {
     return "active";
-  }
-
-  if (record?.enabled === false) {
-    return "disabled";
   }
 
   return "active";
