@@ -277,6 +277,11 @@ export function createRbacRouter(options: CreateRbacRouterOptions): Router {
         res.status(400).json({ detail: "resourceType 必填" });
         return;
       }
+      const role = await options.roles.getById(req.params.roleId);
+      if (!role) {
+        res.status(404).json({ detail: "role 不存在" });
+        return;
+      }
       const before = await options.policies.listSubjectPolicies({
         subjectType: "role",
         subjectId: req.params.roleId,

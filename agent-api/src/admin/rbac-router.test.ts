@@ -345,4 +345,25 @@ describe("createRbacRouter", () => {
       ])
     );
   });
+
+  it("rejects role-scoped resource policy writes for unknown roles", async () => {
+    const { app, policyDb } = buildRbacApp();
+
+    const response = await request(app).put("/api/admin/roles/role-missing/resource-policies").send({
+      resourceType: "workspace",
+      policies: [{ resourceId: "workspace-rd", effect: "allow" }]
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({
+      detail: "role 不存在"
+    });
+    expect(policyDb.rows).toEqual([
+      expect.objectContaining({
+        subjectType: "user",
+        subjectId: "user-1",
+        resourceId: "workspace-user"
+      })
+    ]);
+  });
 });
