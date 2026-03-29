@@ -24,7 +24,7 @@ export class NotificationDispatchService {
           channelType: "in_app",
           targetRef: event.id,
           eventType: "alert_event",
-          status: "delivered",
+          status: "sent",
           payload: buildNotificationPayload(event, channel)
         });
         continue;
@@ -51,7 +51,7 @@ export class NotificationDispatchService {
         await this.deps.notifications.update({
           id: record.id,
           changes: {
-            status: "delivered",
+            status: "sent",
             errorMessage: null
           }
         });

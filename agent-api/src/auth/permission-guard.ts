@@ -17,6 +17,22 @@ type PermissionGuardOptions = {
     }): Promise<unknown>;
   };
   listDepartmentIdsForUser?: (userId: string) => Promise<string[]>;
+  securityAlerts?: {
+    evaluateSecurityEvent(input: {
+      scopeType: string;
+      scopeId: string;
+      resourceType?: string;
+      resourceId?: string;
+      actionType?: string;
+      resultStatus?: string;
+      userId?: string;
+      denialPattern?: {
+        deniedCount: number;
+        thresholdCount?: number;
+      };
+    }): Promise<unknown>;
+  };
+  countRecentDeniedPermissionsForUser?: (userId: string, permissionKey: string) => Promise<number>;
 };
 
 export function createPermissionGuard(permissionChecker: PermissionChecker, options: PermissionGuardOptions = {}) {
@@ -38,9 +54,10 @@ export function createPermissionGuard(permissionChecker: PermissionChecker, opti
             const departmentIds = options.listDepartmentIdsForUser
               ? await options.listDepartmentIdsForUser(req.currentUser.id)
               : [];
+            const departmentIdSnapshot = departmentIds[0];
             await options.resourceAccessLogs.record({
               userId: req.currentUser.id,
-              departmentIdSnapshot: departmentIds[0],
+              departmentIdSnapshot,
               resourceType: "permission",
               resourceId: permissionKey,
               actionType: "deny",
@@ -49,6 +66,24 @@ export function createPermissionGuard(permissionChecker: PermissionChecker, opti
                 kind: "permission_guard"
               }
             });
+            if (options.securityAlerts) {
+              const deniedCount = options.countRecentDeniedPermissionsForUser
+                ? await options.countRecentDeniedPermissionsForUser(req.currentUser.id, permissionKey)
+                : 1;
+              await options.securityAlerts.evaluateSecurityEvent({
+                scopeType: departmentIdSnapshot ? "department" : "platform",
+                scopeId: departmentIdSnapshot ?? "platform",
+                resourceType: "permission",
+                resourceId: permissionKey,
+                actionType: "deny",
+                resultStatus: "denied",
+                userId: req.currentUser.id,
+                denialPattern: {
+                  deniedCount,
+                  thresholdCount: 3
+                }
+              });
+            }
           }
           res.status(403).json({ detail: "Forbidden" });
           return;

@@ -35,7 +35,7 @@ describe("NotificationDispatchService", () => {
     expect(await notifications.list({ targetRef: alertEvent.id, channelType: "in_app" })).toContainEqual(
       expect.objectContaining({
         channelType: "in_app",
-        status: "delivered"
+        status: "sent"
       })
     );
   });

@@ -11,7 +11,7 @@ describe("AlertRuleRepository", () => {
       organizationId: "org-1",
       scopeType: "department",
       scopeId: "dept-rd",
-      ruleType: "quota",
+      ruleType: "quota_threshold",
       name: "Department internal cost warning",
       description: "Warn when internal cost soft-blocks",
       conditions: { metricType: "internal_cost", thresholdValue: "100.000000" },
@@ -22,7 +22,7 @@ describe("AlertRuleRepository", () => {
       organizationId: "org-1",
       scopeType: "department",
       scopeId: "dept-rd",
-      ruleType: "quota",
+      ruleType: "quota_threshold",
       isActive: true
     });
 
@@ -30,7 +30,7 @@ describe("AlertRuleRepository", () => {
     expect(rules[0]).toEqual(
       expect.objectContaining({
         scopeId: "dept-rd",
-        ruleType: "quota",
+        ruleType: "quota_threshold",
         channels: ["in_app", "dingtalk"]
       })
     );

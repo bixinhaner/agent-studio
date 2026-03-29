@@ -55,8 +55,11 @@ import { PermissionRepository, type PermissionRepositoryDb } from "./persistence
 import { UserRoleRepository, type UserRoleRepositoryDb } from "./persistence/user-role-repository.js";
 import { RolePermissionRepository, type RolePermissionRepositoryDb } from "./persistence/role-permission-repository.js";
 import { AdminAuditLogRepository, type AdminAuditLogRepositoryDb } from "./persistence/admin-audit-log-repository.js";
+import { AlertEventRepository, type AlertEventRepositoryDb } from "./persistence/alert-event-repository.js";
+import { AlertRuleRepository, type AlertRuleRepositoryDb } from "./persistence/alert-rule-repository.js";
 import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
+import { NotificationRecordRepository, type NotificationRecordRepositoryDb } from "./persistence/notification-record-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
 import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence/run-profile-repository.js";
 import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
@@ -64,6 +67,8 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
+import { AlertEvaluationService } from "./operations/alert-evaluation-service.js";
+import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
 import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
@@ -89,8 +94,11 @@ const permissions = new PermissionRepository(db as unknown as PermissionReposito
 const userRoles = new UserRoleRepository(db as unknown as UserRoleRepositoryDb);
 const rolePermissions = new RolePermissionRepository(db as unknown as RolePermissionRepositoryDb);
 const adminAuditLogs = new AdminAuditLogRepository(db as unknown as AdminAuditLogRepositoryDb);
+const alertRules = new AlertRuleRepository(db as unknown as AlertRuleRepositoryDb);
+const alertEvents = new AlertEventRepository(db as unknown as AlertEventRepositoryDb);
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
 const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
+const notificationRecords = new NotificationRecordRepository(db as unknown as NotificationRecordRepositoryDb);
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
@@ -103,12 +111,27 @@ const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourceP
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
+const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
 const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
 const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
   costProfiles
+});
+const notificationDispatch = new NotificationDispatchService({
+  notifications: notificationRecords,
+  dingtalk: ({ message }) => {
+    if (!dingtalkClient.sendWorkNotice) {
+      throw new Error("DingTalk work notice sender is not available");
+    }
+    return dingtalkClient.sendWorkNotice({ message });
+  }
+});
+const alertEvaluation = new AlertEvaluationService({
+  alertRules,
+  alertEvents,
+  notifications: notificationDispatch
 });
 const quotaEvaluation = new QuotaEvaluationService({
   policies: quotaPolicies,
@@ -121,7 +144,19 @@ const permissionService = new PermissionService({
 });
 const requirePermission = createRequirePermission(permissionService, {
   resourceAccessLogs,
-  listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+  listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+  securityAlerts: alertEvaluation,
+  countRecentDeniedPermissionsForUser: async (userId, permissionKey) => {
+    const rows = await resourceAccessLogRepository.list({
+      userId,
+      resourceType: "permission",
+      resourceId: permissionKey,
+      actionType: "deny",
+      resultStatus: "denied",
+      take: 3
+    });
+    return rows.length;
+  }
 });
 const portalRuntimeOptions = new PortalRuntimeOptionService({
   modes: agentModes,
@@ -135,10 +170,10 @@ const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   knowledgeSets,
   policies: policyService,
   storage: knowledgeSetStorage,
-  resourceAccessLogs
+  resourceAccessLogs,
+  securityAlerts: alertEvaluation
 });
 const zendesk = new ZendeskIntegrationService();
-const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient);
 const orgSyncService = new OrgSyncService({
   provider: dingtalkOrgProvider,
@@ -392,6 +427,15 @@ async function assertQuotaAllowsNewSession(input: {
     rollupDate: new Date()
   });
   if (decision.decision === "soft_block") {
+    if (decision.policy && decision.thresholdValue !== undefined) {
+      await alertEvaluation.evaluateQuotaResult({
+        scopeType: decision.policy.scopeType,
+        scopeId: decision.policy.scopeId,
+        metricType: decision.policy.metricType,
+        triggeredValue: decision.observedValue,
+        thresholdValue: decision.thresholdValue
+      });
+    }
     throw new Error("当前配额已超限，无法创建新的会话");
   }
 }

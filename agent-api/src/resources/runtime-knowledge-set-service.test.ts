@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeKnowledgeSetService } from "./runtime-knowledge-set-service.js";
 
@@ -211,6 +211,7 @@ describe("RuntimeKnowledgeSetService", () => {
   });
 
   it("rejects selected knowledge sets that are not authorized for the current user", async () => {
+    const evaluateSecurityEvent = vi.fn(async () => undefined);
     const service = new RuntimeKnowledgeSetService({
       workspaces: new FakeWorkspaceRepository([
         {
@@ -237,6 +238,9 @@ describe("RuntimeKnowledgeSetService", () => {
         resolveReadableMountPath(knowledgeSetId: string) {
           return `/managed/${knowledgeSetId}`;
         }
+      },
+      securityAlerts: {
+        evaluateSecurityEvent
       }
     });
 
@@ -250,9 +254,21 @@ describe("RuntimeKnowledgeSetService", () => {
         codexRunConfig: { mode: "standard", workspace: "/workspace/docs" }
       })
     ).rejects.toThrow("knowledge set");
+    expect(evaluateSecurityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeType: "platform",
+        scopeId: "platform",
+        resourceType: "knowledge_set",
+        resourceId: "ks-secret",
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: "employee-1"
+      })
+    );
   });
 
   it("rejects selected knowledge sets that are not optionally bound to the requested workspace", async () => {
+    const evaluateSecurityEvent = vi.fn(async () => undefined);
     const service = new RuntimeKnowledgeSetService({
       workspaces: new FakeWorkspaceRepository([
         {
@@ -280,6 +296,9 @@ describe("RuntimeKnowledgeSetService", () => {
         resolveReadableMountPath(knowledgeSetId: string) {
           return `/managed/${knowledgeSetId}`;
         }
+      },
+      securityAlerts: {
+        evaluateSecurityEvent
       }
     });
 
@@ -293,6 +312,17 @@ describe("RuntimeKnowledgeSetService", () => {
         codexRunConfig: { mode: "standard", workspace: "/workspace/docs" }
       })
     ).rejects.toThrow("knowledge set");
+    expect(evaluateSecurityEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeType: "platform",
+        scopeId: "platform",
+        resourceType: "knowledge_set",
+        resourceId: "ks-faq",
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: "employee-1"
+      })
+    );
   });
 });
 

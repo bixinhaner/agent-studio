@@ -55,14 +55,17 @@ export class AlertEvaluationService {
       organizationId: input.organizationId,
       scopeType: input.scopeType as "platform" | "department",
       scopeId: input.scopeId,
-      ruleType: "quota"
+      ruleType: "quota_threshold"
     });
     const rule = selectFirstMatchingRule(matchingRules, {
       metricType: input.metricType
     });
+    if (!rule) {
+      return undefined;
+    }
     const event = await this.deps.alertEvents.create({
       organizationId: input.organizationId,
-      alertRuleId: input.alertRuleId ?? rule?.id,
+      alertRuleId: input.alertRuleId ?? rule.id,
       scopeType: input.scopeType,
       scopeId: input.scopeId,
       severity: "warning",
@@ -74,7 +77,7 @@ export class AlertEvaluationService {
         metricType: input.metricType,
         triggeredValue: formatNumber(triggeredValue),
         thresholdValue: formatNumber(thresholdValue),
-        channels: rule?.channels ?? ["in_app", "dingtalk"]
+        channels: rule.channels
       }
     });
 
@@ -97,16 +100,19 @@ export class AlertEvaluationService {
       organizationId: input.organizationId,
       scopeType: input.scopeType as "platform" | "department",
       scopeId: input.scopeId,
-      ruleType: "security"
+      ruleType: "security_event"
     });
     const rule = selectFirstMatchingRule(matchingRules, {
       actionType: input.actionType,
       resourceType: input.resourceType
     });
-    const repeated = Boolean(denialPattern);
+    if (!rule) {
+      return undefined;
+    }
+    const repeated = Boolean(denialPattern && isRepeatedDenial(denialPattern));
     const event = await this.deps.alertEvents.create({
       organizationId: input.organizationId,
-      alertRuleId: input.alertRuleId ?? rule?.id,
+      alertRuleId: input.alertRuleId ?? rule.id,
       scopeType: input.scopeType,
       scopeId: input.scopeId,
       severity: repeated ? "critical" : "warning",
@@ -130,7 +136,7 @@ export class AlertEvaluationService {
               thresholdCount: denialPattern.thresholdCount ?? 3
             }
           : undefined,
-        channels: rule?.channels ?? ["in_app", "dingtalk"]
+        channels: rule.channels
       }
     });
 
@@ -155,13 +161,13 @@ function selectFirstMatchingRule<T extends { conditions?: unknown }>(
   return rules.find((rule) => {
     const conditions = asRecord(rule.conditions);
     if (!conditions) return true;
-    if (criteria.metricType && typeof conditions.metricType === "string" && conditions.metricType !== criteria.metricType) {
+    if (typeof conditions.metricType === "string" && conditions.metricType !== criteria.metricType) {
       return false;
     }
-    if (criteria.actionType && typeof conditions.actionType === "string" && conditions.actionType !== criteria.actionType) {
+    if (typeof conditions.actionType === "string" && conditions.actionType !== criteria.actionType) {
       return false;
     }
-    if (criteria.resourceType && typeof conditions.resourceType === "string" && conditions.resourceType !== criteria.resourceType) {
+    if (typeof conditions.resourceType === "string" && conditions.resourceType !== criteria.resourceType) {
       return false;
     }
     return true;

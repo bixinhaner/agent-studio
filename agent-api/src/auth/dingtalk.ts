@@ -6,6 +6,8 @@ export type DingTalkConfig = {
   redirectUri?: string;
   scope?: string;
   apiBaseUrl?: string;
+  alertAgentId?: string;
+  alertUserIds?: string[];
 };
 
 export type DingTalkPublicConfig = {
@@ -39,6 +41,7 @@ export interface DingTalkClient {
   listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]>;
   listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
   getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null>;
+  sendWorkNotice?(input: { userIds?: string[]; message: string }): Promise<void>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -482,6 +485,30 @@ export function createDingTalkClient(
         }
         throw error;
       }
+    },
+    async sendWorkNotice(input: { userIds?: string[]; message: string }): Promise<void> {
+      const userIds = uniqueStrings(input.userIds ?? config.alertUserIds ?? []);
+      const message = trimOrUndefined(input.message);
+      const agentId = trimOrUndefined(config.alertAgentId);
+      if (!agentId) {
+        throw new Error("DingTalk alert agent is not configured");
+      }
+      if (!message) {
+        throw new Error("DingTalk notification message is required");
+      }
+      if (!userIds.length) {
+        throw new Error("DingTalk alert recipients are not configured");
+      }
+      await requestOrgApi("/topapi/message/corpconversation/asyncsend_v2", {
+        agent_id: Number(agentId),
+        userid_list: userIds.join(","),
+        msg: {
+          msgtype: "text",
+          text: {
+            content: message
+          }
+        }
+      });
     }
   };
 }

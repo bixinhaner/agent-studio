@@ -120,6 +120,7 @@ function buildApp(options?: {
   syncService?: { run: ReturnType<typeof vi.fn> };
   syncJobs?: FakeSyncJobRepository;
   quotaChecks?: { evaluate: ReturnType<typeof vi.fn> };
+  alerts?: { evaluateQuotaResult: ReturnType<typeof vi.fn> };
 }) {
   const users = new FakeUserRepository();
   const user = options?.user ?? makeUser();
@@ -151,6 +152,11 @@ function buildApp(options?: {
         options?.quotaChecks ??
         ({
           evaluate: vi.fn().mockResolvedValue({ decision: "allow", observedValue: 0 })
+        } as never),
+      alerts:
+        options?.alerts ??
+        ({
+          evaluateQuotaResult: vi.fn().mockResolvedValue(undefined)
         } as never),
       syncJobs:
         options?.syncJobs ??
@@ -219,6 +225,39 @@ describe("org sync admin router", () => {
       scopeType: "full",
       triggerType: "manual",
       triggeredByUserId: user.id
+    });
+  });
+
+  it("emits a quota alert when org sync is soft-blocked", async () => {
+    const evaluateQuotaResult = vi.fn().mockResolvedValue(undefined);
+    const { app, cookies, user } = buildApp({
+      user: makeUser({ id: "admin-1", role: "admin" }),
+      quotaChecks: {
+        evaluate: vi.fn().mockResolvedValue({
+          decision: "soft_block",
+          observedValue: 12,
+          thresholdValue: 10,
+          policy: {
+            scopeType: "platform",
+            scopeId: "platform",
+            metricType: "request_count"
+          }
+        })
+      },
+      alerts: { evaluateQuotaResult }
+    });
+
+    const response = await request(app)
+      .post("/api/admin/org-sync/jobs")
+      .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(403);
+    expect(evaluateQuotaResult).toHaveBeenCalledWith({
+      scopeType: "platform",
+      scopeId: "platform",
+      metricType: "request_count",
+      triggeredValue: 12,
+      thresholdValue: 10
     });
   });
 

@@ -4,9 +4,14 @@ import { createDingTalkClient } from "../auth/dingtalk.js";
 import { appConfig } from "../config.js";
 import { getDbClient } from "../db/client.js";
 import { DingTalkOrgProvider } from "../org-sync/dingtalk-org-provider.js";
+import { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import { OrgSyncService, type OrgSyncRunInput } from "../org-sync/org-sync-service.js";
+import { AlertEventRepository, type AlertEventRepositoryDb } from "../persistence/alert-event-repository.js";
+import { AlertRuleRepository, type AlertRuleRepositoryDb } from "../persistence/alert-rule-repository.js";
 import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository, type DepartmentRepositoryDb } from "../persistence/department-repository.js";
+import { NotificationRecordRepository, type NotificationRecordRepositoryDb } from "../persistence/notification-record-repository.js";
+import { NotificationDispatchService } from "../operations/notification-dispatch-service.js";
 import { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 import { QuotaPolicyRepository, type QuotaPolicyRepositoryDb } from "../persistence/quota-policy-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "../persistence/usage-rollup-repository.js";
@@ -25,17 +30,20 @@ type OrgSyncRouterDependencies = {
   syncService: Pick<OrgSyncService, "run">;
   syncJobs: Pick<SyncJobRepository, "listRecent" | "getDetail">;
   quotaChecks: Pick<QuotaEvaluationService, "evaluate">;
+  alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
 };
 
 type OrgSyncRouterOptions = {
   syncService?: Pick<OrgSyncService, "run">;
   syncJobs?: Pick<SyncJobRepository, "listRecent" | "getDetail">;
   quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
+  alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   db?: OrgSyncJobDb;
 };
 
 type OrgSyncJobDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
 type OrgSyncQuotaDb = QuotaPolicyRepositoryDb & UsageRollupRepositoryDb;
+type OrgSyncAlertDb = AlertRuleRepositoryDb & AlertEventRepositoryDb & NotificationRecordRepositoryDb;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -86,6 +94,7 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
   const memberships = new DepartmentMembershipRepository(currentDb as DepartmentMembershipRepositoryDb);
   const syncJobs = new SyncJobRepository(currentDb as SyncJobRepositoryDb);
   const quotaDb = currentDb as unknown as OrgSyncQuotaDb;
+  const alertDb = currentDb as unknown as OrgSyncAlertDb;
   const syncService = new OrgSyncService({
     provider: new DingTalkOrgProvider(createDingTalkClient(appConfig.dingtalk)),
     departments,
@@ -97,11 +106,26 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
     policies: new QuotaPolicyRepository(quotaDb),
     rollups: new UsageRollupRepository(quotaDb)
   });
+  const alerts = new AlertEvaluationService({
+    alertRules: new AlertRuleRepository(alertDb),
+    alertEvents: new AlertEventRepository(alertDb),
+    notifications: new NotificationDispatchService({
+      notifications: new NotificationRecordRepository(alertDb),
+      dingtalk: ({ message }) => {
+        const client = createDingTalkClient(appConfig.dingtalk);
+        if (!client.sendWorkNotice) {
+          throw new Error("DingTalk work notice sender is not available");
+        }
+        return client.sendWorkNotice({ message });
+      }
+    })
+  });
 
   return {
     syncService,
     syncJobs,
-    quotaChecks
+    quotaChecks,
+    alerts
   };
 }
 
@@ -112,14 +136,16 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
       return {
         syncService: options.syncService,
         syncJobs: options.syncJobs,
-        quotaChecks: options.quotaChecks ?? createDefaultDependencies(options.db).quotaChecks
+        quotaChecks: options.quotaChecks ?? createDefaultDependencies(options.db).quotaChecks,
+        alerts: options.alerts ?? createDefaultDependencies(options.db).alerts
       };
     }
     defaults ??= createDefaultDependencies(options.db);
     return {
       syncService: options.syncService ?? defaults.syncService,
       syncJobs: options.syncJobs ?? defaults.syncJobs,
-      quotaChecks: options.quotaChecks ?? defaults.quotaChecks
+      quotaChecks: options.quotaChecks ?? defaults.quotaChecks,
+      alerts: options.alerts ?? defaults.alerts
     };
   };
 }
@@ -139,6 +165,15 @@ async function runSync(
       rollupDate: new Date()
     });
     if (quotaDecision?.decision === "soft_block") {
+      if (deps.alerts && quotaDecision.policy && quotaDecision.thresholdValue !== undefined) {
+        await deps.alerts.evaluateQuotaResult({
+          scopeType: quotaDecision.policy.scopeType,
+          scopeId: quotaDecision.policy.scopeId,
+          metricType: quotaDecision.policy.metricType,
+          triggeredValue: quotaDecision.observedValue,
+          thresholdValue: quotaDecision.thresholdValue
+        });
+      }
       sendFailure(res, 403, "当前配额已超限，无法发起组织同步");
       return;
     }

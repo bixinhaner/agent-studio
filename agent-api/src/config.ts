@@ -12,6 +12,8 @@ const schema = z.object({
   DINGTALK_CLIENT_SECRET: z.string().optional(),
   DINGTALK_REDIRECT_URI: z.string().optional(),
   DINGTALK_SCOPE: z.string().default("openid"),
+  DINGTALK_ALERT_AGENT_ID: z.string().optional(),
+  DINGTALK_ALERT_USER_IDS: z.string().optional(),
   DEFAULT_MODEL: z.string().default(DEFAULT_MODEL),
   DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
@@ -91,7 +93,12 @@ export const appConfig = {
     clientId: (env.DINGTALK_CLIENT_ID || "").trim(),
     clientSecret: (env.DINGTALK_CLIENT_SECRET || "").trim(),
     redirectUri: (env.DINGTALK_REDIRECT_URI || "").trim(),
-    scope: (env.DINGTALK_SCOPE || "").trim() || "openid"
+    scope: (env.DINGTALK_SCOPE || "").trim() || "openid",
+    alertAgentId: (env.DINGTALK_ALERT_AGENT_ID || "").trim(),
+    alertUserIds: (env.DINGTALK_ALERT_USER_IDS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
   },
   defaultModel,
   defaultReasoningEffort,

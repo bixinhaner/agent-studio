@@ -1,5 +1,5 @@
 export type AlertRuleScopeType = "platform" | "department";
-export type AlertRuleType = "quota" | "security";
+export type AlertRuleType = "quota_threshold" | "error_rate" | "security_event";
 
 export type AlertRuleRecord = {
   id: string;

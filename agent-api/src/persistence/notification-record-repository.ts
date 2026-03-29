@@ -1,5 +1,5 @@
 export type NotificationChannelType = "in_app" | "dingtalk";
-export type NotificationStatus = "pending" | "delivered" | "failed";
+export type NotificationStatus = "pending" | "sent" | "failed";
 
 export type NotificationRecord = {
   id: string;

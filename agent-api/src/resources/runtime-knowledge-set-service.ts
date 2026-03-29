@@ -58,6 +58,18 @@ type ResourceAccessLogServiceLike = {
   }): Promise<unknown>;
 };
 
+type SecurityAlertServiceLike = {
+  evaluateSecurityEvent(input: {
+    scopeType: string;
+    scopeId: string;
+    resourceType?: string;
+    resourceId?: string;
+    actionType?: string;
+    resultStatus?: string;
+    userId?: string;
+  }): Promise<unknown>;
+};
+
 const KNOWLEDGE_SET_METADATA_KEY = "_agentStudioKnowledgeSets";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -152,6 +164,7 @@ export class RuntimeKnowledgeSetService {
       policies: PolicyServiceLike;
       storage: KnowledgeSetStorageLike;
       resourceAccessLogs?: ResourceAccessLogServiceLike;
+      securityAlerts?: SecurityAlertServiceLike;
     }
   ) {}
 
@@ -184,6 +197,15 @@ export class RuntimeKnowledgeSetService {
       (candidate) => trimOrUndefined(candidate.rootPath) === workspacePath && allowedWorkspaceIds.has(candidate.id)
     );
     if (!workspace) {
+      await this.options.securityAlerts?.evaluateSecurityEvent({
+        scopeType: input.departmentIds[0] ? "department" : "platform",
+        scopeId: input.departmentIds[0] ?? "platform",
+        resourceType: "workspace",
+        resourceId: workspacePath,
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: input.userId
+      });
       throw new Error("workspace 不存在或无权限");
     }
 
@@ -200,6 +222,15 @@ export class RuntimeKnowledgeSetService {
       codexRunConfig: input.codexRunConfig
     });
     if (selectedOptionalKnowledgeSetIds.some((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId))) {
+      await this.options.securityAlerts?.evaluateSecurityEvent({
+        scopeType: input.departmentIds[0] ? "department" : "platform",
+        scopeId: input.departmentIds[0] ?? "platform",
+        resourceType: "knowledge_set",
+        resourceId: selectedOptionalKnowledgeSetIds.find((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId)),
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: input.userId
+      });
       throw new Error("knowledge set 未授权或未绑定到当前 workspace");
     }
     const resolvedKnowledgeSetIds = [...defaultKnowledgeSetIds, ...selectedOptionalKnowledgeSetIds];
@@ -214,6 +245,15 @@ export class RuntimeKnowledgeSetService {
       })
     );
     if (resolvedKnowledgeSetIds.some((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId))) {
+      await this.options.securityAlerts?.evaluateSecurityEvent({
+        scopeType: input.departmentIds[0] ? "department" : "platform",
+        scopeId: input.departmentIds[0] ?? "platform",
+        resourceType: "knowledge_set",
+        resourceId: resolvedKnowledgeSetIds.find((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId)),
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: input.userId
+      });
       throw new Error("knowledge set 未授权或未绑定到当前 workspace");
     }
 
