@@ -227,7 +227,7 @@ function buildRbacApp(seed?: {
     next();
   });
   app.use(
-    "/api/admin/rbac",
+    "/api/admin",
     createRbacRouter({
       roles,
       permissions,
@@ -247,7 +247,7 @@ describe("createRbacRouter", () => {
   it("creates a custom role and records an audit log", async () => {
     const { app, db } = buildRbacApp();
 
-    const response = await request(app).post("/api/admin/rbac/roles").send({
+    const response = await request(app).post("/api/admin/roles").send({
       slug: "ops_manager_2",
       name: "Ops Manager 2",
       description: "Operations managers"
@@ -273,7 +273,7 @@ describe("createRbacRouter", () => {
   it("replaces user roles with one primary role", async () => {
     const { app } = buildRbacApp();
 
-    const response = await request(app).put("/api/admin/rbac/users/user-1/roles").send({
+    const response = await request(app).put("/api/admin/users/user-1/roles").send({
       assignments: [
         { roleId: "role-employee", isPrimary: false },
         { roleId: "role-admin", isPrimary: true }
@@ -315,7 +315,7 @@ describe("createRbacRouter", () => {
       ]
     });
 
-    const response = await request(app).put("/api/admin/rbac/roles/role-ops/resource-policies").send({
+    const response = await request(app).put("/api/admin/roles/role-ops/resource-policies").send({
       resourceType: "workspace",
       policies: [{ resourceId: "workspace-rd", effect: "allow" }]
     });
