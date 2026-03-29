@@ -564,12 +564,12 @@ class FakeAdminDb {
       where,
       orderBy
     }: {
-      where: { userId: string; departmentId?: { in: string[] } };
+      where?: { userId?: string; departmentId?: { in: string[] } };
       orderBy?: { createdAt?: "asc" | "desc" };
     }) => {
       const rows = this.memberships.filter((item) => {
-        if (item.userId !== where.userId) return false;
-        if (where.departmentId?.in && !where.departmentId.in.includes(item.departmentId)) return false;
+        if (where?.userId && item.userId !== where.userId) return false;
+        if (where?.departmentId?.in && !where.departmentId.in.includes(item.departmentId)) return false;
         return true;
       });
       rows.sort((left, right) => {
@@ -1205,6 +1205,21 @@ describe("admin and portal routers", () => {
     });
   });
 
+  it("rejects unsupported local user roles", async () => {
+    const { app, cookies, user } = buildAdminApp();
+
+    const response = await request(app)
+      .patch("/api/admin/users/user-1/local-settings")
+      .set("Cookie", cookies.create(user.id))
+      .send({
+        role: "super_admin",
+        manualDisabled: false
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ detail: "role 不受支持" });
+  });
+
   it("returns persisted user detail with synced, local, and effective fields", async () => {
     const { app, cookies, user } = buildAdminApp();
 
@@ -1215,7 +1230,9 @@ describe("admin and portal routers", () => {
     expect(response.status).toBe(200);
     expect(response.body.user).toEqual(
       expect.objectContaining({
-        synced: expect.any(Object),
+        synced: expect.objectContaining({
+          primaryDepartmentId: "dept-1"
+        }),
         local: expect.any(Object),
         effective: expect.any(Object)
       })
@@ -1223,12 +1240,35 @@ describe("admin and portal routers", () => {
   });
 
   it("returns department tree, department detail, department users, and org sync config", async () => {
-    const { app, cookies, user } = buildAdminApp();
+    const { app, cookies, user } = buildAdminApp({
+      seed: {
+        departments: [
+          makeAdminDepartmentSeed("department-1", "dept-1", "研发"),
+          makeAdminDepartmentSeed("department-2", "dept-2", "平台", "department-1")
+        ],
+        memberships: [
+          makeAdminMembershipSeed("membership-1", "user-1", "department-1", true),
+          makeAdminMembershipSeed("membership-2", "admin-1", "department-2", true)
+        ]
+      }
+    });
 
     const treeResponse = await request(app)
       .get("/api/admin/departments/tree")
       .set("Cookie", cookies.create(user.id));
     expect(treeResponse.status).toBe(200);
+    expect(treeResponse.body.departments).toEqual([
+      expect.objectContaining({
+        id: "department-1",
+        memberCount: 1,
+        children: [
+          expect.objectContaining({
+            id: "department-2",
+            memberCount: 1
+          })
+        ]
+      })
+    ]);
 
     const detailResponse = await request(app)
       .get("/api/admin/departments/department-1")
@@ -1239,6 +1279,14 @@ describe("admin and portal routers", () => {
       .get("/api/admin/departments/department-1/users")
       .set("Cookie", cookies.create(user.id));
     expect(usersResponse.status).toBe(200);
+    expect(usersResponse.body.users).toEqual([
+      expect.objectContaining({
+        id: "user-1",
+        synced: expect.objectContaining({
+          primaryDepartmentId: "dept-1"
+        })
+      })
+    ]);
 
     const configResponse = await request(app)
       .get("/api/admin/org-sync/config")

@@ -81,6 +81,7 @@ type AdminDetailUser = {
     dingtalkOpenId: string | null;
     dingtalkCorpId: string | null;
     departmentIds: string[];
+    primaryDepartmentId: string | null;
   };
   local: {
     role: string;
@@ -94,6 +95,8 @@ type AdminDetailUser = {
     lastSyncedAt: string | null;
   };
 };
+
+const ADMIN_EDITABLE_ROLES = new Set(["employee", "team_lead", "admin"]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -133,8 +136,13 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
     orderBy: { createdAt: "asc" }
   })) as DepartmentMembershipRow[];
   const departmentIds = [];
+  let primaryDepartmentId: string | null = null;
   for (const membership of memberships) {
-    departmentIds.push(await resolveDepartmentExternalId(db, membership.departmentId));
+    const externalId = await resolveDepartmentExternalId(db, membership.departmentId);
+    departmentIds.push(externalId);
+    if (membership.isPrimary && !primaryDepartmentId) {
+      primaryDepartmentId = externalId;
+    }
   }
 
   return {
@@ -145,7 +153,8 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       dingtalkUserId: trimOrUndefined(row.dingtalkUserId) ?? null,
       dingtalkOpenId: trimOrUndefined(row.dingtalkOpenId) ?? null,
       dingtalkCorpId: trimOrUndefined(row.dingtalkCorpId) ?? null,
-      departmentIds
+      departmentIds,
+      primaryDepartmentId
     },
     local: {
       role: trimOrUndefined(row.role) ?? "employee",
@@ -187,9 +196,11 @@ async function getDepartmentById(db: AdminDb, departmentId: string): Promise<Dep
 
 async function attachMemberCount(db: AdminDb, node: DepartmentTreeNode): Promise<DepartmentTreeNode & { memberCount: number }> {
   const count = (await (db.departmentMembership as any).findMany({ where: { departmentId: { in: [node.id] } } })) as DepartmentMembershipRow[];
+  const children = await Promise.all(node.children.map((child) => attachMemberCount(db, child)));
   return {
     ...node,
-    memberCount: count.length
+    memberCount: count.length,
+    children
   };
 }
 
@@ -321,6 +332,10 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       }
 
       const role = trimOrUndefined(req.body?.role) ?? existing.role ?? "employee";
+      if (!ADMIN_EDITABLE_ROLES.has(role)) {
+        res.status(400).json({ detail: "role 不受支持" });
+        return;
+      }
       const manualDisabled =
         typeof req.body?.manualDisabled === "boolean" ? req.body.manualDisabled : Boolean(req.body?.manualDisabled);
       const adminNote = req.body?.adminNote === undefined ? existing.adminNote : req.body.adminNote;
