@@ -610,8 +610,8 @@ it("preserves manual disables when DingTalk later reports the user active", asyn
   expect(user?.statusSource).toBe("manual_disable");
 });
 
-it("blocks overlapping runs for the same scope while one job is running", async () => {
-  const service = buildOrgSyncServiceForTest({ runningJob: { scopeType: "department", scopeExternalId: "rd", status: "running" } });
+it("blocks overlapping runs that could touch shared org state", async () => {
+  const service = buildOrgSyncServiceForTest({ runningJob: { scopeType: "full", status: "running" } });
 
   await expect(service.run({ scopeType: "department", scopeExternalId: "rd", triggerType: "manual", triggeredByUserId: "admin-1" })).rejects.toThrow("already running");
 });
@@ -642,6 +642,7 @@ Implementation rules:
 - if lifecycle state is `active` and `manualDisabled = false`, set local `status = "active"`, `statusSource = "sync"`, and `syncState = "active"`
 - if `manualDisabled = true`, preserve `status = "disabled"` regardless of snapshot lifecycle state
 - emit job events for fetch start, fetch complete, diff summary, persistence complete, and failure
+- block overlapping runs that could mutate the same organization state; this phase may conservatively serialize org sync execution to avoid concurrent writes to shared user and membership records
 
 - [ ] **Step 3: Add a lightweight scheduler and config plumbing**
 
@@ -667,7 +668,7 @@ Scheduler rules:
 - default interval is daily
 - skip if disabled
 - call `OrgSyncService.run({ scopeType: "full", triggerType: "scheduled" })`
-- do not start another run if one full sync job is already active
+- do not start another scheduled full sync if one full sync job is already active
 
 - [ ] **Step 4: Wire the service and scheduler in `index.ts`**
 

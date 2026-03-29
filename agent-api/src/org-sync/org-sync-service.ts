@@ -649,7 +649,10 @@ export class OrgSyncService {
         const target = currentMemberships
           .map((membership) => {
             const departmentExternalId = departmentRowsById.get(membership.departmentId)?.externalId;
-            if (!departmentExternalId || scopedDepartmentExternalIds.has(departmentExternalId)) {
+            if (!departmentExternalId) {
+              return null;
+            }
+            if (scopedDepartmentExternalIds.has(departmentExternalId) && membership.source === "sync") {
               return null;
             }
             return {

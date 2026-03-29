@@ -472,7 +472,7 @@ Requirements:
 
 - cadence is configurable
 - default cadence is once per day
-- the scheduler must prevent overlapping runs of the same scope when one is already active
+- the scheduler must prevent overlapping scheduled runs that could touch shared organization state; in this phase a conservative serialized scheduler is acceptable
 - a failed scheduled run records the same jobs, events, and diffs model as a manual run
 
 A lightweight in-process scheduler is acceptable for this phase if it is clearly isolated behind a scheduling service and can later be replaced by an external scheduler without rewriting sync logic.

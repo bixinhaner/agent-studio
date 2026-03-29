@@ -175,4 +175,28 @@ describe("OrgSyncScheduler", () => {
     scheduler.start();
     expect(timers).toHaveLength(0);
   });
+
+  it("swallows non-overlap tick failures so the interval callback does not reject", async () => {
+    const timers: Array<() => unknown> = [];
+    const scheduler = new OrgSyncScheduler(
+      {
+        run: async () => {
+          throw new Error("provider unavailable");
+        }
+      },
+      new SyncJobRepository(new FakeSyncJobDb() as never),
+      {
+        enabled: true,
+        intervalMinutes: 60,
+        setIntervalFn: ((callback: () => unknown) => {
+          timers.push(callback);
+          return { unref() {} } as never;
+        }) as never
+      }
+    );
+
+    scheduler.start();
+    expect(timers).toHaveLength(1);
+    await expect(Promise.resolve(timers[0]?.())).resolves.toBeUndefined();
+  });
 });
