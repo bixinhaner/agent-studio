@@ -6,6 +6,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { registerCommonApiRoutes } from "../app-routes.js";
+import type { DingTalkClient } from "../auth/dingtalk.js";
 import { createAuthRouter } from "../auth/router.js";
 import { createCurrentUserMiddleware } from "../auth/current-user.js";
 import { createSessionCookieManager } from "../auth/session-cookie.js";
@@ -783,6 +784,20 @@ function makeUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser
 }
 
 async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
+  const dingtalkClient: DingTalkClient = {
+    async exchangeCode() {
+      throw new Error("not used in mode admin router tests");
+    },
+    async listDepartments() {
+      throw new Error("not used in mode admin router tests");
+    },
+    async listDepartmentUsers() {
+      throw new Error("not used in mode admin router tests");
+    },
+    async getUser() {
+      throw new Error("not used in mode admin router tests");
+    }
+  };
   const users = new FakeUserRepository();
   const user = options?.user ?? makeUser();
   users.seed(user);
@@ -805,11 +820,7 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
     authRouter: createAuthRouter({
       users,
       cookies,
-      dingtalkClient: {
-        async exchangeCode() {
-          throw new Error("not used in mode admin router tests");
-        }
-      },
+      dingtalkClient,
       dingtalkConfig: {
         clientId: "client-id",
         clientSecret: "client-secret",

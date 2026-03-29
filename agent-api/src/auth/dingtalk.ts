@@ -36,9 +36,9 @@ export type DingTalkOrganizationUser = {
 
 export interface DingTalkClient {
   exchangeCode(code: string): Promise<DingTalkUserIdentity>;
-  listDepartments?(input: { parentId?: string | null }): Promise<DingTalkDepartment[]>;
-  listDepartmentUsers?(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
-  getUser?(input: { userId: string }): Promise<DingTalkOrganizationUser | null>;
+  listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]>;
+  listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
+  getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

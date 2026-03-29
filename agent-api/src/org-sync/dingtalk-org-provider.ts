@@ -28,10 +28,6 @@ export type NormalizedOrgSnapshot = {
   users: NormalizedOrgUser[];
 };
 
-type DingTalkOrgReader = Required<
-  Pick<DingTalkClient, "listDepartments" | "listDepartmentUsers" | "getUser">
->;
-
 const LIFECYCLE_PRIORITY: Record<NormalizedOrgUser["lifecycleState"], number> = {
   active: 0,
   disabled: 1,
@@ -182,8 +178,7 @@ export class DingTalkOrgProvider {
   }
 
   async fetchUserScope(externalUserId: string): Promise<NormalizedOrgSnapshot> {
-    const client = this.getOrgReader();
-    const user = await client.getUser({ userId: externalUserId });
+    const user = await this.client.getUser({ userId: externalUserId });
     if (!user) {
       return { departments: [], users: [] };
     }
@@ -206,10 +201,9 @@ export class DingTalkOrgProvider {
   private async collectDepartmentTree(parentId: string): Promise<DingTalkDepartment[]> {
     const collected: DingTalkDepartment[] = [];
     const seen = new Set<string>();
-    const client = this.getOrgReader();
 
     const visit = async (currentParentId: string) => {
-      const children = await client.listDepartments({ parentId: currentParentId });
+      const children = await this.client.listDepartments({ parentId: currentParentId });
       for (const child of children) {
         if (seen.has(child.externalId)) continue;
         seen.add(child.externalId);
@@ -253,27 +247,14 @@ export class DingTalkOrgProvider {
 
   private async collectUsersForDepartments(departmentIds: string[]): Promise<Map<string, NormalizedOrgUser>> {
     const users = new Map<string, NormalizedOrgUser>();
-    const client = this.getOrgReader();
 
     for (const departmentId of departmentIds) {
-      const members = await client.listDepartmentUsers({ departmentId });
+      const members = await this.client.listDepartmentUsers({ departmentId });
       for (const member of members) {
         users.set(member.userId, mergeUser(users.get(member.userId), member, departmentId));
       }
     }
 
     return users;
-  }
-
-  private getOrgReader(): DingTalkOrgReader {
-    if (!this.client.listDepartments || !this.client.listDepartmentUsers || !this.client.getUser) {
-      throw new Error("DingTalk client does not support organization reads");
-    }
-
-    return {
-      listDepartments: (input) => this.client.listDepartments!(input),
-      listDepartmentUsers: (input) => this.client.listDepartmentUsers!(input),
-      getUser: (input) => this.client.getUser!(input)
-    };
   }
 }

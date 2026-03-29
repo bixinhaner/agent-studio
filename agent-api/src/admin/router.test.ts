@@ -11,6 +11,7 @@ import { ZendeskSettingsStore } from "../integrations/zendesk/settings-store.js"
 import { ZendeskIntegrationService } from "../integrations/zendesk/service.js";
 import { createPortalRouter } from "../portal/router.js";
 import { IntegrationRepository } from "../persistence/integration-repository.js";
+import type { DingTalkClient } from "../auth/dingtalk.js";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 
 type RuntimeOptionResponse = {
@@ -133,6 +134,20 @@ function buildApp(options?: {
   zendesk?: Pick<ZendeskIntegrationService, "getOverview">;
   runtimeOptions?: RuntimeOptionResponse;
 }) {
+  const dingtalkClient: DingTalkClient = {
+    async exchangeCode() {
+      throw new Error("not used in admin router tests");
+    },
+    async listDepartments() {
+      throw new Error("not used in admin router tests");
+    },
+    async listDepartmentUsers() {
+      throw new Error("not used in admin router tests");
+    },
+    async getUser() {
+      throw new Error("not used in admin router tests");
+    }
+  };
   const users = new FakeUserRepository();
   const user = options?.user ?? makeUser();
   users.seed(user);
@@ -152,11 +167,7 @@ function buildApp(options?: {
     authRouter: createAuthRouter({
       users,
       cookies,
-      dingtalkClient: {
-        async exchangeCode() {
-          throw new Error("not used in admin router tests");
-        }
-      },
+      dingtalkClient,
       dingtalkConfig: {
         clientId: "client-id",
         clientSecret: "client-secret",

@@ -3,6 +3,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 
 import { createCurrentUserMiddleware } from "./current-user.js";
+import type { DingTalkClient } from "./dingtalk.js";
 import { createAuthRouter } from "./router.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./session-cookie.js";
 import type {
@@ -45,9 +46,27 @@ class FakeUserRepository implements UserRepositoryLike {
   }
 }
 
+function createDingTalkClientDouble(overrides?: Partial<DingTalkClient>): DingTalkClient {
+  return {
+    async exchangeCode() {
+      throw new Error("unexpected exchangeCode call");
+    },
+    async listDepartments() {
+      throw new Error("unexpected listDepartments call");
+    },
+    async listDepartmentUsers() {
+      throw new Error("unexpected listDepartmentUsers call");
+    },
+    async getUser() {
+      throw new Error("unexpected getUser call");
+    },
+    ...overrides
+  };
+}
+
 function buildApp(options?: {
   users?: FakeUserRepository;
-  dingtalkClient?: { exchangeCode(code: string): Promise<DingTalkUserIdentity> };
+  dingtalkClient?: DingTalkClient;
   dingtalkConfig?: {
     clientId?: string;
     clientSecret?: string;
@@ -78,12 +97,7 @@ function buildApp(options?: {
     createAuthRouter({
       users,
       cookies,
-      dingtalkClient:
-        options?.dingtalkClient ?? {
-          async exchangeCode() {
-            throw new Error("unexpected exchangeCode call");
-          }
-        },
+      dingtalkClient: options?.dingtalkClient ?? createDingTalkClientDouble(),
       dingtalkConfig: {
         clientId: options?.dingtalkConfig?.clientId ?? "ding-client-id",
         clientSecret: options?.dingtalkConfig?.clientSecret ?? "ding-client-secret",
@@ -183,11 +197,11 @@ describe("auth router", () => {
 
   it("rejects DingTalk login when the server-issued state does not match", async () => {
     const { app } = buildApp({
-      dingtalkClient: {
+      dingtalkClient: createDingTalkClientDouble({
         async exchangeCode() {
           throw new Error("exchangeCode should not run for invalid state");
         }
-      }
+      })
     });
 
     const config = await request(app).get("/api/auth/dingtalk/config");
@@ -206,7 +220,7 @@ describe("auth router", () => {
 
   it("creates a session cookie from DingTalk code exchange and serves whoami from the persisted user", async () => {
     const { app } = buildApp({
-      dingtalkClient: {
+      dingtalkClient: createDingTalkClientDouble({
         async exchangeCode(code: string) {
           expect(code).toBe("temporary-auth-code");
           return {
@@ -215,7 +229,7 @@ describe("auth router", () => {
             displayName: "Agent 99"
           };
         }
-      }
+      })
     });
 
     const config = await request(app).get("/api/auth/dingtalk/config");
