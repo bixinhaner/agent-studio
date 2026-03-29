@@ -1,8 +1,4 @@
-import {
-  QuotaPolicyRepository,
-  type QuotaPolicyMetricType,
-  type QuotaPolicyRecord,
-} from "../persistence/quota-policy-repository.js";
+import { QuotaPolicyRepository, type QuotaPolicyMetricType, type QuotaPolicyRecord } from "../persistence/quota-policy-repository.js";
 import { UsageRollupRepository, type UsageDailyRollupRecord } from "../persistence/usage-rollup-repository.js";
 
 export type QuotaDecision = "allow" | "soft_block";
@@ -15,11 +11,19 @@ export type QuotaEvaluationInput = {
   rollupDate?: string | Date;
 };
 
+export type EvaluatedQuotaPolicy = {
+  policy: QuotaPolicyRecord;
+  observedValue: number;
+  thresholdValue: number;
+  exceeded: boolean;
+};
+
 export type QuotaEvaluationResult = {
   decision: QuotaDecision;
   policy?: QuotaPolicyRecord;
   observedValue: number;
   thresholdValue?: number;
+  evaluatedPolicies: EvaluatedQuotaPolicy[];
 };
 
 export class QuotaEvaluationService {
@@ -32,71 +36,97 @@ export class QuotaEvaluationService {
 
   async evaluate(input: QuotaEvaluationInput): Promise<QuotaEvaluationResult> {
     const rollupDate = toDayKey(input.rollupDate ?? new Date());
+    const organizationId = input.organizationId === undefined ? null : input.organizationId;
     const departmentPolicies = input.departmentId
       ? await this.deps.policies.list({
-          organizationId: input.organizationId,
+          organizationId,
           scopeType: "department",
           scopeId: input.departmentId,
           isActive: true
         })
       : [];
     const platformPolicies = await this.deps.policies.list({
-      organizationId: input.organizationId,
+      organizationId,
       scopeType: "platform",
       scopeId: "platform",
       isActive: true
     });
-    const policy = selectBestPolicy(departmentPolicies, input) ?? selectBestPolicy(platformPolicies, input);
 
-    if (!policy) {
+    const policies = [...departmentPolicies, ...platformPolicies];
+    const evaluatedPolicies: EvaluatedQuotaPolicy[] = [];
+    let firstExceededPolicy: QuotaPolicyRecord | undefined;
+    let firstObservedValue = 0;
+    let firstThresholdValue: number | undefined;
+    let firstBlockingPolicy: QuotaPolicyRecord | undefined;
+    let firstBlockingObservedValue = 0;
+    let firstBlockingThresholdValue: number | undefined;
+    let anySoftBlock = false;
+
+    for (const policy of policies) {
+      if (!matchesPolicyFilters(policy, input)) continue;
+      const scopedRollups = await this.deps.rollups.list({
+        organizationId,
+        rollupDate,
+        scopeType: policy.scopeType,
+        scopeId: policy.scopeId,
+        model: policy.model,
+        featureType: policy.featureType
+      });
+      const observedValue = summarizeMetric(policy.metricType, scopedRollups);
+      const thresholdValue = Number(policy.thresholdValue);
+      const hasThreshold = Number.isFinite(thresholdValue);
+      const exceeded = hasThreshold && observedValue >= thresholdValue;
+      evaluatedPolicies.push({
+        policy,
+        observedValue,
+        thresholdValue: hasThreshold ? thresholdValue : 0,
+        exceeded
+      });
+      if (exceeded && !firstExceededPolicy) {
+        firstExceededPolicy = policy;
+        firstObservedValue = observedValue;
+        firstThresholdValue = hasThreshold ? thresholdValue : undefined;
+      }
+      if (exceeded && policy.enforcementMode === "soft_block") {
+        anySoftBlock = true;
+        if (!firstBlockingPolicy) {
+          firstBlockingPolicy = policy;
+          firstBlockingObservedValue = observedValue;
+          firstBlockingThresholdValue = hasThreshold ? thresholdValue : undefined;
+        }
+      }
+    }
+
+    if (!evaluatedPolicies.length) {
       return {
         decision: "allow",
-        observedValue: 0
+        observedValue: 0,
+        evaluatedPolicies: []
       };
     }
 
-    const rollups = await this.deps.rollups.list({
-      organizationId: input.organizationId,
-      rollupDate,
-      scopeType: policy.scopeType,
-      scopeId: policy.scopeId,
-      model: policy.model,
-      featureType: policy.featureType
-    });
-    const observedValue = summarizeMetric(policy.metricType, rollups);
-    const thresholdValue = Number(policy.thresholdValue);
-    const exceeded = Number.isFinite(thresholdValue) && observedValue >= thresholdValue;
-
     return {
-      decision: exceeded && policy.enforcementMode === "soft_block" ? "soft_block" : "allow",
-      policy,
-      observedValue,
-      thresholdValue: Number.isFinite(thresholdValue) ? thresholdValue : undefined
+      decision: anySoftBlock ? "soft_block" : "allow",
+      policy: firstBlockingPolicy ?? firstExceededPolicy ?? evaluatedPolicies[0]?.policy,
+      observedValue: firstBlockingPolicy
+        ? firstBlockingObservedValue
+        : firstExceededPolicy
+          ? firstObservedValue
+          : evaluatedPolicies[0]?.observedValue ?? 0,
+      thresholdValue: firstBlockingPolicy
+        ? firstBlockingThresholdValue
+        : firstExceededPolicy
+          ? firstThresholdValue
+          : evaluatedPolicies[0]?.thresholdValue,
+      evaluatedPolicies
     };
   }
-}
-
-function selectBestPolicy(policies: QuotaPolicyRecord[], input: QuotaEvaluationInput): QuotaPolicyRecord | undefined {
-  return [...policies]
-    .filter((policy) => matchesPolicyFilters(policy, input))
-    .sort((left, right) => {
-      const specificityDiff = specificityScore(right) - specificityScore(left);
-      if (specificityDiff !== 0) return specificityDiff;
-      return right.updatedAt.localeCompare(left.updatedAt, "en");
-    })[0];
 }
 
 function matchesPolicyFilters(policy: QuotaPolicyRecord, input: QuotaEvaluationInput): boolean {
   if (policy.model && policy.model !== trimOrUndefined(input.model)) return false;
   if (policy.featureType && policy.featureType !== trimOrUndefined(input.featureType)) return false;
   return true;
-}
-
-function specificityScore(policy: QuotaPolicyRecord): number {
-  let score = 0;
-  if (policy.model) score += 2;
-  if (policy.featureType) score += 1;
-  return score;
 }
 
 function summarizeMetric(metricType: QuotaPolicyMetricType, rows: UsageDailyRollupRecord[]): number {

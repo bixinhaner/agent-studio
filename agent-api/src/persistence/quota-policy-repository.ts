@@ -36,7 +36,7 @@ export type UpsertQuotaPolicyInput = {
 };
 
 export type ListQuotaPoliciesInput = {
-  organizationId?: string;
+  organizationId?: string | null;
   scopeType?: QuotaPolicyScopeType;
   scopeId?: string;
   featureType?: string;
@@ -161,11 +161,11 @@ export class QuotaPolicyRepository {
 
     const existing = await this.db.quotaPolicy.findFirst({
       where: {
-        ...(organizationId ? { organizationId } : {}),
+        organizationId: organizationId ?? null,
         scopeType,
         scopeId,
-        ...(featureType ? { featureType } : {}),
-        ...(model ? { model } : {}),
+        featureType: featureType ?? null,
+        model: model ?? null,
         metricType,
         windowType
       },

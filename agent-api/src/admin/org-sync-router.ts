@@ -7,6 +7,9 @@ import { DingTalkOrgProvider } from "../org-sync/dingtalk-org-provider.js";
 import { OrgSyncService, type OrgSyncRunInput } from "../org-sync/org-sync-service.js";
 import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository, type DepartmentRepositoryDb } from "../persistence/department-repository.js";
+import { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
+import { QuotaPolicyRepository, type QuotaPolicyRepositoryDb } from "../persistence/quota-policy-repository.js";
+import { UsageRollupRepository, type UsageRollupRepositoryDb } from "../persistence/usage-rollup-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb, type SyncJobRecord } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
 
@@ -21,15 +24,18 @@ type SyncJobDetailLike = {
 type OrgSyncRouterDependencies = {
   syncService: Pick<OrgSyncService, "run">;
   syncJobs: Pick<SyncJobRepository, "listRecent" | "getDetail">;
+  quotaChecks: Pick<QuotaEvaluationService, "evaluate">;
 };
 
 type OrgSyncRouterOptions = {
   syncService?: Pick<OrgSyncService, "run">;
   syncJobs?: Pick<SyncJobRepository, "listRecent" | "getDetail">;
+  quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
   db?: OrgSyncJobDb;
 };
 
 type OrgSyncJobDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
+type OrgSyncQuotaDb = QuotaPolicyRepositoryDb & UsageRollupRepositoryDb;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -79,6 +85,7 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
   const departments = new DepartmentRepository(currentDb as DepartmentRepositoryDb);
   const memberships = new DepartmentMembershipRepository(currentDb as DepartmentMembershipRepositoryDb);
   const syncJobs = new SyncJobRepository(currentDb as SyncJobRepositoryDb);
+  const quotaDb = currentDb as unknown as OrgSyncQuotaDb;
   const syncService = new OrgSyncService({
     provider: new DingTalkOrgProvider(createDingTalkClient(appConfig.dingtalk)),
     departments,
@@ -86,10 +93,15 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
     memberships,
     jobs: syncJobs
   });
+  const quotaChecks = new QuotaEvaluationService({
+    policies: new QuotaPolicyRepository(quotaDb),
+    rollups: new UsageRollupRepository(quotaDb)
+  });
 
   return {
     syncService,
-    syncJobs
+    syncJobs,
+    quotaChecks
   };
 }
 
@@ -99,13 +111,15 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
     if (options.syncService && options.syncJobs) {
       return {
         syncService: options.syncService,
-        syncJobs: options.syncJobs
+        syncJobs: options.syncJobs,
+        quotaChecks: options.quotaChecks ?? createDefaultDependencies(options.db).quotaChecks
       };
     }
     defaults ??= createDefaultDependencies(options.db);
     return {
       syncService: options.syncService ?? defaults.syncService,
-      syncJobs: options.syncJobs ?? defaults.syncJobs
+      syncJobs: options.syncJobs ?? defaults.syncJobs,
+      quotaChecks: options.quotaChecks ?? defaults.quotaChecks
     };
   };
 }
@@ -120,6 +134,14 @@ async function runSync(
   input: OrgSyncRunInput
 ): Promise<void> {
   try {
+    const quotaDecision = await deps.quotaChecks?.evaluate({
+      featureType: "sync",
+      rollupDate: new Date()
+    });
+    if (quotaDecision?.decision === "soft_block") {
+      sendFailure(res, 403, "当前配额已超限，无法发起组织同步");
+      return;
+    }
     const result = await deps.syncService.run(input);
     const job = await deps.syncJobs.getDetail(result.jobId);
     if (result.status === "failed") {

@@ -1037,6 +1037,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     }
 
+    await assertQuotaAllowsNewSession({
+      currentUser,
+      model: session.model,
+      featureType: "chat"
+    });
+
     sendSSE(res, "meta", {
       session_id: session.sessionId,
       thread_id: session.threadId,

@@ -41,12 +41,17 @@ export type UsageDailyRollupInput = {
 };
 
 export type ListUsageDailyRollupsInput = {
-  organizationId?: string;
+  organizationId?: string | null;
   rollupDate?: string | Date;
   scopeType?: UsageDailyRollupScopeType;
   scopeId?: string;
   model?: string;
   featureType?: string;
+};
+
+export type UsageDailyRollupDeleteInput = {
+  rollupDate: string | Date;
+  organizationId?: string | null;
 };
 
 type UsageDailyRollupRow = {
@@ -151,22 +156,30 @@ function mapUsageDailyRollup(row: UsageDailyRollupRow): UsageDailyRollupRecord {
 export class UsageRollupRepository {
   constructor(private readonly db: UsageRollupRepositoryDb) {}
 
-  async replaceDaily(input: { rollupDate: string | Date; organizationId?: string; records: UsageDailyRollupInput[] }): Promise<UsageDailyRollupRecord[]> {
+  async replaceDaily(input: { rollupDate: string | Date; organizationId?: string | null; records: UsageDailyRollupInput[] }): Promise<UsageDailyRollupRecord[]> {
     const rollupDate = toDayKey(input.rollupDate);
-    const organizationId = trimOrUndefined(input.organizationId);
-    const deleteWhere = {
-      ...(organizationId ? { organizationId } : {}),
-      rollupDate
-    };
-
-    await this.db.usageDailyRollup.deleteMany({ where: deleteWhere });
+    const explicitOrganizationId = input.organizationId === undefined ? undefined : input.organizationId === null ? null : trimOrUndefined(input.organizationId);
+    const targetOrganizationIds = explicitOrganizationId !== undefined
+      ? [explicitOrganizationId]
+      : [...new Set(input.records.map((record) => (record.organizationId === undefined ? null : trimOrUndefined(record.organizationId) ?? null)))];
+    const deleteTargets = targetOrganizationIds.length > 0
+      ? targetOrganizationIds
+      : [undefined];
+    for (const organizationId of deleteTargets) {
+      await this.db.usageDailyRollup.deleteMany({
+        where: {
+          ...(organizationId !== undefined ? { organizationId } : {}),
+          rollupDate
+        }
+      });
+    }
 
     const created: UsageDailyRollupRecord[] = [];
     for (const record of input.records) {
       const createdRow = await this.db.usageDailyRollup.create({
         data: {
           id: trimOrUndefined(record.id),
-          organizationId: trimOrUndefined(record.organizationId) ?? organizationId ?? null,
+          organizationId: trimOrUndefined(record.organizationId) ?? explicitOrganizationId ?? null,
           rollupDate,
           scopeType: record.scopeType,
           scopeId: trimOrUndefined(record.scopeId) ?? record.scopeId,
@@ -205,6 +218,13 @@ export class UsageRollupRepository {
     });
 
     return rows.map(mapUsageDailyRollup).sort(compareRollups);
+  }
+
+  async listByRollupDate(input: { rollupDate: string | Date; organizationId?: string | null }): Promise<UsageDailyRollupRecord[]> {
+    return this.list({
+      rollupDate: input.rollupDate,
+      organizationId: input.organizationId === undefined ? undefined : input.organizationId ?? null
+    });
   }
 }
 

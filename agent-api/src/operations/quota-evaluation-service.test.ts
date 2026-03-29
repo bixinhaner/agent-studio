@@ -6,22 +6,12 @@ import { UsageRollupRepository } from "../persistence/usage-rollup-repository.js
 import { QuotaEvaluationService } from "./quota-evaluation-service.js";
 
 describe("QuotaEvaluationService", () => {
-  it("prefers department override over platform policy", async () => {
+  it("evaluates matching department and platform policies without shadowing other metrics", async () => {
     const db = new FakeOperationsDb();
     const policies = new QuotaPolicyRepository(db as never);
     const rollups = new UsageRollupRepository(db as never);
     const service = new QuotaEvaluationService({ policies, rollups });
 
-    await policies.upsert({
-      organizationId: "org-1",
-      scopeType: "platform",
-      scopeId: "platform",
-      featureType: "chat",
-      metricType: "request_count",
-      windowType: "daily",
-      thresholdValue: "1",
-      enforcementMode: "soft_block"
-    });
     await policies.upsert({
       organizationId: "org-1",
       scopeType: "department",
@@ -32,25 +22,20 @@ describe("QuotaEvaluationService", () => {
       thresholdValue: "10",
       enforcementMode: "soft_block"
     });
+    await policies.upsert({
+      organizationId: "org-1",
+      scopeType: "platform",
+      scopeId: "platform",
+      featureType: "chat",
+      metricType: "total_tokens",
+      windowType: "daily",
+      thresholdValue: "100",
+      enforcementMode: "soft_block"
+    });
 
     await rollups.replaceDaily({
       rollupDate: "2026-03-30",
       records: [
-        {
-          organizationId: "org-1",
-          scopeType: "platform",
-          scopeId: "platform",
-          model: "gpt-5.4",
-          featureType: "chat",
-          requestCount: 2,
-          successCount: 2,
-          failureCount: 0,
-          inputTokens: 100,
-          cachedInputTokens: 0,
-          outputTokens: 20,
-          estimatedCost: "1.000000",
-          internalCost: "1.500000"
-        },
         {
           organizationId: "org-1",
           scopeType: "department",
@@ -60,9 +45,24 @@ describe("QuotaEvaluationService", () => {
           requestCount: 2,
           successCount: 2,
           failureCount: 0,
-          inputTokens: 100,
-          cachedInputTokens: 0,
-          outputTokens: 20,
+          inputTokens: 40,
+          cachedInputTokens: 20,
+          outputTokens: 10,
+          estimatedCost: "1.000000",
+          internalCost: "1.500000"
+        },
+        {
+          organizationId: "org-1",
+          scopeType: "platform",
+          scopeId: "platform",
+          model: "gpt-5.4",
+          featureType: "chat",
+          requestCount: 2,
+          successCount: 2,
+          failureCount: 0,
+          inputTokens: 80,
+          cachedInputTokens: 30,
+          outputTokens: 10,
           estimatedCost: "1.000000",
           internalCost: "1.500000"
         }
@@ -77,11 +77,12 @@ describe("QuotaEvaluationService", () => {
       featureType: "chat"
     });
 
-    expect(result.decision).toBe("allow");
-    expect(result.policy?.scopeType).toBe("department");
+    expect(result.decision).toBe("soft_block");
+    expect(result.evaluatedPolicies).toHaveLength(2);
+    expect(result.evaluatedPolicies?.map((item) => item.policy.scopeType)).toEqual(["department", "platform"]);
   });
 
-  it("soft-blocks when the matching platform policy is exceeded", async () => {
+  it("soft-blocks when any matching active policy is exceeded", async () => {
     const db = new FakeOperationsDb();
     const policies = new QuotaPolicyRepository(db as never);
     const rollups = new UsageRollupRepository(db as never);
@@ -127,6 +128,7 @@ describe("QuotaEvaluationService", () => {
     });
 
     expect(result.decision).toBe("soft_block");
+    expect(result.evaluatedPolicies).toHaveLength(1);
     expect(result.policy?.metricType).toBe("total_tokens");
   });
 });

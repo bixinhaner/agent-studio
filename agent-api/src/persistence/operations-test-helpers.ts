@@ -32,6 +32,18 @@ export type FakeUsageEventRow = {
   createdAt: Date;
 };
 
+export type FakeUsageEventFindManyWhere = {
+  organizationId?: string | null;
+  userId?: string;
+  departmentIdSnapshot?: string;
+  threadId?: string;
+  sessionId?: string;
+  model?: string;
+  featureType?: string;
+  resultStatus?: string;
+  createdAt?: { gte?: Date; lt?: Date };
+};
+
 export type FakeUsageDailyRollupRow = {
   id: string;
   organizationId: string | null;
@@ -176,16 +188,17 @@ export class FakeOperationsDb {
       orderBy,
       take
     }: {
-      where?: {
-        model?: string;
-        featureType?: string;
-        resultStatus?: string;
-        sessionId?: string;
-      };
+      where?: FakeUsageEventFindManyWhere;
       orderBy?: { createdAt?: "asc" | "desc" };
       take?: number;
     } = {}) => {
       const rows = this.usageEvents.filter((item) => {
+        if ("organizationId" in (where ?? {}) && item.organizationId !== (where?.organizationId ?? null)) return false;
+        if (where?.userId && item.userId !== where.userId) return false;
+        if (where?.departmentIdSnapshot && item.departmentIdSnapshot !== where.departmentIdSnapshot) return false;
+        if (where?.threadId && item.threadId !== where.threadId) return false;
+        if (where?.createdAt?.gte && item.createdAt < where.createdAt.gte) return false;
+        if (where?.createdAt?.lt && item.createdAt >= where.createdAt.lt) return false;
         if (where?.model && item.model !== where.model) return false;
         if (where?.featureType && item.featureType !== where.featureType) return false;
         if (where?.resultStatus && item.resultStatus !== where.resultStatus) return false;

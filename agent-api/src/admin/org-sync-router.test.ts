@@ -119,6 +119,7 @@ function buildApp(options?: {
   user?: AuthenticatedUser;
   syncService?: { run: ReturnType<typeof vi.fn> };
   syncJobs?: FakeSyncJobRepository;
+  quotaChecks?: { evaluate: ReturnType<typeof vi.fn> };
 }) {
   const users = new FakeUserRepository();
   const user = options?.user ?? makeUser();
@@ -140,11 +141,16 @@ function buildApp(options?: {
     "/api/admin/org-sync",
     requireCurrentUser,
     requireRole("admin"),
-    createOrgSyncRouter({
-      syncService:
-        options?.syncService ??
+      createOrgSyncRouter({
+        syncService:
+          options?.syncService ??
+          ({
+            run: vi.fn().mockResolvedValue({ jobId: "job-1", status: "succeeded" })
+          } as never),
+      quotaChecks:
+        options?.quotaChecks ??
         ({
-          run: vi.fn().mockResolvedValue({ jobId: "job-1", status: "succeeded" })
+          evaluate: vi.fn().mockResolvedValue({ decision: "allow", observedValue: 0 })
         } as never),
       syncJobs:
         options?.syncJobs ??
@@ -273,6 +279,25 @@ describe("org sync admin router", () => {
 
     expect(response.status).toBe(409);
     expect(response.body).toEqual({ detail: "org sync is already running" });
+  });
+
+  it("soft blocks manual org sync when quota checks reject the action", async () => {
+    const syncRun = vi.fn();
+    const quotaEvaluate = vi.fn().mockResolvedValue({ decision: "soft_block", observedValue: 10 });
+    const { app, cookies, user } = buildApp({
+      user: makeUser({ id: "admin-1", role: "admin" }),
+      syncService: { run: syncRun },
+      quotaChecks: { evaluate: quotaEvaluate }
+    });
+
+    const response = await request(app)
+      .post("/api/admin/org-sync/jobs")
+      .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ detail: "当前配额已超限，无法发起组织同步" });
+    expect(syncRun).not.toHaveBeenCalled();
+    expect(quotaEvaluate).toHaveBeenCalled();
   });
 
   it("surfaces provider failures as a 502 detail response", async () => {
