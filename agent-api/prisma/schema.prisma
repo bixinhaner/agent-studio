@@ -38,6 +38,7 @@ model User {
 
 model Role {
   id             String           @id @default(cuid())
+  /// Global roles use organizationId = NULL and rely on a partial unique index in SQL migration.
   organizationId String?          @map("organization_id")
   slug           String
   name           String
@@ -74,6 +75,7 @@ model UserRole {
   id        String   @id @default(cuid())
   userId    String   @map("user_id")
   roleId    String   @map("role_id")
+  /// At most one primary role per user is enforced by a partial unique index in SQL migration.
   isPrimary Boolean  @default(false) @map("is_primary")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

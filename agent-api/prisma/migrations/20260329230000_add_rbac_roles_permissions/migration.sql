@@ -71,10 +71,16 @@ CREATE TABLE "admin_audit_logs" (
 CREATE UNIQUE INDEX "roles_organization_id_slug_key" ON "roles"("organization_id", "slug");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "roles_global_slug_key" ON "roles"("slug") WHERE "organization_id" IS NULL;
+
+-- CreateIndex
 CREATE UNIQUE INDEX "permissions_key_key" ON "permissions"("key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_roles_user_id_role_id_key" ON "user_roles"("user_id", "role_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "user_roles_primary_per_user_key" ON "user_roles"("user_id") WHERE "is_primary" = true;
 
 -- CreateIndex
 CREATE INDEX "user_roles_user_id_is_primary_idx" ON "user_roles"("user_id", "is_primary");
