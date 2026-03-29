@@ -1,30 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { ResourcePolicyRepository } from "../persistence/resource-policy-repository.js";
+import {
+  ResourcePolicyRepository,
+  type ResourcePolicyEffect,
+  type ResourcePolicyResourceType,
+  type ResourcePolicySubjectType
+} from "../persistence/resource-policy-repository.js";
 import { PolicyService } from "./policy-service.js";
 
 type ExtendedResourceType = "workspace" | "knowledge_set" | "agent_mode" | "skill_package" | "run_profile";
-type PolicySubjectType = "role" | "department" | "user";
-type PolicyInput = {
-  subjectType: PolicySubjectType;
-  subjectId: string;
-  resourceType: ExtendedResourceType;
-  resourceId: string;
-  effect: "allow" | "deny";
-};
-
-type TestRepository = {
-  replacePolicies(policies: PolicyInput[]): Promise<unknown>;
-};
 
 type FakePolicyRow = {
   id: string;
   organizationId: string | null;
-  subjectType: string;
+  subjectType: ResourcePolicySubjectType;
   subjectId: string;
-  resourceType: string;
+  resourceType: ResourcePolicyResourceType;
   resourceId: string;
-  effect: string;
+  effect: ResourcePolicyEffect;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -41,7 +34,16 @@ class FakeResourcePolicyDb {
   constructor(readonly rows: FakePolicyRow[] = []) {}
 
   readonly resourcePolicy = {
-    findMany: async ({ where, orderBy }: { where?: { resourceType?: string; OR?: Array<{ subjectType: string; subjectId: string }> }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+    findMany: async ({
+      where,
+      orderBy
+    }: {
+      where?: {
+        resourceType?: ResourcePolicyResourceType;
+        OR?: Array<{ subjectType: ResourcePolicySubjectType; subjectId: string }>;
+      };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    }) => {
       if (where?.resourceType && !this.supportedResourceTypes.has(where.resourceType as ExtendedResourceType)) {
         throw new Error(`unsupported resource type: ${where.resourceType}`);
       }
@@ -65,7 +67,10 @@ class FakeResourcePolicyDb {
     deleteMany: async ({
       where
     }: {
-      where: { resourceType?: string; OR?: Array<{ subjectType: string; subjectId: string }> };
+      where: {
+        resourceType?: ResourcePolicyResourceType;
+        OR?: Array<{ subjectType: ResourcePolicySubjectType; subjectId: string }>;
+      };
     }) => {
       const before = this.rows.length;
       const remaining = this.rows.filter((item) => {
@@ -87,11 +92,21 @@ class FakeResourcePolicyDb {
       const row: FakePolicyRow = {
         id: typeof data.id === "string" ? data.id : `policy-${this.rows.length + 1}`,
         organizationId: typeof data.organizationId === "string" ? data.organizationId : null,
-        subjectType: typeof data.subjectType === "string" ? data.subjectType : "",
+        subjectType:
+          data.subjectType === "role" || data.subjectType === "department" || data.subjectType === "user"
+            ? data.subjectType
+            : "user",
         subjectId: typeof data.subjectId === "string" ? data.subjectId : "",
-        resourceType: typeof data.resourceType === "string" ? data.resourceType : "",
+        resourceType:
+          data.resourceType === "workspace" ||
+          data.resourceType === "knowledge_set" ||
+          data.resourceType === "agent_mode" ||
+          data.resourceType === "skill_package" ||
+          data.resourceType === "run_profile"
+            ? data.resourceType
+            : "workspace",
         resourceId: typeof data.resourceId === "string" ? data.resourceId : "",
-        effect: typeof data.effect === "string" ? data.effect : "",
+        effect: data.effect === "allow" || data.effect === "deny" ? data.effect : "allow",
         createdAt: data.createdAt instanceof Date ? data.createdAt : now,
         updatedAt: data.updatedAt instanceof Date ? data.updatedAt : now
       };
@@ -260,14 +275,14 @@ describe("PolicyService", () => {
 });
 
 function createPolicyServiceForTest(): {
-  repository: TestRepository;
+  repository: ResourcePolicyRepository;
   service: PolicyService;
 } {
   const db = new FakeResourcePolicyDb();
-  const repository = new ResourcePolicyRepository(db as never) as unknown as TestRepository;
+  const repository = new ResourcePolicyRepository(db);
 
   return {
     repository,
-    service: new PolicyService(repository as never)
+    service: new PolicyService(repository)
   };
 }

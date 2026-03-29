@@ -3,12 +3,6 @@ import {
   type ResourcePolicyResourceType
 } from "../persistence/resource-policy-repository.js";
 
-export type PolicyResourceType =
-  | ResourcePolicyResourceType
-  | "agent_mode"
-  | "skill_package"
-  | "run_profile";
-
 export class PolicyService {
   constructor(private readonly policies: ResourcePolicyRepository) {}
 
@@ -16,7 +10,7 @@ export class PolicyService {
     userId: string;
     roleIds: string[];
     departmentIds: string[];
-    resourceType: PolicyResourceType;
+    resourceType: ResourcePolicyResourceType;
     candidateIds: string[];
   }): Promise<string[]> {
     if (input.candidateIds.length === 0) {
@@ -24,7 +18,7 @@ export class PolicyService {
     }
 
     const rows = await this.policies.listForSubjects({
-      resourceType: input.resourceType as ResourcePolicyResourceType,
+      resourceType: input.resourceType,
       subjectRefs: [
         ...input.roleIds.map((subjectId) => ({ subjectType: "role" as const, subjectId })),
         ...input.departmentIds.map((subjectId) => ({ subjectType: "department" as const, subjectId })),

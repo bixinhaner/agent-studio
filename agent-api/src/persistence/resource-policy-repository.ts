@@ -1,5 +1,10 @@
 export type ResourcePolicySubjectType = "role" | "department" | "user";
-export type ResourcePolicyResourceType = "workspace" | "knowledge_set";
+export type ResourcePolicyResourceType =
+  | "workspace"
+  | "knowledge_set"
+  | "agent_mode"
+  | "skill_package"
+  | "run_profile";
 export type ResourcePolicyEffect = "allow" | "deny";
 
 export type ResourcePolicyRecord = {
