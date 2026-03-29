@@ -96,7 +96,7 @@ type AdminDetailUser = {
   };
 };
 
-const ADMIN_EDITABLE_ROLES = new Set(["employee", "team_lead", "admin"]);
+const ADMIN_EDITABLE_ROLES = new Set(["employee", "admin"]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;

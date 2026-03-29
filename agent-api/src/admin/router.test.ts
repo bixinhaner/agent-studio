@@ -1205,14 +1205,14 @@ describe("admin and portal routers", () => {
     });
   });
 
-  it("rejects unsupported local user roles", async () => {
+  it.each(["super_admin", "team_lead"])("rejects unsupported local user role %s", async (role) => {
     const { app, cookies, user } = buildAdminApp();
 
     const response = await request(app)
       .patch("/api/admin/users/user-1/local-settings")
       .set("Cookie", cookies.create(user.id))
       .send({
-        role: "super_admin",
+        role,
         manualDisabled: false
       });
 
