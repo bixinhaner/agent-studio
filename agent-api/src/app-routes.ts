@@ -9,6 +9,7 @@ export function registerCommonApiRoutes(
     authRouter: Router;
     adminRouter: Router;
     resourcesAdminRouter?: Router;
+    modeAdminRouter?: Router;
     portalRouter: Router;
     resourcesPortalRouter?: Router;
     serviceTokenMiddleware: RequestHandler;
@@ -22,7 +23,8 @@ export function registerCommonApiRoutes(
     requireCurrentUser,
     requireRole("admin"),
     options.adminRouter,
-    options.resourcesAdminRouter ?? Router()
+    options.resourcesAdminRouter ?? Router(),
+    options.modeAdminRouter ?? Router()
   );
   app.use("/api/portal", requireCurrentUser, options.portalRouter, options.resourcesPortalRouter ?? Router());
   app.use("/api/integrations/zendesk", options.serviceTokenMiddleware, options.zendeskRouter);

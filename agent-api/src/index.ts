@@ -33,8 +33,12 @@ import {
 import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
+import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence/run-profile-repository.js";
+import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
+import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
 import { createPortalRouter } from "./portal/router.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
+import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
@@ -51,6 +55,9 @@ const departmentMemberships = new DepartmentMembershipRepository(db as unknown a
 const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
+const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
+const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
+const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
@@ -494,6 +501,11 @@ registerCommonApiRoutes(app, {
     resourcePolicies,
     storage: knowledgeSetStorage,
     validateFilesystemPath: resolveWorkspace
+  }),
+  modeAdminRouter: createModeAdminRouter({
+    runProfiles,
+    skillPackages,
+    agentModes
   }),
   portalRouter: createPortalRouter({
     workspaceWhitelist: appConfig.workspaceWhitelist,
