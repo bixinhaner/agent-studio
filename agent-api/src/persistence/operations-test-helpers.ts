@@ -32,6 +32,42 @@ export type FakeUsageEventRow = {
   createdAt: Date;
 };
 
+export type FakeUsageDailyRollupRow = {
+  id: string;
+  organizationId: string | null;
+  rollupDate: string;
+  scopeType: string;
+  scopeId: string;
+  model: string | null;
+  featureType: string | null;
+  requestCount: number;
+  successCount: number;
+  failureCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type FakeQuotaPolicyRow = {
+  id: string;
+  organizationId: string | null;
+  scopeType: string;
+  scopeId: string;
+  featureType: string | null;
+  model: string | null;
+  metricType: string;
+  windowType: string;
+  thresholdValue: string;
+  enforcementMode: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type FakeCostProfileRow = {
   id: string;
   organizationId: string | null;
@@ -52,11 +88,15 @@ function clone<T>(value: T): T {
 export class FakeOperationsDb {
   private resourceAccessLogCounter = 0;
   private usageEventCounter = 0;
+  private usageDailyRollupCounter = 0;
+  private quotaPolicyCounter = 0;
   private costProfileCounter = 0;
 
   constructor(
     readonly resourceAccessLogs: FakeResourceAccessLogRow[] = [],
     readonly usageEvents: FakeUsageEventRow[] = [],
+    readonly usageDailyRollups: FakeUsageDailyRollupRow[] = [],
+    readonly quotaPolicies: FakeQuotaPolicyRow[] = [],
     readonly costProfiles: FakeCostProfileRow[] = []
   ) {}
 
@@ -157,6 +197,170 @@ export class FakeOperationsDb {
         return orderBy?.createdAt === "desc" ? -diff : diff;
       });
       return clone(typeof take === "number" ? rows.slice(0, take) : rows);
+    }
+  };
+
+  readonly usageDailyRollup = {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      const now = new Date();
+      const row: FakeUsageDailyRollupRow = {
+        id: typeof data.id === "string" ? data.id : `usage-daily-rollup-${++this.usageDailyRollupCounter}`,
+        organizationId: typeof data.organizationId === "string" ? data.organizationId : null,
+        rollupDate: String(data.rollupDate ?? ""),
+        scopeType: String(data.scopeType ?? ""),
+        scopeId: String(data.scopeId ?? ""),
+        model: typeof data.model === "string" ? data.model : null,
+        featureType: typeof data.featureType === "string" ? data.featureType : null,
+        requestCount: Number(data.requestCount ?? 0),
+        successCount: Number(data.successCount ?? 0),
+        failureCount: Number(data.failureCount ?? 0),
+        inputTokens: Number(data.inputTokens ?? 0),
+        cachedInputTokens: Number(data.cachedInputTokens ?? 0),
+        outputTokens: Number(data.outputTokens ?? 0),
+        estimatedCost: String(data.estimatedCost ?? "0"),
+        internalCost: String(data.internalCost ?? "0"),
+        createdAt: data.createdAt instanceof Date ? data.createdAt : now,
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : now
+      };
+      this.usageDailyRollups.push(row);
+      return clone(row);
+    },
+    findMany: async ({
+      where,
+      orderBy
+    }: {
+      where?: {
+        organizationId?: string | null;
+        rollupDate?: string;
+        scopeType?: string;
+        scopeId?: string;
+        model?: string | null;
+        featureType?: string | null;
+      };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
+      const rows = this.usageDailyRollups.filter((item) => {
+        if ("organizationId" in (where ?? {}) && item.organizationId !== (where?.organizationId ?? null)) return false;
+        if (where?.rollupDate && item.rollupDate !== where.rollupDate) return false;
+        if (where?.scopeType && item.scopeType !== where.scopeType) return false;
+        if (where?.scopeId && item.scopeId !== where.scopeId) return false;
+        if ("model" in (where ?? {}) && item.model !== (where?.model ?? null)) return false;
+        if ("featureType" in (where ?? {}) && item.featureType !== (where?.featureType ?? null)) return false;
+        return true;
+      });
+      rows.sort((left, right) => {
+        const diff = left.createdAt.getTime() - right.createdAt.getTime();
+        return orderBy?.createdAt === "desc" ? -diff : diff;
+      });
+      return clone(rows);
+    },
+    deleteMany: async ({
+      where
+    }: {
+      where?: {
+        organizationId?: string | null;
+        rollupDate?: string;
+      };
+    } = {}) => {
+      const before = this.usageDailyRollups.length;
+      for (let index = this.usageDailyRollups.length - 1; index >= 0; index -= 1) {
+        const item = this.usageDailyRollups[index];
+        if ("organizationId" in (where ?? {}) && item.organizationId !== (where?.organizationId ?? null)) continue;
+        if (where?.rollupDate && item.rollupDate !== where.rollupDate) continue;
+        this.usageDailyRollups.splice(index, 1);
+      }
+      return { count: before - this.usageDailyRollups.length };
+    }
+  };
+
+  readonly quotaPolicy = {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      const now = new Date();
+      const row: FakeQuotaPolicyRow = {
+        id: typeof data.id === "string" ? data.id : `quota-policy-${++this.quotaPolicyCounter}`,
+        organizationId: typeof data.organizationId === "string" ? data.organizationId : null,
+        scopeType: String(data.scopeType ?? ""),
+        scopeId: String(data.scopeId ?? ""),
+        featureType: typeof data.featureType === "string" ? data.featureType : null,
+        model: typeof data.model === "string" ? data.model : null,
+        metricType: String(data.metricType ?? ""),
+        windowType: String(data.windowType ?? ""),
+        thresholdValue: String(data.thresholdValue ?? "0"),
+        enforcementMode: String(data.enforcementMode ?? "soft_block"),
+        isActive: typeof data.isActive === "boolean" ? data.isActive : true,
+        createdAt: data.createdAt instanceof Date ? data.createdAt : now,
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : now
+      };
+      this.quotaPolicies.push(row);
+      return clone(row);
+    },
+    update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const row = this.quotaPolicies.find((item) => item.id === where.id);
+      if (!row) throw new Error("quota policy not found");
+      Object.assign(row, clone(data));
+      row.updatedAt = data.updatedAt instanceof Date ? data.updatedAt : new Date();
+      return clone(row);
+    },
+    findFirst: async ({
+      where
+    }: {
+      where?: {
+        organizationId?: string | null;
+        scopeType?: string;
+        scopeId?: string;
+        featureType?: string | null;
+        model?: string | null;
+        metricType?: string;
+        windowType?: string;
+        isActive?: boolean;
+      };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
+      const row = this.quotaPolicies.find((item) => {
+        if ("organizationId" in (where ?? {}) && item.organizationId !== (where?.organizationId ?? null)) return false;
+        if (where?.scopeType && item.scopeType !== where.scopeType) return false;
+        if (where?.scopeId && item.scopeId !== where.scopeId) return false;
+        if ("featureType" in (where ?? {}) && item.featureType !== (where?.featureType ?? null)) return false;
+        if ("model" in (where ?? {}) && item.model !== (where?.model ?? null)) return false;
+        if (where?.metricType && item.metricType !== where.metricType) return false;
+        if (where?.windowType && item.windowType !== where.windowType) return false;
+        if (typeof where?.isActive === "boolean" && item.isActive !== where.isActive) return false;
+        return true;
+      });
+      return row ? clone(row) : null;
+    },
+    findMany: async ({
+      where,
+      orderBy
+    }: {
+      where?: {
+        organizationId?: string | null;
+        scopeType?: string;
+        scopeId?: string;
+        featureType?: string | null;
+        model?: string | null;
+        metricType?: string;
+        windowType?: string;
+        isActive?: boolean;
+      };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
+      const rows = this.quotaPolicies.filter((item) => {
+        if ("organizationId" in (where ?? {}) && item.organizationId !== (where?.organizationId ?? null)) return false;
+        if (where?.scopeType && item.scopeType !== where.scopeType) return false;
+        if (where?.scopeId && item.scopeId !== where.scopeId) return false;
+        if ("featureType" in (where ?? {}) && item.featureType !== (where?.featureType ?? null)) return false;
+        if ("model" in (where ?? {}) && item.model !== (where?.model ?? null)) return false;
+        if (where?.metricType && item.metricType !== where.metricType) return false;
+        if (where?.windowType && item.windowType !== where.windowType) return false;
+        if (typeof where?.isActive === "boolean" && item.isActive !== where.isActive) return false;
+        return true;
+      });
+      rows.sort((left, right) => {
+        const diff = left.createdAt.getTime() - right.createdAt.getTime();
+        return orderBy?.createdAt === "desc" ? -diff : diff;
+      });
+      return clone(rows);
     }
   };
 

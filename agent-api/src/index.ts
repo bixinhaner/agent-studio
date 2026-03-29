@@ -25,6 +25,7 @@ import {
   CostProfileRepository,
   type CostProfileRepositoryDb
 } from "./persistence/cost-profile-repository.js";
+import { QuotaPolicyRepository, type QuotaPolicyRepositoryDb } from "./persistence/quota-policy-repository.js";
 import {
   ResourceAccessLogRepository,
   type ResourceAccessLogRepositoryDb
@@ -47,6 +48,7 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
+import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
 import { RoleRepository, type RoleRepositoryDb } from "./persistence/role-repository.js";
 import { PermissionRepository, type PermissionRepositoryDb } from "./persistence/permission-repository.js";
@@ -65,6 +67,7 @@ import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
 import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
+import { QuotaEvaluationService } from "./operations/quota-evaluation-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
@@ -91,7 +94,9 @@ const departments = new DepartmentRepository(db as unknown as DepartmentReposito
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
+const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
+const quotaPolicies = new QuotaPolicyRepository(db as unknown as QuotaPolicyRepositoryDb);
 const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
@@ -104,6 +109,10 @@ const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogReposit
 const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
   costProfiles
+});
+const quotaEvaluation = new QuotaEvaluationService({
+  policies: quotaPolicies,
+  rollups: usageRollupRepository
 });
 const permissionService = new PermissionService({
   roles,
@@ -368,6 +377,25 @@ async function resolveSessionOptions(
   };
 }
 
+async function assertQuotaAllowsNewSession(input: {
+  currentUser: {
+    id: string;
+  };
+  model: string;
+  featureType: "chat";
+}): Promise<void> {
+  const departmentId = await departmentMemberships.getPreferredDepartmentIdForUser(input.currentUser.id);
+  const decision = await quotaEvaluation.evaluate({
+    departmentId: departmentId ?? undefined,
+    model: input.model,
+    featureType: input.featureType,
+    rollupDate: new Date()
+  });
+  if (decision.decision === "soft_block") {
+    throw new Error("当前配额已超限，无法创建新的会话");
+  }
+}
+
 async function ensureThreadSession(
   currentUser: {
     id: string;
@@ -445,6 +473,12 @@ async function ensureThreadSession(
   if (!changed && active) {
     return active;
   }
+
+  await assertQuotaAllowsNewSession({
+    currentUser,
+    model: desired.model,
+    featureType: "chat"
+  });
 
   if (active?.sessionId) {
     await sessions.remove(active.sessionId);
@@ -716,6 +750,11 @@ app.post("/api/session", async (req: Request, res: Response) => {
             knowledgeSetIds: input.knowledge_set_ids,
             codexRunConfig: nextSourceCodexRunConfig
           });
+          await assertQuotaAllowsNewSession({
+            currentUser,
+            model: (input.model || existing.model).trim(),
+            featureType: "chat"
+          });
           const updated = await replaceLiveRuntimeSession({
             runtime,
             liveRuntimeThreads,
@@ -743,11 +782,17 @@ app.post("/api/session", async (req: Request, res: Response) => {
       }
     }
 
-    const created = await createSession(await resolveSessionOptions(input, currentUser));
+    const sessionOptions = await resolveSessionOptions(input, currentUser);
+    await assertQuotaAllowsNewSession({
+      currentUser,
+      model: sessionOptions.model,
+      featureType: "chat"
+    });
+    const created = await createSession(sessionOptions);
     res.json(sessionOut(created));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "创建 session 失败";
-    res.status(400).json({ detail });
+    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
   }
 });
 
@@ -763,6 +808,11 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     const currentUser = req.currentUser!;
     const input = createThreadSchema.parse(req.body || {});
     const options = await resolveSessionOptions(input, currentUser);
+    await assertQuotaAllowsNewSession({
+      currentUser,
+      model: options.model,
+      featureType: "chat"
+    });
     const createdThread = await threads.create({
       userId: currentUser.id,
       title: input.title?.trim() || undefined,
@@ -781,7 +831,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "创建 thread 失败";
-    res.status(400).json({ detail });
+    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
   }
 });
 
@@ -857,7 +907,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     res.json({ session: sessionOut(session) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "确保 thread session 失败";
-    res.status(400).json({ detail });
+    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
   }
 });
 
