@@ -89,4 +89,69 @@ describe("UsersView", () => {
       });
     });
   });
+
+  it("filters users by synced profile text", async () => {
+    mockedFetchAdminUsers.mockResolvedValue({
+      users: [
+        {
+          id: "user-1",
+          synced: {
+            displayName: "Alice",
+            email: "alice@example.com",
+            dingtalkUserId: "ding-u1",
+            dingtalkOpenId: null,
+            dingtalkCorpId: null,
+            departmentIds: ["dept-rd"],
+            primaryDepartmentId: "dept-rd"
+          },
+          local: {
+            role: "employee",
+            manualDisabled: false,
+            adminNote: null
+          },
+          effective: {
+            status: "active",
+            statusSource: "sync",
+            syncState: "active",
+            lastSyncedAt: "2026-03-29T10:00:00.000Z"
+          }
+        },
+        {
+          id: "user-2",
+          synced: {
+            displayName: "Bob",
+            email: "bob@example.com",
+            dingtalkUserId: "ding-u2",
+            dingtalkOpenId: null,
+            dingtalkCorpId: null,
+            departmentIds: ["dept-ops"],
+            primaryDepartmentId: "dept-ops"
+          },
+          local: {
+            role: "admin",
+            manualDisabled: false,
+            adminNote: null
+          },
+          effective: {
+            status: "active",
+            statusSource: "sync",
+            syncState: "active",
+            lastSyncedAt: "2026-03-29T10:00:00.000Z"
+          }
+        }
+      ]
+    });
+
+    render(<UsersView />);
+
+    expect(await screen.findByText("Alice")).toBeTruthy();
+    expect(screen.getByText("Bob")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("搜索用户"), { target: { value: "bob@" } });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Alice")).toBeNull();
+      expect(screen.getByText("Bob")).toBeTruthy();
+    });
+  });
 });

@@ -14,6 +14,7 @@ export function UsersView() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
+  const [filterText, setFilterText] = useState("");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [role, setRole] = useState("employee");
   const [manualDisabled, setManualDisabled] = useState(false);
@@ -46,6 +47,22 @@ export function UsersView() {
     () => users.find((item) => item.id === editingUserId) ?? null,
     [editingUserId, users]
   );
+  const filteredUsers = useMemo(() => {
+    const query = filterText.trim().toLowerCase();
+    if (!query) return users;
+    return users.filter((user) => {
+      const haystack = [
+        user.id,
+        user.synced.displayName ?? "",
+        user.synced.email ?? "",
+        user.synced.dingtalkUserId ?? "",
+        ...user.synced.departmentIds
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [filterText, users]);
 
   function openEditor(user: AdminUser) {
     setEditingUserId(user.id);
@@ -81,10 +98,20 @@ export function UsersView() {
           <p>只允许编辑本地治理字段，钉钉同步资料保持只读。</p>
         </div>
       </div>
+      <label className="field admin-inline-filter">
+        <span className="field-label">搜索用户</span>
+        <input
+          aria-label="搜索用户"
+          className="field-input"
+          value={filterText}
+          onChange={(event) => setFilterText(event.target.value)}
+          placeholder="姓名、邮箱、钉钉 ID、部门"
+        />
+      </label>
       {loading ? <p>加载中...</p> : null}
       {errorText ? <p className="err-text">{errorText}</p> : null}
       <div className="admin-user-list">
-        {users.map((user) => {
+        {filteredUsers.map((user) => {
           const title = user.synced.displayName || user.synced.email || user.id;
           return (
             <article key={user.id} className="admin-list-card">

@@ -1474,6 +1474,10 @@ body {
   margin-top: 16px;
 }
 
+.admin-inline-filter {
+  margin-top: 16px;
+}
+
 .admin-list-card,
 .admin-inline-editor {
   border: 1px solid #d6e2f3;
