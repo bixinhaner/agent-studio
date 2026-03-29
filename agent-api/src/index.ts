@@ -33,9 +33,9 @@ import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
 import {
   ensureThreadUploadInRunConfig,
-  extractRuntimeUsageFromStreamEvent,
   replaceLiveRuntimeSession,
-  startLiveRuntimeSession
+  startLiveRuntimeSession,
+  streamRuntimeCompletionWithBestEffortUsage
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
@@ -961,7 +961,6 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   try {
     const currentUser = req.currentUser!;
     const input = streamSchema.parse(req.body || {});
-    const departmentIds = await departmentMemberships.listIdsForUser(currentUser.id);
     const session = await sessions.getOwned(input.session_id, currentUser.id);
     const liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
     if (!session || !liveThread) {
@@ -997,40 +996,43 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       started_at: new Date().toISOString()
     });
 
-    let answer = "";
-    let latestUsage: ReturnType<typeof extractRuntimeUsageFromStreamEvent> | undefined;
-    for await (const event of runtime.runStreamed(liveThread, input.message)) {
-      const usage = extractRuntimeUsageFromStreamEvent(event);
-      if (usage) {
-        latestUsage = usage;
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: runtime.runStreamed(liveThread, input.message),
+      onEvent(event) {
+        sendSSE(res, "codex", event);
+      },
+      async onDone(payload) {
+        sendSSE(res, "done", {
+          session_id: session.sessionId,
+          answer: payload.answer,
+          completed_at: new Date().toISOString()
+        });
+      },
+      async recordUsage(usage) {
+        const departmentIdSnapshot = await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id);
+        await usageIngestion.record({
+          userId: currentUser.id,
+          departmentIdSnapshot,
+          threadId: session.threadId ?? undefined,
+          sessionId: session.sessionId,
+          model: session.model,
+          featureType: "chat",
+          inputTokens: usage.inputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          outputTokens: usage.outputTokens,
+          resultStatus: "success",
+          metadata: {
+            source: "chat_stream"
+          }
+        });
+      },
+      onTelemetryError(error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn("usage telemetry ingestion failed", {
+          sessionId: session.sessionId,
+          detail
+        });
       }
-      if (event.delta) answer += event.delta;
-      else if (event.text) answer += event.text;
-      sendSSE(res, "codex", event);
-    }
-
-    if (latestUsage) {
-      await usageIngestion.record({
-        userId: currentUser.id,
-        departmentIdSnapshot: departmentIds[0],
-        threadId: session.threadId ?? undefined,
-        sessionId: session.sessionId,
-        model: session.model,
-        featureType: "chat",
-        inputTokens: latestUsage.inputTokens,
-        cachedInputTokens: latestUsage.cachedInputTokens,
-        outputTokens: latestUsage.outputTokens,
-        resultStatus: "success",
-        metadata: {
-          source: "chat_stream"
-        }
-      });
-    }
-
-    sendSSE(res, "done", {
-      session_id: session.sessionId,
-      answer,
-      completed_at: new Date().toISOString()
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "聊天流失败";

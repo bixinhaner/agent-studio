@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { extractRuntimeUsageFromStreamEvent, replaceLiveRuntimeSession } from "./live-runtime-session.js";
+import {
+  extractRuntimeUsageFromStreamEvent,
+  replaceLiveRuntimeSession,
+  streamRuntimeCompletionWithBestEffortUsage
+} from "./live-runtime-session.js";
 
 describe("replaceLiveRuntimeSession", () => {
   it("replaces the live runtime thread for an existing session update", async () => {
@@ -115,5 +119,50 @@ describe("extractRuntimeUsageFromStreamEvent", () => {
         }
       })
     ).toBeUndefined();
+  });
+});
+
+describe("streamRuntimeCompletionWithBestEffortUsage", () => {
+  it("still emits done when telemetry recording fails", async () => {
+    const onEvent = vi.fn();
+    const onDone = vi.fn();
+    const onTelemetryError = vi.fn();
+    const recordUsage = vi.fn(async () => {
+      throw new Error("telemetry unavailable");
+    });
+
+    async function* events() {
+      yield { type: "item.started", text: "hello " };
+      yield {
+        type: "turn.completed",
+        raw: {
+          usage: {
+            input_tokens: 100,
+            cached_input_tokens: 10,
+            output_tokens: 50
+          }
+        }
+      };
+      yield { type: "item.delta", delta: "world" };
+    }
+
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: events(),
+      onEvent,
+      onDone,
+      recordUsage,
+      onTelemetryError
+    });
+
+    expect(onDone).toHaveBeenCalledWith({
+      answer: "hello world",
+      usage: {
+        inputTokens: 100,
+        cachedInputTokens: 10,
+        outputTokens: 50
+      }
+    });
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(onTelemetryError).toHaveBeenCalledTimes(1);
   });
 });

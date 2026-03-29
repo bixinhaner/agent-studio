@@ -41,6 +41,12 @@ export class DepartmentMembershipRepository {
     return memberships.map((membership) => membership.departmentId);
   }
 
+  async getPreferredDepartmentIdForUser(userId: string): Promise<string | undefined> {
+    const memberships = await this.listForUser(userId);
+    const primary = memberships.find((membership) => membership.isPrimary);
+    return primary?.departmentId ?? memberships[0]?.departmentId;
+  }
+
   async listForUser(userId: string): Promise<Array<{ departmentId: string; isPrimary: boolean }>> {
     const normalizedUserId = trimOrUndefined(userId);
     if (!normalizedUserId) return [];

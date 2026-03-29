@@ -6,6 +6,14 @@ export type RuntimeUsageSnapshot = {
   outputTokens: number;
 };
 
+type RuntimeStreamEvent = {
+  type?: string;
+  delta?: string;
+  text?: string;
+  raw?: unknown;
+  usage?: unknown;
+};
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -52,6 +60,40 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
     cachedInputTokens,
     outputTokens
   };
+}
+
+export async function streamRuntimeCompletionWithBestEffortUsage(input: {
+  events: AsyncIterable<RuntimeStreamEvent>;
+  onEvent(event: RuntimeStreamEvent): void;
+  onDone(payload: { answer: string; usage?: RuntimeUsageSnapshot }): void | Promise<void>;
+  recordUsage?(usage: RuntimeUsageSnapshot): Promise<void>;
+  onTelemetryError?(error: unknown): void;
+}): Promise<void> {
+  let answer = "";
+  let latestUsage: RuntimeUsageSnapshot | undefined;
+
+  for await (const event of input.events) {
+    const usage = extractRuntimeUsageFromStreamEvent(event);
+    if (usage) {
+      latestUsage = usage;
+    }
+    if (event.delta) answer += event.delta;
+    else if (event.text) answer += event.text;
+    input.onEvent(event);
+  }
+
+  await input.onDone({
+    answer,
+    usage: latestUsage
+  });
+
+  if (latestUsage && input.recordUsage) {
+    try {
+      await input.recordUsage(latestUsage);
+    } catch (error) {
+      input.onTelemetryError?.(error);
+    }
+  }
 }
 
 export function ensureThreadUploadInRunConfig(
