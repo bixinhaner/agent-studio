@@ -155,8 +155,15 @@ export class FakeRbacDb {
       });
       return row ? clone(row) : null;
     },
-    findMany: async ({ orderBy }: { orderBy?: { createdAt?: "asc" | "desc" } } = {}) => {
-      const rows = [...this.roles];
+    findMany: async ({
+      where,
+      orderBy
+    }: { where?: { slug?: string; organizationId?: string | null }; orderBy?: { createdAt?: "asc" | "desc" } } = {}) => {
+      const rows = this.roles.filter((item) => {
+        if (where?.slug && item.slug !== where.slug) return false;
+        if (where && "organizationId" in where && item.organizationId !== (where.organizationId ?? null)) return false;
+        return true;
+      });
       rows.sort((left, right) => {
         const diff = left.createdAt.getTime() - right.createdAt.getTime();
         return orderBy?.createdAt === "desc" ? -diff : diff;

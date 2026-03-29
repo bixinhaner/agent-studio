@@ -44,7 +44,10 @@ type RoleRow = {
 
 type RoleTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<RoleRow | null>;
-  findMany(args?: { orderBy?: { createdAt?: "asc" | "desc" } }): Promise<RoleRow[]>;
+  findMany(args?: {
+    where?: { slug?: string; organizationId?: string | null };
+    orderBy?: { createdAt?: "asc" | "desc" };
+  }): Promise<RoleRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<RoleRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<RoleRow>;
 };
@@ -102,8 +105,20 @@ export class RoleRepository {
   async getBySlug(slug: string): Promise<RoleRecord | null> {
     const normalized = trimOrUndefined(slug);
     if (!normalized) return null;
-    const row = await this.db.role.findUnique({ where: { slug: normalized } });
-    return row ? mapRole(row) : null;
+
+    const globalRows = await this.db.role.findMany({
+      where: { slug: normalized, organizationId: null },
+      orderBy: { createdAt: "asc" }
+    });
+    if (globalRows[0]) {
+      return mapRole(globalRows[0]);
+    }
+
+    const rows = await this.db.role.findMany({
+      where: { slug: normalized },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows[0] ? mapRole(rows[0]) : null;
   }
 
   async create(input: CreateRoleInput): Promise<RoleRecord> {

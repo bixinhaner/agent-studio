@@ -75,4 +75,41 @@ describe("RoleRepository", () => {
     });
     expect(db.roles).toHaveLength(2);
   });
+
+  it("resolves global system roles before organization-scoped roles with the same slug", async () => {
+    const db = new FakeRbacDb([], [
+      {
+        id: "role-org-admin",
+        organizationId: "org-1",
+        slug: "admin",
+        name: "Org Admin",
+        description: null,
+        isSystem: false,
+        isActive: true,
+        createdAt: new Date("2026-03-29T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:00:00.000Z")
+      },
+      {
+        id: "role-global-admin",
+        organizationId: null,
+        slug: "admin",
+        name: "Admin",
+        description: null,
+        isSystem: true,
+        isActive: true,
+        createdAt: new Date("2026-03-29T00:01:00.000Z"),
+        updatedAt: new Date("2026-03-29T00:01:00.000Z")
+      }
+    ]);
+    const repository = new RoleRepository(db as never);
+
+    const role = await repository.getBySlug("admin");
+
+    expect(role).toMatchObject({
+      id: "role-global-admin",
+      organizationId: undefined,
+      slug: "admin",
+      isSystem: true
+    });
+  });
 });
