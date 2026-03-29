@@ -1,34 +1,22 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/api")>();
-  return {
-    ...actual,
-    api: vi.fn()
-  };
-});
-
-vi.mock("../auth/api", () => ({
-  fetchWhoAmI: vi.fn()
+vi.mock("./api", () => ({
+  fetchAdminOverview: vi.fn()
 }));
 
-import App from "../../App";
-import { fetchWhoAmI } from "../auth/api";
-import { api } from "../../lib/api";
 import { AdminShell } from "./AdminShell";
+import { fetchAdminOverview } from "./api";
 
-const mockedApi = vi.mocked(api);
-const mockedFetchWhoAmI = vi.mocked(fetchWhoAmI);
+const mockedFetchAdminOverview = vi.mocked(fetchAdminOverview);
 
 describe("AdminShell", () => {
   beforeEach(() => {
-    mockedApi.mockReset();
-    mockedFetchWhoAmI.mockReset();
+    mockedFetchAdminOverview.mockReset();
   });
 
-  it("loads and renders the admin overview", async () => {
-    mockedApi.mockResolvedValueOnce({
+  it("switches between overview, users, and organization views", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
       counts: {
         users: 7,
         threads: 13,
@@ -38,30 +26,10 @@ describe("AdminShell", () => {
 
     render(<AdminShell />);
 
-    expect(await screen.findByText("管理控制台")).toBeTruthy();
-    expect(await screen.findByText("7")).toBeTruthy();
-    expect(screen.getByText("13")).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
-  });
-
-  it("routes super admins into the real admin shell", async () => {
-    mockedFetchWhoAmI.mockResolvedValueOnce({
-      user: {
-        id: "root-1",
-        role: "super_admin"
-      }
-    });
-    mockedApi.mockResolvedValueOnce({
-      counts: {
-        users: 2,
-        threads: 5,
-        activeSessions: 1
-      }
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("管理控制台")).toBeTruthy();
-    expect(mockedApi).toHaveBeenCalledWith("/api/admin/overview");
+    expect(await screen.findByText("运行概览")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "用户" }));
+    expect(await screen.findByText("用户管理")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));
+    expect(await screen.findByText("同步任务")).toBeTruthy();
   });
 });

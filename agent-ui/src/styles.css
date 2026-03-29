@@ -1410,3 +1410,192 @@ body {
     left: 10px;
   }
 }
+
+
+.admin-shell-layout {
+  align-content: start;
+  justify-items: stretch;
+  overflow: auto;
+}
+
+.admin-shell-layout .admin-card {
+  width: min(1120px, 100%);
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.admin-nav-btn,
+.admin-action-btn,
+.admin-secondary-btn {
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid #c3d3ea;
+  padding: 0 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-nav-btn,
+.admin-secondary-btn {
+  background: #f8fbff;
+  color: #0f172a;
+}
+
+.admin-nav-btn.active,
+.admin-action-btn {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.admin-section-header,
+.admin-list-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-stack-grid {
+  width: min(1120px, 100%);
+  display: grid;
+  gap: 16px;
+}
+
+.admin-user-list,
+.admin-job-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-list-card,
+.admin-inline-editor {
+  border: 1px solid #d6e2f3;
+  border-radius: 16px;
+  padding: 16px;
+  background: #f8fbff;
+}
+
+.admin-list-card h3,
+.admin-list-card h4,
+.admin-inline-editor h3 {
+  margin: 0;
+}
+
+.admin-list-card p,
+.admin-inline-editor p {
+  margin: 6px 0 0;
+}
+
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 0;
+}
+
+.admin-detail-grid dt {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.admin-detail-grid dd {
+  margin: 6px 0 0;
+  font-weight: 600;
+}
+
+.field-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.admin-actions-row,
+.admin-trigger-inline,
+.admin-trigger-grid {
+  display: flex;
+  gap: 10px;
+}
+
+.admin-actions-row,
+.admin-trigger-grid {
+  flex-wrap: wrap;
+}
+
+.admin-trigger-grid {
+  margin-top: 16px;
+  align-items: center;
+}
+
+.admin-trigger-inline {
+  flex: 1;
+  min-width: 260px;
+}
+
+.admin-sync-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.admin-job-time,
+.department-tree-meta,
+.department-tree-count,
+.admin-integration-note,
+.admin-job-summary {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.department-tree-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding-left: 18px;
+}
+
+.department-tree-list.root {
+  padding-left: 0;
+}
+
+.department-tree-node + .department-tree-node {
+  margin-top: 10px;
+}
+
+.department-tree-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.department-tree-name {
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .admin-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-trigger-inline {
+    min-width: 100%;
+  }
+}
