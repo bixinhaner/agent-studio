@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import { ResourcePolicyRepository } from "../persistence/resource-policy-repository.js";
 import { PolicyService } from "./policy-service.js";
 
+type ExtendedResourceType = "workspace" | "knowledge_set" | "agent_mode" | "skill_package" | "run_profile";
+type PolicySubjectType = "role" | "department" | "user";
+type PolicyInput = {
+  subjectType: PolicySubjectType;
+  subjectId: string;
+  resourceType: ExtendedResourceType;
+  resourceId: string;
+  effect: "allow" | "deny";
+};
+
+type TestRepository = {
+  replacePolicies(policies: PolicyInput[]): Promise<unknown>;
+};
+
 type FakePolicyRow = {
   id: string;
   organizationId: string | null;
@@ -16,10 +30,21 @@ type FakePolicyRow = {
 };
 
 class FakeResourcePolicyDb {
+  readonly supportedResourceTypes = new Set<ExtendedResourceType>([
+    "workspace",
+    "knowledge_set",
+    "agent_mode",
+    "skill_package",
+    "run_profile"
+  ]);
+
   constructor(readonly rows: FakePolicyRow[] = []) {}
 
   readonly resourcePolicy = {
     findMany: async ({ where, orderBy }: { where?: { resourceType?: string; OR?: Array<{ subjectType: string; subjectId: string }> }; orderBy?: { createdAt?: "asc" | "desc" } }) => {
+      if (where?.resourceType && !this.supportedResourceTypes.has(where.resourceType as ExtendedResourceType)) {
+        throw new Error(`unsupported resource type: ${where.resourceType}`);
+      }
       const rows = this.rows.filter((item) => {
         if (where?.resourceType && item.resourceType !== where.resourceType) {
           return false;
@@ -187,17 +212,62 @@ describe("PolicyService", () => {
 
     expect(visible).toEqual(["knowledge-set-1"]);
   });
+
+  it.each([
+    ["agent_mode", "mode-chat", "mode-code", "mode-review"],
+    ["skill_package", "package-chat", "package-code", "package-review"],
+    ["run_profile", "profile-chat", "profile-code", "profile-review"]
+  ] as Array<[ExtendedResourceType, string, string, string]>)(
+    "filters %s through role, department, and user policies",
+    async (resourceType, allowedByRole, allowedByDepartment, deniedByUser) => {
+      const { repository, service } = createPolicyServiceForTest();
+
+      await repository.replacePolicies([
+        {
+          subjectType: "role",
+          subjectId: "employee",
+          resourceType,
+          resourceId: allowedByRole,
+          effect: "allow"
+        },
+        {
+          subjectType: "department",
+          subjectId: "dept-1",
+          resourceType,
+          resourceId: allowedByDepartment,
+          effect: "allow"
+        },
+        {
+          subjectType: "user",
+          subjectId: "user-1",
+          resourceType,
+          resourceId: deniedByUser,
+          effect: "deny"
+        }
+      ]);
+
+      const visible = await service.filterAllowedResources({
+        userId: "user-1",
+        roleIds: ["employee"],
+        departmentIds: ["dept-1"],
+        resourceType,
+        candidateIds: [allowedByRole, allowedByDepartment, deniedByUser]
+      });
+
+      expect(visible).toEqual([allowedByRole, allowedByDepartment]);
+    }
+  );
 });
 
 function createPolicyServiceForTest(): {
-  repository: ResourcePolicyRepository;
+  repository: TestRepository;
   service: PolicyService;
 } {
   const db = new FakeResourcePolicyDb();
-  const repository = new ResourcePolicyRepository(db as never);
+  const repository = new ResourcePolicyRepository(db as never) as unknown as TestRepository;
 
   return {
     repository,
-    service: new PolicyService(repository)
+    service: new PolicyService(repository as never)
   };
 }
