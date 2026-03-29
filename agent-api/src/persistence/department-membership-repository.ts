@@ -13,8 +13,8 @@ type DepartmentMembershipTable = {
   findMany(args: {
     where: { userId: string };
     orderBy?: { createdAt?: "asc" | "desc" };
-    select?: { departmentId?: boolean; isPrimary?: boolean };
-  }): Promise<Array<Pick<DepartmentMembershipRow, "departmentId" | "isPrimary">>>;
+    select?: { departmentId?: boolean; isPrimary?: boolean; source?: boolean };
+  }): Promise<Array<Pick<DepartmentMembershipRow, "departmentId" | "isPrimary" | "source">>>;
   deleteMany?(args: { where: { userId: string; source?: string } }): Promise<{ count: number }>;
   create?(args: { data: Record<string, unknown> }): Promise<DepartmentMembershipRow>;
 };
@@ -70,12 +70,24 @@ export class DepartmentMembershipRepository {
       throw new Error("department membership userId is required");
     }
 
-    const primaryCount = input.memberships.filter((membership) => membership.isPrimary).length;
-    if (primaryCount > 1) {
+    const incomingPrimaryCount = input.memberships.filter((membership) => membership.isPrimary).length;
+    if (incomingPrimaryCount > 1) {
       throw new Error("department memberships cannot contain multiple primary records");
     }
     if (!this.db.departmentMembership.deleteMany || !this.db.departmentMembership.create) {
       throw new Error("department membership repository does not support replacement");
+    }
+
+    const existingMemberships = await this.db.departmentMembership.findMany({
+      where: { userId: normalizedUserId },
+      orderBy: { createdAt: "asc" },
+      select: { departmentId: true, isPrimary: true, source: true }
+    });
+    const preservedPrimaryCount = existingMemberships.filter(
+      (membership) => membership.source !== "sync" && membership.isPrimary
+    ).length;
+    if (preservedPrimaryCount + incomingPrimaryCount > 1) {
+      throw new Error("department memberships cannot contain multiple primary records");
     }
 
     await this.db.$transaction(async (tx) => {

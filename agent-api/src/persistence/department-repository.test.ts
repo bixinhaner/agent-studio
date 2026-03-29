@@ -99,7 +99,7 @@ class FakeDepartmentDb {
     }: {
       where: { userId: string };
       orderBy?: { createdAt?: "asc" | "desc" };
-      select?: { departmentId?: boolean };
+      select?: { departmentId?: boolean; isPrimary?: boolean; source?: boolean };
     }) => {
       const rows = this.memberships.filter((item) => item.userId === where.userId);
       rows.sort((left, right) => {
@@ -110,7 +110,8 @@ class FakeDepartmentDb {
         return clone(
           rows.map((item) => ({
             departmentId: item.departmentId,
-            isPrimary: item.isPrimary
+            isPrimary: item.isPrimary,
+            source: item.source
           }))
         );
       }
@@ -237,6 +238,31 @@ describe("DepartmentMembershipRepository", () => {
           { departmentId: "dept-a", isPrimary: true },
           { departmentId: "dept-b", isPrimary: true }
         ]
+      })
+    ).rejects.toThrow(/primary/i);
+  });
+
+  it("rejects replacement when a preserved manual primary would conflict with an incoming synced primary", async () => {
+    const repository = new DepartmentMembershipRepository(
+      new FakeDepartmentDb([], [
+        {
+          id: "membership-manual-primary",
+          userId: "user-1",
+          departmentId: "dept-manual",
+          isPrimary: true,
+          source: "manual",
+          lastSyncedAt: null,
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        }
+      ]) as never
+    );
+
+    await expect(
+      repository.replaceSyncedMemberships({
+        userId: "user-1",
+        memberships: [{ departmentId: "dept-sync", isPrimary: true }],
+        syncedAt: new Date("2026-03-29T00:00:00.000Z")
       })
     ).rejects.toThrow(/primary/i);
   });
