@@ -14,7 +14,7 @@
 
 ### Backend
 
-- Create: `agent-api/prisma/migrations/<generated>_add_mode_skill_profile_models/migration.sql`
+- Create: `agent-api/prisma/migrations/*_add_mode_skill_profile_models/migration.sql`
 - Modify: `agent-api/prisma/schema.prisma`
 - Create: `agent-api/src/persistence/run-profile-repository.ts`
 - Create: `agent-api/src/persistence/run-profile-repository.test.ts`
@@ -54,7 +54,7 @@
 
 **Files:**
 - Modify: `agent-api/prisma/schema.prisma`
-- Create: `agent-api/prisma/migrations/<generated>_add_mode_skill_profile_models/migration.sql`
+- Create: `agent-api/prisma/migrations/*_add_mode_skill_profile_models/migration.sql`
 
 - [ ] **Step 1: Write a schema diff check for the new tables**
 
