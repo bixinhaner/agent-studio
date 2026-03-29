@@ -172,9 +172,6 @@ function getDepartmentExternalIds(record: Record<string, unknown> | null): strin
 }
 
 function getPrimaryDepartmentExternalId(record: Record<string, unknown> | null): string | undefined {
-  const explicitPrimary = getString(record, ["primaryDepartmentExternalId"]);
-  if (explicitPrimary) return explicitPrimary;
-
   for (const item of asArray(record?.dept_position_list)) {
     const entry = asRecord(item);
     if (entry?.is_main === true || entry?.is_main === 1 || entry?.is_main === "1") {
@@ -182,6 +179,9 @@ function getPrimaryDepartmentExternalId(record: Record<string, unknown> | null):
       if (deptId) return deptId;
     }
   }
+
+  const explicitPrimary = getString(record, ["primaryDepartmentExternalId"]);
+  if (explicitPrimary) return explicitPrimary;
 
   const departmentExternalIds = getDepartmentExternalIds(record);
   if (departmentExternalIds.length === 1) {
@@ -355,26 +355,31 @@ export function createDingTalkClient(
   const getAppAccessToken = async (): Promise<string> => {
     if (!appAccessTokenPromise) {
       appAccessTokenPromise = (async () => {
-        const resolved = getResolvedConfig();
-        const tokenPayload = await requestJson(
-          `${resolved.config.apiBaseUrl}/v1.0/oauth2/accessToken`,
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json"
+        try {
+          const resolved = getResolvedConfig();
+          const tokenPayload = await requestJson(
+            `${resolved.config.apiBaseUrl}/v1.0/oauth2/accessToken`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({
+                appKey: resolved.config.clientId,
+                appSecret: resolved.config.clientSecret
+              })
             },
-            body: JSON.stringify({
-              appKey: resolved.config.clientId,
-              appSecret: resolved.config.clientSecret
-            })
-          },
-          fetchImpl
-        );
-        const accessToken = getString(asRecord(tokenPayload), ["accessToken", "access_token"]);
-        if (!accessToken) {
-          throw new Error("DingTalk app access token request did not return an access token");
+            fetchImpl
+          );
+          const accessToken = getString(asRecord(tokenPayload), ["accessToken", "access_token"]);
+          if (!accessToken) {
+            throw new Error("DingTalk app access token request did not return an access token");
+          }
+          return accessToken;
+        } catch (error) {
+          appAccessTokenPromise = undefined;
+          throw error;
         }
-        return accessToken;
       })();
     }
 

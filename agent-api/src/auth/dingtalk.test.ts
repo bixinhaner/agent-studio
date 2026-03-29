@@ -118,6 +118,8 @@ describe("createDingTalkClient", () => {
                 userid: "u3",
                 name: "Carol",
                 dept_id_list: ["6", "7"],
+                primaryDepartmentExternalId: "6",
+                dept_position_list: [{ dept_id: "7", is_main: 1 }],
                 disable_status: 1,
                 active: false
               }
@@ -163,6 +165,7 @@ describe("createDingTalkClient", () => {
         userId: "u3",
         displayName: "Carol",
         departmentExternalIds: ["6", "7"],
+        primaryDepartmentExternalId: "7",
         lifecycleState: "disabled"
       }
     ]);
@@ -301,5 +304,52 @@ describe("createDingTalkClient", () => {
     );
 
     await expect(client.exchangeCode("auth-code")).rejects.toThrow(/unionId/i);
+  });
+
+  it("retries app token acquisition after a transient failure", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("temporary token outage"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "app-token-retry" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              dept_list: [{ dept_id: "2", name: "研发", parent_id: "0", order: 20 }]
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      );
+
+    const client = createDingTalkClient(
+      {
+        clientId: "ding-client-id",
+        clientSecret: "ding-client-secret",
+        redirectUri: "https://agent.example.com/auth/dingtalk/callback",
+        scope: "openid"
+      },
+      fetchMock
+    );
+
+    await expect(client.listDepartments({ parentId: "0" })).rejects.toThrow("temporary token outage");
+    await expect(client.listDepartments({ parentId: "0" })).resolves.toEqual([
+      {
+        externalId: "2",
+        name: "研发",
+        parentExternalId: "0",
+        sortOrder: 20
+      }
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
