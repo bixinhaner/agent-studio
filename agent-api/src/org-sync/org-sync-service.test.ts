@@ -238,7 +238,11 @@ class FakeOrgSyncDb {
     findMany: async ({ where }: { where: { userId: string } }) => {
       return clone(this.memberships.filter((item) => item.userId === where.userId));
     },
-    deleteMany: async ({ where }: { where: { userId: string; source?: string } }) => {
+    deleteMany: async ({
+      where
+    }: {
+      where: { userId: string; source?: string; departmentId?: { in: string[] } };
+    }) => {
       const before = this.memberships.length;
       this.memberships.splice(
         0,
@@ -246,6 +250,7 @@ class FakeOrgSyncDb {
         ...this.memberships.filter((item) => {
           if (item.userId !== where.userId) return true;
           if (where.source && item.source !== where.source) return true;
+          if (where.departmentId?.in && !where.departmentId.in.includes(item.departmentId)) return true;
           return false;
         })
       );
@@ -575,6 +580,14 @@ describe("OrgSyncService", () => {
               displayName: "Bob",
               departmentExternalIds: ["rd"],
               lifecycleState: "disabled"
+            },
+            {
+              userId: "ding-u3",
+              unionId: "union-3",
+              displayName: "Carol",
+              departmentExternalIds: ["rd"],
+              primaryDepartmentExternalId: "rd",
+              lifecycleState: "active"
             }
           ]
         }
@@ -615,6 +628,20 @@ describe("OrgSyncService", () => {
       "membership"
     ]);
     expect(detail?.diffs.length).toBeGreaterThan(0);
+    expect(detail?.diffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: "membership",
+          entityExternalId: "union-3",
+          changeType: "created",
+          afterPayload: {
+            userId: "union-3",
+            departmentExternalIds: ["rd"],
+            primaryDepartmentExternalId: "rd"
+          }
+        })
+      ])
+    );
     expect(detail?.events.map((event) => event.eventType)).toEqual([
       "remote_fetch_started",
       "remote_fetch_completed",
@@ -695,7 +722,26 @@ describe("OrgSyncService", () => {
     expect(result.status).toBe("succeeded");
     expect((await repositories.departments.getByExternalId("sales"))?.name).toBe("旧销售");
     expect((await repositories.departments.getByExternalId("rd"))?.name).toBe("研发");
+    const detail = await repositories.jobs.getDetail(result.jobId);
+    expect(detail?.diffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: "membership",
+          entityExternalId: "union-2",
+          changeType: "primary_changed",
+          afterPayload: {
+            userId: "union-2",
+            memberships: [
+              { departmentId: "platform", isPrimary: false },
+              { departmentId: "rd", isPrimary: true },
+              { departmentId: "sales", isPrimary: false }
+            ]
+          }
+        })
+      ])
+    );
     expect((await repositories.memberships.listForUser("user-u2"))).toEqual([
+      { departmentId: "department-sales", isPrimary: false },
       { departmentId: "department-rd", isPrimary: true },
       { departmentId: "department-1", isPrimary: false }
     ]);
@@ -760,7 +806,7 @@ describe("OrgSyncService", () => {
     });
   });
 
-  it("blocks overlapping runs for the same scope while one job is running", async () => {
+  it("blocks overlapping runs while any org sync job is running", async () => {
     const repositories = buildRepositories(
       {
         jobs: [
@@ -768,8 +814,8 @@ describe("OrgSyncService", () => {
             id: "job-1",
             organizationId: null,
             provider: "dingtalk",
-            scopeType: "department",
-            scopeExternalId: "rd",
+            scopeType: "full",
+            scopeExternalId: null,
             status: "running",
             triggerType: "manual",
             triggeredByUserId: "admin-1",

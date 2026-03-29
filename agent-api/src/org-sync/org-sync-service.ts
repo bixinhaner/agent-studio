@@ -150,10 +150,6 @@ function getDb(repository: { [key: string]: unknown }): OrgSyncDb {
   return db;
 }
 
-function scopeKey(input: OrgSyncRunInput): string {
-  return `${input.scopeType}:${trimOrUndefined(input.scopeExternalId) ?? ""}`;
-}
-
 function getSnapshotUserKey(user: UserSnapshot): string {
   return trimOrUndefined(user.unionId) ?? user.userId;
 }
@@ -401,7 +397,7 @@ function resolveUserStatus(
 }
 
 export class OrgSyncService {
-  private readonly activeScopes = new Set<string>();
+  private activeRun = false;
 
   constructor(private readonly dependencies: OrgSyncRepositories) {}
 
@@ -411,30 +407,25 @@ export class OrgSyncService {
       throw new Error(`scopeExternalId is required for ${input.scopeType} sync`);
     }
 
-    const key = scopeKey(input);
-    if (this.activeScopes.has(key)) {
-      throw new Error(`org sync for ${key} is already running`);
+    if (this.activeRun) {
+      throw new Error("org sync is already running");
     }
-    this.activeScopes.add(key);
-
-    const db = getDb(this.dependencies.jobs as unknown as { db: OrgSyncDb });
-    const activeJob = (await db.syncJob.findMany()).find((job) => {
-      const jobScopeKey = `${String(job.scopeType ?? "")}:${trimOrUndefined(job.scopeExternalId as string | null) ?? ""}`;
-      return (
-        jobScopeKey === key &&
-        RUNNING_JOB_STATUSES.has(String(job.status ?? "")) &&
-        String(job.provider ?? "dingtalk") === "dingtalk"
-      );
-    });
-    if (activeJob) {
-      this.activeScopes.delete(key);
-      throw new Error(`org sync for ${key} is already running`);
-    }
+    this.activeRun = true;
 
     let jobId = "";
     const startedAt = new Date();
 
     try {
+      const db = getDb(this.dependencies.jobs as unknown as { db: OrgSyncDb });
+      const activeJob = (await db.syncJob.findMany()).find(
+        (job) =>
+          RUNNING_JOB_STATUSES.has(String(job.status ?? "")) &&
+          String(job.provider ?? "dingtalk") === "dingtalk"
+      );
+      if (activeJob) {
+        throw new Error("org sync is already running");
+      }
+
       const createdJob = await this.dependencies.jobs.create({
         scopeType: input.scopeType,
         scopeExternalId: normalizedScopeExternalId,
@@ -466,7 +457,7 @@ export class OrgSyncService {
         }
       });
 
-      const diffData = await this.computeDiffs(snapshot, input.scopeType, normalizedScopeExternalId);
+      const diffData = await this.computeDiffs(snapshot, input.scopeType);
       await this.dependencies.jobs.appendEvent(jobId, {
         level: "info",
         eventType: "diff_summary",
@@ -474,7 +465,7 @@ export class OrgSyncService {
         payload: buildDiffSummary(diffData.diffs)
       });
 
-      await this.persistSnapshot(snapshot, diffData);
+      await this.persistSnapshot(snapshot, diffData, input.scopeType);
 
       await this.dependencies.jobs.replaceSnapshots(jobId, [
         {
@@ -520,6 +511,9 @@ export class OrgSyncService {
       await this.dependencies.jobs.markSucceeded(jobId, diffData.summary);
       return { jobId, status: "succeeded" };
     } catch (error) {
+      if (!jobId) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : "organization sync failed";
       if (jobId) {
         await this.dependencies.jobs.appendEvent(jobId, {
@@ -532,7 +526,7 @@ export class OrgSyncService {
       }
       return { jobId, status: "failed" };
     } finally {
-      this.activeScopes.delete(key);
+      this.activeRun = false;
     }
   }
 
@@ -546,11 +540,7 @@ export class OrgSyncService {
     return this.dependencies.provider.fetchUserScope(trimOrUndefined(input.scopeExternalId) ?? "");
   }
 
-  private async computeDiffs(
-    snapshot: NormalizedOrgSnapshot,
-    scopeType: OrgSyncScopeType,
-    scopeExternalId?: string
-  ): Promise<{
+  private async computeDiffs(snapshot: NormalizedOrgSnapshot, scopeType: OrgSyncScopeType): Promise<{
     diffs: SyncDiff[];
     summary: Record<string, unknown>;
     departmentRowsByExternalId: Map<string, DepartmentRow>;
@@ -561,8 +551,10 @@ export class OrgSyncService {
     const userRows = (await db.user.findMany()) as UserRow[];
 
     const departmentRowsByExternalId = new Map<string, DepartmentRow>();
+    const departmentRowsById = new Map<string, DepartmentRow>();
     for (const row of departmentRows) {
       departmentRowsByExternalId.set(row.externalId, row);
+      departmentRowsById.set(row.id, row);
     }
 
     const userRowsByKey = new Map<string, UserRow>();
@@ -592,13 +584,33 @@ export class OrgSyncService {
 
     for (const user of snapshot.users) {
       const beforeUser = userRowsByKey.get(getSnapshotUserKey(user)) ?? userRowsByKey.get(user.userId) ?? null;
-      if (!beforeUser) continue;
+      if (!beforeUser) {
+        if (user.departmentExternalIds.length > 0 || user.primaryDepartmentExternalId) {
+          diffs.push({
+            entityType: "membership",
+            entityExternalId: getSnapshotUserKey(user),
+            changeType: "created",
+            afterPayload: normalizeMembershipPayload({
+              userId: getSnapshotUserKey(user),
+              departmentExternalIds: user.departmentExternalIds,
+              primaryDepartmentExternalId: user.primaryDepartmentExternalId
+            })
+          });
+        }
+        continue;
+      }
       const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: beforeUser.id } })) as MembershipRow[];
       const current = currentMemberships.map((membership) => ({
-        departmentId: membership.departmentId,
+        departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
         isPrimary: Boolean(membership.isPrimary)
       }));
-      const target = this.resolveTargetMemberships(snapshot, user, departmentRowsByExternalId);
+      const target = this.resolveTargetMembershipsByExternalId(
+        user,
+        currentMemberships,
+        departmentRowsById,
+        scopeType,
+        new Set(snapshot.departments.map((department) => department.externalId))
+      );
       const diff = compareMembership(current, target, getSnapshotUserKey(user));
       if (diff) diffs.push(diff);
     }
@@ -613,7 +625,8 @@ export class OrgSyncService {
 
   private async persistSnapshot(
     snapshot: NormalizedOrgSnapshot,
-    diffData: Awaited<ReturnType<OrgSyncService["computeDiffs"]>>
+    diffData: Awaited<ReturnType<OrgSyncService["computeDiffs"]>>,
+    scopeType: OrgSyncScopeType
   ): Promise<void> {
     const now = new Date();
     const departmentUpserts = snapshot.departments.map((department) => ({
@@ -685,10 +698,13 @@ export class OrgSyncService {
         continue;
       }
 
-      const memberships = this.resolveTargetMemberships(snapshot, user, departmentIdsByExternalId);
+      const memberships = this.resolveTargetMemberships(user, departmentIdsByExternalId);
       await this.dependencies.memberships.replaceSyncedMemberships({
         userId: existing.id,
         memberships,
+        ...(scopeType === "department"
+          ? { replaceDepartmentIds: [...new Set(snapshot.departments.map((department) => departmentIdsByExternalId.get(department.externalId)).filter(Boolean) as string[])] }
+          : {}),
         syncedAt: now
       });
     }
@@ -696,7 +712,6 @@ export class OrgSyncService {
   }
 
   private resolveTargetMemberships(
-    snapshot: NormalizedOrgSnapshot,
     user: UserSnapshot,
     departmentRowsByExternalId: Map<string, string | DepartmentRow>
   ): Array<{ departmentId: string; isPrimary: boolean }> {
@@ -721,5 +736,46 @@ export class OrgSyncService {
     }
 
     return memberships;
+  }
+
+  private resolveTargetMembershipsByExternalId(
+    user: UserSnapshot,
+    currentMemberships: MembershipRow[],
+    departmentRowsById: Map<string, DepartmentRow>,
+    scopeType: OrgSyncScopeType,
+    scopedDepartmentExternalIds: Set<string>
+  ): Array<{ departmentId: string; isPrimary: boolean }> {
+    const membershipExternalIds = new Set(user.departmentExternalIds);
+    if (user.primaryDepartmentExternalId) {
+      membershipExternalIds.add(user.primaryDepartmentExternalId);
+    }
+
+    const memberships = [...membershipExternalIds].map((departmentExternalId) => ({
+      departmentId: departmentExternalId,
+      isPrimary: departmentExternalId === user.primaryDepartmentExternalId
+    }));
+
+    if (scopeType === "department") {
+      const incomingHasPrimary = memberships.some((membership) => membership.isPrimary);
+      for (const currentMembership of currentMemberships) {
+        const departmentExternalId = departmentRowsById.get(currentMembership.departmentId)?.externalId;
+        if (!departmentExternalId || scopedDepartmentExternalIds.has(departmentExternalId)) {
+          continue;
+        }
+        if (memberships.some((membership) => membership.departmentId === departmentExternalId)) {
+          continue;
+        }
+        memberships.push({
+          departmentId: departmentExternalId,
+          isPrimary: currentMembership.source === "sync" && incomingHasPrimary ? false : Boolean(currentMembership.isPrimary)
+        });
+      }
+    }
+
+    if (!user.primaryDepartmentExternalId && memberships.length === 1) {
+      memberships[0]!.isPrimary = true;
+    }
+
+    return memberships.sort((left, right) => left.departmentId.localeCompare(right.departmentId));
   }
 }

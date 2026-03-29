@@ -117,11 +117,16 @@ class FakeDepartmentDb {
       }
       return clone(rows);
     },
-    deleteMany: async ({ where }: { where: { userId: string; source?: string } }) => {
+    deleteMany: async ({
+      where
+    }: {
+      where: { userId: string; source?: string; departmentId?: { in: string[] } };
+    }) => {
       const before = this.memberships.length;
       const remaining = this.memberships.filter((item) => {
         if (item.userId !== where.userId) return true;
         if (where.source && item.source !== where.source) return true;
+        if (where.departmentId?.in && !where.departmentId.in.includes(item.departmentId)) return true;
         return false;
       });
       this.memberships.splice(0, this.memberships.length, ...remaining);
@@ -359,5 +364,43 @@ describe("DepartmentMembershipRepository", () => {
       source: "sync",
       isPrimary: false
     });
+  });
+
+  it("keeps out-of-scope synced memberships when replacing only a department-scoped subset", async () => {
+    const db = new FakeDepartmentDb([], [
+      {
+        id: "membership-sync-rd",
+        userId: "user-1",
+        departmentId: "dept-rd",
+        isPrimary: true,
+        source: "sync",
+        lastSyncedAt: new Date("2026-03-28T00:00:00.000Z"),
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      },
+      {
+        id: "membership-sync-sales",
+        userId: "user-1",
+        departmentId: "dept-sales",
+        isPrimary: false,
+        source: "sync",
+        lastSyncedAt: new Date("2026-03-28T00:00:00.000Z"),
+        createdAt: new Date("2026-03-28T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-28T00:00:00.000Z")
+      }
+    ]);
+    const repository = new DepartmentMembershipRepository(db as never);
+
+    await repository.replaceSyncedMemberships({
+      userId: "user-1",
+      memberships: [{ departmentId: "dept-platform", isPrimary: true }],
+      replaceDepartmentIds: ["dept-rd", "dept-platform"],
+      syncedAt: new Date("2026-03-29T00:00:00.000Z")
+    });
+
+    expect(await repository.listForUser("user-1")).toEqual([
+      { departmentId: "dept-sales", isPrimary: false },
+      { departmentId: "dept-platform", isPrimary: true }
+    ]);
   });
 });

@@ -15,7 +15,9 @@ type DepartmentMembershipTable = {
     orderBy?: { createdAt?: "asc" | "desc" };
     select?: { departmentId?: boolean; isPrimary?: boolean; source?: boolean };
   }): Promise<DepartmentMembershipRow[]>;
-  deleteMany?(args: { where: { userId: string; source?: string } }): Promise<{ count: number }>;
+  deleteMany?(args: {
+    where: { userId: string; source?: string; departmentId?: { in: string[] } };
+  }): Promise<{ count: number }>;
   create?(args: { data: Record<string, unknown> }): Promise<DepartmentMembershipRow>;
   update?(args: { where: { id: string }; data: Record<string, unknown> }): Promise<DepartmentMembershipRow>;
 };
@@ -64,6 +66,7 @@ export class DepartmentMembershipRepository {
     userId: string;
     memberships: Array<{ departmentId: string; isPrimary: boolean }>;
     syncedAt?: Date;
+    replaceDepartmentIds?: string[];
   }): Promise<void> {
     const normalizedUserId = trimOrUndefined(input.userId);
     if (!normalizedUserId) {
@@ -86,6 +89,10 @@ export class DepartmentMembershipRepository {
       where: { userId: normalizedUserId },
       orderBy: { createdAt: "asc" }
     });
+    const replaceDepartmentIds = new Set(
+      (input.replaceDepartmentIds ?? []).map((departmentId) => trimOrUndefined(departmentId)).filter(Boolean) as string[]
+    );
+    const scopedReplace = replaceDepartmentIds.size > 0;
 
     const incomingByDepartmentId = new Map<string, { departmentId: string; isPrimary: boolean }>();
     for (const membership of input.memberships) {
@@ -105,11 +112,26 @@ export class DepartmentMembershipRepository {
       | { kind: "preserved"; row: DepartmentMembershipRow; isPrimary: boolean; lastSyncedAt: Date | string | null }
       | { kind: "sync"; departmentId: string; isPrimary: boolean; lastSyncedAt: Date | null }
     >();
+    const incomingHasPrimary = [...incomingByDepartmentId.values()].some((membership) => membership.isPrimary);
 
     for (const membership of existingMemberships) {
       const departmentId = trimOrUndefined(membership.departmentId);
-      if (!departmentId || membership.source === "sync") continue;
+      if (!departmentId) continue;
       const incoming = incomingByDepartmentId.get(departmentId);
+
+      if (membership.source === "sync") {
+        if (scopedReplace && !replaceDepartmentIds.has(departmentId)) {
+          finalMemberships.set(departmentId, {
+            kind: "preserved",
+            row: membership,
+            isPrimary: incomingHasPrimary ? false : Boolean(membership.isPrimary),
+            lastSyncedAt: membership.lastSyncedAt ?? null
+          });
+          continue;
+        }
+        continue;
+      }
+
       finalMemberships.set(departmentId, {
         kind: "preserved",
         row: membership,
@@ -139,7 +161,8 @@ export class DepartmentMembershipRepository {
       await tx.departmentMembership.deleteMany!({
         where: {
           userId: normalizedUserId,
-          source: "sync"
+          source: "sync",
+          ...(scopedReplace ? { departmentId: { in: [...replaceDepartmentIds] } } : {})
         }
       });
 
