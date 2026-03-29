@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { replaceLiveRuntimeSession } from "./live-runtime-session.js";
+import { extractRuntimeUsageFromStreamEvent, replaceLiveRuntimeSession } from "./live-runtime-session.js";
 
 describe("replaceLiveRuntimeSession", () => {
   it("replaces the live runtime thread for an existing session update", async () => {
@@ -78,5 +78,42 @@ describe("replaceLiveRuntimeSession", () => {
         }
       }
     });
+  });
+});
+
+describe("extractRuntimeUsageFromStreamEvent", () => {
+  it("returns usage from a turn.completed event payload", () => {
+    expect(
+      extractRuntimeUsageFromStreamEvent({
+        type: "turn.completed",
+        raw: {
+          usage: {
+            input_tokens: 1200,
+            cached_input_tokens: 200,
+            output_tokens: 450
+          }
+        }
+      })
+    ).toEqual({
+      inputTokens: 1200,
+      cachedInputTokens: 200,
+      outputTokens: 450
+    });
+  });
+
+  it("ignores non terminal or malformed events", () => {
+    expect(extractRuntimeUsageFromStreamEvent({ type: "item.started" })).toBeUndefined();
+    expect(
+      extractRuntimeUsageFromStreamEvent({
+        type: "turn.completed",
+        raw: {
+          usage: {
+            input_tokens: -1,
+            cached_input_tokens: 2,
+            output_tokens: 3
+          }
+        }
+      })
+    ).toBeUndefined();
   });
 });

@@ -1,5 +1,11 @@
 import type { ReasoningEffort } from "./model-config.js";
 
+export type RuntimeUsageSnapshot = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+};
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -11,6 +17,41 @@ function normalizeAdditionalDirectories(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function toTokenCount(value: unknown): number | undefined {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return undefined;
+  return Math.round(numeric);
+}
+
+export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsageSnapshot | undefined {
+  const event = asRecord(value);
+  if (!event) return undefined;
+  const eventType = trimOrUndefined(typeof event.type === "string" ? event.type : undefined);
+  if (eventType !== "turn.completed") return undefined;
+
+  const raw = asRecord(event.raw);
+  const usage = asRecord(raw?.usage ?? event.usage);
+  if (!usage) return undefined;
+
+  const inputTokens = toTokenCount(usage.input_tokens);
+  const cachedInputTokens = toTokenCount(usage.cached_input_tokens);
+  const outputTokens = toTokenCount(usage.output_tokens);
+  if (inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    cachedInputTokens,
+    outputTokens
+  };
 }
 
 export function ensureThreadUploadInRunConfig(

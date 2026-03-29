@@ -21,9 +21,22 @@ import {
   DepartmentMembershipRepository,
   type DepartmentMembershipRepositoryDb
 } from "./persistence/department-membership-repository.js";
+import {
+  CostProfileRepository,
+  type CostProfileRepositoryDb
+} from "./persistence/cost-profile-repository.js";
+import {
+  ResourceAccessLogRepository,
+  type ResourceAccessLogRepositoryDb
+} from "./persistence/resource-access-log-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
-import { ensureThreadUploadInRunConfig, replaceLiveRuntimeSession, startLiveRuntimeSession } from "./live-runtime-session.js";
+import {
+  ensureThreadUploadInRunConfig,
+  extractRuntimeUsageFromStreamEvent,
+  replaceLiveRuntimeSession,
+  startLiveRuntimeSession
+} from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { SessionRepository, type SessionRepositoryDb } from "./persistence/session-repository.js";
@@ -33,6 +46,7 @@ import {
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
+import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
 import { RoleRepository, type RoleRepositoryDb } from "./persistence/role-repository.js";
 import { PermissionRepository, type PermissionRepositoryDb } from "./persistence/permission-repository.js";
@@ -50,6 +64,8 @@ import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
+import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
+import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
@@ -73,6 +89,9 @@ const adminAuditLogs = new AdminAuditLogRepository(db as unknown as AdminAuditLo
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
 const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
+const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
+const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
+const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
 const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
@@ -81,12 +100,20 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
+const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
+const usageIngestion = new UsageIngestionService({
+  usageEvents: usageEventRepository,
+  costProfiles
+});
 const permissionService = new PermissionService({
   roles,
   userRoles,
   rolePermissions
 });
-const requirePermission = createRequirePermission(permissionService);
+const requirePermission = createRequirePermission(permissionService, {
+  resourceAccessLogs,
+  listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+});
 const portalRuntimeOptions = new PortalRuntimeOptionService({
   modes: agentModes,
   workspaces,
@@ -98,7 +125,8 @@ const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   workspaces,
   knowledgeSets,
   policies: policyService,
-  storage: knowledgeSetStorage
+  storage: knowledgeSetStorage,
+  resourceAccessLogs
 });
 const zendesk = new ZendeskIntegrationService();
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
@@ -108,7 +136,8 @@ const orgSyncService = new OrgSyncService({
   departments,
   users,
   memberships: departmentMemberships,
-  jobs: syncJobs
+  jobs: syncJobs,
+  resourceAccessLogs
 });
 const orgSyncScheduler = new OrgSyncScheduler(orgSyncService, syncJobs, {
   enabled: appConfig.orgSync.enabled,
@@ -549,14 +578,17 @@ registerCommonApiRoutes(app, {
     threads,
     sessions: {
       countActive: async () => liveRuntimeThreads.size
-    }
+    },
+    syncService: orgSyncService,
+    orgSyncConfig: appConfig.orgSync
   }),
   resourcesAdminRouter: createResourcesAdminRouter({
     workspaces,
     knowledgeSets,
     resourcePolicies,
     storage: knowledgeSetStorage,
-    validateFilesystemPath: resolveWorkspace
+    validateFilesystemPath: resolveWorkspace,
+    resourceAccessLogs
   }),
   modeAdminRouter: createModeAdminRouter({
     runProfiles,
@@ -929,6 +961,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   try {
     const currentUser = req.currentUser!;
     const input = streamSchema.parse(req.body || {});
+    const departmentIds = await departmentMemberships.listIdsForUser(currentUser.id);
     const session = await sessions.getOwned(input.session_id, currentUser.id);
     const liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
     if (!session || !liveThread) {
@@ -965,10 +998,33 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
 
     let answer = "";
+    let latestUsage: ReturnType<typeof extractRuntimeUsageFromStreamEvent> | undefined;
     for await (const event of runtime.runStreamed(liveThread, input.message)) {
+      const usage = extractRuntimeUsageFromStreamEvent(event);
+      if (usage) {
+        latestUsage = usage;
+      }
       if (event.delta) answer += event.delta;
       else if (event.text) answer += event.text;
       sendSSE(res, "codex", event);
+    }
+
+    if (latestUsage) {
+      await usageIngestion.record({
+        userId: currentUser.id,
+        departmentIdSnapshot: departmentIds[0],
+        threadId: session.threadId ?? undefined,
+        sessionId: session.sessionId,
+        model: session.model,
+        featureType: "chat",
+        inputTokens: latestUsage.inputTokens,
+        cachedInputTokens: latestUsage.cachedInputTokens,
+        outputTokens: latestUsage.outputTokens,
+        resultStatus: "success",
+        metadata: {
+          source: "chat_stream"
+        }
+      });
     }
 
     sendSSE(res, "done", {
