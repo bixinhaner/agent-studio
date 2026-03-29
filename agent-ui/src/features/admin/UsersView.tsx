@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { fetchAdminUsers, patchAdminUserLocalSettings } from "./api";
 import type { AdminUser } from "./types";
+import { UserRoleEditor } from "../rbac/UserRoleEditor";
 
 function formatLocalTime(value: string | null): string {
   if (!value) return "未同步";
@@ -20,6 +21,7 @@ export function UsersView() {
   const [manualDisabled, setManualDisabled] = useState(false);
   const [adminNote, setAdminNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [roleEditorUserId, setRoleEditorUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -123,6 +125,9 @@ export function UsersView() {
                 <button type="button" className="admin-action-btn" onClick={() => openEditor(user)}>
                   编辑 {title}
                 </button>
+                <button type="button" className="admin-secondary-btn" onClick={() => setRoleEditorUserId(user.id)}>
+                  角色分配
+                </button>
               </div>
               <dl className="admin-detail-grid">
                 <div>
@@ -132,6 +137,10 @@ export function UsersView() {
                 <div>
                   <dt>状态</dt>
                   <dd>{user.effective.status}</dd>
+                </div>
+                <div>
+                  <dt>已分配角色</dt>
+                  <dd>{user.assignedRoles.map((role) => role.slug).join(", ") || "未分配"}</dd>
                 </div>
                 <div>
                   <dt>主部门</dt>
@@ -178,6 +187,13 @@ export function UsersView() {
             </button>
           </div>
         </section>
+      ) : null}
+      {roleEditorUserId ? (
+        <UserRoleEditor
+          userId={roleEditorUserId}
+          onSaved={() => setRoleEditorUserId(null)}
+          onCancel={() => setRoleEditorUserId(null)}
+        />
       ) : null}
     </section>
   );

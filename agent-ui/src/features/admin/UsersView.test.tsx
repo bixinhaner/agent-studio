@@ -37,6 +37,19 @@ describe("UsersView", () => {
             manualDisabled: false,
             adminNote: null
           },
+          assignedRoles: [
+            {
+              roleId: "role-employee",
+              slug: "employee",
+              name: "Employee",
+              isPrimary: true
+            }
+          ],
+          primaryRole: {
+            roleId: "role-employee",
+            slug: "employee",
+            name: "Employee"
+          },
           effective: {
             status: "active",
             statusSource: "sync",
@@ -62,6 +75,19 @@ describe("UsersView", () => {
           role: "admin",
           manualDisabled: true,
           adminNote: "temporary hold"
+        },
+        assignedRoles: [
+          {
+            roleId: "role-admin",
+            slug: "admin",
+            name: "Admin",
+            isPrimary: true
+          }
+        ],
+        primaryRole: {
+          roleId: "role-admin",
+          slug: "admin",
+          name: "Admin"
         },
         effective: {
           status: "disabled",
@@ -109,6 +135,19 @@ describe("UsersView", () => {
             manualDisabled: false,
             adminNote: null
           },
+          assignedRoles: [
+            {
+              roleId: "role-employee",
+              slug: "employee",
+              name: "Employee",
+              isPrimary: true
+            }
+          ],
+          primaryRole: {
+            roleId: "role-employee",
+            slug: "employee",
+            name: "Employee"
+          },
           effective: {
             status: "active",
             statusSource: "sync",
@@ -131,6 +170,19 @@ describe("UsersView", () => {
             role: "admin",
             manualDisabled: false,
             adminNote: null
+          },
+          assignedRoles: [
+            {
+              roleId: "role-admin",
+              slug: "admin",
+              name: "Admin",
+              isPrimary: true
+            }
+          ],
+          primaryRole: {
+            roleId: "role-admin",
+            slug: "admin",
+            name: "Admin"
           },
           effective: {
             status: "active",

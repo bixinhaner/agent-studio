@@ -1,4 +1,4 @@
-export type AdminSection = "overview" | "users" | "organization";
+export type AdminSection = "overview" | "users" | "organization" | "rbac";
 
 export type AdminOverview = {
   counts: {
@@ -34,6 +34,17 @@ export type AdminUser = {
     manualDisabled: boolean;
     adminNote: string | null;
   };
+  assignedRoles: Array<{
+    roleId: string;
+    slug: string;
+    name: string;
+    isPrimary: boolean;
+  }>;
+  primaryRole: {
+    roleId: string;
+    slug: string;
+    name: string;
+  } | null;
   effective: {
     status: string;
     statusSource: string;

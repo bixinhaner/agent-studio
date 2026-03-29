@@ -4,6 +4,7 @@ import { fetchAdminOverview } from "./api";
 import { AdminNav } from "./AdminNav";
 import { DepartmentTreeView } from "./DepartmentTreeView";
 import { OrgSyncView } from "./OrgSyncView";
+import { RolesView } from "../rbac/RolesView";
 import type { AdminOverview, AdminSection } from "./types";
 import { UsersView } from "./UsersView";
 
@@ -72,11 +73,12 @@ export function AdminShell() {
       <section className="admin-card">
         <p className="auth-eyebrow">Agent Studio Admin</p>
         <h1>管理控制台</h1>
-        <p className="admin-description">统一查看运行状态、用户治理和钉钉组织同步。</p>
+        <p className="admin-description">统一查看运行状态、用户治理、角色权限和钉钉组织同步。</p>
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
       {section === "users" ? <UsersView /> : null}
+      {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (
         <div className="admin-stack-grid">
           <DepartmentTreeView />
