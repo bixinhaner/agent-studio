@@ -1,14 +1,32 @@
 -- CreateEnum
-CREATE TYPE "ThreadStatus" AS ENUM ('active', 'archived');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ThreadStatus') THEN
+        CREATE TYPE "ThreadStatus" AS ENUM ('active', 'archived');
+    END IF;
+END
+$$;
 
 -- CreateEnum
-CREATE TYPE "MessageRole" AS ENUM ('user', 'assistant', 'system', 'tool');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'MessageRole') THEN
+        CREATE TYPE "MessageRole" AS ENUM ('user', 'assistant', 'system', 'tool');
+    END IF;
+END
+$$;
 
 -- CreateEnum
-CREATE TYPE "SessionStatus" AS ENUM ('active', 'ended', 'failed');
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'SessionStatus') THEN
+        CREATE TYPE "SessionStatus" AS ENUM ('active', 'ended', 'failed');
+    END IF;
+END
+$$;
 
 -- CreateTable
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "users" (
     "id" TEXT NOT NULL,
     "external_id" TEXT,
     "email" TEXT,
@@ -25,7 +43,7 @@ CREATE TABLE "users" (
 );
 
 -- CreateTable
-CREATE TABLE "threads" (
+CREATE TABLE IF NOT EXISTS "threads" (
     "id" TEXT NOT NULL,
     "user_id" TEXT,
     "title" TEXT,
@@ -44,7 +62,7 @@ CREATE TABLE "threads" (
 );
 
 -- CreateTable
-CREATE TABLE "messages" (
+CREATE TABLE IF NOT EXISTS "messages" (
     "id" TEXT NOT NULL,
     "thread_id" TEXT NOT NULL,
     "external_id" TEXT,
@@ -60,7 +78,7 @@ CREATE TABLE "messages" (
 );
 
 -- CreateTable
-CREATE TABLE "runtime_sessions" (
+CREATE TABLE IF NOT EXISTS "runtime_sessions" (
     "id" TEXT NOT NULL,
     "thread_id" TEXT,
     "user_id" TEXT,
@@ -77,46 +95,106 @@ CREATE TABLE "runtime_sessions" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_external_id_key" ON "users"("external_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "users_external_id_key" ON "users"("external_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_dingtalk_user_id_key" ON "users"("dingtalk_user_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "users_dingtalk_user_id_key" ON "users"("dingtalk_user_id");
 
 -- CreateIndex
-CREATE INDEX "users_email_idx" ON "users"("email");
+CREATE INDEX IF NOT EXISTS "users_email_idx" ON "users"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "threads_external_id_key" ON "threads"("external_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "threads_external_id_key" ON "threads"("external_id");
 
 -- CreateIndex
-CREATE INDEX "threads_user_id_idx" ON "threads"("user_id");
+CREATE INDEX IF NOT EXISTS "threads_user_id_idx" ON "threads"("user_id");
 
 -- CreateIndex
-CREATE INDEX "messages_thread_id_created_at_idx" ON "messages"("thread_id", "created_at");
+CREATE INDEX IF NOT EXISTS "messages_thread_id_created_at_idx" ON "messages"("thread_id", "created_at");
 
 -- CreateIndex
-CREATE INDEX "messages_thread_id_position_idx" ON "messages"("thread_id", "position");
+CREATE INDEX IF NOT EXISTS "messages_thread_id_position_idx" ON "messages"("thread_id", "position");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "messages_thread_id_external_id_key" ON "messages"("thread_id", "external_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "messages_thread_id_external_id_key" ON "messages"("thread_id", "external_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "runtime_sessions_external_id_key" ON "runtime_sessions"("external_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "runtime_sessions_external_id_key" ON "runtime_sessions"("external_id");
 
 -- CreateIndex
-CREATE INDEX "runtime_sessions_thread_id_idx" ON "runtime_sessions"("thread_id");
+CREATE INDEX IF NOT EXISTS "runtime_sessions_thread_id_idx" ON "runtime_sessions"("thread_id");
 
 -- CreateIndex
-CREATE INDEX "runtime_sessions_user_id_idx" ON "runtime_sessions"("user_id");
+CREATE INDEX IF NOT EXISTS "runtime_sessions_user_id_idx" ON "runtime_sessions"("user_id");
 
 -- AddForeignKey
-ALTER TABLE "threads" ADD CONSTRAINT "threads_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+    IF to_regclass('public.threads') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'threads_user_id_fkey'
+             AND conrelid = 'public.threads'::regclass
+       ) THEN
+        ALTER TABLE "threads"
+            ADD CONSTRAINT "threads_user_id_fkey"
+            FOREIGN KEY ("user_id") REFERENCES "users"("id")
+            ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END
+$$;
 
 -- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+    IF to_regclass('public.messages') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'messages_thread_id_fkey'
+             AND conrelid = 'public.messages'::regclass
+       ) THEN
+        ALTER TABLE "messages"
+            ADD CONSTRAINT "messages_thread_id_fkey"
+            FOREIGN KEY ("thread_id") REFERENCES "threads"("id")
+            ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END
+$$;
 
 -- AddForeignKey
-ALTER TABLE "runtime_sessions" ADD CONSTRAINT "runtime_sessions_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "threads"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+    IF to_regclass('public.runtime_sessions') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'runtime_sessions_thread_id_fkey'
+             AND conrelid = 'public.runtime_sessions'::regclass
+       ) THEN
+        ALTER TABLE "runtime_sessions"
+            ADD CONSTRAINT "runtime_sessions_thread_id_fkey"
+            FOREIGN KEY ("thread_id") REFERENCES "threads"("id")
+            ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END
+$$;
 
 -- AddForeignKey
-ALTER TABLE "runtime_sessions" ADD CONSTRAINT "runtime_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+    IF to_regclass('public.runtime_sessions') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'runtime_sessions_user_id_fkey'
+             AND conrelid = 'public.runtime_sessions'::regclass
+       ) THEN
+        ALTER TABLE "runtime_sessions"
+            ADD CONSTRAINT "runtime_sessions_user_id_fkey"
+            FOREIGN KEY ("user_id") REFERENCES "users"("id")
+            ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END
+$$;
