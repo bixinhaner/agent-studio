@@ -5,11 +5,6 @@ ALTER TABLE "users"
   ADD COLUMN "admin_note" TEXT,
   ADD COLUMN "last_synced_at" TIMESTAMP(3);
 
-ALTER TABLE "department_memberships"
-  ADD COLUMN "is_primary" BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN "source" TEXT NOT NULL DEFAULT 'sync',
-  ADD COLUMN "last_synced_at" TIMESTAMP(3);
-
 CREATE TABLE "departments" (
   "id" TEXT PRIMARY KEY,
   "organization_id" TEXT,
@@ -70,14 +65,10 @@ CREATE TABLE "sync_diffs" (
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX "department_memberships_department_id_created_at_idx" ON "department_memberships"("department_id", "created_at");
+CREATE INDEX "users_status_role_idx" ON "users"("status", "role");
 CREATE INDEX "departments_parent_department_id_idx" ON "departments"("parent_department_id");
 CREATE INDEX "sync_jobs_status_created_at_idx" ON "sync_jobs"("status", "created_at");
 CREATE INDEX "sync_jobs_scope_type_scope_external_id_idx" ON "sync_jobs"("scope_type", "scope_external_id");
 CREATE INDEX "sync_job_events_sync_job_id_created_at_idx" ON "sync_job_events"("sync_job_id", "created_at");
 CREATE INDEX "sync_snapshots_sync_job_id_entity_type_idx" ON "sync_snapshots"("sync_job_id", "entity_type");
 CREATE INDEX "sync_diffs_sync_job_id_entity_type_idx" ON "sync_diffs"("sync_job_id", "entity_type");
-
-ALTER TABLE "department_memberships"
-  ADD CONSTRAINT "department_memberships_department_id_fkey"
-  FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE CASCADE ON UPDATE CASCADE;
