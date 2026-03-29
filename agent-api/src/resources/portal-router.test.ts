@@ -14,6 +14,41 @@ import { createPortalRouter } from "../portal/router.js";
 import { PolicyService } from "./policy-service.js";
 import { createResourcesPortalRouter } from "./portal-router.js";
 
+type RuntimeOptionResponse = {
+  modes: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    runtimeProfile: {
+      id: string;
+      name: string;
+      slug: string;
+      status: string;
+      defaultModel: string;
+      allowedModels: string[];
+      defaultReasoningEffort: string;
+      sandboxMode: string;
+      approvalPolicy: string;
+      networkAccessEnabled: boolean;
+      webSearchMode: string;
+    };
+    allowDirectorySelection: boolean;
+    skillPackages: Array<{ id: string; label: string }>;
+    workspaces: Array<{
+      id: string;
+      label: string;
+      isDefault: boolean;
+      allowDirectorySelection: boolean;
+      directoryScope: string;
+      loadWorkspaceAgentsMd: boolean;
+    }>;
+    instructionSources: Array<{ sourceType: string; sourceRef: string; sortOrder: number }>;
+  }>;
+  workspaces: Array<{ id: string; label: string; isDefault: boolean }>;
+  canUpload: boolean;
+  defaults: { mode: string; workspace: string };
+};
+
 describe("resources portal router", () => {
   it("uses department memberships when computing visible portal resources", async () => {
     const { app, cookies, user } = buildPortalResourcesApp({
@@ -90,15 +125,46 @@ describe("resources portal router", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
-      modes: [{ id: "standard", label: "通用助手" }],
+      modes: [
+        {
+          id: "mode-code",
+          label: "代码助手",
+          description: "面向代码任务",
+          runtimeProfile: {
+            id: "profile-code",
+            name: "Coding Default",
+            slug: "profile-code",
+            status: "active",
+            defaultModel: "gpt-5.4",
+            allowedModels: ["gpt-5.4"],
+            defaultReasoningEffort: "high",
+            sandboxMode: "workspace-write",
+            approvalPolicy: "never",
+            networkAccessEnabled: true,
+            webSearchMode: "disabled"
+          },
+          allowDirectorySelection: true,
+          skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+          workspaces: [
+            {
+              id: "ws-docs",
+              label: "Docs",
+              isDefault: true,
+              allowDirectorySelection: true,
+              directoryScope: "descendants_only",
+              loadWorkspaceAgentsMd: true
+            }
+          ],
+          instructionSources: [{ sourceType: "inline_text", sourceRef: "Always write tests first.", sortOrder: 10 }]
+        }
+      ],
       workspaces: [
-        { id: "/workspace/default", label: "default", isDefault: true },
-        { id: "/workspace/shared", label: "shared", isDefault: false }
+        { id: "ws-docs", label: "Docs", isDefault: true }
       ],
       canUpload: true,
       defaults: {
-        mode: "standard",
-        workspace: "/workspace/default"
+        mode: "mode-code",
+        workspace: "ws-docs"
       }
     });
   });
@@ -264,6 +330,7 @@ function buildPortalResourcesApp(options?: {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  runtimeOptions?: RuntimeOptionResponse;
 }) {
   const users = new FakeUserRepository();
   const user = makeUser({ id: "employee-1", role: "employee" });
@@ -467,8 +534,51 @@ function buildPortalResourcesApp(options?: {
       }
     }),
     portalRouter: createPortalRouter({
-      workspaceWhitelist: ["/workspace/default", "/workspace/shared"],
-      defaultWorkspace: "/workspace/default"
+      runtimeOptions: {
+        resolve: async () =>
+          options?.runtimeOptions ?? {
+            modes: [
+              {
+                id: "mode-code",
+                label: "代码助手",
+                description: "面向代码任务",
+                runtimeProfile: {
+                  id: "profile-code",
+                  name: "Coding Default",
+                  slug: "profile-code",
+                  status: "active",
+                  defaultModel: "gpt-5.4",
+                  allowedModels: ["gpt-5.4"],
+                  defaultReasoningEffort: "high",
+                  sandboxMode: "workspace-write",
+                  approvalPolicy: "never",
+                  networkAccessEnabled: true,
+                  webSearchMode: "disabled"
+                },
+                allowDirectorySelection: true,
+                skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+                workspaces: [
+                  {
+                    id: "ws-docs",
+                    label: "Docs",
+                    isDefault: true,
+                    allowDirectorySelection: true,
+                    directoryScope: "descendants_only",
+                    loadWorkspaceAgentsMd: true
+                  }
+                ],
+                instructionSources: [{ sourceType: "inline_text", sourceRef: "Always write tests first.", sortOrder: 10 }]
+              }
+            ],
+            workspaces: [{ id: "ws-docs", label: "Docs", isDefault: true }],
+            canUpload: true,
+            defaults: {
+              mode: "mode-code",
+              workspace: "ws-docs"
+            }
+          }
+      },
+      listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
     }),
     resourcesPortalRouter: createResourcesPortalRouter({
       workspaces: workspaces as never,

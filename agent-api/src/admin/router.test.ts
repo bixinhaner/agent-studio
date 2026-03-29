@@ -13,6 +13,41 @@ import { createPortalRouter } from "../portal/router.js";
 import { IntegrationRepository } from "../persistence/integration-repository.js";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
 
+type RuntimeOptionResponse = {
+  modes: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    runtimeProfile: {
+      id: string;
+      name: string;
+      slug: string;
+      status: string;
+      defaultModel: string;
+      allowedModels: string[];
+      defaultReasoningEffort: string;
+      sandboxMode: string;
+      approvalPolicy: string;
+      networkAccessEnabled: boolean;
+      webSearchMode: string;
+    };
+    allowDirectorySelection: boolean;
+    skillPackages: Array<{ id: string; label: string }>;
+    workspaces: Array<{
+      id: string;
+      label: string;
+      isDefault: boolean;
+      allowDirectorySelection: boolean;
+      directoryScope: string;
+      loadWorkspaceAgentsMd: boolean;
+    }>;
+    instructionSources: Array<{ sourceType: string; sourceRef: string; sortOrder: number }>;
+  }>;
+  workspaces: Array<{ id: string; label: string; isDefault: boolean }>;
+  canUpload: boolean;
+  defaults: { mode: string; workspace: string };
+};
+
 class FakeUserRepository implements UserRepositoryLike {
   constructor(private readonly users = new Map<string, AuthenticatedUser>()) {}
 
@@ -96,6 +131,7 @@ function buildApp(options?: {
   user?: AuthenticatedUser;
   counts?: { users: number; threads: number; activeSessions: number };
   zendesk?: Pick<ZendeskIntegrationService, "getOverview">;
+  runtimeOptions?: RuntimeOptionResponse;
 }) {
   const users = new FakeUserRepository();
   const user = options?.user ?? makeUser();
@@ -186,8 +222,51 @@ function buildApp(options?: {
         } satisfies Pick<ZendeskIntegrationService, "getOverview">)
     }),
     portalRouter: createPortalRouter({
-      workspaceWhitelist: ["/workspace/default", "/workspace/shared"],
-      defaultWorkspace: "/workspace/default"
+      runtimeOptions: {
+        resolve: async () =>
+          options?.runtimeOptions ?? {
+            modes: [
+              {
+                id: "mode-code",
+                label: "代码助手",
+                description: "面向代码任务",
+                runtimeProfile: {
+                  id: "profile-code",
+                  name: "Coding Default",
+                  slug: "profile-code",
+                  status: "active",
+                  defaultModel: "gpt-5.4",
+                  allowedModels: ["gpt-5.4"],
+                  defaultReasoningEffort: "high",
+                  sandboxMode: "workspace-write",
+                  approvalPolicy: "never",
+                  networkAccessEnabled: true,
+                  webSearchMode: "disabled"
+                },
+                allowDirectorySelection: true,
+                skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+                workspaces: [
+                  {
+                    id: "/workspace/default",
+                    label: "default",
+                    isDefault: true,
+                    allowDirectorySelection: true,
+                    directoryScope: "descendants_only",
+                    loadWorkspaceAgentsMd: true
+                  }
+                ],
+                instructionSources: []
+              }
+            ],
+            workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+            canUpload: true,
+            defaults: {
+              mode: "mode-code",
+              workspace: "/workspace/default"
+            }
+          }
+      },
+      listDepartmentIdsForUser: async () => []
     }),
     serviceTokenMiddleware: (_req, _res, next) => {
       next();
@@ -287,8 +366,35 @@ describe("admin and portal routers", () => {
     expect(response.body).toEqual({
       modes: [
         {
-          id: "standard",
-          label: "通用助手"
+          id: "mode-code",
+          label: "代码助手",
+          description: "面向代码任务",
+          runtimeProfile: {
+            id: "profile-code",
+            name: "Coding Default",
+            slug: "profile-code",
+            status: "active",
+            defaultModel: "gpt-5.4",
+            allowedModels: ["gpt-5.4"],
+            defaultReasoningEffort: "high",
+            sandboxMode: "workspace-write",
+            approvalPolicy: "never",
+            networkAccessEnabled: true,
+            webSearchMode: "disabled"
+          },
+          allowDirectorySelection: true,
+          skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+          workspaces: [
+            {
+              id: "/workspace/default",
+              label: "default",
+              isDefault: true,
+              allowDirectorySelection: true,
+              directoryScope: "descendants_only",
+              loadWorkspaceAgentsMd: true
+            }
+          ],
+          instructionSources: []
         }
       ],
       workspaces: [
@@ -296,16 +402,11 @@ describe("admin and portal routers", () => {
           id: "/workspace/default",
           label: "default",
           isDefault: true
-        },
-        {
-          id: "/workspace/shared",
-          label: "shared",
-          isDefault: false
         }
       ],
       canUpload: true,
       defaults: {
-        mode: "standard",
+        mode: "mode-code",
         workspace: "/workspace/default"
       }
     });
