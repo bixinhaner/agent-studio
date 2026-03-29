@@ -1037,6 +1037,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     }
 
+    // Each streamed turn is a new costly action. Gate it before execution without
+    // terminating any turn that is already in flight.
     await assertQuotaAllowsNewSession({
       currentUser,
       model: session.model,

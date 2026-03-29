@@ -179,7 +179,7 @@ export class UsageRollupRepository {
       const createdRow = await this.db.usageDailyRollup.create({
         data: {
           id: trimOrUndefined(record.id),
-          organizationId: trimOrUndefined(record.organizationId) ?? explicitOrganizationId ?? null,
+          organizationId: explicitOrganizationId ?? trimOrUndefined(record.organizationId) ?? null,
           rollupDate,
           scopeType: record.scopeType,
           scopeId: trimOrUndefined(record.scopeId) ?? record.scopeId,

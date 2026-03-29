@@ -52,7 +52,11 @@ export class QuotaEvaluationService {
       isActive: true
     });
 
-    const policies = [...departmentPolicies, ...platformPolicies];
+    const policies = selectPoliciesForEvaluation({
+      departmentPolicies,
+      platformPolicies,
+      input
+    });
     const evaluatedPolicies: EvaluatedQuotaPolicy[] = [];
     let firstExceededPolicy: QuotaPolicyRecord | undefined;
     let firstObservedValue = 0;
@@ -140,6 +144,24 @@ function summarizeMetric(metricType: QuotaPolicyMetricType, rows: UsageDailyRoll
     case "internal_cost":
       return rows.reduce((sum, row) => sum + Number(row.internalCost), 0);
   }
+}
+
+function selectPoliciesForEvaluation(input: {
+  departmentPolicies: QuotaPolicyRecord[];
+  platformPolicies: QuotaPolicyRecord[];
+  input: QuotaEvaluationInput;
+}): QuotaPolicyRecord[] {
+  const matchingDepartmentPolicies = input.departmentPolicies.filter((policy) => matchesPolicyFilters(policy, input.input));
+  const departmentDimensions = new Set(matchingDepartmentPolicies.map(toPolicyDimensionKey));
+  const matchingPlatformPolicies = input.platformPolicies.filter((policy) => {
+    if (!matchesPolicyFilters(policy, input.input)) return false;
+    return !departmentDimensions.has(toPolicyDimensionKey(policy));
+  });
+  return [...matchingDepartmentPolicies, ...matchingPlatformPolicies];
+}
+
+function toPolicyDimensionKey(policy: QuotaPolicyRecord): string {
+  return [policy.metricType, policy.windowType].join("|");
 }
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
