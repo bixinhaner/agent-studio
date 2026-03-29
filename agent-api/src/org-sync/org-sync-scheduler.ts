@@ -53,7 +53,7 @@ export class OrgSyncScheduler {
 
     const intervalMs = Math.max(1, Math.trunc(this.options.intervalMinutes)) * 60_000;
     this.timer = this.setIntervalFn(() => {
-      void this.tick();
+      void this.tick().catch(() => undefined);
     }, intervalMs);
     this.timer?.unref?.();
   }

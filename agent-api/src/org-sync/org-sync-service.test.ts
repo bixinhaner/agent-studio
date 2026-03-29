@@ -235,8 +235,18 @@ class FakeOrgSyncDb {
   };
 
   readonly departmentMembership = {
-    findMany: async ({ where }: { where: { userId: string } }) => {
-      return clone(this.memberships.filter((item) => item.userId === where.userId));
+    findMany: async ({
+      where
+    }: {
+      where: { userId?: string; departmentId?: { in: string[] } };
+    }) => {
+      return clone(
+        this.memberships.filter((item) => {
+          if (where.userId && item.userId !== where.userId) return false;
+          if (where.departmentId?.in && !where.departmentId.in.includes(item.departmentId)) return false;
+          return true;
+        })
+      );
     },
     deleteMany: async ({
       where
@@ -745,6 +755,70 @@ describe("OrgSyncService", () => {
       { departmentId: "department-rd", isPrimary: true },
       { departmentId: "department-1", isPrimary: false }
     ]);
+  });
+
+  it("removes stale scoped sync memberships for users omitted from a department snapshot", async () => {
+    const repositories = buildRepositories(
+      {
+        departments: [
+          makeDepartment("department-root", "root", "总部"),
+          makeDepartment("department-rd", "rd", "研发", "department-root"),
+          makeDepartment("department-sales", "sales", "销售", "department-root")
+        ],
+        users: [
+          makeUser({
+            id: "user-u2",
+            externalId: "union-2",
+            displayName: "Bob",
+            dingtalkUserId: "ding-u2"
+          })
+        ],
+        memberships: [
+          makeMembership({ id: "membership-rd", userId: "user-u2", departmentId: "department-rd", isPrimary: true }),
+          makeMembership({ id: "membership-sales", userId: "user-u2", departmentId: "department-sales", isPrimary: false })
+        ]
+      },
+      {
+        department: {
+          departments: [{ externalId: "rd", name: "研发", parentExternalId: "root", sortOrder: 20 }],
+          users: []
+        }
+      }
+    );
+    const service = new OrgSyncService({
+      provider: repositories.provider as never,
+      departments: repositories.departments,
+      users: repositories.users,
+      memberships: repositories.memberships,
+      jobs: repositories.jobs
+    });
+
+    const result = await service.run({
+      scopeType: "department",
+      scopeExternalId: "rd",
+      triggerType: "manual",
+      triggeredByUserId: "admin-1"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(await repositories.memberships.listForUser("user-u2")).toEqual([
+      { departmentId: "department-sales", isPrimary: false }
+    ]);
+
+    const detail = await repositories.jobs.getDetail(result.jobId);
+    expect(detail?.diffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: "membership",
+          entityExternalId: "union-2",
+          changeType: "primary_changed",
+          afterPayload: {
+            userId: "union-2",
+            memberships: [{ departmentId: "sales", isPrimary: false }]
+          }
+        })
+      ])
+    );
   });
 
   it("preserves manual disables when DingTalk later reports the user active", async () => {
