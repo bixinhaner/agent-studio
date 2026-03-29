@@ -123,6 +123,7 @@ function normalizeUserIdentity(payload: unknown): DingTalkUserIdentity {
 }
 
 function normalizeLifecycleState(record: Record<string, unknown> | null): "active" | "disabled" | "departed" {
+  const disableStatus = record?.disable_status;
   const status = getString(record, [
     "lifecycleState",
     "lifecycle_state",
@@ -135,6 +136,9 @@ function normalizeLifecycleState(record: Record<string, unknown> | null): "activ
   if (status && ["departed", "left", "resigned"].includes(status)) {
     return "departed";
   }
+  if (disableStatus === true || disableStatus === 1 || disableStatus === "1") {
+    return "disabled";
+  }
   if (status && ["disabled", "inactive"].includes(status)) {
     return "disabled";
   }
@@ -142,7 +146,7 @@ function normalizeLifecycleState(record: Record<string, unknown> | null): "activ
     return "active";
   }
 
-  if (record?.enabled === false || record?.active === false) {
+  if (record?.enabled === false) {
     return "disabled";
   }
 
@@ -168,25 +172,20 @@ function getDepartmentExternalIds(record: Record<string, unknown> | null): strin
 }
 
 function getPrimaryDepartmentExternalId(record: Record<string, unknown> | null): string | undefined {
-  const explicitPrimary = getString(record, [
-    "primaryDepartmentExternalId",
-    "dept_id",
-    "deptId",
-    "departmentId",
-    "department_id"
-  ]);
-  if (explicitPrimary) {
-    return explicitPrimary;
+  const explicitPrimary = getString(record, ["primaryDepartmentExternalId"]);
+  if (explicitPrimary) return explicitPrimary;
+
+  for (const item of asArray(record?.dept_position_list)) {
+    const entry = asRecord(item);
+    if (entry?.is_main === true || entry?.is_main === 1 || entry?.is_main === "1") {
+      const deptId = getString(entry, ["dept_id", "deptId", "departmentId"]);
+      if (deptId) return deptId;
+    }
   }
 
-  for (const item of asArray(record?.leader_in_dept)) {
-    const entry = asRecord(item);
-    if (entry?.leader === true) {
-      const deptId = getString(entry, ["dept_id", "deptId", "departmentId"]);
-      if (deptId) {
-        return deptId;
-      }
-    }
+  const departmentExternalIds = getDepartmentExternalIds(record);
+  if (departmentExternalIds.length === 1) {
+    return departmentExternalIds[0];
   }
 
   return undefined;
@@ -280,6 +279,25 @@ async function requestJson(
   return payload;
 }
 
+function getErrorMessage(payload: unknown): string | undefined {
+  return getString(asRecord(payload), ["message", "msg", "errmsg", "error_description", "sub_msg"]);
+}
+
+async function requestTopApiJson(
+  input: string,
+  init: RequestInit,
+  fetchImpl: typeof fetch
+): Promise<unknown> {
+  const payload = await requestJson(input, init, fetchImpl);
+  const record = asRecord(payload);
+  const errcode = record?.errcode;
+  if (errcode === undefined || errcode === null || errcode === 0 || errcode === "0") {
+    return payload;
+  }
+
+  throw new Error(getErrorMessage(payload) ?? `DingTalk request failed (${String(errcode)})`);
+}
+
 export function resolveDingTalkConfig(config: DingTalkConfig):
   | { ok: true; config: Required<Pick<DingTalkConfig, "clientId" | "clientSecret" | "redirectUri" | "scope" | "apiBaseUrl">>; publicConfig: DingTalkPublicConfig }
   | { ok: false; missing: string[] } {
@@ -324,6 +342,62 @@ export function createDingTalkClient(
   config: DingTalkConfig,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
 ): DingTalkClient {
+  let appAccessTokenPromise: Promise<string> | undefined;
+
+  const getResolvedConfig = () => {
+    const resolved = resolveDingTalkConfig(config);
+    if (!resolved.ok) {
+      throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
+    }
+    return resolved;
+  };
+
+  const getAppAccessToken = async (): Promise<string> => {
+    if (!appAccessTokenPromise) {
+      appAccessTokenPromise = (async () => {
+        const resolved = getResolvedConfig();
+        const tokenPayload = await requestJson(
+          `${resolved.config.apiBaseUrl}/v1.0/oauth2/accessToken`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              appKey: resolved.config.clientId,
+              appSecret: resolved.config.clientSecret
+            })
+          },
+          fetchImpl
+        );
+        const accessToken = getString(asRecord(tokenPayload), ["accessToken", "access_token"]);
+        if (!accessToken) {
+          throw new Error("DingTalk app access token request did not return an access token");
+        }
+        return accessToken;
+      })();
+    }
+
+    return appAccessTokenPromise;
+  };
+
+  const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
+    const resolved = getResolvedConfig();
+    const accessToken = await getAppAccessToken();
+    return requestTopApiJson(
+      `${resolved.config.apiBaseUrl}${path}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-acs-dingtalk-access-token": accessToken
+        },
+        body: JSON.stringify(body)
+      },
+      fetchImpl
+    );
+  };
+
   return {
     async exchangeCode(code: string): Promise<DingTalkUserIdentity> {
       const normalizedCode = trimOrUndefined(code);
@@ -331,10 +405,7 @@ export function createDingTalkClient(
         throw new Error("DingTalk auth code is required");
       }
 
-      const resolved = resolveDingTalkConfig(config);
-      if (!resolved.ok) {
-        throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
-      }
+      const resolved = getResolvedConfig();
 
       const tokenPayload = await requestJson(
         `${resolved.config.apiBaseUrl}/v1.0/oauth2/userAccessToken`,
@@ -372,74 +443,43 @@ export function createDingTalkClient(
       return normalizeUserIdentity(userPayload);
     },
     async listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]> {
-      const resolved = resolveDingTalkConfig(config);
-      if (!resolved.ok) {
-        throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
-      }
-
       const parentId = normalizeString(input.parentId) ?? "0";
-      const payload = await requestJson(
-        `${resolved.config.apiBaseUrl}/v1.0/contact/departments?parentId=${encodeURIComponent(parentId)}`,
-        {
-          method: "GET"
-        },
-        fetchImpl
-      );
+      const payload = await requestOrgApi("/topapi/v2/department/listsub", { dept_id: parentId });
 
-      return getPayloadItems(payload, ["departments", "list"])
+      return getPayloadItems(payload, ["dept_list", "departments", "list"])
         .map((item) => normalizeDepartment(item))
         .filter((item): item is DingTalkDepartment => Boolean(item));
     },
     async listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]> {
-      const resolved = resolveDingTalkConfig(config);
-      if (!resolved.ok) {
-        throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
-      }
-
       const departmentId = normalizeString(input.departmentId);
       if (!departmentId) {
         throw new Error("DingTalk departmentId is required");
       }
 
-      const payload = await requestJson(
-        `${resolved.config.apiBaseUrl}/v1.0/contact/users?departmentId=${encodeURIComponent(departmentId)}`,
-        {
-          method: "GET"
-        },
-        fetchImpl
-      );
+      const payload = await requestOrgApi("/topapi/v2/user/list", { dept_id: departmentId });
 
       return getPayloadItems(payload, ["users", "list", "userlist"])
         .map((item) => normalizeOrganizationUser(item))
         .filter((item): item is DingTalkOrganizationUser => Boolean(item));
     },
     async getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null> {
-      const resolved = resolveDingTalkConfig(config);
-      if (!resolved.ok) {
-        throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
-      }
-
       const userId = normalizeString(input.userId);
       if (!userId) {
         throw new Error("DingTalk userId is required");
       }
 
-      const response = await fetchImpl(`${resolved.config.apiBaseUrl}/v1.0/contact/users/${encodeURIComponent(userId)}`, {
-        method: "GET"
-      });
-      if (response.status === 404) {
-        return null;
+      try {
+        const payload = await requestOrgApi("/topapi/v2/user/get", { userid: userId });
+        return normalizeOrganizationUser(asRecord(payload)?.result ?? payload);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          /not\s*found|not\s*exist|userid/i.test(error.message)
+        ) {
+          return null;
+        }
+        throw error;
       }
-
-      const payload = await readJson(response);
-      if (!response.ok) {
-        const message =
-          getString(asRecord(payload), ["message", "msg", "errmsg", "error_description"]) ??
-          `DingTalk request failed (${response.status})`;
-        throw new Error(message);
-      }
-
-      return normalizeOrganizationUser(asRecord(payload)?.result ?? payload);
     }
   };
 }

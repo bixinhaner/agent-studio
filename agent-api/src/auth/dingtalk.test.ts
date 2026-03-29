@@ -3,12 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { createDingTalkClient } from "./dingtalk.js";
 
 describe("createDingTalkClient", () => {
-  it("lists departments and normalizes the payload", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+  it("lists departments through the app-authorized server API", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "app-token-1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           result: {
-            departments: [
+            dept_list: [
               {
                 dept_id: "1",
                 name: "总部",
@@ -23,7 +31,7 @@ describe("createDingTalkClient", () => {
           headers: { "content-type": "application/json" }
         }
       )
-    );
+      );
 
     const client = createDingTalkClient(
       {
@@ -44,16 +52,44 @@ describe("createDingTalkClient", () => {
       }
     ]);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.dingtalk.com/v1.0/contact/departments?parentId=0",
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dingtalk.com/v1.0/oauth2/accessToken",
       expect.objectContaining({
-        method: "GET"
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appKey: "ding-client-id",
+          appSecret: "ding-client-secret"
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/topapi/v2/department/listsub",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-acs-dingtalk-access-token": "app-token-1"
+        },
+        body: JSON.stringify({
+          dept_id: "0"
+        })
       })
     );
   });
 
-  it("lists department users and normalizes lifecycle and department ids", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+  it("lists department users with explicit lifecycle mapping and main-department detection", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "app-token-2" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           result: {
@@ -65,14 +101,25 @@ describe("createDingTalkClient", () => {
                 org_email: "alice@example.com",
                 name: "Alice",
                 dept_id_list: ["1", "2", "1"],
-                leader_in_dept: [{ dept_id: "2", leader: true }],
+                dept_position_list: [
+                  { dept_id: "1", is_main: false },
+                  { dept_id: "2", is_main: true }
+                ],
                 active: true
               },
               {
                 userid: "u2",
                 name: "Bob",
                 department: [3],
+                active: false,
                 status: "resigned"
+              },
+              {
+                userid: "u3",
+                name: "Carol",
+                dept_id_list: ["6", "7"],
+                disable_status: 1,
+                active: false
               }
             ]
           }
@@ -82,7 +129,7 @@ describe("createDingTalkClient", () => {
           headers: { "content-type": "application/json" }
         }
       )
-    );
+      );
 
     const client = createDingTalkClient(
       {
@@ -109,20 +156,55 @@ describe("createDingTalkClient", () => {
         userId: "u2",
         displayName: "Bob",
         departmentExternalIds: ["3"],
+        primaryDepartmentExternalId: "3",
         lifecycleState: "departed"
+      },
+      {
+        userId: "u3",
+        displayName: "Carol",
+        departmentExternalIds: ["6", "7"],
+        lifecycleState: "disabled"
       }
     ]);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.dingtalk.com/v1.0/contact/users?departmentId=1",
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dingtalk.com/v1.0/oauth2/accessToken",
       expect.objectContaining({
-        method: "GET"
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appKey: "ding-client-id",
+          appSecret: "ding-client-secret"
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/topapi/v2/user/list",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-acs-dingtalk-access-token": "app-token-2"
+        },
+        body: JSON.stringify({
+          dept_id: "1"
+        })
       })
     );
   });
 
-  it("gets a single organization user and normalizes disabled state", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+  it("gets a single organization user through the server API and only falls back to primary when one department exists", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "app-token-3" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           result: {
@@ -132,8 +214,8 @@ describe("createDingTalkClient", () => {
             name: "Disabled User",
             email: "disabled@example.com",
             dept_id_list: ["8", "8"],
-            dept_id: "8",
-            enabled: false
+            disable_status: 0,
+            active: false
           }
         }),
         {
@@ -141,7 +223,7 @@ describe("createDingTalkClient", () => {
           headers: { "content-type": "application/json" }
         }
       )
-    );
+      );
 
     const client = createDingTalkClient(
       {
@@ -161,13 +243,33 @@ describe("createDingTalkClient", () => {
       email: "disabled@example.com",
       departmentExternalIds: ["8"],
       primaryDepartmentExternalId: "8",
-      lifecycleState: "disabled"
+      lifecycleState: "active"
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.dingtalk.com/v1.0/contact/users/u-disabled",
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dingtalk.com/v1.0/oauth2/accessToken",
       expect.objectContaining({
-        method: "GET"
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appKey: "ding-client-id",
+          appSecret: "ding-client-secret"
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/topapi/v2/user/get",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-acs-dingtalk-access-token": "app-token-3"
+        },
+        body: JSON.stringify({
+          userid: "u-disabled"
+        })
       })
     );
   });
