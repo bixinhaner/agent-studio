@@ -238,18 +238,30 @@ export class FakeRbacDb {
   };
 
   readonly userRole = {
-    findMany: async ({ where, orderBy }: { where?: { userId?: string; roleId?: string; roleIdIn?: string[] }; orderBy?: { createdAt?: "asc" | "desc" } } = {}) => {
+    findMany: async ({
+      where,
+      include,
+      orderBy
+    }: {
+      where?: { userId?: string; roleId?: string; roleIdIn?: string[] };
+      include?: { role?: boolean };
+      orderBy?: { createdAt?: "asc" | "desc" };
+    } = {}) => {
       const rows = this.userRoles.filter((item) => {
         if (where?.userId && item.userId !== where.userId) return false;
         if (where?.roleId && item.roleId !== where.roleId) return false;
         if (where?.roleIdIn && !where.roleIdIn.includes(item.roleId)) return false;
         return true;
       });
-      rows.sort((left, right) => {
+      const hydratedRows = rows.map((row) => ({
+        ...row,
+        role: include?.role ? this.roles.find((role) => role.id === row.roleId) ?? null : undefined
+      }));
+      hydratedRows.sort((left, right) => {
         const diff = left.createdAt.getTime() - right.createdAt.getTime();
         return orderBy?.createdAt === "desc" ? -diff : diff;
       });
-      return clone(rows);
+      return clone(hydratedRows);
     },
     deleteMany: async ({ where }: { where: { userId?: string; roleId?: string } }) => {
       const before = this.userRoles.length;

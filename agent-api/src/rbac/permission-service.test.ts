@@ -61,4 +61,26 @@ describe("PermissionService", () => {
 
     await expect(service.hasPermission({ userId: "root-1", legacyRole: "super_admin", permissionKey: "role.write" })).resolves.toBe(true);
   });
+
+  it("does not fall back to the legacy role when explicit assignments exist but are inactive", async () => {
+    const db = new FakeRbacDb(
+      [{ id: "user-1", externalId: null, email: null, displayName: null, role: "admin", status: "active", statusSource: "sync", syncState: "active", manualDisabled: false, adminNote: null, lastSyncedAt: null, dingtalkOpenId: null, dingtalkUserId: null, dingtalkCorpId: null, createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") }],
+      [
+        { id: "role-admin", organizationId: null, slug: "admin", name: "Admin", description: null, isSystem: true, isActive: true, createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") },
+        { id: "role-disabled-auditor", organizationId: null, slug: "auditor", name: "Auditor", description: null, isSystem: false, isActive: false, createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") }
+      ],
+      [
+        { id: "permission-role-read", key: "role.read", name: "Read roles", description: null, category: "role_management", isSystem: true, isActive: true, createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") }
+      ],
+      [
+        { id: "user-role-1", userId: "user-1", roleId: "role-disabled-auditor", isPrimary: true, createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") }
+      ],
+      [{ id: "binding-1", roleId: "role-admin", permissionId: "permission-role-read", createdAt: new Date("2026-03-29T00:00:00Z"), updatedAt: new Date("2026-03-29T00:00:00Z") }]
+    );
+
+    const service = buildPermissionServiceForTest(db);
+
+    await expect(service.listEffectiveRoleIdsForUser({ userId: "user-1", legacyRole: "admin" })).resolves.toEqual([]);
+    await expect(service.hasPermission({ userId: "user-1", legacyRole: "admin", permissionKey: "role.read" })).resolves.toBe(false);
+  });
 });

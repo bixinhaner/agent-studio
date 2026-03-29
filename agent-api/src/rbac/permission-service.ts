@@ -32,7 +32,7 @@ export class PermissionService {
         activeAssignedRoleIds.push(role.id);
       }
     }
-    if (activeAssignedRoleIds.length > 0) {
+    if (assignments.length > 0) {
       return [...new Set(activeAssignedRoleIds)];
     }
 

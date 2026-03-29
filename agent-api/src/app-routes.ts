@@ -7,6 +7,7 @@ export function registerCommonApiRoutes(
   options: {
     currentUserMiddleware: RequestHandler;
     authRouter: Router;
+    rbacAdminRouter?: Router;
     adminRouter: Router;
     resourcesAdminRouter?: Router;
     modeAdminRouter?: Router;
@@ -18,6 +19,7 @@ export function registerCommonApiRoutes(
 ): void {
   app.use(options.currentUserMiddleware);
   app.use("/api/auth", options.authRouter);
+  app.use("/api/admin/rbac", requireCurrentUser, options.rbacAdminRouter ?? Router());
   app.use(
     "/api/admin",
     requireCurrentUser,
