@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { RoleAuditView } from "./RoleAuditView";
 
 describe("RoleAuditView", () => {
-  it("renders audit entries", () => {
+  it("renders audit log entries", () => {
     render(
       <RoleAuditView
         auditLogs={[

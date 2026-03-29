@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cloneRole,
   createRole,
   disableRole,
   fetchRoleAuditLogs,
@@ -28,6 +29,7 @@ describe("rbac api helpers", () => {
     await fetchRoles();
     await fetchRoleDetail("role-1");
     await createRole({ slug: "ops", name: "Ops" });
+    await cloneRole("role-1", { slug: "ops-copy", name: "Ops Copy" });
     await disableRole("role-1");
     await putRolePermissions("role-1", { permissionIds: ["perm-1"] });
     await putRoleResourcePolicies("role-1", {
@@ -43,6 +45,7 @@ describe("rbac api helpers", () => {
       "http://127.0.0.1:8787/api/admin/roles",
       "http://127.0.0.1:8787/api/admin/roles/role-1",
       "http://127.0.0.1:8787/api/admin/roles",
+      "http://127.0.0.1:8787/api/admin/roles/role-1/clone",
       "http://127.0.0.1:8787/api/admin/roles/role-1/disable",
       "http://127.0.0.1:8787/api/admin/roles/role-1/permissions",
       "http://127.0.0.1:8787/api/admin/roles/role-1/resource-policies",

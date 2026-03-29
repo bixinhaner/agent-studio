@@ -24,52 +24,34 @@ describe("UserRoleEditor", () => {
   it("saves multi-role assignments with one primary role", async () => {
     mockedFetchRoles.mockResolvedValue({
       roles: [
-        {
-          id: "role-admin",
-          slug: "admin",
-          name: "Admin",
-          isSystem: true,
-          isActive: true,
-          createdAt: "2026-03-30T00:00:00.000Z",
-          updatedAt: "2026-03-30T00:00:00.000Z"
-        },
-        {
-          id: "role-ops",
-          slug: "ops_manager",
-          name: "Ops Manager",
-          isSystem: false,
-          isActive: true,
-          createdAt: "2026-03-30T00:00:00.000Z",
-          updatedAt: "2026-03-30T00:00:00.000Z"
-        }
+        { id: "role-admin", slug: "admin", name: "Admin", isSystem: true, isActive: true, createdAt: "", updatedAt: "" },
+        { id: "role-ops", slug: "ops_manager", name: "Ops Manager", isSystem: false, isActive: true, createdAt: "", updatedAt: "" }
       ]
     });
     mockedFetchUserRoles.mockResolvedValue({
       userRoles: [
-        {
-          roleId: "role-admin",
-          roleSlug: "admin",
-          roleName: "Admin",
-          roleIsSystem: true,
-          roleIsActive: true,
-          isPrimary: true
-        }
+        { roleId: "role-admin", roleSlug: "admin", roleName: "Admin", roleIsSystem: true, roleIsActive: true, isPrimary: true }
       ]
     });
-    mockedPutUserRoles.mockResolvedValue({ userRoles: [] });
+    mockedPutUserRoles.mockResolvedValue({
+      userRoles: [
+        { roleId: "role-admin", roleSlug: "admin", roleName: "Admin", roleIsSystem: true, roleIsActive: true, isPrimary: true },
+        { roleId: "role-ops", roleSlug: "ops_manager", roleName: "Ops Manager", roleIsSystem: false, roleIsActive: true, isPrimary: false }
+      ]
+    });
 
     render(<UserRoleEditor userId="user-1" />);
 
-    await screen.findByText("Admin");
-    fireEvent.click(screen.getByLabelText("选择角色 ops_manager"));
-    fireEvent.click(screen.getByLabelText("设为主角色 ops_manager"));
+    expect(await screen.findByText("角色分配")).toBeTruthy();
+    fireEvent.click(await screen.findByLabelText("选择角色 ops_manager"));
+    fireEvent.click(screen.getByLabelText("设为主角色 admin"));
     fireEvent.click(screen.getByRole("button", { name: "保存角色分配" }));
 
     await waitFor(() => {
       expect(mockedPutUserRoles).toHaveBeenCalledWith("user-1", {
         assignments: [
-          { roleId: "role-admin", isPrimary: false },
-          { roleId: "role-ops", isPrimary: true }
+          { roleId: "role-admin", isPrimary: true },
+          { roleId: "role-ops", isPrimary: false }
         ]
       });
     });

@@ -1594,6 +1594,65 @@ body {
   font-weight: 700;
 }
 
+.rbac-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.rbac-selected-card {
+  border-color: #93c5fd;
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.16);
+}
+
+.rbac-permission-matrix,
+.rbac-audit-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.rbac-group {
+  border: 1px solid #d6e2f3;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: #f8fbff;
+}
+
+.rbac-group h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.rbac-option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rbac-option,
+.rbac-role-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rbac-role-option {
+  justify-content: space-between;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.rbac-option code {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e0ecff;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
 @media (max-width: 720px) {
   .admin-detail-grid {
     grid-template-columns: 1fr;
@@ -1601,5 +1660,14 @@ body {
 
   .admin-trigger-inline {
     min-width: 100%;
+  }
+
+  .rbac-create-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rbac-role-option {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

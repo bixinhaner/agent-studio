@@ -120,7 +120,7 @@ describe("RolesView", () => {
     render(<RolesView />);
 
     expect(await screen.findByText("角色列表")).toBeTruthy();
-    expect(screen.getByText("Role detail role-admin")).toBeTruthy();
+    expect(await screen.findByText("Role detail role-admin")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("角色 slug"), { target: { value: "ops_new" } });
     fireEvent.change(screen.getByLabelText("角色名称"), { target: { value: "Ops New" } });

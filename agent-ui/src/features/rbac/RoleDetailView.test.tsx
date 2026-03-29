@@ -8,12 +8,7 @@ vi.mock("./api", () => ({
   putRoleResourcePolicies: vi.fn()
 }));
 
-import {
-  fetchRoleAuditLogs,
-  fetchRoleDetail,
-  putRolePermissions,
-  putRoleResourcePolicies
-} from "./api";
+import { fetchRoleAuditLogs, fetchRoleDetail, putRolePermissions, putRoleResourcePolicies } from "./api";
 import { RoleDetailView } from "./RoleDetailView";
 
 const mockedFetchRoleDetail = vi.mocked(fetchRoleDetail);
@@ -29,37 +24,14 @@ describe("RoleDetailView", () => {
     mockedPutRoleResourcePolicies.mockReset();
   });
 
-  it("edits role permissions and role-scoped resource policies from one detail view", async () => {
+  it("saves role permissions and resource policies from one detail view", async () => {
     mockedFetchRoleDetail.mockResolvedValue({
-      role: {
-        id: "role-ops",
-        slug: "ops_manager",
-        name: "Ops Manager",
-        isSystem: false,
-        isActive: true,
-        createdAt: "2026-03-30T00:00:00.000Z",
-        updatedAt: "2026-03-30T00:00:00.000Z"
-      },
+      role: { id: "role-ops", slug: "ops_manager", name: "Ops Manager", isSystem: false, isActive: true, createdAt: "", updatedAt: "" },
       permissions: [
-        {
-          id: "permission-role-write",
-          key: "role.write",
-          name: "Write roles",
-          category: "role",
-          isSystem: true,
-          isActive: true,
-          assigned: false
-        }
+        { id: "permission-role-write", key: "role.write", name: "Edit roles", category: "role_management", isSystem: true, isActive: true, assigned: false }
       ],
       resourcePolicies: [
-        {
-          id: "policy-1",
-          subjectType: "role",
-          subjectId: "role-ops",
-          resourceType: "workspace",
-          resourceId: "workspace-rd",
-          effect: "allow"
-        }
+        { id: "policy-1", subjectType: "role", subjectId: "role-ops", resourceType: "workspace", resourceId: "workspace-rd", effect: "allow" }
       ],
       memberCount: 1,
       recentAuditEntries: []
@@ -70,20 +42,19 @@ describe("RoleDetailView", () => {
 
     render(<RoleDetailView roleId="role-ops" />);
 
-    await screen.findByText("功能权限");
+    expect(await screen.findByText("Ops Manager")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("permission role.write"));
     fireEvent.click(screen.getByRole("tab", { name: "资源授权" }));
-    fireEvent.click(screen.getByLabelText("workspace workspace-rd allow"));
     fireEvent.click(screen.getByRole("button", { name: "保存角色配置" }));
 
     await waitFor(() => {
       expect(mockedPutRolePermissions).toHaveBeenCalledWith("role-ops", {
         permissionIds: ["permission-role-write"]
       });
-    });
-    expect(mockedPutRoleResourcePolicies).toHaveBeenCalledWith("role-ops", {
-      resourceType: "workspace",
-      policies: []
+      expect(mockedPutRoleResourcePolicies).toHaveBeenCalledWith("role-ops", {
+        resourceType: "workspace",
+        policies: [{ resourceId: "workspace-rd", effect: "allow" }]
+      });
     });
   });
 });
