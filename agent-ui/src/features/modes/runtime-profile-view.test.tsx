@@ -9,6 +9,7 @@ describe("RuntimeProfileView", () => {
       <RuntimeProfileView
         profile={{
           defaultModel: "gpt-5.4-pro",
+          allowedModels: ["gpt-5.4-pro"],
           defaultReasoningEffort: "xhigh",
           sandboxMode: "workspace-write",
           approvalPolicy: "never",
