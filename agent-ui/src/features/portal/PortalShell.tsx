@@ -56,6 +56,8 @@ import {
 } from "../../lib/model-config";
 import { iterateSSE } from "../../lib/sse";
 import { resolveRunThreadId } from "../../lib/thread-id-resolver";
+import { RuntimeProfileView } from "../modes/runtime-profile-view";
+import type { PortalRuntimeOptions } from "../modes/types";
 import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import { resolvePortalWorkspaceResources } from "../resources/workspace-resources";
@@ -118,23 +120,6 @@ type DirectoryBrowseOut = {
     name: string;
     path: string;
   }>;
-};
-
-type PortalRuntimeOptions = {
-  modes: Array<{
-    id: string;
-    label: string;
-  }>;
-  workspaces: Array<{
-    id: string;
-    label: string;
-    isDefault: boolean;
-  }>;
-  canUpload: boolean;
-  defaults: {
-    mode: string;
-    workspace: string;
-  };
 };
 
 type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -498,6 +483,11 @@ function buildCodexRunConfig(cfg: AppliedConfig, mode: string): Record<string, u
     mode,
     workspace
   };
+}
+
+function findRuntimeMode(options: PortalRuntimeOptions | null, modeId: string) {
+  if (!options) return undefined;
+  return options.modes.find((mode) => mode.id === modeId);
 }
 
 function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
@@ -1448,15 +1438,30 @@ export function PortalShell() {
         if (!active) return;
         setRuntimeOptions(next);
         setRuntimeMode((prev) =>
-          next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || "standard"
+          next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || ""
         );
         setAppliedConfig((prev) => {
-          const workspaceIds = new Set(next.workspaces.map((item) => item.id));
+          const nextMode = findRuntimeMode(next, next.defaults.mode || next.modes[0]?.id || "");
+          const candidateWorkspaces = nextMode?.workspaces.length ? nextMode.workspaces : next.workspaces;
+          const workspaceIds = new Set(candidateWorkspaces.map((item) => item.id));
           const currentWorkspace = prev.workspace.trim();
-          if (currentWorkspace && workspaceIds.has(currentWorkspace)) return prev;
+          const runtimeProfile = nextMode?.runtimeProfile;
+          const nextWorkspace =
+            currentWorkspace && workspaceIds.has(currentWorkspace)
+              ? currentWorkspace
+              : next.defaults.workspace || candidateWorkspaces.find((item) => item.isDefault)?.id || candidateWorkspaces[0]?.id || prev.workspace;
           return {
             ...prev,
-            workspace: next.defaults.workspace || next.workspaces[0]?.id || prev.workspace
+            workspace: nextWorkspace,
+            model: runtimeProfile?.defaultModel || prev.model,
+            reasoningEffort: normalizeReasoningEffortForModel(
+              runtimeProfile?.defaultModel || prev.model,
+              (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort
+            ),
+            sandboxMode: (runtimeProfile?.sandboxMode as SandboxMode | undefined) || prev.sandboxMode,
+            approvalPolicy: (runtimeProfile?.approvalPolicy as ApprovalPolicy | undefined) || prev.approvalPolicy,
+            networkAccessEnabled: runtimeProfile?.networkAccessEnabled ?? prev.networkAccessEnabled,
+            webSearchMode: (runtimeProfile?.webSearchMode as WebSearchMode | undefined) || prev.webSearchMode
           };
         });
       } catch (error) {
@@ -1470,6 +1475,33 @@ export function PortalShell() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+    if (!selectedMode) return;
+    const candidateWorkspaces = selectedMode.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
+    setAppliedConfig((prev) => {
+      const currentWorkspace = prev.workspace.trim();
+      const workspaceIds = new Set(candidateWorkspaces.map((item) => item.id));
+      const nextWorkspace =
+        currentWorkspace && workspaceIds.has(currentWorkspace)
+          ? currentWorkspace
+          : candidateWorkspaces.find((item) => item.isDefault)?.id || candidateWorkspaces[0]?.id || prev.workspace;
+      return {
+        ...prev,
+        workspace: nextWorkspace,
+        model: selectedMode.runtimeProfile.defaultModel,
+        reasoningEffort: normalizeReasoningEffortForModel(
+          selectedMode.runtimeProfile.defaultModel,
+          selectedMode.runtimeProfile.defaultReasoningEffort as ReasoningEffort
+        ),
+        sandboxMode: selectedMode.runtimeProfile.sandboxMode as SandboxMode,
+        approvalPolicy: selectedMode.runtimeProfile.approvalPolicy as ApprovalPolicy,
+        networkAccessEnabled: selectedMode.runtimeProfile.networkAccessEnabled,
+        webSearchMode: selectedMode.runtimeProfile.webSearchMode as WebSearchMode
+      };
+    });
+  }, [runtimeMode, runtimeOptions]);
 
   useEffect(() => {
     let active = true;
@@ -1767,9 +1799,11 @@ export function PortalShell() {
 
   const reasoningOptions = useMemo(() => reasoningOptionsForModel(appliedConfig.model), [appliedConfig.model]);
   const canUpload = runtimeOptions?.canUpload ?? false;
-  const workspaceOptions = resolveWorkspaceOptions(runtimeOptions?.workspaces ?? [], appliedConfig.workspace);
+  const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+  const modeScopedWorkspaces = selectedMode?.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
+  const workspaceOptions = resolveWorkspaceOptions(modeScopedWorkspaces, appliedConfig.workspace);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
-  const selectedWorkspaceLabel = resolveWorkspaceLabel(runtimeOptions?.workspaces ?? [], appliedConfig.workspace);
+  const selectedWorkspaceLabel = resolveWorkspaceLabel(modeScopedWorkspaces, appliedConfig.workspace);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedWorkspaceResources = resolvePortalWorkspaceResources(
     portalResources?.workspaces ?? [],
@@ -2445,6 +2479,14 @@ export function PortalShell() {
               </select>
               <span className="field-help">由 `/api/portal/runtime-options` 提供，员工仅能选择允许的策略。</span>
             </label>
+
+            {selectedMode ? (
+              <div className="field">
+                <span className="field-label">策略快照</span>
+                <RuntimeProfileView profile={selectedMode.runtimeProfile} />
+                <span className="field-help">以下运行参数由当前策略模式绑定的 run profile 决定。</span>
+              </div>
+            ) : null}
 
             <div className="status-box">
               <p>

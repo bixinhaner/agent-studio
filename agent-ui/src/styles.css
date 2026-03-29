@@ -303,6 +303,32 @@ body {
   accent-color: #1d4ed8;
 }
 
+.runtime-profile-view {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #d6e2f3;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.runtime-profile-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.runtime-profile-key {
+  color: #64748b;
+}
+
+.runtime-profile-value {
+  color: #0f172a;
+  font-weight: 600;
+  text-align: right;
+}
+
 .status-box {
   border: 1px dashed #ccd8ea;
   border-radius: 10px;
