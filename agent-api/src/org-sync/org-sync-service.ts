@@ -127,6 +127,9 @@ type MembershipDiff = {
 type SyncDiff = DepartmentDiff | UserDiff | MembershipDiff;
 
 const RUNNING_JOB_STATUSES = new Set(["running"]);
+const STALE_PENDING_JOB_SUMMARY = {
+  detail: "Recovered stale pending org sync job after interrupted startup"
+};
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -419,7 +422,16 @@ export class OrgSyncService {
 
     try {
       const db = getDb(this.dependencies.jobs as unknown as { db: OrgSyncDb });
-      const activeJob = (await db.syncJob.findMany()).find(
+      const knownJobs = await db.syncJob.findMany();
+      for (const job of knownJobs) {
+        if (String(job.provider ?? "dingtalk") !== "dingtalk") continue;
+        if (String(job.status ?? "") !== "pending") continue;
+        const pendingJobId = trimOrUndefined(job.id as string | null);
+        if (pendingJobId) {
+          await this.dependencies.jobs.markFailed(pendingJobId, STALE_PENDING_JOB_SUMMARY);
+        }
+      }
+      const activeJob = knownJobs.find(
         (job) =>
           RUNNING_JOB_STATUSES.has(String(job.status ?? "")) &&
           String(job.provider ?? "dingtalk") === "dingtalk"

@@ -1046,5 +1046,11 @@ describe("OrgSyncService", () => {
     });
 
     expect(result.status).toBe("succeeded");
+    expect(repositories.db.jobs.find((job) => job.id === "job-1")).toMatchObject({
+      status: "failed",
+      summary: {
+        detail: "Recovered stale pending org sync job after interrupted startup"
+      }
+    });
   });
 });

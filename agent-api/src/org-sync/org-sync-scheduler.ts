@@ -11,6 +11,9 @@ type OrgSyncSchedulerOptions = {
 };
 
 const RUNNING_JOB_STATUSES = new Set(["running"]);
+const STALE_PENDING_JOB_SUMMARY = {
+  detail: "Recovered stale pending org sync job before scheduler tick"
+};
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -94,6 +97,14 @@ export class OrgSyncScheduler {
   private async hasRunningFullSync(): Promise<boolean> {
     const db = getDb(this.jobs as unknown as { db: { syncJob: { findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>> } } });
     const jobs = await db.syncJob.findMany();
+    for (const job of jobs) {
+      if (String(job.provider ?? "dingtalk") !== "dingtalk") continue;
+      if (String(job.status ?? "") !== "pending") continue;
+      const jobId = trimOrUndefined(job.id as string | null);
+      if (jobId) {
+        await this.jobs.markFailed(jobId, STALE_PENDING_JOB_SUMMARY);
+      }
+    }
     return jobs.some((job) => {
       const scopeType = String(job.scopeType ?? "");
       const status = String(job.status ?? "");

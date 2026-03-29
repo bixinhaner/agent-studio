@@ -219,6 +219,12 @@ describe("OrgSyncScheduler", () => {
     timers[0]?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(serviceRuns).toHaveLength(1);
+    expect(db.jobs.find((job) => job.id === "job-pending")).toMatchObject({
+      status: "failed",
+      summary: {
+        detail: "Recovered stale pending org sync job before scheduler tick"
+      }
+    });
   });
 
   it("swallows non-overlap tick failures so the interval callback does not reject", async () => {
