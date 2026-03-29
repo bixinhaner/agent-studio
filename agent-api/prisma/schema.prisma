@@ -28,10 +28,97 @@ model User {
   runtimeSessions    RuntimeSession[]
   departmentMemberships DepartmentMembership[]
   triggeredSyncJobs   SyncJob[]             @relation("SyncJobTriggeredBy")
+  userRoles          UserRole[]
+  auditLogEntries    AdminAuditLog[]       @relation("AdminAuditActor")
 
   @@index([email])
   @@index([status, role])
   @@map("users")
+}
+
+model Role {
+  id             String           @id @default(cuid())
+  organizationId String?          @map("organization_id")
+  slug           String
+  name           String
+  description    String?
+  isSystem       Boolean          @default(false) @map("is_system")
+  isActive       Boolean          @default(true) @map("is_active")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([organizationId, slug])
+  @@map("roles")
+}
+
+model Permission {
+  id             String           @id @default(cuid())
+  key            String           @unique
+  name           String
+  description    String?
+  category       String
+  isSystem       Boolean          @default(true) @map("is_system")
+  isActive       Boolean          @default(true) @map("is_active")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId])
+  @@index([userId, isPrimary])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model AdminAuditLog {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  actorUserId    String?  @map("actor_user_id")
+  actionType     String   @map("action_type")
+  targetType     String   @map("target_type")
+  targetId       String?  @map("target_id")
+  beforePayload  Json?    @map("before_payload")
+  afterPayload   Json?    @map("after_payload")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actorUser User? @relation("AdminAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@map("admin_audit_logs")
 }
 
 model Department {
