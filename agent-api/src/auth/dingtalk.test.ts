@@ -118,7 +118,7 @@ describe("createDingTalkClient", () => {
                 userid: "u3",
                 name: "Carol",
                 dept_id_list: ["6", "7"],
-                primaryDepartmentExternalId: "6",
+                primaryDepartmentExternalId: "6-primary-only",
                 dept_position_list: [{ dept_id: "7", is_main: 1 }],
                 disable_status: 1,
                 active: false
@@ -143,7 +143,9 @@ describe("createDingTalkClient", () => {
       fetchMock
     );
 
-    await expect(client.listDepartmentUsers!({ departmentId: "1" })).resolves.toEqual([
+    const users = await client.listDepartmentUsers!({ departmentId: "1" });
+
+    expect(users).toEqual([
       {
         userId: "u1",
         unionId: "union-1",
@@ -169,6 +171,7 @@ describe("createDingTalkClient", () => {
         lifecycleState: "disabled"
       }
     ]);
+    expect(users[2]?.departmentExternalIds).not.toContain("6-primary-only");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,

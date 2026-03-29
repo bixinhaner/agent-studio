@@ -158,15 +158,13 @@ function getDepartmentExternalIds(record: Record<string, unknown> | null): strin
   for (const key of ["departmentExternalIds", "departmentIds", "dept_id_list", "department", "deptIds"]) {
     values.push(...asArray(record?.[key]));
   }
-  const primary = getString(record, [
-    "primaryDepartmentExternalId",
-    "dept_id",
-    "deptId",
-    "departmentId",
-    "department_id"
-  ]);
-  if (primary) {
-    values.push(primary);
+  for (const item of asArray(record?.dept_position_list)) {
+    const entry = asRecord(item);
+    values.push(getString(entry, ["dept_id", "deptId", "departmentId"]));
+  }
+  const directDepartmentId = getString(record, ["dept_id", "deptId", "departmentId", "department_id"]);
+  if (directDepartmentId) {
+    values.push(directDepartmentId);
   }
   return uniqueStrings(values);
 }
