@@ -8,37 +8,135 @@ datasource db {
 }
 
 model User {
-  id             String           @id @default(cuid())
-  externalId     String?          @unique @map("external_id")
-  email          String?
-  displayName    String?          @map("display_name")
-  role           String           @default("employee")
-  status         String           @default("active")
-  dingtalkOpenId String?          @map("dingtalk_open_id")
-  dingtalkUserId String?          @unique @map("dingtalk_user_id")
-  dingtalkCorpId String?          @map("dingtalk_corp_id")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
-  threads        Thread[]
-  runtimeSessions RuntimeSession[]
+  id                 String                @id @default(cuid())
+  externalId         String?               @unique @map("external_id")
+  email              String?
+  displayName        String?               @map("display_name")
+  role               String                @default("employee")
+  status             String                @default("active")
+  statusSource       String                @default("sync") @map("status_source")
+  syncState          String                @default("active") @map("sync_state")
+  manualDisabled     Boolean               @default(false) @map("manual_disabled")
+  adminNote          String?               @map("admin_note")
+  lastSyncedAt       DateTime?             @map("last_synced_at")
+  dingtalkOpenId     String?               @map("dingtalk_open_id")
+  dingtalkUserId     String?               @unique @map("dingtalk_user_id")
+  dingtalkCorpId     String?               @map("dingtalk_corp_id")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  threads            Thread[]
+  runtimeSessions    RuntimeSession[]
   departmentMemberships DepartmentMembership[]
+  triggeredSyncJobs   SyncJob[]             @relation("SyncJobTriggeredBy")
 
   @@index([email])
+  @@index([status, role])
   @@map("users")
 }
 
-model DepartmentMembership {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  departmentId String   @map("department_id")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+model Department {
+  id                 String                 @id @default(cuid())
+  organizationId     String?                @map("organization_id")
+  externalId         String                 @unique @map("external_id")
+  name               String
+  parentDepartmentId String?                @map("parent_department_id")
+  sortOrder          Int                    @default(0) @map("sort_order")
+  status             String                 @default("active")
+  lastSyncedAt       DateTime?              @map("last_synced_at")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  parentDepartment   Department?            @relation("DepartmentTree", fields: [parentDepartmentId], references: [id], onDelete: SetNull)
+  childDepartments   Department[]           @relation("DepartmentTree")
+  memberships        DepartmentMembership[]
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([parentDepartmentId])
+  @@map("departments")
+}
+
+model DepartmentMembership {
+  id           String      @id @default(cuid())
+  userId       String      @map("user_id")
+  departmentId String      @map("department_id")
+  isPrimary    Boolean     @default(false) @map("is_primary")
+  source       String      @default("sync")
+  lastSyncedAt DateTime?   @map("last_synced_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department   Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([departmentId, createdAt])
   @@unique([userId, departmentId])
   @@map("department_memberships")
+}
+
+model SyncJob {
+  id                String          @id @default(cuid())
+  organizationId    String?         @map("organization_id")
+  provider          String          @default("dingtalk")
+  scopeType         String          @map("scope_type")
+  scopeExternalId   String?         @map("scope_external_id")
+  status            String          @default("pending")
+  triggerType       String          @map("trigger_type")
+  triggeredByUserId String?         @map("triggered_by_user_id")
+  startedAt         DateTime?       @map("started_at")
+  finishedAt        DateTime?       @map("finished_at")
+  summary           Json?
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  triggeredByUser   User?           @relation("SyncJobTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+  events            SyncJobEvent[]
+  snapshots         SyncSnapshot[]
+  diffs             SyncDiff[]
+
+  @@index([status, createdAt])
+  @@index([scopeType, scopeExternalId])
+  @@map("sync_jobs")
+}
+
+model SyncJobEvent {
+  id        String    @id @default(cuid())
+  syncJobId String    @map("sync_job_id")
+  level     String
+  eventType String    @map("event_type")
+  message   String
+  payload   Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+  syncJob   SyncJob   @relation(fields: [syncJobId], references: [id], onDelete: Cascade)
+
+  @@index([syncJobId, createdAt])
+  @@map("sync_job_events")
+}
+
+model SyncSnapshot {
+  id              String    @id @default(cuid())
+  syncJobId       String    @map("sync_job_id")
+  entityType      String    @map("entity_type")
+  scopeType       String    @map("scope_type")
+  scopeExternalId String?   @map("scope_external_id")
+  snapshotPayload Json      @map("snapshot_payload")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  syncJob         SyncJob   @relation(fields: [syncJobId], references: [id], onDelete: Cascade)
+
+  @@index([syncJobId, entityType])
+  @@map("sync_snapshots")
+}
+
+model SyncDiff {
+  id               String    @id @default(cuid())
+  syncJobId        String    @map("sync_job_id")
+  entityType       String    @map("entity_type")
+  entityExternalId String?   @map("entity_external_id")
+  changeType       String    @map("change_type")
+  beforePayload    Json?     @map("before_payload")
+  afterPayload     Json?     @map("after_payload")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  syncJob          SyncJob   @relation(fields: [syncJobId], references: [id], onDelete: Cascade)
+
+  @@index([syncJobId, entityType])
+  @@map("sync_diffs")
 }
 
 model Thread {
