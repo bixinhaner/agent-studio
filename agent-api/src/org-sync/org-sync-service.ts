@@ -52,6 +52,16 @@ type OrgSyncRepositories = {
   users: UserRepository;
   memberships: DepartmentMembershipRepository;
   jobs: SyncJobRepository;
+  resourceAccessLogs?: {
+    record(input: {
+      userId?: string;
+      resourceType: string;
+      resourceId: string;
+      actionType: string;
+      resultStatus: string;
+      metadata?: unknown;
+    }): Promise<unknown>;
+  };
 };
 
 type DepartmentSnapshot = NormalizedOrgSnapshot["departments"][number];
@@ -557,6 +567,21 @@ export class OrgSyncService {
       });
 
       await this.dependencies.jobs.markSucceeded(jobId, diffData.summary);
+      if (this.dependencies.resourceAccessLogs) {
+        await this.dependencies.resourceAccessLogs.record({
+          userId: trimOrUndefined(input.triggeredByUserId),
+          resourceType: "org_sync",
+          resourceId: normalizedScopeExternalId ?? input.scopeType,
+          actionType: "sync",
+          resultStatus: "success",
+          metadata: {
+            jobId,
+            scopeType: input.scopeType,
+            scopeExternalId: normalizedScopeExternalId,
+            triggerType: input.triggerType
+          }
+        });
+      }
       return { jobId, status: "succeeded" };
     } catch (error) {
       if (!jobId) {
@@ -571,6 +596,22 @@ export class OrgSyncService {
           payload: { detail: message }
         });
         await this.dependencies.jobs.markFailed(jobId, { detail: message });
+        if (this.dependencies.resourceAccessLogs) {
+          await this.dependencies.resourceAccessLogs.record({
+            userId: trimOrUndefined(input.triggeredByUserId),
+            resourceType: "org_sync",
+            resourceId: normalizedScopeExternalId ?? input.scopeType,
+            actionType: "sync",
+            resultStatus: "failed",
+            metadata: {
+              jobId,
+              detail: message,
+              scopeType: input.scopeType,
+              scopeExternalId: normalizedScopeExternalId,
+              triggerType: input.triggerType
+            }
+          });
+        }
       }
       return { jobId, status: "failed" };
     } finally {

@@ -91,6 +91,17 @@ type ResourcePolicyRepositoryLike = {
   }): Promise<ResourcePolicyRecord[]>;
 };
 
+type ResourceAccessLogServiceLike = {
+  record(input: {
+    userId?: string;
+    resourceType: string;
+    resourceId: string;
+    actionType: string;
+    resultStatus: string;
+    metadata?: unknown;
+  }): Promise<unknown>;
+};
+
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
@@ -144,6 +155,7 @@ export function createResourcesAdminRouter(options: {
   resourcePolicies: ResourcePolicyRepositoryLike;
   storage: KnowledgeSetStorage;
   validateFilesystemPath?: (input?: string | null) => string;
+  resourceAccessLogs?: ResourceAccessLogServiceLike;
 }): Router {
   const router = Router();
   const validateFilesystemPath = options.validateFilesystemPath ?? ((input?: string | null) => input?.trim() ?? "");
@@ -273,6 +285,19 @@ export function createResourcesAdminRouter(options: {
       }
       const result = await options.storage.saveFiles({ knowledgeSetId, files });
       await options.knowledgeSets.replaceItems(knowledgeSetId, result.items);
+      if (options.resourceAccessLogs) {
+        await options.resourceAccessLogs.record({
+          userId: req.currentUser?.id,
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          actionType: "upload",
+          resultStatus: "success",
+          metadata: {
+            fileCount: files.length,
+            mountPath: result.mountPath
+          }
+        });
+      }
       res.json({
         mountPath: result.mountPath,
         items: await options.knowledgeSets.listItems(knowledgeSetId)
@@ -304,6 +329,19 @@ export function createResourcesAdminRouter(options: {
           buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
         });
         await options.knowledgeSets.replaceItems(knowledgeSetId, result.items);
+        if (options.resourceAccessLogs) {
+          await options.resourceAccessLogs.record({
+            userId: req.currentUser?.id,
+            resourceType: "knowledge_set",
+            resourceId: knowledgeSetId,
+            actionType: "upload",
+            resultStatus: "success",
+            metadata: {
+              archiveName: req.header("X-Archive-Name") || "archive.zip",
+              mountPath: result.mountPath
+            }
+          });
+        }
         res.json({
           mountPath: result.mountPath,
           items: await options.knowledgeSets.listItems(knowledgeSetId)

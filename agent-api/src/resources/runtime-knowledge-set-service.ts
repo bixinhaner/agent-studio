@@ -46,6 +46,18 @@ type KnowledgeSetRuntimeMetadata = {
   mountPaths: string[];
 };
 
+type ResourceAccessLogServiceLike = {
+  record(input: {
+    userId?: string;
+    departmentIdSnapshot?: string;
+    resourceType: string;
+    resourceId: string;
+    actionType: string;
+    resultStatus: string;
+    metadata?: unknown;
+  }): Promise<unknown>;
+};
+
 const KNOWLEDGE_SET_METADATA_KEY = "_agentStudioKnowledgeSets";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -139,6 +151,7 @@ export class RuntimeKnowledgeSetService {
       knowledgeSets: KnowledgeSetRepositoryLike;
       policies: PolicyServiceLike;
       storage: KnowledgeSetStorageLike;
+      resourceAccessLogs?: ResourceAccessLogServiceLike;
     }
   ) {}
 
@@ -224,6 +237,38 @@ export class RuntimeKnowledgeSetService {
       }
       return mountPath;
     });
+
+    if (this.options.resourceAccessLogs) {
+      const departmentIdSnapshot = input.departmentIds[0];
+      await this.options.resourceAccessLogs.record({
+        userId: input.userId,
+        departmentIdSnapshot,
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        actionType: "mount",
+        resultStatus: "success",
+        metadata: {
+          workspacePath
+        }
+      });
+
+      for (const knowledgeSetId of resolvedKnowledgeSetIds) {
+        const knowledgeSet = knowledgeSetById.get(knowledgeSetId);
+        if (!knowledgeSet) continue;
+        await this.options.resourceAccessLogs.record({
+          userId: input.userId,
+          departmentIdSnapshot,
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          actionType: "mount",
+          resultStatus: "success",
+          metadata: {
+            sourceType: knowledgeSet.sourceType,
+            workspaceId: workspace.id
+          }
+        });
+      }
+    }
 
     return replaceManagedKnowledgeSetDirectories(input.codexRunConfig, {
       workspacePath,
