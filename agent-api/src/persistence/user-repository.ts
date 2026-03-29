@@ -9,6 +9,8 @@ export type AuthenticatedUser = {
   updatedAt: string;
 };
 
+export type UserRecord = AuthenticatedUser;
+
 export type DingTalkUserIdentity = {
   unionId: string;
   openId?: string;
@@ -24,6 +26,12 @@ export interface UserRepositoryLike {
   getById(id: string): Promise<AuthenticatedUser | undefined>;
   getByExternalId(externalId: string): Promise<AuthenticatedUser | undefined>;
   upsertFromDingTalk(identity: DingTalkUserIdentity): Promise<AuthenticatedUser>;
+  updateLocalSettings(input: {
+    userId: string;
+    role: string;
+    manualDisabled: boolean;
+    adminNote?: string | null;
+  }): Promise<UserRecord>;
 }
 
 type UserRow = {
@@ -33,6 +41,11 @@ type UserRow = {
   displayName: string | null;
   role: string | null;
   status: string | null;
+  statusSource?: string | null;
+  syncState?: string | null;
+  manualDisabled?: boolean;
+  adminNote?: string | null;
+  lastSyncedAt?: Date | string | null;
   dingtalkOpenId?: string | null;
   dingtalkUserId?: string | null;
   dingtalkCorpId?: string | null;
@@ -161,11 +174,56 @@ export class UserRepository implements UserRepositoryLike {
         displayName: displayName ?? null,
         role: "employee",
         status: "active",
+        statusSource: "sync",
+        syncState: "active",
+        manualDisabled: false,
+        adminNote: null,
         dingtalkOpenId: dingtalkOpenId ?? null,
         dingtalkUserId: dingtalkUserId ?? null,
         dingtalkCorpId: dingtalkCorpId ?? null
       }
     });
     return mapUser(created);
+  }
+
+  async updateLocalSettings(input: {
+    userId: string;
+    role: string;
+    manualDisabled: boolean;
+    adminNote?: string | null;
+  }): Promise<UserRecord> {
+    const userId = trimOrUndefined(input.userId);
+    if (!userId) {
+      throw new Error("user 不存在");
+    }
+
+    const existing = await this.db.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      throw new Error("user 不存在");
+    }
+
+    const role = trimOrUndefined(input.role) ?? existing.role ?? "employee";
+    const adminNote =
+      input.adminNote === undefined ? existing.adminNote ?? null : trimOrUndefined(input.adminNote) ?? null;
+    const syncState = trimOrUndefined(existing.syncState) ?? "active";
+    const manualDisabled = input.manualDisabled;
+    const status = manualDisabled
+      ? "disabled"
+      : syncState === "disabled" || syncState === "departed"
+        ? "disabled"
+        : "active";
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data: {
+        role,
+        manualDisabled,
+        adminNote,
+        status,
+        statusSource: manualDisabled ? "manual_disable" : "sync"
+      }
+    });
+
+    return mapUser(updated);
   }
 }
