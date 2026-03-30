@@ -137,4 +137,65 @@ describe("CapabilityCenterShell", () => {
     );
     expect(await screen.findByRole("heading", { name: "Coding Copy" })).toBeTruthy();
   });
+
+  it("resets the create draft when switching tabs so the active tab controls the created resource type", async () => {
+    mockedFetchRunProfiles.mockResolvedValue({
+      runProfiles: [
+        {
+          id: "run-profile-1",
+          name: "Coding Default",
+          slug: "coding-default",
+          description: "default",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4"],
+          defaultReasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
+    mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+    mockedCreateSkillPackage.mockResolvedValue({
+      skillPackage: {
+        id: "skill-package-2",
+        name: "Support Tools",
+        slug: "support-tools",
+        description: "",
+        status: "active",
+        visibleToUsers: false,
+        items: [],
+        createdAt: "2026-03-30T00:00:00.000Z",
+        updatedAt: "2026-03-30T00:00:00.000Z"
+      }
+    });
+
+    render(<CapabilityCenterShell />);
+
+    expect(await screen.findByRole("heading", { name: "能力配置中心" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建能力资源" }));
+    expect(screen.getByLabelText("运行策略")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Skill Packages" }));
+    expect(await screen.findByText("Skill Packages")).toBeTruthy();
+    expect(screen.queryByLabelText("运行策略")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("能力名称"), { target: { value: "Support Tools" } });
+    fireEvent.change(screen.getByLabelText("能力 slug"), { target: { value: "support-tools" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建能力" }));
+
+    expect(mockedCreateAgentMode).not.toHaveBeenCalled();
+    expect(mockedCreateSkillPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Support Tools",
+        slug: "support-tools"
+      })
+    );
+  });
 });

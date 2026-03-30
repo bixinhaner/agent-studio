@@ -67,6 +67,12 @@ const VISIBILITY_FILTER_LABELS: Record<CapabilityVisibilityFilter, string> = {
 
 const DEFAULT_RUN_PROFILE_MODEL = "gpt-5.4";
 
+function panelKindForTab(tab: CapabilityCenterTab): CreatePanelState["kind"] {
+  if (tab === "agent_mode") return "agent_mode";
+  if (tab === "skill_package") return "skill_package";
+  return "run_profile";
+}
+
 function formatLocalDateTime(value?: string) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -344,6 +350,22 @@ export function CapabilityCenterShell() {
       setVisibilityFilter("all");
     }
   }, [tab, visibilityFilter]);
+
+  useEffect(() => {
+    if (!createPanel) return;
+    if (createPanel.kind === panelKindForTab(tab)) return;
+    setCreatePanel(createInitialPanelState(tab, runProfiles));
+    setCreateErrorText("");
+    setCreateSaving(false);
+  }, [createPanel, runProfiles, tab]);
+
+  useEffect(() => {
+    if (!createPanel || createPanel.kind !== "agent_mode") return;
+    if (createPanel.runProfileId || runProfiles.length === 0) return;
+    setCreatePanel((current) =>
+      current && current.kind === "agent_mode" ? { ...current, runProfileId: runProfiles[0]?.id ?? "" } : current
+    );
+  }, [createPanel, runProfiles]);
 
   const visibleItems = useMemo(() => {
     if (tab === "agent_mode") {
