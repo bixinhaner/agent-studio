@@ -9,7 +9,7 @@ type PublishHistoryViewProps = {
   onPublish(): void;
 };
 
-function formatLocalDateTime(value: string | null) {
+function formatLocalDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "-";
@@ -17,7 +17,7 @@ function formatLocalDateTime(value: string | null) {
 }
 
 function describeVersion(meta: SystemSettingsVersionMeta | null) {
-  if (!meta) return "-";
+  if (!meta) return "尚未发布";
   return `v${meta.versionNumber}`;
 }
 
@@ -48,6 +48,10 @@ export function PublishHistoryView({ draftMeta, publishedMeta, saving, publishin
               <dd>{describeVersion(draftMeta)}</dd>
             </div>
             <div>
+              <dt>修订</dt>
+              <dd>{draftMeta.revision}</dd>
+            </div>
+            <div>
               <dt>创建时间</dt>
               <dd>{formatLocalDateTime(draftMeta.createdAt)}</dd>
             </div>
@@ -70,12 +74,16 @@ export function PublishHistoryView({ draftMeta, publishedMeta, saving, publishin
               <dd>{describeVersion(publishedMeta)}</dd>
             </div>
             <div>
+              <dt>修订</dt>
+              <dd>{publishedMeta?.revision ?? "-"}</dd>
+            </div>
+            <div>
               <dt>发布时间</dt>
               <dd>{formatLocalDateTime(publishedMeta?.publishedAt ?? null)}</dd>
             </div>
             <div>
               <dt>发布人</dt>
-              <dd>{publishedMeta?.publishedByUserId ?? "-"}</dd>
+              <dd>{publishedMeta?.publishedByUserId ?? "尚未发布"}</dd>
             </div>
             <div>
               <dt>更新时间</dt>

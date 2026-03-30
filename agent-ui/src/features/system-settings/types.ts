@@ -49,6 +49,20 @@ export type SystemSettingsBehavior = {
   markdown: string;
 };
 
+export type SystemSettingsVersionRecord = {
+  id: string;
+  versionNumber: number;
+  revision: number;
+  status: "draft" | "published";
+  payload: SystemSettingsPayload;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+  publishedByUserId?: string;
+};
+
+export type SystemSettingsFieldErrors = Record<string, string>;
+
 export type SystemSettingsPayload = {
   branding: SystemSettingsBranding;
   platformDefaults: SystemSettingsPlatformDefaults;
@@ -62,16 +76,17 @@ export type SystemSettingsPayload = {
 export type SystemSettingsVersionMeta = {
   id: string;
   versionNumber: number;
+  revision: number;
   status: "draft" | "published";
   createdAt: string;
   updatedAt: string;
-  publishedAt: string | null;
-  publishedByUserId: string | null;
+  publishedAt?: string;
+  publishedByUserId?: string;
 };
 
 export type SystemSettingsResponse = {
-  draft: SystemSettingsPayload;
-  published: SystemSettingsPayload;
+  draft: SystemSettingsVersionRecord;
+  published: SystemSettingsVersionRecord | null;
   draftMeta: SystemSettingsVersionMeta;
   publishedMeta: SystemSettingsVersionMeta | null;
 };

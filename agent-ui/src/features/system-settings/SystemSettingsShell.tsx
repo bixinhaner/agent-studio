@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SystemSettingsPayload, SystemSettingsSection, SystemSettingsVersionMeta } from "./types";
+
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "./api";
 import { BrandingSettingsView } from "./BrandingSettingsView";
 import { ModelDefaultsView } from "./ModelDefaultsView";
@@ -7,6 +7,14 @@ import { OrganizationDefaultsView } from "./OrganizationDefaultsView";
 import { PublishHistoryView } from "./PublishHistoryView";
 import { RetentionUploadView } from "./RetentionUploadView";
 import { SafetySettingsView } from "./SafetySettingsView";
+import type {
+  SystemSettingsFieldErrors,
+  SystemSettingsPayload,
+  SystemSettingsSection,
+  SystemSettingsVersionMeta,
+  SystemSettingsVersionRecord
+} from "./types";
+import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from "./validation";
 
 const SECTIONS: Array<{ id: SystemSettingsSection; label: string }> = [
   { id: "branding", label: "基本设置" },
@@ -17,7 +25,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string }> = [
   { id: "publish-history", label: "发布记录" }
 ];
 
-function clonePayload(payload: SystemSettingsPayload) {
+function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
   return {
     branding: { ...payload.branding },
     platformDefaults: { ...payload.platformDefaults },
@@ -29,15 +37,31 @@ function clonePayload(payload: SystemSettingsPayload) {
   };
 }
 
-function formatVersion(meta: SystemSettingsVersionMeta | null) {
-  if (!meta) return "-";
+function cloneRecord(record: SystemSettingsVersionRecord): SystemSettingsVersionRecord {
+  return {
+    ...record,
+    payload: clonePayload(record.payload)
+  };
+}
+
+function formatVersionLabel(meta: SystemSettingsVersionMeta | null) {
+  if (!meta) return "尚未发布";
   return `v${meta.versionNumber}`;
+}
+
+function fieldPaths(prefix: string, patch: Record<string, unknown>) {
+  return Object.keys(patch).map((key) => `${prefix}.${key}`);
+}
+
+function getValidationMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return "请求失败";
 }
 
 export function SystemSettingsShell() {
   const [section, setSection] = useState<SystemSettingsSection>("branding");
-  const [draft, setDraft] = useState<SystemSettingsPayload | null>(null);
-  const [published, setPublished] = useState<SystemSettingsPayload | null>(null);
+  const [draftRecord, setDraftRecord] = useState<SystemSettingsVersionRecord | null>(null);
+  const [publishedRecord, setPublishedRecord] = useState<SystemSettingsVersionRecord | null>(null);
   const [draftMeta, setDraftMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [publishedMeta, setPublishedMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,22 +69,25 @@ export function SystemSettingsShell() {
   const [publishing, setPublishing] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<SystemSettingsFieldErrors>({});
 
   useEffect(() => {
     let active = true;
     async function load() {
       setLoading(true);
       setErrorText("");
+      setSuccessText("");
+      setFieldErrors({});
       try {
         const response = await fetchSystemSettings();
         if (!active) return;
-        setDraft(clonePayload(response.draft));
-        setPublished(clonePayload(response.published));
+        setDraftRecord(cloneRecord(response.draft));
+        setPublishedRecord(response.published ? cloneRecord(response.published) : null);
         setDraftMeta(response.draftMeta);
         setPublishedMeta(response.publishedMeta);
       } catch (error) {
         if (active) {
-          setErrorText(error instanceof Error ? error.message : "加载系统设置失败");
+          setErrorText(getValidationMessage(error));
         }
       } finally {
         if (active) setLoading(false);
@@ -73,48 +100,139 @@ export function SystemSettingsShell() {
     };
   }, []);
 
+  function updateDraft(
+    updater: (current: SystemSettingsVersionRecord) => SystemSettingsVersionRecord,
+    pathsToClear: string[]
+  ) {
+    setDraftRecord((current) => (current ? updater(current) : current));
+    setErrorText("");
+    setFieldErrors((current) => {
+      if (pathsToClear.length === 0) return current;
+      const next = { ...current };
+      for (const path of pathsToClear) {
+        delete next[path];
+      }
+      return next;
+    });
+  }
+
   function updateDraftBranding(patch: Partial<SystemSettingsPayload["branding"]>) {
-    setDraft((current) => (current ? { ...current, branding: { ...current.branding, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          branding: { ...current.payload.branding, ...patch }
+        }
+      }),
+      fieldPaths("branding", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftPlatformDefaults(patch: Partial<SystemSettingsPayload["platformDefaults"]>) {
-    setDraft((current) => (current ? { ...current, platformDefaults: { ...current.platformDefaults, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          platformDefaults: { ...current.payload.platformDefaults, ...patch }
+        }
+      }),
+      fieldPaths("platformDefaults", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftRetention(patch: Partial<SystemSettingsPayload["retention"]>) {
-    setDraft((current) => (current ? { ...current, retention: { ...current.retention, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          retention: { ...current.payload.retention, ...patch }
+        }
+      }),
+      fieldPaths("retention", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftUploads(patch: Partial<SystemSettingsPayload["uploads"]>) {
-    setDraft((current) => (current ? { ...current, uploads: { ...current.uploads, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          uploads: { ...current.payload.uploads, ...patch }
+        }
+      }),
+      fieldPaths("uploads", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftSafety(patch: Partial<SystemSettingsPayload["safety"]>) {
-    setDraft((current) => (current ? { ...current, safety: { ...current.safety, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          safety: { ...current.payload.safety, ...patch }
+        }
+      }),
+      fieldPaths("safety", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftOrganization(patch: Partial<SystemSettingsPayload["organizationDefaults"]>) {
-    setDraft((current) => (current ? { ...current, organizationDefaults: { ...current.organizationDefaults, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          organizationDefaults: { ...current.payload.organizationDefaults, ...patch }
+        }
+      }),
+      fieldPaths("organizationDefaults", patch as Record<string, unknown>)
+    );
   }
 
   function updateDraftBehavior(patch: Partial<SystemSettingsPayload["behavior"]>) {
-    setDraft((current) => (current ? { ...current, behavior: { ...current.behavior, ...patch } } : current));
+    updateDraft(
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          behavior: { ...current.payload.behavior, ...patch }
+        }
+      }),
+      fieldPaths("behavior", patch as Record<string, unknown>)
+    );
   }
 
   async function handleSaveDraft() {
-    if (!draft) return;
+    if (!draftRecord) return;
     setSaving(true);
     setErrorText("");
     setSuccessText("");
     try {
-      const response = await saveSystemSettingsDraft(draft);
-      setDraft(clonePayload(response.draft));
-      setPublished(clonePayload(response.published));
+      const response = await saveSystemSettingsDraft(draftRecord.payload);
+      setDraftRecord(cloneRecord(response.draft));
+      setPublishedRecord(response.published ? cloneRecord(response.published) : null);
       setDraftMeta(response.draftMeta);
       setPublishedMeta(response.publishedMeta);
+      setFieldErrors({});
       setSuccessText("草稿已保存");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "保存草稿失败");
+      const message = getValidationMessage(error);
+      const parsed = parseSystemSettingsValidationDetail(message);
+      if (Object.keys(parsed.fieldErrors).length > 0) {
+        setFieldErrors(parsed.fieldErrors);
+        const nextSection = firstSectionWithFieldErrors(parsed.fieldErrors);
+        if (nextSection) {
+          setSection(nextSection);
+        }
+        setErrorText(parsed.summary);
+      } else {
+        setErrorText(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -126,25 +244,40 @@ export function SystemSettingsShell() {
     setSuccessText("");
     try {
       const response = await publishSystemSettings();
-      setDraft(clonePayload(response.draft));
-      setPublished(clonePayload(response.published));
+      setDraftRecord(cloneRecord(response.draft));
+      setPublishedRecord(response.published ? cloneRecord(response.published) : null);
       setDraftMeta(response.draftMeta);
       setPublishedMeta(response.publishedMeta);
+      setFieldErrors({});
       setSuccessText("设置已发布");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "发布系统设置失败");
+      const message = getValidationMessage(error);
+      const parsed = parseSystemSettingsValidationDetail(message);
+      if (Object.keys(parsed.fieldErrors).length > 0) {
+        setFieldErrors(parsed.fieldErrors);
+        const nextSection = firstSectionWithFieldErrors(parsed.fieldErrors);
+        if (nextSection) {
+          setSection(nextSection);
+        }
+        setErrorText(parsed.summary);
+      } else {
+        setErrorText(message);
+      }
     } finally {
       setPublishing(false);
     }
   }
 
-  if (loading || !draft || !draftMeta) {
+  if (loading || !draftRecord || !draftMeta) {
     return (
       <section className="admin-card">
         <p>加载系统设置中...</p>
       </section>
     );
   }
+
+  const draftPayload = draftRecord.payload;
+  const publishedPayload = publishedRecord?.payload ?? null;
 
   return (
     <section className="admin-card system-settings-shell">
@@ -155,8 +288,8 @@ export function SystemSettingsShell() {
           <p>编辑平台默认值和安全边界，保存到草稿后再显式发布。</p>
         </div>
         <div className="system-settings-meta-pill-group">
-          <span className="system-settings-meta-pill">编辑中：{formatVersion(draftMeta)}</span>
-          <span className="system-settings-meta-pill">已发布：{formatVersion(publishedMeta)}</span>
+          <span className="system-settings-meta-pill">编辑中：{formatVersionLabel(draftMeta)}</span>
+          <span className="system-settings-meta-pill">已发布：{formatVersionLabel(publishedMeta)}</span>
         </div>
       </div>
 
@@ -183,25 +316,31 @@ export function SystemSettingsShell() {
 
       {section === "branding" ? (
         <BrandingSettingsView
-          value={draft.branding}
-          behavior={draft.behavior}
+          value={draftPayload.branding}
+          behavior={draftPayload.behavior}
+          fieldErrors={fieldErrors}
           disabled={saving || publishing}
           onChange={updateDraftBranding}
           onBehaviorChange={updateDraftBehavior}
         />
       ) : null}
-      {section === "model-defaults" ? <ModelDefaultsView value={draft.platformDefaults} disabled={saving || publishing} onChange={updateDraftPlatformDefaults} /> : null}
+      {section === "model-defaults" ? (
+        <ModelDefaultsView value={draftPayload.platformDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftPlatformDefaults} />
+      ) : null}
       {section === "retention-upload" ? (
         <RetentionUploadView
-          retention={draft.retention}
-          uploads={draft.uploads}
+          retention={draftPayload.retention}
+          uploads={draftPayload.uploads}
+          fieldErrors={fieldErrors}
           disabled={saving || publishing}
           onRetentionChange={updateDraftRetention}
           onUploadsChange={updateDraftUploads}
         />
       ) : null}
-      {section === "safety" ? <SafetySettingsView value={draft.safety} disabled={saving || publishing} onChange={updateDraftSafety} /> : null}
-      {section === "organization-defaults" ? <OrganizationDefaultsView value={draft.organizationDefaults} disabled={saving || publishing} onChange={updateDraftOrganization} /> : null}
+      {section === "safety" ? <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} /> : null}
+      {section === "organization-defaults" ? (
+        <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />
+      ) : null}
       {section === "publish-history" ? (
         <PublishHistoryView
           draftMeta={draftMeta}
@@ -216,15 +355,25 @@ export function SystemSettingsShell() {
       <section className="system-settings-preview-grid">
         <article className="system-settings-preview-card">
           <h3>当前草稿预览</h3>
-          <p>{draft.branding.platformName}</p>
-          <p>{draft.platformDefaults.provider} / {draft.platformDefaults.model}</p>
-          <p>{draft.behavior.welcomeSummary}</p>
+          <p>{draftPayload.branding.platformName}</p>
+          <p>
+            {draftPayload.platformDefaults.provider} / {draftPayload.platformDefaults.model}
+          </p>
+          <p>{draftPayload.behavior.welcomeSummary}</p>
         </article>
         <article className="system-settings-preview-card">
           <h3>当前发布预览</h3>
-          <p>{published?.branding.platformName || "-"}</p>
-          <p>{published?.platformDefaults.provider || "-"} / {published?.platformDefaults.model || "-"}</p>
-          <p>{published?.behavior.welcomeSummary || "-"}</p>
+          {publishedPayload ? (
+            <>
+              <p>{publishedPayload.branding.platformName}</p>
+              <p>
+                {publishedPayload.platformDefaults.provider} / {publishedPayload.platformDefaults.model}
+              </p>
+              <p>{publishedPayload.behavior.welcomeSummary}</p>
+            </>
+          ) : (
+            <p>尚未发布</p>
+          )}
         </article>
       </section>
     </section>

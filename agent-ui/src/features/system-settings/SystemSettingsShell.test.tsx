@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const draft = {
+import type { SystemSettingsPayload, SystemSettingsVersionRecord } from "./types";
+
+const payload: SystemSettingsPayload = {
   branding: {
     platformName: "Agent Studio",
     headerSubtitle: "Enterprise Agent Platform",
@@ -40,13 +42,19 @@ const draft = {
   }
 };
 
-const published = {
-  ...draft,
-  branding: {
-    ...draft.branding,
-    platformName: "Agent Studio Classic"
-  }
-};
+function createRecord(overrides: Partial<SystemSettingsVersionRecord> & { id: string; versionNumber: number }): SystemSettingsVersionRecord {
+  return {
+    id: overrides.id,
+    versionNumber: overrides.versionNumber,
+    revision: overrides.revision ?? 0,
+    status: overrides.status ?? "draft",
+    payload: overrides.payload ?? payload,
+    createdAt: overrides.createdAt ?? "2026-03-30T01:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-03-30T01:30:00.000Z",
+    publishedAt: overrides.publishedAt,
+    publishedByUserId: overrides.publishedByUserId
+  };
+}
 
 vi.mock("./api", () => ({
   fetchSystemSettings: vi.fn(),
@@ -68,40 +76,31 @@ describe("SystemSettingsShell", () => {
     mockedPublishSystemSettings.mockReset();
   });
 
-  it("renders the system settings sections and local publish metadata", async () => {
+  it("renders version records and handles the no-published case", async () => {
     const toLocaleStringSpy = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (this: Date) {
       return `LOCAL:${this.toISOString()}`;
     });
 
     mockedFetchSystemSettings.mockResolvedValue({
-      draft,
-      published,
+      draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+      published: null,
       draftMeta: {
         id: "system-settings-version-2",
         versionNumber: 2,
+        revision: 1,
         status: "draft",
         createdAt: "2026-03-30T01:00:00.000Z",
-        updatedAt: "2026-03-30T01:30:00.000Z",
-        publishedAt: null,
-        publishedByUserId: null
+        updatedAt: "2026-03-30T01:30:00.000Z"
       },
-      publishedMeta: {
-        id: "system-settings-version-1",
-        versionNumber: 1,
-        status: "published",
-        createdAt: "2026-03-29T01:00:00.000Z",
-        updatedAt: "2026-03-29T01:30:00.000Z",
-        publishedAt: "2026-03-29T02:00:00.000Z",
-        publishedByUserId: "admin-1"
-      }
+      publishedMeta: null
     });
 
     render(<SystemSettingsShell />);
 
     expect(await screen.findByRole("heading", { name: "系统设置" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "基本设置" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("编辑中：v2")).toBeTruthy();
+    expect(screen.getAllByText("尚未发布").length).toBeGreaterThan(0);
     expect((screen.getByLabelText("平台名称") as HTMLInputElement).value).toBe("Agent Studio");
-    expect((screen.getByLabelText("欢迎摘要") as HTMLTextAreaElement).value).toBe("Use approved resources and modes only.");
 
     fireEvent.click(screen.getByRole("tab", { name: "模型默认值" }));
     expect((screen.getByLabelText("默认提供方") as HTMLInputElement).value).toBe("openai_codex");
@@ -109,95 +108,126 @@ describe("SystemSettingsShell", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "发布记录" }));
     expect(screen.getByText("最近发布")).toBeTruthy();
-    expect(screen.getByText("LOCAL:2026-03-29T02:00:00.000Z")).toBeTruthy();
+    expect(screen.getAllByText("尚未发布").length).toBeGreaterThan(0);
 
     toLocaleStringSpy.mockRestore();
   });
 
-  it("saves the edited draft and publishes it", async () => {
+  it("shows inline validation errors for the affected sections", async () => {
+    mockedFetchSystemSettings.mockResolvedValue({
+      draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+      published: null,
+      draftMeta: {
+        id: "system-settings-version-2",
+        versionNumber: 2,
+        revision: 1,
+        status: "draft",
+        createdAt: "2026-03-30T01:00:00.000Z",
+        updatedAt: "2026-03-30T01:30:00.000Z"
+      },
+      publishedMeta: null
+    });
+    mockedSaveSystemSettingsDraft.mockRejectedValue(new Error("branding.platformName: must not be empty; retention.sessionDays: must be positive integer"));
+
+    render(<SystemSettingsShell />);
+
+    await screen.findByRole("heading", { name: "系统设置" });
+    fireEvent.click(screen.getByRole("tab", { name: "发布记录" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+
+    expect(await screen.findByText("请修正标红字段后再试")).toBeTruthy();
+    expect(screen.getByText("must not be empty")).toBeTruthy();
+    expect((screen.getByDisplayValue("Agent Studio") as HTMLInputElement).getAttribute("aria-invalid")).toBe("true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "保留与上传" }));
+    expect(screen.getByText("must be positive integer")).toBeTruthy();
+    expect((screen.getByDisplayValue("30") as HTMLInputElement).getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("saves the edited draft and publishes the updated version records", async () => {
     const toLocaleStringSpy = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (this: Date) {
       return `LOCAL:${this.toISOString()}`;
     });
 
     mockedFetchSystemSettings.mockResolvedValue({
-      draft,
-      published,
+      draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+      published: null,
       draftMeta: {
         id: "system-settings-version-2",
         versionNumber: 2,
+        revision: 1,
         status: "draft",
         createdAt: "2026-03-30T01:00:00.000Z",
-        updatedAt: "2026-03-30T01:30:00.000Z",
-        publishedAt: null,
-        publishedByUserId: null
+        updatedAt: "2026-03-30T01:30:00.000Z"
       },
-      publishedMeta: {
-        id: "system-settings-version-1",
-        versionNumber: 1,
-        status: "published",
-        createdAt: "2026-03-29T01:00:00.000Z",
-        updatedAt: "2026-03-29T01:30:00.000Z",
-        publishedAt: "2026-03-29T02:00:00.000Z",
-        publishedByUserId: "admin-1"
-      }
+      publishedMeta: null
     });
 
     mockedSaveSystemSettingsDraft.mockResolvedValue({
-      draft: {
-        ...draft,
-        branding: {
-          ...draft.branding,
-          platformName: "Agent Studio Prime"
+      draft: createRecord({
+        id: "system-settings-version-3",
+        versionNumber: 3,
+        revision: 2,
+        payload: {
+          ...payload,
+          branding: {
+            ...payload.branding,
+            platformName: "Agent Studio Prime"
+          }
         }
-      },
-      published,
+      }),
+      published: null,
       draftMeta: {
         id: "system-settings-version-3",
         versionNumber: 3,
+        revision: 2,
         status: "draft",
         createdAt: "2026-03-30T01:00:00.000Z",
-        updatedAt: "2026-03-30T03:00:00.000Z",
-        publishedAt: null,
-        publishedByUserId: null
+        updatedAt: "2026-03-30T03:00:00.000Z"
       },
-      publishedMeta: {
-        id: "system-settings-version-1",
-        versionNumber: 1,
-        status: "published",
-        createdAt: "2026-03-29T01:00:00.000Z",
-        updatedAt: "2026-03-29T01:30:00.000Z",
-        publishedAt: "2026-03-29T02:00:00.000Z",
-        publishedByUserId: "admin-1"
-      }
+      publishedMeta: null
     });
 
     mockedPublishSystemSettings.mockResolvedValue({
-      draft: {
-        ...draft,
-        branding: {
-          ...draft.branding,
-          platformName: "Agent Studio Prime"
+      draft: createRecord({
+        id: "system-settings-version-3",
+        versionNumber: 3,
+        revision: 2,
+        payload: {
+          ...payload,
+          branding: {
+            ...payload.branding,
+            platformName: "Agent Studio Prime"
+          }
         }
-      },
-      published: {
-        ...draft,
-        branding: {
-          ...draft.branding,
-          platformName: "Agent Studio Prime"
-        }
-      },
+      }),
+      published: createRecord({
+        id: "system-settings-version-4",
+        versionNumber: 4,
+        revision: 3,
+        status: "published",
+        payload: {
+          ...payload,
+          branding: {
+            ...payload.branding,
+            platformName: "Agent Studio Prime"
+          }
+        },
+        publishedAt: "2026-03-30T03:50:00.000Z",
+        publishedByUserId: "admin-2"
+      }),
       draftMeta: {
         id: "system-settings-version-3",
         versionNumber: 3,
+        revision: 2,
         status: "draft",
         createdAt: "2026-03-30T01:00:00.000Z",
-        updatedAt: "2026-03-30T03:00:00.000Z",
-        publishedAt: null,
-        publishedByUserId: null
+        updatedAt: "2026-03-30T03:00:00.000Z"
       },
       publishedMeta: {
         id: "system-settings-version-4",
         versionNumber: 4,
+        revision: 3,
         status: "published",
         createdAt: "2026-03-30T03:30:00.000Z",
         updatedAt: "2026-03-30T03:45:00.000Z",
@@ -216,9 +246,9 @@ describe("SystemSettingsShell", () => {
 
     expect(await screen.findByText("草稿已保存")).toBeTruthy();
     expect(mockedSaveSystemSettingsDraft).toHaveBeenCalledWith({
-      ...draft,
+      ...payload,
       branding: {
-        ...draft.branding,
+        ...payload.branding,
         platformName: "Agent Studio Prime"
       }
     });

@@ -210,6 +210,13 @@ body {
   color: #64748b;
 }
 
+.field-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b91c1c;
+}
+
 .field-input {
   width: 100%;
   min-height: 34px;

@@ -1,12 +1,18 @@
-import type { SystemSettingsPlatformDefaults } from "./types";
+import type { SystemSettingsFieldErrors, SystemSettingsPlatformDefaults } from "./types";
+import { getFieldError } from "./validation";
 
 type ModelDefaultsViewProps = {
   value: SystemSettingsPlatformDefaults;
+  fieldErrors: SystemSettingsFieldErrors;
   disabled?: boolean;
   onChange(patch: Partial<SystemSettingsPlatformDefaults>): void;
 };
 
-export function ModelDefaultsView({ value, disabled, onChange }: ModelDefaultsViewProps) {
+export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: ModelDefaultsViewProps) {
+  const providerError = getFieldError(fieldErrors, "platformDefaults.provider");
+  const modelError = getFieldError(fieldErrors, "platformDefaults.model");
+  const reasoningEffortError = getFieldError(fieldErrors, "platformDefaults.reasoningEffort");
+
   return (
     <section className="resource-center-section">
       <div className="resource-center-section-header">
@@ -19,17 +25,38 @@ export function ModelDefaultsView({ value, disabled, onChange }: ModelDefaultsVi
       <div className="resource-center-form-grid">
         <label className="field">
           <span className="field-label">默认提供方</span>
-          <input className="field-input" value={value.provider} disabled={disabled} onChange={(event) => onChange({ provider: event.target.value })} />
+          <input
+            className="field-input"
+            value={value.provider}
+            aria-invalid={Boolean(providerError)}
+            disabled={disabled}
+            onChange={(event) => onChange({ provider: event.target.value })}
+          />
+          {providerError ? <p className="field-error">{providerError}</p> : null}
         </label>
 
         <label className="field">
           <span className="field-label">默认模型</span>
-          <input className="field-input" value={value.model} disabled={disabled} onChange={(event) => onChange({ model: event.target.value })} />
+          <input
+            className="field-input"
+            value={value.model}
+            aria-invalid={Boolean(modelError)}
+            disabled={disabled}
+            onChange={(event) => onChange({ model: event.target.value })}
+          />
+          {modelError ? <p className="field-error">{modelError}</p> : null}
         </label>
 
         <label className="field">
           <span className="field-label">默认推理强度</span>
-          <input className="field-input" value={value.reasoningEffort} disabled={disabled} onChange={(event) => onChange({ reasoningEffort: event.target.value })} />
+          <input
+            className="field-input"
+            value={value.reasoningEffort}
+            aria-invalid={Boolean(reasoningEffortError)}
+            disabled={disabled}
+            onChange={(event) => onChange({ reasoningEffort: event.target.value })}
+          />
+          {reasoningEffortError ? <p className="field-error">{reasoningEffortError}</p> : null}
         </label>
       </div>
     </section>
