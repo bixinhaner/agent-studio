@@ -212,4 +212,39 @@ describe("BroadcastService", () => {
       "broadcast publish access denied"
     );
   });
+
+  it("requires authorization to create and update broadcast drafts", async () => {
+    const db = new FakeBroadcastDb();
+    const service = new BroadcastService({
+      broadcasts: new BroadcastRepository(db as never),
+      authorizer: {
+        canCreateBroadcast: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1"),
+        canUpdateBroadcast: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1")
+      }
+    });
+
+    await expect(
+      service.createDraft({
+        actorUserId: "user-1",
+        title: "Heads up",
+        bodyMarkdown: "Message",
+        targets: [{ targetType: "department", targetId: "dept-1" }]
+      })
+    ).rejects.toThrow("broadcast create access denied");
+
+    const draft = await service.createDraft({
+      actorUserId: "admin-1",
+      title: "Heads up",
+      bodyMarkdown: "Message",
+      targets: [{ targetType: "department", targetId: "dept-1" }]
+    });
+
+    await expect(
+      service.updateDraft({
+        actorUserId: "user-1",
+        id: draft.id,
+        bodyMarkdown: "Updated"
+      })
+    ).rejects.toThrow("broadcast update access denied");
+  });
 });

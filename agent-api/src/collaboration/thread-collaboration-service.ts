@@ -32,6 +32,7 @@ type CollaborationDirectory = {
 
 type CollaborationAuthorizer = {
   canReadThreadCollaboration?: (input: { actorUserId: string; threadId: string; ownerUserId?: string }) => Promise<boolean>;
+  canCommentThreadCollaboration?: (input: { actorUserId: string; threadId: string; ownerUserId?: string }) => Promise<boolean>;
   canManageThreadCollaboration?: (input: { actorUserId: string; threadId: string; ownerUserId?: string }) => Promise<boolean>;
 };
 
@@ -138,7 +139,7 @@ export class ThreadCollaborationService {
     mentionedUserIds: string[];
   }): Promise<ThreadCommentRecord> {
     const thread = await this.requireThread(input.threadId);
-    await this.assertReadable(thread, input.actorUserId, undefined);
+    await this.assertCommentable(thread, input.actorUserId, undefined);
     await this.deps.directory?.ensureUsersExist?.(input.mentionedUserIds);
 
     const comment = await this.deps.comments.create({
@@ -296,6 +297,13 @@ export class ThreadCollaborationService {
 
   private async assertReadable(thread: ThreadRecord, actorUserId: string, departmentIds?: string[]): Promise<void> {
     const access = await this.getAccess({ actorUserId, departmentIds, thread });
+    if (!access.canRead) {
+      throw new Error("thread collaboration access denied");
+    }
+  }
+
+  private async assertCommentable(thread: ThreadRecord, actorUserId: string, departmentIds?: string[]): Promise<void> {
+    const access = await this.getAccess({ actorUserId, departmentIds, thread });
     if (!access.canComment) {
       throw new Error("thread collaboration access denied");
     }
@@ -321,14 +329,25 @@ export class ThreadCollaborationService {
         threadId: input.thread.id,
         ownerUserId
       })) ?? false;
+    const adminCommentable =
+      (await this.deps.authorizer?.canCommentThreadCollaboration?.({
+        actorUserId,
+        threadId: input.thread.id,
+        ownerUserId
+      })) ?? false;
     const adminManageable =
       (await this.deps.authorizer?.canManageThreadCollaboration?.({
         actorUserId,
         threadId: input.thread.id,
         ownerUserId
       })) ?? false;
-    if (adminReadable || adminManageable) {
-      return { canRead: true, canComment: true, canRun: false, isOwner: false };
+    if (adminReadable || adminCommentable || adminManageable) {
+      return {
+        canRead: true,
+        canComment: adminCommentable || adminManageable,
+        canRun: false,
+        isOwner: false
+      };
     }
     const departmentIds =
       input.departmentIds ?? (this.deps.directory?.listDepartmentIdsForUser ? await this.deps.directory.listDepartmentIdsForUser(actorUserId) : []);

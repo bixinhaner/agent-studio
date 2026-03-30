@@ -21,6 +21,8 @@ type BroadcastNotificationDispatcher = {
 };
 
 type BroadcastAuthorizer = {
+  canCreateBroadcast?: (input: { actorUserId: string }) => Promise<boolean>;
+  canUpdateBroadcast?: (input: { actorUserId: string; broadcastId: string }) => Promise<boolean>;
   canPublishBroadcast?: (input: { actorUserId: string; broadcastId: string }) => Promise<boolean>;
 };
 
@@ -52,6 +54,9 @@ export class BroadcastService {
       actorUserId: string;
     }
   ): Promise<BroadcastRecord> {
+    if (!(await this.canCreate(input.actorUserId))) {
+      throw new Error("broadcast create access denied");
+    }
     return this.deps.broadcasts.createDraft({
       ...input,
       createdByUserId: input.actorUserId
@@ -63,7 +68,9 @@ export class BroadcastService {
       actorUserId: string;
     }
   ): Promise<BroadcastRecord> {
-    void input.actorUserId;
+    if (!(await this.canUpdate(input.actorUserId, input.id))) {
+      throw new Error("broadcast update access denied");
+    }
     return this.deps.broadcasts.updateDraft(input);
   }
 
@@ -107,6 +114,20 @@ export class BroadcastService {
       return true;
     }
     return this.deps.authorizer.canPublishBroadcast({ actorUserId, broadcastId });
+  }
+
+  private async canCreate(actorUserId: string): Promise<boolean> {
+    if (!this.deps.authorizer?.canCreateBroadcast) {
+      return true;
+    }
+    return this.deps.authorizer.canCreateBroadcast({ actorUserId });
+  }
+
+  private async canUpdate(actorUserId: string, broadcastId: string): Promise<boolean> {
+    if (!this.deps.authorizer?.canUpdateBroadcast) {
+      return true;
+    }
+    return this.deps.authorizer.canUpdateBroadcast({ actorUserId, broadcastId });
   }
 
   private async resolveRecipients(targets: BroadcastTargetRecord[]): Promise<string[]> {

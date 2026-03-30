@@ -418,6 +418,7 @@ describe("ThreadCollaborationService", () => {
       ...deps,
       authorizer: {
         canReadThreadCollaboration: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1"),
+        canCommentThreadCollaboration: vi.fn(async () => false),
         canManageThreadCollaboration: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1")
       }
     });
@@ -439,5 +440,44 @@ describe("ThreadCollaborationService", () => {
         shares: [{ subjectType: "user", subjectId: "user-9" }]
       })
     ).resolves.toHaveLength(1);
+  });
+
+  it("does not let read-only elevated access comment or manage collaboration", async () => {
+    const { deps } = createService();
+    const readOnlyService = new ThreadCollaborationService({
+      ...deps,
+      authorizer: {
+        canReadThreadCollaboration: vi.fn(async ({ actorUserId }) => actorUserId === "auditor-1"),
+        canCommentThreadCollaboration: vi.fn(async () => false),
+        canManageThreadCollaboration: vi.fn(async () => false)
+      }
+    });
+
+    const summary = await readOnlyService.getThreadCollaborationView({
+      actorUserId: "auditor-1",
+      departmentIds: [],
+      threadId: "thread-1"
+    });
+
+    expect(summary.access.canRead).toBe(true);
+    expect(summary.access.canComment).toBe(false);
+    expect(summary.access.canRun).toBe(false);
+
+    await expect(
+      readOnlyService.addComment({
+        actorUserId: "auditor-1",
+        threadId: "thread-1",
+        bodyMarkdown: "cannot comment",
+        mentionedUserIds: []
+      })
+    ).rejects.toThrow("thread collaboration access denied");
+
+    await expect(
+      readOnlyService.replaceShares({
+        actorUserId: "auditor-1",
+        threadId: "thread-1",
+        shares: [{ subjectType: "user", subjectId: "user-9" }]
+      })
+    ).rejects.toThrow("thread collaboration access denied");
   });
 });
