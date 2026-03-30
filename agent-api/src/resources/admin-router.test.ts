@@ -305,6 +305,20 @@ describe("resources admin router", () => {
     ]);
   });
 
+  it("rejects invalid global resource policy payloads", async () => {
+    const { app, cookies, adminUser } = await buildResourcesAdminApp();
+
+    const response = await request(app)
+      .put("/api/admin/resource-policies")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "role", subjectId: "employee", resourceType: "workspace", effect: "allow" }]
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("invalid resource policy");
+  });
+
   it("gets and replaces policies for a single workspace resource", async () => {
     const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
     const workspace = await workspaces.create({
@@ -346,6 +360,215 @@ describe("resources admin router", () => {
 
     expect(putResponse.status).toBe(200);
     expect(putResponse.body.policies).toHaveLength(2);
+  });
+
+  it("requires resource-policy permissions for scoped policy routes", async () => {
+    const { app, cookies, adminUser, workspaces, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp({
+      allowedPermissions: []
+    });
+    const workspace = await workspaces.create({
+      name: "Workspace",
+      slug: "workspace",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
+    });
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Policies",
+      slug: "policies",
+      sourceType: "managed_upload"
+    });
+
+    const workspaceGet = await request(app)
+      .get(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id));
+    expect(workspaceGet.status).toBe(403);
+    expect(workspaceGet.body).toEqual({ detail: "Missing permission: resource_policy.read" });
+
+    const workspacePut = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ policies: [] });
+    expect(workspacePut.status).toBe(403);
+    expect(workspacePut.body).toEqual({ detail: "Missing permission: resource_policy.write" });
+
+    const knowledgeSetGet = await request(app)
+      .get(`/api/admin/resources/knowledge-sets/${knowledgeSet.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id));
+    expect(knowledgeSetGet.status).toBe(403);
+    expect(knowledgeSetGet.body).toEqual({ detail: "Missing permission: resource_policy.read" });
+  });
+
+  it("clears scoped workspace policies without deleting other resources for the same subject", async () => {
+    const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const workspaceA = await workspaces.create({
+      name: "Workspace A",
+      slug: "workspace-a",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace-a")
+    });
+    const workspaceB = await workspaces.create({
+      name: "Workspace B",
+      slug: "workspace-b",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace-b")
+    });
+    resourcePolicies.records.push(
+      {
+        id: "policy-1",
+        organizationId: undefined,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: workspaceA.id,
+        effect: "allow",
+        createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+      },
+      {
+        id: "policy-2",
+        organizationId: undefined,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: workspaceB.id,
+        effect: "deny",
+        createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+      }
+    );
+
+    const response = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspaceA.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ policies: [] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.policies).toEqual([
+      expect.objectContaining({
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: workspaceB.id,
+        effect: "deny"
+      })
+    ]);
+  });
+
+  it("preserves organization scope when replacing scoped resource policies", async () => {
+    const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const workspace = await workspaces.create({
+      organizationId: "org-1",
+      name: "Workspace",
+      slug: "workspace",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
+    });
+    resourcePolicies.records.push({
+      id: "policy-1",
+      organizationId: "org-1",
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: workspace.id,
+      effect: "allow",
+      createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+    });
+
+    const response = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "role", subjectId: "employee", effect: "deny" }]
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.policies).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: workspace.id,
+        effect: "deny"
+      })
+    ]);
+  });
+
+  it("rejects invalid scoped resource policy payloads", async () => {
+    const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const workspace = await workspaces.create({
+      name: "Workspace",
+      slug: "workspace",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
+    });
+    resourcePolicies.records.push({
+      id: "policy-1",
+      organizationId: undefined,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: workspace.id,
+      effect: "allow",
+      createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+    });
+
+    const response = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "team", subjectId: "rd", effect: "allow" }]
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("invalid resource policy");
+    expect(await resourcePolicies.listAll()).toEqual([
+      expect.objectContaining({
+        resourceId: workspace.id,
+        subjectType: "role",
+        subjectId: "employee",
+        effect: "allow"
+      })
+    ]);
+  });
+
+  it("rejects scoped policy replacement requests without an explicit policies array", async () => {
+    const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const workspace = await workspaces.create({
+      name: "Workspace",
+      slug: "workspace",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
+    });
+    resourcePolicies.records.push({
+      id: "policy-1",
+      organizationId: undefined,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: workspace.id,
+      effect: "allow",
+      createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+    });
+
+    const response = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({});
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("invalid resource policy");
+    expect(await resourcePolicies.listAll()).toEqual([
+      expect.objectContaining({
+        resourceId: workspace.id,
+        subjectType: "role",
+        subjectId: "employee",
+        effect: "allow"
+      })
+    ]);
   });
 
   it("gets and replaces policies for a single knowledge set resource", async () => {
@@ -870,6 +1093,7 @@ function makeUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser
 
 async function buildResourcesAdminApp(options?: {
   user?: AuthenticatedUser;
+  allowedPermissions?: string[];
 }) {
   const dingtalkClient: DingTalkClient = {
     async exchangeCode() {
@@ -956,6 +1180,14 @@ async function buildResourcesAdminApp(options?: {
       knowledgeSets: knowledgeSets as never,
       resourcePolicies: resourcePolicies as never,
       storage,
+      requirePermission: (permissionKey) => (_req, res, next) => {
+        const allowedPermissions = options?.allowedPermissions ?? ["resource_policy.read", "resource_policy.write"];
+        if (!allowedPermissions.includes(permissionKey)) {
+          res.status(403).json({ detail: `Missing permission: ${permissionKey}` });
+          return;
+        }
+        next();
+      },
       validateFilesystemPath: (input?: string | null) => {
         const raw = (input || "").trim();
         const candidate = raw ? path.resolve(raw) : "";

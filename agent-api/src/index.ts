@@ -677,6 +677,7 @@ registerCommonApiRoutes(app, {
     knowledgeSets,
     resourcePolicies,
     storage: knowledgeSetStorage,
+    requirePermission,
     validateFilesystemPath: resolveWorkspace,
     resourceAccessLogs
   }),

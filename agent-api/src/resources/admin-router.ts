@@ -1,4 +1,4 @@
-import express, { Router, type NextFunction, type Request, type Response } from "express";
+import express, { Router, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import multer, { MulterError } from "multer";
 
 import type { ResourcePolicyRecord } from "../persistence/resource-policy-repository.js";
@@ -27,7 +27,7 @@ type WorkspaceRepositoryLike = {
       rootPath?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<{ id: string; sourceType?: string; rootPath?: string } | undefined>;
+  get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string } | undefined>;
 };
 
 type KnowledgeSetRepositoryLike = {
@@ -55,7 +55,7 @@ type KnowledgeSetRepositoryLike = {
       storageKey?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<{ id: string; sourceType?: string; rootPath?: string } | undefined>;
+  get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string } | undefined>;
   listItems(id: string): Promise<unknown[]>;
   replaceItems(
     id: string,
@@ -108,6 +108,14 @@ type ResourcePolicyInput = {
   effect: ResourcePolicyRecord["effect"];
 };
 
+type ResourcePolicyGroupInput = {
+  subjectType: ResourcePolicyRecord["subjectType"];
+  subjectId: string;
+  resourceType: ResourcePolicyRecord["resourceType"];
+};
+
+type ResourcePolicyReplacementInput = Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">;
+
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
@@ -155,50 +163,172 @@ function requireFilesystemRootPath(
   return validateFilesystemPath(rootPath);
 }
 
-function parseResourcePolicies(body: unknown): ResourcePolicyInput[] {
+function parsePolicyArray(body: unknown, options?: { requireExplicitArray?: boolean }): unknown[] {
   if (!body || typeof body !== "object") {
+    if (options?.requireExplicitArray) {
+      throw new Error("invalid resource policy payload");
+    }
     return [];
   }
-  const policies = Array.isArray((body as { policies?: unknown }).policies) ? ((body as { policies: unknown[] }).policies ?? []) : [];
-  return policies
-    .map((policy) => ({
-      subjectType: (policy as { subjectType?: ResourcePolicyRecord["subjectType"] }).subjectType,
-      subjectId: String((policy as { subjectId?: unknown }).subjectId ?? ""),
-      effect: (policy as { effect?: ResourcePolicyRecord["effect"] }).effect
-    }))
-    .filter(
-      (policy): policy is ResourcePolicyInput =>
-        (policy.subjectType === "role" || policy.subjectType === "department" || policy.subjectType === "user") &&
-        (policy.effect === "allow" || policy.effect === "deny") &&
-        policy.subjectId.trim().length > 0
-    );
+  const rawPolicies = (body as { policies?: unknown }).policies;
+  if (rawPolicies === undefined) {
+    if (options?.requireExplicitArray) {
+      throw new Error("invalid resource policy payload");
+    }
+    return [];
+  }
+  if (!Array.isArray(rawPolicies)) {
+    throw new Error("invalid resource policy payload");
+  }
+  return rawPolicies;
 }
 
-function mapResourcePoliciesForResource(
+function parseResourcePolicies(body: unknown, options?: { requireExplicitArray?: boolean }): ResourcePolicyInput[] {
+  const rawPolicies = parsePolicyArray(body, options);
+  return rawPolicies.map((policy, index) => {
+    if (!policy || typeof policy !== "object") {
+      throw new Error(`invalid resource policy payload at index ${index}`);
+    }
+    const subjectType = (policy as { subjectType?: ResourcePolicyRecord["subjectType"] }).subjectType;
+    const subjectId = String((policy as { subjectId?: unknown }).subjectId ?? "").trim();
+    const effect = (policy as { effect?: ResourcePolicyRecord["effect"] }).effect;
+    if (!(subjectType === "role" || subjectType === "department" || subjectType === "user")) {
+      throw new Error(`invalid resource policy subjectType at index ${index}`);
+    }
+    if (!(effect === "allow" || effect === "deny")) {
+      throw new Error(`invalid resource policy effect at index ${index}`);
+    }
+    if (!subjectId) {
+      throw new Error(`invalid resource policy subjectId at index ${index}`);
+    }
+    return {
+      subjectType,
+      subjectId,
+      effect
+    };
+  });
+}
+
+function parseReplacePoliciesRequest(body: unknown): {
+  policies: ResourcePolicyReplacementInput[];
+  groups?: ResourcePolicyGroupInput[];
+} {
+  const rawPolicies = parsePolicyArray(body, { requireExplicitArray: true });
+  const policies = rawPolicies.map((policy, index) => {
+    if (!policy || typeof policy !== "object") {
+      throw new Error(`invalid resource policy payload at index ${index}`);
+    }
+    const subjectType = (policy as { subjectType?: ResourcePolicyRecord["subjectType"] }).subjectType;
+    const subjectId = String((policy as { subjectId?: unknown }).subjectId ?? "").trim();
+    const resourceType = (policy as { resourceType?: ResourcePolicyRecord["resourceType"] }).resourceType;
+    const resourceId = String((policy as { resourceId?: unknown }).resourceId ?? "").trim();
+    const effect = (policy as { effect?: ResourcePolicyRecord["effect"] }).effect;
+    if (!(subjectType === "role" || subjectType === "department" || subjectType === "user")) {
+      throw new Error(`invalid resource policy subjectType at index ${index}`);
+    }
+    if (!(resourceType === "workspace" || resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
+      throw new Error(`invalid resource policy resourceType at index ${index}`);
+    }
+    if (!(effect === "allow" || effect === "deny")) {
+      throw new Error(`invalid resource policy effect at index ${index}`);
+    }
+    if (!subjectId || !resourceId) {
+      throw new Error(`invalid resource policy resource identifiers at index ${index}`);
+    }
+    return {
+      organizationId: toTrimmedString((policy as { organizationId?: unknown }).organizationId as string | undefined),
+      subjectType,
+      subjectId,
+      resourceType,
+      resourceId,
+      effect
+    };
+  });
+
+  const rawGroups = body && typeof body === "object" ? (body as { groups?: unknown }).groups : undefined;
+  if (rawGroups === undefined) {
+    return { policies };
+  }
+  if (!Array.isArray(rawGroups)) {
+    throw new Error("invalid resource policy groups payload");
+  }
+  const groups = rawGroups.map((group, index) => {
+    if (!group || typeof group !== "object") {
+      throw new Error(`invalid resource policy group at index ${index}`);
+    }
+    const subjectType = (group as { subjectType?: ResourcePolicyRecord["subjectType"] }).subjectType;
+    const subjectId = String((group as { subjectId?: unknown }).subjectId ?? "").trim();
+    const resourceType = (group as { resourceType?: ResourcePolicyRecord["resourceType"] }).resourceType;
+    if (!(subjectType === "role" || subjectType === "department" || subjectType === "user")) {
+      throw new Error(`invalid resource policy group subjectType at index ${index}`);
+    }
+    if (!(resourceType === "workspace" || resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
+      throw new Error(`invalid resource policy group resourceType at index ${index}`);
+    }
+    if (!subjectId) {
+      throw new Error(`invalid resource policy group subjectId at index ${index}`);
+    }
+    return {
+      subjectType,
+      subjectId,
+      resourceType
+    };
+  });
+  return { policies, groups };
+}
+
+function buildResourcePolicyReplacement(
   allPolicies: ResourcePolicyRecord[],
   resourceType: ResourcePolicyRecord["resourceType"],
   resourceId: string,
-  nextPolicies: ResourcePolicyInput[]
-): Array<Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">> {
+  nextPolicies: ResourcePolicyInput[],
+  defaultOrganizationId?: string
+) {
+  const existingTargetPolicies = allPolicies.filter(
+    (policy) => policy.resourceType === resourceType && policy.resourceId === resourceId
+  );
+  const existingTargetPoliciesByGroup = new Map<string, ResourcePolicyRecord>();
+  const groupsByKey = new Map<string, ResourcePolicyGroupInput>();
+  for (const policy of existingTargetPolicies) {
+    const groupKey = `${policy.subjectType}:${policy.subjectId}:${resourceType}`;
+    existingTargetPoliciesByGroup.set(groupKey, policy);
+    groupsByKey.set(groupKey, {
+      subjectType: policy.subjectType,
+      subjectId: policy.subjectId,
+      resourceType
+    });
+  }
+  for (const policy of nextPolicies) {
+    groupsByKey.set(`${policy.subjectType}:${policy.subjectId}:${resourceType}`, {
+      subjectType: policy.subjectType,
+      subjectId: policy.subjectId,
+      resourceType
+    });
+  }
   const preservedPolicies = allPolicies.filter((policy) => !(policy.resourceType === resourceType && policy.resourceId === resourceId));
-  return [
-    ...preservedPolicies.map((policy) => ({
-      organizationId: policy.organizationId,
-      subjectType: policy.subjectType,
-      subjectId: policy.subjectId,
-      resourceType: policy.resourceType,
-      resourceId: policy.resourceId,
-      effect: policy.effect
-    })),
-    ...nextPolicies.map((policy) => ({
-      organizationId: undefined,
-      subjectType: policy.subjectType,
-      subjectId: policy.subjectId,
-      resourceType,
-      resourceId,
-      effect: policy.effect
-    }))
-  ];
+  return {
+    groups: [...groupsByKey.values()],
+    policies: [
+      ...preservedPolicies.map((policy) => ({
+        organizationId: policy.organizationId,
+        subjectType: policy.subjectType,
+        subjectId: policy.subjectId,
+        resourceType: policy.resourceType,
+        resourceId: policy.resourceId,
+        effect: policy.effect
+      })),
+      ...nextPolicies.map((policy) => ({
+        organizationId:
+          existingTargetPoliciesByGroup.get(`${policy.subjectType}:${policy.subjectId}:${resourceType}`)?.organizationId ??
+          defaultOrganizationId,
+        subjectType: policy.subjectType,
+        subjectId: policy.subjectId,
+        resourceType,
+        resourceId,
+        effect: policy.effect
+      }))
+    ]
+  };
 }
 
 export function createResourcesAdminRouter(options: {
@@ -206,11 +336,13 @@ export function createResourcesAdminRouter(options: {
   knowledgeSets: KnowledgeSetRepositoryLike;
   resourcePolicies: ResourcePolicyRepositoryLike;
   storage: KnowledgeSetStorage;
+  requirePermission?: (permissionKey: string) => RequestHandler;
   validateFilesystemPath?: (input?: string | null) => string;
   resourceAccessLogs?: ResourceAccessLogServiceLike;
 }): Router {
   const router = Router();
   const validateFilesystemPath = options.validateFilesystemPath ?? ((input?: string | null) => input?.trim() ?? "");
+  const requirePermission = options.requirePermission ?? ((_permissionKey: string) => (_req, _res, next) => next());
 
   router.get("/workspaces", async (_req: Request, res: Response) => {
     res.json({ workspaces: await options.workspaces.list() });
@@ -433,30 +565,13 @@ export function createResourcesAdminRouter(options: {
     }
   });
 
-  router.get("/resource-policies", async (_req: Request, res: Response) => {
+  router.get("/resource-policies", requirePermission("resource_policy.read"), async (_req: Request, res: Response) => {
     res.json({ policies: await options.resourcePolicies.listAll() });
   });
 
-  router.put("/resource-policies", async (req: Request, res: Response) => {
+  router.put("/resource-policies", requirePermission("resource_policy.write"), async (req: Request, res: Response) => {
     try {
-      const policies = Array.isArray(req.body?.policies)
-        ? req.body.policies.map((policy: Record<string, unknown>) => ({
-            organizationId: toTrimmedString(policy.organizationId),
-            subjectType: policy.subjectType as ResourcePolicyRecord["subjectType"],
-            subjectId: String(policy.subjectId ?? ""),
-            resourceType: policy.resourceType as ResourcePolicyRecord["resourceType"],
-            resourceId: String(policy.resourceId ?? ""),
-            effect: policy.effect as ResourcePolicyRecord["effect"]
-          }))
-        : [];
-      const groups = Array.isArray(req.body?.groups)
-        ? req.body.groups.map((group: Record<string, unknown>) => ({
-            subjectType: group.subjectType as ResourcePolicyRecord["subjectType"],
-            subjectId: String(group.subjectId ?? ""),
-            resourceType: group.resourceType as ResourcePolicyRecord["resourceType"]
-          }))
-        : undefined;
-
+      const { policies, groups } = parseReplacePoliciesRequest(req.body);
       const next = groups
         ? await options.resourcePolicies.replacePoliciesForGroups({ groups, policies })
         : await options.resourcePolicies.replacePolicies(policies);
@@ -466,7 +581,10 @@ export function createResourcesAdminRouter(options: {
     }
   });
 
-  router.get("/resources/workspaces/:workspaceId/policies", async (req: Request, res: Response) => {
+  router.get(
+    "/resources/workspaces/:workspaceId/policies",
+    requirePermission("resource_policy.read"),
+    async (req: Request, res: Response) => {
     try {
       const workspaceId = req.params.workspaceId;
       const workspace = await options.workspaces.get(workspaceId);
@@ -481,9 +599,13 @@ export function createResourcesAdminRouter(options: {
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
-  });
+    }
+  );
 
-  router.put("/resources/workspaces/:workspaceId/policies", async (req: Request, res: Response) => {
+  router.put(
+    "/resources/workspaces/:workspaceId/policies",
+    requirePermission("resource_policy.write"),
+    async (req: Request, res: Response) => {
     try {
       const workspaceId = req.params.workspaceId;
       const workspace = await options.workspaces.get(workspaceId);
@@ -491,16 +613,20 @@ export function createResourcesAdminRouter(options: {
         res.status(404).json({ detail: "workspace 不存在" });
         return;
       }
-      const nextPolicies = parseResourcePolicies(req.body);
+      const nextPolicies = parseResourcePolicies(req.body, { requireExplicitArray: true });
       const allPolicies = await options.resourcePolicies.listAll();
-      const policies = mapResourcePoliciesForResource(allPolicies, "workspace", workspaceId, nextPolicies);
-      res.json({ policies: await options.resourcePolicies.replacePolicies(policies) });
+      const replacement = buildResourcePolicyReplacement(allPolicies, "workspace", workspaceId, nextPolicies, workspace.organizationId);
+      res.json({ policies: await options.resourcePolicies.replacePoliciesForGroups(replacement) });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
-  });
+    }
+  );
 
-  router.get("/resources/knowledge-sets/:knowledgeSetId/policies", async (req: Request, res: Response) => {
+  router.get(
+    "/resources/knowledge-sets/:knowledgeSetId/policies",
+    requirePermission("resource_policy.read"),
+    async (req: Request, res: Response) => {
     try {
       const knowledgeSetId = req.params.knowledgeSetId;
       const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
@@ -515,9 +641,13 @@ export function createResourcesAdminRouter(options: {
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
-  });
+    }
+  );
 
-  router.put("/resources/knowledge-sets/:knowledgeSetId/policies", async (req: Request, res: Response) => {
+  router.put(
+    "/resources/knowledge-sets/:knowledgeSetId/policies",
+    requirePermission("resource_policy.write"),
+    async (req: Request, res: Response) => {
     try {
       const knowledgeSetId = req.params.knowledgeSetId;
       const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
@@ -525,14 +655,21 @@ export function createResourcesAdminRouter(options: {
         res.status(404).json({ detail: "knowledge set 不存在" });
         return;
       }
-      const nextPolicies = parseResourcePolicies(req.body);
+      const nextPolicies = parseResourcePolicies(req.body, { requireExplicitArray: true });
       const allPolicies = await options.resourcePolicies.listAll();
-      const policies = mapResourcePoliciesForResource(allPolicies, "knowledge_set", knowledgeSetId, nextPolicies);
-      res.json({ policies: await options.resourcePolicies.replacePolicies(policies) });
+      const replacement = buildResourcePolicyReplacement(
+        allPolicies,
+        "knowledge_set",
+        knowledgeSetId,
+        nextPolicies,
+        knowledgeSet.organizationId
+      );
+      res.json({ policies: await options.resourcePolicies.replacePoliciesForGroups(replacement) });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
-  });
+    }
+  );
 
   router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (error instanceof MulterError) {
