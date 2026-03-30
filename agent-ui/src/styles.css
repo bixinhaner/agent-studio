@@ -1461,6 +1461,113 @@ body {
   gap: 12px;
 }
 
+.system-settings-shell {
+  display: grid;
+  width: min(1120px, 100%);
+  align-content: start;
+  justify-items: stretch;
+  gap: 16px;
+  overflow: auto;
+}
+
+.system-settings-meta-pill-group,
+.system-settings-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.system-settings-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #cfe0f6;
+  background: #f7faff;
+  color: #1e3a8a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.system-settings-subsection {
+  display: grid;
+  gap: 14px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.system-settings-toggle-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.system-settings-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.system-settings-toggle-row .field-label {
+  display: block;
+}
+
+.system-settings-toggle-row .field-help {
+  display: block;
+  margin-top: 4px;
+}
+
+.system-settings-history-grid,
+.system-settings-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.system-settings-history-card,
+.system-settings-preview-card {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.system-settings-history-card h4,
+.system-settings-preview-card h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.system-settings-history-card dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.system-settings-history-card dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.system-settings-history-card dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.system-settings-history-card dd,
+.system-settings-preview-card p {
+  margin: 0;
+  color: #0f172a;
+  line-height: 1.5;
+}
+
 .admin-stack-grid {
   width: min(1120px, 100%);
   display: grid;
@@ -2079,7 +2186,9 @@ body {
   .resource-center-form-grid,
   .resource-policy-fields,
   .knowledge-set-upload-grid,
-  .knowledge-set-tree-file-row {
+  .knowledge-set-tree-file-row,
+  .system-settings-history-grid,
+  .system-settings-preview-grid {
     grid-template-columns: 1fr;
   }
 

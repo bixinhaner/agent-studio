@@ -6,6 +6,7 @@ const ITEMS: Array<{ id: AdminSection; label: string }> = [
   { id: "resources", label: "资源配置中心" },
   { id: "capabilities", label: "能力配置中心" },
   { id: "integrations", label: "集成中心" },
+  { id: "system-settings", label: "系统设置" },
   { id: "organization", label: "组织同步" },
   { id: "rbac", label: "角色权限" },
   { id: "monitoring", label: "审计监控" }

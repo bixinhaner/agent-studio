@@ -16,6 +16,7 @@ import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
 import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
 import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
+import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
 
 function OverviewCard(props: { overview: AdminOverview | null; loading: boolean; errorText: string }) {
   return (
@@ -82,7 +83,7 @@ export function AdminShell() {
       <section className="admin-card">
         <p className="auth-eyebrow">Agent Studio Admin</p>
         <h1>管理控制台</h1>
-        <p className="admin-description">统一查看运行状态、资源配置、用户治理、角色权限、钉钉组织同步和运营监控。</p>
+        <p className="admin-description">统一查看运行状态、资源配置、用户治理、角色权限、系统设置、钉钉组织同步和运营监控。</p>
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
@@ -90,6 +91,7 @@ export function AdminShell() {
       {section === "resources" ? <ResourceCenterShell /> : null}
       {section === "capabilities" ? <CapabilityCenterShell /> : null}
       {section === "integrations" ? <IntegrationCenterShell /> : null}
+      {section === "system-settings" ? <SystemSettingsShell /> : null}
       {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (
         <div className="admin-stack-grid">

@@ -4,6 +4,7 @@ export type AdminSection =
   | "resources"
   | "capabilities"
   | "integrations"
+  | "system-settings"
   | "organization"
   | "rbac"
   | "monitoring";
