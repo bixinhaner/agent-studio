@@ -121,6 +121,7 @@ describe("IntegrationCenterShell", () => {
         })
       );
     });
-    expect(await screen.findByText("int-zd-2")).toBeTruthy();
+    const selectedItem = await screen.findByRole("button", { name: /Zendesk Secondary/ });
+    expect(selectedItem.className).toContain("active");
   });
 });
