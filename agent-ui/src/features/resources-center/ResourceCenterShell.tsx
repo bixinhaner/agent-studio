@@ -56,6 +56,12 @@ export function ResourceCenterShell() {
     };
   }, []);
 
+  useEffect(() => {
+    if (tab === "workspace" && typeFilter === "managed_upload") {
+      setTypeFilter("all");
+    }
+  }, [tab, typeFilter]);
+
   const filteredWorkspaces = useMemo(() => {
     return workspaces.filter((workspace) => {
       if (statusFilter !== "all" && workspace.status !== statusFilter) return false;

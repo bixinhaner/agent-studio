@@ -98,4 +98,47 @@ describe("ResourceCenterShell", () => {
     expect(screen.getByText("请选择左侧资源以继续配置。")).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建工作区" })).toBeTruthy();
   });
+
+  it("resets an invalid managed_upload filter when switching back to the workspace tab", async () => {
+    mockedFetchWorkspaces.mockResolvedValue({
+      workspaces: [
+        {
+          id: "workspace-1",
+          name: "docs-workspace",
+          slug: "docs-workspace",
+          description: "",
+          status: "active",
+          sourceType: "filesystem",
+          rootPath: "/workspace/docs",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchKnowledgeSets.mockResolvedValue({
+      knowledgeSets: [
+        {
+          id: "knowledge-set-1",
+          name: "Uploads",
+          slug: "uploads",
+          description: "",
+          status: "active",
+          sourceType: "managed_upload",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+
+    render(<ResourceCenterShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "资料集" }));
+    fireEvent.change(screen.getByLabelText("类型筛选"), { target: { value: "managed_upload" } });
+    expect(screen.getByText("Uploads")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "工作区" }));
+
+    expect(await screen.findByText("docs-workspace")).toBeTruthy();
+    expect((screen.getByLabelText("类型筛选") as HTMLSelectElement).value).toBe("all");
+  });
 });
