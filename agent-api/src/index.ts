@@ -157,6 +157,15 @@ const notificationDispatch = new NotificationDispatchService({
       throw new Error("DingTalk work notice sender is not available");
     }
     return dingtalkClient.sendWorkNotice({ message });
+  },
+  broadcastDingtalk: ({ recipientUserIds, message }) => {
+    if (!dingtalkClient.sendWorkNotice) {
+      throw new Error("DingTalk work notice sender is not available");
+    }
+    return dingtalkClient.sendWorkNotice({
+      userIds: recipientUserIds,
+      message
+    });
   }
 });
 const alertEvaluation = new AlertEvaluationService({
