@@ -776,6 +776,21 @@ model NotificationRecord {
   @@map("notification_records")
 }
 
+model SystemSettingsVersion {
+  id               String                  @id @default(cuid())
+  versionNumber    Int                     @unique @map("version_number")
+  status           SystemSettingsVersionStatus
+  payload          Json                    @map("payload")
+  publishedAt      DateTime?               @map("published_at")
+  publishedByUserId String?                @map("published_by_user_id")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+
+  @@index([status, versionNumber])
+  @@index([status, publishedAt])
+  @@map("system_settings_versions")
+}
+
 enum ThreadStatus {
   active
   archived
@@ -792,4 +807,9 @@ enum SessionStatus {
   active
   ended
   failed
+}
+
+enum SystemSettingsVersionStatus {
+  draft
+  published
 }
