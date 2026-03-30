@@ -418,6 +418,7 @@ model BroadcastMessage {
   title             String
   bodyMarkdown      String    @map("body_markdown")
   status            String    @default("draft")
+  dingtalkDeliveryEnabled Boolean @default(false) @map("dingtalk_delivery_enabled")
   createdByUserId   String?   @map("created_by_user_id")
   publishedAt       DateTime? @map("published_at")
   publishedByUserId String?   @map("published_by_user_id")
@@ -435,16 +436,17 @@ model BroadcastMessage {
 }
 
 model BroadcastTarget {
-  id           String   @id @default(cuid())
-  broadcastId  String   @map("broadcast_id")
-  targetType   String   @map("target_type")
-  targetId     String   @default("") @map("target_id")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          String   @id @default(cuid())
+  broadcastId String   @map("broadcast_id")
+  targetType  String   @map("target_type")
+  /// `targetId` is null for all_users targets; uniqueness is enforced with partial indexes in SQL migration.
+  targetId    String?  @map("target_id")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  broadcast    BroadcastMessage @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  broadcast   BroadcastMessage @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
 
-  @@unique([broadcastId, targetType, targetId])
   @@index([broadcastId])
+  @@index([broadcastId, targetType])
   @@index([targetType, targetId])
   @@map("broadcast_targets")
 }

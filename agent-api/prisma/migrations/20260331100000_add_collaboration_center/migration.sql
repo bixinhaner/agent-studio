@@ -78,6 +78,7 @@ CREATE TABLE "broadcast_messages" (
   "title" TEXT NOT NULL,
   "body_markdown" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'draft',
+  "dingtalk_delivery_enabled" BOOLEAN NOT NULL DEFAULT FALSE,
   "created_by_user_id" TEXT,
   "published_at" TIMESTAMP(3),
   "published_by_user_id" TEXT,
@@ -92,7 +93,7 @@ CREATE TABLE "broadcast_targets" (
   "id" TEXT NOT NULL,
   "broadcast_id" TEXT NOT NULL,
   "target_type" TEXT NOT NULL,
-  "target_id" TEXT NOT NULL DEFAULT '',
+  "target_id" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "broadcast_targets_pkey" PRIMARY KEY ("id")
@@ -178,7 +179,14 @@ CREATE INDEX "broadcast_messages_published_at_idx" ON "broadcast_messages"("publ
 CREATE INDEX "broadcast_messages_created_by_user_id_created_at_idx" ON "broadcast_messages"("created_by_user_id", "created_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "broadcast_targets_broadcast_id_target_type_target_id_key" ON "broadcast_targets"("broadcast_id", "target_type", "target_id");
+CREATE UNIQUE INDEX "broadcast_targets_all_users_key"
+  ON "broadcast_targets"("broadcast_id", "target_type")
+  WHERE "target_id" IS NULL;
+
+-- CreateIndex
+CREATE UNIQUE INDEX "broadcast_targets_target_key"
+  ON "broadcast_targets"("broadcast_id", "target_type", "target_id")
+  WHERE "target_id" IS NOT NULL;
 
 -- CreateIndex
 CREATE INDEX "broadcast_targets_broadcast_id_idx" ON "broadcast_targets"("broadcast_id");
