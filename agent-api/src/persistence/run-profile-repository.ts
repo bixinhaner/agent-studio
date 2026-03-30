@@ -179,4 +179,28 @@ export class RunProfileRepository {
     });
     return mapRunProfile(updated);
   }
+
+  async copy(
+    id: string,
+    overrides: { name: string; slug: string; status: string }
+  ): Promise<RunProfileRecord> {
+    const existing = await this.get(id);
+    if (!existing) {
+      throw new Error("run profile 不存在");
+    }
+    return this.create({
+      organizationId: existing.organizationId,
+      name: overrides.name,
+      slug: overrides.slug,
+      description: existing.description,
+      status: overrides.status,
+      defaultModel: existing.defaultModel,
+      allowedModels: existing.allowedModels,
+      defaultReasoningEffort: existing.defaultReasoningEffort,
+      sandboxMode: existing.sandboxMode,
+      approvalPolicy: existing.approvalPolicy,
+      networkAccessEnabled: existing.networkAccessEnabled,
+      webSearchMode: existing.webSearchMode
+    });
+  }
 }

@@ -247,4 +247,52 @@ describe("SkillPackageRepository", () => {
     });
     await expect(repository.list()).resolves.toEqual([updated]);
   });
+
+  it("copies a skill package with items and runtime bindings into a disabled hidden record", async () => {
+    const repository = new SkillPackageRepository(new FakeSkillPackageDb() as never);
+    const skillPackage = await repository.create({
+      name: "Support Tools",
+      slug: "support-tools",
+      description: " Runtime skills ",
+      status: "active",
+      visibleToUsers: true
+    });
+
+    await repository.replaceItems(skillPackage.id, [
+      {
+        capabilityKey: "ticket.search",
+        description: "Search tickets",
+        runtimeBindings: [{ runtimeType: "codex", bindingType: "config_fragment", bindingPayload: { tool: "ticket_search" } }]
+      }
+    ]);
+
+    const copied = await repository.copy(skillPackage.id, {
+      name: "Support Tools Copy",
+      slug: "support-tools-copy",
+      status: "disabled",
+      visibleToUsers: false
+    });
+
+    expect(copied.id).not.toBe(skillPackage.id);
+    expect(copied).toMatchObject({
+      name: "Support Tools Copy",
+      slug: "support-tools-copy",
+      status: "disabled",
+      visibleToUsers: false,
+      description: "Runtime skills"
+    });
+    expect(copied.items).toEqual([
+      expect.objectContaining({
+        capabilityKey: "ticket.search",
+        description: "Search tickets",
+        runtimeBindings: [
+          expect.objectContaining({
+            runtimeType: "codex",
+            bindingType: "config_fragment",
+            bindingPayload: { tool: "ticket_search" }
+          })
+        ]
+      })
+    ]);
+  });
 });

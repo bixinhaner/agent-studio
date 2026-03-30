@@ -284,4 +284,110 @@ describe("AgentModeRepository", () => {
     });
     await expect(repository.list()).resolves.toEqual([updated]);
   });
+
+  it("replaces ordered workspace bindings and instruction sources", async () => {
+    const repository = new AgentModeRepository(new FakeAgentModeDb() as never);
+    const mode = await repository.create({
+      name: "Support Assistant",
+      slug: "support-assistant",
+      runProfileId: "profile-support"
+    });
+
+    await repository.replaceWorkspaces(mode.id, [
+      {
+        workspaceId: "workspace-b",
+        isDefault: false,
+        allowDirectorySelection: false,
+        directoryScope: "authorized_workspace_and_knowledge_set",
+        loadWorkspaceAgentsMd: false
+      },
+      {
+        workspaceId: "workspace-a",
+        isDefault: true,
+        allowDirectorySelection: true,
+        directoryScope: "workspace_only",
+        loadWorkspaceAgentsMd: true
+      }
+    ]);
+
+    const updated = await repository.replaceInstructionSources(mode.id, [
+      { sourceType: "inline", sourceRef: "You are concise.", sortOrder: 0 },
+      { sourceType: "workspace_agents_md", sourceRef: "workspace-root", sortOrder: 1 }
+    ]);
+
+    expect(updated.workspaceRules.map((item) => item.workspaceId)).toEqual(["workspace-b", "workspace-a"]);
+    expect(updated.workspaceRules).toEqual([
+      expect.objectContaining({
+        workspaceId: "workspace-b",
+        directoryScope: "authorized_workspace_and_knowledge_set",
+        loadWorkspaceAgentsMd: false
+      }),
+      expect.objectContaining({
+        workspaceId: "workspace-a",
+        directoryScope: "workspace_only",
+        loadWorkspaceAgentsMd: true
+      })
+    ]);
+    expect(updated.instructionSources.map((item) => item.sourceType)).toEqual(["inline", "workspace_agents_md"]);
+  });
+
+  it("copies an agent mode with run profile, skill packages, workspace rules, and instruction sources", async () => {
+    const repository = new AgentModeRepository(new FakeAgentModeDb() as never);
+    const mode = await repository.create({
+      name: "Coding Assistant",
+      slug: "coding-assistant",
+      description: " Mode description ",
+      status: "active",
+      visibleToUsers: true,
+      runProfileId: "profile-1"
+    });
+
+    await repository.replaceSkillPackages(mode.id, ["skill-package-1", "skill-package-2"]);
+    await repository.replaceWorkspaces(mode.id, [
+      {
+        workspaceId: "workspace-1",
+        isDefault: true,
+        allowDirectorySelection: true,
+        directoryScope: "workspace_only",
+        loadWorkspaceAgentsMd: true
+      }
+    ]);
+    await repository.replaceInstructionSources(mode.id, [
+      { sourceType: "inline", sourceRef: "Be precise.", sortOrder: 0 }
+    ]);
+
+    const copied = await repository.copy(mode.id, {
+      name: "Coding Assistant Copy",
+      slug: "coding-assistant-copy",
+      status: "disabled",
+      visibleToUsers: false
+    });
+
+    expect(copied.id).not.toBe(mode.id);
+    expect(copied).toMatchObject({
+      name: "Coding Assistant Copy",
+      slug: "coding-assistant-copy",
+      description: "Mode description",
+      status: "disabled",
+      visibleToUsers: false,
+      runProfileId: "profile-1"
+    });
+    expect(copied.skillPackages.map((item) => item.skillPackageId)).toEqual(["skill-package-1", "skill-package-2"]);
+    expect(copied.workspaceRules).toEqual([
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        isDefault: true,
+        allowDirectorySelection: true,
+        directoryScope: "workspace_only",
+        loadWorkspaceAgentsMd: true
+      })
+    ]);
+    expect(copied.instructionSources).toEqual([
+      expect.objectContaining({
+        sourceType: "inline",
+        sourceRef: "Be precise.",
+        sortOrder: 0
+      })
+    ]);
+  });
 });

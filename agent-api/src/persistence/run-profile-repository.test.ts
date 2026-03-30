@@ -122,4 +122,42 @@ describe("RunProfileRepository", () => {
     await expect(repository.get(created.id)).resolves.toEqual(updated);
     await expect(repository.list()).resolves.toEqual([updated]);
   });
+
+  it("copies a run profile while preserving runtime fields", async () => {
+    const repository = new RunProfileRepository(new FakeRunProfileDb() as never);
+    const created = await repository.create({
+      name: "Coding Default",
+      slug: "coding-default",
+      description: " Runtime profile ",
+      status: "active",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4", "gpt-5.4-mini"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "live"
+    });
+
+    const copied = await repository.copy(created.id, {
+      name: "Coding Default Copy",
+      slug: "coding-default-copy",
+      status: "disabled"
+    });
+
+    expect(copied.id).not.toBe(created.id);
+    expect(copied).toMatchObject({
+      name: "Coding Default Copy",
+      slug: "coding-default-copy",
+      status: "disabled",
+      description: "Runtime profile",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4", "gpt-5.4-mini"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "live"
+    });
+  });
 });

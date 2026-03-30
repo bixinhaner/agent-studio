@@ -278,6 +278,10 @@ export class AgentModeRepository {
   }
 
   async replaceWorkspaceRules(agentModeId: string, workspaceRules: ReplaceWorkspaceRulesPayload): Promise<AgentModeRecord> {
+    return this.replaceWorkspaces(agentModeId, workspaceRules);
+  }
+
+  async replaceWorkspaces(agentModeId: string, workspaceRules: ReplaceWorkspaceRulesPayload): Promise<AgentModeRecord> {
     return this.db.$transaction(async (tx) => {
       const record = await this.requireAgentMode(tx, agentModeId);
       await tx.agentModeWorkspace.deleteMany({ where: { agentModeId: record.id } });
@@ -327,6 +331,62 @@ export class AgentModeRepository {
         }
       });
       return this.loadRecord(tx, refreshed);
+    });
+  }
+
+  async copy(
+    id: string,
+    overrides: { name: string; slug: string; status: string; visibleToUsers: boolean }
+  ): Promise<AgentModeRecord> {
+    return this.db.$transaction(async (tx) => {
+      const existing = await this.requireAgentMode(tx, id);
+      const loaded = await this.loadRecord(tx, existing);
+      const copied = await tx.agentMode.create({
+        data: {
+          organizationId: trimOrUndefined(loaded.organizationId) ?? null,
+          name: overrides.name,
+          slug: overrides.slug,
+          description: trimOrUndefined(loaded.description) ?? null,
+          status: trimOrUndefined(overrides.status) ?? "disabled",
+          visibleToUsers: overrides.visibleToUsers,
+          runProfileId: loaded.runProfileId
+        }
+      });
+
+      for (const skillPackage of loaded.skillPackages) {
+        await tx.agentModeSkillPackage.create({
+          data: {
+            agentModeId: copied.id,
+            skillPackageId: skillPackage.skillPackageId
+          }
+        });
+      }
+
+      for (const workspaceRule of loaded.workspaceRules) {
+        await tx.agentModeWorkspace.create({
+          data: {
+            agentModeId: copied.id,
+            workspaceId: workspaceRule.workspaceId,
+            isDefault: workspaceRule.isDefault,
+            allowDirectorySelection: workspaceRule.allowDirectorySelection,
+            directoryScope: workspaceRule.directoryScope,
+            loadWorkspaceAgentsMd: workspaceRule.loadWorkspaceAgentsMd
+          }
+        });
+      }
+
+      for (const instructionSource of loaded.instructionSources) {
+        await tx.agentModeInstructionSource.create({
+          data: {
+            agentModeId: copied.id,
+            sourceType: instructionSource.sourceType,
+            sourceRef: instructionSource.sourceRef,
+            sortOrder: instructionSource.sortOrder
+          }
+        });
+      }
+
+      return this.loadRecord(tx, copied);
     });
   }
 

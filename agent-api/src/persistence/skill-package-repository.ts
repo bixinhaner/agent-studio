@@ -230,6 +230,48 @@ export class SkillPackageRepository {
     });
   }
 
+  async copy(
+    id: string,
+    overrides: { name: string; slug: string; status: string; visibleToUsers: boolean }
+  ): Promise<SkillPackageRecord> {
+    return this.db.$transaction(async (tx) => {
+      const existing = await this.requireSkillPackage(tx, id);
+      const loaded = await this.loadRecord(tx, existing);
+      const copied = await tx.skillPackage.create({
+        data: {
+          organizationId: trimOrUndefined(loaded.organizationId) ?? null,
+          name: overrides.name,
+          slug: overrides.slug,
+          description: trimOrUndefined(loaded.description) ?? null,
+          status: trimOrUndefined(overrides.status) ?? "disabled",
+          visibleToUsers: overrides.visibleToUsers
+        }
+      });
+
+      for (const item of loaded.items) {
+        const copiedItem = await tx.skillPackageItem.create({
+          data: {
+            skillPackageId: copied.id,
+            capabilityKey: item.capabilityKey,
+            description: trimOrUndefined(item.description) ?? null
+          }
+        });
+        for (const runtimeBinding of item.runtimeBindings) {
+          await tx.skillPackageRuntimeBinding.create({
+            data: {
+              skillPackageItemId: copiedItem.id,
+              runtimeType: runtimeBinding.runtimeType,
+              bindingType: runtimeBinding.bindingType,
+              bindingPayload: runtimeBinding.bindingPayload
+            }
+          });
+        }
+      }
+
+      return this.loadRecord(tx, copied);
+    });
+  }
+
   private async requireSkillPackage(db: SkillPackageRepositoryDb, skillPackageId: string): Promise<SkillPackageRow> {
     const normalized = trimOrUndefined(skillPackageId);
     if (!normalized) {
