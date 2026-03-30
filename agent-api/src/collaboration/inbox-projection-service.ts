@@ -106,15 +106,15 @@ export class InboxProjectionService {
 
   private async resolveAlertRecipients(event: AlertEventRecord): Promise<string[]> {
     const payload = asRecord(event.payload);
-    const explicitUserId = trimOrUndefined(typeof payload?.userId === "string" ? payload.userId : undefined);
-    if (explicitUserId) {
-      return [explicitUserId];
-    }
     if (event.scopeType === "department" && this.deps.alerts?.listUserIdsForDepartment) {
       return uniqueUserIds(await this.deps.alerts.listUserIdsForDepartment(event.scopeId));
     }
     if (event.scopeType === "platform" && this.deps.alerts?.listAllUserIds) {
       return uniqueUserIds(await this.deps.alerts.listAllUserIds());
+    }
+    const explicitUserId = trimOrUndefined(typeof payload?.userId === "string" ? payload.userId : undefined);
+    if (explicitUserId) {
+      return [explicitUserId];
     }
     return [];
   }

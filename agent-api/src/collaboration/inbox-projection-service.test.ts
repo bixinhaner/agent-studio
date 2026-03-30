@@ -117,4 +117,67 @@ describe("InboxProjectionService", () => {
     });
     expect(await inbox.listForUser("user-2")).toHaveLength(1);
   });
+
+  it("fans out department security alerts by department audience even when payload.userId exists", async () => {
+    const inbox = new InboxItemRepository(new FakeInboxDb() as never);
+    const service = new InboxProjectionService({
+      inbox,
+      alerts: {
+        listUserIdsForDepartment: async (departmentId) => (departmentId === "dept-rd" ? ["user-1", "user-2"] : [])
+      }
+    });
+
+    const event: AlertEventRecord = {
+      id: "alert-2",
+      organizationId: "org-1",
+      alertRuleId: "rule-1",
+      scopeType: "department",
+      scopeId: "dept-rd",
+      severity: "warning",
+      status: "open",
+      title: "Denied resource access detected",
+      detail: "Access denied",
+      payload: { category: "resource_access_denied", userId: "actor-1" },
+      createdAt: new Date("2026-03-31T00:00:00Z").toISOString(),
+      updatedAt: new Date("2026-03-31T00:00:00Z").toISOString()
+    };
+
+    await service.projectAlertEvent({ event });
+
+    expect(await inbox.listForUser("actor-1")).toHaveLength(0);
+    expect(await inbox.listForUser("user-1")).toHaveLength(1);
+    expect(await inbox.listForUser("user-2")).toHaveLength(1);
+  });
+
+  it("fans out platform security alerts to the platform audience", async () => {
+    const inbox = new InboxItemRepository(new FakeInboxDb() as never);
+    const service = new InboxProjectionService({
+      inbox,
+      alerts: {
+        listAllUserIds: async () => ["user-1", "user-2", "user-3"]
+      }
+    });
+
+    const event: AlertEventRecord = {
+      id: "alert-3",
+      organizationId: "org-1",
+      alertRuleId: "rule-1",
+      scopeType: "platform",
+      scopeId: "platform",
+      severity: "critical",
+      status: "open",
+      title: "Repeated permission denial detected",
+      detail: "Denied repeatedly",
+      payload: { category: "permission_denial_pattern", userId: "actor-1" },
+      createdAt: new Date("2026-03-31T00:00:00Z").toISOString(),
+      updatedAt: new Date("2026-03-31T00:00:00Z").toISOString()
+    };
+
+    await service.projectAlertEvent({ event });
+
+    expect(await inbox.listForUser("actor-1")).toHaveLength(0);
+    expect(await inbox.listForUser("user-1")).toHaveLength(1);
+    expect(await inbox.listForUser("user-2")).toHaveLength(1);
+    expect(await inbox.listForUser("user-3")).toHaveLength(1);
+  });
 });

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { InboxItemRepository } from "../persistence/inbox-item-repository.js";
 import { ThreadCollaborationRepository } from "../persistence/thread-collaboration-repository.js";
 import { ThreadCommentRepository } from "../persistence/thread-comment-repository.js";
+import type { ThreadRecord } from "../persistence/thread-repository.js";
 import { ThreadShareRepository } from "../persistence/thread-share-repository.js";
 import { ThreadCollaborationService } from "./thread-collaboration-service.js";
 
@@ -256,53 +257,58 @@ class FakeThreadCollaborationDb {
 function createService() {
   const inboxDb = new FakeInboxDb();
   const inbox = new InboxItemRepository(inboxDb as never);
+  const shareDb = new FakeThreadShareDb();
+  const collaborationDb = new FakeThreadCollaborationDb();
+  const threadRecord: ThreadRecord = {
+    id: "thread-1",
+    userId: "owner-1",
+    status: "regular",
+    title: "Thread 1",
+    model: "gpt-5",
+    reasoningEffort: "medium",
+    workspace: "default",
+    createdAt: new Date("2026-03-31T00:00:00Z").toISOString(),
+    updatedAt: new Date("2026-03-31T00:00:00Z").toISOString(),
+    messages: [],
+    feedback: []
+  };
+  const deps = {
+    threads: {
+      get: async (threadId: string) => (threadId === "thread-1" ? threadRecord : undefined)
+    },
+    shares: new ThreadShareRepository(shareDb as never),
+    comments: new ThreadCommentRepository(new FakeThreadCommentDb() as never),
+    collaboration: new ThreadCollaborationRepository(collaborationDb as never),
+    inboxProjection: {
+      projectCollaborationEvent: vi.fn(async (input) => {
+        for (const userId of input.recipientUserIds) {
+          await inbox.create({
+            userId,
+            eventType: input.eventType,
+            category: "collaboration",
+            title: input.title,
+            body: input.body,
+            threadId: input.threadId,
+            relatedEntityType: input.relatedEntityType,
+            relatedEntityId: input.relatedEntityId,
+            sourceActorUserId: input.actorUserId,
+            payload: input.payload
+          });
+        }
+      })
+    },
+    directory: {
+      listDepartmentIdsForUser: async (userId: string) => (userId === "user-2" ? ["dept-ops"] : []),
+      listUserIdsForDepartment: async (departmentId: string) => (departmentId === "dept-ops" ? ["user-2", "user-4"] : []),
+      ensureUsersExist: async () => undefined
+    }
+  };
   return {
     inbox,
-    service: new ThreadCollaborationService({
-      threads: {
-        get: async (threadId: string) =>
-          threadId === "thread-1"
-            ? {
-                id: "thread-1",
-                userId: "owner-1",
-                status: "regular",
-                title: "Thread 1",
-                model: "gpt-5",
-                reasoningEffort: "medium",
-                workspace: "default",
-                createdAt: new Date("2026-03-31T00:00:00Z").toISOString(),
-                updatedAt: new Date("2026-03-31T00:00:00Z").toISOString(),
-                messages: [],
-                feedback: []
-              }
-            : undefined
-      },
-      shares: new ThreadShareRepository(new FakeThreadShareDb() as never),
-      comments: new ThreadCommentRepository(new FakeThreadCommentDb() as never),
-      collaboration: new ThreadCollaborationRepository(new FakeThreadCollaborationDb() as never),
-      inboxProjection: {
-        projectCollaborationEvent: vi.fn(async (input) => {
-          for (const userId of input.recipientUserIds) {
-            await inbox.create({
-              userId,
-              eventType: input.eventType,
-              category: "collaboration",
-              title: input.title,
-              body: input.body,
-              threadId: input.threadId,
-              relatedEntityType: input.relatedEntityType,
-              relatedEntityId: input.relatedEntityId,
-              sourceActorUserId: input.actorUserId,
-              payload: input.payload
-            });
-          }
-        })
-      },
-      directory: {
-        listDepartmentIdsForUser: async () => [],
-        ensureUsersExist: async () => undefined
-      }
-    })
+    shareDb,
+    collaborationDb,
+    deps,
+    service: new ThreadCollaborationService(deps)
   };
 }
 
@@ -353,5 +359,85 @@ describe("ThreadCollaborationService", () => {
       expect.arrayContaining(["thread.shared", "thread.mentioned", "thread.follower_added"])
     );
     expect((await inbox.listForUser("user-3")).map((item) => item.eventType)).toContain("thread.assigned");
+  });
+
+  it("includes the assigned owner in comment fanout even when they are not a follower", async () => {
+    const { inbox, service } = createService();
+
+    await service.setAssignment({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      ownerUserId: "user-3",
+      followerIds: ["user-2"]
+    });
+
+    await service.addComment({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      bodyMarkdown: "owner update",
+      mentionedUserIds: []
+    });
+
+    expect((await inbox.listForUser("user-3")).map((item) => item.eventType)).toEqual(
+      expect.arrayContaining(["thread.assigned", "thread.comment_added"])
+    );
+  });
+
+  it("only notifies newly added effective share recipients across share rewrites", async () => {
+    const { inbox, service } = createService();
+
+    await service.replaceShares({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      shares: [{ subjectType: "department", subjectId: "dept-ops" }]
+    });
+    await service.replaceShares({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      shares: [
+        { subjectType: "department", subjectId: "dept-ops" },
+        { subjectType: "user", subjectId: "user-2" }
+      ]
+    });
+    await service.replaceShares({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      shares: [
+        { subjectType: "department", subjectId: "dept-ops" },
+        { subjectType: "user", subjectId: "user-4" }
+      ]
+    });
+
+    expect((await inbox.listForUser("user-2")).map((item) => item.eventType)).toEqual(["thread.shared"]);
+    expect((await inbox.listForUser("user-4")).map((item) => item.eventType)).toEqual(["thread.shared"]);
+  });
+
+  it("allows elevated admin collaboration rights without granting runtime ownership", async () => {
+    const { deps } = createService();
+    const adminService = new ThreadCollaborationService({
+      ...deps,
+      authorizer: {
+        canReadThreadCollaboration: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1"),
+        canManageThreadCollaboration: vi.fn(async ({ actorUserId }) => actorUserId === "admin-1")
+      }
+    });
+
+    const summary = await adminService.getThreadCollaborationView({
+      actorUserId: "admin-1",
+      departmentIds: [],
+      threadId: "thread-1"
+    });
+
+    expect(summary.access.canRead).toBe(true);
+    expect(summary.access.canComment).toBe(true);
+    expect(summary.access.canRun).toBe(false);
+
+    await expect(
+      adminService.replaceShares({
+        actorUserId: "admin-1",
+        threadId: "thread-1",
+        shares: [{ subjectType: "user", subjectId: "user-9" }]
+      })
+    ).resolves.toHaveLength(1);
   });
 });

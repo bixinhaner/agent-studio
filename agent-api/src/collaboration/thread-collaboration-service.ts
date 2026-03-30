@@ -30,6 +30,11 @@ type CollaborationDirectory = {
   ensureUsersExist?: (userIds: string[]) => Promise<void>;
 };
 
+type CollaborationAuthorizer = {
+  canReadThreadCollaboration?: (input: { actorUserId: string; threadId: string; ownerUserId?: string }) => Promise<boolean>;
+  canManageThreadCollaboration?: (input: { actorUserId: string; threadId: string; ownerUserId?: string }) => Promise<boolean>;
+};
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -57,6 +62,7 @@ export class ThreadCollaborationService {
       collaboration: Pick<ThreadCollaborationRepository, "getState" | "setAssignment" | "replaceFollowers" | "setCaptureMark">;
       inboxProjection?: Pick<InboxProjectionService, "projectCollaborationEvent">;
       directory?: CollaborationDirectory;
+      authorizer?: CollaborationAuthorizer;
     }
   ) {}
 
@@ -99,7 +105,10 @@ export class ThreadCollaborationService {
     shares: Array<Omit<ThreadShareInput, "sharedByUserId" | "permissionLevel"> & { permissionLevel?: "read_comment" }>;
   }): Promise<ThreadShareRecord[]> {
     const thread = await this.requireThread(input.threadId);
-    this.assertOwner(thread, input.actorUserId);
+    await this.assertCanManage(thread, input.actorUserId);
+
+    const previousShares = await this.deps.shares.listForThread(thread.id);
+    const previousRecipients = await this.resolveShareRecipients(previousShares);
 
     const normalizedShares = input.shares.map((share) => ({
       ...share,
@@ -107,7 +116,7 @@ export class ThreadCollaborationService {
       permissionLevel: "read_comment" as const
     }));
     const created = await this.deps.shares.replaceForThread(thread.id, normalizedShares, input.actorUserId);
-    const recipients = await this.resolveShareRecipients(created);
+    const recipients = difference(await this.resolveShareRecipients(created), previousRecipients);
     await this.project({
       eventType: "thread.shared",
       actorUserId: input.actorUserId,
@@ -142,6 +151,7 @@ export class ThreadCollaborationService {
     const mentionedUserIds = uniqueUserIds(comment.mentionedUserIds);
     const participantRecipients = uniqueUserIds([
       trimOrUndefined(thread.userId) ?? "",
+      state.assignment?.ownerUserId ?? "",
       ...state.followers.map((follower) => follower.userId)
     ]).filter((userId) => userId !== input.actorUserId && !mentionedUserIds.includes(userId));
 
@@ -188,7 +198,7 @@ export class ThreadCollaborationService {
     followerIds: string[];
   }) {
     const thread = await this.requireThread(input.threadId);
-    this.assertOwner(thread, input.actorUserId);
+    await this.assertCanManage(thread, input.actorUserId);
     await this.deps.directory?.ensureUsersExist?.([input.ownerUserId, ...input.followerIds]);
 
     await this.deps.collaboration.setAssignment({
@@ -232,7 +242,7 @@ export class ThreadCollaborationService {
     enabled: boolean;
   }): Promise<ThreadCaptureMarkRecord | null> {
     const thread = await this.requireThread(input.threadId);
-    this.assertOwner(thread, input.actorUserId);
+    await this.assertCanManage(thread, input.actorUserId);
     const captureMark = input.enabled
       ? await this.deps.collaboration.setCaptureMark({
           threadId: thread.id,
@@ -266,8 +276,20 @@ export class ThreadCollaborationService {
     return thread;
   }
 
-  private assertOwner(thread: ThreadRecord, actorUserId: string): void {
-    if (trimOrUndefined(thread.userId) !== trimOrUndefined(actorUserId)) {
+  private async assertCanManage(thread: ThreadRecord, actorUserId: string): Promise<void> {
+    const ownerUserId = trimOrUndefined(thread.userId);
+    const normalizedActorUserId = trimOrUndefined(actorUserId);
+    if (ownerUserId && ownerUserId === normalizedActorUserId) {
+      return;
+    }
+    const allowed = normalizedActorUserId
+      ? await this.deps.authorizer?.canManageThreadCollaboration?.({
+          actorUserId: normalizedActorUserId,
+          threadId: thread.id,
+          ownerUserId
+        })
+      : false;
+    if (!allowed) {
       throw new Error("thread collaboration access denied");
     }
   }
@@ -292,6 +314,21 @@ export class ThreadCollaborationService {
     const isOwner = ownerUserId === actorUserId;
     if (isOwner) {
       return { canRead: true, canComment: true, canRun: true, isOwner: true };
+    }
+    const adminReadable =
+      (await this.deps.authorizer?.canReadThreadCollaboration?.({
+        actorUserId,
+        threadId: input.thread.id,
+        ownerUserId
+      })) ?? false;
+    const adminManageable =
+      (await this.deps.authorizer?.canManageThreadCollaboration?.({
+        actorUserId,
+        threadId: input.thread.id,
+        ownerUserId
+      })) ?? false;
+    if (adminReadable || adminManageable) {
+      return { canRead: true, canComment: true, canRun: false, isOwner: false };
     }
     const departmentIds =
       input.departmentIds ?? (this.deps.directory?.listDepartmentIdsForUser ? await this.deps.directory.listDepartmentIdsForUser(actorUserId) : []);
@@ -327,4 +364,9 @@ export class ThreadCollaborationService {
     if (!this.deps.inboxProjection) return;
     await this.deps.inboxProjection.projectCollaborationEvent(input);
   }
+}
+
+function difference(next: string[], previous: string[]): string[] {
+  const previousSet = new Set(previous);
+  return next.filter((userId) => !previousSet.has(userId));
 }

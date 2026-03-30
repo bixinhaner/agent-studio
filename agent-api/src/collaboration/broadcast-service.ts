@@ -20,6 +20,10 @@ type BroadcastNotificationDispatcher = {
   }) => Promise<void>;
 };
 
+type BroadcastAuthorizer = {
+  canPublishBroadcast?: (input: { actorUserId: string; broadcastId: string }) => Promise<boolean>;
+};
+
 function uniqueUserIds(userIds: string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -39,6 +43,7 @@ export class BroadcastService {
       inboxProjection?: Pick<InboxProjectionService, "projectCollaborationEvent">;
       recipientDirectory?: BroadcastRecipientDirectory;
       notifications?: BroadcastNotificationDispatcher;
+      authorizer?: BroadcastAuthorizer;
     }
   ) {}
 
@@ -63,6 +68,9 @@ export class BroadcastService {
   }
 
   async publish(input: { actorUserId: string; broadcastId: string }): Promise<BroadcastRecord> {
+    if (!(await this.canPublish(input.actorUserId, input.broadcastId))) {
+      throw new Error("broadcast publish access denied");
+    }
     const broadcast = await this.deps.broadcasts.publish({
       id: input.broadcastId,
       publishedByUserId: input.actorUserId
@@ -92,6 +100,13 @@ export class BroadcastService {
     }
 
     return broadcast;
+  }
+
+  private async canPublish(actorUserId: string, broadcastId: string): Promise<boolean> {
+    if (!this.deps.authorizer?.canPublishBroadcast) {
+      return true;
+    }
+    return this.deps.authorizer.canPublishBroadcast({ actorUserId, broadcastId });
   }
 
   private async resolveRecipients(targets: BroadcastTargetRecord[]): Promise<string[]> {

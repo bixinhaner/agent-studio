@@ -192,4 +192,24 @@ describe("BroadcastService", () => {
       })
     );
   });
+
+  it("requires explicit service-layer authorization before publish", async () => {
+    const service = new BroadcastService({
+      broadcasts: new BroadcastRepository(new FakeBroadcastDb() as never),
+      authorizer: {
+        canPublishBroadcast: vi.fn(async () => false)
+      }
+    });
+
+    const draft = await service.createDraft({
+      actorUserId: "admin-1",
+      title: "Heads up",
+      bodyMarkdown: "Message",
+      targets: [{ targetType: "department", targetId: "dept-1" }]
+    });
+
+    await expect(service.publish({ actorUserId: "admin-1", broadcastId: draft.id })).rejects.toThrow(
+      "broadcast publish access denied"
+    );
+  });
 });
