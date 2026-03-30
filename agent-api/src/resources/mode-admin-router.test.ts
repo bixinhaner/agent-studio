@@ -311,12 +311,64 @@ describe("mode admin router", () => {
     ]);
   });
 
-  it("clamps run profile writes to the published safety limits", async () => {
+  it("does not clamp run profile writes when no published settings exist", async () => {
     const { app, cookies, adminUser } = await buildModeAdminApp({
-      systemSettings: createPublishedSystemSettingsRecord()
+      systemSettings: {
+        async getCurrentPublished() {
+          return undefined;
+        }
+      }
     });
 
     const createResponse = await request(app)
+      .post("/api/admin/run-profiles")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Unpublished Profile",
+        slug: "unpublished-profile",
+        defaultModel: "gpt-5.4",
+        allowedModels: ["gpt-5.4"],
+        defaultReasoningEffort: "high",
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true,
+        webSearchMode: "live"
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.runProfile).toMatchObject({
+      sandboxMode: "danger-full-access",
+      networkAccessEnabled: true,
+      webSearchMode: "live"
+    });
+
+    const updateResponse = await request(app)
+      .patch(`/api/admin/run-profiles/${createResponse.body.runProfile.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        sandboxMode: "danger-full-access",
+        networkAccessEnabled: true,
+        webSearchMode: "live"
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.runProfile).toMatchObject({
+      sandboxMode: "danger-full-access",
+      networkAccessEnabled: true,
+      webSearchMode: "live"
+    });
+  });
+
+  it("rejects run profile writes that exceed the published safety limits", async () => {
+    const { app, cookies, adminUser, runProfiles } = await buildModeAdminApp({
+      systemSettings: {
+        async getCurrentPublished() {
+          return createPublishedSystemSettingsRecord();
+        }
+      }
+    });
+
+    const rejectedCreate = await request(app)
       .post("/api/admin/run-profiles")
       .set("Cookie", cookies.create(adminUser.id))
       .send({
@@ -331,28 +383,57 @@ describe("mode admin router", () => {
         webSearchMode: "live"
       });
 
-    expect(createResponse.status).toBe(201);
-    expect(createResponse.body.runProfile).toMatchObject({
-      sandboxMode: "read-only",
-      networkAccessEnabled: false,
-      webSearchMode: "cached"
-    });
+    expect(rejectedCreate.status).toBe(400);
+    expect(rejectedCreate.body.detail).toContain("system settings");
 
-    const updateResponse = await request(app)
-      .patch(`/api/admin/run-profiles/${createResponse.body.runProfile.id}`)
+    const safeCreate = await request(app)
+      .post("/api/admin/run-profiles")
       .set("Cookie", cookies.create(adminUser.id))
       .send({
-        sandboxMode: "workspace-write",
+        name: "Safe Profile",
+        slug: "safe-profile",
+        defaultModel: "gpt-5.4",
+        allowedModels: ["gpt-5.4"],
+        defaultReasoningEffort: "high",
+        sandboxMode: "read-only",
+        approvalPolicy: "never",
+        networkAccessEnabled: false,
+        webSearchMode: "cached"
+      });
+
+    expect(safeCreate.status).toBe(201);
+
+    const rejectedUpdate = await request(app)
+      .patch(`/api/admin/run-profiles/${safeCreate.body.runProfile.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        sandboxMode: "danger-full-access",
         networkAccessEnabled: true,
         webSearchMode: "live"
       });
 
-    expect(updateResponse.status).toBe(200);
-    expect(updateResponse.body.runProfile).toMatchObject({
-      sandboxMode: "read-only",
-      networkAccessEnabled: false,
-      webSearchMode: "cached"
+    expect(rejectedUpdate.status).toBe(400);
+    expect(rejectedUpdate.body.detail).toContain("system settings");
+
+    const unsafeRunProfile = await runProfiles.create({
+      name: "Unsafe Existing",
+      slug: "unsafe-existing",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "live"
     });
+
+    const rejectedCopy = await request(app)
+      .post(`/api/admin/run-profiles/${unsafeRunProfile.id}/copy`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ name: "Unsafe Copy", slug: "unsafe-copy" });
+
+    expect(rejectedCopy.status).toBe(400);
+    expect(rejectedCopy.body.detail).toContain("system settings");
   });
 
   it("copies an agent mode into a disabled hidden record with bindings", async () => {
@@ -1112,7 +1193,12 @@ function makeUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser
   };
 }
 
-async function buildModeAdminApp(options?: { user?: AuthenticatedUser; systemSettings?: SystemSettingsVersionRecord }) {
+async function buildModeAdminApp(options?: {
+  user?: AuthenticatedUser;
+  systemSettings?: {
+    getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
+  };
+}) {
   const dingtalkClient: DingTalkClient = {
     async exchangeCode() {
       throw new Error("not used in mode admin router tests");
@@ -1134,8 +1220,6 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser; systemSet
   const skillPackages = new FakeSkillPackageRepository();
   const agentModes = new FakeAgentModeRepository();
   const resourcePolicies = new FakeResourcePolicyRepository();
-  const systemSettings = options?.systemSettings ?? undefined;
-
   const cookies = createSessionCookieManager({
     cookieName: "agent_studio_session",
     secret: "test-session-secret",
@@ -1177,13 +1261,7 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser; systemSet
       skillPackages: skillPackages as never,
       agentModes: agentModes as never,
       resourcePolicies: resourcePolicies as never,
-      systemSettings: systemSettings
-        ? {
-            async getCurrentPublished() {
-              return structuredClone(systemSettings);
-            }
-          }
-        : undefined
+      systemSettings: options?.systemSettings
     }),
     portalRouter: express.Router(),
     serviceTokenMiddleware: (_req, _res, next) => next(),

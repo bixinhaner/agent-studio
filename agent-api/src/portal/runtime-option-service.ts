@@ -5,7 +5,7 @@ import { type WorkspaceRecord } from "../persistence/workspace-repository.js";
 import { type PolicyService } from "../resources/policy-service.js";
 import { getDbClient } from "../db/client.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
-import { createDefaultSystemSettingsPayload, type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
+import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 export type PortalRuntimeOptionWorkspace = {
   id: string;
@@ -333,7 +333,7 @@ export class PortalRuntimeOptionService {
   private async resolvePublishedSafetyLimits(): Promise<SystemSettingsSafety | undefined> {
     if (this.deps.systemSettings) {
       const published = await this.deps.systemSettings.getCurrentPublished();
-      return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+      return published?.payload.safety;
     }
 
     if (process.env.NODE_ENV === "test" || !process.env.DATABASE_URL) {
@@ -342,6 +342,6 @@ export class PortalRuntimeOptionService {
 
     this.systemSettingsRepository ??= new SystemSettingsRepository(getDbClient() as never);
     const published = await this.systemSettingsRepository.getCurrentPublished();
-    return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+    return published?.payload.safety;
   }
 }

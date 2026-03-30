@@ -10,7 +10,7 @@ import {
   WEB_SEARCH_MODE_VALUES
 } from "../integrations/zendesk/types.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
-import { createDefaultSystemSettingsPayload, type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
+import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -72,37 +72,20 @@ const capabilityPoliciesReplaceSchema = z.object({
   )
 });
 
-function clampSandboxMode(sandboxMode: string, safety: SystemSettingsSafety): string {
-  if (!safety.allowFilesystemMutations) {
-    return "read-only";
+function buildRunProfileSafetyViolationDetail(input: RunProfileWritableRecord, safety: SystemSettingsSafety): string | undefined {
+  if (!safety.allowFilesystemMutations && input.sandboxMode !== "read-only") {
+    return "run profile exceeds published system settings limits";
   }
-  if (sandboxMode === "danger-full-access" && !safety.allowDangerFullAccess) {
-    return "workspace-write";
+  if (!safety.allowDangerFullAccess && input.sandboxMode === "danger-full-access") {
+    return "run profile exceeds published system settings limits";
   }
-  return sandboxMode;
-}
-
-function clampNetworkAccess(networkAccessEnabled: boolean | undefined, safety: SystemSettingsSafety): boolean | undefined {
-  if (networkAccessEnabled === undefined) {
-    return undefined;
+  if (!safety.allowNetworkAccess && input.networkAccessEnabled === true) {
+    return "run profile exceeds published system settings limits";
   }
-  return safety.allowNetworkAccess ? networkAccessEnabled : false;
-}
-
-function clampWebSearchMode(webSearchMode: string, safety: SystemSettingsSafety): string {
-  if (!safety.allowLiveWebSearch && webSearchMode === "live") {
-    return "cached";
+  if (!safety.allowLiveWebSearch && input.webSearchMode === "live") {
+    return "run profile exceeds published system settings limits";
   }
-  return webSearchMode;
-}
-
-function clampRunProfileInput(input: RunProfileWritableRecord, safety: SystemSettingsSafety): RunProfileWritableRecord {
-  return {
-    ...input,
-    sandboxMode: clampSandboxMode(input.sandboxMode, safety),
-    networkAccessEnabled: clampNetworkAccess(input.networkAccessEnabled, safety),
-    webSearchMode: clampWebSearchMode(input.webSearchMode, safety)
-  };
+  return undefined;
 }
 
 const runProfileCreateSchema = z.object({
@@ -428,7 +411,7 @@ export function createModeAdminRouter(options: {
   async function resolvePublishedSafetyLimits(): Promise<SystemSettingsSafety | undefined> {
     if (options.systemSettings) {
       const published = await options.systemSettings.getCurrentPublished();
-      return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+      return published?.payload.safety;
     }
 
     if (process.env.NODE_ENV === "test" || !process.env.DATABASE_URL) {
@@ -437,7 +420,7 @@ export function createModeAdminRouter(options: {
 
     systemSettingsRepository ??= new SystemSettingsRepository(getDbClient() as never);
     const published = await systemSettingsRepository.getCurrentPublished();
-    return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+    return published?.payload.safety;
   }
 
   router.get("/run-profiles", async (_req: Request, res: Response) => {
@@ -452,8 +435,15 @@ export function createModeAdminRouter(options: {
     }
     try {
       const safetyLimits = await resolvePublishedSafetyLimits();
+      if (safetyLimits) {
+        const violation = buildRunProfileSafetyViolationDetail(parsed.data, safetyLimits);
+        if (violation) {
+          res.status(400).json({ detail: violation });
+          return;
+        }
+      }
       const runProfile = await options.runProfiles.create(
-        safetyLimits ? clampRunProfileInput(parsed.data, safetyLimits) : parsed.data
+        parsed.data
       );
       res.status(201).json({ runProfile });
     } catch (error) {
@@ -476,39 +466,32 @@ export function createModeAdminRouter(options: {
         return;
       }
       const safetyLimits = await resolvePublishedSafetyLimits();
+      const nextInput: RunProfileWritableRecord = {
+        ...(existing as RunProfileWritableRecord),
+        ...parsed.data
+      };
+      if (safetyLimits) {
+        const violation = buildRunProfileSafetyViolationDetail(nextInput, safetyLimits);
+        if (violation) {
+          res.status(400).json({ detail: violation });
+          return;
+        }
+      }
       const runProfile = await options.runProfiles.create(
-        safetyLimits
-          ? clampRunProfileInput(
-              {
-                organizationId: existing.organizationId,
-                name: parsed.data.name,
-                slug: parsed.data.slug,
-                description: existing.description,
-                status: "disabled",
-                defaultModel: existing.defaultModel,
-                allowedModels: existing.allowedModels,
-                defaultReasoningEffort: existing.defaultReasoningEffort,
-                sandboxMode: existing.sandboxMode,
-                approvalPolicy: existing.approvalPolicy,
-                networkAccessEnabled: existing.networkAccessEnabled,
-                webSearchMode: existing.webSearchMode
-              },
-              safetyLimits
-            )
-          : {
-              organizationId: existing.organizationId,
-              name: parsed.data.name,
-              slug: parsed.data.slug,
-              description: existing.description,
-              status: "disabled",
-              defaultModel: existing.defaultModel,
-              allowedModels: existing.allowedModels,
-              defaultReasoningEffort: existing.defaultReasoningEffort,
-              sandboxMode: existing.sandboxMode,
-              approvalPolicy: existing.approvalPolicy,
-              networkAccessEnabled: existing.networkAccessEnabled,
-              webSearchMode: existing.webSearchMode
-            }
+        {
+          organizationId: existing.organizationId,
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+          description: existing.description,
+          status: "disabled",
+          defaultModel: existing.defaultModel,
+          allowedModels: existing.allowedModels,
+          defaultReasoningEffort: existing.defaultReasoningEffort,
+          sandboxMode: existing.sandboxMode,
+          approvalPolicy: existing.approvalPolicy,
+          networkAccessEnabled: existing.networkAccessEnabled,
+          webSearchMode: existing.webSearchMode
+        }
       );
       res.status(201).json({ runProfile });
     } catch (error) {
@@ -529,11 +512,20 @@ export function createModeAdminRouter(options: {
         return;
       }
       const safetyLimits = await resolvePublishedSafetyLimits();
+      const nextInput: RunProfileWritableRecord = {
+        ...(existing as RunProfileWritableRecord),
+        ...parsed.data
+      };
+      if (safetyLimits) {
+        const violation = buildRunProfileSafetyViolationDetail(nextInput, safetyLimits);
+        if (violation) {
+          res.status(400).json({ detail: violation });
+          return;
+        }
+      }
       const runProfile = await options.runProfiles.update(
         req.params.id,
-        safetyLimits
-          ? clampRunProfileInput({ ...(existing as RunProfileWritableRecord), ...parsed.data }, safetyLimits)
-          : parsed.data
+        parsed.data
       );
       res.json({ runProfile });
     } catch (error) {
