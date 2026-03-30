@@ -65,6 +65,9 @@ import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./per
 import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence/run-profile-repository.js";
 import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
+import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
+import { createIntegrationCenterRouter } from "./integrations/center/router.js";
+import { createIntegrationCenterService } from "./integrations/center/service.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
@@ -112,6 +115,10 @@ const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourceP
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
+const integrationCenter = createIntegrationCenterService({
+  db: db as unknown as IntegrationInstanceRepositoryDb,
+  policies: resourcePolicies as never
+});
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
@@ -661,6 +668,10 @@ registerCommonApiRoutes(app, {
     syncService: orgSyncService,
     orgSyncConfig: appConfig.orgSync
   }),
+  integrationCenterRouter: createIntegrationCenterRouter({
+    service: integrationCenter,
+    requirePermission
+  }),
   monitoringAdminRouter: createMonitoringRouter({
     requirePermission,
     resourceAccessLogs: resourceAccessLogRepository,
@@ -691,12 +702,12 @@ registerCommonApiRoutes(app, {
     runtimeOptions: portalRuntimeOptions,
     listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
   }),
-    resourcesPortalRouter: createResourcesPortalRouter({
-      workspaces,
-      knowledgeSets,
-      policies: policyService,
-      listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
-    }),
+  resourcesPortalRouter: createResourcesPortalRouter({
+    workspaces,
+    knowledgeSets,
+    policies: policyService,
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+  }),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });
