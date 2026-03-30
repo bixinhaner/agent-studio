@@ -6,6 +6,10 @@ vi.mock("./api", () => ({
   fetchKnowledgeSets: vi.fn()
 }));
 
+vi.mock("./WorkspaceDetailView", () => ({
+  WorkspaceDetailView: ({ workspace }: { workspace: { name: string } }) => <section>详情: {workspace.name}</section>
+}));
+
 import { fetchKnowledgeSets, fetchWorkspaces } from "./api";
 import { ResourceCenterShell } from "./ResourceCenterShell";
 
@@ -140,5 +144,30 @@ describe("ResourceCenterShell", () => {
 
     expect(await screen.findByText("docs-workspace")).toBeTruthy();
     expect((screen.getByLabelText("类型筛选") as HTMLSelectElement).value).toBe("all");
+  });
+
+  it("mounts the workspace detail view when a workspace is selected", async () => {
+    mockedFetchWorkspaces.mockResolvedValue({
+      workspaces: [
+        {
+          id: "workspace-1",
+          name: "docs-workspace",
+          slug: "docs-workspace",
+          description: "",
+          status: "active",
+          sourceType: "filesystem",
+          rootPath: "/workspace/docs",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchKnowledgeSets.mockResolvedValue({ knowledgeSets: [] });
+
+    render(<ResourceCenterShell />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /docs-workspace/i }));
+
+    expect(await screen.findByText("详情: docs-workspace")).toBeTruthy();
   });
 });

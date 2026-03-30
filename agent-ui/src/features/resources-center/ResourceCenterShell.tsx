@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchKnowledgeSets, fetchWorkspaces } from "./api";
+import { WorkspaceDetailView } from "./WorkspaceDetailView";
 import type {
   KnowledgeSetRecord,
   ResourceCenterTab,
@@ -80,6 +81,12 @@ export function ResourceCenterShell() {
 
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selected.workspaceId) ?? null;
   const selectedKnowledgeSet = knowledgeSets.find((knowledgeSet) => knowledgeSet.id === selected.knowledgeSetId) ?? null;
+
+  function handleWorkspaceUpdated(updatedWorkspace: WorkspaceRecord) {
+    setWorkspaces((current) =>
+      current.map((workspace) => (workspace.id === updatedWorkspace.id ? updatedWorkspace : workspace))
+    );
+  }
 
   return (
     <section className="admin-card resource-center-shell">
@@ -210,10 +217,11 @@ export function ResourceCenterShell() {
 
         <section className="resource-center-detail">
           {tab === "workspace" && selectedWorkspace ? (
-            <div className="resource-center-placeholder">
-              <h3>{selectedWorkspace.name}</h3>
-              <p>工作区详情编辑将在 Task 4 实现。当前壳已保留绑定、授权和目录配置挂载位。</p>
-            </div>
+            <WorkspaceDetailView
+              workspace={selectedWorkspace}
+              knowledgeSets={knowledgeSets}
+              onWorkspaceUpdated={handleWorkspaceUpdated}
+            />
           ) : null}
           {tab === "knowledge_set" && selectedKnowledgeSet ? (
             <div className="resource-center-placeholder">

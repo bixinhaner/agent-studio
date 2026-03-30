@@ -1876,6 +1876,116 @@ body {
   color: #475569;
 }
 
+.resource-center-detail-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.resource-center-section {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #fff;
+  padding: 16px;
+}
+
+.resource-center-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resource-center-section-header h3 {
+  margin: 0;
+}
+
+.resource-center-section-header p {
+  margin: 4px 0 0;
+  color: #475569;
+}
+
+.resource-center-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: lowercase;
+}
+
+.resource-center-badge.muted {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.resource-center-success {
+  margin: 0;
+  color: #166534;
+}
+
+.resource-center-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-center-form-span-2 {
+  grid-column: span 2;
+}
+
+.resource-center-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.resource-center-binding-list,
+.resource-policy-list {
+  display: grid;
+  gap: 12px;
+}
+
+.resource-center-binding-card,
+.resource-policy-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 12px;
+}
+
+.resource-center-binding-toggle {
+  align-items: center;
+}
+
+.resource-center-binding-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.resource-center-binding-toggle small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.resource-policy-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-policy-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (max-width: 980px) {
   .monitoring-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1886,8 +1996,14 @@ body {
   }
 
   .resource-center-toolbar,
-  .resource-center-body {
+  .resource-center-body,
+  .resource-center-form-grid,
+  .resource-policy-fields {
     grid-template-columns: 1fr;
+  }
+
+  .resource-center-form-span-2 {
+    grid-column: auto;
   }
 }
 
