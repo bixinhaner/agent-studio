@@ -66,7 +66,7 @@ export function createCollaborationRouter(options: {
     }>;
     replaceShares(input: { actorUserId: string; threadId: string; shares: Array<{ subjectType: "user" | "department"; subjectId: string }> }): Promise<unknown[]>;
     addComment(input: { actorUserId: string; threadId: string; bodyMarkdown: string; mentionedUserIds: string[] }): Promise<unknown>;
-    setAssignment(input: { actorUserId: string; threadId: string; ownerUserId: string; followerIds: string[] }): Promise<{
+    setAssignment(input: { actorUserId: string; threadId: string; ownerUserId: string; followerIds?: string[] }): Promise<{
       assignment: { ownerUserId?: string; assignedByUserId?: string; assignedAt?: string } | null;
       followers: unknown[];
       captureMark: unknown;
@@ -165,7 +165,7 @@ export function createCollaborationRouter(options: {
         actorUserId: currentUser.id,
         threadId: String(req.params.threadId || "").trim(),
         ownerUserId: input.owner_user_id.trim(),
-        followerIds: input.follower_ids?.map((userId) => userId.trim()) ?? []
+        followerIds: input.follower_ids?.map((userId) => userId.trim())
       });
       res.json({ assignment: state.assignment, followers: state.followers });
     } catch (error) {

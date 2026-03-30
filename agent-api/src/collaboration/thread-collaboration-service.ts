@@ -190,24 +190,28 @@ export class ThreadCollaborationService {
     actorUserId: string;
     threadId: string;
     ownerUserId: string;
-    followerIds: string[];
+    followerIds?: string[];
   }): Promise<Awaited<ReturnType<ThreadCollaborationRepository["getState"]>>>;
   async setAssignment(input: {
     actorUserId: string;
     threadId: string;
     ownerUserId: string;
-    followerIds: string[];
+    followerIds?: string[];
   }) {
     const thread = await this.requireThread(input.threadId);
     await this.assertCanManage(thread, input.actorUserId);
-    await this.deps.directory?.ensureUsersExist?.([input.ownerUserId, ...input.followerIds]);
+    const followerIds = input.followerIds ? uniqueUserIds(input.followerIds) : undefined;
+    await this.deps.directory?.ensureUsersExist?.([input.ownerUserId, ...(followerIds ?? [])]);
 
     await this.deps.collaboration.setAssignment({
       threadId: thread.id,
       ownerUserId: input.ownerUserId,
       assignedByUserId: input.actorUserId
     });
-    const followers = await this.deps.collaboration.replaceFollowers(thread.id, input.followerIds, input.actorUserId);
+    const followers =
+      followerIds !== undefined
+        ? await this.deps.collaboration.replaceFollowers(thread.id, followerIds, input.actorUserId)
+        : (await this.deps.collaboration.getState(thread.id)).followers;
 
     await this.project({
       eventType: "thread.assigned",
@@ -220,7 +224,7 @@ export class ThreadCollaborationService {
       relatedEntityId: thread.id,
       payload: { ownerUserId: input.ownerUserId }
     });
-    if (followers.length > 0) {
+    if (followerIds !== undefined && followers.length > 0) {
       await this.project({
         eventType: "thread.follower_added",
         actorUserId: input.actorUserId,

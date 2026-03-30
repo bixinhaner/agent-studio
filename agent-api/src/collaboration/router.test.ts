@@ -60,7 +60,7 @@ function buildApp(options?: {
         })),
         setAssignment: vi.fn(async ({ ownerUserId, followerIds }) => ({
           assignment: { ownerUserId, assignedByUserId: "user-1", assignedAt: new Date().toISOString() },
-          followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
+          followers: (followerIds ?? ["user-3"]).map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
           captureMark: null
         })),
         setFollowers: vi.fn(async ({ followerIds }) => ({
@@ -155,7 +155,7 @@ describe("createCollaborationRouter", () => {
   it("updates shares, comments, assignment, followers, capture mark, and inbox item state", async () => {
     const setAssignment = vi.fn(async ({ ownerUserId, followerIds }) => ({
       assignment: { ownerUserId, assignedByUserId: "user-1", assignedAt: new Date().toISOString() },
-      followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
+      followers: (followerIds ?? ["user-3"]).map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
       captureMark: null
     }));
     const setFollowers = vi.fn(async ({ followerIds }) => ({
@@ -243,7 +243,7 @@ describe("createCollaborationRouter", () => {
   it("allows assignment updates without depending on collaboration read access", async () => {
     const setAssignment = vi.fn(async ({ ownerUserId, followerIds }) => ({
       assignment: { ownerUserId, assignedByUserId: "user-1", assignedAt: new Date().toISOString() },
-      followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
+      followers: (followerIds ?? ["user-3"]).map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
       captureMark: null
     }));
     const app = buildApp({
@@ -260,6 +260,15 @@ describe("createCollaborationRouter", () => {
     expect(response.status).toBe(200);
     expect(response.body.assignment.ownerUserId).toBe("user-2");
     expect(setAssignment).toHaveBeenCalled();
+    expect(setAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: "user-1",
+        threadId: "thread-1",
+        ownerUserId: "user-2",
+        followerIds: undefined
+      })
+    );
+    expect(response.body.followers).toHaveLength(1);
   });
 
   it("allows follower-only updates without requiring an assignment owner row", async () => {

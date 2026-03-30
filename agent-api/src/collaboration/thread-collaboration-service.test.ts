@@ -403,6 +403,26 @@ describe("ThreadCollaborationService", () => {
     );
   });
 
+  it("preserves existing followers when assignment updates omit follower ids", async () => {
+    const { service } = createService();
+
+    await service.setAssignment({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      ownerUserId: "user-3",
+      followerIds: ["user-2"]
+    });
+
+    const updated = await service.setAssignment({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      ownerUserId: "user-4"
+    });
+
+    expect(updated.assignment?.ownerUserId).toBe("user-4");
+    expect(updated.followers.map((follower) => follower.userId)).toEqual(["user-2"]);
+  });
+
   it("only notifies newly added effective share recipients across share rewrites", async () => {
     const { inbox, service } = createService();
 
