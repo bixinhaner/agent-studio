@@ -2,13 +2,18 @@ import { Router, type Express, type RequestHandler } from "express";
 
 import { requireCurrentUser, requireRole } from "./auth/current-user.js";
 
+type AdminRouterLike = Router & {
+  systemSettingsRouter?: Router;
+};
+
 export function registerCommonApiRoutes(
   app: Pick<Express, "use">,
   options: {
     currentUserMiddleware: RequestHandler;
     authRouter: Router;
     rbacAdminRouter?: Router;
-    adminRouter: Router;
+    adminRouter: AdminRouterLike;
+    systemSettingsRouter?: Router;
     integrationCenterRouter?: Router;
     monitoringAdminRouter?: Router;
     resourcesAdminRouter?: Router;
@@ -27,6 +32,7 @@ export function registerCommonApiRoutes(
     options.rbacAdminRouter ?? Router(),
     requireRole("admin"),
     options.adminRouter,
+    options.systemSettingsRouter ?? options.adminRouter.systemSettingsRouter ?? Router(),
     options.integrationCenterRouter ?? Router(),
     options.monitoringAdminRouter ?? Router(),
     options.resourcesAdminRouter ?? Router(),

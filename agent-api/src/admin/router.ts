@@ -1,17 +1,30 @@
 import { Router, type Request, type Response } from "express";
 
 import { appConfig } from "../config.js";
+import { createRequirePermission } from "../auth/permission-guard.js";
 import { getDbClient } from "../db/client.js";
 import { ZendeskIntegrationService } from "../integrations/zendesk/service.js";
 import { createOrgSyncRouter } from "./org-sync-router.js";
 import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository, type DepartmentRepositoryDb, type DepartmentTreeNode } from "../persistence/department-repository.js";
+import { AdminAuditLogRepository } from "../persistence/admin-audit-log-repository.js";
+import { RolePermissionRepository } from "../persistence/role-permission-repository.js";
+import { RoleRepository } from "../persistence/role-repository.js";
+import { UserRoleRepository } from "../persistence/user-role-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
+import { PermissionService } from "../rbac/permission-service.js";
+import { createSystemSettingsRouter } from "../system-settings/router.js";
+import { SystemSettingsRepository } from "../system-settings/repository.js";
+import { SystemSettingsService } from "../system-settings/service.js";
 import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 
 type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
+
+type AdminRouterWithExtensions = Router & {
+  systemSettingsRouter?: Router;
+};
 
 type UserRoleDbRow = {
   roleId: string;
@@ -272,7 +285,7 @@ async function listDepartmentUsers(db: AdminDb, departmentId: string): Promise<A
 }
 
 export function createAdminRouter(options: AdminRouterOptions): Router {
-  const router = Router();
+  const router = Router() as AdminRouterWithExtensions;
   const zendesk = options.zendesk ?? new ZendeskIntegrationService();
   let cachedDb: AdminDb | null = options.db ?? null;
   let cachedRepositories: {
@@ -309,6 +322,33 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       };
     }
     return cachedRepositories;
+  }
+
+  let systemSettingsRouter: Router | undefined;
+  if (options.db || process.env.DATABASE_URL) {
+    Object.defineProperty(router, "systemSettingsRouter", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (!systemSettingsRouter) {
+          const db = getDbInstance();
+          const permissionService = new PermissionService({
+            roles: new RoleRepository(db as never),
+            userRoles: new UserRoleRepository(db as never),
+            rolePermissions: new RolePermissionRepository(db as never)
+          });
+          const requirePermission = createRequirePermission(permissionService);
+          systemSettingsRouter = createSystemSettingsRouter({
+            service: new SystemSettingsService({
+              repository: new SystemSettingsRepository(db as never),
+              audits: new AdminAuditLogRepository(db as never)
+            }),
+            requirePermission
+          });
+        }
+        return systemSettingsRouter;
+      }
+    });
   }
 
   router.get("/overview", async (_req: Request, res: Response) => {
