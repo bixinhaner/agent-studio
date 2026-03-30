@@ -57,6 +57,7 @@ type AdminRouterOptions = {
   quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   orgSyncConfig?: { enabled: boolean; intervalMinutes: number };
+  broadcastRouter?: Router;
 };
 
 type UserRow = {
@@ -501,6 +502,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       orgSync: options.orgSyncConfig ?? appConfig.orgSync
     });
   });
+
+  router.use(options.broadcastRouter ?? Router());
 
   return router;
 }

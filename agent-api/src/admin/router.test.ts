@@ -169,6 +169,7 @@ function buildApp(options?: {
   zendesk?: Pick<ZendeskIntegrationService, "getOverview">;
   runtimeOptions?: RuntimeOptionResponse;
   modeAdminRouter?: Router;
+  broadcastRouter?: Router;
 }) {
   const dingtalkClient: DingTalkClient = {
     async exchangeCode() {
@@ -266,7 +267,8 @@ function buildApp(options?: {
             },
             runs: []
           })
-        } satisfies Pick<ZendeskIntegrationService, "getOverview">)
+        } satisfies Pick<ZendeskIntegrationService, "getOverview">),
+      broadcastRouter: options?.broadcastRouter
     }),
     modeAdminRouter: options?.modeAdminRouter,
     portalRouter: createPortalRouter({
@@ -1083,6 +1085,24 @@ function buildAdminApp(options?: {
 }
 
 describe("admin and portal routers", () => {
+  it("mounts an injected broadcast router under /api/admin", async () => {
+    const broadcastRouter = Router();
+    broadcastRouter.get("/broadcasts", (_req, res) => {
+      res.json({ ok: true });
+    });
+    const { app, cookies, user } = buildApp({
+      user: makeUser({ id: "admin-1", role: "admin" }),
+      broadcastRouter
+    });
+
+    const response = await request(app)
+      .get("/api/admin/broadcasts")
+      .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: true });
+  });
+
   it("returns overview counts for an admin user", async () => {
     const integrationRepository = new IntegrationRepository(new FakeIntegrationDb() as never);
     await integrationRepository.upsertConfig("zendesk", {

@@ -6,6 +6,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
+import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createAdminRouter } from "./admin/router.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
@@ -14,6 +15,10 @@ import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
+import { BroadcastService } from "./collaboration/broadcast-service.js";
+import { InboxProjectionService } from "./collaboration/inbox-projection-service.js";
+import { createCollaborationRouter } from "./collaboration/router.js";
+import { ThreadCollaborationService } from "./collaboration/thread-collaboration-service.js";
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { getDbClient } from "./db/client.js";
@@ -32,6 +37,7 @@ import {
   type ResourceAccessLogRepositoryDb
 } from "./persistence/resource-access-log-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
+import { BroadcastRepository, type BroadcastRepositoryDb } from "./persistence/broadcast-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
 import {
   ensureThreadUploadInRunConfig,
@@ -43,11 +49,18 @@ import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForMod
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { SessionRepository, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
+  ThreadCollaborationRepository,
+  type ThreadCollaborationRepositoryDb
+} from "./persistence/thread-collaboration-repository.js";
+import { ThreadCommentRepository, type ThreadCommentRepositoryDb } from "./persistence/thread-comment-repository.js";
+import {
   ThreadRepository,
   type ReasoningEffort,
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
+import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persistence/thread-share-repository.js";
+import { InboxItemRepository, type InboxItemRepositoryDb } from "./persistence/inbox-item-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
@@ -104,7 +117,12 @@ const departmentMemberships = new DepartmentMembershipRepository(db as unknown a
 const departments = new DepartmentRepository(db as unknown as DepartmentRepositoryDb);
 const notificationRecords = new NotificationRecordRepository(db as unknown as NotificationRecordRepositoryDb);
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
+const broadcasts = new BroadcastRepository(db as unknown as BroadcastRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
+const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepositoryDb);
+const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
+const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
+const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryDb);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
@@ -155,6 +173,161 @@ const permissionService = new PermissionService({
   userRoles,
   rolePermissions
 });
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean))];
+}
+
+async function listActiveUserIds(): Promise<string[]> {
+  const rows = (await (db as unknown as { user: { findMany(args: unknown): Promise<Array<{ id: string }>> } }).user.findMany({
+    where: { status: "active" },
+    orderBy: { createdAt: "asc" }
+  })) as Array<{ id: string }>;
+  return uniqueStrings(rows.map((row) => row.id));
+}
+
+async function listUserIdsForDepartment(departmentId: string): Promise<string[]> {
+  const rows = (await (
+    db as unknown as {
+      departmentMembership: { findMany(args: unknown): Promise<Array<{ userId: string }>> };
+    }
+  ).departmentMembership.findMany({
+    where: { departmentId: { in: [departmentId] } },
+    orderBy: { createdAt: "asc" }
+  })) as Array<{ userId: string }>;
+  return uniqueStrings(rows.map((row) => row.userId));
+}
+
+async function listUserIdsForRole(roleId: string): Promise<string[]> {
+  const rows = (await (db as unknown as { userRole: { findMany(args: unknown): Promise<Array<{ userId: string }>> } }).userRole.findMany({
+    where: { roleId },
+    orderBy: { createdAt: "asc" }
+  })) as Array<{ userId: string }>;
+  return uniqueStrings(rows.map((row) => row.userId));
+}
+
+async function ensureUsersExist(userIds: string[]): Promise<void> {
+  for (const userId of uniqueStrings(userIds)) {
+    if (!(await users.getById(userId))) {
+      throw new Error("user not found");
+    }
+  }
+}
+
+async function hasUserPermission(userId: string, permissionKey: string): Promise<boolean> {
+  const user = await users.getById(userId);
+  return permissionService.hasPermission({
+    userId,
+    legacyRole: user?.role,
+    permissionKey
+  });
+}
+
+function createThreadCollaborationAuthorizer(permissionKey: "collaboration.read" | "collaboration.comment" | "collaboration.share" | "collaboration.assign" | "collaboration.capture_mark.write") {
+  return {
+    canReadThreadCollaboration: async ({ actorUserId }: { actorUserId: string }) =>
+      permissionKey === "collaboration.read" ? hasUserPermission(actorUserId, permissionKey) : false,
+    canCommentThreadCollaboration: async ({ actorUserId }: { actorUserId: string }) =>
+      permissionKey === "collaboration.comment" ? hasUserPermission(actorUserId, permissionKey) : false,
+    canManageThreadCollaboration: async ({ actorUserId }: { actorUserId: string }) =>
+      permissionKey === "collaboration.share" ||
+      permissionKey === "collaboration.assign" ||
+      permissionKey === "collaboration.capture_mark.write"
+        ? hasUserPermission(actorUserId, permissionKey)
+        : false
+  };
+}
+
+const inboxProjection = new InboxProjectionService({
+  inbox: inboxItems,
+  alerts: {
+    listAllUserIds: listActiveUserIds,
+    listUserIdsForDepartment
+  }
+});
+const collaborationReadService = new ThreadCollaborationService({
+  threads,
+  shares: threadShares,
+  comments: threadComments,
+  collaboration: threadCollaboration,
+  inboxProjection,
+  directory: {
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listUserIdsForDepartment,
+    ensureUsersExist
+  },
+  authorizer: createThreadCollaborationAuthorizer("collaboration.read")
+});
+const collaborationCommentService = new ThreadCollaborationService({
+  threads,
+  shares: threadShares,
+  comments: threadComments,
+  collaboration: threadCollaboration,
+  inboxProjection,
+  directory: {
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listUserIdsForDepartment,
+    ensureUsersExist
+  },
+  authorizer: createThreadCollaborationAuthorizer("collaboration.comment")
+});
+const collaborationShareService = new ThreadCollaborationService({
+  threads,
+  shares: threadShares,
+  comments: threadComments,
+  collaboration: threadCollaboration,
+  inboxProjection,
+  directory: {
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listUserIdsForDepartment,
+    ensureUsersExist
+  },
+  authorizer: createThreadCollaborationAuthorizer("collaboration.share")
+});
+const collaborationAssignService = new ThreadCollaborationService({
+  threads,
+  shares: threadShares,
+  comments: threadComments,
+  collaboration: threadCollaboration,
+  inboxProjection,
+  directory: {
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listUserIdsForDepartment,
+    ensureUsersExist
+  },
+  authorizer: createThreadCollaborationAuthorizer("collaboration.assign")
+});
+const collaborationCaptureService = new ThreadCollaborationService({
+  threads,
+  shares: threadShares,
+  comments: threadComments,
+  collaboration: threadCollaboration,
+  inboxProjection,
+  directory: {
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listUserIdsForDepartment,
+    ensureUsersExist
+  },
+  authorizer: createThreadCollaborationAuthorizer("collaboration.capture_mark.write")
+});
+const broadcastService = new BroadcastService({
+  broadcasts,
+  inboxProjection,
+  recipientDirectory: {
+    listAllUserIds: listActiveUserIds,
+    listUserIdsForDepartment,
+    listUserIdsForRole
+  },
+  notifications: {
+    dispatchBroadcast: ({ broadcast, recipientUserIds }) => notificationDispatch.dispatchBroadcast({ broadcast, recipientUserIds })
+  },
+  authorizer: {
+    canCreateBroadcast: async ({ actorUserId }) => hasUserPermission(actorUserId, "collaboration.broadcast.publish"),
+    canUpdateBroadcast: async ({ actorUserId }) => hasUserPermission(actorUserId, "collaboration.broadcast.publish"),
+    canPublishBroadcast: async ({ actorUserId }) => hasUserPermission(actorUserId, "collaboration.broadcast.publish")
+  }
+});
+
 const requirePermission = createRequirePermission(permissionService, {
   resourceAccessLogs,
   listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
@@ -671,7 +844,11 @@ registerCommonApiRoutes(app, {
       countActive: async () => liveRuntimeThreads.size
     },
     syncService: orgSyncService,
-    orgSyncConfig: appConfig.orgSync
+    orgSyncConfig: appConfig.orgSync,
+    broadcastRouter: createBroadcastAdminRouter({
+      broadcasts,
+      service: broadcastService
+    })
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
@@ -716,6 +893,20 @@ registerCommonApiRoutes(app, {
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });
+
+app.use(
+  createCollaborationRouter({
+    collaboration: {
+      getThreadCollaborationView: (input) => collaborationReadService.getThreadCollaborationView(input),
+      replaceShares: (input) => collaborationShareService.replaceShares(input),
+      addComment: (input) => collaborationCommentService.addComment(input),
+      setAssignment: (input) => collaborationAssignService.setAssignment(input),
+      setCaptureMark: (input) => collaborationCaptureService.setCaptureMark(input)
+    },
+    inbox: inboxItems,
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+  })
+);
 
 app.get("/api/fs/directories", async (req: Request, res: Response) => {
   try {
