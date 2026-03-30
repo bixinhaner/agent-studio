@@ -19,150 +19,206 @@ function makeDate(value: string): Date {
   return new Date(value);
 }
 
-function buildService(seed?: {
-  instances?: FakeIntegrationInstance[];
-  configs?: Array<{ integrationInstanceId: string; config: Record<string, unknown> }>;
-  secrets?: Array<{ integrationInstanceId: string; secretState: Record<string, unknown>; hasSecrets: boolean; rotatedByUserId?: string | null; rotatedAt?: Date | null }>;
-  validations?: Array<{ integrationInstanceId: string; triggerType: string; status: string; summary?: unknown; detail?: unknown; triggeredByUserId?: string | null; createdAt?: Date }>;
-  bindings?: Array<{ integrationInstanceId: string; targetType: string; targetId: string; bindingType: string; bindingPayload: unknown }>;
-  policies?: Array<{
-    id: string;
-    subjectType: "role" | "department" | "user";
-    subjectId: string;
-    resourceType: string;
-    resourceId: string;
-    effect: "allow" | "deny";
-    organizationId?: string | null;
-    createdAt: string;
-    updatedAt: string;
-  }>;
-}) {
-  const instances = seed?.instances ? [...seed.instances] : [];
-  const configs = seed?.configs ? [...seed.configs] : [];
-  const secrets = seed?.secrets ? [...seed.secrets] : [];
-  const validations = seed?.validations ? [...seed.validations] : [];
-  const bindings = seed?.bindings ? [...seed.bindings] : [];
-  const policies = seed?.policies ? [...seed.policies] : [];
+function buildService(
+  seed?: {
+    instances?: FakeIntegrationInstance[];
+    configs?: Array<{ integrationInstanceId: string; config: Record<string, unknown> }>;
+    secrets?: Array<{ integrationInstanceId: string; secretState: Record<string, unknown>; hasSecrets: boolean; rotatedByUserId?: string | null; rotatedAt?: Date | null }>;
+    validations?: Array<{ integrationInstanceId: string; triggerType: string; status: string; summary?: unknown; detail?: unknown; triggeredByUserId?: string | null; createdAt?: Date }>;
+    bindings?: Array<{ integrationInstanceId: string; targetType: string; targetId: string; bindingType: string; bindingPayload: unknown }>;
+    policies?: Array<{
+      id: string;
+      subjectType: "role" | "department" | "user";
+      subjectId: string;
+      resourceType: string;
+      resourceId: string;
+      effect: "allow" | "deny";
+      organizationId?: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  },
+  failure?: {
+    failOnConfigUpsert?: boolean;
+    failOnSecretUpsert?: boolean;
+    failOnResourcePolicyCreate?: boolean;
+  }
+) {
+  type DbState = {
+    instances: FakeIntegrationInstance[];
+    configs: Array<{ integrationInstanceId: string; config: Record<string, unknown> }>;
+    secrets: Array<{ integrationInstanceId: string; secretState: Record<string, unknown>; hasSecrets: boolean; rotatedByUserId?: string | null; rotatedAt?: Date | null }>;
+    validations: Array<{ integrationInstanceId: string; triggerType: string; status: string; summary?: unknown; detail?: unknown; triggeredByUserId?: string | null; createdAt?: Date }>;
+    bindings: Array<{ integrationInstanceId: string; targetType: string; targetId: string; bindingType: string; bindingPayload: unknown }>;
+    policies: Array<{
+      id: string;
+      subjectType: "role" | "department" | "user";
+      subjectId: string;
+      resourceType: string;
+      resourceId: string;
+      effect: "allow" | "deny";
+      organizationId?: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
 
-  const db = {
-    integrationInstance: {
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => instances.find((item) => item.id === where.id) ?? null),
-      findMany: vi.fn(async ({ where }: { where?: { type?: string } } = {}) =>
-        instances.filter((item) => (where?.type ? item.type === where.type : true))),
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const now = new Date().toISOString();
-        const row: FakeIntegrationInstance = {
-          id: String(data.id ?? `integration-instance-${instances.length + 1}`),
-          organizationId: (data.organizationId as string | null | undefined) ?? null,
-          type: String(data.type ?? ""),
-          slug: String(data.slug ?? ""),
-          name: String(data.name ?? ""),
-          description: (data.description as string | null | undefined) ?? null,
-          status: String(data.status ?? "draft"),
-          isSystemSingleton: Boolean(data.isSystemSingleton),
-          createdAt: now,
-          updatedAt: now
-        };
-        instances.push(row);
-        return row as never;
-      }),
-      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        const row = instances.find((item) => item.id === where.id);
-        if (!row) throw new Error("integration instance not found");
-        Object.assign(row, data);
-        row.updatedAt = new Date().toISOString();
-        return row as never;
-      })
-    },
-    integrationInstanceConfig: {
-      findUnique: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
-        configs.find((item) => item.integrationInstanceId === where.integrationInstanceId) ?? null),
-      upsert: vi.fn(async ({ where, create, update }: { where: { integrationInstanceId: string }; create: { integrationInstanceId: string; config: Record<string, unknown> }; update: { config: Record<string, unknown> } }) => {
-        const existing = configs.find((item) => item.integrationInstanceId === where.integrationInstanceId);
-        if (existing) {
-          existing.config = update.config;
-          return existing as never;
-        }
-        const created = { ...create };
-        configs.push(created);
-        return created as never;
-      })
-    },
-    integrationInstanceSecret: {
-      findUnique: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
-        secrets.find((item) => item.integrationInstanceId === where.integrationInstanceId) ?? null),
-      upsert: vi.fn(async ({ where, create, update }: { where: { integrationInstanceId: string }; create: { integrationInstanceId: string; hasSecrets: boolean; secretState: Record<string, unknown>; rotatedAt: Date | null; rotatedByUserId: string | null }; update: { hasSecrets: boolean; secretState: Record<string, unknown>; rotatedAt: Date | null; rotatedByUserId: string | null } }) => {
-        const existing = secrets.find((item) => item.integrationInstanceId === where.integrationInstanceId);
-        if (existing) {
-          Object.assign(existing, update);
-          return existing as never;
-        }
-        const created = { ...create };
-        secrets.push(created);
-        return created as never;
-      })
-    },
-    integrationValidationRun: {
-      findMany: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
-        validations.filter((item) => item.integrationInstanceId === where.integrationInstanceId)),
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const row = {
-          id: `validation-${validations.length + 1}`,
-          integrationInstanceId: String(data.integrationInstanceId),
-          triggerType: String(data.triggerType),
-          status: String(data.status),
-          summary: data.summary,
-          detail: data.detail,
-          triggeredByUserId: (data.triggeredByUserId as string | null | undefined) ?? null,
-          createdAt: new Date()
-        };
-        validations.push(row);
-        return row as never;
-      })
-    },
-    integrationBindingRecord: {
-      findMany: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
-        bindings.filter((item) => item.integrationInstanceId === where.integrationInstanceId)),
-      deleteMany: vi.fn(async () => ({ count: 0 })),
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const row = {
-          id: `binding-${bindings.length + 1}`,
-          integrationInstanceId: String(data.integrationInstanceId),
-          targetType: String(data.targetType),
-          targetId: String(data.targetId),
-          bindingType: String(data.bindingType),
-          bindingPayload: data.bindingPayload
-        };
-        bindings.push(row);
-        return row as never;
-      })
-    },
-    resourcePolicy: {
-      findMany: vi.fn(async ({ where }: { where?: { resourceType?: string; resourceId?: string } } = {}) =>
-        policies.filter((item) =>
-          (where?.resourceType ? item.resourceType === where.resourceType : true) &&
-          (where?.resourceId ? item.resourceId === where.resourceId : true)
-        )),
-      deleteMany: vi.fn(async () => ({ count: 0 })),
-      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const row = {
-          id: `policy-${policies.length + 1}`,
-          organizationId: (data.organizationId as string | null | undefined) ?? null,
-          subjectType: data.subjectType as "role" | "department" | "user",
-          subjectId: String(data.subjectId),
-          resourceType: data.resourceType as string,
-          resourceId: String(data.resourceId),
-          effect: data.effect as "allow" | "deny",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        policies.push(row);
-        return row as never;
-      })
-    },
-    $transaction: async <T>(callback: (tx: never) => Promise<T>) => callback(db as never)
-  } as never;
+  const state: DbState = {
+    instances: seed?.instances ? structuredClone(seed.instances) : [],
+    configs: seed?.configs ? structuredClone(seed.configs) : [],
+    secrets: seed?.secrets ? structuredClone(seed.secrets) : [],
+    validations: seed?.validations ? structuredClone(seed.validations) : [],
+    bindings: seed?.bindings ? structuredClone(seed.bindings) : [],
+    policies: seed?.policies ? structuredClone(seed.policies) : []
+  };
 
+  function makeDb(currentState: DbState): any {
+    const db = {
+      integrationInstance: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => currentState.instances.find((item) => item.id === where.id) ?? null),
+        findMany: vi.fn(async ({ where }: { where?: { type?: string } } = {}) =>
+          currentState.instances.filter((item) => (where?.type ? item.type === where.type : true))),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          const now = new Date().toISOString();
+          const row: FakeIntegrationInstance = {
+            id: String(data.id ?? `integration-instance-${currentState.instances.length + 1}`),
+            organizationId: (data.organizationId as string | null | undefined) ?? null,
+            type: String(data.type ?? ""),
+            slug: String(data.slug ?? ""),
+            name: String(data.name ?? ""),
+            description: (data.description as string | null | undefined) ?? null,
+            status: String(data.status ?? "draft"),
+            isSystemSingleton: Boolean(data.isSystemSingleton),
+            createdAt: now,
+            updatedAt: now
+          };
+          currentState.instances.push(row);
+          return row as never;
+        }),
+        update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const row = currentState.instances.find((item) => item.id === where.id);
+          if (!row) throw new Error("integration instance not found");
+          Object.assign(row, data);
+          row.updatedAt = new Date().toISOString();
+          return row as never;
+        })
+      },
+      integrationInstanceConfig: {
+        findUnique: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
+          currentState.configs.find((item) => item.integrationInstanceId === where.integrationInstanceId) ?? null),
+        upsert: vi.fn(async ({ where, create, update }: { where: { integrationInstanceId: string }; create: { integrationInstanceId: string; config: Record<string, unknown> }; update: { config: Record<string, unknown> } }) => {
+          if (failure?.failOnConfigUpsert) {
+            throw new Error("config write failed");
+          }
+          const existing = currentState.configs.find((item) => item.integrationInstanceId === where.integrationInstanceId);
+          if (existing) {
+            existing.config = update.config;
+            return existing as never;
+          }
+          const created = { ...create };
+          currentState.configs.push(created);
+          return created as never;
+        })
+      },
+      integrationInstanceSecret: {
+        findUnique: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
+          currentState.secrets.find((item) => item.integrationInstanceId === where.integrationInstanceId) ?? null),
+        upsert: vi.fn(async ({ where, create, update }: { where: { integrationInstanceId: string }; create: { integrationInstanceId: string; hasSecrets: boolean; secretState: Record<string, unknown>; rotatedAt: Date | null; rotatedByUserId: string | null }; update: { hasSecrets: boolean; secretState: Record<string, unknown>; rotatedAt: Date | null; rotatedByUserId: string | null } }) => {
+          if (failure?.failOnSecretUpsert) {
+            throw new Error("secret write failed");
+          }
+          const existing = currentState.secrets.find((item) => item.integrationInstanceId === where.integrationInstanceId);
+          if (existing) {
+            Object.assign(existing, update);
+            return existing as never;
+          }
+          const created = { ...create };
+          currentState.secrets.push(created);
+          return created as never;
+        })
+      },
+      integrationValidationRun: {
+        findMany: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
+          currentState.validations.filter((item) => item.integrationInstanceId === where.integrationInstanceId)),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          const row = {
+            id: `validation-${currentState.validations.length + 1}`,
+            integrationInstanceId: String(data.integrationInstanceId),
+            triggerType: String(data.triggerType),
+            status: String(data.status),
+            summary: data.summary,
+            detail: data.detail,
+            triggeredByUserId: (data.triggeredByUserId as string | null | undefined) ?? null,
+            createdAt: new Date()
+          };
+          currentState.validations.push(row);
+          return row as never;
+        })
+      },
+      integrationBindingRecord: {
+        findMany: vi.fn(async ({ where }: { where: { integrationInstanceId: string } }) =>
+          currentState.bindings.filter((item) => item.integrationInstanceId === where.integrationInstanceId)),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          const row = {
+            id: `binding-${currentState.bindings.length + 1}`,
+            integrationInstanceId: String(data.integrationInstanceId),
+            targetType: String(data.targetType),
+            targetId: String(data.targetId),
+            bindingType: String(data.bindingType),
+            bindingPayload: data.bindingPayload
+          };
+          currentState.bindings.push(row);
+          return row as never;
+        })
+      },
+      resourcePolicy: {
+        findMany: vi.fn(async ({ where }: { where?: { resourceType?: string; resourceId?: string } } = {}) =>
+          currentState.policies.filter((item) =>
+            (where?.resourceType ? item.resourceType === where.resourceType : true) &&
+            (where?.resourceId ? item.resourceId === where.resourceId : true)
+          )),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (failure?.failOnResourcePolicyCreate) {
+            throw new Error("policy write failed");
+          }
+          const row = {
+            id: `policy-${currentState.policies.length + 1}`,
+            organizationId: (data.organizationId as string | null | undefined) ?? null,
+            subjectType: data.subjectType as "role" | "department" | "user",
+            subjectId: String(data.subjectId),
+            resourceType: data.resourceType as string,
+            resourceId: String(data.resourceId),
+            effect: data.effect as "allow" | "deny",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          currentState.policies.push(row);
+          return row as never;
+        })
+      },
+      $transaction: async <T>(callback: (tx: never) => Promise<T>) => {
+        const txState: DbState = structuredClone(currentState);
+        const txDb = makeDb(txState);
+        try {
+          const result = await callback(txDb as never);
+          currentState.instances = txState.instances;
+          currentState.configs = txState.configs;
+          currentState.secrets = txState.secrets;
+          currentState.validations = txState.validations;
+          currentState.bindings = txState.bindings;
+          currentState.policies = txState.policies;
+          return result;
+        } catch (error) {
+          throw error;
+        }
+      }
+    } as never;
+    return db;
+  }
+
+  const db = makeDb(state);
   const roleIdsByUser = new Map<string, string[]>([
     ["admin-1", ["role-support-admin"]],
     ["other-user", ["role-viewer"]]
@@ -172,17 +228,17 @@ function buildService(seed?: {
     ["other-user", ["dept-ops"]]
   ]);
 
-    return {
-      service: createIntegrationCenterService({
-        db,
-        policies: {
-        listAll: async () => policies.map((item) => ({ ...item })),
+  return {
+    service: createIntegrationCenterService({
+      db,
+      policies: {
+        listAll: async () => state.policies.map((item) => ({ ...item })),
         replacePoliciesForResource: async ({ resourceType, resourceId, policies: nextPolicies }) => {
-          const kept = policies.filter((item) => item.resourceType !== resourceType || item.resourceId !== resourceId);
-          policies.splice(0, policies.length, ...kept);
+          const kept = state.policies.filter((item) => item.resourceType !== resourceType || item.resourceId !== resourceId);
+          state.policies.splice(0, state.policies.length, ...kept);
           for (const policy of nextPolicies) {
-            policies.push({
-              id: `policy-${policies.length + 1}`,
+            state.policies.push({
+              id: `policy-${state.policies.length + 1}`,
               organizationId: policy.organizationId ?? null,
               subjectType: policy.subjectType,
               subjectId: policy.subjectId,
@@ -193,10 +249,10 @@ function buildService(seed?: {
               updatedAt: new Date().toISOString()
             });
           }
-          return policies
+          return state.policies
             .filter((item) => item.resourceType === resourceType && item.resourceId === resourceId)
             .map((item) => ({ ...item }));
-          }
+        }
       },
       policyService: {
         async filterAllowedResources(input) {
@@ -206,7 +262,7 @@ function buildService(seed?: {
             input.userId
           ]);
           return input.candidateIds.filter((candidateId) =>
-            policies.some(
+            state.policies.some(
               (policy) =>
                 policy.resourceType === input.resourceType &&
                 policy.resourceId === candidateId &&
@@ -221,7 +277,7 @@ function buildService(seed?: {
         getDepartmentIdsForUser: async (userId: string) => departmentIdsByUser.get(userId) ?? []
       }
     }),
-    policies
+    state
   };
 }
 
@@ -332,6 +388,56 @@ describe("createIntegrationCenterService", () => {
     expect(JSON.stringify(detail.instance.config)).not.toContain("secret-value");
   });
 
+  it("redacts secret-like config keys nested inside arrays from reads", async () => {
+    const { service } = buildService({
+      instances: [
+        {
+          id: "int-openai-array",
+          type: "openai_codex",
+          slug: "openai-array",
+          name: "OpenAI Array",
+          description: null,
+          status: "active",
+          isSystemSingleton: true,
+          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+        }
+      ],
+      configs: [
+        {
+          integrationInstanceId: "int-openai-array",
+          config: {
+            endpoints: [
+              { apiKey: "sk-array", url: "https://api.example.com" },
+              { headers: [{ clientSecret: "nested-secret" }] }
+            ],
+            publicValue: "ok"
+          }
+        }
+      ],
+      policies: [
+        {
+          id: "policy-1",
+          subjectType: "role",
+          subjectId: "role-support-admin",
+          resourceType: "integration_instance",
+          resourceId: "int-openai-array",
+          effect: "allow",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const detail = await service.getInstanceDetail({ currentUserId: "admin-1", instanceId: "int-openai-array" });
+    expect(detail.config).toMatchObject({
+      endpoints: [{ url: "https://api.example.com" }, { headers: [{}] }],
+      publicValue: "ok"
+    });
+    expect(JSON.stringify(detail.config)).not.toContain("sk-array");
+    expect(JSON.stringify(detail.config)).not.toContain("nested-secret");
+  });
+
   it("rejects secret-like config keys and keeps secrets in secretState", async () => {
     const { service } = buildService();
 
@@ -373,5 +479,133 @@ describe("createIntegrationCenterService", () => {
     expect(detail.config).toMatchObject({ defaultModel: "gpt-5.4-mini" });
     expect(detail.secretState.hasSecrets).toBe(true);
     expect(JSON.stringify(detail.config)).not.toContain("sk-test");
+  });
+
+  it("rejects secret-like config keys nested inside arrays on write", async () => {
+    const { service, state } = buildService();
+
+    await expect(
+      service.saveInstance({
+        currentUserId: "admin-1",
+        payload: {
+          type: "openai_codex",
+          slug: "openai-array",
+          name: "OpenAI Array",
+          status: "active",
+          config: {
+            endpoints: [
+              {
+                url: "https://api.example.com",
+                apiKey: "sk-array"
+              },
+              {
+                nested: [{ clientSecret: "nested-secret" }]
+              }
+            ]
+          },
+          secretState: {
+            apiKey: "sk-array"
+          }
+        }
+      })
+    ).rejects.toThrow(/secret/i);
+
+    expect(state.instances).toHaveLength(0);
+    expect(state.configs).toHaveLength(0);
+    expect(state.secrets).toHaveLength(0);
+    expect(state.policies).toHaveLength(0);
+  });
+
+  it("rolls back create writes when a later policy write fails", async () => {
+    const { service, state } = buildService(undefined, { failOnResourcePolicyCreate: true });
+
+    await expect(
+      service.saveInstance({
+        currentUserId: "admin-1",
+        payload: {
+          type: "openai_codex",
+          slug: "openai-atomic",
+          name: "OpenAI Atomic",
+          status: "active",
+          config: {
+            defaultModel: "gpt-5.4-mini"
+          },
+          secretState: {
+            apiKey: "sk-atomic"
+          }
+        }
+      })
+    ).rejects.toThrow(/policy write failed/i);
+
+    expect(state.instances).toHaveLength(0);
+    expect(state.configs).toHaveLength(0);
+    expect(state.secrets).toHaveLength(0);
+    expect(state.policies).toHaveLength(0);
+  });
+
+  it("rolls back update writes when a later secret write fails", async () => {
+    const { service, state } = buildService(
+      {
+        instances: [
+          {
+            id: "int-openai-update",
+            type: "openai_codex",
+            slug: "openai-update",
+            name: "OpenAI Update",
+            description: null,
+            status: "active",
+            isSystemSingleton: true,
+            createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+            updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+          }
+        ],
+        configs: [
+          {
+            integrationInstanceId: "int-openai-update",
+            config: {
+              defaultModel: "gpt-5.4-mini"
+            }
+          }
+        ],
+        policies: [
+          {
+            id: "policy-1",
+            subjectType: "role",
+            subjectId: "role-support-admin",
+            resourceType: "integration_instance",
+            resourceId: "int-openai-update",
+            effect: "allow",
+            createdAt: "2026-03-30T10:00:00.000Z",
+            updatedAt: "2026-03-30T10:00:00.000Z"
+          }
+        ]
+      },
+      { failOnSecretUpsert: true }
+    );
+
+    await expect(
+      service.saveInstance({
+        currentUserId: "admin-1",
+        instanceId: "int-openai-update",
+        payload: {
+          name: "OpenAI Update v2",
+          config: {
+            defaultModel: "gpt-5.4-pro"
+          },
+          secretState: {
+            apiKey: "sk-update"
+          }
+        }
+      })
+    ).rejects.toThrow(/secret write failed/i);
+
+    expect(state.instances[0]).toMatchObject({
+      name: "OpenAI Update",
+      status: "active"
+    });
+    expect(state.configs[0].config).toMatchObject({
+      defaultModel: "gpt-5.4-mini"
+    });
+    expect(state.secrets).toHaveLength(0);
   });
 });

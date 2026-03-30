@@ -50,6 +50,16 @@ type AccessResolver = {
   getDepartmentIdsForUser(userId: string): Promise<string[]>;
 };
 
+type IntegrationCenterTx = IntegrationInstanceRepositoryDb & {
+  resourcePolicy: {
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
+  };
+};
+
+export type IntegrationCenterDb = Omit<IntegrationInstanceRepositoryDb, "$transaction"> & {
+  $transaction<T>(callback: (tx: IntegrationCenterTx) => Promise<T>): Promise<T>;
+};
+
 type ValidationOutcome = {
   status: "success" | "failed";
   summary: unknown;
@@ -217,7 +227,7 @@ function createValidationOutcome(instanceType: string, config: Record<string, un
 }
 
 export function createIntegrationCenterService(options: {
-  db: IntegrationInstanceRepositoryDb;
+  db: IntegrationCenterDb;
   policies: IntegrationPolicyStore;
   policyService: Pick<PolicyService, "filterAllowedResources">;
   accessResolver: AccessResolver;
@@ -273,24 +283,81 @@ export function createIntegrationCenterService(options: {
     return mapInstanceDetail(detail, buildPoliciesResult(instancePolicies));
   }
 
-  async function saveConfigAndSecrets(
+  async function persistConfigAndSecrets(
+    db: Pick<IntegrationCenterTx, "integrationInstanceConfig" | "integrationInstanceSecret">,
     instanceId: string,
     payload: IntegrationInstanceBaseInput | IntegrationInstanceUpdateInput,
     currentUserId: string
   ): Promise<void> {
     if (payload.config) {
-      await repository.upsertConfig(instanceId, assertConfigIsSafe(payload.config));
+      await db.integrationInstanceConfig.upsert({
+        where: { integrationInstanceId: instanceId },
+        create: {
+          integrationInstanceId: instanceId,
+          config: assertConfigIsSafe(payload.config)
+        },
+        update: {
+          config: assertConfigIsSafe(payload.config)
+        }
+      });
     }
     if (payload.secretState !== undefined) {
       if (payload.secretState === null) {
-        await repository.clearSecrets(instanceId, { clearedByUserId: currentUserId });
+        const existing = await db.integrationInstanceSecret.findUnique({
+          where: { integrationInstanceId: instanceId }
+        });
+        await db.integrationInstanceSecret.upsert({
+          where: { integrationInstanceId: instanceId },
+          create: {
+            integrationInstanceId: instanceId,
+            hasSecrets: false,
+            secretState: {},
+            rotatedAt: existing?.rotatedAt ?? null,
+            rotatedByUserId: trimOrUndefined(existing?.rotatedByUserId) ?? null
+          },
+          update: {
+            hasSecrets: false,
+            secretState: {},
+            rotatedAt: existing?.rotatedAt ?? null,
+            rotatedByUserId: trimOrUndefined(existing?.rotatedByUserId) ?? null
+          }
+        });
       } else {
-        await repository.rotateSecrets(instanceId, {
-          payload: payload.secretState,
-          rotatedByUserId: currentUserId
+        await db.integrationInstanceSecret.upsert({
+          where: { integrationInstanceId: instanceId },
+          create: {
+            integrationInstanceId: instanceId,
+            hasSecrets: true,
+            secretState: payload.secretState,
+            rotatedAt: new Date(),
+            rotatedByUserId: currentUserId
+          },
+          update: {
+            hasSecrets: true,
+            secretState: payload.secretState,
+            rotatedAt: new Date(),
+            rotatedByUserId: currentUserId
+          }
         });
       }
     }
+  }
+
+  async function createCreatorPolicy(
+    db: Pick<IntegrationCenterTx, "resourcePolicy">,
+    created: { id: string; organizationId?: string | null },
+    currentUserId: string
+  ): Promise<void> {
+    await db.resourcePolicy.create({
+      data: {
+        organizationId: created.organizationId ?? null,
+        subjectType: "user",
+        subjectId: currentUserId,
+        resourceType: integrationPolicyResourceType,
+        resourceId: created.id,
+        effect: "allow"
+      }
+    });
   }
 
   async function saveInstance(input: {
@@ -298,51 +365,48 @@ export function createIntegrationCenterService(options: {
     instanceId?: string;
     payload: IntegrationInstanceBaseInput | IntegrationInstanceUpdateInput;
   }): Promise<IntegrationDetail> {
-    if (input.instanceId) {
-      const existing = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+    const instanceId = input.instanceId;
+    if (instanceId) {
+      const existing = await requireAuthorizedInstance(instanceId, input.currentUserId);
 
       if ("slug" in input.payload && input.payload.slug && input.payload.slug !== existing.slug) {
         throw new Error("integration slug cannot be changed");
       }
 
-      await repository.updateInstance(input.instanceId, {
-        name: trimOrUndefined(input.payload.name) ?? existing.name,
-        description: input.payload.description === undefined ? existing.description ?? null : input.payload.description ?? null,
-        status: input.payload.status ?? existing.status
+      await options.db.$transaction(async (tx) => {
+        await tx.integrationInstance.update({
+          where: { id: instanceId },
+          data: {
+            name: trimOrUndefined(input.payload.name) ?? existing.name,
+            description: input.payload.description === undefined ? existing.description ?? null : input.payload.description ?? null,
+            status: input.payload.status ?? existing.status,
+            updatedAt: new Date()
+          }
+        });
+        await persistConfigAndSecrets(tx, instanceId, input.payload, input.currentUserId);
       });
-      await saveConfigAndSecrets(input.instanceId, input.payload, input.currentUserId);
-      return await readDetail(input.instanceId, input.currentUserId);
+      return await readDetail(instanceId, input.currentUserId);
     }
 
     const payload = input.payload as IntegrationInstanceBaseInput;
     const safeConfig = payload.config ? assertConfigIsSafe(payload.config) : undefined;
-    const created = await repository.createInstance({
-      organizationId: payload.organizationId ?? null,
-      type: payload.type,
-      slug: payload.slug,
-      name: payload.name,
-      description: payload.description ?? null,
-      status: payload.status ?? "draft"
-    });
-    if (safeConfig) {
-      await repository.upsertConfig(created.id, safeConfig);
-    }
-    await options.policies.replacePoliciesForResource({
-      resourceType: integrationPolicyResourceType,
-      resourceId: created.id,
-      policies: [
-        {
-          organizationId: created.organizationId,
-          subjectType: "user",
-          subjectId: input.currentUserId,
-          resourceType: integrationPolicyResourceType,
-          resourceId: created.id,
-          effect: "allow"
+    const createdId = await options.db.$transaction(async (tx) => {
+      const created = await tx.integrationInstance.create({
+        data: {
+          organizationId: payload.organizationId ?? null,
+          type: payload.type,
+          slug: payload.slug,
+          name: payload.name,
+          description: payload.description ?? null,
+          status: payload.status ?? "draft",
+          isSystemSingleton: payload.type === "dingtalk" || payload.type === "openai_codex"
         }
-      ]
+      });
+      await persistConfigAndSecrets(tx, created.id, { ...input.payload, config: safeConfig }, input.currentUserId);
+      await createCreatorPolicy(tx, created, input.currentUserId);
+      return created.id;
     });
-    await saveConfigAndSecrets(created.id, { ...input.payload, config: safeConfig }, input.currentUserId);
-    return await readDetail(created.id, input.currentUserId);
+    return await readDetail(createdId, input.currentUserId);
   }
 
   return {

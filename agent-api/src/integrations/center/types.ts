@@ -28,7 +28,11 @@ const identifierSchema = z
 const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
 
 function collectSecretLikeConfigKeys(value: unknown, path = ""): string[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectSecretLikeConfigKeys(item, `${path}[${index}]`));
+  }
+
+  if (!value || typeof value !== "object") {
     return [];
   }
 

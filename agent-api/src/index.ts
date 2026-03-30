@@ -67,7 +67,7 @@ import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persist
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
-import { createIntegrationCenterService } from "./integrations/center/service.js";
+import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
@@ -119,7 +119,7 @@ const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
-  db: db as unknown as IntegrationInstanceRepositoryDb,
+  db: db as unknown as IntegrationCenterDb,
   policies: resourcePolicies as never,
   policyService,
   accessResolver: {
