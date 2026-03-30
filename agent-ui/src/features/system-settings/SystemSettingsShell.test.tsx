@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SystemSettingsPayload, SystemSettingsVersionRecord } from "./types";
@@ -76,6 +76,37 @@ describe("SystemSettingsShell", () => {
     mockedPublishSystemSettings.mockReset();
   });
 
+  it("shows a visible recovery state when the initial load fails", async () => {
+    mockedFetchSystemSettings
+      .mockRejectedValueOnce(new Error("service unavailable"))
+      .mockResolvedValueOnce({
+        draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+        published: null,
+        draftMeta: {
+          id: "system-settings-version-2",
+          versionNumber: 2,
+          revision: 1,
+          status: "draft",
+          createdAt: "2026-03-30T01:00:00.000Z",
+          updatedAt: "2026-03-30T01:30:00.000Z"
+        },
+        publishedMeta: null
+      });
+
+    render(<SystemSettingsShell />);
+
+    expect(await screen.findByText("系统设置加载失败")).toBeTruthy();
+    expect(screen.getByText("service unavailable")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试加载" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试加载" }));
+
+    await waitFor(() => {
+      expect(mockedFetchSystemSettings).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("编辑中：v2")).toBeTruthy();
+  });
+
   it("renders version records and handles the no-published case", async () => {
     const toLocaleStringSpy = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (this: Date) {
       return `LOCAL:${this.toISOString()}`;
@@ -142,6 +173,71 @@ describe("SystemSettingsShell", () => {
     fireEvent.click(screen.getByRole("tab", { name: "保留与上传" }));
     expect(screen.getByText("must be positive integer")).toBeTruthy();
     expect((screen.getByDisplayValue("30") as HTMLInputElement).getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("keeps publish disabled until the draft save finishes", async () => {
+    let resolveSave: ((value: any) => void) | undefined;
+
+    const savePromise = new Promise<any>((resolve) => {
+      resolveSave = resolve;
+    });
+
+    mockedFetchSystemSettings.mockResolvedValue({
+      draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+      published: null,
+      draftMeta: {
+        id: "system-settings-version-2",
+        versionNumber: 2,
+        revision: 1,
+        status: "draft",
+        createdAt: "2026-03-30T01:00:00.000Z",
+        updatedAt: "2026-03-30T01:30:00.000Z"
+      },
+      publishedMeta: null
+    });
+
+    mockedSaveSystemSettingsDraft.mockReturnValue(savePromise);
+    mockedPublishSystemSettings.mockResolvedValue({
+      draft: createRecord({ id: "system-settings-version-2", versionNumber: 2, revision: 1 }),
+      published: null,
+      draftMeta: {
+        id: "system-settings-version-2",
+        versionNumber: 2,
+        revision: 1,
+        status: "draft",
+        createdAt: "2026-03-30T01:00:00.000Z",
+        updatedAt: "2026-03-30T01:30:00.000Z"
+      },
+      publishedMeta: null
+    });
+
+    render(<SystemSettingsShell />);
+
+    await screen.findByRole("heading", { name: "系统设置" });
+    fireEvent.click(screen.getByRole("tab", { name: "发布记录" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
+
+    expect(screen.getByRole("button", { name: "发布设置" }).getAttribute("disabled")).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "发布设置" }));
+    expect(mockedPublishSystemSettings).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSave?.({
+      draft: createRecord({ id: "system-settings-version-3", versionNumber: 3, revision: 2 }),
+      published: null,
+      draftMeta: {
+        id: "system-settings-version-3",
+        versionNumber: 3,
+        revision: 2,
+        status: "draft",
+        createdAt: "2026-03-30T01:00:00.000Z",
+        updatedAt: "2026-03-30T03:00:00.000Z"
+      },
+      publishedMeta: null
+    });
+    });
+
+    expect(await screen.findByText("草稿已保存")).toBeTruthy();
   });
 
   it("saves the edited draft and publishes the updated version records", async () => {

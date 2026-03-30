@@ -65,6 +65,7 @@ export function SystemSettingsShell() {
   const [draftMeta, setDraftMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [publishedMeta, setPublishedMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadErrorText, setLoadErrorText] = useState("");
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [errorText, setErrorText] = useState("");
@@ -75,6 +76,7 @@ export function SystemSettingsShell() {
     let active = true;
     async function load() {
       setLoading(true);
+      setLoadErrorText("");
       setErrorText("");
       setSuccessText("");
       setFieldErrors({});
@@ -87,7 +89,7 @@ export function SystemSettingsShell() {
         setPublishedMeta(response.publishedMeta);
       } catch (error) {
         if (active) {
-          setErrorText(getValidationMessage(error));
+          setLoadErrorText(getValidationMessage(error));
         }
       } finally {
         if (active) setLoading(false);
@@ -99,6 +101,25 @@ export function SystemSettingsShell() {
       active = false;
     };
   }, []);
+
+  async function reloadSettings() {
+    setLoading(true);
+    setLoadErrorText("");
+    setErrorText("");
+    setSuccessText("");
+    setFieldErrors({});
+    try {
+      const response = await fetchSystemSettings();
+      setDraftRecord(cloneRecord(response.draft));
+      setPublishedRecord(response.published ? cloneRecord(response.published) : null);
+      setDraftMeta(response.draftMeta);
+      setPublishedMeta(response.publishedMeta);
+    } catch (error) {
+      setLoadErrorText(getValidationMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function updateDraft(
     updater: (current: SystemSettingsVersionRecord) => SystemSettingsVersionRecord,
@@ -208,7 +229,7 @@ export function SystemSettingsShell() {
   }
 
   async function handleSaveDraft() {
-    if (!draftRecord) return;
+    if (!draftRecord || loading || saving || publishing) return;
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -239,6 +260,7 @@ export function SystemSettingsShell() {
   }
 
   async function handlePublish() {
+    if (!draftRecord || loading || saving || publishing) return;
     setPublishing(true);
     setErrorText("");
     setSuccessText("");
@@ -268,10 +290,40 @@ export function SystemSettingsShell() {
     }
   }
 
-  if (loading || !draftRecord || !draftMeta) {
+  if (loading && !draftRecord && !loadErrorText) {
     return (
       <section className="admin-card">
         <p>加载系统设置中...</p>
+      </section>
+    );
+  }
+
+  if (loadErrorText && !draftRecord) {
+    return (
+      <section className="admin-card system-settings-shell">
+        <div className="admin-section-header">
+          <div>
+            <p className="auth-eyebrow">Admin System Settings</p>
+            <h2>系统设置</h2>
+            <p>编辑平台默认值和安全边界，保存到草稿后再显式发布。</p>
+          </div>
+        </div>
+
+        <div className="system-settings-load-error">
+          <p className="err-text">系统设置加载失败</p>
+          <p>{loadErrorText}</p>
+          <button type="button" className="admin-action-btn" disabled={loading} onClick={() => void reloadSettings()}>
+            {loading ? "重试中..." : "重试加载"}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!draftRecord || !draftMeta) {
+    return (
+      <section className="admin-card">
+        <p>系统设置暂不可用</p>
       </section>
     );
   }

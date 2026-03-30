@@ -33,7 +33,7 @@ export function PublishHistoryView({ draftMeta, publishedMeta, saving, publishin
           <button type="button" className="admin-secondary-btn" disabled={saving || publishing} onClick={onSave}>
             {saving ? "保存中..." : "保存草稿"}
           </button>
-          <button type="button" className="admin-action-btn" disabled={publishing} onClick={onPublish}>
+          <button type="button" className="admin-action-btn" disabled={saving || publishing} onClick={onPublish}>
             {publishing ? "发布中..." : "发布设置"}
           </button>
         </div>
