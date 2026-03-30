@@ -36,12 +36,6 @@ export type UpsertQuotaPolicyInput = {
 };
 
 export type UpdateQuotaPolicyInput = {
-  scopeType?: QuotaPolicyScopeType;
-  scopeId?: string;
-  featureType?: string;
-  model?: string;
-  metricType?: QuotaPolicyMetricType;
-  windowType?: QuotaPolicyWindowType;
   thresholdValue?: string | number;
   enforcementMode?: QuotaPolicyEnforcementMode;
   isActive?: boolean;
@@ -253,12 +247,6 @@ export class QuotaPolicyRepository {
     const updated = await this.db.quotaPolicy.update({
       where: { id: existing.id },
       data: {
-        ...(input.changes.scopeType !== undefined ? { scopeType: input.changes.scopeType } : {}),
-        ...(input.changes.scopeId !== undefined ? { scopeId: trimOrUndefined(input.changes.scopeId) ?? existing.scopeId } : {}),
-        ...(input.changes.featureType !== undefined ? { featureType: trimOrUndefined(input.changes.featureType) ?? null } : {}),
-        ...(input.changes.model !== undefined ? { model: trimOrUndefined(input.changes.model) ?? null } : {}),
-        ...(input.changes.metricType !== undefined ? { metricType: input.changes.metricType } : {}),
-        ...(input.changes.windowType !== undefined ? { windowType: input.changes.windowType } : {}),
         ...(input.changes.thresholdValue !== undefined ? { thresholdValue: formatDecimal(input.changes.thresholdValue) } : {}),
         ...(input.changes.enforcementMode !== undefined ? { enforcementMode: input.changes.enforcementMode } : {}),
         ...(typeof input.changes.isActive === "boolean" ? { isActive: input.changes.isActive } : {}),

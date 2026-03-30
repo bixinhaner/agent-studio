@@ -15,7 +15,7 @@ type MonitoringRouterOptions = {
   usageEvents: Pick<UsageEventRepository, "list">;
   usageRollups: Pick<UsageRollupRepository, "list">;
   quotaPolicies: Pick<QuotaPolicyRepository, "list" | "upsert" | "getById" | "update">;
-  costProfiles: Pick<CostProfileRepository, "listActive" | "upsert" | "getById" | "update">;
+  costProfiles: Pick<CostProfileRepository, "list" | "listActive" | "upsert" | "getById" | "update">;
   alertRules: Pick<AlertRuleRepository, "list" | "create" | "getById" | "update">;
   alertEvents: Pick<AlertEventRepository, "list" | "getById" | "update">;
   notificationRecords: Pick<NotificationRecordRepository, "list">;
@@ -83,7 +83,12 @@ function aggregateRankings<T extends UsageEventRecord>(
       estimatedCost: value.estimatedCost.toFixed(6),
       internalCost: value.internalCost.toFixed(6)
     }))
-    .sort((left, right) => right.requestCount - left.requestCount || right.estimatedCost.localeCompare(left.estimatedCost) || left.key.localeCompare(right.key));
+    .sort(
+      (left, right) =>
+        right.requestCount - left.requestCount ||
+        toNumber(right.estimatedCost) - toNumber(left.estimatedCost) ||
+        left.key.localeCompare(right.key)
+    );
 }
 
 function buildTrends(records: UsageDailyRollupRecord[]): MonitoringTrend[] {
@@ -106,6 +111,10 @@ function buildTrends(records: UsageDailyRollupRecord[]): MonitoringTrend[] {
     buckets.set(rollupDate, existing);
   }
   return [...buckets.values()].sort((left, right) => left.rollupDate.localeCompare(right.rollupDate));
+}
+
+function isPlatformRollup(record: UsageDailyRollupRecord): boolean {
+  return record.scopeType === "platform";
 }
 
 function detailFromError(error: unknown): string {
@@ -182,10 +191,11 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         options.alertEvents.list(),
         options.notificationRecords.list()
       ]);
-      const trends = buildTrends(usageRollups);
+      const platformRollups = usageRollups.filter(isPlatformRollup);
+      const trends = buildTrends(platformRollups);
       const totalRequests = trends.reduce((sum, item) => sum + item.requestCount, 0);
-      const totalEstimatedCost = usageRollups.reduce((sum, item) => sum + toNumber(item.estimatedCost), 0).toFixed(6);
-      const totalInternalCost = usageRollups.reduce((sum, item) => sum + toNumber(item.internalCost), 0).toFixed(6);
+      const totalEstimatedCost = platformRollups.reduce((sum, item) => sum + toNumber(item.estimatedCost), 0).toFixed(6);
+      const totalInternalCost = platformRollups.reduce((sum, item) => sum + toNumber(item.internalCost), 0).toFixed(6);
 
       res.json({
         overview: {
@@ -243,7 +253,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/monitoring/trends", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
-      res.json({ trends: buildTrends(await options.usageRollups.list()) });
+      res.json({ trends: buildTrends((await options.usageRollups.list()).filter(isPlatformRollup)) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }
@@ -301,18 +311,18 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         res.status(404).json({ detail: "quota policy 不存在" });
         return;
       }
+      const forbiddenIdentityFields = ["scopeType", "scopeId", "featureType", "model", "metricType", "windowType"].filter(
+        (key) => req.body?.[key] !== undefined
+      );
+      if (forbiddenIdentityFields.length > 0) {
+        res.status(400).json({
+          detail: `quota policy identity fields are immutable: ${forbiddenIdentityFields.join(", ")}`
+        });
+        return;
+      }
       const quotaPolicy = await options.quotaPolicies.update({
         id: req.params.policyId,
-        changes: pickObject(req.body ?? {}, [
-          "scopeType",
-          "scopeId",
-          "featureType",
-          "model",
-          "metricType",
-          "thresholdValue",
-          "enforcementMode",
-          "isActive"
-        ])
+        changes: pickObject(req.body ?? {}, ["thresholdValue", "enforcementMode", "isActive"])
       });
       res.json({ quotaPolicy });
     } catch (error) {
@@ -322,7 +332,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/cost-profiles", options.requirePermission("quota.read"), async (_req: Request, res: Response) => {
     try {
-      res.json({ costProfiles: await options.costProfiles.listActive() });
+      res.json({ costProfiles: await options.costProfiles.list() });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }

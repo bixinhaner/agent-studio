@@ -104,6 +104,22 @@ function mapCostProfile(row: CostProfileRow): CostProfileRecord {
 export class CostProfileRepository {
   constructor(private readonly db: CostProfileRepositoryDb) {}
 
+  async list(input: { organizationId?: string } = {}): Promise<CostProfileRecord[]> {
+    const rows = await this.db.costProfile.findMany({
+      orderBy: { createdAt: "asc" }
+    });
+    const organizationId = trimOrUndefined(input.organizationId);
+    return rows
+      .filter((row) => {
+        const rowOrganizationId = trimOrUndefined(row.organizationId);
+        if (organizationId) {
+          return !rowOrganizationId || rowOrganizationId === organizationId;
+        }
+        return true;
+      })
+      .map(mapCostProfile);
+  }
+
   async listActive(input: { organizationId?: string } = {}): Promise<CostProfileRecord[]> {
     const rows = await this.db.costProfile.findMany({
       where: {

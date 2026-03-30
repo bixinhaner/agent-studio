@@ -101,6 +101,15 @@ function makeCrudTable<T extends MonitoringRecord & { id: string }>(rows: T[]) {
   };
 }
 
+function makeCostProfileTable<T extends MonitoringRecord & { id: string; isActive?: boolean; organizationId?: string | null }>(rows: T[]) {
+  const table = makeCrudTable(rows);
+  return {
+    ...table,
+    listActive: async () => clone(rows.filter((row) => row.isActive && !row.organizationId)),
+    list: async () => clone(rows)
+  };
+}
+
 function buildMonitoringApp(options?: { allowedPermissions?: string[] }) {
   const allowedPermissions = options?.allowedPermissions ?? [
     "monitoring.read",
@@ -147,6 +156,25 @@ function buildMonitoringApp(options?: { allowedPermissions?: string[] }) {
       outputTokens: 50,
       estimatedCost: "5.000000",
       internalCost: "3.000000",
+      createdAt: makeDate("2026-03-29T12:00:00.000Z"),
+      updatedAt: makeDate("2026-03-29T12:00:00.000Z")
+    },
+    {
+      id: "rollup-3",
+      organizationId: null,
+      rollupDate: "2026-03-29",
+      scopeType: "department",
+      scopeId: "dept-rd",
+      model: null,
+      featureType: null,
+      requestCount: 9,
+      successCount: 8,
+      failureCount: 1,
+      inputTokens: 90,
+      cachedInputTokens: 0,
+      outputTokens: 70,
+      estimatedCost: "9.000000",
+      internalCost: "4.000000",
       createdAt: makeDate("2026-03-29T12:00:00.000Z"),
       updatedAt: makeDate("2026-03-29T12:00:00.000Z")
     }
@@ -205,6 +233,42 @@ function buildMonitoringApp(options?: { allowedPermissions?: string[] }) {
       resultStatus: "success",
       metadata: { scope: "agent" },
       createdAt: makeDate("2026-03-29T10:00:00.000Z")
+    },
+    {
+      id: "usage-4",
+      organizationId: null,
+      userId: "user-3",
+      departmentIdSnapshot: "dept-fin",
+      threadId: "thread-4",
+      sessionId: "session-4",
+      model: "claude-code",
+      featureType: "tool",
+      inputTokens: 50,
+      cachedInputTokens: 0,
+      outputTokens: 25,
+      estimatedCost: "10.000000",
+      internalCost: "5.000000",
+      resultStatus: "success",
+      metadata: { scope: "tool" },
+      createdAt: makeDate("2026-03-29T11:00:00.000Z")
+    },
+    {
+      id: "usage-5",
+      organizationId: null,
+      userId: "user-4",
+      departmentIdSnapshot: "dept-fin",
+      threadId: "thread-5",
+      sessionId: "session-5",
+      model: "claude-code",
+      featureType: "tool",
+      inputTokens: 40,
+      cachedInputTokens: 0,
+      outputTokens: 20,
+      estimatedCost: "9.000000",
+      internalCost: "4.500000",
+      resultStatus: "success",
+      metadata: { scope: "tool" },
+      createdAt: makeDate("2026-03-29T11:05:00.000Z")
     }
   ];
   const resourceAccessLogs = [
@@ -266,6 +330,30 @@ function buildMonitoringApp(options?: { allowedPermissions?: string[] }) {
       isActive: true,
       createdAt: makeDate("2026-03-29T00:00:00.000Z"),
       updatedAt: makeDate("2026-03-29T00:00:00.000Z")
+    },
+    {
+      id: "profile-2",
+      organizationId: "org-1",
+      model: "gpt-4.1",
+      inputTokenPrice: "0.020000",
+      cachedInputTokenPrice: "0.004000",
+      outputTokenPrice: "0.030000",
+      internalCostMultiplier: "1.1000",
+      isActive: false,
+      createdAt: makeDate("2026-03-29T00:05:00.000Z"),
+      updatedAt: makeDate("2026-03-29T00:05:00.000Z")
+    },
+    {
+      id: "profile-3",
+      organizationId: "org-1",
+      model: "claude-code",
+      inputTokenPrice: "0.030000",
+      cachedInputTokenPrice: "0.006000",
+      outputTokenPrice: "0.040000",
+      internalCostMultiplier: "1.3000",
+      isActive: true,
+      createdAt: makeDate("2026-03-29T00:10:00.000Z"),
+      updatedAt: makeDate("2026-03-29T00:10:00.000Z")
     }
   ];
   const alertRules = [
@@ -335,7 +423,7 @@ function buildMonitoringApp(options?: { allowedPermissions?: string[] }) {
     usageEvents: makeListTable(usageEvents),
     usageRollups: makeListTable(usageDailyRollups),
     quotaPolicies: makeCrudTable(quotaPolicies),
-    costProfiles: makeCrudTable(costProfiles),
+    costProfiles: makeCostProfileTable(costProfiles),
     alertRules: makeCrudTable(alertRules),
     alertEvents: makeCrudTable(alertEvents),
     notificationRecords: makeListTable(notificationRecords)
@@ -386,6 +474,7 @@ describe("monitoring admin router", () => {
 
     expect(overviewResponse.status).toBe(200);
     expect(overviewResponse.body.overview.totalEstimatedCost).toBe("15.000000");
+    expect(overviewResponse.body.overview.totalInternalCost).toBe("9.000000");
     expect(overviewResponse.body.trends).toHaveLength(2);
     expect(rankingsResponse.status).toBe(200);
     expect(rankingsResponse.body.rankings.topUsers[0]).toMatchObject({
@@ -393,10 +482,20 @@ describe("monitoring admin router", () => {
       requestCount: 2,
       estimatedCost: "5.000000"
     });
+    expect(rankingsResponse.body.rankings.topUsers[1]).toMatchObject({
+      userId: "user-3",
+      requestCount: 1,
+      estimatedCost: "10.000000"
+    });
     expect(trendsResponse.status).toBe(200);
     expect(trendsResponse.body.trends[0]).toMatchObject({
       rollupDate: "2026-03-28",
       requestCount: 8
+    });
+    expect(trendsResponse.body.trends[1]).toMatchObject({
+      rollupDate: "2026-03-29",
+      requestCount: 4,
+      estimatedCost: "5.000000"
     });
   });
 
@@ -438,6 +537,16 @@ describe("monitoring admin router", () => {
     expect(costPatchResponse.status).toBe(200);
     expect(costPatchResponse.body.costProfile.outputTokenPrice).toBe("0.031000");
 
+    const costProfilesResponse = await request(app).get("/api/admin/cost-profiles");
+    expect(costProfilesResponse.status).toBe(200);
+    expect(costProfilesResponse.body.costProfiles).toHaveLength(4);
+    expect(costProfilesResponse.body.costProfiles.map((profile: { id: string }) => profile.id)).toEqual([
+      "profile-1",
+      "profile-2",
+      "profile-3",
+      costCreateResponse.body.costProfile.id
+    ]);
+
     const alertRuleCreateResponse = await request(app).post("/api/admin/alert-rules").send({
       scopeType: "platform",
       scopeId: "platform",
@@ -471,5 +580,20 @@ describe("monitoring admin router", () => {
       channelType: "dingtalk",
       status: "sent"
     });
+  });
+
+  it("rejects quota policy identity changes during patch updates", async () => {
+    const { app, quotaPolicies } = buildMonitoringApp();
+
+    const response = await request(app).patch("/api/admin/quota-policies/policy-1").send({
+      scopeId: "dept-ops",
+      thresholdValue: "250.00"
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("identity");
+    expect(quotaPolicies).toHaveLength(1);
+    expect(quotaPolicies[0]?.scopeId).toBe("dept-rd");
+    expect(quotaPolicies[0]?.thresholdValue).toBe("100.000000");
   });
 });

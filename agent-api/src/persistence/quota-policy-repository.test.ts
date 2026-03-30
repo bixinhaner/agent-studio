@@ -63,4 +63,33 @@ describe("QuotaPolicyRepository", () => {
     expect(first.id).not.toBe(second.id);
     expect(second.featureType).toBe("chat");
   });
+
+  it("only allows mutable fields to change during updates", async () => {
+    const repository = new QuotaPolicyRepository(new FakeOperationsDb() as never);
+
+    const created = await repository.upsert({
+      organizationId: "org-1",
+      scopeType: "department",
+      scopeId: "dept-rd",
+      featureType: "chat",
+      metricType: "request_count",
+      windowType: "daily",
+      thresholdValue: "10"
+    });
+
+    const updated = await repository.update({
+      id: created.id,
+      changes: {
+        thresholdValue: "20",
+        enforcementMode: "alert_only",
+        isActive: false
+      }
+    });
+
+    expect(updated.scopeId).toBe("dept-rd");
+    expect(updated.featureType).toBe("chat");
+    expect(updated.thresholdValue).toBe("20.000000");
+    expect(updated.enforcementMode).toBe("alert_only");
+    expect(updated.isActive).toBe(false);
+  });
 });
