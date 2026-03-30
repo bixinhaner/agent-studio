@@ -39,4 +39,22 @@ describe("SeedSystemRbacService", () => {
       expect(db.rolePermissions.filter((binding) => binding.roleId === role.id)).toHaveLength(expectedPermissionCount);
     }
   });
+
+  it("includes resource center permissions in the built-in permission definitions", () => {
+    const permissionKeys = BUILTIN_PERMISSIONS.map((item) => item.key);
+
+    expect(permissionKeys).toEqual(
+      expect.arrayContaining([
+        "resource_center.read",
+        "workspace.read",
+        "workspace.write",
+        "workspace.disable",
+        "knowledge_set.read",
+        "knowledge_set.write",
+        "knowledge_set.upload",
+        "knowledge_set.reindex",
+        "knowledge_set.file_manage"
+      ])
+    );
+  });
 });

@@ -4,6 +4,7 @@ import { RoleRepository, type RoleRecord } from "../persistence/role-repository.
 
 export const BUILTIN_PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: "admin.overview.read", name: "Read admin overview", category: "admin_overview" },
+  { key: "resource_center.read", name: "Read resource center", category: "resource_center" },
   { key: "user.read", name: "Read users", category: "user_management" },
   { key: "user.write", name: "Edit users", category: "user_management" },
   { key: "user.role.assign", name: "Assign user roles", category: "user_management" },
@@ -15,6 +16,14 @@ export const BUILTIN_PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: "permission.assign", name: "Assign permissions", category: "role_management" },
   { key: "resource_policy.read", name: "Read resource authorization", category: "resource_authorization" },
   { key: "resource_policy.write", name: "Edit resource authorization", category: "resource_authorization" },
+  { key: "workspace.read", name: "Read workspaces", category: "resource_center" },
+  { key: "workspace.write", name: "Edit workspaces", category: "resource_center" },
+  { key: "workspace.disable", name: "Disable workspaces", category: "resource_center" },
+  { key: "knowledge_set.read", name: "Read knowledge sets", category: "resource_center" },
+  { key: "knowledge_set.write", name: "Edit knowledge sets", category: "resource_center" },
+  { key: "knowledge_set.upload", name: "Upload knowledge set files", category: "resource_center" },
+  { key: "knowledge_set.reindex", name: "Reindex knowledge sets", category: "resource_center" },
+  { key: "knowledge_set.file_manage", name: "Manage knowledge set files", category: "resource_center" },
   { key: "org_sync.read", name: "Read org sync", category: "org_sync" },
   { key: "org_sync.trigger", name: "Trigger org sync", category: "org_sync" },
   { key: "integration.read", name: "Read integrations", category: "integration_management" },

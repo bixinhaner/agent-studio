@@ -305,6 +305,96 @@ describe("resources admin router", () => {
     ]);
   });
 
+  it("gets and replaces policies for a single workspace resource", async () => {
+    const { app, cookies, adminUser, workspaces, resourcePolicies, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const workspace = await workspaces.create({
+      name: "Workspace",
+      slug: "workspace",
+      sourceType: "filesystem",
+      rootPath: path.join(allowedFilesystemRoot, "workspace")
+    });
+    resourcePolicies.records.push({
+      id: "policy-1",
+      organizationId: undefined,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: workspace.id,
+      effect: "allow",
+      createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+    });
+
+    const getResponse = await request(app)
+      .get(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.policies).toEqual([
+      expect.objectContaining({ resourceType: "workspace", resourceId: workspace.id, effect: "allow" })
+    ]);
+
+    const putResponse = await request(app)
+      .put(`/api/admin/resources/workspaces/${workspace.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [
+          { subjectType: "role", subjectId: "employee", effect: "allow" },
+          { subjectType: "department", subjectId: "dept-rd", effect: "deny" }
+        ]
+      });
+
+    expect(putResponse.status).toBe(200);
+    expect(putResponse.body.policies).toHaveLength(2);
+  });
+
+  it("gets and replaces policies for a single knowledge set resource", async () => {
+    const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp();
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Policies",
+      slug: "policies",
+      sourceType: "managed_upload"
+    });
+
+    const putResponse = await request(app)
+      .put(`/api/admin/resources/knowledge-sets/${knowledgeSet.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [
+          { subjectType: "role", subjectId: "employee", effect: "allow" },
+          { subjectType: "user", subjectId: "user-1", effect: "deny" }
+        ]
+      });
+
+    expect(putResponse.status).toBe(200);
+    expect(putResponse.body.policies).toHaveLength(2);
+
+    const getResponse = await request(app)
+      .get(`/api/admin/resources/knowledge-sets/${knowledgeSet.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.policies).toHaveLength(2);
+    expect(getResponse.body.policies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSet.id,
+          subjectType: "role",
+          subjectId: "employee",
+          effect: "allow"
+        }),
+        expect.objectContaining({
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSet.id,
+          subjectType: "user",
+          subjectId: "user-1",
+          effect: "deny"
+        })
+      ])
+    );
+  });
+
   it("protects the admin resources routes behind the existing admin registration path", async () => {
     const { app, cookies, user } = await buildResourcesAdminApp({
       user: makeUser({ id: "employee-1", role: "employee" })
