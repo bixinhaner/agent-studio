@@ -7,6 +7,11 @@ function formatCount(value: string): string {
   return value;
 }
 
+function getScopeIdInput(scopeType: "platform" | "department", scopeId: string): string {
+  if (scopeType === "platform") return "platform";
+  return scopeId.trim() || "dept-rd";
+}
+
 export function QuotaRulesView() {
   const [policies, setPolicies] = useState<QuotaPolicyRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +50,7 @@ export function QuotaRulesView() {
     try {
       await createQuotaPolicy({
         scopeType,
-        scopeId,
+        scopeId: getScopeIdInput(scopeType, scopeId),
         featureType,
         metricType,
         thresholdValue,
@@ -89,12 +94,12 @@ export function QuotaRulesView() {
           </select>
         </label>
         <label className="field">
-          <span className="field-label">部门范围</span>
+          <span className="field-label">{scopeType === "platform" ? "平台范围" : "部门范围"}</span>
           <input
             className="field-input"
             value={scopeId}
             onChange={(event) => setScopeId(event.target.value)}
-            placeholder="dept-rd"
+            placeholder={scopeType === "platform" ? "platform" : "dept-rd"}
           />
         </label>
         <label className="field">

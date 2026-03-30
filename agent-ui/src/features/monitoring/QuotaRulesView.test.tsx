@@ -60,4 +60,36 @@ describe("QuotaRulesView", () => {
       expect(mockedCreateQuotaPolicy).toHaveBeenCalled();
     });
   });
+
+  it("normalizes platform quota rules to the platform scope id", async () => {
+    mockedFetchQuotaPolicies.mockResolvedValue({ quotaPolicies: [] });
+    mockedCreateQuotaPolicy.mockResolvedValue({
+      quotaPolicy: {
+        id: "policy-3",
+        scopeType: "platform",
+        scopeId: "platform",
+        featureType: "chat",
+        model: null,
+        metricType: "internal_cost",
+        windowType: "daily",
+        thresholdValue: "100.000000",
+        enforcementMode: "soft_block",
+        isActive: true
+      }
+    });
+
+    render(<QuotaRulesView />);
+
+    fireEvent.change(await screen.findByLabelText("作用域类型"), { target: { value: "platform" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存配额规则" }));
+
+    await waitFor(() => {
+      expect(mockedCreateQuotaPolicy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: "platform",
+          scopeId: "platform"
+        })
+      );
+    });
+  });
 });
