@@ -47,6 +47,26 @@ function workspaceLabel(workspace: WorkspaceRecord) {
   return `${workspace.name} (${workspace.slug})`;
 }
 
+function workspaceOptionsForSource(sourceRef: string, workspaces: WorkspaceRecord[]) {
+  if (!sourceRef || workspaces.some((workspace) => workspace.id === sourceRef)) {
+    return workspaces.map((workspace) => ({
+      id: workspace.id,
+      label: workspaceLabel(workspace)
+    }));
+  }
+
+  return [
+    {
+      id: sourceRef,
+      label: `${sourceRef} (unavailable)`
+    },
+    ...workspaces.map((workspace) => ({
+      id: workspace.id,
+      label: workspaceLabel(workspace)
+    }))
+  ];
+}
+
 export function InstructionSourceEditor({
   instructionSources,
   workspaces,
@@ -153,9 +173,9 @@ export function InstructionSourceEditor({
                     onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
                   >
                     <option value="">请选择工作区</option>
-                    {workspaces.map((workspace) => (
+                    {workspaceOptionsForSource(source.sourceRef, workspaces).map((workspace) => (
                       <option key={workspace.id} value={workspace.id}>
-                        {workspaceLabel(workspace)}
+                        {workspace.label}
                       </option>
                     ))}
                   </select>

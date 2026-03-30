@@ -95,4 +95,19 @@ describe("InstructionSourceEditor", () => {
     expect(screen.getByLabelText("来源引用 2")).toBeTruthy();
     expect(screen.getByLabelText("来源引用 3")).toBeTruthy();
   });
+
+  it("keeps unavailable workspace-backed sources visible in degraded mode", async () => {
+    const onChange = vi.fn();
+
+    render(
+      <Harness
+        sources={[{ sourceType: "workspace_agents_md", sourceRef: "workspace-2", sortOrder: 0 }]}
+        workspaces={[]}
+        onChange={onChange}
+      />
+    );
+
+    expect((await screen.findByLabelText("来源引用 1")) as HTMLSelectElement).toHaveProperty("value", "workspace-2");
+    expect(screen.getByRole("option", { name: "workspace-2 (unavailable)" })).toBeTruthy();
+  });
 });
