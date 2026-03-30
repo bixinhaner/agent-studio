@@ -17,6 +17,11 @@ function isNotFoundError(error: unknown): boolean {
   return message.includes("not found") || message.includes("不存在");
 }
 
+function isForbiddenError(error: unknown): boolean {
+  const message = detailFromError(error).toLowerCase();
+  return message.includes("access denied") || message.includes("forbidden") || message.includes("not authorized");
+}
+
 type IntegrationCenterRouterOptions = {
   service: IntegrationCenterService;
   requirePermission: (permissionKey: string) => RequestHandler;
@@ -61,7 +66,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         })
       );
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -76,7 +81,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         })
       );
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -89,7 +94,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         })
       );
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -102,7 +107,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         })
       );
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -115,7 +120,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         })
       );
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -145,7 +150,7 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
       });
       res.json(policies);
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }
   });
 

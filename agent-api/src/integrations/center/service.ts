@@ -1,6 +1,7 @@
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb, type IntegrationValidationRecord } from "../../persistence/integration-instance-repository.js";
 import {
   createEmptyPolicySummary,
+  collectSecretLikeConfigKeys,
   integrationPolicyResourceType,
   type IntegrationDetail,
   type IntegrationInstanceBaseInput,
@@ -13,6 +14,7 @@ import {
   type IntegrationValidationItem,
   type IntegrationValidationResult
 } from "./types.js";
+import type { PolicyService } from "../../resources/policy-service.js";
 
 type PolicyRecord = {
   id: string;
@@ -42,6 +44,11 @@ type IntegrationPolicyStore = {
   }): Promise<PolicyRecord[]>;
 };
 
+type AccessResolver = {
+  getRoleIdsForUser(userId: string): Promise<string[]>;
+  getDepartmentIdsForUser(userId: string): Promise<string[]>;
+};
+
 type ValidationOutcome = {
   status: "success" | "failed";
   summary: unknown;
@@ -66,6 +73,11 @@ export type IntegrationCenterService = {
     organizationId?: string;
   }): Promise<IntegrationPoliciesResult>;
 };
+
+function isForbiddenError(error: unknown): boolean {
+  const message = detailFromError(error).toLowerCase();
+  return message.includes("access denied") || message.includes("forbidden") || message.includes("not authorized");
+}
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -111,6 +123,15 @@ function normalizeConfigValue(value: unknown): Record<string, unknown> {
     return {};
   }
   return value as Record<string, unknown>;
+}
+
+function assertConfigIsSafe(config: unknown): Record<string, unknown> {
+  const normalized = normalizeConfigValue(config);
+  const secretLikeKeys = collectSecretLikeConfigKeys(normalized);
+  if (secretLikeKeys.length > 0) {
+    throw new Error(`config must not contain secret-like keys: ${[...new Set(secretLikeKeys)].join(", ")}`);
+  }
+  return normalized;
 }
 
 function normalizeValidationSummary(type: string, config: Record<string, unknown>): ValidationOutcome {
@@ -194,18 +215,46 @@ function createValidationOutcome(instanceType: string, config: Record<string, un
 export function createIntegrationCenterService(options: {
   db: IntegrationInstanceRepositoryDb;
   policies: IntegrationPolicyStore;
+  policyService: Pick<PolicyService, "filterAllowedResources">;
+  accessResolver: AccessResolver;
 }): IntegrationCenterService {
   const repository = new IntegrationInstanceRepository(options.db);
 
-  async function readDetail(instanceId: string): Promise<IntegrationDetail> {
-    const [detail, policies] = await Promise.all([
-      repository.getInstance(instanceId),
-      options.policies.listAll()
-    ]);
+  async function getAccessContext(userId: string): Promise<{ roleIds: string[]; departmentIds: string[] }> {
+    return {
+      roleIds: await options.accessResolver.getRoleIdsForUser(userId),
+      departmentIds: await options.accessResolver.getDepartmentIdsForUser(userId)
+    };
+  }
 
+  async function filterAuthorizedInstanceIds(currentUserId: string, instanceIds: string[]): Promise<string[]> {
+    const access = await getAccessContext(currentUserId);
+    return await options.policyService.filterAllowedResources({
+      userId: currentUserId,
+      roleIds: access.roleIds,
+      departmentIds: access.departmentIds,
+      resourceType: integrationPolicyResourceType,
+      candidateIds: instanceIds
+    });
+  }
+
+  async function requireAuthorizedInstance(instanceId: string, currentUserId: string): Promise<NonNullable<Awaited<ReturnType<IntegrationInstanceRepository["getInstance"]>>>> {
+    const detail = await repository.getInstance(instanceId);
     if (!detail) {
       throw new Error("integration instance not found");
     }
+    const allowed = await filterAuthorizedInstanceIds(currentUserId, [detail.id]);
+    if (!allowed.includes(detail.id)) {
+      throw new Error("integration instance access denied");
+    }
+    return detail;
+  }
+
+  async function readDetail(instanceId: string, currentUserId: string): Promise<IntegrationDetail> {
+    const [detail, policies] = await Promise.all([
+      requireAuthorizedInstance(instanceId, currentUserId),
+      options.policies.listAll()
+    ]);
 
     const instancePolicies = policies
       .filter(
@@ -226,7 +275,7 @@ export function createIntegrationCenterService(options: {
     currentUserId: string
   ): Promise<void> {
     if (payload.config) {
-      await repository.upsertConfig(instanceId, payload.config);
+      await repository.upsertConfig(instanceId, assertConfigIsSafe(payload.config));
     }
     if (payload.secretState !== undefined) {
       if (payload.secretState === null) {
@@ -246,10 +295,7 @@ export function createIntegrationCenterService(options: {
     payload: IntegrationInstanceBaseInput | IntegrationInstanceUpdateInput;
   }): Promise<IntegrationDetail> {
     if (input.instanceId) {
-      const existing = await repository.getInstance(input.instanceId);
-      if (!existing) {
-        throw new Error("integration instance not found");
-      }
+      const existing = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
 
       if ("slug" in input.payload && input.payload.slug && input.payload.slug !== existing.slug) {
         throw new Error("integration slug cannot be changed");
@@ -261,10 +307,11 @@ export function createIntegrationCenterService(options: {
         status: input.payload.status ?? existing.status
       });
       await saveConfigAndSecrets(input.instanceId, input.payload, input.currentUserId);
-      return await readDetail(input.instanceId);
+      return await readDetail(input.instanceId, input.currentUserId);
     }
 
     const payload = input.payload as IntegrationInstanceBaseInput;
+    const safeConfig = payload.config ? assertConfigIsSafe(payload.config) : undefined;
     const created = await repository.createInstance({
       organizationId: payload.organizationId ?? null,
       type: payload.type,
@@ -273,19 +320,38 @@ export function createIntegrationCenterService(options: {
       description: payload.description ?? null,
       status: payload.status ?? "draft"
     });
-    await saveConfigAndSecrets(created.id, input.payload, input.currentUserId);
-    return await readDetail(created.id);
+    if (safeConfig) {
+      await repository.upsertConfig(created.id, safeConfig);
+    }
+    await options.policies.replacePoliciesForResource({
+      resourceType: integrationPolicyResourceType,
+      resourceId: created.id,
+      policies: [
+        {
+          organizationId: created.organizationId,
+          subjectType: "user",
+          subjectId: input.currentUserId,
+          resourceType: integrationPolicyResourceType,
+          resourceId: created.id,
+          effect: "allow"
+        }
+      ]
+    });
+    await saveConfigAndSecrets(created.id, { ...input.payload, config: safeConfig }, input.currentUserId);
+    return await readDetail(created.id, input.currentUserId);
   }
 
   return {
     async listInstances(input) {
+      const items = (await repository.listInstances(trimOrUndefined(input.type))).map((item) => item as IntegrationListItem);
+      const allowedIds = new Set(await filterAuthorizedInstanceIds(input.currentUserId, items.map((item) => item.id)));
       return {
-        items: (await repository.listInstances(trimOrUndefined(input.type))).map((item) => item as IntegrationListItem)
+        items: items.filter((item) => allowedIds.has(item.id))
       };
     },
 
     async getInstanceDetail(input) {
-      return await readDetail(input.instanceId);
+      return await readDetail(input.instanceId, input.currentUserId);
     },
 
     async saveInstance(input) {
@@ -297,6 +363,7 @@ export function createIntegrationCenterService(options: {
       if (!detail) {
         throw new Error("integration instance not found");
       }
+      await requireAuthorizedInstance(detail.id, input.currentUserId);
 
       const validationConfig = normalizeConfigValue(detail.config);
       const outcome = createValidationOutcome(detail.type, validationConfig);
@@ -311,11 +378,12 @@ export function createIntegrationCenterService(options: {
       );
       return {
         validation,
-        detail: await readDetail(detail.id)
+        detail: await readDetail(detail.id, input.currentUserId)
       };
     },
 
     async listValidationHistory(input) {
+      await requireAuthorizedInstance(input.instanceId, input.currentUserId);
       const items = await repository.listValidationHistory(input.instanceId);
       return {
         items: items.map(mapValidation)
@@ -323,10 +391,7 @@ export function createIntegrationCenterService(options: {
     },
 
     async getPolicies(input) {
-      const detail = await repository.getInstance(input.instanceId);
-      if (!detail) {
-        throw new Error("integration instance not found");
-      }
+      const detail = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
 
       const policies = await options.policies.listAll();
       const items = policies
@@ -340,10 +405,7 @@ export function createIntegrationCenterService(options: {
     },
 
     async replacePolicies(input) {
-      const instance = await repository.getInstance(input.instanceId);
-      if (!instance) {
-        throw new Error("integration instance not found");
-      }
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
 
       const policies = input.policies.map((policy) => ({
         organizationId: input.organizationId ?? instance.organizationId ?? undefined,

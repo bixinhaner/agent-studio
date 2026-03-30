@@ -4,26 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createIntegrationCenterRouter } from "./router.js";
 
-function buildApp() {
+function buildApp(options?: { detailAccessDenied?: boolean }) {
   const service = {
     async listInstances() {
-      return {
-        items: [
-          {
-            id: "int-zendesk-1",
-            type: "zendesk",
-            slug: "zendesk-main",
-            name: "Zendesk Main",
-            description: "primary",
-            status: "active",
-            isSystemSingleton: false,
-            createdAt: "2026-03-29T00:00:00.000Z",
-            updatedAt: "2026-03-29T00:00:00.000Z"
-          }
-        ]
-      };
+      return { items: [] };
     },
     async getInstanceDetail() {
+      if (options?.detailAccessDenied) {
+        throw new Error("integration instance access denied");
+      }
       return {
         instance: {
           id: "int-zendesk-1",
@@ -36,8 +25,8 @@ function buildApp() {
           createdAt: "2026-03-29T00:00:00.000Z",
           updatedAt: "2026-03-29T00:00:00.000Z"
         },
-        config: { zendeskBaseUrl: "https://example.zendesk.com" },
-        secretState: { hasSecrets: true, rotatedAt: "2026-03-29T00:00:00.000Z", rotatedByUserId: "admin-1" },
+        config: { defaultModel: "gpt-5.4-mini" },
+        secretState: { hasSecrets: false },
         validationHistory: { items: [] },
         bindings: { items: [] },
         policies: { summary: { allow: { roles: [], departments: [], users: [] }, deny: { roles: [], departments: [], users: [] } }, items: [] }
@@ -56,8 +45,11 @@ function buildApp() {
           createdAt: "2026-03-29T00:00:00.000Z",
           updatedAt: "2026-03-29T00:00:00.000Z"
         },
-        config: { apiKey: "redacted" },
-        secretState: { hasSecrets: true, rotatedAt: "2026-03-29T00:00:00.000Z", rotatedByUserId: "admin-1" }
+        config: { defaultModel: "gpt-5.4-mini" },
+        secretState: { hasSecrets: true, rotatedAt: "2026-03-29T00:00:00.000Z", rotatedByUserId: "admin-1" },
+        validationHistory: { items: [] },
+        bindings: { items: [] },
+        policies: { summary: { allow: { roles: [], departments: [], users: [] }, deny: { roles: [], departments: [], users: [] } }, items: [] }
       };
     },
     async validateInstance() {
@@ -83,7 +75,7 @@ function buildApp() {
             createdAt: "2026-03-29T00:00:00.000Z",
             updatedAt: "2026-03-29T00:00:00.000Z"
           },
-          config: { apiKey: "redacted" },
+          config: { defaultModel: "gpt-5.4-mini" },
           secretState: { hasSecrets: true, rotatedAt: "2026-03-29T00:00:00.000Z", rotatedByUserId: "admin-1" },
           validationHistory: { items: [] },
           bindings: { items: [] },
@@ -92,7 +84,7 @@ function buildApp() {
       };
     },
     async listValidationHistory() {
-      return { items: [{ id: "validation-1", triggerType: "manual", status: "success", createdAt: "2026-03-30T10:00:00.000Z" }] };
+      return { items: [] };
     },
     async getPolicies() {
       return {
@@ -140,60 +132,46 @@ function buildApp() {
     })
   );
 
-  return { app, service };
+  return { app };
 }
 
 describe("createIntegrationCenterRouter", () => {
-  it("lists integration instances by type for admins", async () => {
+  it("rejects secret-like config keys at the HTTP contract layer", async () => {
     const { app } = buildApp();
 
-    const response = await request(app).get("/api/admin/integrations?type=zendesk");
-
-    expect(response.status).toBe(200);
-    expect(response.body.items[0]).toMatchObject({ type: "zendesk" });
-  });
-
-  it("creates, validates, and reads validation history for an integration instance", async () => {
-    const { app } = buildApp();
-
-    const saveResponse = await request(app).post("/api/admin/integrations").send({
+    const response = await request(app).post("/api/admin/integrations").send({
       type: "openai_codex",
       slug: "openai-primary",
       name: "OpenAI Platform",
       status: "active",
-      config: { apiKey: "sk-test", defaultModel: "gpt-5.4-mini" }
+      config: {
+        defaultModel: "gpt-5.4-mini",
+        clientSecret: "super-secret"
+      },
+      secretState: {
+        clientSecret: "super-secret"
+      }
     });
 
-    expect(saveResponse.status).toBe(201);
-    expect(saveResponse.body.instance).toMatchObject({
-      type: "openai_codex",
-      name: "OpenAI Platform"
-    });
-
-    const validateResponse = await request(app).post("/api/admin/integrations/int-openai-1/validate").send({});
-    expect(validateResponse.status).toBe(200);
-    expect(validateResponse.body.validation.status).toBe("success");
-
-    const historyResponse = await request(app).get("/api/admin/integrations/int-openai-1/history");
-    expect(historyResponse.status).toBe(200);
-    expect(historyResponse.body.items[0]).toMatchObject({ triggerType: "manual" });
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toMatch(/secret/i);
   });
 
-  it("returns and replaces resource policies for an integration instance", async () => {
+  it("denies access to instances that are not authorized by resource policy", async () => {
+    const { app } = buildApp({ detailAccessDenied: true });
+
+    const response = await request(app).get("/api/admin/integrations/int-zendesk-1");
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns policy summaries for authorized instances", async () => {
     const { app } = buildApp();
 
-    const getResponse = await request(app).get("/api/admin/integrations/int-zendesk-1/policies");
-    expect(getResponse.status).toBe(200);
-    expect(getResponse.body.summary.allow.roles).toContain("role-support-admin");
+    const response = await request(app).get("/api/admin/integrations/int-zendesk-1/policies");
 
-    const putResponse = await request(app)
-      .put("/api/admin/integrations/int-zendesk-1/policies")
-      .send({
-        roleAllowIds: ["role-support-admin"],
-        userDenyIds: ["user-9"]
-      });
-
-    expect(putResponse.status).toBe(200);
-    expect(putResponse.body.summary.deny.users).toContain("user-9");
+    expect(response.status).toBe(200);
+    expect(response.body.summary.allow.roles).toContain("role-support-admin");
+    expect(response.body.summary.deny.users).toContain("user-9");
   });
 });

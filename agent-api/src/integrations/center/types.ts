@@ -25,7 +25,34 @@ const identifierSchema = z
   .trim()
   .min(1, "identifier is required");
 
+const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
+
+function collectSecretLikeConfigKeys(value: unknown, path = ""): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  const hits: string[] = [];
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    const nextPath = path ? `${path}.${key}` : key;
+    if (secretLikeKeyPattern.test(key)) {
+      hits.push(nextPath);
+    }
+    hits.push(...collectSecretLikeConfigKeys(nested, nextPath));
+  }
+  return hits;
+}
+
 const recordSchema = z.record(z.string(), z.unknown());
+const integrationConfigSchema = recordSchema.superRefine((value, ctx) => {
+  const secretLikeKeys = [...new Set(collectSecretLikeConfigKeys(value))];
+  if (secretLikeKeys.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `config must not contain secret-like keys: ${secretLikeKeys.join(", ")}`
+    });
+  }
+});
 
 export const integrationListQuerySchema = z.object({
   type: integrationTypeSchema.optional()
@@ -38,7 +65,7 @@ export const integrationInstanceBaseSchema = z.object({
   description: z.string().trim().min(1).optional().nullable(),
   status: integrationStatusSchema.optional(),
   organizationId: z.string().trim().min(1).optional().nullable(),
-  config: recordSchema.optional(),
+  config: integrationConfigSchema.optional(),
   secretState: z.unknown().optional()
 });
 
@@ -47,7 +74,7 @@ export const integrationInstanceUpdateSchema = z.object({
   slug: identifierSchema.optional(),
   description: z.string().trim().min(1).optional().nullable(),
   status: integrationStatusSchema.optional(),
-  config: recordSchema.optional(),
+  config: integrationConfigSchema.optional(),
   secretState: z.unknown().optional()
 });
 
@@ -163,3 +190,5 @@ export function createEmptyPolicySummary(): IntegrationPolicySummary {
     deny: { roles: [], departments: [], users: [] }
   };
 }
+
+export { collectSecretLikeConfigKeys };

@@ -115,13 +115,18 @@ const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourceP
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
-const integrationCenter = createIntegrationCenterService({
-  db: db as unknown as IntegrationInstanceRepositoryDb,
-  policies: resourcePolicies as never
-});
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
+const integrationCenter = createIntegrationCenterService({
+  db: db as unknown as IntegrationInstanceRepositoryDb,
+  policies: resourcePolicies as never,
+  policyService,
+  accessResolver: {
+    getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
+    getDepartmentIdsForUser: async (userId) => departmentMemberships.listIdsForUser(userId)
+  }
+});
 const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
 const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,

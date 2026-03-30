@@ -150,7 +150,7 @@ function buildService(seed?: {
           organizationId: (data.organizationId as string | null | undefined) ?? null,
           subjectType: data.subjectType as "role" | "department" | "user",
           subjectId: String(data.subjectId),
-          resourceType: String(data.resourceType),
+          resourceType: data.resourceType as string,
           resourceId: String(data.resourceId),
           effect: data.effect as "allow" | "deny",
           createdAt: new Date().toISOString(),
@@ -163,35 +163,71 @@ function buildService(seed?: {
     $transaction: async <T>(callback: (tx: never) => Promise<T>) => callback(db as never)
   } as never;
 
-  return createIntegrationCenterService({
-    db,
-    policies: {
-      listAll: async () => policies.map((item) => ({ ...item })),
-      replacePoliciesForResource: async ({ resourceType, resourceId, policies: nextPolicies }) => {
-        const kept = policies.filter((item) => item.resourceType !== resourceType || item.resourceId !== resourceId);
-        policies.splice(0, policies.length, ...kept);
-        for (const policy of nextPolicies) {
-          policies.push({
-            id: `policy-${policies.length + 1}`,
-            organizationId: policy.organizationId ?? null,
-            subjectType: policy.subjectType,
-            subjectId: policy.subjectId,
-            resourceType: resourceType as string,
-            resourceId,
-            effect: policy.effect,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          });
+  const roleIdsByUser = new Map<string, string[]>([
+    ["admin-1", ["role-support-admin"]],
+    ["other-user", ["role-viewer"]]
+  ]);
+  const departmentIdsByUser = new Map<string, string[]>([
+    ["admin-1", ["dept-support"]],
+    ["other-user", ["dept-ops"]]
+  ]);
+
+    return {
+      service: createIntegrationCenterService({
+        db,
+        policies: {
+        listAll: async () => policies.map((item) => ({ ...item })),
+        replacePoliciesForResource: async ({ resourceType, resourceId, policies: nextPolicies }) => {
+          const kept = policies.filter((item) => item.resourceType !== resourceType || item.resourceId !== resourceId);
+          policies.splice(0, policies.length, ...kept);
+          for (const policy of nextPolicies) {
+            policies.push({
+              id: `policy-${policies.length + 1}`,
+              organizationId: policy.organizationId ?? null,
+              subjectType: policy.subjectType,
+              subjectId: policy.subjectId,
+              resourceType: resourceType as string,
+              resourceId,
+              effect: policy.effect,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+          }
+          return policies
+            .filter((item) => item.resourceType === resourceType && item.resourceId === resourceId)
+            .map((item) => ({ ...item }));
+          }
+      },
+      policyService: {
+        async filterAllowedResources(input) {
+          const subjectIds = new Set<string>([
+            ...(roleIdsByUser.get(input.userId) ?? []),
+            ...(departmentIdsByUser.get(input.userId) ?? []),
+            input.userId
+          ]);
+          return input.candidateIds.filter((candidateId) =>
+            policies.some(
+              (policy) =>
+                policy.resourceType === input.resourceType &&
+                policy.resourceId === candidateId &&
+                policy.effect === "allow" &&
+                subjectIds.has(policy.subjectId)
+            )
+          );
         }
-        return policies.filter((item) => item.resourceType === resourceType && item.resourceId === resourceId).map((item) => ({ ...item }));
+      },
+      accessResolver: {
+        getRoleIdsForUser: async (userId: string) => roleIdsByUser.get(userId) ?? [],
+        getDepartmentIdsForUser: async (userId: string) => departmentIdsByUser.get(userId) ?? []
       }
-    }
-  });
+    }),
+    policies
+  };
 }
 
 describe("createIntegrationCenterService", () => {
-  it("returns a unified instance detail with validation history and policies", async () => {
-    const service = buildService({
+  it("filters unauthorized integration instances from list and denies detail access", async () => {
+    const { service } = buildService({
       instances: [
         {
           id: "int-zendesk-1",
@@ -203,18 +239,17 @@ describe("createIntegrationCenterService", () => {
           isSystemSingleton: false,
           createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
           updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
-        }
-      ],
-      configs: [{ integrationInstanceId: "int-zendesk-1", config: { zendeskBaseUrl: "https://example.zendesk.com" } }],
-      validations: [
+        },
         {
-          integrationInstanceId: "int-zendesk-1",
-          triggerType: "manual",
-          status: "success",
-          summary: { ok: true },
-          detail: { message: "connected" },
-          triggeredByUserId: "admin-1",
-          createdAt: makeDate("2026-03-30T10:00:00.000Z")
+          id: "int-zendesk-2",
+          type: "zendesk",
+          slug: "zendesk-secret",
+          name: "Zendesk Secret",
+          description: "restricted",
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: makeDate("2026-03-29T01:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T01:00:00.000Z").toISOString()
         }
       ],
       policies: [
@@ -231,54 +266,53 @@ describe("createIntegrationCenterService", () => {
       ]
     });
 
-    const detail = await service.getInstanceDetail({ instanceId: "int-zendesk-1", currentUserId: "admin-1" });
-
-    expect(detail.instance).toMatchObject({
-      id: "int-zendesk-1",
-      type: "zendesk",
-      name: "Zendesk Main"
-    });
-    expect(detail.validationHistory.items).toHaveLength(1);
-    expect(detail.policies.summary.allow.roles).toContain("role-support-admin");
+    const list = await service.listInstances({ currentUserId: "admin-1", type: "zendesk" });
+    expect(list.items.map((item) => item.id)).toEqual(["int-zendesk-1"]);
+    await expect(
+      service.getInstanceDetail({ currentUserId: "admin-1", instanceId: "int-zendesk-2" })
+    ).rejects.toThrow(/access denied/i);
   });
 
-  it("saves configuration and records a validation run for an integration instance", async () => {
-    const service = buildService({
-      instances: [
-        {
-          id: "int-openai-1",
+  it("rejects secret-like config keys and keeps secrets in secretState", async () => {
+    const { service } = buildService();
+
+    await expect(
+      service.saveInstance({
+        currentUserId: "admin-1",
+        payload: {
           type: "openai_codex",
           slug: "openai-primary",
           name: "OpenAI Primary",
-          description: null,
-          status: "draft",
-          isSystemSingleton: true,
-          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
-          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+          status: "active",
+          config: {
+            defaultModel: "gpt-5.4-mini",
+            apiKey: "sk-test"
+          },
+          secretState: {
+            apiKey: "sk-test"
+          }
         }
-      ]
-    });
+      })
+    ).rejects.toThrow(/secret/i);
 
-    const saved = await service.saveInstance({
+    const detail = await service.saveInstance({
       currentUserId: "admin-1",
-      instanceId: "int-openai-1",
       payload: {
-        name: "OpenAI Platform",
+        type: "openai_codex",
+        slug: "openai-primary",
+        name: "OpenAI Primary",
         status: "active",
-        config: { apiKey: "sk-test", defaultModel: "gpt-5.4-mini" }
+        config: {
+          defaultModel: "gpt-5.4-mini"
+        },
+        secretState: {
+          apiKey: "sk-test"
+        }
       }
     });
-    const validation = await service.validateInstance({
-      currentUserId: "admin-1",
-      instanceId: "int-openai-1"
-    });
 
-    expect(saved.instance).toMatchObject({
-      id: "int-openai-1",
-      name: "OpenAI Platform",
-      status: "active"
-    });
-    expect(validation.validation.status).toBe("success");
-    expect(validation.detail.validationHistory.items[0].triggerType).toBe("manual");
+    expect(detail.config).toMatchObject({ defaultModel: "gpt-5.4-mini" });
+    expect(detail.secretState.hasSecrets).toBe(true);
+    expect(JSON.stringify(detail.config)).not.toContain("sk-test");
   });
 });

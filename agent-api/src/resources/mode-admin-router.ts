@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
 import { REASONING_EFFORT_VALUES } from "../model-config.js";
+import type { ResourcePolicyResourceType } from "../persistence/resource-policy-repository.js";
 import {
   APPROVAL_POLICY_VALUES,
   SANDBOX_MODE_VALUES,
@@ -295,7 +296,7 @@ type ResourcePolicyRepositoryLike = {
       organizationId?: string;
       subjectType: "role" | "department" | "user";
       subjectId: string;
-      resourceType: "workspace" | "knowledge_set" | "agent_mode" | "skill_package" | "run_profile";
+      resourceType: ResourcePolicyResourceType;
       resourceId: string;
       effect: "allow" | "deny";
       createdAt?: string;
@@ -303,13 +304,13 @@ type ResourcePolicyRepositoryLike = {
     }>
   >;
   replacePoliciesForResource(input: {
-    resourceType: "agent_mode" | "skill_package" | "run_profile";
+    resourceType: ResourcePolicyResourceType;
     resourceId: string;
     policies: Array<{
       organizationId?: string;
       subjectType: "role" | "department" | "user";
       subjectId: string;
-      resourceType: "agent_mode" | "skill_package" | "run_profile";
+      resourceType: ResourcePolicyResourceType;
       resourceId: string;
       effect: "allow" | "deny";
     }>;
