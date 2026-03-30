@@ -2236,3 +2236,64 @@ body {
 .capability-center-create-grid {
   align-items: start;
 }
+
+.capability-center-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.capability-center-detail-tab {
+  border: 1px solid #d6e2f3;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #334155;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.capability-center-detail-tab.active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.capability-center-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+}
+
+.capability-center-preview-card {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 0.9rem 1rem;
+}
+
+.capability-center-preview-card h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.capability-center-preview-card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.capability-center-preview-card-wide {
+  grid-column: 1 / -1;
+}
+
+.capability-center-preview-code {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "SFMono-Regular", "Menlo", monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #0f172a;
+}

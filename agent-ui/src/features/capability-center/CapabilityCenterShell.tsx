@@ -8,6 +8,7 @@ import {
   fetchRunProfiles,
   fetchSkillPackages
 } from "./api";
+import { RunProfileDetailView } from "./RunProfileDetailView";
 import type {
   AgentModeRecord,
   CapabilityCenterTab,
@@ -417,6 +418,10 @@ export function CapabilityCenterShell() {
     return runProfiles.find((item) => item.id === selectedRunProfileId) ?? null;
   }, [agentModes, runProfiles, selectedAgentModeId, selectedRunProfileId, selectedSkillPackageId, skillPackages, tab]);
 
+  const selectedRunProfile = useMemo(() => {
+    return tab === "run_profile" ? runProfiles.find((item) => item.id === selectedRunProfileId) ?? null : null;
+  }, [runProfiles, selectedRunProfileId, tab]);
+
   function closeCreatePanel() {
     setCreatePanel(null);
     setCreateErrorText("");
@@ -509,6 +514,11 @@ export function CapabilityCenterShell() {
   const visibilityDisabled = tab === "run_profile";
   const resourceLabel = resourceTitle(tab);
   const noResultsLabel = tab === "agent_mode" ? "没有可用能力资源" : `当前筛选条件下没有${resourceLabel}`;
+
+  function handleRunProfileUpdated(updatedRunProfile: RunProfileRecord) {
+    setRunProfiles((current) => current.map((item) => (item.id === updatedRunProfile.id ? updatedRunProfile : item)));
+    setSelectedRunProfileId(updatedRunProfile.id);
+  }
 
   return (
     <section className="admin-card capability-center-shell resource-center-shell">
@@ -911,6 +921,8 @@ export function CapabilityCenterShell() {
                 </button>
               </div>
             </section>
+          ) : selectedRunProfile ? (
+            <RunProfileDetailView runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
           ) : selectedResource ? (
             <CapabilitySummaryCard tab={tab} resource={selectedResource as AgentModeRecord | SkillPackageRecord | RunProfileRecord} />
           ) : (

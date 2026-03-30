@@ -198,4 +198,37 @@ describe("CapabilityCenterShell", () => {
       })
     );
   });
+
+  it("mounts the run profile detail view when a run profile is selected", async () => {
+    mockedFetchRunProfiles.mockResolvedValue({
+      runProfiles: [
+        {
+          id: "run-profile-1",
+          name: "Coding Default",
+          slug: "coding-default",
+          description: "default",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4"],
+          defaultReasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
+    mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+
+    render(<CapabilityCenterShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Run Profiles" }));
+    fireEvent.click((await screen.findByText("Coding Default")).closest("button") as HTMLButtonElement);
+
+    expect(await screen.findByRole("button", { name: "保存运行策略" })).toBeTruthy();
+    expect(screen.queryByText("后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。")).toBeNull();
+  });
 });
