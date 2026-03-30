@@ -73,6 +73,13 @@ export async function putSkillPackageItems(id: string, items: SkillPackageItemIn
   });
 }
 
+export async function putSkillPackageRuntimeBindings(id: string, items: SkillPackageItemInput[]): Promise<SkillPackageResponse> {
+  return api<SkillPackageResponse>(`/api/admin/skill-packages/${encodeURIComponent(id)}/runtime-bindings`, {
+    method: "PUT",
+    json: { items }
+  });
+}
+
 export async function fetchAgentModes(): Promise<AgentModeListResponse> {
   return api<AgentModeListResponse>("/api/admin/agent-modes");
 }

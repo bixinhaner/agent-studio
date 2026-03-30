@@ -24,6 +24,7 @@ import {
   putAgentModeWorkspaces,
   putCapabilityPolicies,
   putSkillPackageItems,
+  putSkillPackageRuntimeBindings,
   updateAgentMode,
   updateRunProfile,
   updateSkillPackage
@@ -46,6 +47,7 @@ describe("capability center api helpers", () => {
       .mockResolvedValueOnce({ skillPackage: { id: "skill-package-1" } })
       .mockResolvedValueOnce({ skillPackage: { id: "skill-package-1" } })
       .mockResolvedValueOnce({ skillPackage: { id: "skill-package-1-copy" } })
+      .mockResolvedValueOnce({ skillPackage: { id: "skill-package-1" } })
       .mockResolvedValueOnce({ skillPackage: { id: "skill-package-1" } })
       .mockResolvedValueOnce({ agentModes: [] })
       .mockResolvedValueOnce({ agentMode: { id: "agent-mode-1" } })
@@ -88,6 +90,19 @@ describe("capability center api helpers", () => {
         capabilityKey: "ticket.search",
         description: "search tickets",
         runtimeBindings: []
+      }
+    ]);
+    await putSkillPackageRuntimeBindings("skill-package-1", [
+      {
+        capabilityKey: "ticket.search",
+        description: "search tickets",
+        runtimeBindings: [
+          {
+            runtimeType: "codex",
+            bindingType: "config_fragment",
+            bindingPayload: { prompt: "search tickets" }
+          }
+        ]
       }
     ]);
 
@@ -149,36 +164,41 @@ describe("capability center api helpers", () => {
       "/api/admin/skill-packages/skill-package-1/items",
       expect.objectContaining({ method: "PUT" })
     );
-    expect(mockedApi).toHaveBeenNthCalledWith(10, "/api/admin/agent-modes");
-    expect(mockedApi).toHaveBeenNthCalledWith(11, "/api/admin/agent-modes", expect.objectContaining({ method: "POST" }));
     expect(mockedApi).toHaveBeenNthCalledWith(
-      12,
+      10,
+      "/api/admin/skill-packages/skill-package-1/runtime-bindings",
+      expect.objectContaining({ method: "PUT" })
+    );
+    expect(mockedApi).toHaveBeenNthCalledWith(11, "/api/admin/agent-modes");
+    expect(mockedApi).toHaveBeenNthCalledWith(12, "/api/admin/agent-modes", expect.objectContaining({ method: "POST" }));
+    expect(mockedApi).toHaveBeenNthCalledWith(
+      13,
       "/api/admin/agent-modes/agent-mode-1",
       expect.objectContaining({ method: "PATCH" })
     );
     expect(mockedApi).toHaveBeenNthCalledWith(
-      13,
+      14,
       "/api/admin/agent-modes/agent-mode-1/copy",
       expect.objectContaining({ method: "POST" })
     );
     expect(mockedApi).toHaveBeenNthCalledWith(
-      14,
+      15,
       "/api/admin/agent-modes/agent-mode-1/skill-packages",
       expect.objectContaining({ method: "PUT" })
     );
     expect(mockedApi).toHaveBeenNthCalledWith(
-      15,
+      16,
       "/api/admin/agent-modes/agent-mode-1/workspaces",
       expect.objectContaining({ method: "PUT" })
     );
     expect(mockedApi).toHaveBeenNthCalledWith(
-      16,
+      17,
       "/api/admin/agent-modes/agent-mode-1/instruction-sources",
       expect.objectContaining({ method: "PUT" })
     );
-    expect(mockedApi).toHaveBeenNthCalledWith(17, "/api/admin/resources/agent-modes/agent-mode-1/policies");
+    expect(mockedApi).toHaveBeenNthCalledWith(18, "/api/admin/resources/agent-modes/agent-mode-1/policies");
     expect(mockedApi).toHaveBeenNthCalledWith(
-      18,
+      19,
       "/api/admin/resources/skill-packages/skill-package-1/policies",
       expect.objectContaining({ method: "PUT" })
     );
