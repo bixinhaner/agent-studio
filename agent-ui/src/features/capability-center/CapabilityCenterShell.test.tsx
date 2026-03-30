@@ -10,7 +10,12 @@ vi.mock("./api", () => ({
   createAgentMode: vi.fn()
 }));
 
+vi.mock("../resources-center/api", () => ({
+  fetchWorkspaces: vi.fn()
+}));
+
 import { createAgentMode, createRunProfile, createSkillPackage, fetchAgentModes, fetchRunProfiles, fetchSkillPackages } from "./api";
+import { fetchWorkspaces } from "../resources-center/api";
 import { CapabilityCenterShell } from "./CapabilityCenterShell";
 
 const mockedFetchRunProfiles = vi.mocked(fetchRunProfiles);
@@ -19,6 +24,7 @@ const mockedFetchAgentModes = vi.mocked(fetchAgentModes);
 const mockedCreateRunProfile = vi.mocked(createRunProfile);
 const mockedCreateSkillPackage = vi.mocked(createSkillPackage);
 const mockedCreateAgentMode = vi.mocked(createAgentMode);
+const mockedFetchWorkspaces = vi.mocked(fetchWorkspaces);
 
 describe("CapabilityCenterShell", () => {
   beforeEach(() => {
@@ -28,12 +34,14 @@ describe("CapabilityCenterShell", () => {
     mockedCreateRunProfile.mockReset();
     mockedCreateSkillPackage.mockReset();
     mockedCreateAgentMode.mockReset();
+    mockedFetchWorkspaces.mockReset();
   });
 
   it("loads capability resources through the typed api helpers and starts on agent modes", async () => {
     mockedFetchRunProfiles.mockResolvedValue({ runProfiles: [] });
     mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
     mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
 
     render(<CapabilityCenterShell />);
 
@@ -65,6 +73,7 @@ describe("CapabilityCenterShell", () => {
         }
       ]
     });
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
     mockedFetchSkillPackages.mockResolvedValue({
       skillPackages: [
         {
@@ -161,6 +170,7 @@ describe("CapabilityCenterShell", () => {
     });
     mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
     mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
     mockedCreateSkillPackage.mockResolvedValue({
       skillPackage: {
         id: "skill-package-2",
@@ -222,6 +232,7 @@ describe("CapabilityCenterShell", () => {
     });
     mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
     mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
 
     render(<CapabilityCenterShell />);
 
@@ -231,4 +242,85 @@ describe("CapabilityCenterShell", () => {
     expect(await screen.findByRole("button", { name: "保存运行策略" })).toBeTruthy();
     expect(screen.queryByText("后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。")).toBeNull();
   });
+
+  it("mounts the agent mode detail view when an agent mode is selected", async () => {
+    mockedFetchRunProfiles.mockResolvedValue({
+      runProfiles: [
+        {
+          id: "run-profile-1",
+          name: "Coding Default",
+          slug: "coding-default",
+          description: "default",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4"],
+          defaultReasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchSkillPackages.mockResolvedValue({
+      skillPackages: [
+        {
+          id: "skill-package-1",
+          name: "Support Tools",
+          slug: "support-tools",
+          description: "",
+          status: "active",
+          visibleToUsers: false,
+          items: [],
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchAgentModes.mockResolvedValue({
+      agentModes: [
+        {
+          id: "agent-mode-1",
+          name: "Coding",
+          slug: "coding",
+          description: "",
+          status: "active",
+          visibleToUsers: true,
+          runProfileId: "run-profile-1",
+          skillPackages: [],
+          workspaceRules: [],
+          instructionSources: [],
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchWorkspaces.mockResolvedValue({
+      workspaces: [
+        {
+          id: "workspace-1",
+          organizationId: "org-1",
+          name: "Workspace A",
+          slug: "workspace-a",
+          description: "Workspace A",
+          status: "active",
+          sourceType: "filesystem",
+          rootPath: "/srv/workspace-a",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+
+    render(<CapabilityCenterShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Agent Modes" }));
+    fireEvent.click(screen.getByRole("button", { name: /Coding/ }));
+
+    expect(await screen.findByRole("button", { name: "保存模式配置" })).toBeTruthy();
+    expect(screen.queryByText("后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。")).toBeNull();
+  });
+
 });

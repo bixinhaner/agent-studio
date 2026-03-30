@@ -8,6 +8,7 @@ import {
   fetchRunProfiles,
   fetchSkillPackages
 } from "./api";
+import { AgentModeDetailView } from "./AgentModeDetailView";
 import { RunProfileDetailView } from "./RunProfileDetailView";
 import { SkillPackageDetailView } from "./SkillPackageDetailView";
 import type {
@@ -21,6 +22,8 @@ import type {
   RunProfileRecord,
   SkillPackageRecord
 } from "./types";
+import { fetchWorkspaces } from "../resources-center/api";
+import type { WorkspaceRecord } from "../resources-center/types";
 
 type CreatePanelState =
   | {
@@ -303,6 +306,7 @@ export function CapabilityCenterShell() {
   const [runProfiles, setRunProfiles] = useState<RunProfileRecord[]>([]);
   const [skillPackages, setSkillPackages] = useState<SkillPackageRecord[]>([]);
   const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [tab, setTab] = useState<CapabilityCenterTab>("agent_mode");
@@ -323,15 +327,17 @@ export function CapabilityCenterShell() {
       setLoading(true);
       setErrorText("");
       try {
-        const [runProfileResponse, skillPackageResponse, agentModeResponse] = await Promise.all([
+        const [runProfileResponse, skillPackageResponse, agentModeResponse, workspaceResponse] = await Promise.all([
           fetchRunProfiles(),
           fetchSkillPackages(),
-          fetchAgentModes()
+          fetchAgentModes(),
+          fetchWorkspaces()
         ]);
         if (!active) return;
         setRunProfiles(runProfileResponse.runProfiles);
         setSkillPackages(skillPackageResponse.skillPackages);
         setAgentModes(agentModeResponse.agentModes);
+        setWorkspaces(workspaceResponse.workspaces);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载能力配置中心失败");
@@ -426,6 +432,10 @@ export function CapabilityCenterShell() {
   const selectedSkillPackage = useMemo(() => {
     return tab === "skill_package" ? skillPackages.find((item) => item.id === selectedSkillPackageId) ?? null : null;
   }, [selectedSkillPackageId, skillPackages, tab]);
+
+  const selectedAgentMode = useMemo(() => {
+    return tab === "agent_mode" ? agentModes.find((item) => item.id === selectedAgentModeId) ?? null : null;
+  }, [agentModes, selectedAgentModeId, tab]);
 
   function closeCreatePanel() {
     setCreatePanel(null);
@@ -931,6 +941,16 @@ export function CapabilityCenterShell() {
                 </button>
               </div>
             </section>
+          ) : selectedAgentMode ? (
+            <AgentModeDetailView
+              agentMode={selectedAgentMode}
+              runProfiles={runProfiles}
+              skillPackages={skillPackages}
+              workspaces={workspaces}
+              onAgentModeUpdated={(updatedAgentMode) =>
+                setAgentModes((current) => current.map((item) => (item.id === updatedAgentMode.id ? updatedAgentMode : item)))
+              }
+            />
           ) : selectedRunProfile ? (
             <RunProfileDetailView runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
           ) : selectedSkillPackage ? (
