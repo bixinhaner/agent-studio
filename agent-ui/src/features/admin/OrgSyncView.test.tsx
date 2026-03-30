@@ -71,8 +71,8 @@ describe("OrgSyncView", () => {
     render(<OrgSyncView />);
 
     expect(await screen.findByText("同步任务")).toBeTruthy();
-    expect(screen.getByText(/每日同步/)).toBeTruthy();
-    expect(screen.getByText(/job-1/)).toBeTruthy();
+    expect(await screen.findByText(/每日同步/)).toBeTruthy();
+    expect(await screen.findByText(/job-1/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "立即全量同步" }));
     await waitFor(() => {
