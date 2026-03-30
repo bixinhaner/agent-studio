@@ -53,6 +53,14 @@ vi.mock("../resources-center/ResourceCenterShell", () => ({
   )
 }));
 
+vi.mock("../capability-center/CapabilityCenterShell", () => ({
+  CapabilityCenterShell: () => (
+    <section>
+      <h2>能力配置中心</h2>
+    </section>
+  )
+}));
+
 import { AdminShell } from "./AdminShell";
 import { fetchAdminOverview } from "./api";
 
@@ -63,7 +71,7 @@ describe("AdminShell", () => {
     mockedFetchAdminOverview.mockReset();
   });
 
-  it("switches between overview, users, resources, rbac, organization, and monitoring views", async () => {
+  it("switches between overview, users, resources, capabilities, rbac, organization, and monitoring views", async () => {
     mockedFetchAdminOverview.mockResolvedValue({
       counts: {
         users: 7,
@@ -79,6 +87,8 @@ describe("AdminShell", () => {
     expect(await screen.findByText("用户管理")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "资源配置中心" }));
     expect(await screen.findByText("资源中心面板")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "能力配置中心" }));
+    expect(await screen.findByRole("heading", { name: "能力配置中心" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "角色权限" }));
     expect(await screen.findByText("角色列表")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));
@@ -120,5 +130,20 @@ describe("AdminShell", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "资源配置中心" }));
     expect(await screen.findByText("资源中心面板")).toBeTruthy();
+  });
+
+  it("navigates from the admin shell into the capability center", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
+      counts: {
+        users: 7,
+        threads: 13,
+        activeSessions: 3
+      }
+    });
+
+    render(<AdminShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "能力配置中心" }));
+    expect(await screen.findByRole("heading", { name: "能力配置中心" })).toBeTruthy();
   });
 });

@@ -12,6 +12,7 @@ import { MonitoringOverviewView } from "../monitoring/MonitoringOverviewView";
 import { QuotaRulesView } from "../monitoring/QuotaRulesView";
 import { ResourceAccessLogView } from "../monitoring/ResourceAccessLogView";
 import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
+import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
 import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
 
@@ -86,6 +87,7 @@ export function AdminShell() {
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
       {section === "users" ? <UsersView /> : null}
       {section === "resources" ? <ResourceCenterShell /> : null}
+      {section === "capabilities" ? <CapabilityCenterShell /> : null}
       {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (
         <div className="admin-stack-grid">

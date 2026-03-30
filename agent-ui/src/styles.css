@@ -2177,3 +2177,62 @@ body {
     flex-direction: column;
   }
 }
+
+
+.capability-center-shell {
+  gap: 1rem;
+}
+
+.capability-center-toolbar {
+  align-items: end;
+}
+
+.capability-center-body {
+  min-height: 32rem;
+}
+
+.capability-center-list {
+  gap: 0.625rem;
+}
+
+.capability-center-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.capability-center-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.capability-center-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+
+.capability-center-summary-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.capability-center-summary-grid p {
+  margin: 0.2rem 0 0;
+  font-weight: 600;
+}
+
+.capability-center-detail-note {
+  margin: 0;
+  color: var(--muted-text, #6b7280);
+}
+
+.capability-center-create-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.capability-center-create-grid {
+  align-items: start;
+}
