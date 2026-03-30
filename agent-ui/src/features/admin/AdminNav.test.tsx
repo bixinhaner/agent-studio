@@ -11,8 +11,10 @@ describe("AdminNav", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "用户" }));
     fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));
+    fireEvent.click(screen.getByRole("tab", { name: "审计监控" }));
 
     expect(onChange).toHaveBeenNthCalledWith(1, "users");
     expect(onChange).toHaveBeenNthCalledWith(2, "organization");
+    expect(onChange).toHaveBeenNthCalledWith(3, "monitoring");
   });
 });

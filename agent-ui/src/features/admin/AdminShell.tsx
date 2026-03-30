@@ -6,6 +6,12 @@ import { DepartmentTreeView } from "./DepartmentTreeView";
 import { OrgSyncView } from "./OrgSyncView";
 import { RolesView } from "../rbac/RolesView";
 import type { AdminOverview, AdminSection } from "./types";
+import { AlertCenterView } from "../monitoring/AlertCenterView";
+import { CostProfilesView } from "../monitoring/CostProfilesView";
+import { MonitoringOverviewView } from "../monitoring/MonitoringOverviewView";
+import { QuotaRulesView } from "../monitoring/QuotaRulesView";
+import { ResourceAccessLogView } from "../monitoring/ResourceAccessLogView";
+import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
 
 function OverviewCard(props: { overview: AdminOverview | null; loading: boolean; errorText: string }) {
@@ -73,7 +79,7 @@ export function AdminShell() {
       <section className="admin-card">
         <p className="auth-eyebrow">Agent Studio Admin</p>
         <h1>管理控制台</h1>
-        <p className="admin-description">统一查看运行状态、用户治理、角色权限和钉钉组织同步。</p>
+        <p className="admin-description">统一查看运行状态、用户治理、角色权限、钉钉组织同步和运营监控。</p>
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
@@ -83,6 +89,16 @@ export function AdminShell() {
         <div className="admin-stack-grid">
           <DepartmentTreeView />
           <OrgSyncView />
+        </div>
+      ) : null}
+      {section === "monitoring" ? (
+        <div className="monitoring-shell">
+          <MonitoringOverviewView />
+          <UsageRankingsView />
+          <ResourceAccessLogView />
+          <QuotaRulesView />
+          <AlertCenterView />
+          <CostProfilesView />
         </div>
       ) : null}
     </div>
