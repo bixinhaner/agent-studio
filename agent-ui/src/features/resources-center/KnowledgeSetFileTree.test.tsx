@@ -53,4 +53,24 @@ describe("KnowledgeSetFileTree", () => {
     expect(onDelete).toHaveBeenCalledWith("guides/getting-started/intro.md");
     expect(onRename).toHaveBeenCalledWith("guides/getting-started/intro.md", "guides/getting-started/overview.md");
   });
+
+  it("requires explicit confirmation before filesystem rename", () => {
+    const onRename = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.spyOn(window, "prompt").mockReturnValue("guides/getting-started/overview.md");
+
+    render(
+      <KnowledgeSetFileTree
+        items={items}
+        requireRenameConfirm
+        onDelete={vi.fn()}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "重命名文件" })[0]);
+
+    expect(confirmSpy).toHaveBeenCalledWith("确认将 guides/getting-started/intro.md 重命名为 guides/getting-started/overview.md 吗？");
+    expect(onRename).not.toHaveBeenCalled();
+  });
 });

@@ -22,6 +22,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
   const [name, setName] = useState(knowledgeSet.name);
   const [slug, setSlug] = useState(knowledgeSet.slug);
   const [description, setDescription] = useState(knowledgeSet.description || "");
+  const [sourceType, setSourceType] = useState(knowledgeSet.sourceType);
   const [status, setStatus] = useState(knowledgeSet.status);
   const [rootPath, setRootPath] = useState(knowledgeSet.rootPath || "");
   const [storageKey, setStorageKey] = useState(knowledgeSet.storageKey || "");
@@ -31,25 +32,37 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [mutatingItemPath, setMutatingItemPath] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedArchive, setSelectedArchive] = useState<File | null>(null);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
   const filesInputRef = useRef<HTMLInputElement | null>(null);
   const archiveInputRef = useRef<HTMLInputElement | null>(null);
+  const viewVersionRef = useRef(0);
 
   useEffect(() => {
     setName(knowledgeSet.name);
     setSlug(knowledgeSet.slug);
     setDescription(knowledgeSet.description || "");
+    setSourceType(knowledgeSet.sourceType);
     setStatus(knowledgeSet.status);
     setRootPath(knowledgeSet.rootPath || "");
     setStorageKey(knowledgeSet.storageKey || "");
+  }, [knowledgeSet]);
+
+  useEffect(() => {
+    viewVersionRef.current += 1;
+    setItems([]);
+    setSaving(false);
+    setUploading(false);
+    setRebuilding(false);
+    setMutatingItemPath(null);
     setSelectedFiles([]);
     setSelectedArchive(null);
     setSuccessText("");
     setErrorText("");
-  }, [knowledgeSet]);
+  }, [knowledgeSet.id]);
 
   useEffect(() => {
     let active = true;
@@ -90,7 +103,12 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
     }
   }
 
+  function isCurrentView(version: number) {
+    return viewVersionRef.current === version;
+  }
+
   async function handleSave() {
+    const viewVersion = viewVersionRef.current;
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -100,96 +118,140 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
         slug: slug.trim(),
         description: description.trim(),
         status,
-        ...(knowledgeSet.sourceType === "filesystem"
+        sourceType,
+        ...(sourceType === "filesystem"
           ? { rootPath: rootPath.trim() }
           : { storageKey: storageKey.trim() })
       });
+      if (!isCurrentView(viewVersion)) return;
       onKnowledgeSetUpdated(response.knowledgeSet);
       setSuccessText("资料集配置已保存");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "保存资料集配置失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "保存资料集配置失败");
+      }
     } finally {
-      setSaving(false);
+      if (isCurrentView(viewVersion)) {
+        setSaving(false);
+      }
     }
   }
 
   async function handleRebuild() {
+    const viewVersion = viewVersionRef.current;
     setRebuilding(true);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await rebuildKnowledgeSet(knowledgeSet.id);
+      if (!isCurrentView(viewVersion)) return;
       setItems(response.items);
       setItemsReady(true);
       setSuccessText("资料集文件清单已重建");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "重建资料集文件清单失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "重建资料集文件清单失败");
+      }
     } finally {
-      setRebuilding(false);
+      if (isCurrentView(viewVersion)) {
+        setRebuilding(false);
+      }
     }
   }
 
   async function handleUploadFiles() {
     if (selectedFiles.length === 0) return;
+    const viewVersion = viewVersionRef.current;
     setUploading(true);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await uploadKnowledgeSetFiles(knowledgeSet.id, selectedFiles);
+      if (!isCurrentView(viewVersion)) return;
       setItems(response.items);
       setItemsReady(true);
       clearUploadSelections();
       setSuccessText("文件已上传");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "上传文件失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "上传文件失败");
+      }
     } finally {
-      setUploading(false);
+      if (isCurrentView(viewVersion)) {
+        setUploading(false);
+      }
     }
   }
 
   async function handleUploadArchive() {
     if (!selectedArchive) return;
+    const viewVersion = viewVersionRef.current;
     setUploading(true);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await uploadKnowledgeSetArchive(knowledgeSet.id, selectedArchive.name, selectedArchive);
+      if (!isCurrentView(viewVersion)) return;
       setItems(response.items);
       setItemsReady(true);
       clearUploadSelections();
       setSuccessText("压缩包已导入");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "导入压缩包失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "导入压缩包失败");
+      }
     } finally {
-      setUploading(false);
+      if (isCurrentView(viewVersion)) {
+        setUploading(false);
+      }
     }
   }
 
   async function handleDeleteItem(relativePath: string) {
+    const viewVersion = viewVersionRef.current;
+    setMutatingItemPath(relativePath);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await deleteKnowledgeSetItem(knowledgeSet.id, relativePath);
+      if (!isCurrentView(viewVersion)) return;
       setItems(response.items);
       setSuccessText("文件已删除");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "删除文件失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "删除文件失败");
+      }
+    } finally {
+      if (isCurrentView(viewVersion)) {
+        setMutatingItemPath(null);
+      }
     }
   }
 
   async function handleRenameItem(relativePath: string, nextRelativePath: string) {
+    const viewVersion = viewVersionRef.current;
+    setMutatingItemPath(relativePath);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await renameKnowledgeSetItem(knowledgeSet.id, relativePath, nextRelativePath);
+      if (!isCurrentView(viewVersion)) return;
       setItems(response.items);
       setSuccessText("文件已重命名");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "重命名文件失败");
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "重命名文件失败");
+      }
+    } finally {
+      if (isCurrentView(viewVersion)) {
+        setMutatingItemPath(null);
+      }
     }
   }
 
-  const busy = saving || uploading || rebuilding;
+  const busy = saving || uploading || rebuilding || Boolean(mutatingItemPath);
+  const sourceTypeChanged = sourceType !== knowledgeSet.sourceType;
+  const fileOpsDisabled = busy || !itemsReady || sourceTypeChanged;
 
   return (
     <div className="resource-center-detail-stack">
@@ -217,6 +279,14 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
           </label>
 
           <label className="field">
+            <span className="field-label">资料集类型</span>
+            <select className="field-input" aria-label="资料集类型" value={sourceType} disabled={busy} onChange={(event) => setSourceType(event.target.value)}>
+              <option value="filesystem">filesystem</option>
+              <option value="managed_upload">managed_upload</option>
+            </select>
+          </label>
+
+          <label className="field">
             <span className="field-label">资料集状态</span>
             <select className="field-input" aria-label="资料集状态" value={status} disabled={busy} onChange={(event) => setStatus(event.target.value)}>
               <option value="active">active</option>
@@ -224,7 +294,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
             </select>
           </label>
 
-          {knowledgeSet.sourceType === "filesystem" ? (
+          {sourceType === "filesystem" ? (
             <label className="field resource-center-form-span-2">
               <span className="field-label">根目录</span>
               <input className="field-input" aria-label="根目录" value={rootPath} disabled={busy} onChange={(event) => setRootPath(event.target.value)} />
@@ -261,12 +331,16 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
             <h3>文件清单</h3>
             <p>支持重建文件清单，并对单个文件执行删除和重命名。</p>
           </div>
-          <button type="button" className="admin-secondary-btn" disabled={busy || loadingItems} onClick={() => void handleRebuild()}>
+          <button type="button" className="admin-secondary-btn" disabled={busy || loadingItems || sourceTypeChanged} onClick={() => void handleRebuild()}>
             {rebuilding ? "重建中..." : "重建资料清单"}
           </button>
         </div>
 
-        {knowledgeSet.sourceType === "managed_upload" ? (
+        {sourceTypeChanged ? (
+          <p className="resource-center-subtle">资料集类型已修改，保存配置后再执行上传、重建和文件操作。</p>
+        ) : null}
+
+        {sourceType === "managed_upload" ? (
           <div className="knowledge-set-upload-grid">
             <label className="field">
               <span className="field-label">上传资料文件</span>
@@ -276,12 +350,17 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
                 aria-label="上传资料文件"
                 type="file"
                 multiple
-                disabled={busy}
+                disabled={busy || loadingItems || !itemsReady || sourceTypeChanged}
                 onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
               />
             </label>
             <div className="resource-center-actions">
-              <button type="button" className="admin-secondary-btn" disabled={busy || selectedFiles.length === 0} onClick={() => void handleUploadFiles()}>
+              <button
+                type="button"
+                className="admin-secondary-btn"
+                disabled={busy || loadingItems || !itemsReady || sourceTypeChanged || selectedFiles.length === 0}
+                onClick={() => void handleUploadFiles()}
+              >
                 上传文件
               </button>
             </div>
@@ -294,12 +373,17 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
                 aria-label="上传压缩包"
                 type="file"
                 accept=".zip,application/zip,application/octet-stream"
-                disabled={busy}
+                disabled={busy || loadingItems || !itemsReady || sourceTypeChanged}
                 onChange={(event) => setSelectedArchive(event.target.files?.[0] ?? null)}
               />
             </label>
             <div className="resource-center-actions">
-              <button type="button" className="admin-secondary-btn" disabled={busy || !selectedArchive} onClick={() => void handleUploadArchive()}>
+              <button
+                type="button"
+                className="admin-secondary-btn"
+                disabled={busy || loadingItems || !itemsReady || sourceTypeChanged || !selectedArchive}
+                onClick={() => void handleUploadArchive()}
+              >
                 上传压缩包
               </button>
             </div>
@@ -311,7 +395,8 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
         {!loadingItems ? (
           <KnowledgeSetFileTree
             items={items}
-            disabled={busy || !itemsReady}
+            disabled={fileOpsDisabled}
+            requireRenameConfirm={knowledgeSet.sourceType === "filesystem"}
             onDelete={handleDeleteItem}
             onRename={handleRenameItem}
           />

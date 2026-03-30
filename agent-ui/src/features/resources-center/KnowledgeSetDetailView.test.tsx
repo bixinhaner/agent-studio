@@ -27,6 +27,16 @@ import {
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import type { KnowledgeSetItemRecord, KnowledgeSetRecord } from "./types";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 const mockedDeleteKnowledgeSetItem = vi.mocked(deleteKnowledgeSetItem);
 const mockedFetchKnowledgeSetItems = vi.mocked(fetchKnowledgeSetItems);
 const mockedRebuildKnowledgeSet = vi.mocked(rebuildKnowledgeSet);
@@ -57,6 +67,19 @@ const filesystemKnowledgeSet: KnowledgeSetRecord = {
   status: "active",
   sourceType: "filesystem",
   rootPath: "/srv/runbooks",
+  createdAt: "2026-03-30T00:00:00.000Z",
+  updatedAt: "2026-03-30T00:00:00.000Z"
+};
+
+const managedKnowledgeSetTwo: KnowledgeSetRecord = {
+  id: "knowledge-set-3",
+  organizationId: "org-1",
+  name: "Policies",
+  slug: "policies",
+  description: "Policies",
+  status: "active",
+  sourceType: "managed_upload",
+  storageKey: "policies",
   createdAt: "2026-03-30T00:00:00.000Z",
   updatedAt: "2026-03-30T00:00:00.000Z"
 };
@@ -166,6 +189,7 @@ describe("KnowledgeSetDetailView", () => {
         name: "Updated FAQ",
         slug: "faq",
         description: "Updated desc",
+        sourceType: "managed_upload",
         status: "active",
         storageKey: "faq"
       });
@@ -239,5 +263,158 @@ describe("KnowledgeSetDetailView", () => {
     expect(await screen.findByLabelText("根目录")).toBeTruthy();
     expect(screen.queryByLabelText("上传资料文件")).toBeNull();
     expect(screen.queryByLabelText("上传压缩包")).toBeNull();
+  });
+
+  it("keeps managed-upload controls disabled until the initial inventory load completes", async () => {
+    const pendingItems = deferred<{ items: KnowledgeSetItemRecord[] }>();
+    mockedFetchKnowledgeSetItems.mockReturnValue(pendingItems.promise);
+
+    render(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSet}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect((screen.getByLabelText("上传资料文件") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "上传文件" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("上传压缩包") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "上传压缩包" }) as HTMLButtonElement).disabled).toBe(true);
+
+    pendingItems.resolve({ items: initialItems });
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+    await waitFor(() => {
+      expect((screen.getByLabelText("上传资料文件") as HTMLInputElement).disabled).toBe(false);
+      expect((screen.getByLabelText("上传压缩包") as HTMLInputElement).disabled).toBe(false);
+    });
+  });
+
+  it("locks file actions and upload controls while a file mutation is in flight", async () => {
+    mockedFetchKnowledgeSetItems.mockResolvedValue({ items: initialItems });
+    const pendingDelete = deferred<{ items: KnowledgeSetItemRecord[] }>();
+    mockedDeleteKnowledgeSetItem.mockReturnValue(pendingDelete.promise);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSet}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "删除文件" }));
+
+    await waitFor(() => {
+      expect(mockedDeleteKnowledgeSetItem).toHaveBeenCalledWith("knowledge-set-1", "guides/intro.md");
+    });
+
+    expect((screen.getByRole("button", { name: "删除文件" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "重命名文件" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("上传资料文件") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("上传压缩包") as HTMLInputElement).disabled).toBe(true);
+
+    pendingDelete.resolve({ items: initialItems });
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "删除文件" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "重命名文件" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByLabelText("上传资料文件") as HTMLInputElement).disabled).toBe(false);
+      expect((screen.getByLabelText("上传压缩包") as HTMLInputElement).disabled).toBe(false);
+    });
+  });
+
+  it("switches the detail form by sourceType and requires save before file actions resume", async () => {
+    mockedFetchKnowledgeSetItems.mockResolvedValue({ items: initialItems });
+
+    render(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSet}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+    expect(screen.getByLabelText("存储键")).toBeTruthy();
+    expect(screen.queryByLabelText("根目录")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("资料集类型"), { target: { value: "filesystem" } });
+
+    expect(screen.getByLabelText("根目录")).toBeTruthy();
+    expect(screen.queryByLabelText("存储键")).toBeNull();
+    expect(screen.getByText("资料集类型已修改，保存配置后再执行上传、重建和文件操作。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "重建资料清单" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "删除文件" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps the current file tree visible when metadata updates for the same knowledge set id", async () => {
+    mockedFetchKnowledgeSetItems.mockResolvedValue({ items: initialItems });
+
+    const view = render(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSet}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+
+    view.rerender(
+      <KnowledgeSetDetailView
+        knowledgeSet={{ ...managedKnowledgeSet, name: "FAQ Updated", description: "Updated desc" }}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+    expect(mockedFetchKnowledgeSetItems).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores stale async mutation results after switching to another knowledge set", async () => {
+    mockedFetchKnowledgeSetItems
+      .mockResolvedValueOnce({ items: initialItems })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "item-7",
+            kind: "file",
+            relativePath: "policies/guide.md",
+            displayName: "guide.md"
+          }
+        ]
+      });
+    const pendingDelete = deferred<{ items: KnowledgeSetItemRecord[] }>();
+    mockedDeleteKnowledgeSetItem.mockReturnValue(pendingDelete.promise);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const view = render(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSet}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("intro.md")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "删除文件" }));
+    await waitFor(() => {
+      expect(mockedDeleteKnowledgeSetItem).toHaveBeenCalledWith("knowledge-set-1", "guides/intro.md");
+    });
+
+    view.rerender(
+      <KnowledgeSetDetailView
+        knowledgeSet={managedKnowledgeSetTwo}
+        onKnowledgeSetUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("guide.md")).toBeTruthy();
+
+    pendingDelete.resolve({ items: [] });
+
+    await waitFor(() => {
+      expect(screen.getByText("guide.md")).toBeTruthy();
+    });
+    expect(screen.queryByText("文件已删除")).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import type { KnowledgeSetItemRecord } from "./types";
 type KnowledgeSetFileTreeProps = {
   items: KnowledgeSetItemRecord[];
   disabled?: boolean;
+  requireRenameConfirm?: boolean;
   onDelete: (relativePath: string) => void | Promise<void>;
   onRename: (relativePath: string, nextRelativePath: string) => void | Promise<void>;
 };
@@ -65,11 +66,12 @@ function formatSize(sizeBytes?: string) {
 type DirectoryListProps = {
   node: DirectoryNode;
   disabled: boolean;
+  requireRenameConfirm: boolean;
   onDelete: KnowledgeSetFileTreeProps["onDelete"];
   onRename: KnowledgeSetFileTreeProps["onRename"];
 };
 
-function DirectoryList({ node, disabled, onDelete, onRename }: DirectoryListProps) {
+function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRename }: DirectoryListProps) {
   const directories = [...node.directories.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
   const files = [...node.files].sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"));
 
@@ -80,7 +82,13 @@ function DirectoryList({ node, disabled, onDelete, onRename }: DirectoryListProp
           <div className="knowledge-set-tree-directory-row">
             <span className="knowledge-set-tree-directory-name">{directory.name}</span>
           </div>
-          <DirectoryList node={directory} disabled={disabled} onDelete={onDelete} onRename={onRename} />
+          <DirectoryList
+            node={directory}
+            disabled={disabled}
+            requireRenameConfirm={requireRenameConfirm}
+            onDelete={onDelete}
+            onRename={onRename}
+          />
         </li>
       ))}
 
@@ -111,6 +119,9 @@ function DirectoryList({ node, disabled, onDelete, onRename }: DirectoryListProp
                     if (!nextRelativePath || !nextRelativePath.trim() || nextRelativePath === item.relativePath) {
                       return;
                     }
+                    if (requireRenameConfirm && !window.confirm(`确认将 ${item.relativePath} 重命名为 ${nextRelativePath.trim()} 吗？`)) {
+                      return;
+                    }
                     void onRename(item.relativePath, nextRelativePath.trim());
                   }}
                 >
@@ -137,12 +148,26 @@ function DirectoryList({ node, disabled, onDelete, onRename }: DirectoryListProp
   );
 }
 
-export function KnowledgeSetFileTree({ items, disabled = false, onDelete, onRename }: KnowledgeSetFileTreeProps) {
+export function KnowledgeSetFileTree({
+  items,
+  disabled = false,
+  requireRenameConfirm = false,
+  onDelete,
+  onRename
+}: KnowledgeSetFileTreeProps) {
   const tree = useMemo(() => buildTree(items), [items]);
 
   if (items.length === 0) {
     return <p className="resource-center-empty">当前资料集没有文件清单。</p>;
   }
 
-  return <DirectoryList node={tree} disabled={disabled} onDelete={onDelete} onRename={onRename} />;
+  return (
+    <DirectoryList
+      node={tree}
+      disabled={disabled}
+      requireRenameConfirm={requireRenameConfirm}
+      onDelete={onDelete}
+      onRename={onRename}
+    />
+  );
 }
