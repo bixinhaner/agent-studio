@@ -126,7 +126,6 @@ Each item row includes at least:
   - slug
   - description
   - status
-  - `visible_to_users`
 - default model
 - allowed model set
 - reasoning effort
@@ -206,7 +205,7 @@ Copy creates a new draft-like record with:
 - a new id
 - a new slug required before save or generated as a suffixed slug
 - copied bindings where valid for that resource type
-- copied visibility / status fields, except implementations may default copied records to disabled if that reduces accidental rollout risk
+- copied status fields, and for resource types with visibility controls copied visibility fields, except implementations may default copied records to disabled if that reduces accidental rollout risk
 
 This phase should choose one deterministic copy policy and keep it consistent across all three resource types.
 

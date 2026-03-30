@@ -24,7 +24,7 @@ function sendValidationError(res: Response, error: z.ZodError): void {
 }
 
 const stringListSchema = z.array(z.string().trim().min(1));
-const statusSchema = z.enum(["active", "inactive"]);
+const statusSchema = z.enum(["active", "disabled"]);
 const runtimeTypeSchema = z.enum(["codex", "claude_code"]);
 const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint"]);
 const directoryScopeSchema = z.enum([

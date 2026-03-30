@@ -84,7 +84,6 @@ it("copies a run profile into a disabled record", async () => {
       slug: "coding-default",
       description: "default",
       status: "active",
-      visibleToUsers: true,
       defaultModel: "gpt-5.4",
       allowedModels: ["gpt-5.4"],
       defaultReasoningEffort: "high",
@@ -162,8 +161,7 @@ Implementation rules:
 const copied = await options.runProfiles.copy(req.params.id, {
   name: parsed.data.name,
   slug: parsed.data.slug,
-  status: "disabled",
-  visibleToUsers: false
+  status: "disabled"
 });
 ```
 
@@ -253,7 +251,7 @@ Expected: FAIL because copy helpers and binding replacement APIs are incomplete.
 Add repository methods:
 
 ```ts
-copy(id: string, overrides: { name: string; slug: string; status: string; visibleToUsers: boolean }): Promise<RunProfileRecord>
+copy(id: string, overrides: { name: string; slug: string; status: string }): Promise<RunProfileRecord>
 copy(id: string, overrides: { name: string; slug: string; status: string; visibleToUsers: boolean }): Promise<SkillPackageRecord>
 copy(id: string, overrides: { name: string; slug: string; status: string; visibleToUsers: boolean }): Promise<AgentModeRecord>
 replaceWorkspaces(id: string, workspaces: ReplaceAgentModeWorkspacesPayload): Promise<AgentModeRecord>
@@ -265,7 +263,7 @@ Copy rules:
 - preserve item rows and runtime bindings for `skill_package`
 - preserve run-profile binding, skill-package ids, workspace rules, and instruction-source rows for `agent_mode`
 - set copied records to `disabled`
-- set `visibleToUsers` on copies to `false`
+- set `visibleToUsers` on copied `skill_package` and `agent_mode` records to `false`
 
 - [ ] **Step 4: Re-run targeted tests to verify they pass**
 
@@ -438,7 +436,6 @@ Editable run-profile fields include:
 - slug
 - description
 - status
-- `visibleToUsers`
 - default model
 - allowed models
 - reasoning effort
