@@ -327,6 +327,7 @@ model IntegrationInstanceConfig {
 model IntegrationInstanceSecret {
   id                    String              @id @default(cuid())
   integrationInstanceId  String              @unique @map("integration_instance_id")
+  hasSecrets            Boolean             @default(false) @map("has_secrets")
   secretState           Json                @map("secret_state")
   rotatedAt             DateTime?           @map("rotated_at")
   rotatedByUserId       String?             @map("rotated_by_user_id")

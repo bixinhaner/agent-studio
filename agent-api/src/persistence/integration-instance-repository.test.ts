@@ -30,6 +30,7 @@ type FakeIntegrationInstanceConfigRow = {
 type FakeIntegrationInstanceSecretRow = {
   id: string;
   integrationInstanceId: string;
+  hasSecrets: boolean;
   secretState: unknown;
   rotatedAt: Date | null;
   rotatedByUserId: string | null;
@@ -180,6 +181,7 @@ class FakeIntegrationInstanceDb {
         id: typeof create.id === "string" ? create.id : `integration-instance-secret-${++this.secretCounter}`,
         integrationInstanceId:
           typeof create.integrationInstanceId === "string" ? create.integrationInstanceId : where.integrationInstanceId,
+        hasSecrets: typeof create.hasSecrets === "boolean" ? create.hasSecrets : true,
         secretState: clone(create.secretState),
         rotatedAt: create.rotatedAt instanceof Date ? create.rotatedAt : null,
         rotatedByUserId: typeof create.rotatedByUserId === "string" ? create.rotatedByUserId : null,
@@ -322,12 +324,45 @@ describe("IntegrationInstanceRepository", () => {
       payload: { apiKey: "sk-test" },
       rotatedByUserId: "user-1"
     });
+    await repository.clearSecrets(instance.id, {
+      clearedByUserId: "user-2"
+    });
 
     const summary = await repository.getInstance(instance.id);
-    expect(summary?.secretState.hasSecrets).toBe(true);
+    expect(summary?.secretState.hasSecrets).toBe(false);
     expect(summary?.secretState.rotatedByUserId).toBe("user-1");
     expect(summary?.secretState.rotatedAt).toEqual(expect.any(String));
     expect(JSON.stringify(summary)).not.toContain("sk-test");
+  });
+
+  it("updates integration instance fields for lifecycle changes", async () => {
+    const repository = new IntegrationInstanceRepository(new FakeIntegrationInstanceDb() as never);
+    const instance = await repository.createInstance({
+      type: "zendesk",
+      slug: "zendesk-main",
+      name: "Zendesk Main",
+      description: " Initial description ",
+      status: "draft"
+    });
+
+    const updated = await repository.updateInstance(instance.id, {
+      name: "Zendesk Primary",
+      description: " Support line ",
+      status: "disabled"
+    });
+
+    expect(updated).toMatchObject({
+      name: "Zendesk Primary",
+      description: "Support line",
+      status: "disabled"
+    });
+
+    const detail = await repository.getInstance(instance.id);
+    expect(detail).toMatchObject({
+      name: "Zendesk Primary",
+      description: "Support line",
+      status: "disabled"
+    });
   });
 
   it("records validation history in reverse chronological order", async () => {

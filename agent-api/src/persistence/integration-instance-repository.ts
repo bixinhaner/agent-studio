@@ -22,6 +22,7 @@ type IntegrationInstanceConfigRow = {
 type IntegrationInstanceSecretRow = {
   id: string;
   integrationInstanceId: string;
+  hasSecrets: boolean;
   secretState: unknown;
   rotatedAt: Date | string | null;
   rotatedByUserId: string | null;
@@ -55,6 +56,7 @@ type IntegrationInstanceTable = {
   findUnique(args: { where: { id: string } }): Promise<IntegrationInstanceRow | null>;
   findMany(args?: { where?: { type?: string }; orderBy?: { createdAt?: "asc" | "desc" } }): Promise<IntegrationInstanceRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<IntegrationInstanceRow>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<IntegrationInstanceRow>;
 };
 
 type IntegrationInstanceConfigTable = {
@@ -157,6 +159,10 @@ export type RotateIntegrationSecretsInput = {
   rotatedByUserId?: string | null;
 };
 
+export type ClearIntegrationSecretsInput = {
+  clearedByUserId?: string | null;
+};
+
 export type RecordIntegrationValidationInput = {
   triggerType: string;
   status: string;
@@ -187,6 +193,13 @@ function toIsoString(value: Date | string | null | undefined): string | undefine
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function toDateOrNull(value: Date | string | null | undefined): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
@@ -194,7 +207,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function mapSecretState(row: IntegrationInstanceSecretRow | null | undefined): IntegrationInstanceSecretStateSummary {
   return {
-    hasSecrets: Boolean(row),
+    hasSecrets: typeof row?.hasSecrets === "boolean" ? row.hasSecrets : Boolean(row),
     rotatedAt: toIsoString(row?.rotatedAt),
     rotatedByUserId: trimOrUndefined(row?.rotatedByUserId)
   };
@@ -313,6 +326,27 @@ export class IntegrationInstanceRepository {
     return row ? loadDetail(this.db, row) : null;
   }
 
+  async updateInstance(
+    instanceId: string,
+    input: {
+      name?: string;
+      description?: string | null;
+      status?: string;
+    }
+  ): Promise<IntegrationInstanceSummary> {
+    const instance = await requireInstance(this.db, instanceId);
+    const updated = await this.db.integrationInstance.update({
+      where: { id: instance.id },
+      data: {
+        name: input.name ?? instance.name,
+        description: input.description === undefined ? instance.description : trimOrUndefined(input.description) ?? null,
+        status: input.status ?? instance.status,
+        updatedAt: new Date()
+      }
+    });
+    return loadSummary(this.db, updated);
+  }
+
   async upsertConfig(instanceId: string, config: UpsertIntegrationConfigInput): Promise<IntegrationInstanceSummary> {
     return this.db.$transaction(async (tx) => {
       const instance = await requireInstance(tx, instanceId);
@@ -338,14 +372,43 @@ export class IntegrationInstanceRepository {
         where: { integrationInstanceId: instance.id },
         create: {
           integrationInstanceId: instance.id,
+          hasSecrets: true,
           secretState: input.payload,
           rotatedAt: new Date(),
           rotatedByUserId: trimOrUndefined(input.rotatedByUserId) ?? null
         },
         update: {
+          hasSecrets: true,
           secretState: input.payload,
           rotatedAt: new Date(),
           rotatedByUserId: trimOrUndefined(input.rotatedByUserId) ?? null
+        }
+      });
+      const refreshed = await tx.integrationInstance.findUnique({ where: { id: instance.id } });
+      return loadSummary(tx, refreshed ?? instance);
+    });
+  }
+
+  async clearSecrets(instanceId: string, input: ClearIntegrationSecretsInput = {}): Promise<IntegrationInstanceSummary> {
+    return this.db.$transaction(async (tx) => {
+      const instance = await requireInstance(tx, instanceId);
+      const existing = await tx.integrationInstanceSecret.findUnique({
+        where: { integrationInstanceId: instance.id }
+      });
+      await tx.integrationInstanceSecret.upsert({
+        where: { integrationInstanceId: instance.id },
+        create: {
+          integrationInstanceId: instance.id,
+          hasSecrets: false,
+          secretState: {},
+          rotatedAt: toDateOrNull(existing?.rotatedAt),
+          rotatedByUserId: trimOrUndefined(existing?.rotatedByUserId) ?? null
+        },
+        update: {
+          hasSecrets: false,
+          secretState: {},
+          rotatedAt: toDateOrNull(existing?.rotatedAt),
+          rotatedByUserId: trimOrUndefined(existing?.rotatedByUserId) ?? null
         }
       });
       const refreshed = await tx.integrationInstance.findUnique({ where: { id: instance.id } });

@@ -29,6 +29,7 @@ CREATE TABLE "integration_instance_configs" (
 CREATE TABLE "integration_instance_secrets" (
   "id" TEXT NOT NULL,
   "integration_instance_id" TEXT NOT NULL,
+  "has_secrets" BOOLEAN NOT NULL DEFAULT FALSE,
   "secret_state" JSONB NOT NULL,
   "rotated_at" TIMESTAMP(3),
   "rotated_by_user_id" TEXT,
