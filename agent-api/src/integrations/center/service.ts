@@ -12,7 +12,8 @@ import {
   type IntegrationPolicySummary,
   type IntegrationTriggerType,
   type IntegrationValidationItem,
-  type IntegrationValidationResult
+  type IntegrationValidationResult,
+  sanitizeIntegrationConfigForRead
 } from "./types.js";
 import type { PolicyService } from "../../resources/policy-service.js";
 
@@ -195,8 +196,11 @@ function mapInstanceDetail(detail: Awaited<ReturnType<IntegrationInstanceReposit
   }
 
   return {
-    instance: detail as IntegrationListItem,
-    config: normalizeConfigValue(detail.config),
+    instance: {
+      ...(detail as IntegrationListItem),
+      config: detail.config ? sanitizeIntegrationConfigForRead(detail.config) : detail.config
+    },
+    config: sanitizeIntegrationConfigForRead(detail.config),
     secretState: detail.secretState,
     validationHistory: {
       items: detail.validationHistory.map(mapValidation)
@@ -343,7 +347,10 @@ export function createIntegrationCenterService(options: {
 
   return {
     async listInstances(input) {
-      const items = (await repository.listInstances(trimOrUndefined(input.type))).map((item) => item as IntegrationListItem);
+      const items = (await repository.listInstances(trimOrUndefined(input.type))).map((item) => ({
+        ...(item as IntegrationListItem),
+        config: item.config ? sanitizeIntegrationConfigForRead(item.config) : item.config
+      }));
       const allowedIds = new Set(await filterAuthorizedInstanceIds(input.currentUserId, items.map((item) => item.id)));
       return {
         items: items.filter((item) => allowedIds.has(item.id))

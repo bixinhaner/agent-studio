@@ -43,6 +43,24 @@ function collectSecretLikeConfigKeys(value: unknown, path = ""): string[] {
   return hits;
 }
 
+function sanitizeSecretLikeConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeSecretLikeConfigValue(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (secretLikeKeyPattern.test(key)) {
+      continue;
+    }
+    sanitized[key] = sanitizeSecretLikeConfigValue(nested);
+  }
+  return sanitized;
+}
+
 const recordSchema = z.record(z.string(), z.unknown());
 const integrationConfigSchema = recordSchema.superRefine((value, ctx) => {
   const secretLikeKeys = [...new Set(collectSecretLikeConfigKeys(value))];
@@ -189,6 +207,14 @@ export function createEmptyPolicySummary(): IntegrationPolicySummary {
     allow: { roles: [], departments: [], users: [] },
     deny: { roles: [], departments: [], users: [] }
   };
+}
+
+export function sanitizeIntegrationConfigForRead(value: unknown): Record<string, unknown> {
+  const sanitized = sanitizeSecretLikeConfigValue(value);
+  if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
+    return {};
+  }
+  return sanitized as Record<string, unknown>;
 }
 
 export { collectSecretLikeConfigKeys };

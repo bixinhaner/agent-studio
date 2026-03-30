@@ -273,6 +273,65 @@ describe("createIntegrationCenterService", () => {
     ).rejects.toThrow(/access denied/i);
   });
 
+  it("redacts secret-like config keys from list and detail reads", async () => {
+    const { service } = buildService({
+      instances: [
+        {
+          id: "int-openai-1",
+          type: "openai_codex",
+          slug: "openai-primary",
+          name: "OpenAI Primary",
+          description: null,
+          status: "active",
+          isSystemSingleton: true,
+          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+        }
+      ],
+      configs: [
+        {
+          integrationInstanceId: "int-openai-1",
+          config: {
+            defaultModel: "gpt-5.4-mini",
+            apiKey: "sk-legacy",
+            nested: {
+              clientSecret: "secret-value",
+              publicValue: "ok"
+            }
+          }
+        }
+      ],
+      policies: [
+        {
+          id: "policy-1",
+          subjectType: "role",
+          subjectId: "role-support-admin",
+          resourceType: "integration_instance",
+          resourceId: "int-openai-1",
+          effect: "allow",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const list = await service.listInstances({ currentUserId: "admin-1", type: "openai_codex" });
+    expect(list.items[0].config).toMatchObject({
+      defaultModel: "gpt-5.4-mini",
+      nested: { publicValue: "ok" }
+    });
+    expect(JSON.stringify(list.items[0].config)).not.toContain("sk-legacy");
+    expect(JSON.stringify(list.items[0].config)).not.toContain("secret-value");
+
+    const detail = await service.getInstanceDetail({ currentUserId: "admin-1", instanceId: "int-openai-1" });
+    expect(detail.config).toMatchObject({
+      defaultModel: "gpt-5.4-mini",
+      nested: { publicValue: "ok" }
+    });
+    expect(JSON.stringify(detail.config)).not.toContain("sk-legacy");
+    expect(JSON.stringify(detail.instance.config)).not.toContain("secret-value");
+  });
+
   it("rejects secret-like config keys and keeps secrets in secretState", async () => {
     const { service } = buildService();
 
