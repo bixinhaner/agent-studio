@@ -130,4 +130,19 @@ describe("WorkspaceDetailView", () => {
       })
     );
   });
+
+  it("keeps save disabled when bindings fail to load", async () => {
+    mockedFetchBindings.mockRejectedValue(new Error("load failed"));
+
+    render(
+      <WorkspaceDetailView
+        workspace={workspace}
+        knowledgeSets={knowledgeSets}
+        onWorkspaceUpdated={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("load failed")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "保存工作区配置" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

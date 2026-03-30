@@ -37,6 +37,7 @@ function normalizePolicies(policies: ResourcePolicyInput[]) {
 export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源策略" }: ResourcePolicyEditorProps) {
   const [policies, setPolicies] = useState<EditablePolicy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [policiesReady, setPoliciesReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
@@ -46,15 +47,18 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
 
     async function load() {
       setLoading(true);
+      setPoliciesReady(false);
       setErrorText("");
       setSuccessText("");
       try {
         const response = await fetchResourcePolicies(resourceType, resourceId);
         if (!active) return;
         setPolicies(normalizePolicies(response.policies));
+        setPoliciesReady(true);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载资源授权失败");
+          setPoliciesReady(false);
         }
       } finally {
         if (active) setLoading(false);
@@ -115,6 +119,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
         <button
           type="button"
           className="admin-secondary-btn"
+          disabled={loading || saving || !policiesReady}
           onClick={() => {
             setPolicies((current) => [...current, { ...EMPTY_POLICY }]);
             setErrorText("");
@@ -139,6 +144,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
                   className="field-input"
                   aria-label={`主体类型 ${index + 1}`}
                   value={policy.subjectType}
+                  disabled={loading || saving}
                   onChange={(event) => updatePolicy(index, { subjectType: event.target.value as ResourcePolicySubjectType })}
                 >
                   <option value="role">role</option>
@@ -153,6 +159,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
                   className="field-input"
                   aria-label={`主体标识 ${index + 1}`}
                   value={policy.subjectId}
+                  disabled={loading || saving}
                   onChange={(event) => updatePolicy(index, { subjectId: event.target.value })}
                   placeholder="如 employee / dept-rd / user-123"
                 />
@@ -164,6 +171,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
                   className="field-input"
                   aria-label={`授权效果 ${index + 1}`}
                   value={policy.effect}
+                  disabled={loading || saving}
                   onChange={(event) => updatePolicy(index, { effect: event.target.value as ResourcePolicyEffect })}
                 >
                   <option value="allow">allow</option>
@@ -176,6 +184,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
               <button
                 type="button"
                 className="admin-secondary-btn"
+                disabled={loading || saving}
                 onClick={() => removePolicy(index)}
               >
                 删除
@@ -192,7 +201,7 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
           type="button"
           className="admin-action-btn"
           onClick={() => void handleSave()}
-          disabled={saving || loading}
+          disabled={saving || loading || !policiesReady}
         >
           {saving ? "保存中..." : "保存资源授权"}
         </button>

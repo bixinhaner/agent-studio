@@ -74,4 +74,20 @@ describe("ResourcePolicyEditor", () => {
       ]);
     });
   });
+
+  it("keeps save disabled when policies fail to load", async () => {
+    mockedFetchResourcePolicies.mockRejectedValue(new Error("load failed"));
+
+    render(
+      <ResourcePolicyEditor
+        resourceType="workspace"
+        resourceId="workspace-1"
+        title="资源授权"
+      />
+    );
+
+    expect(await screen.findByText("load failed")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "保存资源授权" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "新增策略" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

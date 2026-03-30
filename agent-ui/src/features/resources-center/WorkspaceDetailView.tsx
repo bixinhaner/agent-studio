@@ -45,6 +45,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
     buildBindingState(knowledgeSets, [])
   );
   const [loadingBindings, setLoadingBindings] = useState(true);
+  const [bindingsReady, setBindingsReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
@@ -55,6 +56,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
     setDescription(workspace.description || "");
     setStatus(workspace.status);
     setRootPath(workspace.rootPath || "");
+    setBindingsReady(false);
     setSuccessText("");
     setErrorText("");
   }, [workspace]);
@@ -64,14 +66,17 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
 
     async function loadBindings() {
       setLoadingBindings(true);
+      setBindingsReady(false);
       setErrorText("");
       try {
         const response = await fetchWorkspaceKnowledgeSetBindings(workspace.id);
         if (!active) return;
         setBindingState(buildBindingState(knowledgeSets, response.bindings));
+        setBindingsReady(true);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载资料集绑定失败");
+          setBindingsReady(false);
         }
       } finally {
         if (active) setLoadingBindings(false);
@@ -147,17 +152,17 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
         <div className="resource-center-form-grid">
           <label className="field">
             <span className="field-label">工作区名称</span>
-            <input className="field-input" aria-label="工作区名称" value={name} onChange={(event) => setName(event.target.value)} />
+            <input className="field-input" aria-label="工作区名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
           </label>
 
           <label className="field">
             <span className="field-label">工作区 slug</span>
-            <input className="field-input" aria-label="工作区 slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
+            <input className="field-input" aria-label="工作区 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
           </label>
 
           <label className="field">
             <span className="field-label">工作区状态</span>
-            <select className="field-input" aria-label="工作区状态" value={status} onChange={(event) => setStatus(event.target.value)}>
+            <select className="field-input" aria-label="工作区状态" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
               <option value="active">active</option>
               <option value="disabled">disabled</option>
             </select>
@@ -166,7 +171,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
           {workspace.sourceType === "filesystem" ? (
             <label className="field resource-center-form-span-2">
               <span className="field-label">根目录</span>
-              <input className="field-input" aria-label="根目录" value={rootPath} onChange={(event) => setRootPath(event.target.value)} />
+              <input className="field-input" aria-label="根目录" value={rootPath} disabled={saving} onChange={(event) => setRootPath(event.target.value)} />
             </label>
           ) : null}
 
@@ -176,13 +181,19 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
               className="field-input textarea"
               aria-label="工作区描述"
               value={description}
+              disabled={saving}
               onChange={(event) => setDescription(event.target.value)}
             />
           </label>
         </div>
 
         <div className="resource-center-actions">
-          <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving || loadingBindings}>
+          <button
+            type="button"
+            className="admin-action-btn"
+            onClick={() => void handleSave()}
+            disabled={saving || loadingBindings || !bindingsReady}
+          >
             {saving ? "保存中..." : "保存工作区配置"}
           </button>
         </div>
@@ -208,6 +219,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
                     type="checkbox"
                     aria-label={`绑定资料集 ${knowledgeSet.name}`}
                     checked={binding.enabled}
+                    disabled={loadingBindings || saving}
                     onChange={(event) => updateBinding(knowledgeSet.id, { enabled: event.target.checked })}
                   />
                   <span>
@@ -223,6 +235,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
                       className="field-input"
                       aria-label={`挂载方式 ${knowledgeSet.name}`}
                       value={binding.mountType}
+                      disabled={loadingBindings || saving}
                       onChange={(event) => updateBinding(knowledgeSet.id, { mountType: event.target.value })}
                     >
                       <option value="default">default</option>
