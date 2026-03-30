@@ -356,4 +356,61 @@ describe("AgentModeDetailView", () => {
     fireEvent.click(screen.getByRole("tab", { name: "授权" }));
     expect(screen.getByText("能力授权编辑器 agent_mode agent-mode-1")).toBeTruthy();
   });
+
+  it("normalizes workspace defaults when the selected default is removed", async () => {
+    mockedUpdateAgentMode.mockResolvedValue({ agentMode });
+    mockedPutAgentModeSkillPackages.mockResolvedValue({ agentMode });
+    mockedPutAgentModeWorkspaces.mockResolvedValue({ agentMode });
+    mockedPutAgentModeInstructionSources.mockResolvedValue({ agentMode });
+
+    render(
+      <AgentModeDetailView
+        agentMode={{
+          ...agentMode,
+          workspaceRules: [
+            {
+              id: "workspace-rule-1",
+              workspaceId: "workspace-1",
+              isDefault: true,
+              allowDirectorySelection: false,
+              directoryScope: "workspace_only",
+              loadWorkspaceAgentsMd: false,
+              createdAt: "2026-03-30T00:00:00.000Z",
+              updatedAt: "2026-03-30T00:00:00.000Z"
+            },
+            {
+              id: "workspace-rule-2",
+              workspaceId: "workspace-2",
+              isDefault: false,
+              allowDirectorySelection: false,
+              directoryScope: "workspace_only",
+              loadWorkspaceAgentsMd: false,
+              createdAt: "2026-03-30T00:00:00.000Z",
+              updatedAt: "2026-03-30T00:00:00.000Z"
+            }
+          ]
+        }}
+        runProfiles={runProfiles}
+        skillPackages={skillPackages}
+        workspaces={workspaces}
+        onAgentModeUpdated={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "绑定关系" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除工作区规则 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存模式配置" }));
+
+    await waitFor(() => {
+      expect(mockedPutAgentModeWorkspaces).toHaveBeenCalledWith("agent-mode-1", [
+        {
+          workspaceId: "workspace-2",
+          isDefault: true,
+          allowDirectorySelection: false,
+          directoryScope: "workspace_only",
+          loadWorkspaceAgentsMd: false
+        }
+      ]);
+    });
+  });
 });

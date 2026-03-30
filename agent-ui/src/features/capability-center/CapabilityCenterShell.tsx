@@ -309,6 +309,7 @@ export function CapabilityCenterShell() {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
+  const [workspaceWarningText, setWorkspaceWarningText] = useState("");
   const [tab, setTab] = useState<CapabilityCenterTab>("agent_mode");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CapabilityStatusFilter>("all");
@@ -326,18 +327,24 @@ export function CapabilityCenterShell() {
     async function load() {
       setLoading(true);
       setErrorText("");
+      setWorkspaceWarningText("");
       try {
+        let nextWorkspaceWarning = "";
         const [runProfileResponse, skillPackageResponse, agentModeResponse, workspaceResponse] = await Promise.all([
           fetchRunProfiles(),
           fetchSkillPackages(),
           fetchAgentModes(),
-          fetchWorkspaces()
+          fetchWorkspaces().catch((error) => {
+            nextWorkspaceWarning = error instanceof Error ? error.message : "加载工作区失败";
+            return { workspaces: [] };
+          })
         ]);
         if (!active) return;
         setRunProfiles(runProfileResponse.runProfiles);
         setSkillPackages(skillPackageResponse.skillPackages);
         setAgentModes(agentModeResponse.agentModes);
         setWorkspaces(workspaceResponse.workspaces);
+        setWorkspaceWarningText(nextWorkspaceWarning);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载能力配置中心失败");
@@ -613,6 +620,9 @@ export function CapabilityCenterShell() {
 
       {loading ? <p className="resource-center-subtle">加载能力资源中...</p> : null}
       {errorText ? <p className="err-text">{errorText}</p> : null}
+      {!loading && !errorText && tab === "agent_mode" && workspaceWarningText ? (
+        <p className="resource-center-subtle">工作区加载失败，Agent Mode 绑定编辑已降级：{workspaceWarningText}</p>
+      ) : null}
 
       <div className="resource-center-body capability-center-body">
         <aside className="resource-center-sidebar">

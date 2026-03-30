@@ -68,6 +68,27 @@ function workspaceLabel(workspace: WorkspaceRecord) {
   return `${workspace.name} (${workspace.slug})`;
 }
 
+function normalizeWorkspaceRules(
+  workspaceRules: AgentModeWorkspaceRuleInput[],
+  preferredDefaultWorkspaceId?: string
+): AgentModeWorkspaceRuleInput[] {
+  if (workspaceRules.length === 0) {
+    return [];
+  }
+
+  const selectedDefaultWorkspaceId =
+    (preferredDefaultWorkspaceId &&
+      workspaceRules.some((rule) => rule.workspaceId === preferredDefaultWorkspaceId) &&
+      preferredDefaultWorkspaceId) ||
+    workspaceRules.find((rule) => rule.isDefault)?.workspaceId ||
+    workspaceRules[0]?.workspaceId;
+
+  return workspaceRules.map((rule) => ({
+    ...rule,
+    isDefault: rule.workspaceId === selectedDefaultWorkspaceId
+  }));
+}
+
 export function AgentModeDetailView({
   agentMode,
   runProfiles,
@@ -157,28 +178,34 @@ export function AgentModeDetailView({
   }
 
   function updateWorkspaceRule(index: number, patch: Partial<AgentModeWorkspaceRuleInput>) {
-    setWorkspaceRules((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule)));
+    setWorkspaceRules((current) => {
+      const next = current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule));
+      const preferredDefaultWorkspaceId = patch.isDefault ? next[index]?.workspaceId : undefined;
+      return normalizeWorkspaceRules(next, preferredDefaultWorkspaceId);
+    });
     setSuccessText("");
   }
 
   function addWorkspaceRule() {
     if (!workspaceSelection) return;
     if (workspaceRules.some((rule) => rule.workspaceId === workspaceSelection)) return;
-    setWorkspaceRules((current) => [
-      ...current,
-      {
-        workspaceId: workspaceSelection,
-        isDefault: current.length === 0,
-        allowDirectorySelection: false,
-        directoryScope: "workspace_only",
-        loadWorkspaceAgentsMd: false
-      }
-    ]);
+    setWorkspaceRules((current) =>
+      normalizeWorkspaceRules([
+        ...current,
+        {
+          workspaceId: workspaceSelection,
+          isDefault: current.length === 0,
+          allowDirectorySelection: false,
+          directoryScope: "workspace_only",
+          loadWorkspaceAgentsMd: false
+        }
+      ])
+    );
     setSuccessText("");
   }
 
   function removeWorkspaceRule(index: number) {
-    setWorkspaceRules((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+    setWorkspaceRules((current) => normalizeWorkspaceRules(current.filter((_, ruleIndex) => ruleIndex !== index)));
     setSuccessText("");
   }
 
@@ -199,7 +226,7 @@ export function AgentModeDetailView({
     try {
       await updateAgentMode(agentMode.id, payload);
       await putAgentModeSkillPackages(agentMode.id, skillPackageIds);
-      await putAgentModeWorkspaces(agentMode.id, workspaceRules);
+      await putAgentModeWorkspaces(agentMode.id, normalizeWorkspaceRules(workspaceRules));
       const response = await putAgentModeInstructionSources(agentMode.id, instructionSources);
       onAgentModeUpdated(response.agentMode);
       setSuccessText("模式已保存");

@@ -323,4 +323,39 @@ describe("CapabilityCenterShell", () => {
     expect(screen.queryByText("后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。")).toBeNull();
   });
 
+  it("degrades agent mode workspace loading without failing the whole capability center", async () => {
+    mockedFetchRunProfiles.mockResolvedValue({
+      runProfiles: [
+        {
+          id: "run-profile-1",
+          name: "Coding Default",
+          slug: "coding-default",
+          description: "default",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4"],
+          defaultReasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
+    mockedFetchAgentModes.mockResolvedValue({ agentModes: [] });
+    mockedFetchWorkspaces.mockRejectedValue(new Error("workspace load failed"));
+
+    render(<CapabilityCenterShell />);
+
+    expect(await screen.findByRole("heading", { name: "能力配置中心" })).toBeTruthy();
+    expect(await screen.findByText("工作区加载失败，Agent Mode 绑定编辑已降级：workspace load failed")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Run Profiles" }));
+    expect(screen.queryByText("工作区加载失败，Agent Mode 绑定编辑已降级：workspace load failed")).toBeNull();
+    expect(await screen.findByText("Coding Default")).toBeTruthy();
+  });
+
 });
