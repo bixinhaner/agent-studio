@@ -46,6 +46,14 @@ const skillPackage: SkillPackageRecord = {
           bindingPayload: { tool: "ticket.search" },
           createdAt: "2026-03-30T00:00:00.000Z",
           updatedAt: "2026-03-30T00:00:00.000Z"
+        },
+        {
+          id: "binding-2",
+          runtimeType: "claude_code",
+          bindingType: "prompt_hint",
+          bindingPayload: { prompt: "search tickets" },
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
         }
       ]
     }
@@ -83,7 +91,14 @@ describe("SkillPackageDetailView", () => {
         items: [
           {
             ...skillPackage.items[0],
-            capabilityKey: "ticket.reply"
+            capabilityKey: "ticket.reply",
+            runtimeBindings: [
+              skillPackage.items[0].runtimeBindings[0],
+              {
+                ...skillPackage.items[0].runtimeBindings[1],
+                bindingPayload: { prompt: "search tickets quickly" }
+              }
+            ]
           },
           {
             id: "item-2",
@@ -97,6 +112,14 @@ describe("SkillPackageDetailView", () => {
                 runtimeType: "claude_code",
                 bindingType: "prompt_hint",
                 bindingPayload: { prompt: "comment" },
+                createdAt: "2026-03-30T00:00:00.000Z",
+                updatedAt: "2026-03-30T00:00:00.000Z"
+              },
+              {
+                id: "binding-3",
+                runtimeType: "codex",
+                bindingType: "config_fragment",
+                bindingPayload: { tool: "ticket.comment" },
                 createdAt: "2026-03-30T00:00:00.000Z",
                 updatedAt: "2026-03-30T00:00:00.000Z"
               }
@@ -116,7 +139,14 @@ describe("SkillPackageDetailView", () => {
         items: [
           {
             ...skillPackage.items[0],
-            capabilityKey: "ticket.reply"
+            capabilityKey: "ticket.reply",
+            runtimeBindings: [
+              skillPackage.items[0].runtimeBindings[0],
+              {
+                ...skillPackage.items[0].runtimeBindings[1],
+                bindingPayload: { prompt: "search tickets quickly" }
+              }
+            ]
           },
           {
             id: "item-2",
@@ -130,6 +160,14 @@ describe("SkillPackageDetailView", () => {
                 runtimeType: "claude_code",
                 bindingType: "prompt_hint",
                 bindingPayload: { prompt: "comment" },
+                createdAt: "2026-03-30T00:00:00.000Z",
+                updatedAt: "2026-03-30T00:00:00.000Z"
+              },
+              {
+                id: "binding-3",
+                runtimeType: "codex",
+                bindingType: "config_fragment",
+                bindingPayload: { tool: "ticket.comment" },
                 createdAt: "2026-03-30T00:00:00.000Z",
                 updatedAt: "2026-03-30T00:00:00.000Z"
               }
@@ -149,12 +187,17 @@ describe("SkillPackageDetailView", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "绑定关系" }));
     fireEvent.change(screen.getByLabelText("capability_key 1"), { target: { value: "ticket.reply" } });
+    fireEvent.change(screen.getByLabelText("binding 1-2"), { target: { value: "{\"prompt\":\"search tickets quickly\"}" } });
     fireEvent.click(screen.getByRole("button", { name: "新增能力项" }));
     fireEvent.change(screen.getByLabelText("capability_key 2"), { target: { value: "ticket.comment" } });
     fireEvent.change(screen.getByLabelText("description 2"), { target: { value: "Write comments" } });
     fireEvent.change(screen.getByLabelText("runtime 2"), { target: { value: "claude_code" } });
     fireEvent.change(screen.getByLabelText("binding_type 2"), { target: { value: "prompt_hint" } });
     fireEvent.change(screen.getByLabelText("binding 2"), { target: { value: "{\"prompt\":\"comment\"}" } });
+    fireEvent.click(screen.getByRole("button", { name: "新增运行绑定 2" }));
+    fireEvent.change(screen.getByLabelText("runtime 2-2"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("binding_type 2-2"), { target: { value: "config_fragment" } });
+    fireEvent.change(screen.getByLabelText("binding 2-2"), { target: { value: "{\"tool\":\"ticket.comment\"}" } });
 
     fireEvent.click(screen.getByRole("button", { name: "保存技能包" }));
 
@@ -178,6 +221,11 @@ describe("SkillPackageDetailView", () => {
               runtimeType: "codex",
               bindingType: "config_fragment",
               bindingPayload: { tool: "ticket.search" }
+            },
+            {
+              runtimeType: "claude_code",
+              bindingType: "prompt_hint",
+              bindingPayload: { prompt: "search tickets quickly" }
             }
           ]
         },
@@ -189,6 +237,11 @@ describe("SkillPackageDetailView", () => {
               runtimeType: "claude_code",
               bindingType: "prompt_hint",
               bindingPayload: { prompt: "comment" }
+            },
+            {
+              runtimeType: "codex",
+              bindingType: "config_fragment",
+              bindingPayload: { tool: "ticket.comment" }
             }
           ]
         }
@@ -205,6 +258,11 @@ describe("SkillPackageDetailView", () => {
               runtimeType: "codex",
               bindingType: "config_fragment",
               bindingPayload: { tool: "ticket.search" }
+            },
+            {
+              runtimeType: "claude_code",
+              bindingType: "prompt_hint",
+              bindingPayload: { prompt: "search tickets quickly" }
             }
           ]
         },
@@ -216,6 +274,11 @@ describe("SkillPackageDetailView", () => {
               runtimeType: "claude_code",
               bindingType: "prompt_hint",
               bindingPayload: { prompt: "comment" }
+            },
+            {
+              runtimeType: "codex",
+              bindingType: "config_fragment",
+              bindingPayload: { tool: "ticket.comment" }
             }
           ]
         }

@@ -39,14 +39,19 @@ function parseBindingPayload(value: string): unknown {
   }
 }
 
-function updateFirstBinding(
+function normalizeBindings(bindings: SkillPackageRuntimeBindingInput[]) {
+  return bindings.length > 0 ? bindings.map((binding) => cloneBinding(binding)) : [{ ...DEFAULT_BINDING }];
+}
+
+function updateBinding(
   item: SkillPackageItemInput,
+  bindingIndex: number,
   patch: Partial<SkillPackageRuntimeBindingInput>
 ): SkillPackageItemInput {
-  const [firstBinding, ...restBindings] = item.runtimeBindings;
+  const bindings = normalizeBindings(item.runtimeBindings);
   return {
     ...item,
-    runtimeBindings: [{ ...cloneBinding(firstBinding), ...patch }, ...restBindings]
+    runtimeBindings: bindings.map((binding, index) => (index === bindingIndex ? { ...binding, ...patch } : binding))
   };
 }
 
@@ -63,8 +68,33 @@ export function SkillPackageItemEditor({ items, onChange, disabled = false }: Sk
     onChange(items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
   }
 
-  function patchBinding(index: number, patch: Partial<SkillPackageRuntimeBindingInput>) {
-    onChange(items.map((item, itemIndex) => (itemIndex === index ? updateFirstBinding(item, patch) : item)));
+  function patchBinding(index: number, bindingIndex: number, patch: Partial<SkillPackageRuntimeBindingInput>) {
+    onChange(items.map((item, itemIndex) => (itemIndex === index ? updateBinding(item, bindingIndex, patch) : item)));
+  }
+
+  function addBinding(index: number) {
+    onChange(
+      items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, runtimeBindings: [...normalizeBindings(item.runtimeBindings), { ...DEFAULT_BINDING }] } : item
+      )
+    );
+  }
+
+  function removeBinding(index: number, bindingIndex: number) {
+    onChange(
+      items.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const remainingBindings = normalizeBindings(item.runtimeBindings).filter((_, indexToKeep) => indexToKeep !== bindingIndex);
+        return {
+          ...item,
+          runtimeBindings: remainingBindings
+        };
+      })
+    );
+  }
+
+  function bindingLabel(base: string, itemIndex: number, bindingIndex: number) {
+    return `${base} ${itemIndex + 1}${bindingIndex === 0 ? "" : `-${bindingIndex + 1}`}`;
   }
 
   return (
@@ -93,7 +123,7 @@ export function SkillPackageItemEditor({ items, onChange, disabled = false }: Sk
           </thead>
           <tbody>
             {items.map((item, index) => {
-              const binding = cloneBinding(item.runtimeBindings[0]);
+              const bindings = normalizeBindings(item.runtimeBindings);
               return (
                 <tr key={`${item.capabilityKey || "item"}-${index}`}>
                   <td>
@@ -115,51 +145,95 @@ export function SkillPackageItemEditor({ items, onChange, disabled = false }: Sk
                     />
                   </td>
                   <td>
-                    <select
-                      className="field-input"
-                      aria-label={`runtime ${index + 1}`}
-                      disabled={disabled}
-                      value={binding.runtimeType}
-                      onChange={(event) =>
-                        patchBinding(index, { runtimeType: event.target.value as SkillPackageRuntimeBindingInput["runtimeType"] })
-                      }
-                    >
-                      <option value="codex">codex</option>
-                      <option value="claude_code">claude_code</option>
-                    </select>
+                    <div className="capability-skill-package-binding-list">
+                      {bindings.map((binding, bindingIndex) => (
+                        <div
+                          key={`${item.capabilityKey || "item"}-runtime-${bindingIndex}`}
+                          className="capability-skill-package-binding-card"
+                        >
+                          <select
+                            className="field-input"
+                            aria-label={bindingLabel("runtime", index, bindingIndex)}
+                            disabled={disabled}
+                            value={binding.runtimeType}
+                            onChange={(event) =>
+                              patchBinding(index, bindingIndex, {
+                                runtimeType: event.target.value as SkillPackageRuntimeBindingInput["runtimeType"]
+                              })
+                            }
+                          >
+                            <option value="codex">codex</option>
+                            <option value="claude_code">claude_code</option>
+                          </select>
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td>
-                    <select
-                      className="field-input"
-                      aria-label={`binding_type ${index + 1}`}
-                      disabled={disabled}
-                      value={binding.bindingType}
-                      onChange={(event) =>
-                        patchBinding(index, { bindingType: event.target.value as SkillPackageRuntimeBindingInput["bindingType"] })
-                      }
-                    >
-                      <option value="config_fragment">config_fragment</option>
-                      <option value="prompt_hint">prompt_hint</option>
-                    </select>
+                    <div className="capability-skill-package-binding-list">
+                      {bindings.map((binding, bindingIndex) => (
+                        <div
+                          key={`${item.capabilityKey || "item"}-binding-type-${bindingIndex}`}
+                          className="capability-skill-package-binding-card"
+                        >
+                          <select
+                            className="field-input"
+                            aria-label={bindingLabel("binding_type", index, bindingIndex)}
+                            disabled={disabled}
+                            value={binding.bindingType}
+                            onChange={(event) =>
+                              patchBinding(index, bindingIndex, {
+                                bindingType: event.target.value as SkillPackageRuntimeBindingInput["bindingType"]
+                              })
+                            }
+                          >
+                            <option value="config_fragment">config_fragment</option>
+                            <option value="prompt_hint">prompt_hint</option>
+                          </select>
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td>
-                    <textarea
-                      className="field-input textarea capability-skill-package-binding"
-                      aria-label={`binding ${index + 1}`}
-                      disabled={disabled}
-                      value={stringifyBindingPayload(binding.bindingPayload)}
-                      onChange={(event) => patchBinding(index, { bindingPayload: parseBindingPayload(event.target.value) })}
-                    />
+                    <div className="capability-skill-package-binding-list">
+                      {bindings.map((binding, bindingIndex) => (
+                        <div key={`${item.capabilityKey || "item"}-binding-${bindingIndex}`} className="capability-skill-package-binding-card">
+                          <textarea
+                            className="field-input textarea capability-skill-package-binding"
+                            aria-label={bindingLabel("binding", index, bindingIndex)}
+                            disabled={disabled}
+                            value={stringifyBindingPayload(binding.bindingPayload)}
+                            onChange={(event) => patchBinding(index, bindingIndex, { bindingPayload: parseBindingPayload(event.target.value) })}
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="admin-secondary-btn"
-                      disabled={disabled}
-                      onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
-                    >
-                      {`删除能力项 ${index + 1}`}
-                    </button>
+                    <div className="capability-skill-package-row-actions">
+                      <button type="button" className="admin-secondary-btn" disabled={disabled} onClick={() => addBinding(index)}>
+                        {`新增运行绑定 ${index + 1}`}
+                      </button>
+                      {bindings.map((_, bindingIndex) => (
+                        <button
+                          key={`${item.capabilityKey || "item"}-remove-binding-${bindingIndex}`}
+                          type="button"
+                          className="admin-secondary-btn"
+                          disabled={disabled}
+                          onClick={() => removeBinding(index, bindingIndex)}
+                        >
+                          {`删除运行绑定 ${index + 1}${bindingIndex === 0 ? "" : `-${bindingIndex + 1}`}`}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="admin-secondary-btn"
+                        disabled={disabled}
+                        onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
+                      >
+                        {`删除能力项 ${index + 1}`}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

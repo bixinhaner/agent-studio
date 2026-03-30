@@ -2335,3 +2335,14 @@ body {
   min-height: 7rem;
   font-family: "SFMono-Regular", "Menlo", monospace;
 }
+
+.capability-skill-package-binding-list,
+.capability-skill-package-row-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.capability-skill-package-binding-card {
+  display: grid;
+  gap: 0.5rem;
+}
