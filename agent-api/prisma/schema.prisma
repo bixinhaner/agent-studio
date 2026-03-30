@@ -30,6 +30,18 @@ model User {
   triggeredSyncJobs   SyncJob[]             @relation("SyncJobTriggeredBy")
   userRoles          UserRole[]
   auditLogEntries    AdminAuditLog[]       @relation("AdminAuditActor")
+  threadSharesCreated ThreadShare[]         @relation("ThreadShareCreatedBy")
+  threadSharesRevoked ThreadShare[]         @relation("ThreadShareRevokedBy")
+  threadComments     ThreadComment[]        @relation("ThreadCommentAuthor")
+  threadAssignmentsOwned ThreadAssignment[]  @relation("ThreadAssignmentOwner")
+  threadAssignmentsCreated ThreadAssignment[] @relation("ThreadAssignmentCreatedBy")
+  threadFollowers    ThreadFollower[]       @relation("ThreadFollowerUser")
+  threadFollowersAdded ThreadFollower[]     @relation("ThreadFollowerAddedBy")
+  inboxItems         InboxItem[]
+  inboxItemsAsActor   InboxItem[]           @relation("InboxItemSourceActor")
+  broadcastMessagesCreated BroadcastMessage[] @relation("BroadcastMessageCreatedBy")
+  broadcastMessagesPublished BroadcastMessage[] @relation("BroadcastMessagePublishedBy")
+  knowledgeCaptureMarks KnowledgeCaptureMark[] @relation("KnowledgeCaptureMarkMarkedBy")
 
   @@index([email])
   @@index([status, role])
@@ -245,6 +257,12 @@ model Thread {
   user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   messages        Message[]
   runtimeSessions RuntimeSession[]
+  shares          ThreadShare[]
+  comments        ThreadComment[]
+  assignment      ThreadAssignment?
+  followers       ThreadFollower[]
+  inboxItems      InboxItem[]
+  knowledgeCaptureMark KnowledgeCaptureMark?
 
   @@index([userId])
   @@map("threads")
@@ -287,6 +305,165 @@ model RuntimeSession {
   @@index([threadId])
   @@index([userId])
   @@map("runtime_sessions")
+}
+
+model ThreadShare {
+  id              String    @id @default(cuid())
+  threadId        String    @map("thread_id")
+  subjectType     String    @map("subject_type")
+  subjectId       String    @map("subject_id")
+  permissionLevel String    @default("read_comment") @map("permission_level")
+  sharedByUserId  String?   @map("shared_by_user_id")
+  revokedByUserId String?   @map("revoked_by_user_id")
+  revokedAt       DateTime? @map("revoked_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  thread          Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sharedByUser    User?     @relation("ThreadShareCreatedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  revokedByUser   User?     @relation("ThreadShareRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([threadId, subjectType, subjectId])
+  @@index([subjectType, subjectId])
+  @@index([sharedByUserId, createdAt])
+  @@index([revokedByUserId, createdAt])
+  @@map("thread_shares")
+}
+
+model ThreadComment {
+  id               String    @id @default(cuid())
+  threadId         String    @map("thread_id")
+  authorUserId     String?   @map("author_user_id")
+  bodyMarkdown     String    @map("body_markdown")
+  mentionedUserIds Json      @default("[]") @map("mentioned_user_ids")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  thread           Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorUser       User?     @relation("ThreadCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([authorUserId, createdAt])
+  @@map("thread_comments")
+}
+
+model ThreadAssignment {
+  id               String   @id @default(cuid())
+  threadId         String   @unique @map("thread_id")
+  ownerUserId      String   @map("owner_user_id")
+  assignedByUserId String?  @map("assigned_by_user_id")
+  assignedAt       DateTime @default(now()) @map("assigned_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  thread           Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  ownerUser        User     @relation("ThreadAssignmentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  assignedByUser   User?    @relation("ThreadAssignmentCreatedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([ownerUserId, assignedAt])
+  @@index([assignedByUserId, assignedAt])
+  @@map("thread_assignments")
+}
+
+model ThreadFollower {
+  id             String   @id @default(cuid())
+  threadId       String   @map("thread_id")
+  userId         String   @map("user_id")
+  addedByUserId  String?  @map("added_by_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  thread         Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user           User     @relation("ThreadFollowerUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedByUser    User?    @relation("ThreadFollowerAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([threadId, userId])
+  @@index([threadId, createdAt])
+  @@index([userId, createdAt])
+  @@index([addedByUserId, createdAt])
+  @@map("thread_followers")
+}
+
+model InboxItem {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+  eventType         String    @map("event_type")
+  category          String
+  title             String
+  body              String
+  status            String    @default("unread")
+  threadId          String?   @map("thread_id")
+  relatedEntityType String?   @map("related_entity_type")
+  relatedEntityId   String?   @map("related_entity_id")
+  sourceActorUserId String?   @map("source_actor_user_id")
+  payload           Json?
+  readAt            DateTime? @map("read_at")
+  archivedAt        DateTime? @map("archived_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread            Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  sourceActorUser   User?     @relation("InboxItemSourceActor", fields: [sourceActorUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([userId, category, createdAt])
+  @@index([threadId, createdAt])
+  @@index([relatedEntityType, relatedEntityId])
+  @@index([eventType, createdAt])
+  @@map("inbox_items")
+}
+
+model BroadcastMessage {
+  id                String    @id @default(cuid())
+  title             String
+  bodyMarkdown      String    @map("body_markdown")
+  status            String    @default("draft")
+  createdByUserId   String?   @map("created_by_user_id")
+  publishedAt       DateTime? @map("published_at")
+  publishedByUserId String?   @map("published_by_user_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  createdByUser     User?     @relation("BroadcastMessageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  publishedByUser   User?     @relation("BroadcastMessagePublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  targets           BroadcastTarget[]
+
+  @@index([status, createdAt])
+  @@index([publishedAt])
+  @@index([createdByUserId, createdAt])
+  @@map("broadcast_messages")
+}
+
+model BroadcastTarget {
+  id           String   @id @default(cuid())
+  broadcastId  String   @map("broadcast_id")
+  targetType   String   @map("target_type")
+  targetId     String   @default("") @map("target_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  broadcast    BroadcastMessage @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, targetType, targetId])
+  @@index([broadcastId])
+  @@index([targetType, targetId])
+  @@map("broadcast_targets")
+}
+
+model KnowledgeCaptureMark {
+  id              String    @id @default(cuid())
+  threadId        String    @unique @map("thread_id")
+  status          String    @default("pending_capture")
+  markedByUserId  String?   @map("marked_by_user_id")
+  markedAt        DateTime  @default(now()) @map("marked_at")
+  note            String?
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  thread          Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  markedByUser    User?     @relation("KnowledgeCaptureMarkMarkedBy", fields: [markedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, markedAt])
+  @@index([markedByUserId, markedAt])
+  @@map("knowledge_capture_marks")
 }
 
 model IntegrationInstance {
