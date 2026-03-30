@@ -45,7 +45,7 @@
   - add OpenAI/Codex provider config fields only if adapter validation needs them
 - Modify: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/schema.prisma`
   - add integration instance tables and relations
-- Create: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/migrations/<timestamp>_add_integration_center_tables/migration.sql`
+- Create: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/migrations/20260330193000_add_integration_center_tables/migration.sql`
   - migration for instance/config/secret/history/binding tables
 
 ### Frontend
@@ -88,7 +88,7 @@
 
 **Files:**
 - Modify: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/schema.prisma`
-- Create: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/migrations/<timestamp>_add_integration_center_tables/migration.sql`
+- Create: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/prisma/migrations/20260330193000_add_integration_center_tables/migration.sql`
 - Create: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/src/persistence/integration-instance-repository.ts`
 - Test: `/Users/like/Desktop/baicells/Trae/agent-studio/agent-api/src/persistence/integration-instance-repository.test.ts`
 
