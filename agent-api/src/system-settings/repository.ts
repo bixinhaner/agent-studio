@@ -4,6 +4,7 @@ import {
   systemSettingsPayloadPatchSchema,
   systemSettingsPayloadSchema,
   systemSettingsVersionStatusSchema,
+  type SystemSettingsPayload,
   type SystemSettingsPayloadPatch,
   type SystemSettingsPublishInput,
   type SystemSettingsVersionRecord,
@@ -74,12 +75,13 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 function mapVersionRow(row: SystemSettingsVersionRow): SystemSettingsVersionRecord {
+  const payload = systemSettingsPayloadSchema.parse(row.payload);
   return {
     id: row.id,
     versionNumber: row.versionNumber,
     revision: row.revision,
     status: systemSettingsVersionStatusSchema.parse(row.status),
-    payload: systemSettingsPayloadSchema.parse(row.payload),
+    payload,
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updatedAt) ?? new Date().toISOString(),
     publishedAt: toIsoString(row.publishedAt),
@@ -166,7 +168,8 @@ export class SystemSettingsRepository {
       let draft = await getOrCreateDraftRow(tx);
 
       for (let attempt = 0; attempt < 5; attempt++) {
-        const nextPayload = mergeSystemSettingsPayload(draft.payload, normalizedPatch);
+        const currentPayload: SystemSettingsPayload = systemSettingsPayloadSchema.parse(draft.payload);
+        const nextPayload = mergeSystemSettingsPayload(currentPayload, normalizedPatch);
         const result = await tx.systemSettingsVersion.updateMany({
           where: {
             id: draft.id,

@@ -118,6 +118,7 @@ export type SystemSettingsPayloadPatch = z.infer<typeof systemSettingsPayloadPat
 export type SystemSettingsVersionRecord = {
   id: string;
   versionNumber: number;
+  revision: number;
   status: SystemSettingsVersionStatus;
   payload: SystemSettingsPayload;
   createdAt: string;
