@@ -30,6 +30,7 @@ class FakeResourcePolicyDb {
     }: {
       where?: {
         resourceType?: string;
+        resourceId?: string;
         OR?: Array<{
           subjectType: string;
           subjectId: string;
@@ -39,6 +40,9 @@ class FakeResourcePolicyDb {
     }) => {
       const rows = this.rows.filter((item) => {
         if (where?.resourceType && item.resourceType !== where.resourceType) {
+          return false;
+        }
+        if (where?.resourceId && item.resourceId !== where.resourceId) {
           return false;
         }
         if (where?.OR?.length) {
@@ -59,6 +63,7 @@ class FakeResourcePolicyDb {
     }: {
       where: {
         resourceType?: string;
+        resourceId?: string;
         OR?: Array<{
           subjectType: string;
           subjectId: string;
@@ -68,6 +73,9 @@ class FakeResourcePolicyDb {
       const before = this.rows.length;
       const remaining = this.rows.filter((item) => {
         if (where.resourceType && item.resourceType !== where.resourceType) {
+          return true;
+        }
+        if (where.resourceId && item.resourceId !== where.resourceId) {
           return true;
         }
         if (!where.OR?.length) {
@@ -276,6 +284,82 @@ describe("ResourcePolicyRepository", () => {
       "role:employee:workspace:workspace-new:allow",
       "department:dept-1:knowledge_set:knowledge-new:deny"
     ]);
+  });
+
+  it("replaces policies for only the targeted resource row", async () => {
+    const db = new FakeResourcePolicyDb([
+      {
+        id: "policy-workspace-a",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-a",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      },
+      {
+        id: "policy-workspace-b",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-b",
+        effect: "deny",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      }
+    ]);
+    const repository = new ResourcePolicyRepository(db as never);
+
+    const records = await repository.replacePoliciesForResource({
+      resourceType: "workspace",
+      resourceId: "workspace-a",
+      policies: [
+        {
+          organizationId: "org-1",
+          subjectType: "role",
+          subjectId: "employee",
+          resourceType: "workspace",
+          resourceId: "workspace-a",
+          effect: "deny"
+        }
+      ]
+    });
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        organizationId: "org-1",
+        resourceType: "workspace",
+        resourceId: "workspace-a",
+        subjectType: "role",
+        subjectId: "employee",
+        effect: "deny"
+      })
+    ]);
+    expect(db.rows.find((item) => item.id === "policy-workspace-b")).toBeDefined();
+    expect(db.rows.find((item) => item.resourceId === "workspace-b")?.effect).toBe("deny");
+  });
+
+  it("clears all policies when replacePolicies receives an empty payload", async () => {
+    const db = new FakeResourcePolicyDb([
+      {
+        id: "policy-a",
+        organizationId: null,
+        subjectType: "role",
+        subjectId: "employee",
+        resourceType: "workspace",
+        resourceId: "workspace-a",
+        effect: "allow",
+        createdAt: new Date("2026-03-27T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-27T00:00:00.000Z")
+      }
+    ]);
+    const repository = new ResourcePolicyRepository(db as never);
+
+    await expect(repository.replacePolicies([])).resolves.toEqual([]);
+    expect(db.rows).toEqual([]);
   });
 
   it("clears one exact replacement group with an empty policy set", async () => {

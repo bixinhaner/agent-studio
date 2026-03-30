@@ -82,6 +82,11 @@ type ResourcePolicyRepositoryLike = {
   replacePolicies(
     policies: Array<Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">>
   ): Promise<ResourcePolicyRecord[]>;
+  replacePoliciesForResource(input: {
+    resourceType: ResourcePolicyRecord["resourceType"];
+    resourceId: string;
+    policies: Array<Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">>;
+  }): Promise<ResourcePolicyRecord[]>;
   replacePoliciesForGroups(input: {
     groups: Array<{
       subjectType: ResourcePolicyRecord["subjectType"];
@@ -288,6 +293,9 @@ function parseReplacePoliciesRequest(body: unknown): {
   if (!Array.isArray(rawGroups)) {
     throw new Error("invalid resource policy groups payload");
   }
+  if (rawGroups.length === 0) {
+    throw new Error("invalid resource policy groups payload");
+  }
   const groups = rawGroups.map((group, index) => {
     if (!group || typeof group !== "object") {
       throw new Error(`invalid resource policy group at index ${index}`);
@@ -313,58 +321,28 @@ function parseReplacePoliciesRequest(body: unknown): {
   return { policies, groups };
 }
 
-function buildResourcePolicyReplacement(
-  allPolicies: ResourcePolicyRecord[],
+function buildScopedResourcePolicyReplacement(
+  existingTargetPolicies: ResourcePolicyRecord[],
   resourceType: ResourcePolicyRecord["resourceType"],
   resourceId: string,
   nextPolicies: ResourcePolicyInput[],
   defaultOrganizationId?: string
 ) {
-  const existingTargetPolicies = allPolicies.filter(
-    (policy) => policy.resourceType === resourceType && policy.resourceId === resourceId
-  );
   const existingTargetPoliciesByGroup = new Map<string, ResourcePolicyRecord>();
-  const groupsByKey = new Map<string, ResourcePolicyGroupInput>();
   for (const policy of existingTargetPolicies) {
     const groupKey = `${policy.subjectType}:${policy.subjectId}:${resourceType}`;
     existingTargetPoliciesByGroup.set(groupKey, policy);
-    groupsByKey.set(groupKey, {
-      subjectType: policy.subjectType,
-      subjectId: policy.subjectId,
-      resourceType
-    });
   }
-  for (const policy of nextPolicies) {
-    groupsByKey.set(`${policy.subjectType}:${policy.subjectId}:${resourceType}`, {
-      subjectType: policy.subjectType,
-      subjectId: policy.subjectId,
-      resourceType
-    });
-  }
-  const preservedPolicies = allPolicies.filter((policy) => !(policy.resourceType === resourceType && policy.resourceId === resourceId));
-  return {
-    groups: [...groupsByKey.values()],
-    policies: [
-      ...preservedPolicies.map((policy) => ({
-        organizationId: policy.organizationId,
-        subjectType: policy.subjectType,
-        subjectId: policy.subjectId,
-        resourceType: policy.resourceType,
-        resourceId: policy.resourceId,
-        effect: policy.effect
-      })),
-      ...nextPolicies.map((policy) => ({
-        organizationId:
-          existingTargetPoliciesByGroup.get(`${policy.subjectType}:${policy.subjectId}:${resourceType}`)?.organizationId ??
-          defaultOrganizationId,
-        subjectType: policy.subjectType,
-        subjectId: policy.subjectId,
-        resourceType,
-        resourceId,
-        effect: policy.effect
-      }))
-    ]
-  };
+  return nextPolicies.map((policy) => ({
+    organizationId:
+      existingTargetPoliciesByGroup.get(`${policy.subjectType}:${policy.subjectId}:${resourceType}`)?.organizationId ??
+      defaultOrganizationId,
+    subjectType: policy.subjectType,
+    subjectId: policy.subjectId,
+    resourceType,
+    resourceId,
+    effect: policy.effect
+  }));
 }
 
 export function createResourcesAdminRouter(options: {
@@ -495,6 +473,20 @@ export function createResourcesAdminRouter(options: {
         const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
         const items = await scanDirectory(rootPath);
         await options.knowledgeSets.replaceItems(knowledgeSetId, items);
+        if (options.resourceAccessLogs) {
+          await options.resourceAccessLogs.record({
+            userId: req.currentUser?.id,
+            resourceType: "knowledge_set",
+            resourceId: knowledgeSetId,
+            actionType: "write",
+            resultStatus: "success",
+            metadata: {
+              operation: "rebuild",
+              sourceType: knowledgeSet.sourceType,
+              itemCount: items.length
+            }
+          });
+        }
         res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
       } catch (error) {
         res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -513,7 +505,21 @@ export function createResourcesAdminRouter(options: {
       const { relativePath } = parseDeleteKnowledgeSetItem(req.body);
       const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
       await deleteFile(rootPath, relativePath);
-      await options.knowledgeSets.replaceItems(knowledgeSetId, await scanDirectory(rootPath));
+      const items = await scanDirectory(rootPath);
+      await options.knowledgeSets.replaceItems(knowledgeSetId, items);
+      if (options.resourceAccessLogs) {
+        await options.resourceAccessLogs.record({
+          userId: req.currentUser?.id,
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          actionType: "write",
+          resultStatus: "success",
+          metadata: {
+            operation: "delete",
+            relativePath
+          }
+        });
+      }
       res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -531,7 +537,22 @@ export function createResourcesAdminRouter(options: {
       const { relativePath, nextRelativePath } = parsePatchKnowledgeSetItem(req.body);
       const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
       await renameFile(rootPath, relativePath, nextRelativePath);
-      await options.knowledgeSets.replaceItems(knowledgeSetId, await scanDirectory(rootPath));
+      const items = await scanDirectory(rootPath);
+      await options.knowledgeSets.replaceItems(knowledgeSetId, items);
+      if (options.resourceAccessLogs) {
+        await options.resourceAccessLogs.record({
+          userId: req.currentUser?.id,
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          actionType: "write",
+          resultStatus: "success",
+          metadata: {
+            operation: "rename",
+            relativePath,
+            nextRelativePath
+          }
+        });
+      }
       res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -708,9 +729,23 @@ export function createResourcesAdminRouter(options: {
         return;
       }
       const nextPolicies = parseResourcePolicies(req.body, { requireExplicitArray: true });
-      const allPolicies = await options.resourcePolicies.listAll();
-      const replacement = buildResourcePolicyReplacement(allPolicies, "workspace", workspaceId, nextPolicies, workspace.organizationId);
-      res.json({ policies: await options.resourcePolicies.replacePoliciesForGroups(replacement) });
+      const existingPolicies = (await options.resourcePolicies.listAll()).filter(
+        (policy) => policy.resourceType === "workspace" && policy.resourceId === workspaceId
+      );
+      const policies = buildScopedResourcePolicyReplacement(
+        existingPolicies,
+        "workspace",
+        workspaceId,
+        nextPolicies,
+        workspace.organizationId
+      );
+      res.json({
+        policies: await options.resourcePolicies.replacePoliciesForResource({
+          resourceType: "workspace",
+          resourceId: workspaceId,
+          policies
+        })
+      });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
@@ -750,15 +785,23 @@ export function createResourcesAdminRouter(options: {
         return;
       }
       const nextPolicies = parseResourcePolicies(req.body, { requireExplicitArray: true });
-      const allPolicies = await options.resourcePolicies.listAll();
-      const replacement = buildResourcePolicyReplacement(
-        allPolicies,
+      const existingPolicies = (await options.resourcePolicies.listAll()).filter(
+        (policy) => policy.resourceType === "knowledge_set" && policy.resourceId === knowledgeSetId
+      );
+      const policies = buildScopedResourcePolicyReplacement(
+        existingPolicies,
         "knowledge_set",
         knowledgeSetId,
         nextPolicies,
         knowledgeSet.organizationId
       );
-      res.json({ policies: await options.resourcePolicies.replacePoliciesForGroups(replacement) });
+      res.json({
+        policies: await options.resourcePolicies.replacePoliciesForResource({
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          policies
+        })
+      });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }

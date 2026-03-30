@@ -416,6 +416,53 @@ describe("resources admin router", () => {
     ]);
   });
 
+  it("clears global resource policies when replacing with an explicit empty payload", async () => {
+    const { app, cookies, adminUser, resourcePolicies } = await buildResourcesAdminApp();
+    resourcePolicies.records.push({
+      id: "policy-1",
+      organizationId: undefined,
+      subjectType: "role",
+      subjectId: "employee",
+      resourceType: "workspace",
+      resourceId: "workspace-1",
+      effect: "allow",
+      createdAt: new Date("2026-03-30T00:00:00.000Z").toISOString(),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z").toISOString()
+    });
+
+    const response = await request(app)
+      .put("/api/admin/resource-policies")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ policies: [] });
+
+    expect(response.status).toBe(200);
+    expect(response.body.policies).toEqual([]);
+    expect(await resourcePolicies.listAll()).toEqual([]);
+  });
+
+  it("rejects empty global resource policy group lists", async () => {
+    const { app, cookies, adminUser } = await buildResourcesAdminApp();
+
+    const response = await request(app)
+      .put("/api/admin/resource-policies")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        groups: [],
+        policies: [
+          {
+            subjectType: "role",
+            subjectId: "employee",
+            resourceType: "workspace",
+            resourceId: "workspace-1",
+            effect: "allow"
+          }
+        ]
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toContain("invalid resource policy groups");
+  });
+
   it("rejects invalid global resource policy payloads", async () => {
     const { app, cookies, adminUser } = await buildResourcesAdminApp();
 
@@ -554,11 +601,10 @@ describe("resources admin router", () => {
       .send({ policies: [] });
 
     expect(response.status).toBe(200);
-    expect(response.body.policies).toEqual([
+    expect(response.body.policies).toEqual([]);
+    expect(await resourcePolicies.listAll()).toEqual([
       expect.objectContaining({
-        subjectType: "role",
-        subjectId: "employee",
-        resourceType: "workspace",
+        id: "policy-2",
         resourceId: workspaceB.id,
         effect: "deny"
       })
@@ -1227,9 +1273,41 @@ class FakeResourcePolicyRepository {
     return structuredClone(next);
   }
 
+  async replacePoliciesForResource(input: {
+    resourceType: ResourcePolicyRecord["resourceType"];
+    resourceId: string;
+    policies: Array<Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">>;
+  }): Promise<ResourcePolicyRecord[]> {
+    this.records.splice(
+      0,
+      this.records.length,
+      ...this.records.filter(
+        (item) => !(item.resourceType === input.resourceType && item.resourceId === input.resourceId)
+      )
+    );
+    const now = new Date().toISOString();
+    const next = input.policies.map((policy) => ({
+      id: `policy-${++this.counter}`,
+      organizationId: trimOrUndefined(policy.organizationId),
+      subjectType: policy.subjectType,
+      subjectId: policy.subjectId,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      effect: policy.effect,
+      createdAt: now,
+      updatedAt: now
+    }));
+    this.records.push(...structuredClone(next));
+    return structuredClone(next);
+  }
+
   async replacePolicies(
     policies: Array<Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">>
   ): Promise<ResourcePolicyRecord[]> {
+    if (policies.length === 0) {
+      this.records.splice(0, this.records.length);
+      return [];
+    }
     return this.replacePoliciesForGroups({
       groups: policies.map((policy) => ({
         subjectType: policy.subjectType,
@@ -1278,8 +1356,9 @@ async function buildResourcesAdminApp(options?: {
   const workspaces = new FakeWorkspaceRepository();
   const knowledgeSets = new FakeKnowledgeSetRepository(workspaces);
   const resourcePolicies = new FakeResourcePolicyRepository();
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "resources-admin-"));
-  const allowedFilesystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "resources-admin-workspaces-"));
+  const tempBase = await fs.realpath(os.tmpdir());
+  const storageRoot = await fs.mkdtemp(path.join(tempBase, "resources-admin-"));
+  const allowedFilesystemRoot = await fs.mkdtemp(path.join(tempBase, "resources-admin-workspaces-"));
   tempRoots.push(storageRoot);
   tempRoots.push(allowedFilesystemRoot);
   const storage = new FilesystemKnowledgeSetStorage(storageRoot);

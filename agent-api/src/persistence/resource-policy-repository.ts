@@ -44,6 +44,7 @@ type ResourcePolicyTable = {
   findMany(args: {
     where?: {
       resourceType?: ResourcePolicyResourceType;
+      resourceId?: string;
       OR?: SubjectRef[];
     };
     orderBy?: { createdAt?: "asc" | "desc" };
@@ -51,6 +52,7 @@ type ResourcePolicyTable = {
   deleteMany(args: {
     where: {
       resourceType?: ResourcePolicyResourceType;
+      resourceId?: string;
       OR?: SubjectRef[];
     };
   }): Promise<{ count: number }>;
@@ -73,6 +75,12 @@ type ReplaceResourcePoliciesPayload = Array<{
 
 type ReplaceResourcePolicyGroupsInput = {
   groups: ReplacementGroup[];
+  policies: ReplaceResourcePoliciesPayload;
+};
+
+type ReplaceResourcePoliciesForResourceInput = {
+  resourceType: ResourcePolicyResourceType;
+  resourceId: string;
   policies: ReplaceResourcePoliciesPayload;
 };
 
@@ -160,6 +168,12 @@ export class ResourcePolicyRepository {
   }
 
   async replacePolicies(policies: ReplaceResourcePoliciesPayload): Promise<ResourcePolicyRecord[]> {
+    if (policies.length === 0) {
+      await this.db.$transaction(async (tx) => {
+        await tx.resourcePolicy.deleteMany({ where: {} });
+      });
+      return [];
+    }
     return this.replacePoliciesForGroups({
       groups: policies.map((policy) => ({
         subjectType: policy.subjectType,
@@ -193,6 +207,46 @@ export class ResourcePolicyRepository {
           }
         });
       }
+
+      const created: ResourcePolicyRow[] = [];
+      for (const policy of normalizedPolicies) {
+        created.push(
+          await tx.resourcePolicy.create({
+            data: {
+              organizationId: policy.organizationId ?? null,
+              subjectType: policy.subjectType,
+              subjectId: policy.subjectId,
+              resourceType: policy.resourceType,
+              resourceId: policy.resourceId,
+              effect: policy.effect
+            }
+          })
+        );
+      }
+      return created
+        .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+        .map(mapResourcePolicy);
+    });
+  }
+
+  async replacePoliciesForResource(input: ReplaceResourcePoliciesForResourceInput): Promise<ResourcePolicyRecord[]> {
+    const resourceId = requireTrimmedValue(trimOrUndefined(input.resourceId), "resourceId");
+    const normalizedPolicies = input.policies.map((policy) => ({
+      organizationId: trimOrUndefined(policy.organizationId),
+      subjectType: policy.subjectType,
+      subjectId: requireTrimmedValue(trimOrUndefined(policy.subjectId), "subjectId"),
+      resourceType: input.resourceType,
+      resourceId,
+      effect: policy.effect
+    }));
+
+    return this.db.$transaction(async (tx) => {
+      await tx.resourcePolicy.deleteMany({
+        where: {
+          resourceType: input.resourceType,
+          resourceId
+        }
+      });
 
       const created: ResourcePolicyRow[] = [];
       for (const policy of normalizedPolicies) {

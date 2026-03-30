@@ -13,7 +13,8 @@ afterEach(async () => {
 });
 
 async function createTempRoot(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "knowledge-set-ops-"));
+  const tempBase = await fs.realpath(os.tmpdir());
+  const root = await fs.mkdtemp(path.join(tempBase, "knowledge-set-ops-"));
   tempRoots.push(root);
   return root;
 }
@@ -54,6 +55,17 @@ describe("filesystem knowledge set ops", () => {
     await expect(fs.readFile(path.join(root, "guides", "readme.md"), "utf8")).resolves.toBe("# FAQ\n");
   });
 
+  it("rejects renaming onto an existing target file", async () => {
+    const root = await createTempRoot();
+    await fs.mkdir(path.join(root, "docs"), { recursive: true });
+    await fs.writeFile(path.join(root, "docs", "faq.md"), "# FAQ\n");
+    await fs.writeFile(path.join(root, "docs", "readme.md"), "existing");
+
+    await expect(renameFile(root, "docs/faq.md", "docs/readme.md")).rejects.toThrow("already exists");
+    await expect(fs.readFile(path.join(root, "docs", "faq.md"), "utf8")).resolves.toBe("# FAQ\n");
+    await expect(fs.readFile(path.join(root, "docs", "readme.md"), "utf8")).resolves.toBe("existing");
+  });
+
   it("rejects delete and rename paths that escape the root", async () => {
     const root = await createTempRoot();
     await fs.writeFile(path.join(root, "faq.md"), "# FAQ\n");
@@ -68,5 +80,31 @@ describe("filesystem knowledge set ops", () => {
 
     await expect(deleteFile(root, ".")).rejects.toThrow("knowledge set file path is invalid");
     await expect(renameFile(root, ".", "next.md")).rejects.toThrow("knowledge set file path is invalid");
+  });
+
+  it("does not traverse symlinked paths under the knowledge-set root", async () => {
+    const root = await createTempRoot();
+    const outside = await createTempRoot();
+    await fs.mkdir(path.join(outside, "secret"), { recursive: true });
+    await fs.writeFile(path.join(outside, "secret", "data.txt"), "secret");
+    await fs.symlink(path.join(outside, "secret"), path.join(root, "linked"));
+
+    await expect(scanDirectory(root)).resolves.toEqual([]);
+    await expect(deleteFile(root, "linked/data.txt")).rejects.toThrow("symlinks");
+    await expect(renameFile(root, "linked/data.txt", "linked/renamed.txt")).rejects.toThrow("symlinks");
+    await expect(fs.readFile(path.join(outside, "secret", "data.txt"), "utf8")).resolves.toBe("secret");
+  });
+
+  it("rejects knowledge-set roots whose ancestor path segments are symlinks", async () => {
+    const rootParent = await createTempRoot();
+    const outside = await createTempRoot();
+    await fs.mkdir(path.join(outside, "docs"), { recursive: true });
+    await fs.writeFile(path.join(outside, "docs", "data.txt"), "secret");
+    await fs.symlink(outside, path.join(rootParent, "linked-root"));
+    const root = path.join(rootParent, "linked-root", "docs");
+
+    await expect(scanDirectory(root)).rejects.toThrow("cannot traverse symlinks");
+    await expect(deleteFile(root, "data.txt")).rejects.toThrow("cannot traverse symlinks");
+    await expect(renameFile(root, "data.txt", "renamed.txt")).rejects.toThrow("cannot traverse symlinks");
   });
 });
