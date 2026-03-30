@@ -289,6 +289,87 @@ model RuntimeSession {
   @@map("runtime_sessions")
 }
 
+model IntegrationInstance {
+  id                String                     @id @default(cuid())
+  organizationId    String?                    @map("organization_id")
+  type              String
+  slug              String
+  name              String
+  description       String?
+  status            String
+  isSystemSingleton Boolean                    @default(false) @map("is_system_singleton")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  updatedAt         DateTime                   @updatedAt @map("updated_at")
+
+  config            IntegrationInstanceConfig?
+  secret            IntegrationInstanceSecret?
+  validations       IntegrationValidationRun[]
+  bindings          IntegrationBindingRecord[]
+
+  @@unique([type, slug])
+  @@index([type])
+  @@index([organizationId, type])
+  @@map("integration_instances")
+}
+
+model IntegrationInstanceConfig {
+  id                    String              @id @default(cuid())
+  integrationInstanceId  String              @unique @map("integration_instance_id")
+  config                Json                @map("config")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  integrationInstance   IntegrationInstance @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@map("integration_instance_configs")
+}
+
+model IntegrationInstanceSecret {
+  id                    String              @id @default(cuid())
+  integrationInstanceId  String              @unique @map("integration_instance_id")
+  secretState           Json                @map("secret_state")
+  rotatedAt             DateTime?           @map("rotated_at")
+  rotatedByUserId       String?             @map("rotated_by_user_id")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  integrationInstance   IntegrationInstance @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@map("integration_instance_secrets")
+}
+
+model IntegrationValidationRun {
+  id                    String              @id @default(cuid())
+  integrationInstanceId  String              @map("integration_instance_id")
+  triggerType           String              @map("trigger_type")
+  status                String
+  summary               Json?
+  detail                Json?
+  triggeredByUserId     String?             @map("triggered_by_user_id")
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  integrationInstance   IntegrationInstance @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([integrationInstanceId, createdAt])
+  @@map("integration_validation_runs")
+}
+
+model IntegrationBindingRecord {
+  id                    String              @id @default(cuid())
+  integrationInstanceId  String              @map("integration_instance_id")
+  targetType            String              @map("target_type")
+  targetId              String              @map("target_id")
+  bindingType           String              @map("binding_type")
+  bindingPayload        Json                @map("binding_payload")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  integrationInstance   IntegrationInstance @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([integrationInstanceId, createdAt])
+  @@map("integration_binding_records")
+}
+
 model IntegrationConfig {
   key       String   @id
   config    Json
