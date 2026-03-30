@@ -58,6 +58,9 @@ import { iterateSSE } from "../../lib/sse";
 import { resolveRunThreadId } from "../../lib/thread-id-resolver";
 import { RuntimeProfileView } from "../modes/runtime-profile-view";
 import type { PortalRuntimeOptions } from "../modes/types";
+import { ThreadCollaborationPanel } from "../collaboration/ThreadCollaborationPanel";
+import { fetchThreadCollaboration } from "../collaboration/api";
+import type { ThreadCollaborationView } from "../collaboration/types";
 import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import { resolvePortalWorkspaceResources } from "../resources/workspace-resources";
@@ -1387,6 +1390,10 @@ export function PortalShell() {
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
   const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
   const [runtimeMode, setRuntimeMode] = useState("standard");
+  const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
+  const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
+  const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
+  const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
 
   const [statusText, setStatusText] = useState("就绪");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
@@ -1475,6 +1482,38 @@ export function PortalShell() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const remoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
+    if (!remoteThreadId) {
+      setThreadCollaboration(null);
+      setThreadCollaborationLoading(false);
+      setThreadCollaborationErrorText("");
+      return;
+    }
+
+    let cancelled = false;
+    setThreadCollaborationLoading(true);
+    setThreadCollaborationErrorText("");
+
+    void fetchThreadCollaboration(remoteThreadId)
+      .then((next) => {
+        if (cancelled) return;
+        setThreadCollaboration(next);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setThreadCollaboration(null);
+        setThreadCollaborationErrorText(error instanceof Error ? error.message : "加载协作状态失败");
+      })
+      .finally(() => {
+        if (!cancelled) setThreadCollaborationLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThreadIdentity.remoteId]);
 
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
@@ -1717,6 +1756,10 @@ export function PortalShell() {
             codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
           }
         });
+        setActiveThreadIdentity({
+          remoteId: created.thread.id,
+          localId: threadId || undefined
+        });
         return {
           remoteId: created.thread.id,
           externalId: created.thread.external_id
@@ -1783,6 +1826,10 @@ export function PortalShell() {
             const normalizedRemoteId = String(remoteId || "").trim();
             activeRemoteThreadIdRef.current = normalizedRemoteId;
             activeLocalThreadIdRef.current = String(localId || "").trim();
+            setActiveThreadIdentity({
+              remoteId: normalizedRemoteId || undefined,
+              localId: String(localId || "").trim() || undefined
+            });
             if (!normalizedRemoteId) {
               setContextUsage(null);
               return;
@@ -1810,6 +1857,9 @@ export function PortalShell() {
     appliedConfig.workspace
   );
   const selectedOptionalKnowledgeSetIds = selectedOptionalKnowledgeSetIdsByWorkspace[appliedConfig.workspace] ?? [];
+  const sharedThreadReadonly = Boolean(
+    threadCollaboration && threadCollaboration.access.canRead && !threadCollaboration.access.canRun
+  );
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2321,7 +2371,16 @@ export function PortalShell() {
     }
   });
   const threadContent = (
-    <div className="thread-dropzone">
+    <div
+      className={sharedThreadReadonly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
+      aria-disabled={sharedThreadReadonly}
+    >
+      {sharedThreadReadonly ? (
+        <div className="thread-readonly-banner" role="status">
+          <strong>共享只读线程</strong>
+          <span>共享视图中可查看消息和附件，但不能继续运行该线程。</span>
+        </div>
+      ) : null}
       <Thread
         strings={{
           threadList: {
@@ -2353,6 +2412,14 @@ export function PortalShell() {
         }}
         userMessage={{ allowEdit: true }}
       />
+      {sharedThreadReadonly ? (
+        <div className="thread-readonly-shield" aria-hidden="true">
+          <div className="thread-readonly-card">
+            <p>共享线程已切换为只读模式。</p>
+            <p>你仍可浏览消息、附件与右侧协作面板中的评论区。</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -2533,8 +2600,21 @@ export function PortalShell() {
             </div>
           </div>
 
-          <div className="thread-wrap">
-            {canUpload ? <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone> : threadContent}
+          <div className="portal-thread-layout">
+            <div className="thread-wrap">
+              {canUpload && !sharedThreadReadonly ? (
+                <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+              ) : (
+                threadContent
+              )}
+            </div>
+            <ThreadCollaborationPanel
+              threadId={String(activeThreadIdentity.remoteId || "").trim()}
+              collaboration={threadCollaboration}
+              loading={threadCollaborationLoading}
+              errorText={threadCollaborationErrorText}
+              onCollaborationChange={setThreadCollaboration}
+            />
           </div>
         </main>
         </div>

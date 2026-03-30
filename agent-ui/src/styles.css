@@ -490,6 +490,14 @@ body {
   overflow: hidden;
 }
 
+.portal-thread-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
 .chat-header {
   display: flex;
   align-items: center;
@@ -503,6 +511,87 @@ body {
 .chat-header h2 {
   margin: 0;
   font-size: 16px;
+}
+
+.collaboration-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.collaboration-panel-title-row {
+  align-items: flex-start;
+}
+
+.collaboration-panel-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.collaboration-panel-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.collaboration-panel-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe6f5;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f7fbff 100%);
+}
+
+.collaboration-panel-section h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.collaboration-panel-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.collaboration-textarea {
+  min-height: 88px;
+}
+
+.collaboration-comment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.collaboration-comment-card {
+  padding: 10px 12px;
+  border: 1px solid #d6e2f3;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.collaboration-comment-card p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.collaboration-comment-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.collaboration-capture-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
 }
 
 .config-tags {
@@ -664,6 +753,60 @@ body {
 .thread-dropzone {
   position: relative;
   height: 100%;
+}
+
+.thread-dropzone-readonly {
+  overflow: hidden;
+}
+
+.thread-readonly-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #f1d49a;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fff8e7 0%, #fff2d6 100%);
+  color: #8a4b08;
+  font-size: 12px;
+}
+
+.thread-readonly-shield {
+  position: absolute;
+  inset: 56px 0 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  pointer-events: auto;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(248, 250, 252, 0.78) 58%,
+    rgba(248, 250, 252, 0.96) 100%
+  );
+}
+
+.thread-readonly-card {
+  width: min(420px, 100%);
+  padding: 14px 16px;
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.thread-readonly-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.thread-readonly-card p + p {
+  margin-top: 6px;
+  color: #64748b;
 }
 
 .thread-dropzone[data-dragging="true"]::before {
@@ -1395,6 +1538,10 @@ body {
 
   .agent-sidebar {
     overflow: visible;
+  }
+
+  .portal-thread-layout {
+    grid-template-columns: 1fr;
   }
 
   .thread-wrap .aui-thread-root {

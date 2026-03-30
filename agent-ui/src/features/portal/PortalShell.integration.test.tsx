@@ -12,6 +12,11 @@ let capturedChatAdapter: {
     abortSignal?: AbortSignal;
   }): AsyncGenerator<unknown>;
 } | null = null;
+let currentThreadListItemState = {
+  id: "",
+  remoteId: "",
+  title: ""
+};
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -53,7 +58,7 @@ vi.mock("@assistant-ui/react", () => {
     },
     useAui: () => ({
       threadListItem: () => ({
-        getState: () => ({ remoteId: "", id: "", title: "" }),
+        getState: () => currentThreadListItemState,
         rename: vi.fn(),
         initialize: vi.fn(),
         generateTitle: vi.fn()
@@ -98,11 +103,31 @@ vi.mock("@assistant-ui/core", () => ({
 }));
 
 vi.mock("@assistant-ui/store", () => ({
-  useAuiState: () => ({ threadListItem: { id: "", remoteId: "", title: "" } })
+  useAuiState: (selector: (state: { threadListItem: typeof currentThreadListItemState }) => unknown) =>
+    selector({ threadListItem: currentThreadListItemState })
 }));
 
 vi.mock("../zendesk/ZendeskIntegrationPanel", () => ({
   ZendeskIntegrationPanel: () => <div data-testid="zendesk-panel" />
+}));
+
+vi.mock("../collaboration/ThreadCollaborationPanel", () => ({
+  ThreadCollaborationPanel: ({
+    threadId,
+    collaboration,
+    loading,
+    errorText
+  }: {
+    threadId: string;
+    collaboration: { access?: { canRun?: boolean } } | null;
+    loading: boolean;
+    errorText: string;
+  }) => (
+    <div data-testid="thread-collaboration-panel">
+      {threadId}:{loading ? "loading" : collaboration?.access?.canRun === false ? "readonly" : "interactive"}:
+      {errorText || "ok"}
+    </div>
+  )
 }));
 
 import PortalShell from "./PortalShell";
@@ -114,6 +139,11 @@ describe("PortalShell knowledge set integration", () => {
   beforeEach(() => {
     capturedThreadListAdapter = null;
     capturedChatAdapter = null;
+    currentThreadListItemState = {
+      id: "",
+      remoteId: "",
+      title: ""
+    };
     mockedApi.mockReset();
   });
 
@@ -259,6 +289,23 @@ describe("PortalShell knowledge set integration", () => {
         }
       })
       .mockResolvedValueOnce({
+        collaboration: {
+          threadId: "thread-1",
+          ownerUserId: "owner-1",
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: true,
+            isOwner: true
+          },
+          shares: [],
+          comments: [],
+          assignment: null,
+          followers: [],
+          captureMark: null
+        }
+      })
+      .mockResolvedValueOnce({
         session: {
           session_id: "session-2",
           model: "gpt-5",
@@ -309,5 +356,110 @@ describe("PortalShell knowledge set integration", () => {
         })
       })
     );
+  });
+
+  it("loads active-thread collaboration once and exposes shared-thread readonly copy when canRun is false", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: [
+          {
+            id: "ws-docs",
+            label: "Docs",
+            slug: "docs",
+            is_default: true,
+            runtime_workspace_path: "/workspace/default",
+            default_knowledge_sets: [],
+            optional_knowledge_sets: []
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        thread: {
+          id: "thread-1",
+          status: "regular",
+          model: "gpt-5",
+          reasoning_effort: "high",
+          workspace: "/workspace/default",
+          created_at: "2026-03-29T00:00:00.000Z",
+          updated_at: "2026-03-29T00:00:00.000Z"
+        }
+      })
+      .mockResolvedValueOnce({
+        collaboration: {
+          threadId: "thread-1",
+          ownerUserId: "owner-1",
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: false,
+            isOwner: false
+          },
+          shares: [],
+          comments: [],
+          assignment: null,
+          followers: [],
+          captureMark: null
+        }
+      });
+
+    const view = render(<PortalShell />);
+
+    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+
+    await act(async () => {
+      await capturedThreadListAdapter?.initialize("thread-1");
+    });
+
+    currentThreadListItemState = {
+      id: "local-thread-1",
+      remoteId: "thread-1",
+      title: "Shared thread"
+    };
+    view.rerender(<PortalShell />);
+
+    expect(await screen.findByText("共享视图中可查看消息和附件，但不能继续运行该线程。")).toBeTruthy();
+    expect((await screen.findByTestId("thread-collaboration-panel")).textContent).toBe("thread-1:readonly:ok");
+    expect(mockedApi).toHaveBeenCalledWith("/api/threads/thread-1/collaboration");
   });
 });
