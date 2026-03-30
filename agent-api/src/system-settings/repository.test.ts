@@ -64,8 +64,17 @@ class FakeSystemSettingsDb {
   private delayedUpdateBarrier?: ReturnType<typeof createBarrier>;
   private delayedUpdatePredicate?: (data: Record<string, unknown>) => boolean;
   private delayedUpdateConsumed = false;
+  private delayedCreateBarrier?: ReturnType<typeof createBarrier>;
+  private delayedCreatePredicate?: (data: Record<string, unknown>) => boolean;
+  private delayedCreateConsumed = false;
+  private createFailurePredicate?: (data: Record<string, unknown>) => boolean;
+  private createFailureError?: Error;
+  private remainingCreateFailures = 0;
   private draftLookupBarrier?: ReturnType<typeof createBarrier>;
   private versionLookupBarrier?: ReturnType<typeof createBarrier>;
+  private transactionCounter = 0;
+  private rowLockOwnerById = new Map<string, number>();
+  private rowLockWaitersById = new Map<string, Array<() => void>>();
 
   readonly rows: FakeSystemSettingsVersionRow[] = [];
 
@@ -77,6 +86,21 @@ class FakeSystemSettingsDb {
     this.versionLookupBarrier = barrier;
   }
 
+  setDelayedCreateBarrier(
+    barrier: ReturnType<typeof createBarrier>,
+    predicate: (data: Record<string, unknown>) => boolean
+  ): void {
+    this.delayedCreateBarrier = barrier;
+    this.delayedCreatePredicate = predicate;
+    this.delayedCreateConsumed = false;
+  }
+
+  failNextCreates(count: number, predicate: (data: Record<string, unknown>) => boolean, error: Error): void {
+    this.remainingCreateFailures = count;
+    this.createFailurePredicate = predicate;
+    this.createFailureError = error;
+  }
+
   setDelayedUpdateBarrier(
     barrier: ReturnType<typeof createBarrier>,
     predicate: (data: Record<string, unknown>) => boolean
@@ -86,11 +110,54 @@ class FakeSystemSettingsDb {
     this.delayedUpdateConsumed = false;
   }
 
+  private async maybeDelayCreate(data: Record<string, unknown>): Promise<void> {
+    if (this.delayedCreateConsumed) return;
+    if (!this.delayedCreateBarrier || !this.delayedCreatePredicate || !this.delayedCreatePredicate(data)) return;
+    this.delayedCreateConsumed = true;
+    await this.delayedCreateBarrier.wait();
+  }
+
   private async maybeDelayUpdate(data: Record<string, unknown>): Promise<void> {
     if (this.delayedUpdateConsumed) return;
     if (!this.delayedUpdateBarrier || !this.delayedUpdatePredicate || !this.delayedUpdatePredicate(data)) return;
     this.delayedUpdateConsumed = true;
     await this.delayedUpdateBarrier.wait();
+  }
+
+  private async acquireRowLock(rowId: string, transactionId?: number): Promise<boolean> {
+    if (!transactionId) {
+      return false;
+    }
+    while (true) {
+      const owner = this.rowLockOwnerById.get(rowId);
+      if (owner === undefined) {
+        this.rowLockOwnerById.set(rowId, transactionId);
+        return true;
+      }
+      if (owner === transactionId) {
+        return false;
+      }
+      await new Promise<void>((resolve) => {
+        const waiters = this.rowLockWaitersById.get(rowId) ?? [];
+        waiters.push(resolve);
+        this.rowLockWaitersById.set(rowId, waiters);
+      });
+    }
+  }
+
+  private releaseRowLock(rowId: string, transactionId: number): void {
+    if (this.rowLockOwnerById.get(rowId) !== transactionId) {
+      return;
+    }
+    this.rowLockOwnerById.delete(rowId);
+    const waiters = this.rowLockWaitersById.get(rowId) ?? [];
+    const next = waiters.shift();
+    if (waiters.length > 0) {
+      this.rowLockWaitersById.set(rowId, waiters);
+    } else {
+      this.rowLockWaitersById.delete(rowId);
+    }
+    next?.();
   }
 
   private applyRowUpdate(row: FakeSystemSettingsVersionRow, data: Record<string, unknown>): FakeSystemSettingsVersionRow {
@@ -116,7 +183,8 @@ class FakeSystemSettingsDb {
     return row;
   }
 
-  readonly systemSettingsVersion = {
+  private createSystemSettingsVersionTable(transactionId?: number) {
+    return {
     findMany: async ({
       where,
       orderBy,
@@ -162,6 +230,15 @@ class FakeSystemSettingsDb {
       return clone(typeof take === "number" ? rows.slice(0, take) : rows);
     },
     create: async ({ data }: { data: Record<string, unknown> }) => {
+      await this.maybeDelayCreate(data);
+      if (
+        this.remainingCreateFailures > 0 &&
+        this.createFailurePredicate?.(data) &&
+        this.createFailureError
+      ) {
+        this.remainingCreateFailures -= 1;
+        throw this.createFailureError;
+      }
       const versionNumber = typeof data.versionNumber === "number" ? data.versionNumber : ++this.counter;
       const status = data.status === "published" || data.status === "draft" ? data.status : "draft";
 
@@ -203,17 +280,44 @@ class FakeSystemSettingsDb {
     }) => {
       const row = this.rows.find((item) => item.id === where.id);
       if (!row) return { count: 0 };
+      const acquiredLock = await this.acquireRowLock(where.id, transactionId);
       await this.maybeDelayUpdate(data);
       if (where.revision !== undefined && row.revision !== where.revision) {
+        if (acquiredLock && transactionId) {
+          this.releaseRowLock(where.id, transactionId);
+        }
         return { count: 0 };
       }
       this.applyRowUpdate(row, data);
       return { count: 1 };
     }
   };
+  }
+
+  systemSettingsVersion = this.createSystemSettingsVersionTable();
 
   async $transaction<T>(callback: (tx: FakeSystemSettingsDb) => Promise<T>): Promise<T> {
-    return callback(this);
+    const transactionId = ++this.transactionCounter;
+    const lockedRowIds = new Set<string>();
+    const tx = Object.create(this) as FakeSystemSettingsDb;
+    tx.systemSettingsVersion = {
+      ...this.createSystemSettingsVersionTable(transactionId),
+      updateMany: async (args: { where: { id: string; revision?: number }; data: Record<string, unknown> }) => {
+        const result = await this.createSystemSettingsVersionTable(transactionId).updateMany(args);
+        if (result.count > 0) {
+          lockedRowIds.add(args.where.id);
+        }
+        return result;
+      }
+    };
+
+    try {
+      return await callback(tx);
+    } finally {
+      for (const rowId of lockedRowIds) {
+        this.releaseRowLock(rowId, transactionId);
+      }
+    }
   }
 }
 
@@ -239,10 +343,10 @@ describe("SystemSettingsRepository", () => {
         sessionDays: 45
       }
     });
-    const secondResult = await secondSave;
     delayedUpdate.open();
 
     await firstSave;
+    const secondResult = await secondSave;
     const draft = await repository.getOrCreateDraft();
 
     expect(secondResult.payload).toMatchObject({
@@ -276,7 +380,7 @@ describe("SystemSettingsRepository", () => {
     expect(db.rows.filter((row) => row.status === "draft")).toHaveLength(1);
   });
 
-  it("retries publish when version numbers race", async () => {
+  it("retries publish when the published insert hits a version-number conflict", async () => {
     const db = new FakeSystemSettingsDb();
     db.rows.push({
       id: "draft-1",
@@ -291,21 +395,58 @@ describe("SystemSettingsRepository", () => {
     });
 
     const repository = new SystemSettingsRepository(db as never);
-    const versionLookupBarrier = createBarrier(2);
-    db.setVersionLookupBarrier(versionLookupBarrier);
+    db.failNextCreates(
+      1,
+      (data) => data.status === "published",
+      createUniqueConstraintError("system_settings_versions.version_number")
+    );
 
-    const firstPublish = repository.publishDraft({
+    const published = await repository.publishDraft({
       publishedByUserId: "admin-1"
     });
-    const secondPublish = repository.publishDraft({
-      publishedByUserId: "admin-2"
+
+    expect(published.versionNumber).toBe(2);
+    expect(published.revision).toBe(1);
+    expect(db.rows.filter((row) => row.status === "published")).toHaveLength(1);
+  });
+
+  it("does not let publish finalize against a stale draft while a save is racing", async () => {
+    const db = new FakeSystemSettingsDb();
+    const repository = new SystemSettingsRepository(db as never);
+    const publishCreateBarrier = createBarrier();
+    const saveUpdateBarrier = createBarrier();
+
+    db.setDelayedCreateBarrier(publishCreateBarrier, (data) => data.status === "published");
+    db.setDelayedUpdateBarrier(saveUpdateBarrier, (data) => {
+      const payload = data.payload as { branding?: { platformName?: string } } | undefined;
+      return payload?.branding?.platformName === "Published After Save";
     });
-    await versionLookupBarrier.whenEntered();
-    versionLookupBarrier.open();
 
-    const [firstResult, secondResult] = await Promise.all([firstPublish, secondPublish]);
+    const publishPromise = repository.publishDraft({
+      publishedByUserId: "admin-1"
+    });
+    await publishCreateBarrier.whenEntered();
 
-    expect([firstResult.versionNumber, secondResult.versionNumber].sort()).toEqual([2, 3]);
-    expect(db.rows.filter((row) => row.status === "published")).toHaveLength(2);
+    let saveReachedUpdate = false;
+    const saveReachedUpdatePromise = saveUpdateBarrier.whenEntered().then(() => {
+      saveReachedUpdate = true;
+    });
+    const savePromise = repository.saveDraft({
+      branding: {
+        platformName: "Published After Save"
+      }
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(saveReachedUpdate).toBe(false);
+
+    publishCreateBarrier.open();
+    await saveReachedUpdatePromise;
+    saveUpdateBarrier.open();
+
+    const [published, saved] = await Promise.all([publishPromise, savePromise]);
+
+    expect(published.payload.branding.platformName).toBe("Agent Studio");
+    expect(saved.payload.branding.platformName).toBe("Published After Save");
   });
 });

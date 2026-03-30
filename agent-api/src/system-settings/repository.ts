@@ -206,31 +206,46 @@ export class SystemSettingsRepository {
     }
 
     return withTransaction(this.db, async (tx) => {
-      const draft = await getOrCreateDraftRow(tx);
       for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          const published = await tx.systemSettingsVersion.create({
-            data: {
-              versionNumber: await nextVersionNumber(tx),
-              revision: draft.revision,
-              status: "published",
-              payload: draft.payload,
-              publishedAt: new Date(),
-              publishedByUserId
+        const draft = await getOrCreateDraftRow(tx);
+        const currentPayload: SystemSettingsPayload = systemSettingsPayloadSchema.parse(draft.payload);
+        const claimedRevision = draft.revision + 1;
+        const claimed = await tx.systemSettingsVersion.updateMany({
+          where: {
+            id: draft.id,
+            revision: draft.revision
+          },
+          data: {
+            payload: currentPayload,
+            revision: claimedRevision,
+            updatedAt: new Date()
+          }
+        });
+        if (claimed.count === 0) {
+          continue;
+        }
+
+        for (let createAttempt = 0; createAttempt < 5; createAttempt++) {
+          try {
+            const published = await tx.systemSettingsVersion.create({
+              data: {
+                versionNumber: await nextVersionNumber(tx),
+                revision: claimedRevision,
+                status: "published",
+                payload: currentPayload,
+                publishedAt: new Date(),
+                publishedByUserId
+              }
+            });
+            return mapVersionRow(published);
+          } catch (error) {
+            if (!isUniqueConstraintError(error)) {
+              throw error;
             }
-          });
-          return mapVersionRow(published);
-        } catch (error) {
-          if (!isUniqueConstraintError(error)) {
-            throw error;
           }
         }
       }
 
-      const latestPublished = await loadLatestVersion(tx, "published");
-      if (latestPublished) {
-        return mapVersionRow(latestPublished);
-      }
       throw new Error("system settings publish conflict");
     });
   }
