@@ -66,6 +66,7 @@ class FakeIntegrationInstanceDb {
   private secretCounter = 0;
   private validationCounter = 0;
   private bindingCounter = 0;
+  suppressSingletonLookup = false;
 
   readonly instances: FakeIntegrationInstanceRow[] = [];
   readonly configs: FakeIntegrationInstanceConfigRow[] = [];
@@ -89,6 +90,9 @@ class FakeIntegrationInstanceDb {
       where?: { type?: string };
       orderBy?: { createdAt?: "asc" | "desc" };
     } = {}) => {
+      if (this.suppressSingletonLookup && where?.type && (where.type === "dingtalk" || where.type === "openai_codex")) {
+        return [];
+      }
       const rows = this.instances.filter((item) => (where?.type ? item.type === where.type : true));
       rows.sort((left, right) => {
         const diff = left.createdAt.getTime() - right.createdAt.getTime();
@@ -97,11 +101,15 @@ class FakeIntegrationInstanceDb {
       return clone(rows);
     },
     create: async ({ data }: { data: Record<string, unknown> }) => {
+      const type = typeof data.type === "string" ? data.type : "";
+      if ((type === "dingtalk" || type === "openai_codex") && this.instances.some((item) => item.type === type)) {
+        throw new Error(`unique constraint failed on integration_instances.type for ${type}`);
+      }
       const now = new Date();
       const row: FakeIntegrationInstanceRow = {
         id: typeof data.id === "string" ? data.id : `integration-instance-${++this.instanceCounter}`,
         organizationId: typeof data.organizationId === "string" ? data.organizationId : null,
-        type: typeof data.type === "string" ? data.type : "",
+        type,
         slug: typeof data.slug === "string" ? data.slug : "",
         name: typeof data.name === "string" ? data.name : "",
         description: typeof data.description === "string" ? data.description : null,
@@ -310,6 +318,33 @@ describe("IntegrationInstanceRepository", () => {
       name: "Zendesk B"
     });
     expect(secondZendesk.id).not.toBe(firstZendesk.id);
+  });
+
+  it("relies on the database constraint when singleton lookups miss a concurrent create", async () => {
+    const db = new FakeIntegrationInstanceDb();
+    db.suppressSingletonLookup = true;
+    db.instances.push({
+      id: "existing-dingtalk",
+      organizationId: null,
+      type: "dingtalk",
+      slug: "corp-main",
+      name: "Corp Main",
+      description: null,
+      status: "active",
+      isSystemSingleton: true,
+      createdAt: new Date("2026-03-30T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-30T00:00:00.000Z")
+    });
+
+    const repository = new IntegrationInstanceRepository(db as never);
+
+    await expect(
+      repository.createInstance({
+        type: "dingtalk",
+        slug: "corp-race",
+        name: "Corp Race"
+      })
+    ).rejects.toThrow(/single-instance/i);
   });
 
   it("stores secret rotation metadata without exposing secret payload in summary reads", async () => {

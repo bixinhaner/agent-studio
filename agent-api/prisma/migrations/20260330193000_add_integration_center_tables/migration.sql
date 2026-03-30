@@ -71,6 +71,11 @@ CREATE TABLE "integration_binding_records" (
 CREATE UNIQUE INDEX "integration_instances_type_slug_key" ON "integration_instances"("type", "slug");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "integration_instances_singleton_type_key"
+  ON "integration_instances"("type")
+  WHERE "type" IN ('dingtalk', 'openai_codex');
+
+-- CreateIndex
 CREATE INDEX "integration_instances_type_idx" ON "integration_instances"("type");
 
 -- CreateIndex

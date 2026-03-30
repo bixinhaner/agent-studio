@@ -297,6 +297,7 @@ model IntegrationInstance {
   name              String
   description       String?
   status            String
+  /// Singleton types are enforced by a partial unique index in the migration.
   isSystemSingleton Boolean                    @default(false) @map("is_system_singleton")
   createdAt         DateTime                   @default(now()) @map("created_at")
   updatedAt         DateTime                   @updatedAt @map("updated_at")

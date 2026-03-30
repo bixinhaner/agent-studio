@@ -205,6 +205,13 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function isSingletonConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  const code = "code" in error ? String(error.code) : "";
+  return code === "P2002" || /unique|constraint|single-instance/i.test(message);
+}
+
 function mapSecretState(row: IntegrationInstanceSecretRow | null | undefined): IntegrationInstanceSecretStateSummary {
   return {
     hasSecrets: typeof row?.hasSecrets === "boolean" ? row.hasSecrets : Boolean(row),
@@ -295,17 +302,25 @@ export class IntegrationInstanceRepository {
         }
       }
 
-      const created = await tx.integrationInstance.create({
-        data: {
-          organizationId: trimOrUndefined(input.organizationId) ?? null,
-          type: input.type,
-          slug: input.slug,
-          name: input.name,
-          description: trimOrUndefined(input.description) ?? null,
-          status: input.status ?? "draft",
-          isSystemSingleton: SINGLETON_TYPES.has(input.type)
+      let created: IntegrationInstanceRow;
+      try {
+        created = await tx.integrationInstance.create({
+          data: {
+            organizationId: trimOrUndefined(input.organizationId) ?? null,
+            type: input.type,
+            slug: input.slug,
+            name: input.name,
+            description: trimOrUndefined(input.description) ?? null,
+            status: input.status ?? "draft",
+            isSystemSingleton: SINGLETON_TYPES.has(input.type)
+          }
+        });
+      } catch (error) {
+        if (SINGLETON_TYPES.has(input.type) && isSingletonConflictError(error)) {
+          throw new Error(`single-instance integration already exists for ${input.type}`);
         }
-      });
+        throw error;
+      }
 
       return loadSummary(tx, created);
     });
