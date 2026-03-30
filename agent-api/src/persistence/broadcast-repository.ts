@@ -112,17 +112,28 @@ function toIsoString(value: Date | string | null | undefined): string | undefine
   return parsed.toISOString();
 }
 
-function normalizeTargetType(value: string): BroadcastTargetType {
-  if (value === "department" || value === "role") return value;
-  return "all_users";
+function assertBroadcastTargetType(value: string): BroadcastTargetType {
+  if (value === "all_users" || value === "department" || value === "role") return value;
+  throw new Error("broadcast targetType must be all_users, department, or role");
+}
+
+function requireBroadcastTargetId(targetType: BroadcastTargetType, targetId: string | null | undefined): string | undefined {
+  if (targetType === "all_users") {
+    return undefined;
+  }
+  const trimmed = trimOrUndefined(targetId);
+  if (!trimmed) {
+    throw new Error(`broadcast targets of type ${targetType} require targetId`);
+  }
+  return trimmed;
 }
 
 function normalizeTargets(targets: BroadcastTargetInput[] | undefined): BroadcastTargetInput[] {
   const seen = new Set<string>();
   const normalized: BroadcastTargetInput[] = [];
   for (const target of targets ?? []) {
-    const targetType = normalizeTargetType(target.targetType);
-    const targetId = trimOrUndefined(target.targetId);
+    const targetType = assertBroadcastTargetType(target.targetType);
+    const targetId = requireBroadcastTargetId(targetType, target.targetId);
     const key = `${targetType}:${targetId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -135,11 +146,12 @@ function normalizeTargets(targets: BroadcastTargetInput[] | undefined): Broadcas
 }
 
 function mapBroadcastTarget(row: BroadcastTargetLike): BroadcastTargetRecord {
+  const targetType = assertBroadcastTargetType(row.targetType);
   return {
     id: row.id,
     broadcastId: row.broadcastId,
-    targetType: normalizeTargetType(row.targetType),
-    targetId: trimOrUndefined(row.targetId),
+    targetType,
+    targetId: targetType === "all_users" ? undefined : requireBroadcastTargetId(targetType, row.targetId),
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString()
   };
 }

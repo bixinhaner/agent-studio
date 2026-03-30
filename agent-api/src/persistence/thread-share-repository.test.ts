@@ -128,4 +128,14 @@ describe("ThreadShareRepository", () => {
     expect(db.rows.find((row) => row.id === "share-1")?.revokedByUserId).toBe("owner-2");
     expect(await repository.listForThread("thread-1")).toHaveLength(1);
   });
+
+  it("rejects invalid subject types", async () => {
+    const repository = new ThreadShareRepository(new FakeThreadShareDb() as never);
+
+    await expect(
+      repository.replaceForThread("thread-1", [
+        { subjectType: "team" as never, subjectId: "dept-1", permissionLevel: "read_comment", sharedByUserId: "owner-1" }
+      ])
+    ).rejects.toThrow("thread share subjectType must be user or department");
+  });
 });

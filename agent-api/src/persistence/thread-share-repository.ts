@@ -67,11 +67,18 @@ function toIsoString(value: Date | string | null | undefined): string | undefine
   return parsed.toISOString();
 }
 
+function assertThreadShareSubjectType(value: string): ThreadShareSubjectType {
+  if (value === "user" || value === "department") {
+    return value;
+  }
+  throw new Error("thread share subjectType must be user or department");
+}
+
 function mapThreadShare(row: ThreadShareRow): ThreadShareRecord {
   return {
     id: row.id,
     threadId: row.threadId,
-    subjectType: row.subjectType as ThreadShareSubjectType,
+    subjectType: assertThreadShareSubjectType(row.subjectType),
     subjectId: row.subjectId,
     permissionLevel: row.permissionLevel as ThreadSharePermissionLevel,
     sharedByUserId: trimOrUndefined(row.sharedByUserId),
@@ -82,11 +89,6 @@ function mapThreadShare(row: ThreadShareRow): ThreadShareRecord {
   };
 }
 
-function normalizeSubjectType(value: string): ThreadShareSubjectType {
-  if (value === "department") return "department";
-  return "user";
-}
-
 function normalizePermissionLevel(value: string | undefined): ThreadSharePermissionLevel {
   return value === "read_comment" ? value : "read_comment";
 }
@@ -95,7 +97,7 @@ function normalizeShares(shares: ThreadShareInput[]): ThreadShareInput[] {
   const seen = new Set<string>();
   const normalized: ThreadShareInput[] = [];
   for (const share of shares) {
-    const subjectType = normalizeSubjectType(share.subjectType);
+    const subjectType = assertThreadShareSubjectType(share.subjectType);
     const subjectId = trimOrUndefined(share.subjectId);
     if (!subjectId) continue;
     const key = `${subjectType}:${subjectId}`;
@@ -193,7 +195,7 @@ export class ThreadShareRepository {
     });
     return rows
       .filter((row) => {
-        const subjectType = normalizeSubjectType(row.subjectType);
+        const subjectType = assertThreadShareSubjectType(row.subjectType);
         if (subjectType === "user") {
           return row.subjectId === userId;
         }

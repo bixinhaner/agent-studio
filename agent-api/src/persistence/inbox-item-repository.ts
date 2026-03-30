@@ -116,6 +116,14 @@ function normalizeStatus(value: string | undefined): InboxItemStatus {
   return value === "read" || value === "archived" ? value : "unread";
 }
 
+function initialReadAtForStatus(status: InboxItemStatus): Date | null {
+  return status === "unread" ? null : new Date();
+}
+
+function initialArchivedAtForStatus(status: InboxItemStatus): Date | null {
+  return status === "archived" ? new Date() : null;
+}
+
 export class InboxItemRepository {
   constructor(private readonly db: InboxItemRepositoryDb) {}
 
@@ -129,6 +137,7 @@ export class InboxItemRepository {
       throw new Error("userId, eventType, category, title, and body are required");
     }
     const now = new Date();
+    const status = normalizeStatus(input.status);
     const created = await this.db.inboxItem.create({
       data: {
         userId,
@@ -136,14 +145,14 @@ export class InboxItemRepository {
         category,
         title,
         body,
-        status: normalizeStatus(input.status),
+        status,
         threadId: trimOrUndefined(input.threadId) ?? null,
         relatedEntityType: trimOrUndefined(input.relatedEntityType) ?? null,
         relatedEntityId: trimOrUndefined(input.relatedEntityId) ?? null,
         sourceActorUserId: trimOrUndefined(input.sourceActorUserId) ?? null,
         payload: input.payload ?? null,
-        readAt: null,
-        archivedAt: null,
+        readAt: initialReadAtForStatus(status),
+        archivedAt: initialArchivedAtForStatus(status),
         createdAt: now,
         updatedAt: now
       }

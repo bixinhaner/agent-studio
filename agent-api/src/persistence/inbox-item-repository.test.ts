@@ -138,4 +138,38 @@ describe("InboxItemRepository", () => {
     expect(updated.readAt).toBeUndefined();
     expect(updated.archivedAt).toBeUndefined();
   });
+
+  it("sets read metadata for items created as read or archived", async () => {
+    const repository = new InboxItemRepository(new FakeInboxItemDb() as never);
+
+    const readItem = await repository.create({
+      userId: "user-1",
+      eventType: "thread.comment_added",
+      category: "collaboration",
+      title: "read item",
+      body: "body",
+      status: "read"
+    });
+    const archivedItem = await repository.create({
+      userId: "user-1",
+      eventType: "thread.shared",
+      category: "collaboration",
+      title: "archived item",
+      body: "body",
+      status: "archived"
+    });
+
+    expect(readItem.status).toBe("read");
+    expect(readItem.readAt).toEqual(expect.any(String));
+    expect(readItem.archivedAt).toBeUndefined();
+
+    expect(archivedItem.status).toBe("archived");
+    expect(archivedItem.readAt).toEqual(expect.any(String));
+    expect(archivedItem.archivedAt).toEqual(expect.any(String));
+
+    const restored = await repository.unarchive(archivedItem.id, "user-1");
+    expect(restored.status).toBe("read");
+    expect(restored.readAt).toEqual(archivedItem.readAt);
+    expect(restored.archivedAt).toBeUndefined();
+  });
 });

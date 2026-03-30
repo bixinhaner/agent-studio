@@ -160,4 +160,35 @@ describe("BroadcastRepository", () => {
     expect(published.publishedByUserId).toBe("admin-2");
     expect(published.publishedAt).toEqual(expect.any(String));
   });
+
+  it("rejects invalid target types and missing target ids for addressed targets", async () => {
+    const repository = new BroadcastRepository(new FakeBroadcastDb() as never);
+
+    await expect(
+      repository.createDraft({
+        title: "Heads up",
+        bodyMarkdown: "Message body",
+        createdByUserId: "admin-1",
+        targets: [{ targetType: "team" as never, targetId: "team-1" }]
+      })
+    ).rejects.toThrow("broadcast targetType must be all_users, department, or role");
+
+    await expect(
+      repository.createDraft({
+        title: "Heads up",
+        bodyMarkdown: "Message body",
+        createdByUserId: "admin-1",
+        targets: [{ targetType: "department", targetId: undefined }]
+      })
+    ).rejects.toThrow("broadcast targets of type department require targetId");
+
+    await expect(
+      repository.createDraft({
+        title: "Heads up",
+        bodyMarkdown: "Message body",
+        createdByUserId: "admin-1",
+        targets: [{ targetType: "role", targetId: null }]
+      })
+    ).rejects.toThrow("broadcast targets of type role require targetId");
+  });
 });
