@@ -10,6 +10,10 @@ vi.mock("./WorkspaceDetailView", () => ({
   WorkspaceDetailView: ({ workspace }: { workspace: { name: string } }) => <section>详情: {workspace.name}</section>
 }));
 
+vi.mock("./KnowledgeSetDetailView", () => ({
+  KnowledgeSetDetailView: ({ knowledgeSet }: { knowledgeSet: { name: string } }) => <section>资料集详情: {knowledgeSet.name}</section>
+}));
+
 import { fetchKnowledgeSets, fetchWorkspaces } from "./api";
 import { ResourceCenterShell } from "./ResourceCenterShell";
 
@@ -169,5 +173,30 @@ describe("ResourceCenterShell", () => {
     fireEvent.click(await screen.findByRole("button", { name: /docs-workspace/i }));
 
     expect(await screen.findByText("详情: docs-workspace")).toBeTruthy();
+  });
+
+  it("mounts the knowledge-set detail view when a knowledge set is selected", async () => {
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
+    mockedFetchKnowledgeSets.mockResolvedValue({
+      knowledgeSets: [
+        {
+          id: "knowledge-set-1",
+          name: "FAQ",
+          slug: "faq",
+          description: "",
+          status: "active",
+          sourceType: "managed_upload",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+
+    render(<ResourceCenterShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "资料集" }));
+    fireEvent.click(await screen.findByRole("button", { name: /faq/i }));
+
+    expect(await screen.findByText("资料集详情: FAQ")).toBeTruthy();
   });
 });

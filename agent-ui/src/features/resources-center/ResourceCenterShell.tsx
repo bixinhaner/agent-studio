@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchKnowledgeSets, fetchWorkspaces } from "./api";
+import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import { WorkspaceDetailView } from "./WorkspaceDetailView";
 import type {
   KnowledgeSetRecord,
@@ -85,6 +86,12 @@ export function ResourceCenterShell() {
   function handleWorkspaceUpdated(updatedWorkspace: WorkspaceRecord) {
     setWorkspaces((current) =>
       current.map((workspace) => (workspace.id === updatedWorkspace.id ? updatedWorkspace : workspace))
+    );
+  }
+
+  function handleKnowledgeSetUpdated(updatedKnowledgeSet: KnowledgeSetRecord) {
+    setKnowledgeSets((current) =>
+      current.map((knowledgeSet) => (knowledgeSet.id === updatedKnowledgeSet.id ? updatedKnowledgeSet : knowledgeSet))
     );
   }
 
@@ -224,10 +231,10 @@ export function ResourceCenterShell() {
             />
           ) : null}
           {tab === "knowledge_set" && selectedKnowledgeSet ? (
-            <div className="resource-center-placeholder">
-              <h3>{selectedKnowledgeSet.name}</h3>
-              <p>资料集详情编辑将在 Task 5 实现。当前壳已保留文件树、上传和授权挂载位。</p>
-            </div>
+            <KnowledgeSetDetailView
+              knowledgeSet={selectedKnowledgeSet}
+              onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
+            />
           ) : null}
           {((tab === "workspace" && !selectedWorkspace) || (tab === "knowledge_set" && !selectedKnowledgeSet)) && (
             <div className="resource-center-placeholder empty">

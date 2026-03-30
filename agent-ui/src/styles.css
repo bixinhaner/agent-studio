@@ -1986,6 +1986,81 @@ body {
   justify-content: flex-end;
 }
 
+.knowledge-set-upload-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: end;
+}
+
+.knowledge-set-tree-list {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-set-tree-list.nested {
+  margin-top: 10px;
+  padding-left: 18px;
+}
+
+.knowledge-set-tree-directory-row {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.knowledge-set-tree-directory-name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.knowledge-set-tree-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.knowledge-set-tree-file-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.knowledge-set-tree-file-name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.knowledge-set-tree-file-path {
+  font-size: 12px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.knowledge-set-tree-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.knowledge-set-tree-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 980px) {
   .monitoring-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1998,7 +2073,9 @@ body {
   .resource-center-toolbar,
   .resource-center-body,
   .resource-center-form-grid,
-  .resource-policy-fields {
+  .resource-policy-fields,
+  .knowledge-set-upload-grid,
+  .knowledge-set-tree-file-row {
     grid-template-columns: 1fr;
   }
 
