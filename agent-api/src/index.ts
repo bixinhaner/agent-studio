@@ -684,7 +684,8 @@ registerCommonApiRoutes(app, {
   modeAdminRouter: createModeAdminRouter({
     runProfiles,
     skillPackages,
-    agentModes
+    agentModes,
+    resourcePolicies
   }),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,

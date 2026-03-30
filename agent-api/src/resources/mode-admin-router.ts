@@ -33,9 +33,20 @@ const directoryScopeSchema = z.enum([
   "authorized_workspace_and_knowledge_set"
 ]);
 const instructionSourceTypeSchema = z.enum(["inline_text", "knowledge_set_document", "workspace_agents_md"]);
+const policySubjectTypeSchema = z.enum(["role", "department", "user"]);
+const policyEffectSchema = z.enum(["allow", "deny"]);
 const copySchema = z.object({
   name: z.string().trim().min(1),
   slug: z.string().trim().min(1)
+});
+const capabilityPoliciesReplaceSchema = z.object({
+  policies: z.array(
+    z.object({
+      subjectType: policySubjectTypeSchema,
+      subjectId: z.string().trim().min(1),
+      effect: policyEffectSchema
+    })
+  )
 });
 
 const runProfileCreateSchema = z.object({
@@ -277,6 +288,34 @@ type AgentModeRepositoryLike = {
   ): Promise<unknown>;
 };
 
+type ResourcePolicyRepositoryLike = {
+  listAll(): Promise<
+    Array<{
+      id?: string;
+      organizationId?: string;
+      subjectType: "role" | "department" | "user";
+      subjectId: string;
+      resourceType: "workspace" | "knowledge_set" | "agent_mode" | "skill_package" | "run_profile";
+      resourceId: string;
+      effect: "allow" | "deny";
+      createdAt?: string;
+      updatedAt?: string;
+    }>
+  >;
+  replacePoliciesForResource(input: {
+    resourceType: "agent_mode" | "skill_package" | "run_profile";
+    resourceId: string;
+    policies: Array<{
+      organizationId?: string;
+      subjectType: "role" | "department" | "user";
+      subjectId: string;
+      resourceType: "agent_mode" | "skill_package" | "run_profile";
+      resourceId: string;
+      effect: "allow" | "deny";
+    }>;
+  }): Promise<unknown[]>;
+};
+
 function withWorkspaceAlias<T extends { workspaceRules?: unknown }>(record: T): T & { workspaces: unknown } {
   return {
     ...record,
@@ -288,8 +327,45 @@ export function createModeAdminRouter(options: {
   runProfiles: RunProfileRepositoryLike;
   skillPackages: SkillPackageRepositoryLike;
   agentModes: AgentModeRepositoryLike;
+  resourcePolicies?: ResourcePolicyRepositoryLike;
 }): Router {
   const router = Router();
+
+  function requireResourcePolicies(): ResourcePolicyRepositoryLike {
+    if (!options.resourcePolicies) {
+      throw new Error("resource policies 未配置");
+    }
+    return options.resourcePolicies;
+  }
+
+  async function listPoliciesForResource(
+    resourceType: "agent_mode" | "skill_package" | "run_profile",
+    resourceId: string
+  ) {
+    return (await requireResourcePolicies().listAll()).filter(
+      (policy) => policy.resourceType === resourceType && policy.resourceId === resourceId
+    );
+  }
+
+  async function replacePoliciesForResource(
+    resourceType: "agent_mode" | "skill_package" | "run_profile",
+    resourceId: string,
+    organizationId: string | undefined,
+    policies: Array<{ subjectType: "role" | "department" | "user"; subjectId: string; effect: "allow" | "deny" }>
+  ) {
+    return requireResourcePolicies().replacePoliciesForResource({
+      resourceType,
+      resourceId,
+      policies: policies.map((policy) => ({
+        organizationId,
+        subjectType: policy.subjectType,
+        subjectId: policy.subjectId,
+        resourceType,
+        resourceId,
+        effect: policy.effect
+      }))
+    });
+  }
 
   router.get("/run-profiles", async (_req: Request, res: Response) => {
     res.json({ runProfiles: await options.runProfiles.list() });
@@ -367,6 +443,39 @@ export function createModeAdminRouter(options: {
       }
       const runProfile = await options.runProfiles.update(req.params.id, parsed.data);
       res.json({ runProfile });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/resources/run-profiles/:id/policies", async (req: Request, res: Response) => {
+    try {
+      const runProfile = (await options.runProfiles.get(req.params.id)) as { id: string } | undefined;
+      if (!runProfile) {
+        res.status(404).json({ detail: "run profile 不存在" });
+        return;
+      }
+      res.json({ policies: await listPoliciesForResource("run_profile", req.params.id) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/resources/run-profiles/:id/policies", async (req: Request, res: Response) => {
+    const parsed = capabilityPoliciesReplaceSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const runProfile = (await options.runProfiles.get(req.params.id)) as { organizationId?: string } | undefined;
+      if (!runProfile) {
+        res.status(404).json({ detail: "run profile 不存在" });
+        return;
+      }
+      res.json({
+        policies: await replacePoliciesForResource("run_profile", req.params.id, runProfile.organizationId, parsed.data.policies)
+      });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
@@ -498,6 +607,39 @@ export function createModeAdminRouter(options: {
 
   router.put("/skill-packages/:id/items", replaceSkillPackageItems);
   router.put("/skill-packages/:id/runtime-bindings", replaceSkillPackageItems);
+
+  router.get("/resources/skill-packages/:id/policies", async (req: Request, res: Response) => {
+    try {
+      const skillPackage = await options.skillPackages.get(req.params.id);
+      if (!skillPackage) {
+        res.status(404).json({ detail: "skill package 不存在" });
+        return;
+      }
+      res.json({ policies: await listPoliciesForResource("skill_package", req.params.id) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/resources/skill-packages/:id/policies", async (req: Request, res: Response) => {
+    const parsed = capabilityPoliciesReplaceSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const skillPackage = (await options.skillPackages.get(req.params.id)) as { organizationId?: string } | undefined;
+      if (!skillPackage) {
+        res.status(404).json({ detail: "skill package 不存在" });
+        return;
+      }
+      res.json({
+        policies: await replacePoliciesForResource("skill_package", req.params.id, skillPackage.organizationId, parsed.data.policies)
+      });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
 
   router.get("/agent-modes", async (_req: Request, res: Response) => {
     res.json({ agentModes: await options.agentModes.list() });
@@ -634,6 +776,39 @@ export function createModeAdminRouter(options: {
     try {
       const agentMode = await options.agentModes.replaceInstructionSources(req.params.id, parsed.data.instructionSources);
       res.json({ agentMode: withWorkspaceAlias(agentMode as { workspaceRules?: unknown }) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/resources/agent-modes/:id/policies", async (req: Request, res: Response) => {
+    try {
+      const agentMode = await options.agentModes.get(req.params.id);
+      if (!agentMode) {
+        res.status(404).json({ detail: "agent mode 不存在" });
+        return;
+      }
+      res.json({ policies: await listPoliciesForResource("agent_mode", req.params.id) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/resources/agent-modes/:id/policies", async (req: Request, res: Response) => {
+    const parsed = capabilityPoliciesReplaceSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const agentMode = (await options.agentModes.get(req.params.id)) as { organizationId?: string } | undefined;
+      if (!agentMode) {
+        res.status(404).json({ detail: "agent mode 不存在" });
+        return;
+      }
+      res.json({
+        policies: await replacePoliciesForResource("agent_mode", req.params.id, agentMode.organizationId, parsed.data.policies)
+      });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }

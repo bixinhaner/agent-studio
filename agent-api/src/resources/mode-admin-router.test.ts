@@ -395,6 +395,98 @@ describe("mode admin router", () => {
     });
   });
 
+  it("reads and writes capability resource policies for run profiles, skill packages, and agent modes", async () => {
+    const { app, cookies, adminUser, runProfiles, skillPackages, agentModes } = await buildModeAdminApp();
+    const runProfile = await runProfiles.create({
+      name: "Standard Profile",
+      slug: "standard-profile",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "disabled"
+    });
+    const skillPackage = await skillPackages.create({
+      name: "Code Tools",
+      slug: "code-tools",
+      visibleToUsers: true
+    });
+    const agentMode = await agentModes.create({
+      name: "Coding Assistant",
+      slug: "coding-assistant",
+      runProfileId: runProfile.id,
+      visibleToUsers: true
+    });
+
+    await request(app)
+      .put(`/api/admin/resources/run-profiles/${runProfile.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "role", subjectId: "employee", effect: "allow" }]
+      })
+      .expect(200);
+
+    await request(app)
+      .put(`/api/admin/resources/skill-packages/${skillPackage.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "department", subjectId: "dept-rd", effect: "deny" }]
+      })
+      .expect(200);
+
+    await request(app)
+      .put(`/api/admin/resources/agent-modes/${agentMode.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        policies: [{ subjectType: "user", subjectId: "user-123", effect: "allow" }]
+      })
+      .expect(200);
+
+    const runProfilePolicies = await request(app)
+      .get(`/api/admin/resources/run-profiles/${runProfile.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .expect(200);
+    expect(runProfilePolicies.body.policies).toEqual([
+      expect.objectContaining({
+        resourceType: "run_profile",
+        resourceId: runProfile.id,
+        subjectType: "role",
+        subjectId: "employee",
+        effect: "allow"
+      })
+    ]);
+
+    const skillPackagePolicies = await request(app)
+      .get(`/api/admin/resources/skill-packages/${skillPackage.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .expect(200);
+    expect(skillPackagePolicies.body.policies).toEqual([
+      expect.objectContaining({
+        resourceType: "skill_package",
+        resourceId: skillPackage.id,
+        subjectType: "department",
+        subjectId: "dept-rd",
+        effect: "deny"
+      })
+    ]);
+
+    const agentModePolicies = await request(app)
+      .get(`/api/admin/resources/agent-modes/${agentMode.id}/policies`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .expect(200);
+    expect(agentModePolicies.body.policies).toEqual([
+      expect.objectContaining({
+        resourceType: "agent_mode",
+        resourceId: agentMode.id,
+        subjectType: "user",
+        subjectId: "user-123",
+        effect: "allow"
+      })
+    ]);
+  });
+
   it("keeps the admin auth guard in front of the mode admin routes", async () => {
     const { app, cookies, user } = await buildModeAdminApp({
       user: makeUser({ id: "employee-1", role: "employee" })
@@ -996,6 +1088,7 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
   const runProfiles = new FakeRunProfileRepository();
   const skillPackages = new FakeSkillPackageRepository();
   const agentModes = new FakeAgentModeRepository();
+  const resourcePolicies = new FakeResourcePolicyRepository();
 
   const cookies = createSessionCookieManager({
     cookieName: "agent_studio_session",
@@ -1036,7 +1129,8 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
     resourcesAdminRouter: createModeAdminRouter({
       runProfiles: runProfiles as never,
       skillPackages: skillPackages as never,
-      agentModes: agentModes as never
+      agentModes: agentModes as never,
+      resourcePolicies: resourcePolicies as never
     }),
     portalRouter: express.Router(),
     serviceTokenMiddleware: (_req, _res, next) => next(),
@@ -1050,7 +1144,8 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
     user,
     runProfiles,
     skillPackages,
-    agentModes
+    agentModes,
+    resourcePolicies
   };
 }
 
@@ -1058,4 +1153,53 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+class FakeResourcePolicyRepository {
+  private policies: Array<{
+    id: string;
+    organizationId?: string;
+    subjectType: "role" | "department" | "user";
+    subjectId: string;
+    resourceType: "agent_mode" | "skill_package" | "run_profile";
+    resourceId: string;
+    effect: "allow" | "deny";
+    createdAt: string;
+    updatedAt: string;
+  }> = [];
+
+  async listAll() {
+    return [...this.policies];
+  }
+
+  async replacePoliciesForResource(input: {
+    resourceType: "agent_mode" | "skill_package" | "run_profile";
+    resourceId: string;
+    policies: Array<{
+      organizationId?: string;
+      subjectType: "role" | "department" | "user";
+      subjectId: string;
+      resourceType: "agent_mode" | "skill_package" | "run_profile";
+      resourceId: string;
+      effect: "allow" | "deny";
+    }>;
+  }) {
+    this.policies = this.policies.filter(
+      (policy) => !(policy.resourceType === input.resourceType && policy.resourceId === input.resourceId)
+    );
+    const now = new Date().toISOString();
+    const next = input.policies.map((policy, index) => ({
+      id: `${policy.resourceType}-${policy.resourceId}-${index + 1}`,
+      organizationId: policy.organizationId,
+      subjectType: policy.subjectType,
+      subjectId: policy.subjectId,
+      resourceType: policy.resourceType,
+      resourceId: policy.resourceId,
+      effect: policy.effect,
+      createdAt: now,
+      updatedAt: now
+    }));
+    this.policies.push(...next);
+    return next;
+  }
 }
