@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 
 const targetSchema = z.object({
@@ -66,8 +66,14 @@ export function createBroadcastAdminRouter(options: {
     }): Promise<unknown>;
     publish(input: { actorUserId: string; broadcastId: string }): Promise<unknown>;
   };
+  requirePermission?: (permissionKey: string) => RequestHandler;
 }): Router {
   const router = Router();
+  const requireBroadcastPermission = options.requirePermission?.("collaboration.broadcast.publish");
+
+  if (requireBroadcastPermission) {
+    router.use("/broadcasts", requireBroadcastPermission);
+  }
 
   router.get("/broadcasts", async (req: Request, res: Response) => {
     try {

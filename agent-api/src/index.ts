@@ -856,7 +856,8 @@ registerCommonApiRoutes(app, {
     orgSyncConfig: appConfig.orgSync,
     broadcastRouter: createBroadcastAdminRouter({
       broadcasts,
-      service: broadcastService
+      service: broadcastService,
+      requirePermission
     })
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
@@ -910,6 +911,7 @@ app.use(
       replaceShares: (input) => collaborationShareService.replaceShares(input),
       addComment: (input) => collaborationCommentService.addComment(input),
       setAssignment: (input) => collaborationAssignService.setAssignment(input),
+      setFollowers: (input) => collaborationAssignService.setFollowers(input),
       setCaptureMark: (input) => collaborationCaptureService.setCaptureMark(input)
     },
     inbox: inboxItems,

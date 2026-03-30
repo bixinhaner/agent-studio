@@ -63,6 +63,9 @@ function buildApp(options?: {
           followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
           captureMark: null
         })),
+        setFollowers: vi.fn(async ({ followerIds }) => ({
+          followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() }))
+        })),
         setCaptureMark: vi.fn(async ({ enabled, note }) =>
           enabled
             ? { id: "capture-1", threadId: "thread-1", status: "pending_capture", markedByUserId: "user-1", markedAt: new Date().toISOString(), note: note ?? undefined, updatedAt: new Date().toISOString() }
@@ -155,7 +158,10 @@ describe("createCollaborationRouter", () => {
       followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
       captureMark: null
     }));
-    const app = buildApp({ collaboration: { setAssignment } });
+    const setFollowers = vi.fn(async ({ followerIds }) => ({
+      followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() }))
+    }));
+    const app = buildApp({ collaboration: { setAssignment, setFollowers } });
 
     const shares = await request(app)
       .put("/api/threads/thread-1/shares")
@@ -184,11 +190,10 @@ describe("createCollaborationRouter", () => {
       .send({ follower_ids: ["user-5", "user-6"] });
     expect(followers.status).toBe(200);
     expect(followers.body.followers).toHaveLength(2);
-    expect(setAssignment).toHaveBeenLastCalledWith(
+    expect(setFollowers).toHaveBeenLastCalledWith(
       expect.objectContaining({
         actorUserId: "user-1",
         threadId: "thread-1",
-        ownerUserId: "owner-2",
         followerIds: ["user-5", "user-6"]
       })
     );
@@ -235,25 +240,51 @@ describe("createCollaborationRouter", () => {
     expect(response.body).toEqual({ detail: "thread collaboration access denied" });
   });
 
-  it("returns bad request when followers are updated without an assigned owner", async () => {
+  it("allows assignment updates without depending on collaboration read access", async () => {
+    const setAssignment = vi.fn(async ({ ownerUserId, followerIds }) => ({
+      assignment: { ownerUserId, assignedByUserId: "user-1", assignedAt: new Date().toISOString() },
+      followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() })),
+      captureMark: null
+    }));
     const app = buildApp({
       collaboration: {
-        getThreadCollaborationView: vi.fn(async ({ threadId }) => ({
-          threadId,
-          ownerUserId: "owner-1",
-          access: { canRead: true, canComment: true, canRun: false, isOwner: true },
-          shares: [],
-          comments: [],
-          assignment: null,
-          followers: [],
-          captureMark: null
-        }))
+        getThreadCollaborationView: vi.fn(async () => {
+          throw new Error("thread collaboration access denied");
+        }),
+        setAssignment
+      }
+    });
+
+    const response = await request(app).put("/api/threads/thread-1/assignment").send({ owner_user_id: "user-2" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.assignment.ownerUserId).toBe("user-2");
+    expect(setAssignment).toHaveBeenCalled();
+  });
+
+  it("allows follower-only updates without requiring an assignment owner row", async () => {
+    const setFollowers = vi.fn(async ({ followerIds }) => ({
+      followers: followerIds.map((userId: string, index: number) => ({ id: `follower-${index + 1}`, threadId: "thread-1", userId, addedByUserId: "user-1", createdAt: new Date().toISOString() }))
+    }));
+    const app = buildApp({
+      collaboration: {
+        getThreadCollaborationView: vi.fn(async () => {
+          throw new Error("thread collaboration access denied");
+        }),
+        setFollowers
       }
     });
 
     const response = await request(app).put("/api/threads/thread-1/followers").send({ follower_ids: ["user-2"] });
 
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({ detail: "ownerUserId is required before updating followers" });
+    expect(response.status).toBe(200);
+    expect(response.body.followers).toHaveLength(1);
+    expect(setFollowers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: "user-1",
+        threadId: "thread-1",
+        followerIds: ["user-2"]
+      })
+    );
   });
 });

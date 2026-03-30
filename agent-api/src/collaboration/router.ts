@@ -71,6 +71,7 @@ export function createCollaborationRouter(options: {
       followers: unknown[];
       captureMark: unknown;
     }>;
+    setFollowers(input: { actorUserId: string; threadId: string; followerIds: string[] }): Promise<{ followers: unknown[] }>;
     setCaptureMark(input: { actorUserId: string; threadId: string; enabled: boolean; note?: string | null }): Promise<unknown>;
   };
   inbox: {
@@ -160,16 +161,11 @@ export function createCollaborationRouter(options: {
 
     try {
       const input = assignmentSchema.parse(req.body || {});
-      const current = await options.collaboration.getThreadCollaborationView({
-        actorUserId: currentUser.id,
-        departmentIds: await options.listDepartmentIdsForUser(currentUser.id),
-        threadId: String(req.params.threadId || "").trim()
-      });
       const state = await options.collaboration.setAssignment({
         actorUserId: currentUser.id,
-        threadId: current.threadId,
+        threadId: String(req.params.threadId || "").trim(),
         ownerUserId: input.owner_user_id.trim(),
-        followerIds: input.follower_ids?.map((userId) => userId.trim()) ?? current.followers.map((follower) => String((follower as { userId: string }).userId))
+        followerIds: input.follower_ids?.map((userId) => userId.trim()) ?? []
       });
       res.json({ assignment: state.assignment, followers: state.followers });
     } catch (error) {
@@ -183,22 +179,12 @@ export function createCollaborationRouter(options: {
 
     try {
       const input = followersSchema.parse(req.body || {});
-      const current = await options.collaboration.getThreadCollaborationView({
+      const state = await options.collaboration.setFollowers({
         actorUserId: currentUser.id,
-        departmentIds: await options.listDepartmentIdsForUser(currentUser.id),
-        threadId: String(req.params.threadId || "").trim()
-      });
-      const ownerUserId = current.assignment?.ownerUserId;
-      if (!ownerUserId) {
-        throw new Error("ownerUserId is required before updating followers");
-      }
-      const state = await options.collaboration.setAssignment({
-        actorUserId: currentUser.id,
-        threadId: current.threadId,
-        ownerUserId,
+        threadId: String(req.params.threadId || "").trim(),
         followerIds: input.follower_ids.map((userId) => userId.trim())
       });
-      res.json({ assignment: state.assignment, followers: state.followers });
+      res.json({ followers: state.followers });
     } catch (error) {
       res.status(statusFromError(error)).json({ detail: detailFromError(error) });
     }

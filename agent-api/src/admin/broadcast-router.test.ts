@@ -7,6 +7,7 @@ import { createBroadcastAdminRouter } from "./broadcast-router.js";
 function buildApp(options?: {
   broadcasts?: Partial<Parameters<typeof createBroadcastAdminRouter>[0]["broadcasts"]>;
   service?: Partial<Parameters<typeof createBroadcastAdminRouter>[0]["service"]>;
+  requirePermission?: Parameters<typeof createBroadcastAdminRouter>[0]["requirePermission"];
 }) {
   const app = express();
   app.use(express.json());
@@ -73,7 +74,8 @@ function buildApp(options?: {
           targets: [{ id: "target-1", broadcastId, targetType: "department", targetId: "dept-1", createdAt: new Date().toISOString() }]
         })),
         ...options?.service
-      }
+      },
+      requirePermission: options?.requirePermission
     })
   );
   return app;
@@ -118,5 +120,18 @@ describe("createBroadcastAdminRouter", () => {
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({ detail: "broadcast not found" });
+  });
+
+  it("enforces collaboration broadcast permission for listing", async () => {
+    const requirePermission = vi.fn(() => (_req: express.Request, res: express.Response) => {
+      res.status(403).json({ detail: "Forbidden" });
+    });
+    const app = buildApp({ requirePermission });
+
+    const response = await request(app).get("/api/admin/broadcasts");
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ detail: "Forbidden" });
+    expect(requirePermission).toHaveBeenCalledWith("collaboration.broadcast.publish");
   });
 });

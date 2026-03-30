@@ -1103,6 +1103,24 @@ describe("admin and portal routers", () => {
     expect(response.body).toEqual({ ok: true });
   });
 
+  it("keeps injected broadcast routes behind the admin auth guard", async () => {
+    const broadcastRouter = Router();
+    broadcastRouter.get("/broadcasts", (_req, res) => {
+      res.json({ ok: true });
+    });
+    const { app, cookies, user } = buildApp({
+      user: makeUser({ id: "employee-1", role: "employee" }),
+      broadcastRouter
+    });
+
+    const response = await request(app)
+      .get("/api/admin/broadcasts")
+      .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ detail: "Forbidden" });
+  });
+
   it("returns overview counts for an admin user", async () => {
     const integrationRepository = new IntegrationRepository(new FakeIntegrationDb() as never);
     await integrationRepository.upsertConfig("zendesk", {

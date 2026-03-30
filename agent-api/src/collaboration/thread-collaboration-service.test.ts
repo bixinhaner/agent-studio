@@ -361,6 +361,26 @@ describe("ThreadCollaborationService", () => {
     expect((await inbox.listForUser("user-3")).map((item) => item.eventType)).toContain("thread.assigned");
   });
 
+  it("filters mention notifications to users who can access the thread", async () => {
+    const { inbox, service } = createService();
+
+    await service.replaceShares({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      shares: [{ subjectType: "user", subjectId: "user-2" }]
+    });
+
+    await service.addComment({
+      actorUserId: "owner-1",
+      threadId: "thread-1",
+      bodyMarkdown: "ping @user-2 and @user-9",
+      mentionedUserIds: ["user-2", "user-9"]
+    });
+
+    expect((await inbox.listForUser("user-2")).map((item) => item.eventType)).toContain("thread.mentioned");
+    expect(await inbox.listForUser("user-9")).toHaveLength(0);
+  });
+
   it("includes the assigned owner in comment fanout even when they are not a follower", async () => {
     const { inbox, service } = createService();
 

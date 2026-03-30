@@ -149,7 +149,7 @@ export class ThreadCollaborationService {
       mentionedUserIds: input.mentionedUserIds
     });
     const state = await this.deps.collaboration.getState(thread.id);
-    const mentionedUserIds = uniqueUserIds(comment.mentionedUserIds);
+    const mentionedUserIds = await this.filterAccessibleUserIds(thread, uniqueUserIds(comment.mentionedUserIds));
     const participantRecipients = uniqueUserIds([
       trimOrUndefined(thread.userId) ?? "",
       state.assignment?.ownerUserId ?? "",
@@ -234,6 +234,34 @@ export class ThreadCollaborationService {
       });
     }
     return this.deps.collaboration.getState(thread.id);
+  }
+
+  async setFollowers(input: {
+    actorUserId: string;
+    threadId: string;
+    followerIds: string[];
+  }): Promise<{ followers: ThreadFollowerRecord[] }> {
+    const thread = await this.requireThread(input.threadId);
+    await this.assertCanManage(thread, input.actorUserId);
+    await this.deps.directory?.ensureUsersExist?.(input.followerIds);
+
+    const followers = await this.deps.collaboration.replaceFollowers(thread.id, input.followerIds, input.actorUserId);
+
+    if (followers.length > 0) {
+      await this.project({
+        eventType: "thread.follower_added",
+        actorUserId: input.actorUserId,
+        recipientUserIds: followers.map((follower) => follower.userId),
+        threadId: thread.id,
+        title: "Following thread updates",
+        body: "You were added as a follower on a thread.",
+        relatedEntityType: "thread_follower",
+        relatedEntityId: thread.id,
+        payload: { followerIds: followers.map((follower) => follower.userId) }
+      });
+    }
+
+    return { followers };
   }
 
   async setCaptureMark(input: {
@@ -377,6 +405,23 @@ export class ThreadCollaborationService {
       }
     }
     return uniqueUserIds(recipients);
+  }
+
+  private async filterAccessibleUserIds(thread: ThreadRecord, userIds: string[]): Promise<string[]> {
+    const accessible: string[] = [];
+    for (const userId of uniqueUserIds(userIds)) {
+      const access = await this.getAccess({
+        actorUserId: userId,
+        thread,
+        departmentIds: this.deps.directory?.listDepartmentIdsForUser
+          ? await this.deps.directory.listDepartmentIdsForUser(userId)
+          : []
+      });
+      if (access.canRead) {
+        accessible.push(userId);
+      }
+    }
+    return accessible;
   }
 
   private async project(input: CollaborationInboxProjectionInput): Promise<void> {
