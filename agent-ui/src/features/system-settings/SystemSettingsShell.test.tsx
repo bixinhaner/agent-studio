@@ -175,7 +175,7 @@ describe("SystemSettingsShell", () => {
     expect((screen.getByDisplayValue("30") as HTMLInputElement).getAttribute("aria-invalid")).toBe("true");
   });
 
-  it("keeps publish disabled until the draft save finishes", async () => {
+  it("persists the edited draft before publishing when publish is clicked directly", async () => {
     let resolveSave: ((value: any) => void) | undefined;
 
     const savePromise = new Promise<any>((resolve) => {
@@ -214,30 +214,49 @@ describe("SystemSettingsShell", () => {
     render(<SystemSettingsShell />);
 
     await screen.findByRole("heading", { name: "系统设置" });
+    fireEvent.change(screen.getByLabelText("平台名称"), { target: { value: "Agent Studio Prime" } });
     fireEvent.click(screen.getByRole("tab", { name: "发布记录" }));
-    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }));
-
-    expect(screen.getByRole("button", { name: "发布设置" }).getAttribute("disabled")).toBe("");
     fireEvent.click(screen.getByRole("button", { name: "发布设置" }));
+
+    expect(screen.getByRole("button", { name: "发布中..." }).getAttribute("disabled")).toBe("");
     expect(mockedPublishSystemSettings).not.toHaveBeenCalled();
+    expect(mockedSaveSystemSettingsDraft).toHaveBeenCalledWith({
+      ...payload,
+      branding: {
+        ...payload.branding,
+        platformName: "Agent Studio Prime"
+      }
+    });
 
     await act(async () => {
       resolveSave?.({
-      draft: createRecord({ id: "system-settings-version-3", versionNumber: 3, revision: 2 }),
-      published: null,
-      draftMeta: {
-        id: "system-settings-version-3",
-        versionNumber: 3,
-        revision: 2,
-        status: "draft",
-        createdAt: "2026-03-30T01:00:00.000Z",
-        updatedAt: "2026-03-30T03:00:00.000Z"
-      },
-      publishedMeta: null
-    });
+        draft: createRecord({
+          id: "system-settings-version-3",
+          versionNumber: 3,
+          revision: 2,
+          payload: {
+            ...payload,
+            branding: {
+              ...payload.branding,
+              platformName: "Agent Studio Prime"
+            }
+          }
+        }),
+        published: null,
+        draftMeta: {
+          id: "system-settings-version-3",
+          versionNumber: 3,
+          revision: 2,
+          status: "draft",
+          createdAt: "2026-03-30T01:00:00.000Z",
+          updatedAt: "2026-03-30T03:00:00.000Z"
+        },
+        publishedMeta: null
+      });
     });
 
-    expect(await screen.findByText("草稿已保存")).toBeTruthy();
+    expect(await screen.findByText("设置已发布")).toBeTruthy();
+    expect(mockedPublishSystemSettings).toHaveBeenCalledTimes(1);
   });
 
   it("saves the edited draft and publishes the updated version records", async () => {

@@ -58,6 +58,26 @@ function getValidationMessage(error: unknown) {
   return "请求失败";
 }
 
+function applySystemSettingsResponse(
+  response: {
+    draft: SystemSettingsVersionRecord;
+    published: SystemSettingsVersionRecord | null;
+    draftMeta: SystemSettingsVersionMeta;
+    publishedMeta: SystemSettingsVersionMeta | null;
+  },
+  setters: {
+    setDraftRecord(next: SystemSettingsVersionRecord): void;
+    setPublishedRecord(next: SystemSettingsVersionRecord | null): void;
+    setDraftMeta(next: SystemSettingsVersionMeta): void;
+    setPublishedMeta(next: SystemSettingsVersionMeta | null): void;
+  }
+) {
+  setters.setDraftRecord(cloneRecord(response.draft));
+  setters.setPublishedRecord(response.published ? cloneRecord(response.published) : null);
+  setters.setDraftMeta(response.draftMeta);
+  setters.setPublishedMeta(response.publishedMeta);
+}
+
 export function SystemSettingsShell() {
   const [section, setSection] = useState<SystemSettingsSection>("branding");
   const [draftRecord, setDraftRecord] = useState<SystemSettingsVersionRecord | null>(null);
@@ -228,19 +248,24 @@ export function SystemSettingsShell() {
     );
   }
 
-  async function handleSaveDraft() {
-    if (!draftRecord || loading || saving || publishing) return;
+  async function persistDraft(options?: { successText?: string }) {
+    if (!draftRecord || loading || saving || publishing) return false;
     setSaving(true);
     setErrorText("");
     setSuccessText("");
     try {
       const response = await saveSystemSettingsDraft(draftRecord.payload);
-      setDraftRecord(cloneRecord(response.draft));
-      setPublishedRecord(response.published ? cloneRecord(response.published) : null);
-      setDraftMeta(response.draftMeta);
-      setPublishedMeta(response.publishedMeta);
+      applySystemSettingsResponse(response, {
+        setDraftRecord: setDraftRecord,
+        setPublishedRecord: setPublishedRecord,
+        setDraftMeta: setDraftMeta,
+        setPublishedMeta: setPublishedMeta
+      });
       setFieldErrors({});
-      setSuccessText("草稿已保存");
+      if (options?.successText) {
+        setSuccessText(options.successText);
+      }
+      return true;
     } catch (error) {
       const message = getValidationMessage(error);
       const parsed = parseSystemSettingsValidationDetail(message);
@@ -254,9 +279,14 @@ export function SystemSettingsShell() {
       } else {
         setErrorText(message);
       }
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveDraft() {
+    await persistDraft({ successText: "草稿已保存" });
   }
 
   async function handlePublish() {
@@ -265,11 +295,17 @@ export function SystemSettingsShell() {
     setErrorText("");
     setSuccessText("");
     try {
+      const saved = await persistDraft();
+      if (!saved) {
+        return;
+      }
       const response = await publishSystemSettings();
-      setDraftRecord(cloneRecord(response.draft));
-      setPublishedRecord(response.published ? cloneRecord(response.published) : null);
-      setDraftMeta(response.draftMeta);
-      setPublishedMeta(response.publishedMeta);
+      applySystemSettingsResponse(response, {
+        setDraftRecord: setDraftRecord,
+        setPublishedRecord: setPublishedRecord,
+        setDraftMeta: setDraftMeta,
+        setPublishedMeta: setPublishedMeta
+      });
       setFieldErrors({});
       setSuccessText("设置已发布");
     } catch (error) {
