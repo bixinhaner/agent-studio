@@ -1,4 +1,4 @@
-export type AdminSection = "overview" | "users" | "organization" | "rbac" | "monitoring";
+export type AdminSection = "overview" | "users" | "resources" | "organization" | "rbac" | "monitoring";
 
 export type AdminOverview = {
   counts: {

@@ -1758,6 +1758,124 @@ body {
   font-size: 12px;
 }
 
+.resource-center-shell {
+  width: min(1120px, 100%);
+  display: grid;
+  gap: 16px;
+}
+
+.resource-center-type-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.resource-center-type-tab {
+  min-height: 36px;
+  border: 1px solid #c3d3ea;
+  border-radius: 10px;
+  padding: 0 14px;
+  background: #f8fbff;
+  color: #0f172a;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.resource-center-type-tab.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.resource-center-create-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resource-center-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.resource-center-search,
+.resource-center-filter {
+  margin-bottom: 0;
+}
+
+.resource-center-subtle,
+.resource-center-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.resource-center-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 420px;
+}
+
+.resource-center-sidebar,
+.resource-center-detail {
+  border: 1px solid #d6e2f3;
+  border-radius: 16px;
+  background: #f8fbff;
+  padding: 14px;
+}
+
+.resource-center-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.resource-center-item {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.resource-center-item.active {
+  border-color: #93c5fd;
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.16);
+  background: #eff6ff;
+}
+
+.resource-center-item-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.resource-center-item-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.resource-center-placeholder {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-center-placeholder h3 {
+  margin: 0;
+}
+
+.resource-center-placeholder p {
+  margin: 0;
+  color: #475569;
+}
+
 @media (max-width: 980px) {
   .monitoring-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1765,6 +1883,11 @@ body {
 
   .monitoring-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .resource-center-toolbar,
+  .resource-center-body {
+    grid-template-columns: 1fr;
   }
 }
 

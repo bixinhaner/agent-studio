@@ -11,6 +11,7 @@ import { CostProfilesView } from "../monitoring/CostProfilesView";
 import { MonitoringOverviewView } from "../monitoring/MonitoringOverviewView";
 import { QuotaRulesView } from "../monitoring/QuotaRulesView";
 import { ResourceAccessLogView } from "../monitoring/ResourceAccessLogView";
+import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
 import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
 
@@ -79,11 +80,12 @@ export function AdminShell() {
       <section className="admin-card">
         <p className="auth-eyebrow">Agent Studio Admin</p>
         <h1>管理控制台</h1>
-        <p className="admin-description">统一查看运行状态、用户治理、角色权限、钉钉组织同步和运营监控。</p>
+        <p className="admin-description">统一查看运行状态、资源配置、用户治理、角色权限、钉钉组织同步和运营监控。</p>
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
       {section === "users" ? <UsersView /> : null}
+      {section === "resources" ? <ResourceCenterShell /> : null}
       {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (
         <div className="admin-stack-grid">

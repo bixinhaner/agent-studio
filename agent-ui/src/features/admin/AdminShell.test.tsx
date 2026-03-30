@@ -9,6 +9,10 @@ vi.mock("./DepartmentTreeView", () => ({
   DepartmentTreeView: () => <section>部门树</section>
 }));
 
+vi.mock("./UsersView", () => ({
+  UsersView: () => <section>用户管理</section>
+}));
+
 vi.mock("./OrgSyncView", () => ({
   OrgSyncView: () => <section>同步任务</section>
 }));
@@ -41,6 +45,14 @@ vi.mock("../monitoring/CostProfilesView", () => ({
   CostProfilesView: () => <section>模型定价</section>
 }));
 
+vi.mock("../resources-center/ResourceCenterShell", () => ({
+  ResourceCenterShell: () => (
+    <section>
+      <h2>资源中心面板</h2>
+    </section>
+  )
+}));
+
 import { AdminShell } from "./AdminShell";
 import { fetchAdminOverview } from "./api";
 
@@ -51,7 +63,7 @@ describe("AdminShell", () => {
     mockedFetchAdminOverview.mockReset();
   });
 
-  it("switches between overview, users, rbac, organization, and monitoring views", async () => {
+  it("switches between overview, users, resources, rbac, organization, and monitoring views", async () => {
     mockedFetchAdminOverview.mockResolvedValue({
       counts: {
         users: 7,
@@ -65,6 +77,8 @@ describe("AdminShell", () => {
     expect(await screen.findByText("运行概览")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "用户" }));
     expect(await screen.findByText("用户管理")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "资源配置中心" }));
+    expect(await screen.findByText("资源中心面板")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "角色权限" }));
     expect(await screen.findByText("角色列表")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));
@@ -91,5 +105,20 @@ describe("AdminShell", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "审计监控" }));
     expect(await screen.findByText("平台总览")).toBeTruthy();
+  });
+
+  it("navigates from the admin shell into the resource center", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
+      counts: {
+        users: 7,
+        threads: 13,
+        activeSessions: 3
+      }
+    });
+
+    render(<AdminShell />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "资源配置中心" }));
+    expect(await screen.findByText("资源中心面板")).toBeTruthy();
   });
 });

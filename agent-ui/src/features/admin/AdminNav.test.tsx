@@ -10,11 +10,13 @@ describe("AdminNav", () => {
     render(<AdminNav section="overview" onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "用户" }));
+    fireEvent.click(screen.getByRole("tab", { name: "资源配置中心" }));
     fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));
     fireEvent.click(screen.getByRole("tab", { name: "审计监控" }));
 
     expect(onChange).toHaveBeenNthCalledWith(1, "users");
-    expect(onChange).toHaveBeenNthCalledWith(2, "organization");
-    expect(onChange).toHaveBeenNthCalledWith(3, "monitoring");
+    expect(onChange).toHaveBeenNthCalledWith(2, "resources");
+    expect(onChange).toHaveBeenNthCalledWith(3, "organization");
+    expect(onChange).toHaveBeenNthCalledWith(4, "monitoring");
   });
 });
