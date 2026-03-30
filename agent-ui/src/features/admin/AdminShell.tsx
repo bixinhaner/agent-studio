@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { fetchAdminOverview } from "./api";
-import { AdminNav } from "./AdminNav";
+import { AdminNav, type AdminNavSection } from "./AdminNav";
 import { DepartmentTreeView } from "./DepartmentTreeView";
 import { OrgSyncView } from "./OrgSyncView";
 import { RolesView } from "../rbac/RolesView";
-import type { AdminOverview, AdminSection } from "./types";
+import type { AdminOverview } from "./types";
 import { AlertCenterView } from "../monitoring/AlertCenterView";
 import { CostProfilesView } from "../monitoring/CostProfilesView";
 import { MonitoringOverviewView } from "../monitoring/MonitoringOverviewView";
@@ -17,6 +17,7 @@ import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShel
 import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
 import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
+import { BroadcastAdminView } from "../collaboration/BroadcastAdminView";
 
 function OverviewCard(props: { overview: AdminOverview | null; loading: boolean; errorText: string }) {
   return (
@@ -55,7 +56,7 @@ export function AdminShell() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
-  const [section, setSection] = useState<AdminSection>("overview");
+  const [section, setSection] = useState<AdminNavSection>("overview");
 
   useEffect(() => {
     let active = true;
@@ -91,6 +92,7 @@ export function AdminShell() {
       {section === "resources" ? <ResourceCenterShell /> : null}
       {section === "capabilities" ? <CapabilityCenterShell /> : null}
       {section === "integrations" ? <IntegrationCenterShell /> : null}
+      {section === "broadcasts" ? <BroadcastAdminView /> : null}
       {section === "system-settings" ? <SystemSettingsShell /> : null}
       {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (

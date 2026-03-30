@@ -69,6 +69,14 @@ vi.mock("../integration-center/IntegrationCenterShell", () => ({
   )
 }));
 
+vi.mock("../collaboration/BroadcastAdminView", () => ({
+  BroadcastAdminView: () => (
+    <section>
+      <h2>广播管理面板</h2>
+    </section>
+  )
+}));
+
 import { AdminShell } from "./AdminShell";
 import { fetchAdminOverview } from "./api";
 
@@ -79,7 +87,7 @@ describe("AdminShell", () => {
     mockedFetchAdminOverview.mockReset();
   });
 
-  it("switches between overview, users, resources, capabilities, integrations, rbac, organization, and monitoring views", async () => {
+  it("switches between overview, users, resources, capabilities, integrations, broadcasts, rbac, organization, and monitoring views", async () => {
     mockedFetchAdminOverview.mockResolvedValue({
       counts: {
         users: 7,
@@ -99,6 +107,8 @@ describe("AdminShell", () => {
     expect(await screen.findByRole("heading", { name: "能力配置中心" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "集成中心" }));
     expect(await screen.findByRole("heading", { name: "集成中心面板" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "广播管理" }));
+    expect(await screen.findByRole("heading", { name: "广播管理面板" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "角色权限" }));
     expect(await screen.findByText("角色列表")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "组织同步" }));

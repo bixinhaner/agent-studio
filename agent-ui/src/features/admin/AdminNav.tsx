@@ -1,11 +1,14 @@
 import type { AdminSection } from "./types";
 
-const ITEMS: Array<{ id: AdminSection; label: string }> = [
+export type AdminNavSection = AdminSection | "broadcasts";
+
+const ITEMS: Array<{ id: AdminNavSection; label: string }> = [
   { id: "overview", label: "概览" },
   { id: "users", label: "用户" },
   { id: "resources", label: "资源配置中心" },
   { id: "capabilities", label: "能力配置中心" },
   { id: "integrations", label: "集成中心" },
+  { id: "broadcasts", label: "广播管理" },
   { id: "system-settings", label: "系统设置" },
   { id: "organization", label: "组织同步" },
   { id: "rbac", label: "角色权限" },
@@ -13,8 +16,8 @@ const ITEMS: Array<{ id: AdminSection; label: string }> = [
 ];
 
 export function AdminNav(props: {
-  section: AdminSection;
-  onChange(section: AdminSection): void;
+  section: AdminNavSection;
+  onChange(section: AdminNavSection): void;
 }) {
   return (
     <div className="admin-nav" role="tablist" aria-label="管理导航">

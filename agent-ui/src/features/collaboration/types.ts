@@ -89,3 +89,69 @@ export type SetThreadCaptureMarkInput = {
   enabled: boolean;
   note?: string;
 };
+
+export type InboxCategory = "collaboration" | "alert" | "broadcast";
+export type InboxItemStatus = "unread" | "read" | "archived";
+
+export type InboxItemRecord = {
+  id: string;
+  userId: string;
+  eventType: string;
+  category: InboxCategory;
+  title: string;
+  body: string;
+  status: InboxItemStatus;
+  threadId?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  sourceActorUserId?: string;
+  payload?: unknown;
+  readAt?: string;
+  archivedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BroadcastTargetType = "all_users" | "department" | "role";
+export type BroadcastStatus = "draft" | "published" | "archived";
+
+export type BroadcastTargetRecord = {
+  id: string;
+  broadcastId: string;
+  targetType: BroadcastTargetType;
+  targetId?: string;
+  createdAt: string;
+};
+
+export type BroadcastRecord = {
+  id: string;
+  title: string;
+  bodyMarkdown: string;
+  status: BroadcastStatus;
+  createdByUserId?: string;
+  publishedAt?: string;
+  publishedByUserId?: string;
+  dingtalkDeliveryEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  targets: BroadcastTargetRecord[];
+};
+
+export type BroadcastTargetInput = {
+  targetType: BroadcastTargetType;
+  targetId?: string;
+};
+
+export type CreateBroadcastDraftInput = {
+  title: string;
+  bodyMarkdown: string;
+  dingtalkDeliveryEnabled?: boolean;
+  targets: BroadcastTargetInput[];
+};
+
+export type UpdateBroadcastDraftInput = {
+  title?: string;
+  bodyMarkdown?: string;
+  dingtalkDeliveryEnabled?: boolean;
+  targets?: BroadcastTargetInput[];
+};

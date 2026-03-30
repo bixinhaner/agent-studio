@@ -2,6 +2,9 @@ import { api } from "../../lib/api";
 
 import type {
   AddThreadCommentInput,
+  BroadcastRecord,
+  CreateBroadcastDraftInput,
+  InboxItemRecord,
   ReplaceThreadSharesInput,
   SetThreadAssignmentInput,
   SetThreadCaptureMarkInput,
@@ -11,7 +14,8 @@ import type {
   ThreadFollowerRecord,
   ThreadShareRecord,
   ThreadShareSubjectType,
-  ThreadAssignmentRecord
+  ThreadAssignmentRecord,
+  UpdateBroadcastDraftInput
 } from "./types";
 
 function trim(value: string): string {
@@ -94,4 +98,91 @@ export async function setThreadCaptureMark(
     }
   );
   return response.captureMark;
+}
+
+export async function fetchInboxItems(): Promise<InboxItemRecord[]> {
+  const response = await api<{ items: InboxItemRecord[] }>("/api/inbox");
+  return response.items;
+}
+
+async function updateInboxItemStatus(
+  itemId: string,
+  action: "read" | "unread" | "archive" | "unarchive"
+): Promise<InboxItemRecord> {
+  const response = await api<{ item: InboxItemRecord }>(`/api/inbox/${encodeURIComponent(trim(itemId))}/${action}`, {
+    method: "POST"
+  });
+  return response.item;
+}
+
+export function markInboxItemRead(itemId: string): Promise<InboxItemRecord> {
+  return updateInboxItemStatus(itemId, "read");
+}
+
+export function markInboxItemUnread(itemId: string): Promise<InboxItemRecord> {
+  return updateInboxItemStatus(itemId, "unread");
+}
+
+export function archiveInboxItem(itemId: string): Promise<InboxItemRecord> {
+  return updateInboxItemStatus(itemId, "archive");
+}
+
+export function unarchiveInboxItem(itemId: string): Promise<InboxItemRecord> {
+  return updateInboxItemStatus(itemId, "unarchive");
+}
+
+function mapBroadcastInput(input: CreateBroadcastDraftInput | UpdateBroadcastDraftInput) {
+  return {
+    ...(input.title !== undefined ? { title: trim(input.title) } : {}),
+    ...(input.bodyMarkdown !== undefined ? { body_markdown: trim(input.bodyMarkdown) } : {}),
+    ...(input.dingtalkDeliveryEnabled !== undefined
+      ? { dingtalk_delivery_enabled: input.dingtalkDeliveryEnabled }
+      : {}),
+    ...(input.targets !== undefined
+      ? {
+          targets: input.targets.map((target) => ({
+            target_type: target.targetType,
+            target_id: target.targetId ? trim(target.targetId) : null
+          }))
+        }
+      : {})
+  };
+}
+
+export async function fetchAdminBroadcasts(status?: "draft" | "published" | "archived"): Promise<BroadcastRecord[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await api<{ broadcasts: BroadcastRecord[] }>(`/api/admin/broadcasts${query}`);
+  return response.broadcasts;
+}
+
+export async function createBroadcastDraft(input: CreateBroadcastDraftInput): Promise<BroadcastRecord> {
+  const response = await api<{ broadcast: BroadcastRecord }>("/api/admin/broadcasts", {
+    method: "POST",
+    json: mapBroadcastInput(input)
+  });
+  return response.broadcast;
+}
+
+export async function updateBroadcastDraft(
+  broadcastId: string,
+  input: UpdateBroadcastDraftInput
+): Promise<BroadcastRecord> {
+  const response = await api<{ broadcast: BroadcastRecord }>(
+    `/api/admin/broadcasts/${encodeURIComponent(trim(broadcastId))}`,
+    {
+      method: "PATCH",
+      json: mapBroadcastInput(input)
+    }
+  );
+  return response.broadcast;
+}
+
+export async function publishBroadcast(broadcastId: string): Promise<BroadcastRecord> {
+  const response = await api<{ broadcast: BroadcastRecord }>(
+    `/api/admin/broadcasts/${encodeURIComponent(trim(broadcastId))}/publish`,
+    {
+      method: "POST"
+    }
+  );
+  return response.broadcast;
 }
