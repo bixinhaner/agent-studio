@@ -13,7 +13,7 @@
 ## File Structure
 
 ### Backend
-- Create: `agent-api/prisma/migrations/<timestamp>_add_collaboration_center/migration.sql`
+- Create: `agent-api/prisma/migrations/20260331100000_add_collaboration_center/migration.sql`
   - collaboration schema tables and indexes
 - Modify: `agent-api/prisma/schema.prisma`
   - add Prisma models for collaboration/inbox/broadcast entities
@@ -111,7 +111,7 @@
 ### Task 1: Add Collaboration Persistence Schema
 
 **Files:**
-- Create: `agent-api/prisma/migrations/<timestamp>_add_collaboration_center/migration.sql`
+- Create: `agent-api/prisma/migrations/20260331100000_add_collaboration_center/migration.sql`
 - Modify: `agent-api/prisma/schema.prisma`
 - Test: `agent-api/prisma/schema.prisma` validation via Prisma generate/diff
 
@@ -229,7 +229,7 @@ model KnowledgeCaptureMark {
 
 - [ ] **Step 3: Add migration SQL matching the new schema**
 
-Create `agent-api/prisma/migrations/<timestamp>_add_collaboration_center/migration.sql` with `CREATE TABLE`, indexes, and uniqueness constraints matching the models above. Reuse string columns and JSON columns consistent with prior migrations in this repo.
+Create `agent-api/prisma/migrations/20260331100000_add_collaboration_center/migration.sql` with `CREATE TABLE`, indexes, and uniqueness constraints matching the models above. Reuse string columns and JSON columns consistent with prior migrations in this repo.
 
 - [ ] **Step 4: Run Prisma validation and diff checks**
 
