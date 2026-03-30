@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PolicyService } from "../resources/policy-service.js";
 import { ResourcePolicyRepository, type ResourcePolicyRecord } from "../persistence/resource-policy-repository.js";
 import { PortalRuntimeOptionService } from "./runtime-option-service.js";
+import { createDefaultSystemSettingsPayload, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 type FakeWorkspaceRecord = {
   id: string;
@@ -103,6 +104,31 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function createPublishedSystemSettingsRecord(overrides?: Partial<SystemSettingsVersionRecord>): SystemSettingsVersionRecord {
+  const now = "2026-03-29T00:00:00.000Z";
+  const payload = createDefaultSystemSettingsPayload();
+  return {
+    id: overrides?.id ?? "system-settings-version-1",
+    versionNumber: overrides?.versionNumber ?? 1,
+    revision: overrides?.revision ?? 1,
+    status: overrides?.status ?? "published",
+    payload: overrides?.payload ?? {
+      ...payload,
+      safety: {
+        allowDangerFullAccess: false,
+        allowNetworkAccess: false,
+        allowLiveWebSearch: false,
+        allowCustomAdditionalDirectories: false,
+        allowFilesystemMutations: false
+      }
+    },
+    createdAt: overrides?.createdAt ?? now,
+    updatedAt: overrides?.updatedAt ?? now,
+    publishedAt: overrides?.publishedAt ?? now,
+    publishedByUserId: overrides?.publishedByUserId ?? "admin-1"
+  };
+}
+
 class FakeResourcePolicyDb {
   constructor(readonly rows: ResourcePolicyRecord[] = []) {}
 
@@ -170,6 +196,7 @@ function createServiceFixture(input: {
   runProfiles: FakeRunProfileRecord[];
   skillPackages: FakeSkillPackageRecord[];
   policies: ResourcePolicyRecord[];
+  systemSettings?: SystemSettingsVersionRecord;
 }) {
   const policies = new ResourcePolicyRepository(new FakeResourcePolicyDb(input.policies) as never);
   return {
@@ -178,7 +205,14 @@ function createServiceFixture(input: {
       workspaces: new FakeWorkspaceRepository(input.workspaces) as never,
       runProfiles: new FakeRunProfileRepository(input.runProfiles) as never,
       skillPackages: new FakeSkillPackageRepository(input.skillPackages) as never,
-      policies: new PolicyService(policies)
+      policies: new PolicyService(policies),
+      systemSettings: input.systemSettings
+        ? {
+            async getCurrentPublished() {
+              return clone(input.systemSettings);
+            }
+          }
+        : undefined
     })
   };
 }
@@ -376,6 +410,143 @@ describe("PortalRuntimeOptionService", () => {
         mode: "mode-code",
         workspace: "workspace-primary"
       }
+    });
+  });
+
+  it("clamps runtime options to the published safety limits", async () => {
+    const { service } = createServiceFixture({
+      modes: [
+        {
+          id: "mode-code",
+          name: "代码助手",
+          slug: "mode-code",
+          status: "active",
+          visibleToUsers: true,
+          runProfileId: "profile-code",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z",
+          skillPackages: [
+            {
+              id: "mode-code-skill-package",
+              skillPackageId: "skill-package-code",
+              createdAt: "2026-03-29T00:00:00.000Z",
+              updatedAt: "2026-03-29T00:00:00.000Z"
+            }
+          ],
+          workspaceRules: [
+            {
+              id: "mode-code-workspace-primary",
+              workspaceId: "workspace-primary",
+              isDefault: true,
+              allowDirectorySelection: true,
+              directoryScope: "descendants_only",
+              loadWorkspaceAgentsMd: true,
+              createdAt: "2026-03-29T00:00:00.000Z",
+              updatedAt: "2026-03-29T00:00:00.000Z"
+            }
+          ],
+          instructionSources: []
+        }
+      ],
+      workspaces: [
+        {
+          id: "workspace-primary",
+          name: "Primary Workspace",
+          slug: "workspace-primary",
+          status: "active",
+          sourceType: "local",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        }
+      ],
+      runProfiles: [
+        {
+          id: "profile-code",
+          name: "Coding Default",
+          slug: "profile-code",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4", "gpt-5.4-mini"],
+          defaultReasoningEffort: "medium",
+          sandboxMode: "danger-full-access",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        }
+      ],
+      skillPackages: [
+        {
+          id: "skill-package-code",
+          name: "Code Tools",
+          slug: "skill-package-code",
+          status: "active",
+          visibleToUsers: true,
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z",
+          items: []
+        }
+      ],
+      policies: [
+        {
+          id: "policy-mode-code",
+          subjectType: "user",
+          subjectId: "user-1",
+          resourceType: "agent_mode",
+          resourceId: "mode-code",
+          effect: "allow",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        },
+        {
+          id: "policy-profile-code",
+          subjectType: "user",
+          subjectId: "user-1",
+          resourceType: "run_profile",
+          resourceId: "profile-code",
+          effect: "allow",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        },
+        {
+          id: "policy-skill-package-code",
+          subjectType: "user",
+          subjectId: "user-1",
+          resourceType: "skill_package",
+          resourceId: "skill-package-code",
+          effect: "allow",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        },
+        {
+          id: "policy-workspace-primary",
+          subjectType: "user",
+          subjectId: "user-1",
+          resourceType: "workspace",
+          resourceId: "workspace-primary",
+          effect: "allow",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: "2026-03-29T00:00:00.000Z"
+        }
+      ],
+      systemSettings: createPublishedSystemSettingsRecord()
+    });
+
+    const resolved = await service.resolve({
+      userId: "user-1",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(resolved.modes[0].runtimeProfile).toMatchObject({
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "cached"
+    });
+    expect(resolved.modes[0].allowDirectorySelection).toBe(false);
+    expect(resolved.modes[0].workspaces[0]).toMatchObject({
+      allowDirectorySelection: false
     });
   });
 

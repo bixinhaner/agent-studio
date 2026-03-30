@@ -2,12 +2,15 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
 import { REASONING_EFFORT_VALUES } from "../model-config.js";
+import { getDbClient } from "../db/client.js";
 import type { ResourcePolicyResourceType } from "../persistence/resource-policy-repository.js";
 import {
   APPROVAL_POLICY_VALUES,
   SANDBOX_MODE_VALUES,
   WEB_SEARCH_MODE_VALUES
 } from "../integrations/zendesk/types.js";
+import { SystemSettingsRepository } from "../system-settings/repository.js";
+import { createDefaultSystemSettingsPayload, type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -23,6 +26,25 @@ function sendValidationError(res: Response, error: z.ZodError): void {
     detail: error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ")
   });
 }
+
+type RunProfileWritableRecord = {
+  organizationId?: string;
+  name: string;
+  slug: string;
+  description?: string;
+  status?: string;
+  defaultModel: string;
+  allowedModels: string[];
+  defaultReasoningEffort: string;
+  sandboxMode: string;
+  approvalPolicy: string;
+  networkAccessEnabled?: boolean;
+  webSearchMode: string;
+};
+
+type SystemSettingsReaderLike = {
+  getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
+};
 
 const stringListSchema = z.array(z.string().trim().min(1));
 const statusSchema = z.enum(["active", "disabled"]);
@@ -49,6 +71,39 @@ const capabilityPoliciesReplaceSchema = z.object({
     })
   )
 });
+
+function clampSandboxMode(sandboxMode: string, safety: SystemSettingsSafety): string {
+  if (!safety.allowFilesystemMutations) {
+    return "read-only";
+  }
+  if (sandboxMode === "danger-full-access" && !safety.allowDangerFullAccess) {
+    return "workspace-write";
+  }
+  return sandboxMode;
+}
+
+function clampNetworkAccess(networkAccessEnabled: boolean | undefined, safety: SystemSettingsSafety): boolean | undefined {
+  if (networkAccessEnabled === undefined) {
+    return undefined;
+  }
+  return safety.allowNetworkAccess ? networkAccessEnabled : false;
+}
+
+function clampWebSearchMode(webSearchMode: string, safety: SystemSettingsSafety): string {
+  if (!safety.allowLiveWebSearch && webSearchMode === "live") {
+    return "cached";
+  }
+  return webSearchMode;
+}
+
+function clampRunProfileInput(input: RunProfileWritableRecord, safety: SystemSettingsSafety): RunProfileWritableRecord {
+  return {
+    ...input,
+    sandboxMode: clampSandboxMode(input.sandboxMode, safety),
+    networkAccessEnabled: clampNetworkAccess(input.networkAccessEnabled, safety),
+    webSearchMode: clampWebSearchMode(input.webSearchMode, safety)
+  };
+}
 
 const runProfileCreateSchema = z.object({
   organizationId: z.string().trim().min(1).optional(),
@@ -329,8 +384,10 @@ export function createModeAdminRouter(options: {
   skillPackages: SkillPackageRepositoryLike;
   agentModes: AgentModeRepositoryLike;
   resourcePolicies?: ResourcePolicyRepositoryLike;
+  systemSettings?: SystemSettingsReaderLike;
 }): Router {
   const router = Router();
+  let systemSettingsRepository: SystemSettingsRepository | undefined;
 
   function requireResourcePolicies(): ResourcePolicyRepositoryLike {
     if (!options.resourcePolicies) {
@@ -368,6 +425,21 @@ export function createModeAdminRouter(options: {
     });
   }
 
+  async function resolvePublishedSafetyLimits(): Promise<SystemSettingsSafety | undefined> {
+    if (options.systemSettings) {
+      const published = await options.systemSettings.getCurrentPublished();
+      return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+    }
+
+    if (process.env.NODE_ENV === "test" || !process.env.DATABASE_URL) {
+      return undefined;
+    }
+
+    systemSettingsRepository ??= new SystemSettingsRepository(getDbClient() as never);
+    const published = await systemSettingsRepository.getCurrentPublished();
+    return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+  }
+
   router.get("/run-profiles", async (_req: Request, res: Response) => {
     res.json({ runProfiles: await options.runProfiles.list() });
   });
@@ -379,7 +451,10 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
-      const runProfile = await options.runProfiles.create(parsed.data);
+      const safetyLimits = await resolvePublishedSafetyLimits();
+      const runProfile = await options.runProfiles.create(
+        safetyLimits ? clampRunProfileInput(parsed.data, safetyLimits) : parsed.data
+      );
       res.status(201).json({ runProfile });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
@@ -394,36 +469,47 @@ export function createModeAdminRouter(options: {
     }
     try {
       const existing = (await options.runProfiles.get(req.params.id)) as
-        | {
-            organizationId?: string;
-            description?: string;
-            defaultModel: string;
-            allowedModels: string[];
-            defaultReasoningEffort: string;
-            sandboxMode: string;
-            approvalPolicy: string;
-            networkAccessEnabled?: boolean;
-            webSearchMode: string;
-          }
+        | RunProfileWritableRecord
         | undefined;
       if (!existing) {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
       }
-      const runProfile = await options.runProfiles.create({
-        organizationId: existing.organizationId,
-        name: parsed.data.name,
-        slug: parsed.data.slug,
-        description: existing.description,
-        status: "disabled",
-        defaultModel: existing.defaultModel,
-        allowedModels: existing.allowedModels,
-        defaultReasoningEffort: existing.defaultReasoningEffort,
-        sandboxMode: existing.sandboxMode,
-        approvalPolicy: existing.approvalPolicy,
-        networkAccessEnabled: existing.networkAccessEnabled,
-        webSearchMode: existing.webSearchMode
-      });
+      const safetyLimits = await resolvePublishedSafetyLimits();
+      const runProfile = await options.runProfiles.create(
+        safetyLimits
+          ? clampRunProfileInput(
+              {
+                organizationId: existing.organizationId,
+                name: parsed.data.name,
+                slug: parsed.data.slug,
+                description: existing.description,
+                status: "disabled",
+                defaultModel: existing.defaultModel,
+                allowedModels: existing.allowedModels,
+                defaultReasoningEffort: existing.defaultReasoningEffort,
+                sandboxMode: existing.sandboxMode,
+                approvalPolicy: existing.approvalPolicy,
+                networkAccessEnabled: existing.networkAccessEnabled,
+                webSearchMode: existing.webSearchMode
+              },
+              safetyLimits
+            )
+          : {
+              organizationId: existing.organizationId,
+              name: parsed.data.name,
+              slug: parsed.data.slug,
+              description: existing.description,
+              status: "disabled",
+              defaultModel: existing.defaultModel,
+              allowedModels: existing.allowedModels,
+              defaultReasoningEffort: existing.defaultReasoningEffort,
+              sandboxMode: existing.sandboxMode,
+              approvalPolicy: existing.approvalPolicy,
+              networkAccessEnabled: existing.networkAccessEnabled,
+              webSearchMode: existing.webSearchMode
+            }
+      );
       res.status(201).json({ runProfile });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -442,7 +528,13 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
       }
-      const runProfile = await options.runProfiles.update(req.params.id, parsed.data);
+      const safetyLimits = await resolvePublishedSafetyLimits();
+      const runProfile = await options.runProfiles.update(
+        req.params.id,
+        safetyLimits
+          ? clampRunProfileInput({ ...(existing as RunProfileWritableRecord), ...parsed.data }, safetyLimits)
+          : parsed.data
+      );
       res.json({ runProfile });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });

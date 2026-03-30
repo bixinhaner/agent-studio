@@ -11,6 +11,7 @@ import { createAuthRouter } from "../auth/router.js";
 import { createCurrentUserMiddleware } from "../auth/current-user.js";
 import { createSessionCookieManager } from "../auth/session-cookie.js";
 import type { AuthenticatedUser, UserRecord, UserRepositoryLike } from "../persistence/user-repository.js";
+import { createDefaultSystemSettingsPayload, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 import { createModeAdminRouter } from "./mode-admin-router.js";
 
 const tempRoots: string[] = [];
@@ -308,6 +309,50 @@ describe("mode admin router", () => {
         instructionSources: [expect.objectContaining({ sourceType: "workspace_agents_md" })]
       })
     ]);
+  });
+
+  it("clamps run profile writes to the published safety limits", async () => {
+    const { app, cookies, adminUser } = await buildModeAdminApp({
+      systemSettings: createPublishedSystemSettingsRecord()
+    });
+
+    const createResponse = await request(app)
+      .post("/api/admin/run-profiles")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Restricted Profile",
+        slug: "restricted-profile",
+        defaultModel: "gpt-5.4",
+        allowedModels: ["gpt-5.4"],
+        defaultReasoningEffort: "high",
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true,
+        webSearchMode: "live"
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.runProfile).toMatchObject({
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "cached"
+    });
+
+    const updateResponse = await request(app)
+      .patch(`/api/admin/run-profiles/${createResponse.body.runProfile.id}`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        sandboxMode: "workspace-write",
+        networkAccessEnabled: true,
+        webSearchMode: "live"
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.runProfile).toMatchObject({
+      sandboxMode: "read-only",
+      networkAccessEnabled: false,
+      webSearchMode: "cached"
+    });
   });
 
   it("copies an agent mode into a disabled hidden record with bindings", async () => {
@@ -1067,7 +1112,7 @@ function makeUser(overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser
   };
 }
 
-async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
+async function buildModeAdminApp(options?: { user?: AuthenticatedUser; systemSettings?: SystemSettingsVersionRecord }) {
   const dingtalkClient: DingTalkClient = {
     async exchangeCode() {
       throw new Error("not used in mode admin router tests");
@@ -1089,6 +1134,7 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
   const skillPackages = new FakeSkillPackageRepository();
   const agentModes = new FakeAgentModeRepository();
   const resourcePolicies = new FakeResourcePolicyRepository();
+  const systemSettings = options?.systemSettings ?? undefined;
 
   const cookies = createSessionCookieManager({
     cookieName: "agent_studio_session",
@@ -1130,7 +1176,14 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
       runProfiles: runProfiles as never,
       skillPackages: skillPackages as never,
       agentModes: agentModes as never,
-      resourcePolicies: resourcePolicies as never
+      resourcePolicies: resourcePolicies as never,
+      systemSettings: systemSettings
+        ? {
+            async getCurrentPublished() {
+              return structuredClone(systemSettings);
+            }
+          }
+        : undefined
     }),
     portalRouter: express.Router(),
     serviceTokenMiddleware: (_req, _res, next) => next(),
@@ -1146,6 +1199,31 @@ async function buildModeAdminApp(options?: { user?: AuthenticatedUser }) {
     skillPackages,
     agentModes,
     resourcePolicies
+  };
+}
+
+function createPublishedSystemSettingsRecord(overrides?: Partial<SystemSettingsVersionRecord>): SystemSettingsVersionRecord {
+  const now = "2026-03-29T00:00:00.000Z";
+  const payload = createDefaultSystemSettingsPayload();
+  return {
+    id: overrides?.id ?? "system-settings-version-1",
+    versionNumber: overrides?.versionNumber ?? 1,
+    revision: overrides?.revision ?? 1,
+    status: overrides?.status ?? "published",
+    payload: overrides?.payload ?? {
+      ...payload,
+      safety: {
+        allowDangerFullAccess: false,
+        allowNetworkAccess: false,
+        allowLiveWebSearch: false,
+        allowCustomAdditionalDirectories: false,
+        allowFilesystemMutations: false
+      }
+    },
+    createdAt: overrides?.createdAt ?? now,
+    updatedAt: overrides?.updatedAt ?? now,
+    publishedAt: overrides?.publishedAt ?? now,
+    publishedByUserId: overrides?.publishedByUserId ?? "admin-1"
   };
 }
 

@@ -3,6 +3,9 @@ import { type RunProfileRecord } from "../persistence/run-profile-repository.js"
 import { type SkillPackageRecord } from "../persistence/skill-package-repository.js";
 import { type WorkspaceRecord } from "../persistence/workspace-repository.js";
 import { type PolicyService } from "../resources/policy-service.js";
+import { getDbClient } from "../db/client.js";
+import { SystemSettingsRepository } from "../system-settings/repository.js";
+import { createDefaultSystemSettingsPayload, type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 export type PortalRuntimeOptionWorkspace = {
   id: string;
@@ -71,6 +74,9 @@ type RuntimeOptionServiceDependencies = {
   runProfiles: ListRepository<RunProfileRecord>;
   skillPackages: ListRepository<SkillPackageRecord>;
   policies: PolicyService;
+  systemSettings?: {
+    getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
+  };
 };
 
 type RuntimeOptionRequest = {
@@ -89,7 +95,10 @@ function isActive(status: string | undefined): boolean {
   return trimOrUndefined(status) === "active";
 }
 
-function toRunProfileSnapshot(runProfile: RunProfileRecord): PortalRuntimeOptionRunProfile {
+function toRunProfileSnapshot(runProfile: RunProfileRecord, safety?: SystemSettingsSafety): PortalRuntimeOptionRunProfile {
+  const sandboxMode = safety ? clampSandboxMode(runProfile.sandboxMode, safety) : runProfile.sandboxMode;
+  const networkAccessEnabled = safety ? clampNetworkAccess(runProfile.networkAccessEnabled, safety) : runProfile.networkAccessEnabled;
+  const webSearchMode = safety ? clampWebSearchMode(runProfile.webSearchMode, safety) : runProfile.webSearchMode;
   return {
     id: runProfile.id,
     name: runProfile.name,
@@ -99,10 +108,10 @@ function toRunProfileSnapshot(runProfile: RunProfileRecord): PortalRuntimeOption
     defaultModel: runProfile.defaultModel,
     allowedModels: [...runProfile.allowedModels],
     defaultReasoningEffort: runProfile.defaultReasoningEffort,
-    sandboxMode: runProfile.sandboxMode,
+    sandboxMode,
     approvalPolicy: runProfile.approvalPolicy,
-    networkAccessEnabled: runProfile.networkAccessEnabled,
-    webSearchMode: runProfile.webSearchMode
+    networkAccessEnabled,
+    webSearchMode
   };
 }
 
@@ -118,7 +127,34 @@ function toWorkspaceOption(workspace: WorkspaceRecord, isDefault = false): Porta
   };
 }
 
+function clampSandboxMode(sandboxMode: string, safety: SystemSettingsSafety): string {
+  if (!safety.allowFilesystemMutations) {
+    return "read-only";
+  }
+  if (sandboxMode === "danger-full-access" && !safety.allowDangerFullAccess) {
+    return "workspace-write";
+  }
+  return sandboxMode;
+}
+
+function clampNetworkAccess(networkAccessEnabled: boolean, safety: SystemSettingsSafety): boolean {
+  return safety.allowNetworkAccess ? networkAccessEnabled : false;
+}
+
+function clampWebSearchMode(webSearchMode: string, safety: SystemSettingsSafety): string {
+  if (!safety.allowLiveWebSearch && webSearchMode === "live") {
+    return "cached";
+  }
+  return webSearchMode;
+}
+
+function clampDirectorySelection(allowDirectorySelection: boolean, safety: SystemSettingsSafety): boolean {
+  return safety.allowCustomAdditionalDirectories ? allowDirectorySelection : false;
+}
+
 export class PortalRuntimeOptionService {
+  private systemSettingsRepository?: SystemSettingsRepository;
+
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
@@ -143,6 +179,7 @@ export class PortalRuntimeOptionService {
     const runProfileMap = new Map(runProfileRows.map((runProfile) => [runProfile.id, runProfile] as const));
     const skillPackageMap = new Map(skillPackageRows.map((skillPackage) => [skillPackage.id, skillPackage] as const));
     const workspaceMap = new Map(workspaceRows.map((workspace) => [workspace.id, workspace] as const));
+    const safetyLimits = await this.resolvePublishedSafetyLimits();
 
     const authorizedActiveWorkspaces = await this.resolveWorkspaces({
       userId: input.userId,
@@ -222,7 +259,9 @@ export class PortalRuntimeOptionService {
           id: workspace.id,
           label: workspaceLabel(workspace),
           isDefault: binding.isDefault,
-          allowDirectorySelection: binding.allowDirectorySelection,
+          allowDirectorySelection: safetyLimits
+            ? clampDirectorySelection(binding.allowDirectorySelection, safetyLimits)
+            : binding.allowDirectorySelection,
           directoryScope: binding.directoryScope,
           loadWorkspaceAgentsMd: binding.loadWorkspaceAgentsMd
         });
@@ -232,7 +271,7 @@ export class PortalRuntimeOptionService {
         id: mode.id,
         label: mode.name,
         description: trimOrUndefined(mode.description),
-        runtimeProfile: toRunProfileSnapshot(runProfile),
+        runtimeProfile: toRunProfileSnapshot(runProfile, safetyLimits),
         allowDirectorySelection: workspaceBindings.some((binding) => binding.allowDirectorySelection),
         skillPackages: dependentSkillPackages,
         workspaces: workspaceBindings,
@@ -289,5 +328,20 @@ export class PortalRuntimeOptionService {
     return activeVisibleWorkspaces
       .filter((workspace) => allowedWorkspaceSet.has(workspace.id))
       .map((workspace) => toWorkspaceOption(workspace));
+  }
+
+  private async resolvePublishedSafetyLimits(): Promise<SystemSettingsSafety | undefined> {
+    if (this.deps.systemSettings) {
+      const published = await this.deps.systemSettings.getCurrentPublished();
+      return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
+    }
+
+    if (process.env.NODE_ENV === "test" || !process.env.DATABASE_URL) {
+      return undefined;
+    }
+
+    this.systemSettingsRepository ??= new SystemSettingsRepository(getDbClient() as never);
+    const published = await this.systemSettingsRepository.getCurrentPublished();
+    return published?.payload.safety ?? createDefaultSystemSettingsPayload().safety;
   }
 }
