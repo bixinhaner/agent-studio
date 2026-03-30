@@ -5,6 +5,7 @@ CREATE TYPE "SystemSettingsVersionStatus" AS ENUM ('draft', 'published');
 CREATE TABLE "system_settings_versions" (
   "id" TEXT PRIMARY KEY,
   "version_number" INTEGER NOT NULL,
+  "revision" INTEGER NOT NULL DEFAULT 0,
   "status" "SystemSettingsVersionStatus" NOT NULL,
   "payload" JSONB NOT NULL,
   "published_at" TIMESTAMP(3),

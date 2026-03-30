@@ -779,6 +779,7 @@ model NotificationRecord {
 model SystemSettingsVersion {
   id               String                  @id @default(cuid())
   versionNumber    Int                     @unique @map("version_number")
+  revision         Int                     @default(0)
   status           SystemSettingsVersionStatus
   payload          Json                    @map("payload")
   publishedAt      DateTime?               @map("published_at")
