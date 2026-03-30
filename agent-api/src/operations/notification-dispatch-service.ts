@@ -1,8 +1,16 @@
 import { AlertEventRecord } from "../persistence/alert-event-repository.js";
 import { NotificationChannelType, NotificationRecordRepository, type NotificationRecord } from "../persistence/notification-record-repository.js";
+import type { BroadcastRecord } from "../persistence/broadcast-repository.js";
 
 type DingtalkNotificationSender = (input: {
   alertEvent: AlertEventRecord;
+  notification: NotificationRecord;
+  message: string;
+}) => Promise<void>;
+
+type BroadcastDingtalkSender = (input: {
+  broadcast: BroadcastRecord;
+  recipientUserIds: string[];
   notification: NotificationRecord;
   message: string;
 }) => Promise<void>;
@@ -12,6 +20,7 @@ export class NotificationDispatchService {
     private readonly deps: {
       notifications: NotificationRecordRepository;
       dingtalk?: DingtalkNotificationSender;
+      broadcastDingtalk?: BroadcastDingtalkSender;
     }
   ) {}
 
@@ -64,6 +73,48 @@ export class NotificationDispatchService {
           }
         });
       }
+    }
+  }
+
+  async dispatchBroadcast(input: { broadcast: BroadcastRecord; recipientUserIds: string[] }): Promise<void> {
+    const record = await this.deps.notifications.create({
+      organizationId: undefined,
+      channelType: "dingtalk",
+      targetRef: input.broadcast.id,
+      eventType: "broadcast.published",
+      status: "pending",
+      payload: {
+        broadcastId: input.broadcast.id,
+        title: input.broadcast.title,
+        recipientUserIds: input.recipientUserIds
+      }
+    });
+
+    try {
+      if (!this.deps.broadcastDingtalk) {
+        throw new Error("DingTalk sender is not configured");
+      }
+      await this.deps.broadcastDingtalk({
+        broadcast: input.broadcast,
+        recipientUserIds: input.recipientUserIds,
+        notification: record,
+        message: [input.broadcast.title, input.broadcast.bodyMarkdown].filter(Boolean).join("\n")
+      });
+      await this.deps.notifications.update({
+        id: record.id,
+        changes: {
+          status: "sent",
+          errorMessage: null
+        }
+      });
+    } catch (error) {
+      await this.deps.notifications.update({
+        id: record.id,
+        changes: {
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : "DingTalk notification failed"
+        }
+      });
     }
   }
 }

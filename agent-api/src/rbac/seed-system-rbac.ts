@@ -36,7 +36,15 @@ export const BUILTIN_PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   { key: "quota.read", name: "Read quota policies", category: "quota" },
   { key: "quota.write", name: "Edit quota policies", category: "quota" },
   { key: "alert.read", name: "Read alerts", category: "alerting" },
-  { key: "alert.write", name: "Edit alerts", category: "alerting" }
+  { key: "alert.write", name: "Edit alerts", category: "alerting" },
+  { key: "collaboration.read", name: "Read collaboration views", category: "collaboration" },
+  { key: "collaboration.share", name: "Manage thread sharing", category: "collaboration" },
+  { key: "collaboration.comment", name: "Comment on shared threads", category: "collaboration" },
+  { key: "collaboration.assign", name: "Assign collaboration owners", category: "collaboration" },
+  { key: "collaboration.broadcast.publish", name: "Publish broadcasts", category: "collaboration" },
+  { key: "collaboration.capture_mark.write", name: "Mark knowledge capture candidates", category: "collaboration" },
+  { key: "inbox.read", name: "Read inbox items", category: "collaboration" },
+  { key: "inbox.write", name: "Update inbox items", category: "collaboration" }
 ];
 
 export const BUILTIN_PERMISSIONS = BUILTIN_PERMISSION_DEFINITIONS;

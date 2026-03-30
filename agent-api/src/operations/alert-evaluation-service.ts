@@ -5,6 +5,10 @@ type NotificationDispatchLike = {
   dispatchAlert(event: AlertEventRecord): Promise<void>;
 };
 
+type AlertInboxProjectionLike = {
+  projectAlertEvent(input: { event: AlertEventRecord }): Promise<void>;
+};
+
 export type QuotaAlertEvaluationInput = {
   organizationId?: string;
   scopeType: string;
@@ -41,6 +45,7 @@ export class AlertEvaluationService {
       alertRules: AlertRuleRepository;
       alertEvents: AlertEventRepository;
       notifications?: NotificationDispatchLike;
+      inboxProjection?: AlertInboxProjectionLike;
     }
   ) {}
 
@@ -82,6 +87,7 @@ export class AlertEvaluationService {
     });
 
     await this.dispatchNotification(event);
+    await this.projectInbox(event);
     return event;
   }
 
@@ -141,6 +147,7 @@ export class AlertEvaluationService {
     });
 
     await this.dispatchNotification(event);
+    await this.projectInbox(event);
     return event;
   }
 
@@ -150,6 +157,15 @@ export class AlertEvaluationService {
       await this.deps.notifications.dispatchAlert(event);
     } catch {
       // Alert creation must survive notification failures.
+    }
+  }
+
+  private async projectInbox(event: AlertEventRecord): Promise<void> {
+    if (!this.deps.inboxProjection) return;
+    try {
+      await this.deps.inboxProjection.projectAlertEvent({ event });
+    } catch {
+      // Alert creation must survive inbox projection failures.
     }
   }
 }
