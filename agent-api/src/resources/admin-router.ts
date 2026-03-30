@@ -2,6 +2,7 @@ import express, { Router, type NextFunction, type Request, type RequestHandler, 
 import multer, { MulterError } from "multer";
 
 import type { ResourcePolicyRecord } from "../persistence/resource-policy-repository.js";
+import { deleteFile, renameFile, scanDirectory } from "./filesystem-knowledge-set-ops.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
 type WorkspaceRepositoryLike = {
@@ -207,6 +208,41 @@ function parseResourcePolicies(body: unknown, options?: { requireExplicitArray?:
       effect
     };
   });
+}
+
+function parseDeleteKnowledgeSetItem(body: unknown): { relativePath: string } {
+  const relativePath = toTrimmedString(body && typeof body === "object" ? (body as { relativePath?: unknown }).relativePath : undefined);
+  if (!relativePath) {
+    throw new Error("knowledge set relativePath is required");
+  }
+  return { relativePath };
+}
+
+function parsePatchKnowledgeSetItem(body: unknown): { action: "rename"; relativePath: string; nextRelativePath: string } {
+  const action = body && typeof body === "object" ? String((body as { action?: unknown }).action ?? "") : "";
+  const relativePath = toTrimmedString(body && typeof body === "object" ? (body as { relativePath?: unknown }).relativePath : undefined);
+  const nextRelativePath = toTrimmedString(
+    body && typeof body === "object" ? (body as { nextRelativePath?: unknown }).nextRelativePath : undefined
+  );
+  if (action !== "rename" || !relativePath || !nextRelativePath) {
+    throw new Error("knowledge set item patch payload is invalid");
+  }
+  return { action: "rename", relativePath, nextRelativePath };
+}
+
+function resolveKnowledgeSetRoot(
+  knowledgeSet: { sourceType?: string; rootPath?: string },
+  storage: KnowledgeSetStorage,
+  validateFilesystemPath: (input?: string | null) => string,
+  knowledgeSetId: string
+): string {
+  if (knowledgeSet.sourceType === "managed_upload") {
+    return storage.resolveReadableMountPath(knowledgeSetId);
+  }
+  if (knowledgeSet.sourceType === "filesystem") {
+    return validateFilesystemPath(knowledgeSet.rootPath);
+  }
+  throw new Error("knowledge set sourceType does not support filesystem operations");
 }
 
 function parseReplacePoliciesRequest(body: unknown): {
@@ -436,7 +472,7 @@ export function createResourcesAdminRouter(options: {
     }
   });
 
-  router.get("/knowledge-sets/:knowledgeSetId/items", async (req: Request, res: Response) => {
+  router.get("/knowledge-sets/:knowledgeSetId/items", requirePermission("knowledge_set.read"), async (req: Request, res: Response) => {
     try {
       const items = await options.knowledgeSets.listItems(req.params.knowledgeSetId);
       res.json({ items });
@@ -445,7 +481,64 @@ export function createResourcesAdminRouter(options: {
     }
   });
 
-  router.post("/knowledge-sets/:knowledgeSetId/files", withMultipartFiles("files"), async (req: Request, res: Response) => {
+  router.post(
+    "/knowledge-sets/:knowledgeSetId/rebuild",
+    requirePermission("knowledge_set.reindex"),
+    async (req: Request, res: Response) => {
+      try {
+        const knowledgeSetId = req.params.knowledgeSetId;
+        const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+        if (!knowledgeSet) {
+          res.status(404).json({ detail: "knowledge set 不存在" });
+          return;
+        }
+        const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+        const items = await scanDirectory(rootPath);
+        await options.knowledgeSets.replaceItems(knowledgeSetId, items);
+        res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
+      } catch (error) {
+        res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      }
+    }
+  );
+
+  router.delete("/knowledge-sets/:knowledgeSetId/items", requirePermission("knowledge_set.file_manage"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const { relativePath } = parseDeleteKnowledgeSetItem(req.body);
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+      await deleteFile(rootPath, relativePath);
+      await options.knowledgeSets.replaceItems(knowledgeSetId, await scanDirectory(rootPath));
+      res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.patch("/knowledge-sets/:knowledgeSetId/items", requirePermission("knowledge_set.file_manage"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const { relativePath, nextRelativePath } = parsePatchKnowledgeSetItem(req.body);
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+      await renameFile(rootPath, relativePath, nextRelativePath);
+      await options.knowledgeSets.replaceItems(knowledgeSetId, await scanDirectory(rootPath));
+      res.json({ items: await options.knowledgeSets.listItems(knowledgeSetId) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/knowledge-sets/:knowledgeSetId/files", requirePermission("knowledge_set.upload"), withMultipartFiles("files"), async (req: Request, res: Response) => {
     try {
       const knowledgeSetId = req.params.knowledgeSetId;
       const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
@@ -493,6 +586,7 @@ export function createResourcesAdminRouter(options: {
 
   router.post(
     "/knowledge-sets/:knowledgeSetId/archive",
+    requirePermission("knowledge_set.upload"),
     express.raw({ type: ["application/octet-stream", "application/zip"], limit: "50mb" }),
     async (req: Request, res: Response) => {
       try {

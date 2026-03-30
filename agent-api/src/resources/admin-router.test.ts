@@ -166,6 +166,117 @@ describe("resources admin router", () => {
     ]);
   });
 
+  it("rebuilds filesystem knowledge set items from the resolved root", async () => {
+    const { app, cookies, adminUser, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const rootPath = path.join(allowedFilesystemRoot, "docs");
+    await fs.mkdir(path.join(rootPath, "nested"), { recursive: true });
+    await fs.writeFile(path.join(rootPath, "faq.md"), "# FAQ\n");
+    await fs.writeFile(path.join(rootPath, "nested", "guide.txt"), "guide");
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Filesystem Docs",
+      slug: "filesystem-docs",
+      sourceType: "filesystem",
+      rootPath
+    });
+
+    const response = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/rebuild`)
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toEqual([
+      expect.objectContaining({ relativePath: "faq.md", sizeBytes: "6" }),
+      expect.objectContaining({ relativePath: "nested/guide.txt", sizeBytes: "5" })
+    ]);
+  });
+
+  it("rebuilds managed-upload knowledge set items from the storage mount path", async () => {
+    const { app, cookies, adminUser, knowledgeSets, storage } = await buildResourcesAdminApp();
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Policies",
+      slug: "policies",
+      sourceType: "managed_upload"
+    });
+    const mountPath = storage.resolveReadableMountPath(knowledgeSet.id);
+    await fs.mkdir(path.join(mountPath, "guide"), { recursive: true });
+    await fs.writeFile(path.join(mountPath, "guide", "readme.md"), "hello");
+
+    const response = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/rebuild`)
+      .set("Cookie", cookies.create(adminUser.id));
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toEqual([
+      expect.objectContaining({ relativePath: "guide/readme.md", sizeBytes: "5" })
+    ]);
+  });
+
+  it("deletes and renames knowledge set files through controlled filesystem operations", async () => {
+    const { app, cookies, adminUser, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const rootPath = path.join(allowedFilesystemRoot, "edit-docs");
+    await fs.mkdir(path.join(rootPath, "guide"), { recursive: true });
+    await fs.writeFile(path.join(rootPath, "faq.md"), "# FAQ\n");
+    await fs.writeFile(path.join(rootPath, "guide", "intro.txt"), "hello");
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Editable Docs",
+      slug: "editable-docs",
+      sourceType: "filesystem",
+      rootPath
+    });
+
+    const deleteResponse = await request(app)
+      .delete(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ relativePath: "faq.md" });
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body.items).toEqual([
+      expect.objectContaining({ relativePath: "guide/intro.txt" })
+    ]);
+    await expect(fs.access(path.join(rootPath, "faq.md"))).rejects.toThrow();
+
+    const renameResponse = await request(app)
+      .patch(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ action: "rename", relativePath: "guide/intro.txt", nextRelativePath: "guide/getting-started.txt" });
+
+    expect(renameResponse.status).toBe(200);
+    expect(renameResponse.body.items).toEqual([
+      expect.objectContaining({ relativePath: "guide/getting-started.txt" })
+    ]);
+    await expect(fs.access(path.join(rootPath, "guide", "intro.txt"))).rejects.toThrow();
+    await expect(fs.readFile(path.join(rootPath, "guide", "getting-started.txt"), "utf8")).resolves.toBe("hello");
+  });
+
+  it("rejects knowledge set file operations that escape the resolved root", async () => {
+    const { app, cookies, adminUser, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
+    const rootPath = path.join(allowedFilesystemRoot, "escape-docs");
+    await fs.mkdir(rootPath, { recursive: true });
+    await fs.writeFile(path.join(rootPath, "faq.md"), "# FAQ\n");
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Escape Docs",
+      slug: "escape-docs",
+      sourceType: "filesystem",
+      rootPath
+    });
+
+    const deleteResponse = await request(app)
+      .delete(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ relativePath: "../faq.md" });
+
+    expect(deleteResponse.status).toBe(400);
+    expect(deleteResponse.body.detail).toContain("escapes storage root");
+
+    const renameResponse = await request(app)
+      .patch(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ action: "rename", relativePath: "faq.md", nextRelativePath: "../stolen.md" });
+
+    expect(renameResponse.status).toBe(400);
+    expect(renameResponse.body.detail).toContain("escapes storage root");
+  });
+
   it("rejects file and archive uploads for non-managed knowledge sets", async () => {
     const { app, cookies, adminUser, knowledgeSets, allowedFilesystemRoot } = await buildResourcesAdminApp();
     const knowledgeSet = await knowledgeSets.create({
@@ -707,6 +818,58 @@ describe("resources admin router", () => {
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ detail: "at least one file upload is required" });
   });
+
+  it("requires knowledge set permissions for inventory and file mutation routes", async () => {
+    const { app, cookies, adminUser, knowledgeSets } = await buildResourcesAdminApp({
+      allowedPermissions: []
+    });
+    const knowledgeSet = await knowledgeSets.create({
+      name: "Policies",
+      slug: "policies",
+      sourceType: "managed_upload"
+    });
+
+    const listResponse = await request(app)
+      .get(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id));
+    expect(listResponse.status).toBe(403);
+    expect(listResponse.body).toEqual({ detail: "Missing permission: knowledge_set.read" });
+
+    const rebuildResponse = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/rebuild`)
+      .set("Cookie", cookies.create(adminUser.id));
+    expect(rebuildResponse.status).toBe(403);
+    expect(rebuildResponse.body).toEqual({ detail: "Missing permission: knowledge_set.reindex" });
+
+    const uploadResponse = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/files`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .attach("files", Buffer.from("hello"), { filename: "faq.md" });
+    expect(uploadResponse.status).toBe(403);
+    expect(uploadResponse.body).toEqual({ detail: "Missing permission: knowledge_set.upload" });
+
+    const archiveResponse = await request(app)
+      .post(`/api/admin/knowledge-sets/${knowledgeSet.id}/archive`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .set("Content-Type", "application/zip")
+      .send(Buffer.from(zipSync({ "faq.md": strToU8("hello") })));
+    expect(archiveResponse.status).toBe(403);
+    expect(archiveResponse.body).toEqual({ detail: "Missing permission: knowledge_set.upload" });
+
+    const deleteResponse = await request(app)
+      .delete(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ relativePath: "faq.md" });
+    expect(deleteResponse.status).toBe(403);
+    expect(deleteResponse.body).toEqual({ detail: "Missing permission: knowledge_set.file_manage" });
+
+    const renameResponse = await request(app)
+      .patch(`/api/admin/knowledge-sets/${knowledgeSet.id}/items`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ action: "rename", relativePath: "faq.md", nextRelativePath: "guide.md" });
+    expect(renameResponse.status).toBe(403);
+    expect(renameResponse.body).toEqual({ detail: "Missing permission: knowledge_set.file_manage" });
+  });
 });
 
 class FakeUserRepository implements UserRepositoryLike {
@@ -1181,7 +1344,14 @@ async function buildResourcesAdminApp(options?: {
       resourcePolicies: resourcePolicies as never,
       storage,
       requirePermission: (permissionKey) => (_req, res, next) => {
-        const allowedPermissions = options?.allowedPermissions ?? ["resource_policy.read", "resource_policy.write"];
+        const allowedPermissions = options?.allowedPermissions ?? [
+          "resource_policy.read",
+          "resource_policy.write",
+          "knowledge_set.read",
+          "knowledge_set.upload",
+          "knowledge_set.file_manage",
+          "knowledge_set.reindex"
+        ];
         if (!allowedPermissions.includes(permissionKey)) {
           res.status(403).json({ detail: `Missing permission: ${permissionKey}` });
           return;
