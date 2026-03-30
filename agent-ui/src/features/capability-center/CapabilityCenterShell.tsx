@@ -9,6 +9,7 @@ import {
   fetchSkillPackages
 } from "./api";
 import { RunProfileDetailView } from "./RunProfileDetailView";
+import { SkillPackageDetailView } from "./SkillPackageDetailView";
 import type {
   AgentModeRecord,
   CapabilityCenterTab,
@@ -422,6 +423,10 @@ export function CapabilityCenterShell() {
     return tab === "run_profile" ? runProfiles.find((item) => item.id === selectedRunProfileId) ?? null : null;
   }, [runProfiles, selectedRunProfileId, tab]);
 
+  const selectedSkillPackage = useMemo(() => {
+    return tab === "skill_package" ? skillPackages.find((item) => item.id === selectedSkillPackageId) ?? null : null;
+  }, [selectedSkillPackageId, skillPackages, tab]);
+
   function closeCreatePanel() {
     setCreatePanel(null);
     setCreateErrorText("");
@@ -518,6 +523,11 @@ export function CapabilityCenterShell() {
   function handleRunProfileUpdated(updatedRunProfile: RunProfileRecord) {
     setRunProfiles((current) => current.map((item) => (item.id === updatedRunProfile.id ? updatedRunProfile : item)));
     setSelectedRunProfileId(updatedRunProfile.id);
+  }
+
+  function handleSkillPackageUpdated(updatedSkillPackage: SkillPackageRecord) {
+    setSkillPackages((current) => current.map((item) => (item.id === updatedSkillPackage.id ? updatedSkillPackage : item)));
+    setSelectedSkillPackageId(updatedSkillPackage.id);
   }
 
   return (
@@ -923,6 +933,11 @@ export function CapabilityCenterShell() {
             </section>
           ) : selectedRunProfile ? (
             <RunProfileDetailView runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
+          ) : selectedSkillPackage ? (
+            <SkillPackageDetailView
+              skillPackage={selectedSkillPackage}
+              onSkillPackageUpdated={handleSkillPackageUpdated}
+            />
           ) : selectedResource ? (
             <CapabilitySummaryCard tab={tab} resource={selectedResource as AgentModeRecord | SkillPackageRecord | RunProfileRecord} />
           ) : (
