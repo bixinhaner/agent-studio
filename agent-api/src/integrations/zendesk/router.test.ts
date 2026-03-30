@@ -5,6 +5,26 @@ import { describe, expect, it, vi } from "vitest";
 import { createZendeskAdminRouter } from "./router.js";
 
 describe("createZendeskAdminRouter", () => {
+  it("forwards instance_id through overview requests", async () => {
+    const app = express();
+    app.use(express.json());
+    const getOverview = vi.fn().mockResolvedValue({ ok: true });
+    app.use(
+      "/api/integrations/zendesk",
+      createZendeskAdminRouter({
+        getOverview,
+        async updateSettings() {
+          return { ok: true };
+        }
+      } as never)
+    );
+
+    const response = await request(app).get("/api/integrations/zendesk/overview?instance_id=int-zendesk-primary");
+
+    expect(response.status).toBe(200);
+    expect(getOverview).toHaveBeenCalledWith("int-zendesk-primary");
+  });
+
   it("forwards instance_id through compatibility routes for Integration Center-backed editing", async () => {
     const app = express();
     app.use(express.json());

@@ -216,6 +216,221 @@ function buildService(db: ReturnType<typeof buildDb>["db"]) {
 }
 
 describe("ZendeskIntegrationService compatibility with Integration Center", () => {
+  it("reads overview for the requested integration instance", async () => {
+    const { db } = buildDb({
+      instances: [
+        {
+          id: "int-zendesk-1",
+          organizationId: null,
+          type: "zendesk",
+          slug: "zendesk-a",
+          name: "Zendesk A",
+          description: null,
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "int-zendesk-2",
+          organizationId: null,
+          type: "zendesk",
+          slug: "zendesk-b",
+          name: "Zendesk B",
+          description: null,
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ],
+      configs: [
+        {
+          id: "integration-instance-config-1",
+          integrationInstanceId: "int-zendesk-1",
+          config: makeZendeskSettings({
+            publicBaseUrl: "https://one.example.com",
+            zendeskBaseUrl: "https://one.zendesk.com",
+            zendeskEmail: "one@example.com"
+          }),
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "integration-instance-config-2",
+          integrationInstanceId: "int-zendesk-2",
+          config: makeZendeskSettings({
+            publicBaseUrl: "https://two.example.com",
+            zendeskBaseUrl: "https://two.zendesk.com",
+            zendeskEmail: "two@example.com"
+          }),
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ],
+      secrets: [
+        {
+          id: "integration-instance-secret-1",
+          integrationInstanceId: "int-zendesk-1",
+          hasSecrets: true,
+          secretState: {
+            zendeskApiToken: "token-one",
+            webhookSigningSecret: "secret-one"
+          },
+          rotatedAt: new Date("2026-03-29T00:00:00.000Z"),
+          rotatedByUserId: "admin-1",
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "integration-instance-secret-2",
+          integrationInstanceId: "int-zendesk-2",
+          hasSecrets: true,
+          secretState: {
+            zendeskApiToken: "token-two",
+            webhookSigningSecret: "secret-two"
+          },
+          rotatedAt: new Date("2026-03-29T01:00:00.000Z"),
+          rotatedByUserId: "admin-2",
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ]
+    });
+
+    const service = buildService(db);
+    const overview = await service.getOverview("int-zendesk-2");
+
+    expect(overview.settings.publicBaseUrl).toBe("https://two.example.com");
+    expect(overview.settings.zendeskBaseUrl).toBe("https://two.zendesk.com");
+    expect(overview.settings.zendeskEmail).toBe("two@example.com");
+    expect(overview.settings.hasZendeskApiToken).toBe(true);
+    expect(overview.settings.hasWebhookSigningSecret).toBe(true);
+    expect(overview.setup.webhookUrl).toBe("https://two.example.com/api/integrations/zendesk/webhook");
+  });
+
+  it("updates only the requested integration instance", async () => {
+    const { db, state } = buildDb({
+      instances: [
+        {
+          id: "int-zendesk-1",
+          organizationId: null,
+          type: "zendesk",
+          slug: "zendesk-a",
+          name: "Zendesk A",
+          description: null,
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "int-zendesk-2",
+          organizationId: null,
+          type: "zendesk",
+          slug: "zendesk-b",
+          name: "Zendesk B",
+          description: null,
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ],
+      configs: [
+        {
+          id: "integration-instance-config-1",
+          integrationInstanceId: "int-zendesk-1",
+          config: makeZendeskSettings({
+            publicBaseUrl: "https://one.example.com",
+            zendeskBaseUrl: "https://one.zendesk.com",
+            zendeskEmail: "one@example.com"
+          }),
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "integration-instance-config-2",
+          integrationInstanceId: "int-zendesk-2",
+          config: makeZendeskSettings({
+            publicBaseUrl: "https://two.example.com",
+            zendeskBaseUrl: "https://two.zendesk.com",
+            zendeskEmail: "two@example.com"
+          }),
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ],
+      secrets: [
+        {
+          id: "integration-instance-secret-1",
+          integrationInstanceId: "int-zendesk-1",
+          hasSecrets: true,
+          secretState: {
+            zendeskApiToken: "token-one",
+            webhookSigningSecret: "secret-one"
+          },
+          rotatedAt: new Date("2026-03-29T00:00:00.000Z"),
+          rotatedByUserId: "admin-1",
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        },
+        {
+          id: "integration-instance-secret-2",
+          integrationInstanceId: "int-zendesk-2",
+          hasSecrets: true,
+          secretState: {
+            zendeskApiToken: "token-two",
+            webhookSigningSecret: "secret-two"
+          },
+          rotatedAt: new Date("2026-03-29T01:00:00.000Z"),
+          rotatedByUserId: "admin-2",
+          createdAt: new Date("2026-03-29T01:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T01:00:00.000Z")
+        }
+      ]
+    });
+
+    const service = buildService(db);
+    await service.updateSettings(
+      {
+        enabled: true,
+        publicBaseUrl: "https://two-updated.example.com",
+        zendeskBaseUrl: "https://two-updated.zendesk.com",
+        zendeskEmail: "two-updated@example.com",
+        zendeskApiToken: "token-two-updated",
+        webhookSigningSecret: "secret-two-updated",
+        workspace: appConfig.defaultWorkspace,
+        model: "gpt-4.1"
+      },
+      "int-zendesk-2"
+    );
+
+    const first = state.configs.find((item) => item.integrationInstanceId === "int-zendesk-1");
+    const second = state.configs.find((item) => item.integrationInstanceId === "int-zendesk-2");
+    const firstSecret = state.secrets.find((item) => item.integrationInstanceId === "int-zendesk-1");
+    const secondSecret = state.secrets.find((item) => item.integrationInstanceId === "int-zendesk-2");
+
+    expect(first?.config).toMatchObject({
+      publicBaseUrl: "https://one.example.com",
+      zendeskBaseUrl: "https://one.zendesk.com",
+      zendeskEmail: "one@example.com"
+    });
+    expect(second?.config).toMatchObject({
+      publicBaseUrl: "https://two-updated.example.com",
+      zendeskBaseUrl: "https://two-updated.zendesk.com",
+      zendeskEmail: "two-updated@example.com"
+    });
+    expect(firstSecret?.secretState).toMatchObject({
+      zendeskApiToken: "token-one",
+      webhookSigningSecret: "secret-one"
+    });
+    expect(secondSecret?.secretState).toMatchObject({
+      zendeskApiToken: "token-two-updated",
+      webhookSigningSecret: "secret-two-updated"
+    });
+  });
+
   it("reads Zendesk settings from the center-backed instance without changing overview semantics", async () => {
     const { db } = buildDb({
       legacyConfig: makeZendeskSettings({

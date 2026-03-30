@@ -161,6 +161,37 @@ export class ZendeskSettingsStore {
     return this.integrations.upsertZendeskSettings(next);
   }
 
+  async getForInstance(instanceId: string): Promise<ZendeskIntegrationSettings> {
+    const loaded = await this.integrations.getZendeskSettingsForInstance(instanceId);
+    return this.normalize({
+      ...defaultSettings(),
+      ...loaded
+    });
+  }
+
+  async updateForInstance(
+    patch: Partial<ZendeskIntegrationSettings> & {
+      zendeskApiToken?: string | undefined;
+      webhookSigningSecret?: string | undefined;
+    },
+    instanceId: string
+  ): Promise<ZendeskIntegrationSettings> {
+    const current = await this.getForInstance(instanceId);
+    const next = this.normalize({
+      ...current,
+      ...patch,
+      zendeskApiToken:
+        patch.zendeskApiToken === undefined
+          ? current.zendeskApiToken
+          : String(patch.zendeskApiToken || "").trim(),
+      webhookSigningSecret:
+        patch.webhookSigningSecret === undefined
+          ? current.webhookSigningSecret
+          : String(patch.webhookSigningSecret || "").trim()
+    });
+    return this.integrations.upsertZendeskSettingsForInstance(instanceId, next);
+  }
+
   async rememberValidation(user: ZendeskValidatedUser): Promise<ZendeskIntegrationSettings> {
     return await this.update({
       lastValidatedAt: new Date().toISOString(),

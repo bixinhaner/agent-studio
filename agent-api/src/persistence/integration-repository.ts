@@ -101,6 +101,22 @@ function pickZendeskInstance(instances: IntegrationInstanceRow[]): IntegrationIn
   return instances.find((item) => item.slug === ZENDESK_BRIDGE_SLUG) ?? instances[0];
 }
 
+async function findZendeskInstanceById(
+  db: Pick<IntegrationRepositoryDb, "integrationInstance">,
+  instanceId: string
+): Promise<IntegrationInstanceRow | undefined> {
+  const normalizedId = trimOrUndefined(instanceId);
+  if (!normalizedId || !db.integrationInstance) {
+    return undefined;
+  }
+
+  const instances = await db.integrationInstance.findMany({
+    where: { type: "zendesk" },
+    orderBy: { createdAt: "asc" }
+  });
+  return instances.find((item) => item.id === normalizedId);
+}
+
 function splitZendeskSettings(config: Partial<ZendeskIntegrationSettings>): {
   config: Record<string, unknown>;
   secretState: Record<string, unknown>;
@@ -174,6 +190,23 @@ export class IntegrationRepository {
     return this.getConfig<ZendeskIntegrationSettings>("zendesk");
   }
 
+  async getZendeskSettingsForInstance(instanceId: string): Promise<Partial<ZendeskIntegrationSettings> | undefined> {
+    if (!this.db.integrationInstance || !this.db.integrationInstanceConfig || !this.db.integrationInstanceSecret) {
+      throw new Error("integration instance storage is not available");
+    }
+
+    const instance = await findZendeskInstanceById(this.db, instanceId);
+    if (!instance) {
+      throw new Error("integration instance not found");
+    }
+
+    const [configRow, secretRow] = await Promise.all([
+      this.db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: instance.id } }),
+      this.db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: instance.id } })
+    ]);
+    return mergeZendeskSettings(asRecord(configRow?.config), asRecord(secretRow?.secretState));
+  }
+
   async upsertZendeskSettings(
     config: ZendeskIntegrationSettings
   ): Promise<ZendeskIntegrationSettings> {
@@ -232,6 +265,54 @@ export class IntegrationRepository {
     }
 
     await this.upsertConfig("zendesk", config);
+    return config;
+  }
+
+  async upsertZendeskSettingsForInstance(
+    instanceId: string,
+    config: ZendeskIntegrationSettings
+  ): Promise<ZendeskIntegrationSettings> {
+    if (!this.db.integrationInstance || !this.db.integrationInstanceConfig || !this.db.integrationInstanceSecret) {
+      throw new Error("integration instance storage is not available");
+    }
+
+    const instance = await findZendeskInstanceById(this.db, instanceId);
+    if (!instance) {
+      throw new Error("integration instance not found");
+    }
+
+    const { config: centerConfig, secretState, hasSecrets } = splitZendeskSettings(config);
+    await Promise.all([
+      this.db.integrationInstance.update({
+        where: { id: instance.id },
+        data: {
+          name: instance.name || "Zendesk",
+          status: config.enabled ? "active" : "disabled"
+        }
+      }),
+      this.db.integrationInstanceConfig.upsert({
+        where: { integrationInstanceId: instance.id },
+        create: { integrationInstanceId: instance.id, config: centerConfig },
+        update: { config: centerConfig }
+      }),
+      this.db.integrationInstanceSecret.upsert({
+        where: { integrationInstanceId: instance.id },
+        create: {
+          integrationInstanceId: instance.id,
+          hasSecrets,
+          secretState,
+          rotatedAt: hasSecrets ? new Date() : null,
+          rotatedByUserId: null
+        },
+        update: {
+          hasSecrets,
+          secretState,
+          rotatedAt: hasSecrets ? new Date() : null,
+          rotatedByUserId: null
+        }
+      })
+    ]);
+
     return config;
   }
 }

@@ -27,14 +27,14 @@ import type {
 
 type ZendeskSettingsStoreBridge = {
   get(): Promise<ZendeskIntegrationSettings>;
+  getForInstance(instanceId: string): Promise<ZendeskIntegrationSettings>;
   update(
     patch: Partial<ZendeskIntegrationSettings> & {
       zendeskApiToken?: string | undefined;
       webhookSigningSecret?: string | undefined;
     }
   ): Promise<ZendeskIntegrationSettings>;
-  getForInstance?(instanceId: string): Promise<ZendeskIntegrationSettings>;
-  updateForInstance?(
+  updateForInstance(
     patch: Partial<ZendeskIntegrationSettings> & {
       zendeskApiToken?: string | undefined;
       webhookSigningSecret?: string | undefined;
@@ -190,7 +190,7 @@ export class ZendeskIntegrationService {
 
   private async loadSettings(instanceId?: string): Promise<ZendeskIntegrationSettings> {
     const store = this.settingsStore as ZendeskSettingsStoreBridge;
-    if (instanceId && typeof store.getForInstance === "function") {
+    if (instanceId) {
       return await store.getForInstance(instanceId);
     }
     return await store.get();
@@ -204,7 +204,7 @@ export class ZendeskIntegrationService {
     instanceId?: string
   ): Promise<ZendeskIntegrationSettings> {
     const store = this.settingsStore as ZendeskSettingsStoreBridge;
-    if (instanceId && typeof store.updateForInstance === "function") {
+    if (instanceId) {
       return await store.updateForInstance(patch, instanceId);
     }
     return await store.update(patch);
