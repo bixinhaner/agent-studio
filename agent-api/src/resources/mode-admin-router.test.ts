@@ -66,6 +66,41 @@ describe("mode admin router", () => {
     expect(listResponse.body.runProfiles).toEqual([expect.objectContaining({ id: createResponse.body.runProfile.id })]);
   });
 
+  it("copies a run profile into a disabled record", async () => {
+    const { app, cookies, adminUser } = await buildModeAdminApp();
+
+    const createResponse = await request(app)
+      .post("/api/admin/run-profiles")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Coding Default",
+        slug: "coding-default",
+        description: "default",
+        status: "active",
+        defaultModel: "gpt-5.4",
+        allowedModels: ["gpt-5.4"],
+        defaultReasoningEffort: "high",
+        sandboxMode: "workspace-write",
+        approvalPolicy: "never",
+        networkAccessEnabled: true,
+        webSearchMode: "live"
+      });
+
+    const response = await request(app)
+      .post(`/api/admin/run-profiles/${createResponse.body.runProfile.id}/copy`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ name: "Coding Default Copy", slug: "coding-default-copy" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.runProfile).toMatchObject({
+      name: "Coding Default Copy",
+      slug: "coding-default-copy",
+      status: "disabled",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4"]
+    });
+  });
+
   it("creates skill packages and replaces nested runtime bindings through the compatibility endpoint", async () => {
     const { app, cookies, adminUser } = await buildModeAdminApp();
 
@@ -126,6 +161,49 @@ describe("mode admin router", () => {
     ]);
   });
 
+  it("copies a skill package into a disabled hidden record", async () => {
+    const { app, cookies, adminUser } = await buildModeAdminApp();
+
+    const createResponse = await request(app)
+      .post("/api/admin/skill-packages")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Code Tools",
+        slug: "code-tools",
+        description: "Existing tools",
+        status: "active",
+        visibleToUsers: true
+      });
+
+    await request(app)
+      .put(`/api/admin/skill-packages/${createResponse.body.skillPackage.id}/runtime-bindings`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        items: [
+          {
+            capabilityKey: "filesystem.write",
+            description: "Write files",
+            runtimeBindings: [{ runtimeType: "codex", bindingType: "config_fragment", bindingPayload: { tool: "fs_write" } }]
+          }
+        ]
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post(`/api/admin/skill-packages/${createResponse.body.skillPackage.id}/copy`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ name: "Code Tools Copy", slug: "code-tools-copy" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.skillPackage).toMatchObject({
+      name: "Code Tools Copy",
+      slug: "code-tools-copy",
+      status: "disabled",
+      visibleToUsers: false,
+      items: [expect.objectContaining({ capabilityKey: "filesystem.write" })]
+    });
+  });
+
   it("creates agent modes and replaces skill package, workspace, and instruction-source bindings", async () => {
     const { app, cookies, adminUser, runProfiles, skillPackages } = await buildModeAdminApp();
     const runProfile = await runProfiles.create({
@@ -176,24 +254,24 @@ describe("mode admin router", () => {
       .put(`/api/admin/agent-modes/${createResponse.body.agentMode.id}/workspaces`)
       .set("Cookie", cookies.create(adminUser.id))
       .send({
-        workspaceRules: [
+        workspaces: [
           {
             workspaceId: "workspace-1",
             isDefault: true,
             allowDirectorySelection: true,
-            directoryScope: "descendants_only",
+            directoryScope: "authorized_workspace_and_knowledge_set",
             loadWorkspaceAgentsMd: true
           }
         ]
       });
 
     expect(workspacesResponse.status).toBe(200);
-    expect(workspacesResponse.body.agentMode.workspaceRules).toEqual([
+    expect(workspacesResponse.body.agentMode.workspaces).toEqual([
       expect.objectContaining({
         workspaceId: "workspace-1",
         isDefault: true,
         allowDirectorySelection: true,
-        directoryScope: "descendants_only",
+        directoryScope: "authorized_workspace_and_knowledge_set",
         loadWorkspaceAgentsMd: true
       })
     ]);
@@ -204,8 +282,8 @@ describe("mode admin router", () => {
       .send({
         instructionSources: [
           {
-            sourceType: "inline_text",
-            sourceRef: "Always write tests first.",
+            sourceType: "workspace_agents_md",
+            sourceRef: "workspace-root",
             sortOrder: 10
           }
         ]
@@ -214,8 +292,8 @@ describe("mode admin router", () => {
     expect(instructionSourcesResponse.status).toBe(200);
     expect(instructionSourcesResponse.body.agentMode.instructionSources).toEqual([
       expect.objectContaining({
-        sourceType: "inline_text",
-        sourceRef: "Always write tests first.",
+        sourceType: "workspace_agents_md",
+        sourceRef: "workspace-root",
         sortOrder: 10
       })
     ]);
@@ -227,9 +305,94 @@ describe("mode admin router", () => {
         id: createResponse.body.agentMode.id,
         skillPackages: [expect.objectContaining({ skillPackageId: skillPackage.id })],
         workspaceRules: [expect.objectContaining({ workspaceId: "workspace-1" })],
-        instructionSources: [expect.objectContaining({ sourceType: "inline_text" })]
+        instructionSources: [expect.objectContaining({ sourceType: "workspace_agents_md" })]
       })
     ]);
+  });
+
+  it("copies an agent mode into a disabled hidden record with bindings", async () => {
+    const { app, cookies, adminUser, runProfiles, skillPackages } = await buildModeAdminApp();
+    const runProfile = await runProfiles.create({
+      name: "Standard Profile",
+      slug: "standard-profile",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "disabled"
+    });
+    const skillPackage = await skillPackages.create({
+      name: "Code Tools",
+      slug: "code-tools",
+      visibleToUsers: true
+    });
+
+    const createResponse = await request(app)
+      .post("/api/admin/agent-modes")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Coding Assistant",
+        slug: "coding-assistant",
+        runProfileId: runProfile.id,
+        visibleToUsers: true,
+        status: "active"
+      })
+      .expect(201);
+
+    await request(app)
+      .put(`/api/admin/agent-modes/${createResponse.body.agentMode.id}/skill-packages`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ skillPackageIds: [skillPackage.id] })
+      .expect(200);
+
+    await request(app)
+      .put(`/api/admin/agent-modes/${createResponse.body.agentMode.id}/workspaces`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        workspaces: [
+          {
+            workspaceId: "workspace-1",
+            isDefault: true,
+            allowDirectorySelection: true,
+            directoryScope: "authorized_workspace_and_knowledge_set",
+            loadWorkspaceAgentsMd: true
+          }
+        ]
+      })
+      .expect(200);
+
+    await request(app)
+      .put(`/api/admin/agent-modes/${createResponse.body.agentMode.id}/instruction-sources`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        instructionSources: [
+          {
+            sourceType: "workspace_agents_md",
+            sourceRef: "workspace-root",
+            sortOrder: 1
+          }
+        ]
+      })
+      .expect(200);
+
+    const response = await request(app)
+      .post(`/api/admin/agent-modes/${createResponse.body.agentMode.id}/copy`)
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({ name: "Coding Assistant Copy", slug: "coding-assistant-copy" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.agentMode).toMatchObject({
+      name: "Coding Assistant Copy",
+      slug: "coding-assistant-copy",
+      status: "disabled",
+      visibleToUsers: false,
+      runProfileId: runProfile.id,
+      skillPackages: [expect.objectContaining({ skillPackageId: skillPackage.id })],
+      workspaceRules: [expect.objectContaining({ workspaceId: "workspace-1" })],
+      instructionSources: [expect.objectContaining({ sourceType: "workspace_agents_md", sourceRef: "workspace-root" })]
+    });
   });
 
   it("keeps the admin auth guard in front of the mode admin routes", async () => {

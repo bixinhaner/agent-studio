@@ -18,6 +18,7 @@ import { DepartmentMembershipRepository } from "../persistence/department-member
 import { SyncJobRepository } from "../persistence/sync-job-repository.js";
 import { UserRepository } from "../persistence/user-repository.js";
 import { createMonitoringRouter } from "./monitoring-router.js";
+import { createModeAdminRouter } from "../resources/mode-admin-router.js";
 
 type RuntimeOptionResponse = {
   modes: Array<{
@@ -167,6 +168,7 @@ function buildApp(options?: {
   counts?: { users: number; threads: number; activeSessions: number };
   zendesk?: Pick<ZendeskIntegrationService, "getOverview">;
   runtimeOptions?: RuntimeOptionResponse;
+  modeAdminRouter?: Router;
 }) {
   const dingtalkClient: DingTalkClient = {
     async exchangeCode() {
@@ -266,6 +268,7 @@ function buildApp(options?: {
           })
         } satisfies Pick<ZendeskIntegrationService, "getOverview">)
     }),
+    modeAdminRouter: options?.modeAdminRouter,
     portalRouter: createPortalRouter({
       runtimeOptions: {
         resolve: async () =>
@@ -1246,6 +1249,41 @@ describe("admin and portal routers", () => {
     const response = await request(app)
       .get("/api/admin/overview")
       .set("Cookie", cookies.create(user.id));
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ detail: "Forbidden" });
+  });
+
+  it("keeps mode admin routes behind the admin auth guard", async () => {
+    const { app, cookies, user } = buildApp({
+      user: makeUser({ id: "employee-1", role: "employee" }),
+      modeAdminRouter: createModeAdminRouter({
+        runProfiles: {
+          list: async () => [],
+          create: async () => ({ id: "run-profile-1" }),
+          get: async () => undefined,
+          update: async () => ({ id: "run-profile-1" })
+        } as never,
+        skillPackages: {
+          list: async () => [],
+          create: async () => ({ id: "skill-package-1" }),
+          get: async () => undefined,
+          update: async () => ({ id: "skill-package-1" }),
+          replaceItems: async () => ({ id: "skill-package-1" })
+        } as never,
+        agentModes: {
+          list: async () => [],
+          create: async () => ({ id: "agent-mode-1" }),
+          get: async () => undefined,
+          update: async () => ({ id: "agent-mode-1" }),
+          replaceSkillPackages: async () => ({ id: "agent-mode-1" }),
+          replaceWorkspaceRules: async () => ({ id: "agent-mode-1" }),
+          replaceInstructionSources: async () => ({ id: "agent-mode-1" })
+        } as never
+      })
+    });
+
+    const response = await request(app).get("/api/admin/run-profiles").set("Cookie", cookies.create(user.id));
 
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ detail: "Forbidden" });

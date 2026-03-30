@@ -27,8 +27,16 @@ const stringListSchema = z.array(z.string().trim().min(1));
 const statusSchema = z.enum(["active", "inactive"]);
 const runtimeTypeSchema = z.enum(["codex", "claude_code"]);
 const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint"]);
-const directoryScopeSchema = z.enum(["workspace_only", "descendants_only"]);
-const instructionSourceTypeSchema = z.enum(["inline_text", "knowledge_set_document"]);
+const directoryScopeSchema = z.enum([
+  "workspace_only",
+  "descendants_only",
+  "authorized_workspace_and_knowledge_set"
+]);
+const instructionSourceTypeSchema = z.enum(["inline_text", "knowledge_set_document", "workspace_agents_md"]);
+const copySchema = z.object({
+  name: z.string().trim().min(1),
+  slug: z.string().trim().min(1)
+});
 
 const runProfileCreateSchema = z.object({
   organizationId: z.string().trim().min(1).optional(),
@@ -118,17 +126,29 @@ const agentModeSkillPackagesReplaceSchema = z.object({
   skillPackageIds: stringListSchema
 });
 
-const agentModeWorkspaceRulesReplaceSchema = z.object({
-  workspaceRules: z.array(
-    z.object({
-      workspaceId: z.string().trim().min(1),
-      isDefault: z.boolean().optional(),
-      allowDirectorySelection: z.boolean().optional(),
-      directoryScope: directoryScopeSchema,
-      loadWorkspaceAgentsMd: z.boolean().optional()
-    })
-  )
+const workspaceRuleSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  isDefault: z.boolean().optional(),
+  allowDirectorySelection: z.boolean().optional(),
+  directoryScope: directoryScopeSchema,
+  loadWorkspaceAgentsMd: z.boolean().optional()
 });
+
+const agentModeWorkspaceRulesReplaceSchema = z
+  .object({
+    workspaces: z.array(workspaceRuleSchema).optional(),
+    workspaceRules: z.array(workspaceRuleSchema).optional()
+  })
+  .superRefine((value, ctx) => {
+    const workspaces = value.workspaces ?? value.workspaceRules;
+    if (!workspaces) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["workspaces"],
+        message: "Required"
+      });
+    }
+  });
 
 const agentModeInstructionSourcesReplaceSchema = z.object({
   instructionSources: z.array(
@@ -257,6 +277,13 @@ type AgentModeRepositoryLike = {
   ): Promise<unknown>;
 };
 
+function withWorkspaceAlias<T extends { workspaceRules?: unknown }>(record: T): T & { workspaces: unknown } {
+  return {
+    ...record,
+    workspaces: record.workspaceRules ?? []
+  };
+}
+
 export function createModeAdminRouter(options: {
   runProfiles: RunProfileRepositoryLike;
   skillPackages: SkillPackageRepositoryLike;
@@ -279,6 +306,50 @@ export function createModeAdminRouter(options: {
       res.status(201).json({ runProfile });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/run-profiles/:id/copy", async (req: Request, res: Response) => {
+    const parsed = copySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const existing = (await options.runProfiles.get(req.params.id)) as
+        | {
+            organizationId?: string;
+            description?: string;
+            defaultModel: string;
+            allowedModels: string[];
+            defaultReasoningEffort: string;
+            sandboxMode: string;
+            approvalPolicy: string;
+            networkAccessEnabled?: boolean;
+            webSearchMode: string;
+          }
+        | undefined;
+      if (!existing) {
+        res.status(404).json({ detail: "run profile 不存在" });
+        return;
+      }
+      const runProfile = await options.runProfiles.create({
+        organizationId: existing.organizationId,
+        name: parsed.data.name,
+        slug: parsed.data.slug,
+        description: existing.description,
+        status: "disabled",
+        defaultModel: existing.defaultModel,
+        allowedModels: existing.allowedModels,
+        defaultReasoningEffort: existing.defaultReasoningEffort,
+        sandboxMode: existing.sandboxMode,
+        approvalPolicy: existing.approvalPolicy,
+        networkAccessEnabled: existing.networkAccessEnabled,
+        webSearchMode: existing.webSearchMode
+      });
+      res.status(201).json({ runProfile });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -316,6 +387,57 @@ export function createModeAdminRouter(options: {
       res.status(201).json({ skillPackage });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/skill-packages/:id/copy", async (req: Request, res: Response) => {
+    const parsed = copySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const existing = (await options.skillPackages.get(req.params.id)) as
+        | {
+            organizationId?: string;
+            description?: string;
+            items?: Array<{
+              capabilityKey: string;
+              description?: string;
+              runtimeBindings: Array<{
+                runtimeType: string;
+                bindingType: string;
+                bindingPayload: unknown;
+              }>;
+            }>;
+          }
+        | undefined;
+      if (!existing) {
+        res.status(404).json({ detail: "skill package 不存在" });
+        return;
+      }
+      const created = (await options.skillPackages.create({
+        organizationId: existing.organizationId,
+        name: parsed.data.name,
+        slug: parsed.data.slug,
+        description: existing.description,
+        status: "disabled",
+        visibleToUsers: false
+      })) as { id: string };
+      const items = (existing.items ?? []).map((item) => ({
+        capabilityKey: item.capabilityKey,
+        description: item.description,
+        runtimeBindings: item.runtimeBindings.map((binding) => ({
+          runtimeType: binding.runtimeType,
+          bindingType: binding.bindingType,
+          bindingPayload: binding.bindingPayload
+        }))
+      }));
+      const skillPackage =
+        items.length > 0 ? await options.skillPackages.replaceItems(created.id, items) : await options.skillPackages.get(created.id);
+      res.status(201).json({ skillPackage });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
   });
 
@@ -395,6 +517,66 @@ export function createModeAdminRouter(options: {
     }
   });
 
+  router.post("/agent-modes/:id/copy", async (req: Request, res: Response) => {
+    const parsed = copySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const existing = (await options.agentModes.get(req.params.id)) as
+        | {
+            organizationId?: string;
+            description?: string;
+            runProfileId: string;
+            skillPackages?: Array<{ skillPackageId: string }>;
+            workspaceRules?: Array<{
+              workspaceId: string;
+              isDefault?: boolean;
+              allowDirectorySelection?: boolean;
+              directoryScope: string;
+              loadWorkspaceAgentsMd?: boolean;
+            }>;
+            instructionSources?: Array<{
+              sourceType: string;
+              sourceRef: string;
+              sortOrder?: number;
+            }>;
+          }
+        | undefined;
+      if (!existing) {
+        res.status(404).json({ detail: "agent mode 不存在" });
+        return;
+      }
+      const created = (await options.agentModes.create({
+        organizationId: existing.organizationId,
+        name: parsed.data.name,
+        slug: parsed.data.slug,
+        description: existing.description,
+        status: "disabled",
+        visibleToUsers: false,
+        runProfileId: existing.runProfileId
+      })) as { id: string };
+
+      if ((existing.skillPackages ?? []).length > 0) {
+        await options.agentModes.replaceSkillPackages(
+          created.id,
+          existing.skillPackages!.map((item) => item.skillPackageId)
+        );
+      }
+      if ((existing.workspaceRules ?? []).length > 0) {
+        await options.agentModes.replaceWorkspaceRules(created.id, existing.workspaceRules!);
+      }
+      if ((existing.instructionSources ?? []).length > 0) {
+        await options.agentModes.replaceInstructionSources(created.id, existing.instructionSources!);
+      }
+      const agentMode = withWorkspaceAlias((await options.agentModes.get(created.id)) as { workspaceRules?: unknown });
+      res.status(201).json({ agentMode });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.patch("/agent-modes/:id", async (req: Request, res: Response) => {
     const parsed = agentModeUpdateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -435,8 +617,9 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
-      const agentMode = await options.agentModes.replaceWorkspaceRules(req.params.id, parsed.data.workspaceRules);
-      res.json({ agentMode });
+      const workspaceRules = parsed.data.workspaces ?? parsed.data.workspaceRules ?? [];
+      const agentMode = await options.agentModes.replaceWorkspaceRules(req.params.id, workspaceRules);
+      res.json({ agentMode: withWorkspaceAlias(agentMode as { workspaceRules?: unknown }) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
@@ -450,7 +633,7 @@ export function createModeAdminRouter(options: {
     }
     try {
       const agentMode = await options.agentModes.replaceInstructionSources(req.params.id, parsed.data.instructionSources);
-      res.json({ agentMode });
+      res.json({ agentMode: withWorkspaceAlias(agentMode as { workspaceRules?: unknown }) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
