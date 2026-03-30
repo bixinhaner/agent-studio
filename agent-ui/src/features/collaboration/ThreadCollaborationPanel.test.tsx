@@ -11,7 +11,7 @@ vi.mock("./api", () => ({
 
 import { addThreadComment, replaceThreadShares, setThreadAssignment, setThreadCaptureMark } from "./api";
 import { ThreadCollaborationPanel } from "./ThreadCollaborationPanel";
-import type { ThreadCollaborationView } from "./types";
+import type { ThreadCollaborationView, ThreadShareRecord } from "./types";
 
 const mockedAddThreadComment = vi.mocked(addThreadComment);
 const mockedReplaceThreadShares = vi.mocked(replaceThreadShares);
@@ -26,7 +26,8 @@ function buildView(): ThreadCollaborationView {
       canRead: true,
       canComment: true,
       canRun: true,
-      isOwner: true
+      isOwner: true,
+      canManage: true
     },
     shares: [
       {
@@ -216,7 +217,8 @@ describe("ThreadCollaborationPanel", () => {
             canRead: true,
             canComment: true,
             canRun: false,
-            isOwner: false
+            isOwner: false,
+            canManage: false
           }
         }}
         loading={false}
@@ -227,5 +229,106 @@ describe("ThreadCollaborationPanel", () => {
 
     expect(screen.getByText("共享视图中只能查看历史与发表评论，不能继续运行该线程。")).toBeTruthy();
     expect(screen.getByText("Existing note")).toBeTruthy();
+  });
+
+  it("allows elevated non-owner managers to use management controls", () => {
+    render(
+      <ThreadCollaborationPanel
+        threadId="thread-1"
+        collaboration={{
+          ...buildView(),
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: false,
+            isOwner: false,
+            canManage: true
+          }
+        }}
+        loading={false}
+        errorText=""
+        onCollaborationChange={vi.fn()}
+      />
+    );
+
+    expect((screen.getByRole("button", { name: "更新共享" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "保存协作人" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "保存捕获标记" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("ignores stale mutation results after switching to another thread", async () => {
+    let resolveShares: ((value: ThreadShareRecord[]) => void) | undefined;
+    mockedReplaceThreadShares.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveShares = resolve;
+        })
+    );
+
+    function Harness() {
+      const [threadId, setThreadId] = useState("thread-1");
+      const [collaboration, setCollaboration] = useState(buildView());
+
+      return (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setThreadId("thread-2");
+              setCollaboration({
+                ...buildView(),
+                threadId: "thread-2",
+                shares: [],
+                comments: [],
+                assignment: null,
+                followers: [],
+                captureMark: null
+              });
+            }}
+          >
+            switch-thread
+          </button>
+          <ThreadCollaborationPanel
+            threadId={threadId}
+            collaboration={collaboration}
+            loading={false}
+            errorText=""
+            onCollaborationChange={setCollaboration}
+          />
+        </div>
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.change(screen.getByLabelText("共享对象"), { target: { value: "department:dept-ops" } });
+    fireEvent.click(screen.getByRole("button", { name: "更新共享" }));
+
+    await waitFor(() => {
+      expect(mockedReplaceThreadShares).toHaveBeenCalledWith("thread-1", [{ subjectType: "department", subjectId: "dept-ops" }]);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "switch-thread" }));
+
+    if (resolveShares) {
+      resolveShares([
+        {
+          id: "share-stale",
+          threadId: "thread-1",
+          subjectType: "department",
+          subjectId: "dept-ops",
+          permissionLevel: "read_comment",
+          createdAt: "2026-03-31T01:00:00.000Z",
+          updatedAt: "2026-03-31T01:00:00.000Z"
+        }
+      ]);
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText("thread-2")).toBeTruthy();
+    });
+
+    expect((screen.getByLabelText("共享对象") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "更新共享" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

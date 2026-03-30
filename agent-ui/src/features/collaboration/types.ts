@@ -3,6 +3,7 @@ export type ThreadCollaborationAccess = {
   canComment: boolean;
   canRun: boolean;
   isOwner: boolean;
+  canManage: boolean;
 };
 
 export type ThreadShareSubjectType = "user" | "department";

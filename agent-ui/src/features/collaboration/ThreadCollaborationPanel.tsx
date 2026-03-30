@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addThreadComment, replaceThreadShares, setThreadAssignment, setThreadCaptureMark } from "./api";
 import type {
@@ -65,18 +65,23 @@ export function ThreadCollaborationPanel({
   const [captureNoteDraft, setCaptureNoteDraft] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [panelErrorText, setPanelErrorText] = useState("");
+  const currentThreadIdRef = useRef(threadId);
+  const latestCollaborationRef = useRef(collaboration);
 
   useEffect(() => {
+    currentThreadIdRef.current = threadId;
+    latestCollaborationRef.current = collaboration;
     setShareDraft(shareListValue(collaboration));
     setOwnerDraft(collaboration?.assignment?.ownerUserId ?? collaboration?.ownerUserId ?? "");
     setFollowersDraft((collaboration?.followers ?? []).map((follower) => follower.userId).join(", "));
     setCaptureEnabled(Boolean(collaboration?.captureMark));
     setCaptureNoteDraft(collaboration?.captureMark?.note ?? "");
+    setPendingAction(null);
     setPanelErrorText("");
-  }, [collaboration]);
+  }, [collaboration, threadId]);
 
   const readonlySharedThread = Boolean(collaboration && collaboration.access.canRead && !collaboration.access.canRun);
-  const canManage = Boolean(collaboration?.access.isOwner);
+  const canManage = Boolean(collaboration?.access.canManage);
   const canComment = Boolean(collaboration?.access.canComment);
 
   const commentSummary = useMemo(() => {
@@ -87,20 +92,27 @@ export function ThreadCollaborationPanel({
 
   async function handleShareSave() {
     if (!collaboration) return;
+    const requestThreadId = threadId;
     setPendingAction("shares");
     setPanelErrorText("");
     try {
       const shares = await replaceThreadShares(threadId, parseShareList(shareDraft));
-      onCollaborationChange({ ...collaboration, shares });
+      if (currentThreadIdRef.current !== requestThreadId || !latestCollaborationRef.current) return;
+      onCollaborationChange({ ...latestCollaborationRef.current, shares });
     } catch (error) {
-      setPanelErrorText(error instanceof Error ? error.message : "更新共享失败");
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPanelErrorText(error instanceof Error ? error.message : "更新共享失败");
+      }
     } finally {
-      setPendingAction(null);
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPendingAction(null);
+      }
     }
   }
 
   async function handleCommentSubmit() {
     if (!collaboration || !commentDraft.trim()) return;
+    const requestThreadId = threadId;
     setPendingAction("comment");
     setPanelErrorText("");
     try {
@@ -108,21 +120,29 @@ export function ThreadCollaborationPanel({
         bodyMarkdown: commentDraft,
         mentionedUserIds: splitIds(mentionDraft)
       });
+      if (currentThreadIdRef.current !== requestThreadId || !latestCollaborationRef.current) return;
       onCollaborationChange({
-        ...collaboration,
-        comments: [...collaboration.comments, comment]
+        ...latestCollaborationRef.current,
+        comments: [...latestCollaborationRef.current.comments, comment]
       });
-      setCommentDraft("");
-      setMentionDraft("");
+      if (currentThreadIdRef.current === requestThreadId) {
+        setCommentDraft("");
+        setMentionDraft("");
+      }
     } catch (error) {
-      setPanelErrorText(error instanceof Error ? error.message : "发送评论失败");
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPanelErrorText(error instanceof Error ? error.message : "发送评论失败");
+      }
     } finally {
-      setPendingAction(null);
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPendingAction(null);
+      }
     }
   }
 
   async function handleAssignmentSave() {
     if (!collaboration || !ownerDraft.trim()) return;
+    const requestThreadId = threadId;
     setPendingAction("assignment");
     setPanelErrorText("");
     try {
@@ -130,20 +150,26 @@ export function ThreadCollaborationPanel({
         ownerUserId: ownerDraft,
         followerIds: splitIds(followersDraft)
       });
+      if (currentThreadIdRef.current !== requestThreadId || !latestCollaborationRef.current) return;
       onCollaborationChange({
-        ...collaboration,
+        ...latestCollaborationRef.current,
         assignment: next.assignment,
         followers: next.followers
       });
     } catch (error) {
-      setPanelErrorText(error instanceof Error ? error.message : "保存协作负责人失败");
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPanelErrorText(error instanceof Error ? error.message : "保存协作负责人失败");
+      }
     } finally {
-      setPendingAction(null);
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPendingAction(null);
+      }
     }
   }
 
   async function handleCaptureSave() {
     if (!collaboration) return;
+    const requestThreadId = threadId;
     setPendingAction("capture");
     setPanelErrorText("");
     try {
@@ -151,14 +177,19 @@ export function ThreadCollaborationPanel({
         enabled: captureEnabled,
         note: captureNoteDraft
       });
+      if (currentThreadIdRef.current !== requestThreadId || !latestCollaborationRef.current) return;
       onCollaborationChange({
-        ...collaboration,
+        ...latestCollaborationRef.current,
         captureMark
       });
     } catch (error) {
-      setPanelErrorText(error instanceof Error ? error.message : "保存捕获标记失败");
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPanelErrorText(error instanceof Error ? error.message : "保存捕获标记失败");
+      }
     } finally {
-      setPendingAction(null);
+      if (currentThreadIdRef.current === requestThreadId) {
+        setPendingAction(null);
+      }
     }
   }
 

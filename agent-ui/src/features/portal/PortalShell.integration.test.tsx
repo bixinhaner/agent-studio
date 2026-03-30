@@ -132,6 +132,7 @@ vi.mock("../collaboration/ThreadCollaborationPanel", () => ({
 
 import PortalShell from "./PortalShell";
 import { api } from "../../lib/api";
+import { setThreadAssignment } from "../collaboration/api";
 
 const mockedApi = vi.mocked(api);
 
@@ -296,7 +297,8 @@ describe("PortalShell knowledge set integration", () => {
             canRead: true,
             canComment: true,
             canRun: true,
-            isOwner: true
+            isOwner: true,
+            canManage: true
           },
           shares: [],
           comments: [],
@@ -433,7 +435,8 @@ describe("PortalShell knowledge set integration", () => {
             canRead: true,
             canComment: true,
             canRun: false,
-            isOwner: false
+            isOwner: false,
+            canManage: false
           },
           shares: [],
           comments: [],
@@ -461,5 +464,283 @@ describe("PortalShell knowledge set integration", () => {
     expect(await screen.findByText("共享视图中可查看消息和附件，但不能继续运行该线程。")).toBeTruthy();
     expect((await screen.findByTestId("thread-collaboration-panel")).textContent).toBe("thread-1:readonly:ok");
     expect(mockedApi).toHaveBeenCalledWith("/api/threads/thread-1/collaboration");
+  });
+
+  it("blocks actual run startup when the active collaboration state disallows canRun", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: [{ id: "ws-docs", label: "Docs", slug: "docs", is_default: true, runtime_workspace_path: "/workspace/default", default_knowledge_sets: [], optional_knowledge_sets: [] }]
+      })
+      .mockResolvedValueOnce({
+        thread: {
+          id: "thread-1",
+          status: "regular",
+          model: "gpt-5",
+          reasoning_effort: "high",
+          workspace: "/workspace/default",
+          created_at: "2026-03-29T00:00:00.000Z",
+          updated_at: "2026-03-29T00:00:00.000Z"
+        }
+      })
+      .mockResolvedValueOnce({
+        collaboration: {
+          threadId: "thread-1",
+          ownerUserId: "owner-1",
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: false,
+            isOwner: false,
+            canManage: false
+          },
+          shares: [],
+          comments: [],
+          assignment: null,
+          followers: [],
+          captureMark: null
+        }
+      });
+
+    render(<PortalShell />);
+
+    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+
+    await act(async () => {
+      await capturedThreadListAdapter?.initialize("thread-1");
+    });
+
+    currentThreadListItemState = {
+      id: "local-thread-1",
+      remoteId: "thread-1",
+      title: "Shared thread"
+    };
+
+    expect(await screen.findByText("共享视图中可查看消息和附件，但不能继续运行该线程。")).toBeTruthy();
+
+    await expect(
+      (async () => {
+        if (!capturedChatAdapter) throw new Error("missing chat adapter");
+        for await (const _chunk of capturedChatAdapter.run({
+          messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+          unstable_threadId: "thread-1",
+          abortSignal: new AbortController().signal
+        })) {
+          // noop
+        }
+      })()
+    ).rejects.toThrow("当前共享线程为只读模式，不能继续运行。");
+
+    expect(mockedApi).not.toHaveBeenCalledWith(
+      "/api/threads/thread-1/session",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("clears readonly state immediately when switching to another thread", async () => {
+    let resolveSecondCollaboration: ((value: Record<string, unknown>) => void) | undefined;
+
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: [{ id: "ws-docs", label: "Docs", slug: "docs", is_default: true, runtime_workspace_path: "/workspace/default", default_knowledge_sets: [], optional_knowledge_sets: [] }]
+      })
+      .mockResolvedValueOnce({
+        thread: {
+          id: "thread-1",
+          status: "regular",
+          model: "gpt-5",
+          reasoning_effort: "high",
+          workspace: "/workspace/default",
+          created_at: "2026-03-29T00:00:00.000Z",
+          updated_at: "2026-03-29T00:00:00.000Z"
+        }
+      })
+      .mockResolvedValueOnce({
+        collaboration: {
+          threadId: "thread-1",
+          ownerUserId: "owner-1",
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: false,
+            isOwner: false,
+            canManage: false
+          },
+          shares: [],
+          comments: [],
+          assignment: null,
+          followers: [],
+          captureMark: null
+        }
+      })
+      .mockResolvedValueOnce({
+        thread: {
+          id: "thread-2",
+          status: "regular",
+          model: "gpt-5",
+          reasoning_effort: "high",
+          workspace: "/workspace/default",
+          created_at: "2026-03-29T00:00:00.000Z",
+          updated_at: "2026-03-29T00:00:00.000Z"
+        }
+      })
+      .mockImplementationOnce(
+        async () =>
+          await new Promise((resolve) => {
+            resolveSecondCollaboration = resolve;
+          })
+      );
+
+    const view = render(<PortalShell />);
+
+    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+
+    await act(async () => {
+      await capturedThreadListAdapter?.initialize("thread-1");
+    });
+
+    expect(await screen.findByText("共享视图中可查看消息和附件，但不能继续运行该线程。")).toBeTruthy();
+
+    await act(async () => {
+      await capturedThreadListAdapter?.initialize("thread-2");
+    });
+
+    currentThreadListItemState = {
+      id: "local-thread-2",
+      remoteId: "thread-2",
+      title: "Thread 2"
+    };
+    view.rerender(<PortalShell />);
+
+    expect(screen.queryByText("共享视图中可查看消息和附件，但不能继续运行该线程。")).toBeNull();
+    expect((await screen.findByTestId("thread-collaboration-panel")).textContent).toBe("thread-2:loading:ok");
+
+    if (resolveSecondCollaboration) {
+      resolveSecondCollaboration({
+        collaboration: {
+          threadId: "thread-2",
+          ownerUserId: "owner-1",
+          access: {
+            canRead: true,
+            canComment: true,
+            canRun: true,
+            isOwner: true,
+            canManage: true
+          },
+          shares: [],
+          comments: [],
+          assignment: null,
+          followers: [],
+          captureMark: null
+        }
+      });
+    }
+
+    expect((await screen.findByTestId("thread-collaboration-panel")).textContent).toBe("thread-2:interactive:ok");
+  });
+
+  it("does not serialize follower_ids when assignment helper input omits them", async () => {
+    mockedApi.mockResolvedValueOnce({
+      assignment: {
+        id: "assignment-1",
+        threadId: "thread-1",
+        ownerUserId: "user-9",
+        assignedByUserId: "user-1",
+        assignedAt: "2026-03-31T00:00:00.000Z",
+        updatedAt: "2026-03-31T00:00:00.000Z"
+      },
+      followers: []
+    });
+
+    await setThreadAssignment("thread-1", { ownerUserId: "user-9" });
+
+    expect(mockedApi).toHaveBeenCalledWith(
+      "/api/threads/thread-1/assignment",
+      expect.objectContaining({
+        method: "PUT",
+        json: { owner_user_id: "user-9" }
+      })
+    );
   });
 });

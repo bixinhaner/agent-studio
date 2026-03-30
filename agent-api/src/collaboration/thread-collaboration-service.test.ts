@@ -331,6 +331,7 @@ describe("ThreadCollaborationService", () => {
     expect(summary.access.canRead).toBe(true);
     expect(summary.access.canComment).toBe(true);
     expect(summary.access.canRun).toBe(false);
+    expect(summary.access.canManage).toBe(false);
     expect(summary.shares).toHaveLength(1);
   });
 
@@ -472,6 +473,7 @@ describe("ThreadCollaborationService", () => {
     expect(summary.access.canRead).toBe(true);
     expect(summary.access.canComment).toBe(true);
     expect(summary.access.canRun).toBe(false);
+    expect(summary.access.canManage).toBe(true);
 
     await expect(
       adminService.replaceShares({
@@ -502,6 +504,7 @@ describe("ThreadCollaborationService", () => {
     expect(summary.access.canRead).toBe(true);
     expect(summary.access.canComment).toBe(false);
     expect(summary.access.canRun).toBe(false);
+    expect(summary.access.canManage).toBe(false);
 
     await expect(
       readOnlyService.addComment({

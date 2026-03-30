@@ -1425,6 +1425,8 @@ export function PortalShell() {
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
   const selectedOptionalKnowledgeSetIdsByWorkspaceRef = useRef(selectedOptionalKnowledgeSetIdsByWorkspace);
+  const activeThreadIdentityRef = useRef<ThreadIdentity>({});
+  const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1435,6 +1437,8 @@ export function PortalShell() {
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
   selectedOptionalKnowledgeSetIdsByWorkspaceRef.current = selectedOptionalKnowledgeSetIdsByWorkspace;
+  activeThreadIdentityRef.current = activeThreadIdentity;
+  threadCollaborationRef.current = threadCollaboration;
 
   useEffect(() => {
     let active = true;
@@ -1857,8 +1861,11 @@ export function PortalShell() {
     appliedConfig.workspace
   );
   const selectedOptionalKnowledgeSetIds = selectedOptionalKnowledgeSetIdsByWorkspace[appliedConfig.workspace] ?? [];
+  const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
+  const activeThreadCollaboration =
+    threadCollaboration && threadCollaboration.threadId === activeRemoteThreadId ? threadCollaboration : null;
   const sharedThreadReadonly = Boolean(
-    threadCollaboration && threadCollaboration.access.canRead && !threadCollaboration.access.canRun
+    activeThreadCollaboration && activeThreadCollaboration.access.canRead && !activeThreadCollaboration.access.canRun
   );
 
   const chatAdapter = useMemo<ChatModelAdapter>(
@@ -1884,6 +1891,13 @@ export function PortalShell() {
           throw new Error("无法识别当前线程 ID（线程可能仍在初始化，请稍后重试）");
         }
         activeRemoteThreadIdRef.current = threadId;
+        const activeCollaboration =
+          threadCollaborationRef.current && threadCollaborationRef.current.threadId === threadId
+            ? threadCollaborationRef.current
+            : null;
+        if (activeCollaboration && !activeCollaboration.access.canRun) {
+          throw new Error("当前共享线程为只读模式，不能继续运行。");
+        }
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(
@@ -2610,10 +2624,14 @@ export function PortalShell() {
             </div>
             <ThreadCollaborationPanel
               threadId={String(activeThreadIdentity.remoteId || "").trim()}
-              collaboration={threadCollaboration}
+              collaboration={activeThreadCollaboration}
               loading={threadCollaborationLoading}
               errorText={threadCollaborationErrorText}
-              onCollaborationChange={setThreadCollaboration}
+              onCollaborationChange={(next) => {
+                const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
+                if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
+                setThreadCollaboration(next);
+              }}
             />
           </div>
         </main>

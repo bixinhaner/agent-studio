@@ -57,7 +57,7 @@ export function createCollaborationRouter(options: {
     getThreadCollaborationView(input: { actorUserId: string; departmentIds: string[]; threadId: string }): Promise<{
       threadId: string;
       ownerUserId?: string;
-      access: { canRead: boolean; canComment: boolean; canRun: boolean; isOwner: boolean };
+      access: { canRead: boolean; canComment: boolean; canRun: boolean; isOwner: boolean; canManage: boolean };
       shares: unknown[];
       comments: unknown[];
       assignment: { ownerUserId?: string; assignedByUserId?: string; assignedAt?: string } | null;

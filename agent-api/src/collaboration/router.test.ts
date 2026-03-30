@@ -31,7 +31,8 @@ function buildApp(options?: {
             canRead: true,
             canComment: true,
             canRun: false,
-            isOwner: false
+            isOwner: false,
+            canManage: false
           },
           shares: [{ id: "share-1", threadId, subjectType: "user", subjectId: "user-1", permissionLevel: "read_comment", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
           comments: [{ id: "comment-1", threadId, bodyMarkdown: "hello", mentionedUserIds: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
@@ -149,6 +150,7 @@ describe("createCollaborationRouter", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.collaboration.access.canComment).toBe(true);
+    expect(response.body.collaboration.access.canManage).toBe(false);
     expect(response.body.collaboration.threadId).toBe("thread-1");
   });
 

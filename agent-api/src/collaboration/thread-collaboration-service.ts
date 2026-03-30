@@ -12,6 +12,7 @@ export type ThreadCollaborationView = {
     canComment: boolean;
     canRun: boolean;
     isOwner: boolean;
+    canManage: boolean;
   };
   shares: ThreadShareRecord[];
   comments: ThreadCommentRecord[];
@@ -348,12 +349,12 @@ export class ThreadCollaborationService {
   }): Promise<ThreadCollaborationView["access"]> {
     const actorUserId = trimOrUndefined(input.actorUserId);
     if (!actorUserId) {
-      return { canRead: false, canComment: false, canRun: false, isOwner: false };
+      return { canRead: false, canComment: false, canRun: false, isOwner: false, canManage: false };
     }
     const ownerUserId = trimOrUndefined(input.thread.userId);
     const isOwner = ownerUserId === actorUserId;
     if (isOwner) {
-      return { canRead: true, canComment: true, canRun: true, isOwner: true };
+      return { canRead: true, canComment: true, canRun: true, isOwner: true, canManage: true };
     }
     const adminReadable =
       (await this.deps.authorizer?.canReadThreadCollaboration?.({
@@ -378,7 +379,8 @@ export class ThreadCollaborationService {
         canRead: true,
         canComment: adminCommentable || adminManageable,
         canRun: false,
-        isOwner: false
+        isOwner: false,
+        canManage: adminManageable
       };
     }
     const departmentIds =
@@ -393,7 +395,8 @@ export class ThreadCollaborationService {
       canRead: shared,
       canComment: shared,
       canRun: false,
-      isOwner: false
+      isOwner: false,
+      canManage: false
     };
   }
 

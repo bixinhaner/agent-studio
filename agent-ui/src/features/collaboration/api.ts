@@ -65,13 +65,14 @@ export async function setThreadAssignment(
   threadId: string,
   input: SetThreadAssignmentInput
 ): Promise<{ assignment: ThreadAssignmentRecord | null; followers: ThreadFollowerRecord[] }> {
+  const followerIds = input.followerIds?.map(trim).filter(Boolean);
   const response = await api<{ assignment: ThreadAssignmentRecord | null; followers: ThreadFollowerRecord[] }>(
     `/api/threads/${encodeURIComponent(trim(threadId))}/assignment`,
     {
       method: "PUT",
       json: {
         owner_user_id: trim(input.ownerUserId),
-        follower_ids: (input.followerIds ?? []).map(trim).filter(Boolean)
+        ...(followerIds ? { follower_ids: followerIds } : {})
       }
     }
   );
