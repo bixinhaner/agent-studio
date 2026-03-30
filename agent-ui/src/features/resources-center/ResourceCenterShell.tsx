@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchKnowledgeSets, fetchWorkspaces } from "./api";
+import { createKnowledgeSet, createWorkspace, fetchKnowledgeSets, fetchWorkspaces } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import { WorkspaceDetailView } from "./WorkspaceDetailView";
 import type {
+  CreateKnowledgeSetInput,
+  CreateWorkspaceInput,
   KnowledgeSetRecord,
   ResourceCenterTab,
   ResourceStatusFilter,
@@ -16,10 +18,55 @@ type SelectedState = {
   knowledgeSetId: string | null;
 };
 
+type CreatePanelState =
+  | {
+      kind: "workspace";
+      name: string;
+      slug: string;
+      description: string;
+      sourceType: "filesystem";
+      status: string;
+      rootPath: string;
+    }
+  | {
+      kind: "knowledge_set";
+      name: string;
+      slug: string;
+      description: string;
+      sourceType: "filesystem" | "managed_upload";
+      status: string;
+      rootPath: string;
+      storageKey: string;
+    };
+
 function matchesSearch(input: string, values: Array<string | undefined>) {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return true;
   return values.some((value) => (value || "").toLowerCase().includes(normalized));
+}
+
+function createInitialPanelState(tab: ResourceCenterTab): CreatePanelState {
+  if (tab === "workspace") {
+    return {
+      kind: "workspace",
+      name: "",
+      slug: "",
+      description: "",
+      sourceType: "filesystem",
+      status: "active",
+      rootPath: ""
+    };
+  }
+  return {
+    kind: "knowledge_set",
+    name: "",
+    slug: "",
+    description: "",
+    sourceType: "filesystem",
+    status: "active",
+    rootPath: "",
+    storageKey: ""
+  };
 }
 
 export function ResourceCenterShell() {
@@ -32,6 +79,9 @@ export function ResourceCenterShell() {
   const [statusFilter, setStatusFilter] = useState<ResourceStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [selected, setSelected] = useState<SelectedState>({ workspaceId: null, knowledgeSetId: null });
+  const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createErrorText, setCreateErrorText] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -95,6 +145,59 @@ export function ResourceCenterShell() {
     );
   }
 
+  function openCreatePanel() {
+    setCreatePanel(createInitialPanelState(tab));
+    setCreateErrorText("");
+  }
+
+  function closeCreatePanel() {
+    setCreatePanel(null);
+    setCreateErrorText("");
+    setCreateSaving(false);
+  }
+
+  async function handleCreateSave() {
+    if (!createPanel) return;
+    setCreateSaving(true);
+    setCreateErrorText("");
+    try {
+      if (createPanel.kind === "workspace") {
+        const payload: CreateWorkspaceInput = {
+          name: createPanel.name.trim(),
+          slug: createPanel.slug.trim(),
+          description: createPanel.description.trim(),
+          status: createPanel.status,
+          sourceType: createPanel.sourceType,
+          rootPath: createPanel.rootPath.trim()
+        };
+        const response = await createWorkspace(payload);
+        setWorkspaces((current) => [...current, response.workspace]);
+        setSelected({ workspaceId: response.workspace.id, knowledgeSetId: null });
+      } else {
+        const payload: CreateKnowledgeSetInput = {
+          name: createPanel.name.trim(),
+          slug: createPanel.slug.trim(),
+          description: createPanel.description.trim(),
+          status: createPanel.status,
+          sourceType: createPanel.sourceType,
+          ...(createPanel.sourceType === "filesystem"
+            ? { rootPath: createPanel.rootPath.trim() }
+            : { storageKey: createPanel.storageKey.trim() })
+        };
+        const response = await createKnowledgeSet(payload);
+        setKnowledgeSets((current) => [...current, response.knowledgeSet]);
+        setSelected({ workspaceId: null, knowledgeSetId: response.knowledgeSet.id });
+      }
+      setSearch("");
+      setStatusFilter("all");
+      setTypeFilter("all");
+      closeCreatePanel();
+    } catch (error) {
+      setCreateErrorText(error instanceof Error ? error.message : "创建资源失败");
+      setCreateSaving(false);
+    }
+  }
+
   return (
     <section className="admin-card resource-center-shell">
       <div className="admin-section-header">
@@ -103,7 +206,7 @@ export function ResourceCenterShell() {
           <p>统一管理工作区、资料集、绑定关系和后续资源能力入口。</p>
         </div>
         <div className="resource-center-create-row">
-          <button type="button" className="admin-action-btn">
+          <button type="button" className="admin-action-btn" onClick={openCreatePanel}>
             {tab === "workspace" ? "新建工作区" : "新建资料集"}
           </button>
         </div>
@@ -223,6 +326,141 @@ export function ResourceCenterShell() {
         </aside>
 
         <section className="resource-center-detail">
+          {createPanel ? (
+            <section className="resource-center-section resource-center-create-panel">
+              <div className="resource-center-section-header">
+                <div>
+                  <h3>{createPanel.kind === "workspace" ? "新建工作区" : "新建资料集"}</h3>
+                  <p>填写最小必需字段后创建资源，创建成功后会自动选中并进入详情页。</p>
+                </div>
+              </div>
+
+              {createErrorText ? <p className="err-text">{createErrorText}</p> : null}
+
+              <div className="resource-center-form-grid">
+                <label className="field">
+                  <span className="field-label">{createPanel.kind === "workspace" ? "新建工作区名称" : "新建资料集名称"}</span>
+                  <input
+                    className="field-input"
+                    aria-label={createPanel.kind === "workspace" ? "新建工作区名称" : "新建资料集名称"}
+                    value={createPanel.name}
+                    disabled={createSaving}
+                    onChange={(event) => setCreatePanel((current) => (current ? { ...current, name: event.target.value } : current))}
+                  />
+                </label>
+
+                <label className="field">
+                  <span className="field-label">{createPanel.kind === "workspace" ? "新建工作区 slug" : "新建资料集 slug"}</span>
+                  <input
+                    className="field-input"
+                    aria-label={createPanel.kind === "workspace" ? "新建工作区 slug" : "新建资料集 slug"}
+                    value={createPanel.slug}
+                    disabled={createSaving}
+                    onChange={(event) => setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current))}
+                  />
+                </label>
+
+                {createPanel.kind === "knowledge_set" ? (
+                  <label className="field">
+                    <span className="field-label">新建资料集类型</span>
+                    <select
+                      className="field-input"
+                      aria-label="新建资料集类型"
+                      value={createPanel.sourceType}
+                      disabled={createSaving}
+                      onChange={(event) =>
+                        setCreatePanel((current) =>
+                          current && current.kind === "knowledge_set"
+                            ? {
+                                ...current,
+                                sourceType: event.target.value as "filesystem" | "managed_upload",
+                                rootPath: event.target.value === "filesystem" ? current.rootPath : "",
+                                storageKey: event.target.value === "managed_upload" ? current.storageKey : ""
+                              }
+                            : current
+                        )
+                      }
+                    >
+                      <option value="filesystem">filesystem</option>
+                      <option value="managed_upload">managed_upload</option>
+                    </select>
+                  </label>
+                ) : null}
+
+                <label className="field">
+                  <span className="field-label">{createPanel.kind === "workspace" ? "新建工作区状态" : "新建资料集状态"}</span>
+                  <select
+                    className="field-input"
+                    aria-label={createPanel.kind === "workspace" ? "新建工作区状态" : "新建资料集状态"}
+                    value={createPanel.status}
+                    disabled={createSaving}
+                    onChange={(event) => setCreatePanel((current) => (current ? { ...current, status: event.target.value } : current))}
+                  >
+                    <option value="active">active</option>
+                    <option value="disabled">disabled</option>
+                  </select>
+                </label>
+
+                {createPanel.kind === "workspace" || createPanel.sourceType === "filesystem" ? (
+                  <label className="field resource-center-form-span-2">
+                    <span className="field-label">
+                      {createPanel.kind === "workspace" ? "新建工作区根目录" : "新建资料集根目录"}
+                    </span>
+                    <input
+                      className="field-input"
+                      aria-label={createPanel.kind === "workspace" ? "新建工作区根目录" : "新建资料集根目录"}
+                      value={createPanel.rootPath}
+                      disabled={createSaving}
+                      onChange={(event) => setCreatePanel((current) => (current ? { ...current, rootPath: event.target.value } : current))}
+                    />
+                  </label>
+                ) : null}
+
+                {createPanel.kind === "knowledge_set" && createPanel.sourceType === "managed_upload" ? (
+                  <label className="field resource-center-form-span-2">
+                    <span className="field-label">新建资料集存储键</span>
+                    <input
+                      className="field-input"
+                      aria-label="新建资料集存储键"
+                      value={createPanel.storageKey}
+                      disabled={createSaving}
+                      onChange={(event) =>
+                        setCreatePanel((current) =>
+                          current && current.kind === "knowledge_set" ? { ...current, storageKey: event.target.value } : current
+                        )
+                      }
+                    />
+                  </label>
+                ) : null}
+
+                <label className="field resource-center-form-span-2">
+                  <span className="field-label">{createPanel.kind === "workspace" ? "新建工作区描述" : "新建资料集描述"}</span>
+                  <textarea
+                    className="field-input textarea"
+                    aria-label={createPanel.kind === "workspace" ? "新建工作区描述" : "新建资料集描述"}
+                    value={createPanel.description}
+                    disabled={createSaving}
+                    onChange={(event) => setCreatePanel((current) => (current ? { ...current, description: event.target.value } : current))}
+                  />
+                </label>
+              </div>
+
+              <div className="resource-center-actions">
+                <button
+                  type="button"
+                  className="admin-action-btn"
+                  disabled={createSaving}
+                  onClick={() => void handleCreateSave()}
+                >
+                  {createSaving ? "创建中..." : createPanel.kind === "workspace" ? "保存新工作区" : "保存新资料集"}
+                </button>
+                <button type="button" className="admin-secondary-btn" disabled={createSaving} onClick={closeCreatePanel}>
+                  取消创建
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           {tab === "workspace" && selectedWorkspace ? (
             <WorkspaceDetailView
               workspace={selectedWorkspace}
@@ -236,12 +474,12 @@ export function ResourceCenterShell() {
               onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
             />
           ) : null}
-          {((tab === "workspace" && !selectedWorkspace) || (tab === "knowledge_set" && !selectedKnowledgeSet)) && (
+          {!createPanel && ((tab === "workspace" && !selectedWorkspace) || (tab === "knowledge_set" && !selectedKnowledgeSet)) ? (
             <div className="resource-center-placeholder empty">
               <h3>{tab === "workspace" ? "工作区详情" : "资料集详情"}</h3>
               <p>请选择左侧资源以继续配置。</p>
             </div>
-          )}
+          ) : null}
         </section>
       </div>
     </section>

@@ -1881,6 +1881,10 @@ body {
   gap: 16px;
 }
 
+.resource-center-create-panel {
+  margin-bottom: 2px;
+}
+
 .resource-center-section {
   display: grid;
   gap: 14px;
