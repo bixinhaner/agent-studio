@@ -1427,6 +1427,7 @@ export function PortalShell() {
   const selectedOptionalKnowledgeSetIdsByWorkspaceRef = useRef(selectedOptionalKnowledgeSetIdsByWorkspace);
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
+  const threadCollaborationLoadingRef = useRef(false);
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1439,6 +1440,7 @@ export function PortalShell() {
   selectedOptionalKnowledgeSetIdsByWorkspaceRef.current = selectedOptionalKnowledgeSetIdsByWorkspace;
   activeThreadIdentityRef.current = activeThreadIdentity;
   threadCollaborationRef.current = threadCollaboration;
+  threadCollaborationLoadingRef.current = threadCollaborationLoading;
 
   useEffect(() => {
     let active = true;
@@ -1895,6 +1897,13 @@ export function PortalShell() {
           threadCollaborationRef.current && threadCollaborationRef.current.threadId === threadId
             ? threadCollaborationRef.current
             : null;
+        const collaborationLoadingForThread =
+          threadCollaborationLoadingRef.current &&
+          String(activeThreadIdentityRef.current.remoteId || "").trim() === threadId &&
+          !activeCollaboration;
+        if (collaborationLoadingForThread) {
+          throw new Error("当前线程协作权限加载中，请稍后再试。");
+        }
         if (activeCollaboration && !activeCollaboration.access.canRun) {
           throw new Error("当前共享线程为只读模式，不能继续运行。");
         }
