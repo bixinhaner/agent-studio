@@ -38,6 +38,7 @@ export type DingTalkOrganizationUser = {
 
 export interface DingTalkClient {
   exchangeCode(code: string): Promise<DingTalkUserIdentity>;
+  validateCredentials?(): Promise<void>;
   listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]>;
   listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
   getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null>;
@@ -446,6 +447,9 @@ export function createDingTalkClient(
         fetchImpl
       );
       return normalizeUserIdentity(userPayload);
+    },
+    async validateCredentials(): Promise<void> {
+      await getAppAccessToken();
     },
     async listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]> {
       const parentId = normalizeString(input.parentId) ?? "0";

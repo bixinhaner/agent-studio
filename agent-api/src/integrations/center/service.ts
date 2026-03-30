@@ -16,6 +16,8 @@ import {
   sanitizeIntegrationConfigForRead
 } from "./types.js";
 import type { PolicyService } from "../../resources/policy-service.js";
+import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
+import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
 
 type PolicyRecord = {
   id: string;
@@ -60,10 +62,8 @@ export type IntegrationCenterDb = Omit<IntegrationInstanceRepositoryDb, "$transa
   $transaction<T>(callback: (tx: IntegrationCenterTx) => Promise<T>): Promise<T>;
 };
 
-type ValidationOutcome = {
-  status: "success" | "failed";
-  summary: unknown;
-  detail: unknown;
+type ValidationAdapter = {
+  validate(config: Record<string, unknown>): Promise<IntegrationValidationOutcome>;
 };
 
 export type IntegrationCenterService = {
@@ -146,7 +146,7 @@ function assertConfigIsSafe(config: unknown): Record<string, unknown> {
   return normalized;
 }
 
-function normalizeValidationSummary(type: string, config: Record<string, unknown>): ValidationOutcome {
+function normalizeValidationSummary(type: string, config: Record<string, unknown>): IntegrationValidationOutcome {
   const keys = Object.keys(config).sort();
   if (keys.length === 0) {
     return {
@@ -223,7 +223,7 @@ function mapInstanceDetail(detail: Awaited<ReturnType<IntegrationInstanceReposit
   };
 }
 
-function createValidationOutcome(instanceType: string, config: Record<string, unknown>): ValidationOutcome {
+function createValidationOutcome(instanceType: string, config: Record<string, unknown>): IntegrationValidationOutcome {
   return normalizeValidationSummary(instanceType, config);
 }
 
@@ -232,8 +232,14 @@ export function createIntegrationCenterService(options: {
   policies: IntegrationPolicyStore;
   policyService: Pick<PolicyService, "filterAllowedResources">;
   accessResolver: AccessResolver;
+  adapters?: Partial<Record<string, ValidationAdapter>>;
 }): IntegrationCenterService {
   const repository = new IntegrationInstanceRepository(options.db);
+  const adapters: Partial<Record<string, ValidationAdapter>> = {
+    dingtalk: new DingTalkIntegrationAdapter(),
+    openai_codex: new OpenAICodexIntegrationAdapter(),
+    ...options.adapters
+  };
 
   async function getAccessContext(userId: string): Promise<{ roleIds: string[]; departmentIds: string[] }> {
     return {
@@ -282,6 +288,18 @@ export function createIntegrationCenterService(options: {
       }));
 
     return mapInstanceDetail(detail, buildPoliciesResult(instancePolicies));
+  }
+
+  async function readValidationConfig(instanceId: string): Promise<Record<string, unknown>> {
+    const [configRow, secretRow] = await Promise.all([
+      options.db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: instanceId } }),
+      options.db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: instanceId } })
+    ]);
+
+    return {
+      ...normalizeConfigValue(configRow?.config),
+      ...normalizeConfigValue(secretRow?.secretState)
+    };
   }
 
   async function persistConfigAndSecrets(
@@ -445,8 +463,10 @@ export function createIntegrationCenterService(options: {
       }
       await requireAuthorizedInstance(detail.id, input.currentUserId);
 
-      const validationConfig = normalizeConfigValue(detail.config);
-      const outcome = createValidationOutcome(detail.type, validationConfig);
+      const validationConfig = await readValidationConfig(detail.id);
+      const outcome = adapters[detail.type]
+        ? await adapters[detail.type]!.validate(validationConfig)
+        : createValidationOutcome(detail.type, validationConfig);
       const validation = mapValidation(
         await repository.recordValidation(detail.id, {
           triggerType: "manual" as IntegrationTriggerType,

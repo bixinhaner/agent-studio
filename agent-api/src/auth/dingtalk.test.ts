@@ -3,6 +3,39 @@ import { describe, expect, it, vi } from "vitest";
 import { createDingTalkClient } from "./dingtalk.js";
 
 describe("createDingTalkClient", () => {
+  it("validates credentials by fetching an app access token", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(JSON.stringify({ accessToken: "app-token-validate" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const client = createDingTalkClient(
+      {
+        clientId: "ding-client-id",
+        clientSecret: "ding-client-secret",
+        redirectUri: "https://agent.example.com/auth/dingtalk/callback",
+        scope: "openid"
+      },
+      fetchMock
+    );
+
+    await expect(client.validateCredentials!()).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appKey: "ding-client-id",
+          appSecret: "ding-client-secret"
+        })
+      })
+    );
+  });
+
   it("lists departments through the app-authorized server API", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

@@ -9,6 +9,11 @@ export type CodexStreamEvent = {
   raw?: unknown;
 };
 
+type CodexRuntimeOptions = {
+  baseUrl?: string;
+  apiKey?: string;
+};
+
 function pickText(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return "";
@@ -83,8 +88,11 @@ function normalizeAgentTextEvent(event: any, textState: Map<string, string>): Co
 export class CodexRuntime {
   private readonly codex: any;
 
-  constructor() {
-    this.codex = new Codex();
+  constructor(options: CodexRuntimeOptions = {}) {
+    this.codex = new Codex({
+      baseUrl: options.baseUrl,
+      apiKey: options.apiKey
+    });
   }
 
   async startThread(): Promise<any> {
@@ -121,5 +129,18 @@ export class CodexRuntime {
       }
       yield normalizeEvent(event);
     }
+  }
+
+  async validateProvider(options: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
+  }): Promise<void> {
+    const thread = this.codex.startThread({
+      model: options.model,
+      modelReasoningEffort: options.reasoningEffort,
+      workingDirectory: process.cwd(),
+      skipGitRepoCheck: true
+    });
+    await thread.run("Reply with the single word OK.");
   }
 }

@@ -275,6 +275,30 @@ function buildService(
       accessResolver: {
         getRoleIdsForUser: async (userId: string) => roleIdsByUser.get(userId) ?? [],
         getDepartmentIdsForUser: async (userId: string) => departmentIdsByUser.get(userId) ?? []
+      },
+      adapters: {
+        dingtalk: {
+          async validate() {
+            return {
+              status: "success",
+              summary: "DingTalk credential validation succeeded",
+              detail: { validated: "credentials" }
+            };
+          }
+        },
+        openai_codex: {
+          async validate(config) {
+            return {
+              status: "success",
+              summary: "OpenAI/Codex provider validation succeeded",
+              detail: {
+                validated: "provider",
+                defaultModel: config.defaultModel,
+                defaultReasoningEffort: config.defaultReasoningEffort
+              }
+            };
+          }
+        }
       }
     }),
     state
@@ -649,5 +673,125 @@ describe("createIntegrationCenterService", () => {
       defaultModel: "gpt-5.4-mini"
     });
     expect(state.secrets).toHaveLength(0);
+  });
+
+  it("validates dingtalk credentials with the type-specific adapter and records validation history", async () => {
+    const { service, state } = buildService({
+      instances: [
+        {
+          id: "int-dingtalk-main",
+          type: "dingtalk",
+          slug: "corp-main",
+          name: "Corp Main",
+          description: null,
+          status: "active",
+          isSystemSingleton: true,
+          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+        }
+      ],
+      configs: [
+        {
+          integrationInstanceId: "int-dingtalk-main",
+          config: {
+            clientId: "ding-client-id",
+            redirectUri: "https://agent.example.com/auth/dingtalk/callback",
+            scope: "openid"
+          }
+        }
+      ],
+      secrets: [
+        {
+          integrationInstanceId: "int-dingtalk-main",
+          hasSecrets: true,
+          secretState: {
+            clientSecret: "ding-client-secret"
+          },
+          rotatedByUserId: "admin-1",
+          rotatedAt: makeDate("2026-03-29T00:00:00.000Z")
+        }
+      ],
+      policies: [
+        {
+          id: "policy-1",
+          subjectType: "role",
+          subjectId: "role-support-admin",
+          resourceType: "integration_instance",
+          resourceId: "int-dingtalk-main",
+          effect: "allow",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const result = await service.validateInstance({
+      currentUserId: "admin-1",
+      instanceId: "int-dingtalk-main"
+    });
+
+    expect(result.validation.status).toBe("success");
+    expect(String(result.validation.summary)).toMatch(/DingTalk credential validation succeeded/i);
+    expect(state.validations.at(-1)?.integrationInstanceId).toBe("int-dingtalk-main");
+  });
+
+  it("validates openai codex provider connectivity with the type-specific adapter", async () => {
+    const { service, state } = buildService({
+      instances: [
+        {
+          id: "int-openai-main",
+          type: "openai_codex",
+          slug: "openai-main",
+          name: "OpenAI Main",
+          description: null,
+          status: "active",
+          isSystemSingleton: true,
+          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+        }
+      ],
+      configs: [
+        {
+          integrationInstanceId: "int-openai-main",
+          config: {
+            baseUrl: "https://api.openai.com/v1",
+            defaultModel: "gpt-5.4-mini",
+            defaultReasoningEffort: "medium"
+          }
+        }
+      ],
+      secrets: [
+        {
+          integrationInstanceId: "int-openai-main",
+          hasSecrets: true,
+          secretState: {
+            apiKey: "sk-test"
+          },
+          rotatedByUserId: "admin-1",
+          rotatedAt: makeDate("2026-03-29T00:00:00.000Z")
+        }
+      ],
+      policies: [
+        {
+          id: "policy-1",
+          subjectType: "role",
+          subjectId: "role-support-admin",
+          resourceType: "integration_instance",
+          resourceId: "int-openai-main",
+          effect: "allow",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const result = await service.validateInstance({
+      currentUserId: "admin-1",
+      instanceId: "int-openai-main"
+    });
+
+    expect(result.validation.status).toBe("success");
+    expect(String(result.validation.summary)).toMatch(/OpenAI\/Codex provider validation succeeded/i);
+    expect(state.validations.at(-1)?.integrationInstanceId).toBe("int-openai-main");
   });
 });
