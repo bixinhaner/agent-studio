@@ -25,6 +25,24 @@ import type {
   ZendeskRunStatus
 } from "./types.js";
 
+type ZendeskSettingsStoreBridge = {
+  get(): Promise<ZendeskIntegrationSettings>;
+  update(
+    patch: Partial<ZendeskIntegrationSettings> & {
+      zendeskApiToken?: string | undefined;
+      webhookSigningSecret?: string | undefined;
+    }
+  ): Promise<ZendeskIntegrationSettings>;
+  getForInstance?(instanceId: string): Promise<ZendeskIntegrationSettings>;
+  updateForInstance?(
+    patch: Partial<ZendeskIntegrationSettings> & {
+      zendeskApiToken?: string | undefined;
+      webhookSigningSecret?: string | undefined;
+    },
+    instanceId: string
+  ): Promise<ZendeskIntegrationSettings>;
+};
+
 type ProcessTicketResult = {
   status: ZendeskRunStatus;
   detail: string;
@@ -170,8 +188,30 @@ export class ZendeskIntegrationService {
     private readonly runStore = new ZendeskRunStore()
   ) {}
 
-  async getOverview(): Promise<ZendeskOverview> {
-    const settings = await this.settingsStore.get();
+  private async loadSettings(instanceId?: string): Promise<ZendeskIntegrationSettings> {
+    const store = this.settingsStore as ZendeskSettingsStoreBridge;
+    if (instanceId && typeof store.getForInstance === "function") {
+      return await store.getForInstance(instanceId);
+    }
+    return await store.get();
+  }
+
+  private async saveSettings(
+    patch: Partial<ZendeskIntegrationSettings> & {
+      zendeskApiToken?: string | undefined;
+      webhookSigningSecret?: string | undefined;
+    },
+    instanceId?: string
+  ): Promise<ZendeskIntegrationSettings> {
+    const store = this.settingsStore as ZendeskSettingsStoreBridge;
+    if (instanceId && typeof store.updateForInstance === "function") {
+      return await store.updateForInstance(patch, instanceId);
+    }
+    return await store.update(patch);
+  }
+
+  async getOverview(instanceId?: string): Promise<ZendeskOverview> {
+    const settings = await this.loadSettings(instanceId);
     const missing = findZendeskReadinessGaps(settings);
     return {
       settings: redactZendeskSettings(settings),
@@ -186,10 +226,11 @@ export class ZendeskIntegrationService {
     patch: Partial<ZendeskIntegrationSettings> & {
       zendeskApiToken?: string | undefined;
       webhookSigningSecret?: string | undefined;
-    }
+    },
+    instanceId?: string
   ): Promise<ZendeskOverview> {
-    await this.settingsStore.update(patch);
-    return await this.getOverview();
+    await this.saveSettings(patch, instanceId);
+    return await this.getOverview(instanceId);
   }
 
   async validateConnection(): Promise<{ ok: true; overview: ZendeskOverview }> {

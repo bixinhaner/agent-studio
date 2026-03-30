@@ -68,6 +68,7 @@ type ValidationOutcome = {
 
 export type IntegrationCenterService = {
   listInstances(input: { currentUserId: string; type?: string }): Promise<{ items: IntegrationListItem[] }>;
+  findInstanceBySlug(input: { currentUserId: string; type?: string; slug: string }): Promise<IntegrationListItem | null>;
   getInstanceDetail(input: { currentUserId: string; instanceId: string }): Promise<IntegrationDetail>;
   saveInstance(input: {
     currentUserId: string;
@@ -419,6 +420,14 @@ export function createIntegrationCenterService(options: {
       return {
         items: items.filter((item) => allowedIds.has(item.id))
       };
+    },
+
+    async findInstanceBySlug(input) {
+      const { items } = await this.listInstances({
+        currentUserId: input.currentUserId,
+        type: input.type
+      });
+      return items.find((item) => item.slug === input.slug) ?? null;
     },
 
     async getInstanceDetail(input) {

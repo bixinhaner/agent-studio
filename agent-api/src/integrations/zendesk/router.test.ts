@@ -5,6 +5,36 @@ import { describe, expect, it, vi } from "vitest";
 import { createZendeskAdminRouter } from "./router.js";
 
 describe("createZendeskAdminRouter", () => {
+  it("forwards instance_id through compatibility routes for Integration Center-backed editing", async () => {
+    const app = express();
+    app.use(express.json());
+    const updateSettings = vi.fn().mockResolvedValue({ ok: true });
+    const getOverview = vi.fn().mockResolvedValue({ ok: true });
+    app.use(
+      "/api/integrations/zendesk",
+      createZendeskAdminRouter({
+        getOverview,
+        updateSettings
+      } as never)
+    );
+
+    const response = await request(app)
+      .put("/api/integrations/zendesk/settings")
+      .send({
+        instance_id: "int-zendesk-primary",
+        zendesk_api_token: "",
+        webhook_signing_secret: ""
+      });
+
+    expect(response.status).toBe(200);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        zendeskApiToken: "",
+        webhookSigningSecret: ""
+      }),
+      "int-zendesk-primary"
+    );
+  });
 
   it("passes explicit empty secrets through settings updates so they can be cleared", async () => {
     const app = express();

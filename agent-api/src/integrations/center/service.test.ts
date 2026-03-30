@@ -329,6 +329,48 @@ describe("createIntegrationCenterService", () => {
     ).rejects.toThrow(/access denied/i);
   });
 
+  it("finds authorized Zendesk instances by slug for compatibility lookups", async () => {
+    const { service } = buildService({
+      instances: [
+        {
+          id: "int-zendesk-1",
+          type: "zendesk",
+          slug: "zendesk-main",
+          name: "Zendesk Main",
+          description: "primary",
+          status: "active",
+          isSystemSingleton: false,
+          createdAt: makeDate("2026-03-29T00:00:00.000Z").toISOString(),
+          updatedAt: makeDate("2026-03-29T00:00:00.000Z").toISOString()
+        }
+      ],
+      policies: [
+        {
+          id: "policy-1",
+          subjectType: "role",
+          subjectId: "role-support-admin",
+          resourceType: "integration_instance",
+          resourceId: "int-zendesk-1",
+          effect: "allow",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const found = await service.findInstanceBySlug({
+      currentUserId: "admin-1",
+      type: "zendesk",
+      slug: "zendesk-main"
+    });
+
+    expect(found).toMatchObject({
+      id: "int-zendesk-1",
+      slug: "zendesk-main",
+      type: "zendesk"
+    });
+  });
+
   it("redacts secret-like config keys from list and detail reads", async () => {
     const { service } = buildService({
       instances: [

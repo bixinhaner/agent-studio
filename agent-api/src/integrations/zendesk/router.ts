@@ -13,7 +13,11 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
 
   router.get("/overview", async (_req: Request, res: Response) => {
     try {
-      res.json(await service.getOverview());
+      const instanceId =
+        typeof _req.query.instance_id === "string" && _req.query.instance_id.trim()
+          ? _req.query.instance_id.trim()
+          : undefined;
+      res.json(instanceId ? await service.getOverview(instanceId) : await service.getOverview());
     } catch (error) {
       const detail = error instanceof Error ? error.message : "加载 Zendesk 概览失败";
       res.status(500).json({ detail });
@@ -22,8 +26,12 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
 
   router.put("/settings", async (req: Request, res: Response) => {
     try {
+      const instanceId =
+        typeof req.body?.instance_id === "string" && req.body.instance_id.trim()
+          ? req.body.instance_id.trim()
+          : undefined;
       const input = zendeskSettingsUpdateSchema.parse(req.body || {});
-      const overview = await service.updateSettings({
+      const patch = {
         enabled: input.enabled,
         publicBaseUrl: input.public_base_url,
         zendeskBaseUrl: input.zendesk_base_url,
@@ -46,7 +54,8 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         additionalDirectories: normalizeStringArray(input.additional_directories),
         maxCommentHistory: input.max_comment_history,
         systemPrompt: input.system_prompt
-      });
+      };
+      const overview = instanceId ? await service.updateSettings(patch, instanceId) : await service.updateSettings(patch);
       res.json(overview);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "保存 Zendesk 配置失败";
