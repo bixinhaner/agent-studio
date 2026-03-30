@@ -86,6 +86,21 @@ function buildApp(options?: { detailAccessDenied?: boolean }) {
     async listValidationHistory() {
       return { items: [] };
     },
+    async listBindings() {
+      return {
+        items: [
+          {
+            id: "binding-1",
+            targetType: "agent_mode",
+            targetId: "agent-mode-1",
+            bindingType: "primary",
+            bindingPayload: { route: "default" },
+            createdAt: "2026-03-30T10:00:00.000Z",
+            updatedAt: "2026-03-30T10:00:00.000Z"
+          }
+        ]
+      };
+    },
     async getPolicies() {
       return {
         summary: {
@@ -107,6 +122,21 @@ function buildApp(options?: { detailAccessDenied?: boolean }) {
         items: [
           { subjectType: "role", subjectId: "role-support-admin", effect: "allow" },
           { subjectType: "user", subjectId: "user-9", effect: "deny" }
+        ]
+      };
+    },
+    async replaceBindings() {
+      return {
+        items: [
+          {
+            id: "binding-2",
+            targetType: "workspace",
+            targetId: "workspace-1",
+            bindingType: "fallback",
+            bindingPayload: { priority: 1 },
+            createdAt: "2026-03-30T10:00:00.000Z",
+            updatedAt: "2026-03-30T10:00:00.000Z"
+          }
         ]
       };
     }
@@ -173,5 +203,29 @@ describe("createIntegrationCenterRouter", () => {
     expect(response.status).toBe(200);
     expect(response.body.summary.allow.roles).toContain("role-support-admin");
     expect(response.body.summary.deny.users).toContain("user-9");
+  });
+
+  it("returns and replaces bindings for authorized instances", async () => {
+    const { app } = buildApp();
+
+    const getResponse = await request(app).get("/api/admin/integrations/int-zendesk-1/bindings");
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.items[0]).toMatchObject({
+      targetType: "agent_mode",
+      targetId: "agent-mode-1",
+      bindingType: "primary"
+    });
+
+    const putResponse = await request(app)
+      .put("/api/admin/integrations/int-zendesk-1/bindings")
+      .send({
+        bindings: [{ targetType: "workspace", targetId: "workspace-1", bindingType: "fallback", bindingPayload: { priority: 1 } }]
+      });
+    expect(putResponse.status).toBe(200);
+    expect(putResponse.body.items[0]).toMatchObject({
+      targetType: "workspace",
+      targetId: "workspace-1",
+      bindingType: "fallback"
+    });
   });
 });

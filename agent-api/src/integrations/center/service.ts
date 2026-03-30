@@ -6,6 +6,8 @@ import {
   type IntegrationDetail,
   type IntegrationInstanceBaseInput,
   type IntegrationInstanceUpdateInput,
+  type IntegrationBindingInput,
+  type IntegrationBindingsResult,
   type IntegrationListItem,
   type IntegrationPoliciesResult,
   type IntegrationPolicyInput,
@@ -77,7 +79,13 @@ export type IntegrationCenterService = {
   }): Promise<IntegrationDetail>;
   validateInstance(input: { currentUserId: string; instanceId: string }): Promise<IntegrationValidationResult>;
   listValidationHistory(input: { currentUserId: string; instanceId: string }): Promise<{ items: IntegrationValidationItem[] }>;
+  listBindings(input: { currentUserId: string; instanceId: string }): Promise<IntegrationBindingsResult>;
   getPolicies(input: { currentUserId: string; instanceId: string }): Promise<IntegrationPoliciesResult>;
+  replaceBindings(input: {
+    currentUserId: string;
+    instanceId: string;
+    bindings: IntegrationBindingInput[];
+  }): Promise<IntegrationBindingsResult>;
   replacePolicies(input: {
     currentUserId: string;
     instanceId: string;
@@ -127,6 +135,22 @@ function mapValidation(record: IntegrationValidationRecord): IntegrationValidati
     detail: record.detail,
     triggeredByUserId: record.triggeredByUserId,
     createdAt: record.createdAt
+  };
+}
+
+function mapBindingsResult(
+  items: Array<{
+    id: string;
+    targetType: string;
+    targetId: string;
+    bindingType: string;
+    bindingPayload: unknown;
+    createdAt: string;
+    updatedAt: string;
+  }>
+): IntegrationBindingsResult {
+  return {
+    items: items.map((item) => ({ ...item }))
   };
 }
 
@@ -490,6 +514,11 @@ export function createIntegrationCenterService(options: {
       };
     },
 
+    async listBindings(input) {
+      await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      return mapBindingsResult(await repository.listBindings(input.instanceId));
+    },
+
     async getPolicies(input) {
       const detail = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
 
@@ -528,6 +557,21 @@ export function createIntegrationCenterService(options: {
           effect: policy.effect
         }));
       return buildPoliciesResult(items);
+    },
+
+    async replaceBindings(input) {
+      await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      return mapBindingsResult(
+        await repository.replaceBindings(
+          input.instanceId,
+          input.bindings.map((binding) => ({
+            targetType: binding.targetType.trim(),
+            targetId: binding.targetId.trim(),
+            bindingType: binding.bindingType.trim(),
+            bindingPayload: binding.bindingPayload ?? {}
+          }))
+        )
+      );
     }
   };
 }

@@ -25,6 +25,17 @@ const identifierSchema = z
   .trim()
   .min(1, "identifier is required");
 
+export const integrationBindingSchema = z.object({
+  targetType: identifierSchema,
+  targetId: identifierSchema,
+  bindingType: identifierSchema,
+  bindingPayload: z.unknown().optional()
+});
+
+export const integrationBindingsUpdateSchema = z.object({
+  bindings: z.array(integrationBindingSchema)
+});
+
 const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
 
 function collectSecretLikeConfigKeys(value: unknown, path = ""): string[] {
@@ -123,6 +134,7 @@ export const integrationPoliciesUpdateSchema = z
 export type IntegrationInstanceBaseInput = z.infer<typeof integrationInstanceBaseSchema>;
 export type IntegrationInstanceUpdateInput = z.infer<typeof integrationInstanceUpdateSchema>;
 export type IntegrationPoliciesUpdateInput = z.infer<typeof integrationPoliciesUpdateSchema>;
+export type IntegrationBindingsUpdateInput = z.infer<typeof integrationBindingsUpdateSchema>;
 
 export type IntegrationPolicyInput = {
   subjectType: IntegrationPolicySubjectType;
@@ -204,6 +216,20 @@ export type IntegrationValidationResult = {
 export type IntegrationPoliciesResult = {
   items: Array<IntegrationPolicyInput>;
   summary: IntegrationPolicySummary;
+};
+
+export type IntegrationBindingInput = z.infer<typeof integrationBindingSchema>;
+
+export type IntegrationBindingsResult = {
+  items: Array<{
+    id: string;
+    targetType: string;
+    targetId: string;
+    bindingType: string;
+    bindingPayload: unknown;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 export function createEmptyPolicySummary(): IntegrationPolicySummary {

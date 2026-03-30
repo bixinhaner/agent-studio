@@ -11,6 +11,7 @@ import { CostProfilesView } from "../monitoring/CostProfilesView";
 import { MonitoringOverviewView } from "../monitoring/MonitoringOverviewView";
 import { QuotaRulesView } from "../monitoring/QuotaRulesView";
 import { ResourceAccessLogView } from "../monitoring/ResourceAccessLogView";
+import { IntegrationCenterShell } from "../integration-center/IntegrationCenterShell";
 import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
 import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
 import { UsageRankingsView } from "../monitoring/UsageRankingsView";
@@ -88,6 +89,7 @@ export function AdminShell() {
       {section === "users" ? <UsersView /> : null}
       {section === "resources" ? <ResourceCenterShell /> : null}
       {section === "capabilities" ? <CapabilityCenterShell /> : null}
+      {section === "integrations" ? <IntegrationCenterShell /> : null}
       {section === "rbac" ? <RolesView /> : null}
       {section === "organization" ? (
         <div className="admin-stack-grid">
