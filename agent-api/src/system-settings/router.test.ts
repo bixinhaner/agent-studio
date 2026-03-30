@@ -2,6 +2,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 
+import { registerCommonApiRoutes } from "../app-routes.js";
 import { createSystemSettingsRouter } from "./router.js";
 import { createDefaultSystemSettingsPayload } from "./types.js";
 
@@ -78,23 +79,29 @@ function buildApp(options?: { allowedPermissions?: string[] }) {
 
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => {
-    req.currentUser = {
-      id: "admin-1",
-      role: "admin",
-      status: "active",
-      createdAt: "2026-03-30T00:00:00.000Z",
-      updatedAt: "2026-03-30T00:00:00.000Z"
-    };
-    next();
-  });
-  app.use(
-    "/api/admin/system-settings",
-    createSystemSettingsRouter({
+  registerCommonApiRoutes(app, {
+    currentUserMiddleware: (req, _res, next) => {
+      req.currentUser = {
+        id: "admin-1",
+        role: "admin",
+        status: "active",
+        createdAt: "2026-03-30T00:00:00.000Z",
+        updatedAt: "2026-03-30T00:00:00.000Z"
+      };
+      next();
+    },
+    authRouter: express.Router(),
+    adminRouter: express.Router(),
+    systemSettingsRouter: createSystemSettingsRouter({
       service,
-      requirePermission: buildPermissionGuard(options?.allowedPermissions ?? ["system_settings.read", "system_settings.write", "system_settings.publish"])
-    })
-  );
+      requirePermission: buildPermissionGuard(
+        options?.allowedPermissions ?? ["system_settings.read", "system_settings.write", "system_settings.publish"]
+      )
+    }),
+    portalRouter: express.Router(),
+    serviceTokenMiddleware: (_req, _res, next) => next(),
+    zendeskRouter: express.Router()
+  });
 
   return { app, service };
 }

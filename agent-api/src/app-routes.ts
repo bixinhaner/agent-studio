@@ -24,6 +24,9 @@ export function registerCommonApiRoutes(
     zendeskRouter: Router;
   }
 ): void {
+  const systemSettingsMount = Router();
+  systemSettingsMount.use("/system-settings", options.systemSettingsRouter ?? options.adminRouter.systemSettingsRouter ?? Router());
+
   app.use(options.currentUserMiddleware);
   app.use("/api/auth", options.authRouter);
   app.use(
@@ -32,7 +35,7 @@ export function registerCommonApiRoutes(
     options.rbacAdminRouter ?? Router(),
     requireRole("admin"),
     options.adminRouter,
-    options.systemSettingsRouter ?? options.adminRouter.systemSettingsRouter ?? Router(),
+    systemSettingsMount,
     options.integrationCenterRouter ?? Router(),
     options.monitoringAdminRouter ?? Router(),
     options.resourcesAdminRouter ?? Router(),
