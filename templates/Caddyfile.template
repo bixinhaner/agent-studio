@@ -2,7 +2,7 @@
   encode zstd gzip
   root * {$UI_DIST_ROOT}
 
-  @api path /api/*
+  @api path /api/* /healthz
   handle @api {
     reverse_proxy 127.0.0.1:8787
   }
