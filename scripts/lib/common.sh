@@ -79,15 +79,18 @@ prompt_confirm() {
   local default="${2:-y}"
   local reply
   local hint="[y/N]"
+  local normalized_default
 
-  case "${default,,}" in
+  normalized_default="$(printf '%s' "$default" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized_default" in
     y|yes) hint="[Y/n]" ;;
     n|no) hint="[y/N]" ;;
   esac
 
   read -r -p "$prompt $hint " reply || true
   reply="${reply:-$default}"
-  case "${reply,,}" in
+  reply="$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]')"
+  case "$reply" in
     y|yes) return 0 ;;
     *) return 1 ;;
   esac
@@ -199,6 +202,41 @@ else:
 data.pop(key, None)
 path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 PY
+}
+
+state_has() {
+  local key="$1"
+  python3 - "$INSTALL_STATE_FILE" "$key" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+
+if not path.exists():
+    raise SystemExit(1)
+
+try:
+    data = json.loads(path.read_text())
+except json.JSONDecodeError:
+    raise SystemExit(1)
+
+raise SystemExit(0 if key in data else 1)
+PY
+}
+
+state_read_bool() {
+  local key="$1"
+  local default="${2:-false}"
+  local value
+
+  value="$(state_read "$key" "$default")"
+  value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    1|true|yes|y|on) printf '%s' "true" ;;
+    *) printf '%s' "false" ;;
+  esac
 }
 
 redact_secret() {
