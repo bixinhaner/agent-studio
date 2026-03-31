@@ -193,6 +193,21 @@ body {
   color: #94a3b8;
 }
 
+.shell-switch-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.shell-switch-row.compact {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
+.shell-switch-btn {
+  min-width: 112px;
+}
+
 .panel {
   border: 1px solid #d6e2f3;
   border-radius: 12px;

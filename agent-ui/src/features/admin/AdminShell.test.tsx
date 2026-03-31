@@ -206,4 +206,20 @@ describe("AdminShell", () => {
     expect(screen.getByText("超级管理员")).toBeTruthy();
     expect(screen.getByText("alice@example.com")).toBeTruthy();
   });
+
+  it("renders a switch button back to the portal when provided", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
+      counts: {
+        users: 7,
+        threads: 13,
+        activeSessions: 3
+      }
+    });
+    const onOpenPortal = vi.fn();
+
+    render(<AdminShell onOpenPortal={onOpenPortal} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "进入工作台" }));
+    expect(onOpenPortal).toHaveBeenCalledTimes(1);
+  });
 });

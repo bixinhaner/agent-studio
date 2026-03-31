@@ -287,6 +287,70 @@ describe("PortalShell knowledge set integration", () => {
     expect(screen.getByText("eve@example.com")).toBeTruthy();
   });
 
+  it("renders an admin switch button for privileged users", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: []
+      });
+    const onOpenAdmin = vi.fn();
+
+    render(
+      <PortalShell
+        currentUser={{
+          id: "admin-1",
+          role: "admin",
+          displayName: "Alice Admin",
+          email: "alice@example.com"
+        }}
+        onOpenAdmin={onOpenAdmin}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "进入管理台" }));
+    expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+  });
+
   it("includes selected knowledge_set_ids in thread and session creation requests", async () => {
     mockedApi
       .mockResolvedValueOnce({

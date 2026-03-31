@@ -54,7 +54,7 @@ function OverviewCard(props: { overview: AdminOverview | null; loading: boolean;
   );
 }
 
-export function AdminShell(props: { currentUser?: AuthUser }) {
+export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void }) {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
@@ -88,6 +88,13 @@ export function AdminShell(props: { currentUser?: AuthUser }) {
         <h1>管理控制台</h1>
         <p className="admin-description">统一查看运行状态、资源配置、用户治理、角色权限、系统设置、钉钉组织同步和运营监控。</p>
         {props.currentUser ? <UserIdentitySummary user={props.currentUser} /> : null}
+        {props.onOpenPortal ? (
+          <div className="shell-switch-row">
+            <button type="button" className="picker-btn shell-switch-btn" onClick={props.onOpenPortal}>
+              进入工作台
+            </button>
+          </div>
+        ) : null}
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}

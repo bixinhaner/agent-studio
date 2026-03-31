@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./features/auth/api", () => ({
@@ -6,11 +6,25 @@ vi.mock("./features/auth/api", () => ({
 }));
 
 vi.mock("./features/admin/AdminShell", () => ({
-  AdminShell: () => <div>admin-shell</div>
+  AdminShell: (props: { onOpenPortal?: () => void }) => (
+    <div>
+      <div>admin-shell</div>
+      <button type="button" onClick={() => props.onOpenPortal?.()}>
+        to-portal
+      </button>
+    </div>
+  )
 }));
 
 vi.mock("./features/portal/PortalShell", () => ({
-  PortalShell: () => <div>portal-shell</div>
+  PortalShell: (props: { onOpenAdmin?: () => void }) => (
+    <div>
+      <div>portal-shell</div>
+      <button type="button" onClick={() => props.onOpenAdmin?.()}>
+        to-admin
+      </button>
+    </div>
+  )
 }));
 
 import App from "./App";
@@ -31,7 +45,7 @@ describe("App routing", () => {
     expect(await screen.findByText(/登录/i)).toBeTruthy();
   });
 
-  it("shows the admin shell for admin users", async () => {
+  it("shows the portal shell for admin users by default", async () => {
     mockedFetchWhoAmI.mockResolvedValueOnce({
       user: {
         id: "admin-1",
@@ -41,6 +55,20 @@ describe("App routing", () => {
 
     render(<App />);
 
+    expect(await screen.findByText("portal-shell")).toBeTruthy();
+  });
+
+  it("lets admin users switch from the portal shell into the admin shell", async () => {
+    mockedFetchWhoAmI.mockResolvedValueOnce({
+      user: {
+        id: "admin-1",
+        role: "admin"
+      }
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "to-admin" }));
     expect(await screen.findByText("admin-shell")).toBeTruthy();
   });
 

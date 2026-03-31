@@ -1,9 +1,28 @@
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { AdminShell } from "./features/admin/AdminShell";
 import { PortalShell } from "./features/portal/PortalShell";
+import { useEffect, useMemo, useState } from "react";
+
+type AppShellView = "portal" | "admin";
+
+function canOpenAdmin(role: string | undefined): boolean {
+  return role === "admin" || role === "super_admin";
+}
 
 function AppContent() {
   const auth = useAuth();
+  const adminEligible = useMemo(() => canOpenAdmin(auth.user?.role), [auth.user?.role]);
+  const [view, setView] = useState<AppShellView>("portal");
+
+  useEffect(() => {
+    setView("portal");
+  }, [auth.user?.id]);
+
+  useEffect(() => {
+    if (!adminEligible && view === "admin") {
+      setView("portal");
+    }
+  }, [adminEligible, view]);
 
   if (auth.loading) {
     return (
@@ -33,11 +52,11 @@ function AppContent() {
     );
   }
 
-  if (auth.user.role === "admin" || auth.user.role === "super_admin") {
-    return <AdminShell currentUser={auth.user} />;
+  if (adminEligible && view === "admin") {
+    return <AdminShell currentUser={auth.user} onOpenPortal={() => setView("portal")} />;
   }
 
-  return <PortalShell currentUser={auth.user} />;
+  return <PortalShell currentUser={auth.user} onOpenAdmin={adminEligible ? () => setView("admin") : undefined} />;
 }
 
 export default function App() {

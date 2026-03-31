@@ -1378,7 +1378,7 @@ const AgentRuntimeAdapterProvider: FC<
   return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
 };
 
-export function PortalShell(props: { currentUser?: AuthUser }) {
+export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void }) {
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -2458,6 +2458,13 @@ export function PortalShell(props: { currentUser?: AuthUser }) {
             <p>Agent Workspace</p>
           </div>
           {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact /> : null}
+          {props.onOpenAdmin ? (
+            <div className="shell-switch-row compact">
+              <button type="button" className="picker-btn shell-switch-btn" onClick={props.onOpenAdmin}>
+                进入管理台
+              </button>
+            </div>
+          ) : null}
 
           <section className="panel">
             <div className="panel-title-row">
