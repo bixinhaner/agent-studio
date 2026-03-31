@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base="/Users/like/Desktop/baicells/Trae/agent-studio"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+base="$(cd "$script_dir/.." && pwd -P)"
 
 for path in \
   "$base/scripts/lib/common.sh" \
