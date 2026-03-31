@@ -9,9 +9,9 @@ import {
 } from "./layout-state";
 
 describe("layout-state", () => {
-  it("starts with rail collapsed and drawer closed", () => {
+  it("starts with rail expanded and drawer closed", () => {
     expect(createInitialLayoutState()).toEqual({
-      isSessionRailCollapsed: true,
+      isSessionRailCollapsed: false,
       isRightDrawerOpen: false,
       activeRightDrawerTab: "writing",
       isAdvancedSettingsOpen: false
@@ -20,7 +20,7 @@ describe("layout-state", () => {
 
   it("toggles session rail", () => {
     const initial = createInitialLayoutState();
-    expect(toggleSessionRail(initial).isSessionRailCollapsed).toBe(false);
+    expect(toggleSessionRail(initial).isSessionRailCollapsed).toBe(true);
   });
 
   it("opens and closes drawer while preserving active tab", () => {
@@ -37,4 +37,3 @@ describe("layout-state", () => {
     expect(closed.activeRightDrawerTab).toBe("writing");
   });
 });
-

@@ -1883,7 +1883,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const modeScopedWorkspaces = selectedMode?.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
   const workspaceOptions = resolveWorkspaceOptions(modeScopedWorkspaces, appliedConfig.workspace);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
-  const selectedWorkspaceLabel = resolveWorkspaceLabel(modeScopedWorkspaces, appliedConfig.workspace);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedWorkspaceResources = resolvePortalWorkspaceResources(
     portalResources?.workspaces ?? [],
@@ -1900,6 +1899,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedReasoningLabel =
     reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "当前用户";
+  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · 上下文 ${contextUsageView.usedPercent}%`;
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2495,8 +2495,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }))
               }
               onOpenDrawer={() => setLayoutState((prev) => openWorkbenchDrawer(prev, "writing"))}
-              modelTag={appliedConfig.model}
-              modeTag={selectedModeLabel}
+              runtimeSummary={runtimeSummaryText}
+              drawerOpen={layoutState.isRightDrawerOpen}
+              activeDrawerTab={layoutState.activeRightDrawerTab}
             />
 
             <div className="portal-workbench-body">
@@ -2535,33 +2536,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               </ThreadList.Root>
 
               <main className="portal-workbench-chat">
-                <div className="chat-header">
-                  <h2>Studio Chat</h2>
-                  <div className="config-tags">
-                    <span className="tag">{appliedConfig.model}</span>
-                    <span className="tag">{appliedConfig.reasoningEffort}</span>
-                    <span className="tag">{selectedModeLabel}</span>
-                    <span className="tag">{selectedWorkspaceLabel}</span>
-                    <div className={`context-usage-indicator context-usage-${contextUsageView.tone}`}>
-                      <button
-                        type="button"
-                        className="context-usage-trigger"
-                        aria-label={contextUsageView.ariaLabel}
-                      >
-                        <span className="context-usage-battery" aria-hidden="true">
-                          <span className="context-usage-fill" style={{ width: `${contextUsageView.usedPercent}%` }} />
-                          <span className="context-usage-percent">{contextUsageView.usedPercent}%</span>
-                        </span>
-                        <span className="context-usage-cap" aria-hidden="true" />
-                      </button>
-                      <div className="context-usage-tooltip" role="tooltip">
-                        <p>{contextUsageView.summaryLine}</p>
-                        <p>{contextUsageView.detailLine}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="thread-wrap">
                   {canUpload && !sharedThreadReadonly ? (
                     <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>

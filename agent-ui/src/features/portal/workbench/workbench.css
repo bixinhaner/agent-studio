@@ -1,9 +1,17 @@
 .portal-workbench-root {
+  --workbench-accent: #2563eb;
+  --workbench-accent-strong: #1d4ed8;
+  --workbench-border: #d6e2f3;
+  --workbench-surface: #ffffff;
+  --workbench-muted-text: #64748b;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   padding: 10px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 30%),
+    linear-gradient(180deg, #f5f9ff 0%, #eef4ff 100%);
 }
 
 .portal-topbar {
@@ -11,11 +19,72 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #d6e2f3;
+  border: 1px solid var(--workbench-border);
   border-radius: 12px;
   padding: 8px 10px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  background: var(--workbench-surface);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+.portal-topbar-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.portal-topbar-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.portal-topbar-brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-topbar-brand-title {
+  font-family: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.portal-topbar-runtime {
+  max-width: min(42vw, 460px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #334155;
+  font-size: 12px;
+}
+
+.portal-topbar-drawer-state {
+  border: 1px solid #d8e4f8;
+  border-radius: 999px;
+  background: #f6f9ff;
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
 }
 
 .portal-workbench-body {
@@ -23,20 +92,20 @@
   flex: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .session-rail {
-  width: 320px;
-  min-width: 320px;
-  border: 1px solid #d6e2f3;
+  width: 304px;
+  min-width: 304px;
+  border: 1px solid var(--workbench-border);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--workbench-surface);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: width 200ms ease;
+  transition: width 180ms ease;
 }
 
 .session-rail.collapsed {
@@ -84,16 +153,125 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid #d6e2f3;
+  border: 1px solid var(--workbench-border);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--workbench-surface);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
-  padding: 10px;
   overflow: hidden;
 }
 
+.portal-workbench-chat .thread-wrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
 .portal-workbench-chat .thread-wrap .aui-thread-root {
-  --aui-thread-max-width: min(1320px, calc(100vw - 260px));
+  --aui-thread-max-width: min(1420px, calc(100vw - 210px));
+}
+
+.portal-workbench-chat .aui-thread-viewport {
+  padding-top: 1.2rem;
+}
+
+.portal-workbench-chat .aui-thread-welcome-root {
+  flex-grow: 0;
+  min-height: clamp(290px, 48vh, 460px);
+}
+
+.portal-workbench-chat .aui-thread-welcome-center {
+  justify-content: flex-start;
+  padding-top: clamp(18px, 5vh, 52px);
+}
+
+.portal-workbench-chat .aui-thread-welcome-message {
+  margin-top: 0.85rem;
+  color: #0f172a;
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.portal-workbench-chat .aui-thread-welcome-suggestions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-width: min(1080px, 100%);
+  margin-top: 1rem;
+}
+
+.portal-workbench-chat .aui-thread-welcome-suggestion {
+  max-width: none;
+  min-height: 54px;
+  border: 1px solid #d7e4fb;
+  border-radius: 12px;
+  background: #ffffff;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.portal-workbench-chat .aui-thread-welcome-suggestion:hover {
+  border-color: #2563eb;
+  background: #f6f9ff;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.12);
+}
+
+.portal-workbench-chat .aui-thread-welcome-suggestion-text {
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.portal-workbench-chat .aui-thread-viewport-footer {
+  margin-top: 0.85rem;
+  padding-bottom: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, #ffffff 26%, #ffffff 100%);
+}
+
+.portal-workbench-chat .aui-composer-root {
+  border: 1px solid #c4d5f7;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.1);
+}
+
+.portal-workbench-chat .aui-composer-root:focus-within {
+  border-color: var(--workbench-accent);
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.13),
+    0 10px 30px rgba(37, 99, 235, 0.16);
+}
+
+.portal-workbench-chat .aui-composer-input {
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.portal-workbench-chat .aui-composer-input::placeholder {
+  color: var(--workbench-muted-text);
+}
+
+.portal-workbench-chat .aui-composer-send {
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+  border-radius: 10px;
+  background: var(--workbench-accent);
+  color: #ffffff;
+}
+
+.portal-workbench-chat .aui-composer-send:hover {
+  background: var(--workbench-accent-strong);
+}
+
+.portal-workbench-chat .aui-composer-send:disabled {
+  background: #cbd5e1;
+  color: #f8fafc;
 }
 
 .workbench-collaboration-content {
@@ -141,8 +319,44 @@
     min-width: 0;
   }
 
-  .thread-wrap .aui-thread-root {
+  .portal-workbench-chat .thread-wrap .aui-thread-root {
     --aui-thread-max-width: 100%;
     height: 72vh;
+  }
+}
+
+@media (max-width: 980px) {
+  .portal-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .portal-topbar-left,
+  .portal-topbar-right {
+    width: 100%;
+  }
+
+  .portal-topbar-right {
+    justify-content: space-between;
+  }
+
+  .portal-topbar-runtime {
+    display: none;
+  }
+
+  .portal-workbench-chat .aui-thread-welcome-suggestions {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-workbench-chat .aui-thread-welcome-message {
+    font-size: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-rail,
+  .portal-workbench-chat .aui-thread-welcome-suggestion,
+  .portal-workbench-chat .aui-composer-root {
+    transition: none;
   }
 }

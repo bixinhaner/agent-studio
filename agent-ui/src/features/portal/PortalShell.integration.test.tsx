@@ -212,9 +212,10 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("gpt-5.4-pro").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/xhigh/i).length).toBeGreaterThan(0);
+    const runtimeSummary = await screen.findByTitle(/代码助手/);
+    expect(runtimeSummary).toBeTruthy();
+    expect(runtimeSummary.getAttribute("title")).toContain("gpt-5.4-pro");
+    expect(runtimeSummary.getAttribute("title")).toContain("xhigh");
     fireEvent.click(screen.getByRole("button", { name: "高级设置" }));
     expect(await screen.findByText("FAQ")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Runbooks" })).toBeTruthy();
@@ -288,7 +289,6 @@ describe("PortalShell knowledge set integration", () => {
       />
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
     expect(await screen.findByText("Eve Employee")).toBeTruthy();
     expect(screen.getByText("员工")).toBeTruthy();
     expect(screen.getByText("eve@example.com")).toBeTruthy();
@@ -354,12 +354,11 @@ describe("PortalShell knowledge set integration", () => {
       />
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
     fireEvent.click(await screen.findByRole("button", { name: "进入管理台" }));
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
   });
 
-  it("starts with session rail collapsed and can expand from top bar", async () => {
+  it("starts with session rail expanded and can collapse from top bar", async () => {
     mockedApi
       .mockResolvedValueOnce({
         modes: [
@@ -407,9 +406,9 @@ describe("PortalShell knowledge set integration", () => {
       });
 
     render(<PortalShell />);
-    expect(screen.queryByPlaceholderText("搜索会话")).toBeNull();
-    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
     expect(await screen.findByPlaceholderText("搜索会话")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "收起会话栏" }));
+    expect(screen.queryByPlaceholderText("搜索会话")).toBeNull();
   });
 
   it("opens right drawer tabs and injects approved starter suggestions", async () => {
@@ -712,7 +711,7 @@ describe("PortalShell knowledge set integration", () => {
 
     const view = render(<PortalShell />);
 
-    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    expect(await screen.findByTitle(/代码助手/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {
@@ -809,7 +808,7 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    expect(await screen.findByTitle(/代码助手/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {
@@ -911,7 +910,7 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    expect(await screen.findByTitle(/代码助手/)).toBeTruthy();
 
     await act(async () => {
       await capturedThreadListAdapter?.initialize("thread-1");
@@ -1064,7 +1063,7 @@ describe("PortalShell knowledge set integration", () => {
 
     const view = render(<PortalShell />);
 
-    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    expect(await screen.findByTitle(/代码助手/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {

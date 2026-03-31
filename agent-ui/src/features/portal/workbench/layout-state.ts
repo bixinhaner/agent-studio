@@ -9,7 +9,7 @@ export type WorkbenchLayoutState = {
 
 export function createInitialLayoutState(): WorkbenchLayoutState {
   return {
-    isSessionRailCollapsed: true,
+    isSessionRailCollapsed: false,
     isRightDrawerOpen: false,
     activeRightDrawerTab: "writing",
     isAdvancedSettingsOpen: false
@@ -47,4 +47,3 @@ export function switchWorkbenchTab(state: WorkbenchLayoutState, tab: WorkbenchTa
     activeRightDrawerTab: tab
   };
 }
-
