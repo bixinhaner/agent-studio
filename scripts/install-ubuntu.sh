@@ -147,6 +147,27 @@ load_existing_state() {
   [[ -z "$SESSION_COOKIE_SECRET" ]] && SESSION_COOKIE_SECRET="$(state_read session_cookie_secret "")"
 }
 
+normalize_legacy_state_defaults() {
+  local legacy_repo_dir="$INSTALL_ROOT/app/agent-studio"
+  local preferred_deploy_key_path="$APP_HOME/.ssh/id_ed25519_agent_studio_deploy"
+  local legacy_root_key_path="/root/.ssh/id_ed25519_agent_studio_deploy"
+
+  if [[ "$REPO_DIR_EXPLICIT" != "1" && "$REPO_DIR" == "$legacy_repo_dir" ]]; then
+    if current_dir_is_git_checkout; then
+      REPO_DIR="$(pwd -P)"
+      record_install_state repo_resolution "migrated_from_legacy_state_to_current_directory_checkout"
+    else
+      REPO_DIR="$INSTALL_ROOT"
+      record_install_state repo_resolution "migrated_from_legacy_state_to_install_root_default"
+    fi
+  fi
+
+  if [[ "$DEPLOY_KEY_PATH_EXPLICIT" != "1" && "$DEPLOY_KEY_PATH" == "$legacy_root_key_path" ]]; then
+    DEPLOY_KEY_PATH="$preferred_deploy_key_path"
+    record_install_state deploy_key_path_migrated "true"
+  fi
+}
+
 detect_default_repo_dir() {
   if [[ "$REPO_DIR_EXPLICIT" == "1" && -n "$REPO_DIR" ]]; then
     return 0
@@ -833,6 +854,7 @@ main() {
 
   require_root_shell
   load_existing_state
+  normalize_legacy_state_defaults
   detect_default_repo_dir
   refresh_paths_from_repo_dir
   prompt_for_missing_values

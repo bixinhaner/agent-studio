@@ -20,8 +20,11 @@ printf '%s\n' "$help_output" | grep -q 'otherwise the repo defaults to /usr/loca
 
 grep -q 'require_root_shell' "$script"
 grep -q 'detect_default_repo_dir' "$script"
+grep -q 'normalize_legacy_state_defaults' "$script"
 grep -q 'current_dir_is_git_checkout' "$script"
 grep -q 'REPO_DIR="$INSTALL_ROOT"' "$script"
+grep -q 'legacy_repo_dir="$INSTALL_ROOT/app/agent-studio"' "$script"
+grep -q 'legacy_root_key_path="/root/.ssh/id_ed25519_agent_studio_deploy"' "$script"
 grep -q 'ensure_system_dependencies' "$script"
 grep -q 'ensure_ubuntu_apt_packages' "$script"
 grep -q 'ensure_nodesource_nodejs' "$script"
