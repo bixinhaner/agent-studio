@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Input, Spin, Tag, Typography } from "antd";
 
 import {
   createAgentMode,
@@ -155,9 +156,7 @@ function CapabilitySummaryCard(props: {
             <h3>{agentMode.name}</h3>
             <p>{agentMode.slug}</p>
           </div>
-          <span className={agentMode.status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>
-            {agentMode.status}
-          </span>
+          <Tag color={agentMode.status === "active" ? "success" : "default"}>{agentMode.status}</Tag>
         </div>
 
         <div className="capability-center-summary-grid">
@@ -209,9 +208,7 @@ function CapabilitySummaryCard(props: {
             <h3>{skillPackage.name}</h3>
             <p>{skillPackage.slug}</p>
           </div>
-          <span className={skillPackage.status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>
-            {skillPackage.status}
-          </span>
+          <Tag color={skillPackage.status === "active" ? "success" : "default"}>{skillPackage.status}</Tag>
         </div>
 
         <div className="capability-center-summary-grid">
@@ -258,9 +255,7 @@ function CapabilitySummaryCard(props: {
           <h3>{runProfile.name}</h3>
           <p>{runProfile.slug}</p>
         </div>
-        <span className={runProfile.status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>
-          {runProfile.status}
-        </span>
+        <Tag color={runProfile.status === "active" ? "success" : "default"}>{runProfile.status}</Tag>
       </div>
 
       <div className="capability-center-summary-grid">
@@ -536,6 +531,11 @@ export function CapabilityCenterShell() {
   const visibilityDisabled = tab === "run_profile";
   const resourceLabel = resourceTitle(tab);
   const noResultsLabel = tab === "agent_mode" ? "没有可用能力资源" : `当前筛选条件下没有${resourceLabel}`;
+  const visibleCount = visibleItems.length;
+  const enabledCount = visibleItems.filter((item) => item.status === "active").length;
+  const resourceCountLabel = tab === "agent_mode" ? "模式资源总数" : tab === "skill_package" ? "技能包总数" : "运行策略总数";
+  const sidebarTitle = tab === "agent_mode" ? "模式列表" : tab === "skill_package" ? "技能包列表" : "运行策略列表";
+  const selectedResourceSummary = selectedResource?.name ? `已选：${selectedResource.name}` : "未选择";
 
   function handleRunProfileUpdated(updatedRunProfile: RunProfileRecord) {
     setRunProfiles((current) => current.map((item) => (item.id === updatedRunProfile.id ? updatedRunProfile : item)));
@@ -548,43 +548,46 @@ export function CapabilityCenterShell() {
   }
 
   return (
-    <section className="admin-card capability-center-shell resource-center-shell">
+    <Card className="admin-card capability-center-shell resource-center-shell antd-admin-card">
       <div className="admin-section-header">
         <div>
-          <h2>能力配置中心</h2>
-          <p>统一管理 Agent Modes、Skill Packages 和 Run Profiles。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            能力配置中心
+          </Typography.Title>
+          <Typography.Paragraph>统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Paragraph>
         </div>
         <div className="resource-center-create-row">
-          <button type="button" className="admin-action-btn" onClick={openCreatePanel} disabled={loading}>
+          <Button type="primary" onClick={openCreatePanel} disabled={loading}>
             新建能力资源
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="resource-center-type-tabs" role="tablist" aria-label="能力资源类型">
         {CAPABILITY_TABS.map((item) => (
-          <button
+          <Button
             key={item.id}
-            type="button"
+            type={tab === item.id ? "primary" : "default"}
             role="tab"
             aria-selected={tab === item.id}
+            aria-label={item.label}
             className={tab === item.id ? "resource-center-type-tab active" : "resource-center-type-tab"}
             onClick={() => setTab(item.id)}
           >
             {item.label}
-          </button>
+          </Button>
         ))}
       </div>
 
       <div className="resource-center-toolbar capability-center-toolbar">
         <label className="field resource-center-search">
           <span className="field-label">搜索资源</span>
-          <input
-            className="field-input"
+          <Input
             aria-label="搜索资源"
             placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            allowClear
           />
         </label>
 
@@ -618,38 +621,47 @@ export function CapabilityCenterShell() {
         </label>
       </div>
 
-      {loading ? <p className="resource-center-subtle">加载能力资源中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      <div className="resource-center-stats-row capability-center-stats-row" aria-label="能力统计">
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">{resourceCountLabel}</span>
+          <strong className="resource-center-stat-value">{visibleCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">启用中</span>
+          <strong className="resource-center-stat-value">{enabledCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">选中资源</span>
+          <strong className="resource-center-stat-value">{selectedResourceSummary}</strong>
+        </article>
+      </div>
+
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
       {!loading && !errorText && tab === "agent_mode" && workspaceWarningText ? (
-        <p className="resource-center-subtle">工作区加载失败，Agent Mode 绑定编辑已降级：{workspaceWarningText}</p>
+        <Alert
+          className="admin-alert-inline"
+          type="warning"
+          showIcon
+          message={`工作区加载失败，Agent Mode 绑定编辑已降级：${workspaceWarningText}`}
+        />
       ) : null}
 
       <div className="resource-center-body capability-center-body">
         <aside className="resource-center-sidebar">
-          <ul className="resource-center-list capability-center-list">
-            {tab === "agent_mode"
-              ? (visibleItems as AgentModeRecord[]).map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className={selectedAgentModeId === item.id ? "resource-center-item active" : "resource-center-item"}
-                      onClick={() => selectResource(item.id)}
-                    >
-                      <span className="resource-center-item-title">{item.name}</span>
-                      <span className="resource-center-item-meta capability-center-item-meta">
-                        {item.slug}
-                        {` · ${item.visibleToUsers ? "visible" : "hidden"}`}
-                        {` · ${item.status}`}
-                      </span>
-                    </button>
-                  </li>
-                ))
-              : tab === "skill_package"
-                ? (visibleItems as SkillPackageRecord[]).map((item) => (
+          <div className="resource-center-sidebar-header">
+            <span>{sidebarTitle}</span>
+            <Tag color="blue">{visibleCount}</Tag>
+          </div>
+
+          <div className="resource-center-list-wrap">
+            <ul className="resource-center-list capability-center-list">
+              {tab === "agent_mode"
+                ? (visibleItems as AgentModeRecord[]).map((item) => (
                     <li key={item.id}>
                       <button
                         type="button"
-                        className={selectedSkillPackageId === item.id ? "resource-center-item active" : "resource-center-item"}
+                        className={selectedAgentModeId === item.id ? "resource-center-item active" : "resource-center-item"}
                         onClick={() => selectResource(item.id)}
                       >
                         <span className="resource-center-item-title">{item.name}</span>
@@ -661,22 +673,40 @@ export function CapabilityCenterShell() {
                       </button>
                     </li>
                   ))
-                : (visibleItems as RunProfileRecord[]).map((item) => (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        className={selectedRunProfileId === item.id ? "resource-center-item active" : "resource-center-item"}
-                        onClick={() => selectResource(item.id)}
-                      >
-                        <span className="resource-center-item-title">{item.name}</span>
-                        <span className="resource-center-item-meta capability-center-item-meta">
-                          {item.slug}
-                          {` · ${item.status}`}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-          </ul>
+                : tab === "skill_package"
+                  ? (visibleItems as SkillPackageRecord[]).map((item) => (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={selectedSkillPackageId === item.id ? "resource-center-item active" : "resource-center-item"}
+                          onClick={() => selectResource(item.id)}
+                        >
+                          <span className="resource-center-item-title">{item.name}</span>
+                          <span className="resource-center-item-meta capability-center-item-meta">
+                            {item.slug}
+                            {` · ${item.visibleToUsers ? "visible" : "hidden"}`}
+                            {` · ${item.status}`}
+                          </span>
+                        </button>
+                      </li>
+                    ))
+                  : (visibleItems as RunProfileRecord[]).map((item) => (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={selectedRunProfileId === item.id ? "resource-center-item active" : "resource-center-item"}
+                          onClick={() => selectResource(item.id)}
+                        >
+                          <span className="resource-center-item-title">{item.name}</span>
+                          <span className="resource-center-item-meta capability-center-item-meta">
+                            {item.slug}
+                            {` · ${item.status}`}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+            </ul>
+          </div>
 
           {visibleItems.length === 0 && !loading ? <p className="resource-center-empty">{noResultsLabel}</p> : null}
         </aside>
@@ -691,7 +721,7 @@ export function CapabilityCenterShell() {
                 </div>
               </div>
 
-              {createErrorText ? <p className="err-text">{createErrorText}</p> : null}
+              {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
 
               <div className="resource-center-form-grid capability-center-create-grid">
                 <label className="field">
@@ -938,17 +968,17 @@ export function CapabilityCenterShell() {
               </div>
 
               <div className="resource-center-actions">
-                <button
-                  type="button"
-                  className="admin-action-btn"
+                <Button
+                  type="primary"
+                  aria-label="创建能力"
                   disabled={createSaving || (createPanel.kind === "agent_mode" && runProfiles.length === 0)}
                   onClick={() => void handleCreateSave()}
                 >
                   {createSaving ? "创建中..." : "创建能力"}
-                </button>
-                <button type="button" className="admin-secondary-btn" disabled={createSaving} onClick={closeCreatePanel}>
+                </Button>
+                <Button aria-label="取消创建" disabled={createSaving} onClick={closeCreatePanel}>
                   取消创建
-                </button>
+                </Button>
               </div>
             </section>
           ) : selectedAgentMode ? (
@@ -978,6 +1008,6 @@ export function CapabilityCenterShell() {
           )}
         </section>
       </div>
-    </section>
+    </Card>
   );
 }

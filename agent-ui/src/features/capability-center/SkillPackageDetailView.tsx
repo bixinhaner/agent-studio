@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Card, Tag } from "antd";
 
 import { putSkillPackageItems, putSkillPackageRuntimeBindings, updateSkillPackage } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -85,13 +86,13 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
 
   return (
     <div className="resource-center-detail-stack">
-      <section className="resource-center-section capability-center-summary">
+      <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{skillPackage.name}</h3>
             <p>维护技能包元数据、结构化能力项和运行绑定。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="技能包详情标签">
@@ -109,8 +110,8 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
           ))}
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         {activeTab === "basic" ? (
           <>
@@ -160,9 +161,9 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
             </div>
 
             <div className="resource-center-actions">
-              <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving}>
+              <Button type="primary" onClick={() => void handleSave()} disabled={saving}>
                 {saving ? "保存中..." : "保存技能包"}
-              </button>
+              </Button>
             </div>
           </>
         ) : null}
@@ -172,9 +173,9 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
             <SkillPackageItemEditor items={items} onChange={setItems} disabled={saving} />
 
             <div className="resource-center-actions">
-              <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving}>
+              <Button type="primary" onClick={() => void handleSave()} disabled={saving}>
                 {saving ? "保存中..." : "保存技能包"}
-              </button>
+              </Button>
             </div>
           </>
         ) : null}
@@ -182,7 +183,7 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
         {activeTab === "policies" ? (
           <CapabilityPolicyEditor resourceType="skill_package" resourceId={skillPackage.id} title="技能包授权" />
         ) : null}
-      </section>
+      </Card>
     </div>
   );
 }

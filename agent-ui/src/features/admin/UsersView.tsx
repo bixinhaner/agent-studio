@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Input, Space, Spin, Tag, Typography } from "antd";
 
 import { fetchAdminUsers, patchAdminUserLocalSettings } from "./api";
 import type { AdminUser } from "./types";
@@ -93,54 +94,61 @@ export function UsersView() {
   }
 
   return (
-    <section className="admin-card">
+    <Card className="admin-card antd-admin-card">
       <div className="admin-section-header">
         <div>
-          <h2>用户管理</h2>
-          <p>只允许编辑本地治理字段，钉钉同步资料保持只读。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            用户管理
+          </Typography.Title>
+          <Typography.Paragraph>只允许编辑本地治理字段，钉钉同步资料保持只读。</Typography.Paragraph>
         </div>
       </div>
-      <label className="field admin-inline-filter">
-        <span className="field-label">搜索用户</span>
-        <input
-          aria-label="搜索用户"
-          className="field-input"
-          value={filterText}
-          onChange={(event) => setFilterText(event.target.value)}
-          placeholder="姓名、邮箱、钉钉 ID、部门"
-        />
-      </label>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
-      <div className="admin-user-list">
+      <Input
+        aria-label="搜索用户"
+        value={filterText}
+        onChange={(event) => setFilterText(event.target.value)}
+        placeholder="姓名、邮箱、钉钉 ID、部门"
+        allowClear
+      />
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      <Space direction="vertical" size={12} className="admin-full-width admin-user-list">
         {filteredUsers.map((user) => {
           const title = user.synced.displayName || user.synced.email || user.id;
           return (
-            <article key={user.id} className="admin-list-card">
+            <Card key={user.id} size="small" className="admin-list-card">
               <div className="admin-list-card-header">
                 <div>
-                  <h3>{title}</h3>
-                  <p>{user.synced.email || user.synced.dingtalkUserId || "未绑定邮箱"}</p>
+                  <Typography.Title level={5} className="admin-card-subheading">
+                    {title}
+                  </Typography.Title>
+                  <Typography.Paragraph className="admin-card-meta">
+                    {user.synced.email || user.synced.dingtalkUserId || "未绑定邮箱"}
+                  </Typography.Paragraph>
                 </div>
-                <button type="button" className="admin-action-btn" onClick={() => openEditor(user)}>
-                  编辑 {title}
-                </button>
-                <button type="button" className="admin-secondary-btn" onClick={() => setRoleEditorUserId(user.id)}>
-                  角色分配
-                </button>
+                <Space wrap>
+                  <Button type="primary" onClick={() => openEditor(user)}>
+                    编辑 {title}
+                  </Button>
+                  <Button onClick={() => setRoleEditorUserId(user.id)}>角色分配</Button>
+                </Space>
               </div>
               <dl className="admin-detail-grid">
                 <div>
                   <dt>角色</dt>
-                  <dd>{user.local.role}</dd>
+                  <dd>
+                    <Tag color="blue">{user.local.role}</Tag>
+                  </dd>
                 </div>
                 <div>
                   <dt>状态</dt>
-                  <dd>{user.effective.status}</dd>
+                  <dd>
+                    <Tag color={user.effective.status === "active" ? "success" : "warning"}>{user.effective.status}</Tag>
+                  </dd>
                 </div>
                 <div>
                   <dt>已分配角色</dt>
-                  <dd>{user.assignedRoles.map((role) => role.slug).join(", ") || "未分配"}</dd>
+                  <dd>{user.assignedRoles.map((roleItem) => roleItem.slug).join(", ") || "未分配"}</dd>
                 </div>
                 <div>
                   <dt>主部门</dt>
@@ -151,42 +159,52 @@ export function UsersView() {
                   <dd>{formatLocalTime(user.effective.lastSyncedAt)}</dd>
                 </div>
               </dl>
-            </article>
+            </Card>
           );
         })}
-      </div>
+      </Space>
       {editingUser ? (
-        <section className="admin-inline-editor" aria-label="用户编辑表单">
-          <h3>编辑 {editingUser.synced.displayName || editingUser.id}</h3>
-          <label className="field">
-            <span className="field-label">角色</span>
-            <select aria-label="角色" className="field-input" value={role} onChange={(event) => setRole(event.target.value)}>
-              <option value="employee">employee</option>
-              <option value="admin">admin</option>
-            </select>
-          </label>
-          <label className="field field-checkbox">
-            <span className="field-label">手动禁用</span>
-            <input
-              aria-label="手动禁用"
-              type="checkbox"
-              checked={manualDisabled}
-              onChange={(event) => setManualDisabled(event.target.checked)}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">备注</span>
-            <textarea aria-label="备注" className="field-input admin-textarea" value={adminNote} onChange={(event) => setAdminNote(event.target.value)} />
-          </label>
-          <div className="admin-actions-row">
-            <button type="button" className="admin-action-btn" onClick={handleSave} disabled={saving}>
-              保存
-            </button>
-            <button type="button" className="admin-secondary-btn" onClick={() => setEditingUserId(null)} disabled={saving}>
-              取消
-            </button>
-          </div>
-        </section>
+        <Card
+          size="small"
+          className="admin-inline-editor-card"
+          title={`编辑 ${editingUser.synced.displayName || editingUser.id}`}
+        >
+          <section className="admin-inline-editor" aria-label="用户编辑表单">
+            <label className="field">
+              <span className="field-label">角色</span>
+              <select aria-label="角色" className="field-input" value={role} onChange={(event) => setRole(event.target.value)}>
+                <option value="employee">employee</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <label className="field field-checkbox">
+              <span className="field-label">手动禁用</span>
+              <input
+                aria-label="手动禁用"
+                type="checkbox"
+                checked={manualDisabled}
+                onChange={(event) => setManualDisabled(event.target.checked)}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">备注</span>
+              <textarea
+                aria-label="备注"
+                className="field-input admin-textarea"
+                value={adminNote}
+                onChange={(event) => setAdminNote(event.target.value)}
+              />
+            </label>
+            <Space wrap>
+              <Button type="primary" aria-label="保存" onClick={() => void handleSave()} loading={saving}>
+                保存
+              </Button>
+              <Button aria-label="取消" onClick={() => setEditingUserId(null)} disabled={saving}>
+                取消
+              </Button>
+            </Space>
+          </section>
+        </Card>
       ) : null}
       {roleEditorUserId ? (
         <UserRoleEditor
@@ -195,6 +213,6 @@ export function UsersView() {
           onCancel={() => setRoleEditorUserId(null)}
         />
       ) : null}
-    </section>
+    </Card>
   );
 }

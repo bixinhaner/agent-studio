@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Tag } from "antd";
 
 import { putAgentModeInstructionSources, putAgentModeSkillPackages, putAgentModeWorkspaces, updateAgentMode } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -239,13 +240,13 @@ export function AgentModeDetailView({
 
   return (
     <div className="resource-center-detail-stack">
-      <section className="resource-center-section capability-center-summary">
+      <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{agentMode.name}</h3>
             <p>维护模式元数据、绑定关系、工作区规则和指令源。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
         <div className="capability-center-summary-grid">
@@ -278,8 +279,8 @@ export function AgentModeDetailView({
           ))}
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         {activeTab === "basic" ? (
           <div className="resource-center-form-grid">
@@ -389,9 +390,9 @@ export function AgentModeDetailView({
                   <h4>工作区规则</h4>
                   <p>维护允许的工作区、目录范围和 AGENTS.md 加载策略。</p>
                 </div>
-                <button type="button" className="admin-secondary-btn" disabled={saving || availableWorkspaces.length === 0} onClick={addWorkspaceRule}>
+                <Button type="default" disabled={saving || availableWorkspaces.length === 0} onClick={addWorkspaceRule}>
                   添加工作区
-                </button>
+                </Button>
               </div>
 
               <div className="capability-mode-add-row">
@@ -412,9 +413,9 @@ export function AgentModeDetailView({
                     ))}
                   </select>
                 </label>
-                <button type="button" className="admin-secondary-btn" disabled={saving || availableWorkspaces.length === 0 || !workspaceSelection} onClick={addWorkspaceRule}>
+                <Button type="default" disabled={saving || availableWorkspaces.length === 0 || !workspaceSelection} onClick={addWorkspaceRule}>
                   添加选中工作区
-                </button>
+                </Button>
               </div>
 
               <div className="capability-mode-workspace-list">
@@ -427,9 +428,9 @@ export function AgentModeDetailView({
                           <h5>{workspace ? workspaceLabel(workspace) : rule.workspaceId}</h5>
                           <p>{`工作区规则 ${index + 1}`}</p>
                         </div>
-                        <button type="button" className="admin-secondary-btn" disabled={saving} onClick={() => removeWorkspaceRule(index)}>
+                        <Button type="default" disabled={saving} onClick={() => removeWorkspaceRule(index)}>
                           {`删除工作区规则 ${index + 1}`}
-                        </button>
+                        </Button>
                       </div>
 
                       <div className="resource-center-form-grid capability-mode-workspace-grid">
@@ -520,16 +521,16 @@ export function AgentModeDetailView({
 
         {activeTab !== "policies" ? (
           <div className="resource-center-actions">
-            <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving}>
+            <Button type="primary" onClick={() => void handleSave()} disabled={saving}>
               {saving ? "保存中..." : "保存模式配置"}
-            </button>
+            </Button>
           </div>
         ) : null}
 
         {activeTab === "policies" ? (
           <CapabilityPolicyEditor resourceType="agent_mode" resourceId={agentMode.id} title="模式授权" />
         ) : null}
-      </section>
+      </Card>
     </div>
   );
 }

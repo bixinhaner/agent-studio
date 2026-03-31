@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Tag } from "antd";
 
 import {
   fetchWorkspaceKnowledgeSetBindings,
@@ -137,17 +138,17 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
 
   return (
     <div className="resource-center-detail-stack">
-      <section className="resource-center-section">
+      <Card className="resource-center-section antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{workspace.name}</h3>
             <p>维护工作区元数据、目录配置和默认/可选资料集绑定。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         <div className="resource-center-form-grid">
           <label className="field">
@@ -188,18 +189,13 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
         </div>
 
         <div className="resource-center-actions">
-          <button
-            type="button"
-            className="admin-action-btn"
-            onClick={() => void handleSave()}
-            disabled={saving || loadingBindings || !bindingsReady}
-          >
+          <Button type="primary" onClick={() => void handleSave()} disabled={saving || loadingBindings || !bindingsReady}>
             {saving ? "保存中..." : "保存工作区配置"}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
 
-      <section className="resource-center-section">
+      <Card className="resource-center-section antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>资料集绑定</h3>
@@ -247,7 +243,7 @@ export function WorkspaceDetailView({ workspace, knowledgeSets, onWorkspaceUpdat
             );
           })}
         </div>
-      </section>
+      </Card>
 
       <ResourcePolicyEditor resourceType="workspace" resourceId={workspace.id} title="资源策略编辑器" />
     </div>

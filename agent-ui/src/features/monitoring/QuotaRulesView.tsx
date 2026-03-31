@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 
 import { createQuotaPolicy, fetchQuotaPolicies, updateQuotaPolicy } from "./api";
 import type { QuotaPolicyRecord } from "./types";
@@ -78,17 +79,24 @@ export function QuotaRulesView() {
   }
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>配额规则</h2>
-          <p>支持平台和部门级软阻断，不影响已经运行中的会话。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            配额规则
+          </Typography.Title>
+          <Typography.Paragraph>支持平台和部门级软阻断，不影响已经运行中的会话。</Typography.Paragraph>
         </div>
       </div>
       <form className="monitoring-form" onSubmit={handleSubmit}>
         <label className="field">
           <span className="field-label">作用域类型</span>
-          <select className="field-input" value={scopeType} onChange={(event) => setScopeType(event.target.value as typeof scopeType)}>
+          <select
+            className="field-input"
+            aria-label="作用域类型"
+            value={scopeType}
+            onChange={(event) => setScopeType(event.target.value as typeof scopeType)}
+          >
             <option value="department">部门</option>
             <option value="platform">平台</option>
           </select>
@@ -97,6 +105,7 @@ export function QuotaRulesView() {
           <span className="field-label">{scopeType === "platform" ? "平台范围" : "部门范围"}</span>
           <input
             className="field-input"
+            aria-label={scopeType === "platform" ? "平台范围" : "部门范围"}
             value={scopeId}
             onChange={(event) => setScopeId(event.target.value)}
             placeholder={scopeType === "platform" ? "platform" : "dept-rd"}
@@ -121,7 +130,7 @@ export function QuotaRulesView() {
         </label>
         <label className="field">
           <span className="field-label">阈值</span>
-          <input className="field-input" value={thresholdValue} onChange={(event) => setThresholdValue(event.target.value)} />
+          <input className="field-input" aria-label="阈值" value={thresholdValue} onChange={(event) => setThresholdValue(event.target.value)} />
         </label>
         <label className="field">
           <span className="field-label">执行方式</span>
@@ -134,12 +143,12 @@ export function QuotaRulesView() {
             <option value="alert_only">alert_only</option>
           </select>
         </label>
-        <button className="monitoring-action-btn" type="submit" disabled={saving}>
+        <Button className="monitoring-action-btn" type="primary" htmlType="submit" aria-label="保存配额规则" loading={saving}>
           {saving ? "保存中..." : "保存配额规则"}
-        </button>
+        </Button>
       </form>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {message ? <p className="monitoring-success">{message}</p> : null}
       <div className="monitoring-table-wrap">
         <table className="monitoring-table">
@@ -164,17 +173,24 @@ export function QuotaRulesView() {
                 <td>{policy.metricType}</td>
                 <td>{formatCount(policy.thresholdValue)}</td>
                 <td>{policy.enforcementMode}</td>
-                <td>{policy.isActive ? "启用" : "停用"}</td>
                 <td>
-                  <button type="button" className="monitoring-link-btn" onClick={() => void togglePolicy(policy)}>
+                  <Tag color={policy.isActive ? "success" : "default"}>{policy.isActive ? "启用" : "停用"}</Tag>
+                </td>
+                <td>
+                  <Button
+                    type="link"
+                    className="monitoring-link-btn"
+                    aria-label={policy.isActive ? "停用" : "启用"}
+                    onClick={() => void togglePolicy(policy)}
+                  >
                     {policy.isActive ? "停用" : "启用"}
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </Card>
   );
 }

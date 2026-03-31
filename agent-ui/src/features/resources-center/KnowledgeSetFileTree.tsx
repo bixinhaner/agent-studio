@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Button } from "antd";
 
 import type { KnowledgeSetItemRecord } from "./types";
 
@@ -109,9 +110,8 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
               </div>
 
               <div className="knowledge-set-tree-file-actions">
-                <button
-                  type="button"
-                  className="admin-secondary-btn"
+                <Button
+                  type="default"
                   disabled={disabled}
                   aria-label="重命名文件"
                   onClick={() => {
@@ -126,10 +126,9 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
                   }}
                 >
                   重命名
-                </button>
-                <button
-                  type="button"
-                  className="admin-secondary-btn"
+                </Button>
+                <Button
+                  type="default"
                   disabled={disabled}
                   aria-label="删除文件"
                   onClick={() => {
@@ -138,7 +137,7 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
                   }}
                 >
                   删除
-                </button>
+                </Button>
               </div>
             </div>
           </li>

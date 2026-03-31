@@ -1,3 +1,5 @@
+import { Button } from "antd";
+
 import type { AgentModeInstructionSourceInput, InstructionSourceType } from "./types";
 import type { WorkspaceRecord } from "../resources-center/types";
 
@@ -115,9 +117,9 @@ export function InstructionSourceEditor({
           <h4>指令源</h4>
           <p>按顺序维护 inline、workspace_agents_md 和 knowledge_set_document 指令源。</p>
         </div>
-        <button type="button" className="admin-secondary-btn" disabled={disabled} onClick={addSource}>
+        <Button type="default" disabled={disabled} onClick={addSource}>
           新增指令源
-        </button>
+        </Button>
       </div>
 
       <div className="capability-mode-instruction-list">
@@ -129,20 +131,15 @@ export function InstructionSourceEditor({
                 <p>{source.sourceType}</p>
               </div>
               <div className="capability-mode-instruction-row-actions">
-                <button type="button" className="admin-secondary-btn" disabled={disabled || index === 0} onClick={() => moveSource(index, -1)}>
+                <Button type="default" disabled={disabled || index === 0} onClick={() => moveSource(index, -1)}>
                   {`上移 ${index + 1}`}
-                </button>
-                <button
-                  type="button"
-                  className="admin-secondary-btn"
-                  disabled={disabled || index === items.length - 1}
-                  onClick={() => moveSource(index, 1)}
-                >
+                </Button>
+                <Button type="default" disabled={disabled || index === items.length - 1} onClick={() => moveSource(index, 1)}>
                   {`下移 ${index + 1}`}
-                </button>
-                <button type="button" className="admin-secondary-btn" disabled={disabled} onClick={() => removeSource(index)}>
+                </Button>
+                <Button type="default" disabled={disabled} onClick={() => removeSource(index)}>
                   {`删除指令源 ${index + 1}`}
-                </button>
+                </Button>
               </div>
             </div>
 

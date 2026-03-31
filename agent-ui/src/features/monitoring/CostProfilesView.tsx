@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 
 import { createCostProfile, fetchCostProfiles, updateCostProfile } from "./api";
 import type { CostProfileRecord } from "./types";
@@ -65,11 +66,13 @@ export function CostProfilesView() {
   }
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>模型定价</h2>
-          <p>配置模型输入、缓存、输出价格和内部成本系数。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            模型定价
+          </Typography.Title>
+          <Typography.Paragraph>配置模型输入、缓存、输出价格和内部成本系数。</Typography.Paragraph>
         </div>
       </div>
       <form className="monitoring-form" onSubmit={handleSubmit}>
@@ -101,12 +104,12 @@ export function CostProfilesView() {
             onChange={(event) => setInternalCostMultiplier(event.target.value)}
           />
         </label>
-        <button className="monitoring-action-btn" type="submit" disabled={saving}>
+        <Button className="monitoring-action-btn" type="primary" htmlType="submit" aria-label="保存模型定价" loading={saving}>
           {saving ? "保存中..." : "保存模型定价"}
-        </button>
+        </Button>
       </form>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {message ? <p className="monitoring-success">{message}</p> : null}
       <div className="monitoring-table-wrap">
         <table className="monitoring-table">
@@ -129,17 +132,24 @@ export function CostProfilesView() {
                 <td>{profile.cachedInputTokenPrice}</td>
                 <td>{profile.outputTokenPrice}</td>
                 <td>{profile.internalCostMultiplier}</td>
-                <td>{profile.isActive ? "启用" : "停用"}</td>
                 <td>
-                  <button type="button" className="monitoring-link-btn" onClick={() => void toggleProfile(profile)}>
+                  <Tag color={profile.isActive ? "success" : "default"}>{profile.isActive ? "启用" : "停用"}</Tag>
+                </td>
+                <td>
+                  <Button
+                    type="link"
+                    className="monitoring-link-btn"
+                    aria-label={profile.isActive ? "停用" : "启用"}
+                    onClick={() => void toggleProfile(profile)}
+                  >
                     {profile.isActive ? "停用" : "启用"}
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </Card>
   );
 }

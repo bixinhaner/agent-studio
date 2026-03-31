@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 
 import { acknowledgeAlertEvent, fetchAlertEvents, fetchNotificationRecords } from "./api";
 import type { AlertEventRecord, NotificationRecord } from "./types";
@@ -46,18 +47,22 @@ export function AlertCenterView() {
   }
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>告警中心</h2>
-          <p>查看开放告警、确认状态和通知投递结果。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            告警中心
+          </Typography.Title>
+          <Typography.Paragraph>查看开放告警、确认状态和通知投递结果。</Typography.Paragraph>
         </div>
       </div>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       <div className="monitoring-subgrid">
-        <section className="monitoring-subcard">
-          <h3>告警事件</h3>
+        <Card size="small" className="monitoring-subcard">
+          <Typography.Title level={5} className="admin-card-subheading">
+            告警事件
+          </Typography.Title>
           <div className="monitoring-table-wrap">
             <table className="monitoring-table">
               <thead>
@@ -73,8 +78,12 @@ export function AlertCenterView() {
               <tbody>
                 {alertEvents.map((event) => (
                   <tr key={event.id}>
-                    <td>{event.severity}</td>
-                    <td>{event.status}</td>
+                    <td>
+                      <Tag color={event.severity === "critical" ? "error" : "warning"}>{event.severity}</Tag>
+                    </td>
+                    <td>
+                      <Tag color={event.status === "open" ? "processing" : "success"}>{event.status}</Tag>
+                    </td>
                     <td>{event.title}</td>
                     <td>
                       {event.scopeType} / {event.scopeId}
@@ -82,9 +91,14 @@ export function AlertCenterView() {
                     <td>{formatLocalDateTime(event.createdAt)}</td>
                     <td>
                       {event.status === "open" ? (
-                        <button type="button" className="monitoring-link-btn" onClick={() => void handleAcknowledge(event.id)}>
+                        <Button
+                          type="link"
+                          className="monitoring-link-btn"
+                          aria-label="确认"
+                          onClick={() => void handleAcknowledge(event.id)}
+                        >
                           确认
-                        </button>
+                        </Button>
                       ) : (
                         "—"
                       )}
@@ -94,9 +108,11 @@ export function AlertCenterView() {
               </tbody>
             </table>
           </div>
-        </section>
-        <section className="monitoring-subcard">
-          <h3>通知投递</h3>
+        </Card>
+        <Card size="small" className="monitoring-subcard">
+          <Typography.Title level={5} className="admin-card-subheading">
+            通知投递
+          </Typography.Title>
           <div className="monitoring-table-wrap">
             <table className="monitoring-table">
               <thead>
@@ -114,15 +130,17 @@ export function AlertCenterView() {
                     <td>{record.channelType}</td>
                     <td>{record.targetRef}</td>
                     <td>{record.eventType}</td>
-                    <td>{record.status}</td>
+                    <td>
+                      <Tag color={record.status === "sent" ? "success" : "default"}>{record.status}</Tag>
+                    </td>
                     <td>{formatLocalDateTime(record.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </section>
+        </Card>
       </div>
-    </section>
+    </Card>
   );
 }

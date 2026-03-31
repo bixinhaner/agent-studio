@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Input, Spin, Tag, Typography } from "antd";
 
 import { createKnowledgeSet, createWorkspace, fetchKnowledgeSets, fetchWorkspaces } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
@@ -132,6 +133,15 @@ export function ResourceCenterShell() {
 
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selected.workspaceId) ?? null;
   const selectedKnowledgeSet = knowledgeSets.find((knowledgeSet) => knowledgeSet.id === selected.knowledgeSetId) ?? null;
+  const activeListCount = tab === "workspace" ? filteredWorkspaces.length : filteredKnowledgeSets.length;
+  const activeEnabledCount =
+    tab === "workspace"
+      ? filteredWorkspaces.filter((workspace) => workspace.status === "active").length
+      : filteredKnowledgeSets.filter((knowledgeSet) => knowledgeSet.status === "active").length;
+  const selectedResourceSummary = (() => {
+    const name = tab === "workspace" ? selectedWorkspace?.name : selectedKnowledgeSet?.name;
+    return name ? `已选：${name}` : "未选择";
+  })();
 
   function handleWorkspaceUpdated(updatedWorkspace: WorkspaceRecord) {
     setWorkspaces((current) =>
@@ -199,49 +209,53 @@ export function ResourceCenterShell() {
   }
 
   return (
-    <section className="admin-card resource-center-shell">
+    <Card className="admin-card resource-center-shell antd-admin-card">
       <div className="admin-section-header">
         <div>
-          <h2>资源配置中心</h2>
-          <p>统一管理工作区、资料集、绑定关系和后续资源能力入口。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            资源配置中心
+          </Typography.Title>
+          <Typography.Paragraph>统一管理工作区、资料集、绑定关系和后续资源能力入口。</Typography.Paragraph>
         </div>
         <div className="resource-center-create-row">
-          <button type="button" className="admin-action-btn" onClick={openCreatePanel}>
+          <Button type="primary" onClick={openCreatePanel}>
             {tab === "workspace" ? "新建工作区" : "新建资料集"}
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="resource-center-type-tabs" role="tablist" aria-label="资源类型">
-        <button
-          type="button"
+        <Button
+          type={tab === "workspace" ? "primary" : "default"}
           role="tab"
           aria-selected={tab === "workspace"}
+          aria-label="工作区"
           className={tab === "workspace" ? "resource-center-type-tab active" : "resource-center-type-tab"}
           onClick={() => setTab("workspace")}
         >
           工作区
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          type={tab === "knowledge_set" ? "primary" : "default"}
           role="tab"
           aria-selected={tab === "knowledge_set"}
+          aria-label="资料集"
           className={tab === "knowledge_set" ? "resource-center-type-tab active" : "resource-center-type-tab"}
           onClick={() => setTab("knowledge_set")}
         >
           资料集
-        </button>
+        </Button>
       </div>
 
       <div className="resource-center-toolbar">
         <label className="field resource-center-search">
           <span className="field-label">搜索资源</span>
-          <input
-            className="field-input"
+          <Input
             aria-label="搜索资源"
             placeholder={tab === "workspace" ? "名称、slug、路径" : "名称、slug、路径或描述"}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            allowClear
           />
         </label>
 
@@ -274,48 +288,70 @@ export function ResourceCenterShell() {
         </label>
       </div>
 
-      {loading ? <p className="resource-center-subtle">加载资源列表中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      <div className="resource-center-stats-row" aria-label="资源统计">
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">{tab === "workspace" ? "工作区总数" : "资料集总数"}</span>
+          <strong className="resource-center-stat-value">{activeListCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">启用中</span>
+          <strong className="resource-center-stat-value">{activeEnabledCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">选中资源</span>
+          <strong className="resource-center-stat-value">{selectedResourceSummary}</strong>
+        </article>
+      </div>
+
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
 
       <div className="resource-center-body">
         <aside className="resource-center-sidebar">
-          <ul className="resource-center-list">
-            {tab === "workspace"
-              ? filteredWorkspaces.map((workspace) => {
-                  const active = selectedWorkspace?.id === workspace.id;
-                  return (
-                    <li key={workspace.id}>
-                      <button
-                        type="button"
-                        className={active ? "resource-center-item active" : "resource-center-item"}
-                        onClick={() => setSelected((current) => ({ ...current, workspaceId: workspace.id }))}
-                      >
-                        <span className="resource-center-item-title">{workspace.name}</span>
-                        <span className="resource-center-item-meta">
-                          {workspace.sourceType} · {workspace.status}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })
-              : filteredKnowledgeSets.map((knowledgeSet) => {
-                  const active = selectedKnowledgeSet?.id === knowledgeSet.id;
-                  return (
-                    <li key={knowledgeSet.id}>
-                      <button
-                        type="button"
-                        className={active ? "resource-center-item active" : "resource-center-item"}
-                        onClick={() => setSelected((current) => ({ ...current, knowledgeSetId: knowledgeSet.id }))}
-                      >
-                        <span className="resource-center-item-title">{knowledgeSet.name}</span>
-                        <span className="resource-center-item-meta">
-                          {knowledgeSet.sourceType} · {knowledgeSet.status}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-          </ul>
+          <div className="resource-center-sidebar-header">
+            <span>{tab === "workspace" ? "工作区列表" : "资料集列表"}</span>
+            <Tag color="blue">{activeListCount}</Tag>
+          </div>
+
+          <div className="resource-center-list-wrap">
+            <ul className="resource-center-list">
+              {tab === "workspace"
+                ? filteredWorkspaces.map((workspace) => {
+                    const active = selectedWorkspace?.id === workspace.id;
+                    return (
+                      <li key={workspace.id}>
+                        <button
+                          type="button"
+                          className={active ? "resource-center-item active" : "resource-center-item"}
+                          onClick={() => setSelected((current) => ({ ...current, workspaceId: workspace.id }))}
+                        >
+                          <span className="resource-center-item-title">{workspace.name}</span>
+                          <span className="resource-center-item-meta">
+                            <Tag>{workspace.sourceType}</Tag> · <Tag color={workspace.status === "active" ? "success" : "default"}>{workspace.status}</Tag>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })
+                : filteredKnowledgeSets.map((knowledgeSet) => {
+                    const active = selectedKnowledgeSet?.id === knowledgeSet.id;
+                    return (
+                      <li key={knowledgeSet.id}>
+                        <button
+                          type="button"
+                          className={active ? "resource-center-item active" : "resource-center-item"}
+                          onClick={() => setSelected((current) => ({ ...current, knowledgeSetId: knowledgeSet.id }))}
+                        >
+                          <span className="resource-center-item-title">{knowledgeSet.name}</span>
+                          <span className="resource-center-item-meta">
+                            <Tag>{knowledgeSet.sourceType}</Tag> · <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>{knowledgeSet.status}</Tag>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+            </ul>
+          </div>
 
           {tab === "workspace" && filteredWorkspaces.length === 0 ? (
             <p className="resource-center-empty">当前筛选条件下没有工作区。</p>
@@ -335,7 +371,7 @@ export function ResourceCenterShell() {
                 </div>
               </div>
 
-              {createErrorText ? <p className="err-text">{createErrorText}</p> : null}
+              {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
 
               <div className="resource-center-form-grid">
                 <label className="field">
@@ -446,17 +482,17 @@ export function ResourceCenterShell() {
               </div>
 
               <div className="resource-center-actions">
-                <button
-                  type="button"
-                  className="admin-action-btn"
+                <Button
+                  type="primary"
+                  aria-label={createPanel.kind === "workspace" ? "保存新工作区" : "保存新资料集"}
                   disabled={createSaving}
                   onClick={() => void handleCreateSave()}
                 >
                   {createSaving ? "创建中..." : createPanel.kind === "workspace" ? "保存新工作区" : "保存新资料集"}
-                </button>
-                <button type="button" className="admin-secondary-btn" disabled={createSaving} onClick={closeCreatePanel}>
+                </Button>
+                <Button aria-label="取消创建" disabled={createSaving} onClick={closeCreatePanel}>
                   取消创建
-                </button>
+                </Button>
               </div>
             </section>
           ) : null}
@@ -482,6 +518,6 @@ export function ResourceCenterShell() {
           ) : null}
         </section>
       </div>
-    </section>
+    </Card>
   );
 }

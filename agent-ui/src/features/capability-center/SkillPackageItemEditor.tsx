@@ -1,3 +1,5 @@
+import { Button } from "antd";
+
 import type { SkillPackageItemInput, SkillPackageRuntimeBindingInput } from "./types";
 
 type SkillPackageItemEditorProps = {
@@ -104,9 +106,9 @@ export function SkillPackageItemEditor({ items, onChange, disabled = false }: Sk
           <h4>能力项与运行绑定</h4>
           <p>按能力项维护 capability_key、描述、运行时和绑定内容。</p>
         </div>
-        <button type="button" className="admin-secondary-btn" disabled={disabled} onClick={() => onChange([...items, createEmptyItem()])}>
+        <Button type="default" disabled={disabled} onClick={() => onChange([...items, createEmptyItem()])}>
           新增能力项
-        </button>
+        </Button>
       </div>
 
       <div className="capability-skill-package-table-wrap">
@@ -211,28 +213,22 @@ export function SkillPackageItemEditor({ items, onChange, disabled = false }: Sk
                   </td>
                   <td>
                     <div className="capability-skill-package-row-actions">
-                      <button type="button" className="admin-secondary-btn" disabled={disabled} onClick={() => addBinding(index)}>
+                      <Button type="default" disabled={disabled} onClick={() => addBinding(index)}>
                         {`新增运行绑定 ${index + 1}`}
-                      </button>
+                      </Button>
                       {bindings.map((_, bindingIndex) => (
-                        <button
+                        <Button
                           key={`${item.capabilityKey || "item"}-remove-binding-${bindingIndex}`}
-                          type="button"
-                          className="admin-secondary-btn"
+                          type="default"
                           disabled={disabled}
                           onClick={() => removeBinding(index, bindingIndex)}
                         >
                           {`删除运行绑定 ${index + 1}${bindingIndex === 0 ? "" : `-${bindingIndex + 1}`}`}
-                        </button>
+                        </Button>
                       ))}
-                      <button
-                        type="button"
-                        className="admin-secondary-btn"
-                        disabled={disabled}
-                        onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}
-                      >
+                      <Button type="default" disabled={disabled} onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}>
                         {`删除能力项 ${index + 1}`}
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>

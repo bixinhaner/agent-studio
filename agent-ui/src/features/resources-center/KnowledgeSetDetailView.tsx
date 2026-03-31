@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Card, Tag } from "antd";
 
 import {
   deleteKnowledgeSetItem,
@@ -255,17 +256,17 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
 
   return (
     <div className="resource-center-detail-stack">
-      <section className="resource-center-section">
+      <Card className="resource-center-section antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{knowledgeSet.name}</h3>
             <p>维护资料集元数据、文件清单、上传导入和资源授权。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         <div className="resource-center-form-grid">
           <label className="field">
@@ -319,21 +320,21 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
         </div>
 
         <div className="resource-center-actions">
-          <button type="button" className="admin-action-btn" disabled={busy} onClick={() => void handleSave()}>
+          <Button type="primary" disabled={busy} onClick={() => void handleSave()}>
             {saving ? "保存中..." : "保存资料集配置"}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
 
-      <section className="resource-center-section">
+      <Card className="resource-center-section antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>文件清单</h3>
             <p>支持重建文件清单，并对单个文件执行删除和重命名。</p>
           </div>
-          <button type="button" className="admin-secondary-btn" disabled={busy || loadingItems || sourceTypeChanged} onClick={() => void handleRebuild()}>
+          <Button type="default" disabled={busy || loadingItems || sourceTypeChanged} onClick={() => void handleRebuild()}>
             {rebuilding ? "重建中..." : "重建资料清单"}
-          </button>
+          </Button>
         </div>
 
         {sourceTypeChanged ? (
@@ -355,14 +356,13 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
               />
             </label>
             <div className="resource-center-actions">
-              <button
-                type="button"
-                className="admin-secondary-btn"
+              <Button
+                type="default"
                 disabled={busy || loadingItems || !itemsReady || sourceTypeChanged || selectedFiles.length === 0}
                 onClick={() => void handleUploadFiles()}
               >
                 上传文件
-              </button>
+              </Button>
             </div>
 
             <label className="field">
@@ -378,14 +378,13 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
               />
             </label>
             <div className="resource-center-actions">
-              <button
-                type="button"
-                className="admin-secondary-btn"
+              <Button
+                type="default"
                 disabled={busy || loadingItems || !itemsReady || sourceTypeChanged || !selectedArchive}
                 onClick={() => void handleUploadArchive()}
               >
                 上传压缩包
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -401,7 +400,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
             onRename={handleRenameItem}
           />
         ) : null}
-      </section>
+      </Card>
 
       <ResourcePolicyEditor resourceType="knowledge_set" resourceId={knowledgeSet.id} title="资料集资源策略编辑器" />
     </div>

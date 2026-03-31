@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Card, Input, Space, Spin, Tag, Typography } from "antd";
 
 import {
   fetchOrgSyncConfig,
@@ -83,77 +84,77 @@ export function OrgSyncView() {
   }
 
   return (
-    <section className="admin-card">
+    <Card className="admin-card antd-admin-card">
       <div className="admin-section-header">
         <div>
-          <h2>组织同步</h2>
-          <p>支持全量、按部门和按用户补同步。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            组织同步
+          </Typography.Title>
+          <Typography.Paragraph>支持全量、按部门和按用户补同步。</Typography.Paragraph>
         </div>
       </div>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {config ? (
         <div className="admin-sync-meta">
-          <span>启用状态：{config.enabled ? "已启用" : "已关闭"}</span>
-          <span>同步周期：{formatCadence(config.intervalMinutes)}</span>
+          <Tag color={config.enabled ? "success" : "default"}>启用状态：{config.enabled ? "已启用" : "已关闭"}</Tag>
+          <Tag color="processing">同步周期：{formatCadence(config.intervalMinutes)}</Tag>
         </div>
       ) : null}
       <div className="admin-trigger-grid">
-        <button type="button" className="admin-action-btn" disabled={submitting} onClick={() => void handleTrigger(triggerFullOrgSync)}>
+        <Button type="primary" disabled={submitting} onClick={() => void handleTrigger(triggerFullOrgSync)}>
           立即全量同步
-        </button>
+        </Button>
         <div className="admin-trigger-inline">
-          <input
+          <Input
             aria-label="部门 External ID"
-            className="field-input"
             value={departmentId}
             onChange={(event) => setDepartmentId(event.target.value)}
             placeholder="部门 External ID"
           />
-          <button
-            type="button"
-            className="admin-secondary-btn"
+          <Button
             disabled={submitting || !departmentId.trim()}
             onClick={() => void handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}
           >
             按部门同步
-          </button>
+          </Button>
         </div>
         <div className="admin-trigger-inline">
-          <input
+          <Input
             aria-label="用户 External ID"
-            className="field-input"
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
             placeholder="用户 External ID"
           />
-          <button
-            type="button"
-            className="admin-secondary-btn"
+          <Button
             disabled={submitting || !userId.trim()}
             onClick={() => void handleTrigger(() => triggerUserOrgSync(userId.trim()))}
           >
             按用户补同步
-          </button>
+          </Button>
         </div>
       </div>
       <div className="admin-job-list">
-        <h3>同步任务</h3>
-        {jobs.map((job) => (
-          <article key={job.id} className="admin-list-card">
-            <div className="admin-list-card-header">
-              <div>
-                <h4>{job.id}</h4>
-                <p>
-                  {job.scopeType || "full"} / {job.status}
-                </p>
+        <Typography.Title level={5} className="admin-card-subheading">
+          同步任务
+        </Typography.Title>
+        <Space direction="vertical" size={10} className="admin-full-width">
+          {jobs.map((job) => (
+            <Card key={job.id} size="small" className="admin-list-card">
+              <div className="admin-list-card-header">
+                <div>
+                  <Typography.Text strong>{job.id}</Typography.Text>
+                  <Typography.Paragraph className="admin-card-meta">
+                    {job.scopeType || "full"} / {job.status}
+                  </Typography.Paragraph>
+                </div>
+                <span className="admin-job-time">{formatLocalTime(job.updatedAt || job.finishedAt || job.createdAt)}</span>
               </div>
-              <span className="admin-job-time">{formatLocalTime(job.updatedAt || job.finishedAt || job.createdAt)}</span>
-            </div>
-            <p className="admin-job-summary">{summarize(job)}</p>
-          </article>
-        ))}
+              <Typography.Paragraph className="admin-job-summary">{summarize(job)}</Typography.Paragraph>
+            </Card>
+          ))}
+        </Space>
       </div>
-    </section>
+    </Card>
   );
 }

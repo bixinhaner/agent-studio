@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Alert, Card, Spin, Typography } from "antd";
 
 import { fetchResourceAccessLogs, fetchUsageEvents } from "./api";
 import type { ResourceAccessLogRecord, UsageEventRecord } from "./types";
@@ -6,8 +7,10 @@ import { formatLocalDateTime } from "./types";
 
 function LogTable(props: { title: string; columns: string[]; rows: ReactNode[][]; emptyText: string }) {
   return (
-    <section className="monitoring-subcard">
-      <h3>{props.title}</h3>
+    <Card size="small" className="monitoring-subcard">
+      <Typography.Title level={5} className="admin-card-subheading">
+        {props.title}
+      </Typography.Title>
       {props.rows.length ? (
         <div className="monitoring-table-wrap">
           <table className="monitoring-table">
@@ -32,7 +35,7 @@ function LogTable(props: { title: string; columns: string[]; rows: ReactNode[][]
       ) : (
         <p className="monitoring-empty">{props.emptyText}</p>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -92,15 +95,17 @@ export function ResourceAccessLogView() {
   }, []);
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>资源访问日志</h2>
-          <p>记录 workspace、资料集和权限拒绝等关键运行事件。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            资源访问日志
+          </Typography.Title>
+          <Typography.Paragraph>记录 workspace、资料集和权限拒绝等关键运行事件。</Typography.Paragraph>
         </div>
       </div>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {!loading || resourceAccessLogs.length || usageEvents.length ? (
         <div className="monitoring-subgrid">
           <LogTable
@@ -117,6 +122,6 @@ export function ResourceAccessLogView() {
           />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

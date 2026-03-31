@@ -1,25 +1,34 @@
 import { useEffect, useState } from "react";
+import { Alert, Card, Space, Spin, Tag, Tree, Typography } from "antd";
+import type { TreeDataNode } from "antd";
 
 import { fetchDepartmentTree } from "./api";
 import type { AdminDepartmentNode } from "./types";
 
-function DepartmentNode(props: { node: AdminDepartmentNode }) {
-  return (
-    <li className="department-tree-node">
-      <div className="department-tree-row">
-        <span className="department-tree-name">{props.node.name}</span>
-        <span className="department-tree-meta">{props.node.externalId}</span>
-        <span className="department-tree-count">{props.node.memberCount} 人</span>
-      </div>
-      {props.node.children.length > 0 ? (
-        <ul className="department-tree-list">
-          {props.node.children.map((child) => (
-            <DepartmentNode key={child.id} node={child} />
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
+function toTreeData(node: AdminDepartmentNode): TreeDataNode {
+  return {
+    key: node.id,
+    title: (
+      <Space size={8}>
+        <Typography.Text strong>{node.name}</Typography.Text>
+        <Typography.Text type="secondary">{node.externalId}</Typography.Text>
+        <Tag>{node.memberCount} 人</Tag>
+      </Space>
+    ),
+    children: node.children.map(toTreeData)
+  };
+}
+
+function collectExpandedKeys(nodes: AdminDepartmentNode[]): string[] {
+  const keys: string[] = [];
+  function visit(input: AdminDepartmentNode[]) {
+    for (const node of input) {
+      keys.push(node.id);
+      if (node.children.length > 0) visit(node.children);
+    }
+  }
+  visit(nodes);
+  return keys;
 }
 
 export function DepartmentTreeView() {
@@ -48,16 +57,19 @@ export function DepartmentTreeView() {
   }, []);
 
   return (
-    <section className="admin-card">
-      <h2>部门树</h2>
-      <p>部门结构和成员计数来自最近一次组织同步。</p>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
-      <ul className="department-tree-list root">
-        {departments.map((department) => (
-          <DepartmentNode key={department.id} node={department} />
-        ))}
-      </ul>
-    </section>
+    <Card className="admin-card antd-admin-card">
+      <Typography.Title level={4} className="admin-card-heading">
+        部门树
+      </Typography.Title>
+      <Typography.Paragraph>部门结构和成员计数来自最近一次组织同步。</Typography.Paragraph>
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      <Tree
+        showLine
+        blockNode
+        treeData={departments.map(toTreeData)}
+        expandedKeys={collectExpandedKeys(departments)}
+      />
+    </Card>
   );
 }

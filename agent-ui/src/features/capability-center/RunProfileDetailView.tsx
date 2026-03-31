@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Tag } from "antd";
 
 import { updateRunProfile } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -159,13 +160,13 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
 
   return (
     <div className="resource-center-detail-stack">
-      <section className="resource-center-section capability-center-summary">
+      <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{runProfile.name}</h3>
             <p>维护运行策略元数据、模型约束和预览性的绑定信息。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="运行策略详情标签">
@@ -183,8 +184,8 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
           ))}
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         {activeTab === "basic" ? (
           <>
@@ -290,9 +291,9 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
             </div>
 
             <div className="resource-center-actions">
-              <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving}>
+              <Button type="primary" onClick={() => void handleSave()} disabled={saving}>
                 {saving ? "保存中..." : "保存运行策略"}
-              </button>
+              </Button>
             </div>
           </>
         ) : null}
@@ -317,7 +318,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
         {activeTab === "policies" ? (
           <CapabilityPolicyEditor resourceType="run_profile" resourceId={runProfile.id} title="运行策略授权" />
         ) : null}
-      </section>
+      </Card>
     </div>
   );
 }

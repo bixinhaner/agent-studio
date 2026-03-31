@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Card, Spin, Typography } from "antd";
 
 import { fetchMonitoringRankings } from "./api";
 import type { MonitoringRankingsResponse } from "./types";
@@ -9,8 +10,10 @@ function formatCount(value: number): string {
 
 function RankingTable(props: { title: string; rows: Array<Record<string, string | number>>; emptyText: string }) {
   return (
-    <section className="monitoring-subcard">
-      <h3>{props.title}</h3>
+    <Card size="small" className="monitoring-subcard">
+      <Typography.Title level={5} className="admin-card-subheading">
+        {props.title}
+      </Typography.Title>
       {props.rows.length ? (
         <div className="monitoring-table-wrap">
           <table className="monitoring-table">
@@ -37,7 +40,7 @@ function RankingTable(props: { title: string; rows: Array<Record<string, string 
       ) : (
         <p className="monitoring-empty">{props.emptyText}</p>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -80,15 +83,17 @@ export function UsageRankingsView() {
   }, []);
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>使用排行</h2>
-          <p>查看用户、部门、模型和功能维度的成本分布。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            使用排行
+          </Typography.Title>
+          <Typography.Paragraph>查看用户、部门、模型和功能维度的成本分布。</Typography.Paragraph>
         </div>
       </div>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {data ? (
         <div className="monitoring-subgrid">
           <RankingTable title="用户排行" rows={toRows(data.rankings.topUsers, "userId")} emptyText="暂无用户排行数据" />
@@ -101,6 +106,6 @@ export function UsageRankingsView() {
           <RankingTable title="功能排行" rows={toRows(data.rankings.topFeatures, "featureType")} emptyText="暂无功能排行数据" />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

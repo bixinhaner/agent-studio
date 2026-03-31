@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card } from "antd";
 
 import { fetchResourcePolicies, putResourcePolicies } from "./api";
 import type {
@@ -110,15 +111,14 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
   }
 
   return (
-    <section className="resource-center-section resource-policy-editor">
+    <Card className="resource-center-section resource-policy-editor antd-admin-card" size="small">
       <div className="resource-center-section-header">
         <div>
           <h3>{title}</h3>
           <p>按单个资源维护角色、部门和用户的允许或拒绝策略。</p>
         </div>
-        <button
-          type="button"
-          className="admin-secondary-btn"
+        <Button
+          type="default"
           disabled={loading || saving || !policiesReady}
           onClick={() => {
             setPolicies((current) => [...current, { ...EMPTY_POLICY }]);
@@ -127,12 +127,12 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
           }}
         >
           新增策略
-        </button>
+        </Button>
       </div>
 
       {loading ? <p className="resource-center-subtle">加载资源授权中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
-      {successText ? <p className="resource-center-success">{successText}</p> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
       <div className="resource-policy-list">
         {policies.map((policy, index) => (
@@ -181,14 +181,9 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
             </div>
 
             <div className="resource-policy-actions">
-              <button
-                type="button"
-                className="admin-secondary-btn"
-                disabled={loading || saving}
-                onClick={() => removePolicy(index)}
-              >
+              <Button type="default" disabled={loading || saving} onClick={() => removePolicy(index)}>
                 删除
-              </button>
+              </Button>
             </div>
           </div>
         ))}
@@ -197,15 +192,10 @@ export function ResourcePolicyEditor({ resourceType, resourceId, title = "资源
       {!loading && policies.length === 0 ? <p className="resource-center-empty">当前资源还没有显式授权策略。</p> : null}
 
       <div className="resource-center-actions">
-        <button
-          type="button"
-          className="admin-action-btn"
-          onClick={() => void handleSave()}
-          disabled={saving || loading || !policiesReady}
-        >
+        <Button type="primary" onClick={() => void handleSave()} disabled={saving || loading || !policiesReady}>
           {saving ? "保存中..." : "保存资源授权"}
-        </button>
+        </Button>
       </div>
-    </section>
+    </Card>
   );
 }

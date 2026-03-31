@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Card, Spin, Statistic, Tag, Typography } from "antd";
 
 import { fetchMonitoringOverview } from "./api";
 import type { MonitoringOverviewResponse } from "./types";
@@ -9,10 +10,9 @@ function formatCount(value: number): string {
 
 function Metric(props: { label: string; value: string }) {
   return (
-    <div className="monitoring-metric">
-      <dt>{props.label}</dt>
-      <dd>{props.value}</dd>
-    </div>
+    <Card size="small" className="monitoring-metric-card">
+      <Statistic title={props.label} value={props.value} />
+    </Card>
   );
 }
 
@@ -43,19 +43,21 @@ export function MonitoringOverviewView() {
   }, []);
 
   return (
-    <section className="admin-card monitoring-card">
+    <Card className="admin-card monitoring-card antd-admin-card">
       <div className="monitoring-heading">
         <div>
-          <h2>平台总览</h2>
-          <p>按平台口径汇总 token、成本、告警和访问事件。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            平台总览
+          </Typography.Title>
+          <Typography.Paragraph>按平台口径汇总 token、成本、告警和访问事件。</Typography.Paragraph>
         </div>
-        <span className="monitoring-badge">本地时区显示</span>
+        <Tag color="processing">本地时区显示</Tag>
       </div>
-      {loading ? <p>加载中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {loading ? <Spin size="small" /> : null}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {data ? (
         <>
-          <dl className="monitoring-metric-grid">
+          <div className="monitoring-metric-grid monitoring-stat-grid">
             <Metric label="总请求" value={formatCount(data.overview.totalRequests)} />
             <Metric label="预估成本" value={data.overview.totalEstimatedCost} />
             <Metric label="内部成本" value={data.overview.totalInternalCost} />
@@ -64,10 +66,12 @@ export function MonitoringOverviewView() {
             <Metric label="开放告警" value={formatCount(data.overview.openAlertCount)} />
             <Metric label="已确认告警" value={formatCount(data.overview.acknowledgedAlertCount)} />
             <Metric label="通知记录" value={formatCount(data.overview.notificationCount)} />
-          </dl>
+          </div>
           <div className="monitoring-trend-panel">
             <div className="panel-title-row">
-              <h3>趋势概览</h3>
+              <Typography.Title level={5} className="admin-card-subheading">
+                趋势概览
+              </Typography.Title>
               <span className="monitoring-subtle">日期按平台汇总</span>
             </div>
             <div className="monitoring-table-wrap">
@@ -99,6 +103,6 @@ export function MonitoringOverviewView() {
           </div>
         </>
       ) : null}
-    </section>
+    </Card>
   );
 }
