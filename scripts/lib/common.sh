@@ -316,3 +316,37 @@ run_as_root() {
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
+
+current_user() {
+  id -un
+}
+
+current_uid() {
+  id -u
+}
+
+can_own_path_as_app_user() {
+  [[ "$(current_user)" == "$APP_USER" || "$(current_uid)" -eq 0 ]]
+}
+
+apply_app_user_ownership() {
+  local path="$1"
+
+  if [[ "$(current_user)" == "$APP_USER" ]]; then
+    return 0
+  fi
+
+  if [[ "$(current_uid)" -eq 0 ]]; then
+    chown -R "$APP_USER:$APP_GROUP" "$path"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_secure_file_mode() {
+  local path="$1"
+  local mode="${2:-600}"
+
+  chmod "$mode" "$path"
+}

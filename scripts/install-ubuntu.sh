@@ -121,6 +121,21 @@ follow_up_message_for_step() {
   esac
 }
 
+ensure_owned_path() {
+  local path="$1"
+  local label="$2"
+
+  if apply_app_user_ownership "$path"; then
+    record_install_state "${label}_owner" "$APP_USER"
+    record_install_state "${label}_ownership_status" "complete"
+    return 0
+  fi
+
+  record_install_state "${label}_ownership_status" "pending"
+  record_install_state "${label}_ownership_reason" "ownership should be applied by $APP_USER or root"
+  return 1
+}
+
 record_install_state() {
   local key="$1"
   local value="${2:-}"
@@ -413,6 +428,15 @@ ensure_base_directories() {
     fi
   done
 
+  if ensure_owned_path "$INSTALL_ROOT" "install_root"; then
+    record_install_state base_directories_owner "$APP_USER"
+  fi
+  ensure_owned_path "$DATA_ROOT" "data_root" || true
+  ensure_owned_path "$WORKSPACE_ROOT" "workspace_root" || true
+  ensure_owned_path "$SESSION_UPLOAD_ROOT" "session_upload_root" || true
+  ensure_owned_path "$KNOWLEDGE_SET_ROOT" "knowledge_set_root" || true
+  ensure_owned_path "$APP_HOME" "app_home" || true
+
   record_step_status base_directories complete "base directories exist"
 }
 
@@ -517,6 +541,7 @@ attempt_clone() {
 
   log_step "Cloning repository"
   if env "${git_clone_env[@]}" git clone "$REPO_URL" "$REPO_DIR"; then
+    ensure_owned_path "$REPO_DIR" "repo_clone" || true
     record_step_status repo_clone complete "repository cloned"
   else
     record_step_status repo_clone failed "git clone failed"
@@ -588,6 +613,7 @@ copy_template_file() {
 
   ensure_dir "$(dirname "$destination")"
   cp "$template" "$destination"
+  ensure_secure_file_mode "$destination" 600
 }
 
 render_caddy_config() {
@@ -640,6 +666,13 @@ ensure_env_files() {
   if phase_forced env_files || [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
     copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"
   fi
+
+  ensure_owned_path "$BACKEND_ENV_FILE" "backend_env" || true
+  ensure_owned_path "$FRONTEND_ENV_FILE" "frontend_env" || true
+  ensure_secure_file_mode "$BACKEND_ENV_FILE" 600
+  ensure_secure_file_mode "$FRONTEND_ENV_FILE" 600
+  record_install_state backend_env_mode "600"
+  record_install_state frontend_env_mode "600"
 
   if [[ -f "$BACKEND_ENV_FILE" && -f "$FRONTEND_ENV_FILE" ]]; then
     record_step_status env_files complete "backend and frontend env files are present"
@@ -877,7 +910,7 @@ finalize_installation() {
   local step
 
   for step in "${required_steps[@]}"; do
-    if [[ "$(step_status "$step")" != "complete" && "$(step_status "$step")" != "skipped" ]]; then
+    if [[ "$(step_status "$step")" != "complete" ]]; then
       all_complete=0
       break
     fi

@@ -4,54 +4,84 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 base="$(cd "$script_dir/.." && pwd -P)"
 script="$base/scripts/install-ubuntu.sh"
+current_user="$(id -un)"
+probe_root="$base/temp/verify-install-script-probe"
+probe_state="$probe_root/state.json"
+probe_home="$probe_root/home"
+probe_caddy="$probe_root/Caddyfile"
+probe_app_root="$probe_root/install-root"
+probe_repo_dir="$probe_app_root/app/agent-studio"
+probe_env_backend="$probe_repo_dir/agent-api/.env"
+probe_env_frontend="$probe_repo_dir/agent-ui/.env.production"
+probe_skip_root="$probe_root/skip-install-root"
+probe_skip_state="$probe_root/skip-state.json"
 
+cleanup() {
+  rm -rf "$probe_root"
+}
+trap cleanup EXIT
+cleanup
+mkdir -p "$probe_home"
+
+# Static contract checks.
 test -f "$script"
-grep -q -- '--domain' "$script"
-grep -q -- '--repo-url' "$script"
-grep -q -- '--repo-dir' "$script"
-grep -q -- '--deploy-key-path' "$script"
-grep -q -- '--skip-codex-check' "$script"
 grep -q -- '--force-phase' "$script"
 grep -q -- '--force-all' "$script"
-grep -q 'load_existing_state' "$script"
-grep -q 'ensure_app_user' "$script"
-grep -q 'ensure_base_directories' "$script"
-grep -q 'ensure_deploy_key' "$script"
-grep -q 'attempt_clone' "$script"
-grep -q 'ensure_postgres_setup' "$script"
-grep -q 'ensure_env_files' "$script"
-grep -q 'ensure_caddy_config' "$script"
-grep -q 'run_first_deploy' "$script"
-grep -q 'ensure_pm2_start' "$script"
-grep -q 'ensure_codex_verification' "$script"
-grep -q 'phase_forced' "$script"
-grep -q 'maybe_mark_phase_forced' "$script"
-grep -q 'follow_up_message_for_step' "$script"
+grep -q 'apply_app_user_ownership' "$script"
+grep -q 'ensure_secure_file_mode' "$script"
 grep -q 'print_follow_up_actions' "$script"
-grep -q 'record_step_status app_user' "$script"
-grep -q 'record_step_status base_directories' "$script"
-grep -q 'record_step_status repo_clone' "$script"
-grep -q 'record_step_status postgres' "$script"
+grep -q 'follow_up_message_for_step' "$script"
+grep -q 'record_step_status first_deploy attempted' "$script"
 grep -q 'pg_roles' "$script"
 grep -q 'pg_database' "$script"
-grep -q 'postgres_user_status' "$script"
-grep -q 'postgres_db_status' "$script"
-grep -q 'record_step_status caddy_config' "$script"
-grep -q 'record_step_status first_deploy' "$script"
-grep -q 'record_step_status first_deploy attempted' "$script"
-grep -q 'actual deploy execution started' "$script"
-grep -q 'npm run build' "$script"
-grep -q 'record_step_status pm2_start' "$script"
-grep -q 'record_step_status codex_runtime_check' "$script"
-grep -q 'backend_env_status' "$script"
-grep -q 'frontend_env_status' "$script"
-grep -q 'record_step_status repo_clone skipped' "$script"
-grep -q 'record_step_status codex_runtime_check skipped' "$script"
-grep -q 'codex_runtime_check_skipped' "$script"
-grep -q 'Public key path:' "$script"
-grep -q 'backup_existing_repo_dir' "$script"
-grep -q 'repo_dir_has_entries' "$script"
-grep -q 'FOLLOW-UP' "$script"
-grep -q 'state_has repo_dir' "$script"
-grep -q 'state_has deploy_key_path' "$script"
-grep -q 'git clone' "$script"
+grep -q 'installer_complete' "$script"
+grep -q 'record_install_state backend_env_mode "600"' "$script"
+grep -q 'record_install_state frontend_env_mode "600"' "$script"
+
+# Probe 1: ownership and env permissions in a temp install root.
+APP_USER="$current_user" \
+APP_HOME="$probe_home" \
+INSTALL_ROOT="$probe_app_root" \
+CADDY_CONFIG_FILE="$probe_caddy" \
+DEPLOY_KEY_PATH="$probe_app_root/.ssh/id_ed25519_agent_studio_deploy" \
+bash "$script" \
+  --state-file "$probe_state" \
+  --domain example.com \
+  --repo-url "$base" \
+  --skip-codex-check \
+  --yes
+
+test "$(stat -f %Su "$probe_app_root")" = "$current_user"
+test "$(stat -f %Lp "$probe_env_backend")" = "600"
+test "$(stat -f %Lp "$probe_env_frontend")" = "600"
+python3 - "$probe_state" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("installer_complete") == "false", state.get("installer_complete")
+assert state.get("first_deploy_status") == "pending", state.get("first_deploy_status")
+assert state.get("backend_env_mode") == "600", state.get("backend_env_mode")
+assert state.get("frontend_env_mode") == "600", state.get("frontend_env_mode")
+PY
+
+# Probe 2: skipped required work keeps the install incomplete.
+APP_USER="$current_user" \
+APP_HOME="$probe_skip_root/home" \
+INSTALL_ROOT="$probe_skip_root" \
+bash "$script" \
+  --state-file "$probe_skip_state" \
+  --domain example.com \
+  --skip-codex-check \
+  --yes \
+  --no-clone
+python3 - "$probe_skip_state" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("installer_complete") == "false", state.get("installer_complete")
+assert state.get("repo_clone_status") == "skipped", state.get("repo_clone_status")
+PY
