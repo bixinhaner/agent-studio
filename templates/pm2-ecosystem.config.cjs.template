@@ -1,8 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: "agent-studio-api",
-      cwd: "/usr/local/agent-studio/app/agent-studio/agent-api",
+      // Default app name: agent-studio-api
+      name: "__PM2_APP_NAME__",
+      cwd: "__APP_API_DIR__",
       script: "dist/index.js",
       interpreter: "node",
       instances: 1,
@@ -11,8 +12,8 @@ module.exports = {
       max_restarts: 10,
       env: {
         NODE_ENV: "production",
-        HOST: "127.0.0.1",
-        PORT: "8787"
+        HOST: "__API_HOST__",
+        PORT: "__API_PORT__"
       }
     }
   ]
