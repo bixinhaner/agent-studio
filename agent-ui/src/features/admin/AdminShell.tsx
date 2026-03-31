@@ -18,6 +18,8 @@ import { UsageRankingsView } from "../monitoring/UsageRankingsView";
 import { UsersView } from "./UsersView";
 import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
 import { BroadcastAdminView } from "../collaboration/BroadcastAdminView";
+import type { AuthUser } from "../auth/api";
+import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 
 function OverviewCard(props: { overview: AdminOverview | null; loading: boolean; errorText: string }) {
   return (
@@ -52,7 +54,7 @@ function OverviewCard(props: { overview: AdminOverview | null; loading: boolean;
   );
 }
 
-export function AdminShell() {
+export function AdminShell(props: { currentUser?: AuthUser }) {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
@@ -85,6 +87,7 @@ export function AdminShell() {
         <p className="auth-eyebrow">Agent Studio Admin</p>
         <h1>管理控制台</h1>
         <p className="admin-description">统一查看运行状态、资源配置、用户治理、角色权限、系统设置、钉钉组织同步和运营监控。</p>
+        {props.currentUser ? <UserIdentitySummary user={props.currentUser} /> : null}
         <AdminNav section={section} onChange={setSection} />
       </section>
       {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}

@@ -67,6 +67,8 @@ import { resolvePortalWorkspaceResources } from "../resources/workspace-resource
 import type { PortalResourcesResponse } from "../resources/types";
 import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel, resolveWorkspaceOptions } from "./runtime-labels";
+import type { AuthUser } from "../auth/api";
+import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 
 type SessionOut = {
   session_id: string;
@@ -1376,7 +1378,7 @@ const AgentRuntimeAdapterProvider: FC<
   return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
 };
 
-export function PortalShell() {
+export function PortalShell(props: { currentUser?: AuthUser }) {
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -2455,6 +2457,7 @@ export function PortalShell() {
             <h1>Agent Studio</h1>
             <p>Agent Workspace</p>
           </div>
+          {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact /> : null}
 
           <section className="panel">
             <div className="panel-title-row">

@@ -181,4 +181,29 @@ describe("AdminShell", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "集成中心" }));
     expect(await screen.findByRole("heading", { name: "集成中心面板" })).toBeTruthy();
   });
+
+  it("renders the current admin identity summary", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
+      counts: {
+        users: 7,
+        threads: 13,
+        activeSessions: 3
+      }
+    });
+
+    render(
+      <AdminShell
+        currentUser={{
+          id: "admin-1",
+          role: "super_admin",
+          displayName: "Alice Admin",
+          email: "alice@example.com"
+        }}
+      />
+    );
+
+    expect(await screen.findByText("Alice Admin")).toBeTruthy();
+    expect(screen.getByText("超级管理员")).toBeTruthy();
+    expect(screen.getByText("alice@example.com")).toBeTruthy();
+  });
 });

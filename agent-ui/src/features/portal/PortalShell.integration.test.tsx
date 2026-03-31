@@ -214,6 +214,79 @@ describe("PortalShell knowledge set integration", () => {
     expect(screen.getByRole("checkbox", { name: "Runbooks" })).toBeTruthy();
   });
 
+  it("renders the current portal user identity summary", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: [
+          {
+            id: "ws-docs",
+            label: "Docs",
+            slug: "docs",
+            is_default: true,
+            runtime_workspace_path: "/workspace/default",
+            default_knowledge_sets: [],
+            optional_knowledge_sets: []
+          }
+        ]
+      });
+
+    render(
+      <PortalShell
+        currentUser={{
+          id: "employee-1",
+          role: "employee",
+          displayName: "Eve Employee",
+          email: "eve@example.com"
+        }}
+      />
+    );
+
+    expect(await screen.findByText("Eve Employee")).toBeTruthy();
+    expect(screen.getByText("员工")).toBeTruthy();
+    expect(screen.getByText("eve@example.com")).toBeTruthy();
+  });
+
   it("includes selected knowledge_set_ids in thread and session creation requests", async () => {
     mockedApi
       .mockResolvedValueOnce({

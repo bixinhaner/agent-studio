@@ -34,10 +34,10 @@ function AppContent() {
   }
 
   if (auth.user.role === "admin" || auth.user.role === "super_admin") {
-    return <AdminShell />;
+    return <AdminShell currentUser={auth.user} />;
   }
 
-  return <PortalShell />;
+  return <PortalShell currentUser={auth.user} />;
 }
 
 export default function App() {

@@ -148,6 +148,51 @@ body {
   color: #4b5563;
 }
 
+.user-identity-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dbe6f5;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f3f8ff 100%);
+}
+
+.user-identity-card.compact {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+}
+
+.user-identity-copy {
+  min-width: 0;
+}
+
+.user-identity-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.user-identity-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+  word-break: break-word;
+}
+
+.user-identity-role {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.user-identity-divider {
+  margin: 0 6px;
+  color: #94a3b8;
+}
+
 .panel {
   border: 1px solid #d6e2f3;
   border-radius: 12px;
