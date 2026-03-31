@@ -9,12 +9,16 @@ APP_API_DIR_EXPLICIT="${APP_API_DIR_EXPLICIT:-0}"
 APP_UI_DIR_EXPLICIT="${APP_UI_DIR_EXPLICIT:-0}"
 BACKEND_ENV_FILE_EXPLICIT="${BACKEND_ENV_FILE_EXPLICIT:-0}"
 FRONTEND_ENV_FILE_EXPLICIT="${FRONTEND_ENV_FILE_EXPLICIT:-0}"
+REPO_DIR_EXPLICIT="${REPO_DIR_EXPLICIT:-0}"
+DEPLOY_KEY_PATH_EXPLICIT="${DEPLOY_KEY_PATH_EXPLICIT:-0}"
 
 if [[ -n "${APP_REPO_DIR+x}" ]]; then APP_REPO_DIR_EXPLICIT=1; fi
 if [[ -n "${APP_API_DIR+x}" ]]; then APP_API_DIR_EXPLICIT=1; fi
 if [[ -n "${APP_UI_DIR+x}" ]]; then APP_UI_DIR_EXPLICIT=1; fi
 if [[ -n "${BACKEND_ENV_FILE+x}" ]]; then BACKEND_ENV_FILE_EXPLICIT=1; fi
 if [[ -n "${FRONTEND_ENV_FILE+x}" ]]; then FRONTEND_ENV_FILE_EXPLICIT=1; fi
+if [[ -n "${REPO_DIR+x}" ]]; then REPO_DIR_EXPLICIT=1; fi
+if [[ -n "${DEPLOY_KEY_PATH+x}" ]]; then DEPLOY_KEY_PATH_EXPLICIT=1; fi
 
 # shellcheck source=/dev/null
 source "$script_dir/lib/common.sh"
@@ -28,8 +32,6 @@ DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$HOME/.ssh/id_ed25519_agent_studio_deploy}"
 SKIP_CODEX_CHECK="${SKIP_CODEX_CHECK:-0}"
 ASSUME_YES="${ASSUME_YES:-0}"
 STATE_FILE_OVERRIDE="${STATE_FILE_OVERRIDE:-}"
-REPO_DIR_EXPLICIT=0
-DEPLOY_KEY_PATH_EXPLICIT=0
 RUN_CLONE=1
 SHOW_HELP=0
 FORCE_ALL=0
@@ -660,9 +662,17 @@ copy_template_file() {
   local template="$1"
   local destination="$2"
 
-  ensure_dir "$(dirname "$destination")"
-  cp "$template" "$destination"
-  ensure_secure_file_mode "$destination" 600
+  if ! ensure_dir "$(dirname "$destination")"; then
+    return 1
+  fi
+  if ! cp "$template" "$destination"; then
+    return 1
+  fi
+  if ! ensure_secure_file_mode "$destination" 600; then
+    return 1
+  fi
+
+  return 0
 }
 
 render_caddy_config() {
@@ -724,16 +734,36 @@ ensure_env_files() {
   fi
 
   if phase_forced env_files || [[ ! -f "$BACKEND_ENV_FILE" ]]; then
-    copy_template_file "$backend_template" "$BACKEND_ENV_FILE"
+    if ! copy_template_file "$backend_template" "$BACKEND_ENV_FILE"; then
+      record_step_status env_files pending "failed to write backend env file"
+      record_install_state backend_env_status "pending"
+      record_install_state frontend_env_status "pending"
+      return 0
+    fi
   fi
   if phase_forced env_files || [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
-    copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"
+    if ! copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"; then
+      record_step_status env_files pending "failed to write frontend env file"
+      record_install_state backend_env_status "pending"
+      record_install_state frontend_env_status "pending"
+      return 0
+    fi
   fi
 
   ensure_owned_path "$BACKEND_ENV_FILE" "backend_env" || true
   ensure_owned_path "$FRONTEND_ENV_FILE" "frontend_env" || true
-  ensure_secure_file_mode "$BACKEND_ENV_FILE" 600
-  ensure_secure_file_mode "$FRONTEND_ENV_FILE" 600
+  if ! ensure_secure_file_mode "$BACKEND_ENV_FILE" 600; then
+    record_step_status env_files pending "failed to set backend env permissions"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
+  if ! ensure_secure_file_mode "$FRONTEND_ENV_FILE" 600; then
+    record_step_status env_files pending "failed to set frontend env permissions"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
   record_install_state backend_env_mode "600"
   record_install_state frontend_env_mode "600"
 
