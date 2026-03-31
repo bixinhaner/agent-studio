@@ -11,14 +11,10 @@ describe("AdvancedSettingsPanel", () => {
         onClose={vi.fn()}
         modelLabel="gpt-5.4"
         reasoningLabel="high"
-        workspaceValue="/workspace/default"
-        workspaceOptions={[{ id: "/workspace/default", label: "default", isDefault: true }]}
-        onWorkspaceChange={vi.fn()}
       />
     );
     expect(screen.getByText("运行配置")).toBeTruthy();
     expect(screen.getByText("模型")).toBeTruthy();
-    expect(screen.getByLabelText("工作目录")).toBeTruthy();
+    expect(screen.getByText("思考深度")).toBeTruthy();
   });
 });
-

@@ -471,6 +471,12 @@ type SessionOptions = {
   codexRunConfig?: Record<string, unknown>;
 };
 
+type WorkspaceSelection = {
+  modeId: string;
+  workspaceId: string;
+  workspaceRootPath: string;
+};
+
 function stableJson(value: unknown): string {
   try {
     return JSON.stringify(value ?? null);
@@ -511,23 +517,183 @@ function threadOut(thread: ThreadRecord) {
   };
 }
 
-function pickSessionOptions(input: {
-  model?: string;
-  reasoning_effort?: ReasoningEffort;
-  workspace?: string;
-  codex_run_config?: Record<string, unknown>;
-}, userId: string): SessionOptions {
-  const workspace = resolveWorkspace(input.workspace);
-  const model = normalizeModel(input.model || appConfig.defaultModel);
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
+  const raw = codexRunConfig?.mode;
+  return typeof raw === "string" ? trimOrUndefined(raw) : undefined;
+}
+
+function withRunConfigMode(
+  codexRunConfig: Record<string, unknown> | undefined,
+  modeId: string
+): Record<string, unknown> {
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
+  next.mode = modeId;
+  return next;
+}
+
+function sanitizePathSegment(value: string, fallback: string): string {
+  const normalized = value
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function buildThreadWorkspacePath(rootPath: string, userId: string, threadId: string): string {
+  return path.join(
+    rootPath,
+    ".agent-studio",
+    "sessions",
+    sanitizePathSegment(userId, "user"),
+    sanitizePathSegment(threadId, "thread")
+  );
+}
+
+function buildDetachedSessionWorkspacePath(rootPath: string, userId: string): string {
+  const suffix = `${Date.now()}-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  return path.join(
+    rootPath,
+    ".agent-studio",
+    "sessions",
+    sanitizePathSegment(userId, "user"),
+    `session-${suffix}`
+  );
+}
+
+async function resolveWorkspaceSelection(input: {
+  currentUser: {
+    id: string;
+    role?: string;
+  };
+  modeHint?: string;
+  workspaceHint?: string;
+}): Promise<WorkspaceSelection> {
+  const roleIds = [input.currentUser.role ?? "employee"];
+  const departmentIds = await departmentMemberships.listIdsForUser(input.currentUser.id);
+  const runtimeOptions = await portalRuntimeOptions.resolve({
+    userId: input.currentUser.id,
+    roleIds,
+    departmentIds
+  });
+  if (!runtimeOptions.modes.length) {
+    throw new Error("当前账号无可用 Agent 模式");
+  }
+
+  const requestedModeId = trimOrUndefined(input.modeHint);
+  const selectedMode =
+    runtimeOptions.modes.find((mode) => mode.id === requestedModeId) ||
+    runtimeOptions.modes.find((mode) => mode.id === runtimeOptions.defaults.mode) ||
+    runtimeOptions.modes[0];
+  if (!selectedMode) {
+    throw new Error("当前账号无可用 Agent 模式");
+  }
+
+  const candidateWorkspaces = selectedMode.workspaces.length ? selectedMode.workspaces : runtimeOptions.workspaces;
+  if (!candidateWorkspaces.length) {
+    throw new Error("当前模式未绑定可用 workspace");
+  }
+
+  const workspaceRows = await workspaces.list();
+  const workspaceById = new Map(workspaceRows.map((workspace) => [workspace.id, workspace] as const));
+
+  const workspaceHint = trimOrUndefined(input.workspaceHint);
+  let selectedWorkspaceId = workspaceHint && candidateWorkspaces.some((workspace) => workspace.id === workspaceHint)
+    ? workspaceHint
+    : undefined;
+
+  if (!selectedWorkspaceId && workspaceHint) {
+    try {
+      const resolvedHintPath = resolveWorkspace(workspaceHint);
+      selectedWorkspaceId = candidateWorkspaces.find((workspace) => {
+        const rootPath = trimOrUndefined(workspaceById.get(workspace.id)?.rootPath);
+        if (!rootPath) return false;
+        try {
+          return resolveWorkspace(rootPath) === resolvedHintPath;
+        } catch {
+          return false;
+        }
+      })?.id;
+    } catch {
+      // Ignore invalid path-style hints and continue with mode defaults.
+    }
+  }
+
+  if (!selectedWorkspaceId) {
+    const defaultWorkspaceId = trimOrUndefined(runtimeOptions.defaults.workspace);
+    selectedWorkspaceId =
+      candidateWorkspaces.find((workspace) => workspace.isDefault)?.id ||
+      (defaultWorkspaceId && candidateWorkspaces.some((workspace) => workspace.id === defaultWorkspaceId)
+        ? defaultWorkspaceId
+        : undefined) ||
+      candidateWorkspaces[0]?.id;
+  }
+  if (!selectedWorkspaceId) {
+    throw new Error("当前模式未绑定可用 workspace");
+  }
+
+  const selectedWorkspace = workspaceById.get(selectedWorkspaceId);
+  if (!selectedWorkspace || selectedWorkspace.status !== "active") {
+    throw new Error("workspace 不存在或无权限");
+  }
+
+  const workspaceRoot = trimOrUndefined(selectedWorkspace.rootPath);
+  if (!workspaceRoot) {
+    throw new Error("workspace 缺少根目录配置");
+  }
+
   return {
-    userId,
-    model,
-    reasoningEffort: normalizeReasoningEffortForModel(
-      model,
-      input.reasoning_effort || appConfig.defaultReasoningEffort
-    ),
-    workspace,
-    codexRunConfig: input.codex_run_config
+    modeId: selectedMode.id,
+    workspaceId: selectedWorkspaceId,
+    workspaceRootPath: resolveWorkspace(workspaceRoot)
+  };
+}
+
+async function allocateThreadWorkspacePath(input: {
+  currentUser: {
+    id: string;
+    role?: string;
+  };
+  threadId: string;
+  modeHint?: string;
+  workspaceHint?: string;
+}): Promise<WorkspaceSelection & { workspacePath: string }> {
+  const selection = await resolveWorkspaceSelection({
+    currentUser: input.currentUser,
+    modeHint: input.modeHint,
+    workspaceHint: input.workspaceHint
+  });
+  const workspacePath = buildThreadWorkspacePath(selection.workspaceRootPath, input.currentUser.id, input.threadId);
+  await fs.mkdir(workspacePath, { recursive: true });
+  return {
+    ...selection,
+    workspacePath
+  };
+}
+
+async function allocateDetachedSessionWorkspacePath(input: {
+  currentUser: {
+    id: string;
+    role?: string;
+  };
+  modeHint?: string;
+  workspaceHint?: string;
+}): Promise<WorkspaceSelection & { workspacePath: string }> {
+  const selection = await resolveWorkspaceSelection({
+    currentUser: input.currentUser,
+    modeHint: input.modeHint,
+    workspaceHint: input.workspaceHint
+  });
+  const workspacePath = buildDetachedSessionWorkspacePath(selection.workspaceRootPath, input.currentUser.id);
+  await fs.mkdir(workspacePath, { recursive: true });
+  return {
+    ...selection,
+    workspacePath
   };
 }
 
@@ -586,23 +752,32 @@ async function resolveSessionOptions(
   input: {
     model?: string;
     reasoning_effort?: ReasoningEffort;
-    workspace?: string;
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
   },
   currentUser: {
     id: string;
     role?: string;
-  }
+  },
+  workspacePath: string,
+  modeId: string
 ): Promise<SessionOptions> {
-  const options = pickSessionOptions(input, currentUser.id);
+  const model = normalizeModel(input.model || appConfig.defaultModel);
+  const reasoningEffort = normalizeReasoningEffortForModel(
+    model,
+    input.reasoning_effort || appConfig.defaultReasoningEffort
+  );
+  const sourceCodexRunConfig = withRunConfigMode(input.codex_run_config, modeId);
   return {
-    ...options,
+    userId: currentUser.id,
+    model,
+    reasoningEffort,
+    workspace: workspacePath,
     codexRunConfig: await resolveKnowledgeSetRunConfig({
       currentUser,
-      workspacePath: options.workspace,
+      workspacePath,
       knowledgeSetIds: input.knowledge_set_ids,
-      codexRunConfig: options.codexRunConfig
+      codexRunConfig: sourceCodexRunConfig
     })
   };
 }
@@ -653,17 +828,24 @@ async function ensureThreadSession(
   if (!thread) throw new Error("thread 不存在");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
+  const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
+  const workspaceSelection = await allocateThreadWorkspacePath({
+    currentUser,
+    threadId,
+    modeHint,
+    workspaceHint: patch?.workspace
+  });
+  const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, workspaceSelection.modeId);
   const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
   const desiredReasoning = normalizeReasoningEffortForModel(
     desiredModel,
     patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort
   );
-  const desiredWorkspace = resolveWorkspace(patch?.workspace || thread.workspace);
   const desiredBaseCodexRunConfig = await resolveKnowledgeSetRunConfig({
     currentUser,
-    workspacePath: desiredWorkspace,
+    workspacePath: workspaceSelection.workspacePath,
     knowledgeSetIds: patch?.knowledge_set_ids,
-    codexRunConfig: sourceCodexRunConfig
+    codexRunConfig: normalizedSourceCodexRunConfig
   });
   const desiredCodexRunConfig = ensureThreadUploadInRunConfig(
     desiredBaseCodexRunConfig,
@@ -674,7 +856,7 @@ async function ensureThreadSession(
     userId: thread.userId ?? currentUser.id,
     model: desiredModel,
     reasoningEffort: desiredReasoning,
-    workspace: desiredWorkspace,
+    workspace: workspaceSelection.workspacePath,
     codexRunConfig: desiredCodexRunConfig
   };
 
@@ -1018,13 +1200,45 @@ app.post("/api/session", async (req: Request, res: Response) => {
           await sessions.remove(existing.sessionId);
           liveRuntimeThreads.delete(existing.sessionId);
         } else if (input.model || input.reasoning_effort || input.workspace || input.knowledge_set_ids || input.codex_run_config) {
-          const workspace = input.workspace ? resolveWorkspace(input.workspace) : existing.workspace;
           const nextSourceCodexRunConfig = input.codex_run_config ?? existing.codexRunConfig;
+          const modeHint = modeIdFromRunConfig(nextSourceCodexRunConfig) ?? modeIdFromRunConfig(existing.codexRunConfig);
+
+          let workspace = existing.workspace;
+          let modeId = modeHint;
+          if (existing.threadId) {
+            const allocated = await allocateThreadWorkspacePath({
+              currentUser,
+              threadId: existing.threadId,
+              modeHint,
+              workspaceHint: input.workspace ?? existing.workspace
+            });
+            workspace = allocated.workspacePath;
+            modeId = allocated.modeId;
+          } else if (input.workspace || input.codex_run_config || !workspace || !modeId) {
+            const allocated = await allocateDetachedSessionWorkspacePath({
+              currentUser,
+              modeHint,
+              workspaceHint: input.workspace ?? existing.workspace
+            });
+            workspace = allocated.workspacePath;
+            modeId = allocated.modeId;
+          }
+
+          if (!modeId) {
+            const fallback = await resolveWorkspaceSelection({
+              currentUser,
+              modeHint: undefined,
+              workspaceHint: workspace
+            });
+            modeId = fallback.modeId;
+          }
+
+          const normalizedSourceCodexRunConfig = withRunConfigMode(nextSourceCodexRunConfig, modeId);
           const nextCodexRunConfig = await resolveKnowledgeSetRunConfig({
             currentUser,
             workspacePath: workspace,
             knowledgeSetIds: input.knowledge_set_ids,
-            codexRunConfig: nextSourceCodexRunConfig
+            codexRunConfig: normalizedSourceCodexRunConfig
           });
           await assertQuotaAllowsNewSession({
             currentUser,
@@ -1058,7 +1272,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
       }
     }
 
-    const sessionOptions = await resolveSessionOptions(input, currentUser);
+    const modeHint = modeIdFromRunConfig(input.codex_run_config);
+    const allocated = await allocateDetachedSessionWorkspacePath({
+      currentUser,
+      modeHint,
+      workspaceHint: input.workspace
+    });
+    const sessionOptions = await resolveSessionOptions(
+      {
+        model: input.model,
+        reasoning_effort: input.reasoning_effort,
+        knowledge_set_ids: input.knowledge_set_ids,
+        codex_run_config: input.codex_run_config
+      },
+      currentUser,
+      allocated.workspacePath,
+      allocated.modeId
+    );
     await assertQuotaAllowsNewSession({
       currentUser,
       model: sessionOptions.model,
@@ -1083,13 +1313,32 @@ app.post("/api/threads", async (req: Request, res: Response) => {
   try {
     const currentUser = req.currentUser!;
     const input = createThreadSchema.parse(req.body || {});
-    const options = await resolveSessionOptions(input, currentUser);
+    const threadId = randomUUID().replace(/-/g, "");
+    const modeHint = modeIdFromRunConfig(input.codex_run_config);
+    const allocated = await allocateThreadWorkspacePath({
+      currentUser,
+      threadId,
+      modeHint,
+      workspaceHint: input.workspace
+    });
+    const options = await resolveSessionOptions(
+      {
+        model: input.model,
+        reasoning_effort: input.reasoning_effort,
+        knowledge_set_ids: input.knowledge_set_ids,
+        codex_run_config: input.codex_run_config
+      },
+      currentUser,
+      allocated.workspacePath,
+      allocated.modeId
+    );
     await assertQuotaAllowsNewSession({
       currentUser,
       model: options.model,
       featureType: "chat"
     });
     const createdThread = await threads.create({
+      id: threadId,
       userId: currentUser.id,
       title: input.title?.trim() || undefined,
       externalId: input.external_id?.trim() || undefined,

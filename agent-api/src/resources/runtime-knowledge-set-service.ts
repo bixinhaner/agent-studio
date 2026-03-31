@@ -1,3 +1,5 @@
+import path from "node:path";
+
 type WorkspaceRecord = {
   id: string;
   status: string;
@@ -76,6 +78,13 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function isSamePathOrDescendant(candidatePath: string, rootPath: string): boolean {
+  const resolvedCandidate = path.resolve(candidatePath);
+  const resolvedRoot = path.resolve(rootPath);
+  if (resolvedCandidate === resolvedRoot) return true;
+  return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
 }
 
 function normalizeIdList(value: string[] | undefined): string[] {
@@ -193,9 +202,12 @@ export class RuntimeKnowledgeSetService {
         candidateIds: workspaces.map((workspace) => workspace.id)
       })
     );
-    const workspace = workspaces.find(
-      (candidate) => trimOrUndefined(candidate.rootPath) === workspacePath && allowedWorkspaceIds.has(candidate.id)
-    );
+    const workspace = workspaces.find((candidate) => {
+      if (!allowedWorkspaceIds.has(candidate.id)) return false;
+      const rootPath = trimOrUndefined(candidate.rootPath);
+      if (!rootPath) return false;
+      return isSamePathOrDescendant(workspacePath, rootPath);
+    });
     if (!workspace) {
       await this.options.securityAlerts?.evaluateSecurityEvent({
         scopeType: input.departmentIds[0] ? "department" : "platform",

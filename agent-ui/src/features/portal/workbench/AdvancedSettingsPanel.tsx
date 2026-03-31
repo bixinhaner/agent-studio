@@ -1,14 +1,11 @@
 import type { ReactNode } from "react";
-import { Drawer, Select, Space, Typography } from "antd";
+import { Drawer, Space, Typography } from "antd";
 
 export function AdvancedSettingsPanel(props: {
   open: boolean;
   onClose(): void;
   modelLabel: string;
   reasoningLabel: string;
-  workspaceValue: string;
-  workspaceOptions: Array<{ id: string; label: string; isDefault?: boolean }>;
-  onWorkspaceChange(value: string): void;
   children?: ReactNode;
 }) {
   return (
@@ -19,16 +16,6 @@ export function AdvancedSettingsPanel(props: {
 
         <Typography.Text strong>思考深度</Typography.Text>
         <Typography.Paragraph>{props.reasoningLabel}</Typography.Paragraph>
-
-        <label htmlFor="advanced-workspace-select">
-          <Typography.Text strong>工作目录</Typography.Text>
-        </label>
-        <Select
-          id="advanced-workspace-select"
-          value={props.workspaceValue}
-          options={props.workspaceOptions.map((item) => ({ value: item.id, label: item.label }))}
-          onChange={props.onWorkspaceChange}
-        />
 
         {props.children}
       </Space>

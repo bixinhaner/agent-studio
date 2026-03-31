@@ -69,7 +69,7 @@ import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import { resolvePortalWorkspaceResources } from "../resources/workspace-resources";
 import type { PortalResourcesResponse } from "../resources/types";
 import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
-import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel, resolveWorkspaceOptions } from "./runtime-labels";
+import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { PortalTopBar } from "./workbench/PortalTopBar";
@@ -502,10 +502,8 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
 }
 
 function buildCodexRunConfig(cfg: AppliedConfig, mode: string): Record<string, unknown> {
-  const workspace = cfg.workspace.trim() || DEFAULT_WORKSPACE;
   return {
-    mode,
-    workspace
+    mode
   };
 }
 
@@ -1929,7 +1927,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const canUpload = runtimeOptions?.canUpload ?? false;
   const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
   const modeScopedWorkspaces = selectedMode?.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
-  const workspaceOptions = resolveWorkspaceOptions(modeScopedWorkspaces, appliedConfig.workspace);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedWorkspaceResources = resolvePortalWorkspaceResources(
@@ -2644,9 +2641,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
               modelLabel={selectedModelLabel}
               reasoningLabel={selectedReasoningLabel}
-              workspaceValue={appliedConfig.workspace}
-              workspaceOptions={workspaceOptions}
-              onWorkspaceChange={(value) => setAppliedConfig((prev) => ({ ...prev, workspace: value }))}
             >
               <div className="advanced-settings-content">
                 <div className="knowledge-set-shell">

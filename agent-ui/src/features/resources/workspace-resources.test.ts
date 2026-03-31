@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolvePortalWorkspaceResources } from "./workspace-resources";
 
 describe("resolvePortalWorkspaceResources", () => {
-  it("matches portal resources using the stable runtime workspace path", () => {
+  it("matches portal resources using workspace id", () => {
     const selected = resolvePortalWorkspaceResources(
       [
         {
@@ -16,7 +16,7 @@ describe("resolvePortalWorkspaceResources", () => {
           optional_knowledge_sets: [{ id: "ks-runbook", label: "Runbooks", slug: "runbooks" }]
         }
       ],
-      "/workspace/default"
+      "ws-docs"
     );
 
     expect(selected?.id).toBe("ws-docs");
