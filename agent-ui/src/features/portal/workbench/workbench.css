@@ -175,8 +175,9 @@
 }
 
 .portal-workbench-chat .aui-thread-welcome-root {
-  flex-grow: 0;
-  min-height: clamp(290px, 48vh, 460px);
+  flex-grow: 1;
+  min-height: 0;
+  padding-bottom: 10px;
 }
 
 .portal-workbench-chat .aui-thread-welcome-center {
@@ -225,9 +226,12 @@
 }
 
 .portal-workbench-chat .aui-thread-viewport-footer {
-  margin-top: 0.85rem;
+  margin-top: auto;
   padding-bottom: 14px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, #ffffff 26%, #ffffff 100%);
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
 }
 
 .portal-workbench-chat .aui-composer-root {
@@ -235,6 +239,9 @@
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(37, 99, 235, 0.1);
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
 }
 
 .portal-workbench-chat .aui-composer-root:focus-within {
@@ -249,10 +256,15 @@
   padding-bottom: 0.85rem;
   font-size: 14px;
   line-height: 1.55;
+  pointer-events: auto;
 }
 
 .portal-workbench-chat .aui-composer-input::placeholder {
   color: var(--workbench-muted-text);
+}
+
+.portal-workbench-chat .thread-readonly-shield {
+  inset: 0;
 }
 
 .portal-workbench-chat .aui-composer-send {
