@@ -19,6 +19,14 @@ CADDY_CONFIG_FILE="${CADDY_CONFIG_FILE:-/etc/caddy/Caddyfile}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$APP_API_DIR/.env}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-$APP_UI_DIR/.env.production}"
 
+refresh_app_paths() {
+  APP_REPO_DIR="$REPO_DIR"
+  APP_API_DIR="$APP_REPO_DIR/agent-api"
+  APP_UI_DIR="$APP_REPO_DIR/agent-ui"
+  BACKEND_ENV_FILE="$APP_API_DIR/.env"
+  FRONTEND_ENV_FILE="$APP_UI_DIR/.env.production"
+}
+
 log_ts() {
   date "+%Y-%m-%d %H:%M:%S"
 }

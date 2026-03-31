@@ -180,6 +180,11 @@ ensure_state_defaults() {
   record_install_state app_user "$APP_USER"
   record_install_state app_home "$APP_HOME"
   record_install_state repo_dir "$REPO_DIR"
+  record_install_state app_repo_dir "$APP_REPO_DIR"
+  record_install_state app_api_dir "$APP_API_DIR"
+  record_install_state app_ui_dir "$APP_UI_DIR"
+  record_install_state backend_env_file "$BACKEND_ENV_FILE"
+  record_install_state frontend_env_file "$FRONTEND_ENV_FILE"
   record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
   record_install_state domain "$DOMAIN"
   record_install_state repo_url "$REPO_URL"
@@ -226,6 +231,10 @@ load_existing_state() {
   if state_has postgres_port; then
     POSTGRES_PORT="$(state_read postgres_port "$POSTGRES_PORT")"
   fi
+}
+
+refresh_paths_from_repo_dir() {
+  refresh_app_paths
 }
 
 parse_args() {
@@ -447,7 +456,10 @@ ensure_deploy_key() {
   DEPLOY_KEY_CONTINUE_TO_CLONE=0
 
   if step_is_complete deploy_key && ! phase_forced deploy_key; then
-    if state_read_bool deploy_key_guidance_shown "false"; then
+    if step_is_complete repo_clone; then
+      DEPLOY_KEY_CONTINUE_TO_CLONE=1
+      log_info "Repository clone is already complete; deploy key checkpoint is satisfied"
+    elif state_read_bool deploy_key_guidance_shown "false"; then
       if confirm_or_default "Deploy key guidance was already shown. Continue to repository clone now?" "y"; then
         DEPLOY_KEY_CONTINUE_TO_CLONE=1
       else
@@ -951,6 +963,7 @@ main() {
   fi
 
   load_existing_state
+  refresh_paths_from_repo_dir
   prompt_for_missing_values
   ensure_state_defaults
   summarize_configuration
@@ -959,7 +972,7 @@ main() {
   ensure_base_directories
   if [[ "$RUN_CLONE" == "1" ]]; then
     ensure_deploy_key
-    if [[ "$DEPLOY_KEY_SAFE_CHECKPOINT" == "1" && "$DEPLOY_KEY_CONTINUE_TO_CLONE" != "1" ]]; then
+    if [[ "$DEPLOY_KEY_SAFE_CHECKPOINT" == "1" && "$DEPLOY_KEY_CONTINUE_TO_CLONE" != "1" ]] && ! step_is_complete repo_clone; then
       record_step_status repo_clone pending "deploy key guidance shown; rerun to continue clone"
       render_phase_summary
       print_follow_up_actions
