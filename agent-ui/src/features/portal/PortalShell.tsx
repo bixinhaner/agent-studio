@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,6 +17,7 @@ import {
   RuntimeAdapterProvider,
   ThreadListItemPrimitive,
   useAui,
+  useAuiEvent,
   useLocalRuntime,
   unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
   type ChatModelAdapter,
@@ -1286,6 +1288,52 @@ const AgentThreadListItem: FC = () => {
   );
 };
 
+const ComposerActivationGuard: FC = () => {
+  const aui = useAui();
+  const threadItemId = useAuiState((s) => s.threadListItem.id);
+  const isComposerEditing = useAuiState((s) => s.composer.isEditing);
+  const composerType = useAuiState((s) => s.composer.type);
+  const threadLoading = useAuiState((s) => s.thread.isLoading);
+  const recoveredThreadIdRef = useRef("");
+
+  const ensureComposerReady = useCallback(() => {
+    if (threadLoading || isComposerEditing) {
+      recoveredThreadIdRef.current = "";
+      return;
+    }
+
+    const normalizedThreadId = String(threadItemId || "").trim();
+    if (!normalizedThreadId) return;
+    if (recoveredThreadIdRef.current === normalizedThreadId) return;
+    recoveredThreadIdRef.current = normalizedThreadId;
+
+    if (composerType === "edit") {
+      try {
+        aui.composer().beginEdit();
+      } catch {
+        // ignore, runtime may not expose beginEdit yet
+      }
+      return;
+    }
+
+    try {
+      // Re-select active thread to recover from stale no-op composer bindings.
+      aui.threadListItem().switchTo();
+    } catch {
+      // ignore switch failures; next thread event will retry
+    }
+  }, [aui, composerType, isComposerEditing, threadItemId, threadLoading]);
+
+  useEffect(() => {
+    ensureComposerReady();
+  }, [ensureComposerReady]);
+
+  useAuiEvent("thread.initialize", ensureComposerReady);
+  useAuiEvent("threadListItem.switchedTo", ensureComposerReady);
+
+  return null;
+};
+
 const AgentRuntimeAdapterProvider: FC<
   PropsWithChildren<{
     onThreadIdentityChange?: (identity: ThreadIdentity) => void;
@@ -2482,6 +2530,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <ComposerActivationGuard />
       <RunningStageTextContext.Provider value={runningStageText}>
         <ConfigProvider theme={PORTAL_ANTD_THEME}>
           <div className="portal-workbench-root">

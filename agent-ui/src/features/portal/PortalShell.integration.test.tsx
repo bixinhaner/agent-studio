@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let capturedThreadListAdapter: {
@@ -18,6 +18,19 @@ let currentThreadListItemState = {
   remoteId: "",
   title: ""
 };
+let currentComposerState: {
+  isEditing: boolean;
+  type: "thread" | "edit";
+} = {
+  isEditing: true,
+  type: "thread"
+};
+let currentThreadState = {
+  isLoading: false,
+  isDisabled: false
+};
+const mockThreadListItemSwitchTo = vi.fn();
+const mockComposerBeginEdit = vi.fn();
 
 vi.mock("../../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/api")>();
@@ -60,11 +73,16 @@ vi.mock("@assistant-ui/react", () => {
     useAui: () => ({
       threadListItem: () => ({
         getState: () => currentThreadListItemState,
+        switchTo: mockThreadListItemSwitchTo,
         rename: vi.fn(),
         initialize: vi.fn(),
         generateTitle: vi.fn()
+      }),
+      composer: () => ({
+        beginEdit: mockComposerBeginEdit
       })
     }),
+    useAuiEvent: vi.fn(),
     useLocalRuntime: (adapter: unknown) => {
       capturedChatAdapter = adapter as typeof capturedChatAdapter;
       return {};
@@ -107,8 +125,18 @@ vi.mock("@assistant-ui/core", () => ({
 }));
 
 vi.mock("@assistant-ui/store", () => ({
-  useAuiState: (selector: (state: { threadListItem: typeof currentThreadListItemState }) => unknown) =>
-    selector({ threadListItem: currentThreadListItemState })
+  useAuiState: (
+    selector: (state: {
+      threadListItem: typeof currentThreadListItemState;
+      composer: typeof currentComposerState;
+      thread: typeof currentThreadState;
+    }) => unknown
+  ) =>
+    selector({
+      threadListItem: currentThreadListItemState,
+      composer: currentComposerState,
+      thread: currentThreadState
+    })
 }));
 
 vi.mock("../zendesk/ZendeskIntegrationPanel", () => ({
@@ -150,6 +178,16 @@ describe("PortalShell knowledge set integration", () => {
       remoteId: "",
       title: ""
     };
+    currentComposerState = {
+      isEditing: true,
+      type: "thread"
+    };
+    currentThreadState = {
+      isLoading: false,
+      isDisabled: false
+    };
+    mockThreadListItemSwitchTo.mockReset();
+    mockComposerBeginEdit.mockReset();
     mockedApi.mockReset();
   });
 
@@ -1132,5 +1170,79 @@ describe("PortalShell knowledge set integration", () => {
         json: { owner_user_id: "user-9" }
       })
     );
+  });
+
+  it("re-selects active thread when composer unexpectedly starts as non-editing thread mode", async () => {
+    currentThreadListItemState = {
+      id: "local-thread-1",
+      remoteId: "",
+      title: "Thread 1"
+    };
+    currentComposerState = {
+      isEditing: false,
+      type: "thread"
+    };
+
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: [
+          {
+            id: "ws-docs",
+            label: "Docs",
+            slug: "docs",
+            is_default: true,
+            runtime_workspace_path: "/workspace/default",
+            default_knowledge_sets: [],
+            optional_knowledge_sets: []
+          }
+        ]
+      });
+
+    render(<PortalShell />);
+
+    await waitFor(() => {
+      expect(mockThreadListItemSwitchTo).toHaveBeenCalled();
+    });
   });
 });
