@@ -108,6 +108,7 @@ check_commands() {
   require_command npm
   require_command python3
   require_command curl
+  require_command psql
   require_command caddy
   require_command pm2
   print_ok "required commands are available"
@@ -117,7 +118,15 @@ check_backend_env() {
   local database_url
   database_url="$(read_env_value "$BACKEND_ENV_FILE" "DATABASE_URL")" || die "DATABASE_URL is missing from $BACKEND_ENV_FILE"
   [[ -n "$database_url" ]] || die "DATABASE_URL is empty in $BACKEND_ENV_FILE"
+  DATABASE_URL="$database_url"
   print_ok "backend env includes DATABASE_URL"
+}
+
+check_postgres() {
+  [[ -n "${DATABASE_URL:-}" ]] || die "DATABASE_URL is unavailable for PostgreSQL validation"
+  psql "$DATABASE_URL" -tAc 'select 1;' >/dev/null
+  psql "$DATABASE_URL" -tAc 'select current_database(), current_user;' >/dev/null
+  print_ok "postgresql connection is healthy"
 }
 
 check_pm2() {
@@ -160,6 +169,7 @@ main() {
   check_commands
   check_required_files
   check_backend_env
+  check_postgres
   check_pm2
   check_caddy
   check_http
