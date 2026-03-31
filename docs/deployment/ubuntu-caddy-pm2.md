@@ -30,9 +30,19 @@ The installer now performs the full host bootstrap:
 - installs system packages (`git`, `curl`, `nodejs`, `pm2`, `postgresql`, `caddy`, and common build/runtime tools)
 - creates the PostgreSQL role and database automatically
 - renders backend/frontend env files
+- prompts for optional integration bootstrap
+  - `DingTalk`: can write `CLIENT_ID / CLIENT_SECRET / REDIRECT_URI / SCOPE` into the backend `.env`
+  - `OpenAI/Codex`: records install-time hints while still recommending the server user's local Codex auth context
+  - `Zendesk`: can record the site URL for later admin-side completion
 - renders the Caddy configuration
 - runs the first deploy
 - starts PM2 and registers startup
+
+Notes:
+
+- skipping `DingTalk` still allows the install to complete; the frontend login screen will remain unavailable until the credentials are added later
+- `OpenAI/Codex` hints collected by the installer do not replace the current runtime requirement that the `agentstudio` user has a valid local Codex/OpenAI authentication context
+- `Zendesk` email, token, and webhook settings are still completed later in the admin UI
 
 ## Ongoing deploys
 

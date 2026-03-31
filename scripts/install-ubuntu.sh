@@ -42,6 +42,10 @@ POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 DEFAULT_MODEL="${DEFAULT_MODEL:-gpt-5.4}"
 DEFAULT_REASONING_EFFORT="${DEFAULT_REASONING_EFFORT:-high}"
 SESSION_COOKIE_SECRET="${SESSION_COOKIE_SECRET:-}"
+DINGTALK_CLIENT_ID="${DINGTALK_CLIENT_ID:-}"
+DINGTALK_CLIENT_SECRET="${DINGTALK_CLIENT_SECRET:-}"
+DINGTALK_REDIRECT_URI="${DINGTALK_REDIRECT_URI:-}"
+DINGTALK_SCOPE="${DINGTALK_SCOPE:-openid}"
 DEPLOY_KEY_SAFE_CHECKPOINT=0
 DEPLOY_KEY_CONTINUE_TO_CLONE=0
 
@@ -146,6 +150,9 @@ load_existing_state() {
   fi
   [[ -z "$POSTGRES_DB_PASSWORD" ]] && POSTGRES_DB_PASSWORD="$(state_read postgres_db_password "")"
   [[ -z "$SESSION_COOKIE_SECRET" ]] && SESSION_COOKIE_SECRET="$(state_read session_cookie_secret "")"
+  [[ -z "$DINGTALK_CLIENT_ID" ]] && DINGTALK_CLIENT_ID="$(state_read dingtalk_client_id "")"
+  [[ -z "$DINGTALK_REDIRECT_URI" ]] && DINGTALK_REDIRECT_URI="$(state_read dingtalk_redirect_uri "")"
+  [[ -z "$DINGTALK_SCOPE" ]] && DINGTALK_SCOPE="$(state_read dingtalk_scope "openid")"
 }
 
 normalize_legacy_state_defaults() {
@@ -315,6 +322,38 @@ summarize_configuration() {
   log_info "repo url: $(redact_url "$REPO_URL")"
   log_info "deploy key path: $DEPLOY_KEY_PATH"
   log_info "skip codex check: $(state_bool "$SKIP_CODEX_CHECK")"
+}
+
+bootstrap_status_value() {
+  local key="$1"
+  local default="${2:-pending}"
+  local value
+
+  value="$(state_read "$key" "$default")"
+  printf '%s' "${value:-$default}"
+}
+
+read_env_value_if_exists() {
+  local env_file="$1"
+  local key="$2"
+
+  [[ -f "$env_file" ]] || return 0
+  python3 - "$env_file" "$key" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+
+for raw_line in path.read_text().splitlines():
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    current_key, value = raw_line.split("=", 1)
+    if current_key.strip() == key:
+        print(value.strip())
+        break
+PY
 }
 
 ensure_state_defaults() {
@@ -643,7 +682,9 @@ ensure_env_files() {
   write_env_key_value "$BACKEND_ENV_FILE" KNOWLEDGE_SET_STORAGE_ROOT "$KNOWLEDGE_SET_ROOT"
   write_env_key_value "$BACKEND_ENV_FILE" SESSION_COOKIE_SECRET "$SESSION_COOKIE_SECRET"
   write_env_key_value "$BACKEND_ENV_FILE" SESSION_COOKIE_SECURE true
-  if [[ -n "$DOMAIN" ]]; then
+  if [[ -n "$DINGTALK_REDIRECT_URI" ]]; then
+    write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "$DINGTALK_REDIRECT_URI"
+  elif [[ -n "$DOMAIN" ]]; then
     write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "https://$DOMAIN/auth/dingtalk/callback"
   fi
 
@@ -660,6 +701,109 @@ ensure_env_files() {
   record_install_state backend_env_status complete
   record_install_state frontend_env_status complete
   record_step_status env_files complete "environment files rendered and populated"
+}
+
+ensure_integration_bootstrap() {
+  if step_is_complete integration_bootstrap && ! phase_forced integration_bootstrap; then
+    return 0
+  fi
+  maybe_mark_phase_forced integration_bootstrap
+
+  if ! step_is_complete env_files; then
+    record_step_status integration_bootstrap pending "environment files are not ready yet"
+    return 0
+  fi
+
+  local default_redirect_uri=""
+  local input_value=""
+  local dingtalk_status="skipped"
+  local codex_status="local_auth"
+  local zendesk_status="skipped"
+  local existing_dingtalk_client_id=""
+  local existing_dingtalk_client_secret=""
+  local existing_dingtalk_redirect_uri=""
+  local existing_dingtalk_scope=""
+
+  if [[ -n "$DOMAIN" ]]; then
+    default_redirect_uri="https://$DOMAIN/auth/dingtalk/callback"
+  fi
+  existing_dingtalk_client_id="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_CLIENT_ID)"
+  existing_dingtalk_client_secret="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_CLIENT_SECRET)"
+  existing_dingtalk_redirect_uri="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI)"
+  existing_dingtalk_scope="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_SCOPE)"
+
+  [[ -z "$DINGTALK_CLIENT_ID" ]] && DINGTALK_CLIENT_ID="$existing_dingtalk_client_id"
+  [[ -z "$DINGTALK_CLIENT_SECRET" ]] && DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
+  [[ -z "$DINGTALK_REDIRECT_URI" ]] && DINGTALK_REDIRECT_URI="$existing_dingtalk_redirect_uri"
+  [[ -z "$DINGTALK_SCOPE" ]] && DINGTALK_SCOPE="${existing_dingtalk_scope:-openid}"
+
+  if [[ -z "$DINGTALK_REDIRECT_URI" && -n "$default_redirect_uri" ]]; then
+    DINGTALK_REDIRECT_URI="$default_redirect_uri"
+  fi
+
+  if [[ -n "$DINGTALK_CLIENT_ID" && -n "$DINGTALK_CLIENT_SECRET" ]]; then
+    write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_ID "$DINGTALK_CLIENT_ID"
+    write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_SECRET "$DINGTALK_CLIENT_SECRET"
+    [[ -n "$DINGTALK_REDIRECT_URI" ]] && write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "$DINGTALK_REDIRECT_URI"
+    [[ -n "$DINGTALK_SCOPE" ]] && write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_SCOPE "$DINGTALK_SCOPE"
+    dingtalk_status="configured"
+  else
+    if confirm_or_default "Configure DingTalk OAuth now?" "y"; then
+      prompt_optional DINGTALK_CLIENT_ID "Enter DINGTALK_CLIENT_ID" "$DINGTALK_CLIENT_ID"
+      if [[ -n "$DINGTALK_CLIENT_ID" ]]; then
+        prompt_secret DINGTALK_CLIENT_SECRET "Enter DINGTALK_CLIENT_SECRET"
+        [[ -z "$DINGTALK_CLIENT_SECRET" ]] && DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
+      fi
+      prompt_optional DINGTALK_REDIRECT_URI "Enter DINGTALK_REDIRECT_URI" "${DINGTALK_REDIRECT_URI:-$default_redirect_uri}"
+      prompt_optional DINGTALK_SCOPE "Enter DINGTALK_SCOPE" "${DINGTALK_SCOPE:-openid}"
+
+      if [[ -n "$DINGTALK_CLIENT_ID" && -n "$DINGTALK_CLIENT_SECRET" ]]; then
+        write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_ID "$DINGTALK_CLIENT_ID"
+        write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_SECRET "$DINGTALK_CLIENT_SECRET"
+        write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "$DINGTALK_REDIRECT_URI"
+        write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_SCOPE "$DINGTALK_SCOPE"
+        dingtalk_status="configured"
+      else
+        dingtalk_status="skipped"
+      fi
+    fi
+  fi
+  record_install_state dingtalk_client_id "$DINGTALK_CLIENT_ID"
+  record_install_state dingtalk_redirect_uri "$DINGTALK_REDIRECT_URI"
+  record_install_state dingtalk_scope "$DINGTALK_SCOPE"
+  record_install_state dingtalk_bootstrap_status "$dingtalk_status"
+
+  if confirm_or_default "Record OpenAI/Codex install hints now? (runtime still prefers the server user's local Codex auth)" "n"; then
+    input_value="$(state_read openai_codex_provider "openai_codex")"
+    prompt_optional input_value "Enter the OpenAI/Codex provider label (informational)" "$input_value"
+    record_install_state openai_codex_provider "$input_value"
+
+    input_value="$(state_read openai_codex_base_url "")"
+    prompt_optional input_value "Enter the OpenAI/Codex base URL (informational)" "$input_value"
+    record_install_state openai_codex_base_url "$input_value"
+
+    input_value="$(state_read openai_codex_default_model "$DEFAULT_MODEL")"
+    prompt_optional input_value "Enter the default model to persist" "$input_value"
+    if [[ -n "$input_value" ]]; then
+      DEFAULT_MODEL="$input_value"
+      write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_MODEL "$DEFAULT_MODEL"
+    fi
+    record_install_state openai_codex_default_model "$input_value"
+    codex_status="noted"
+  fi
+  record_install_state openai_codex_bootstrap_status "$codex_status"
+
+  if confirm_or_default "Record a Zendesk site URL now? (email/token remain configurable later in the admin UI)" "n"; then
+    input_value="$(state_read zendesk_site_url "")"
+    prompt_optional input_value "Enter the Zendesk site URL" "$input_value"
+    if [[ -n "$input_value" ]]; then
+      record_install_state zendesk_site_url "$input_value"
+      zendesk_status="site_recorded"
+    fi
+  fi
+  record_install_state zendesk_bootstrap_status "$zendesk_status"
+
+  record_step_status integration_bootstrap complete "integration bootstrap prompts completed"
 }
 
 ensure_caddy_config() {
@@ -774,6 +918,10 @@ render_phase_summary() {
   log_info "postgres: $(step_status postgres)"
   log_info "backend env: $(state_read backend_env_status pending)"
   log_info "frontend env: $(state_read frontend_env_status pending)"
+  log_info "integration bootstrap: $(step_status integration_bootstrap)"
+  log_info "dingtalk auth: $(bootstrap_status_value dingtalk_bootstrap_status)"
+  log_info "openai/codex install hint: $(bootstrap_status_value openai_codex_bootstrap_status)"
+  log_info "zendesk site hint: $(bootstrap_status_value zendesk_bootstrap_status)"
   log_info "caddy config: $(step_status caddy_config)"
   log_info "first deploy: $(step_status first_deploy)"
   log_info "pm2 start: $(step_status pm2_start)"
@@ -794,6 +942,9 @@ follow_up_message_for_step() {
     env_files)
       printf '%s' "Ensure the repository checkout is available, then rerun so the installer can render env files."
       ;;
+    integration_bootstrap)
+      printf '%s' "Rerun after env files are rendered if you want the installer to prompt for DingTalk, OpenAI/Codex hints, and Zendesk site metadata."
+      ;;
     caddy_config)
       printf '%s' "Provide a public domain, then rerun so the installer can render the Caddy config."
       ;;
@@ -813,7 +964,7 @@ follow_up_message_for_step() {
 }
 
 print_follow_up_actions() {
-  local phases=(app_user base_directories system_dependencies deploy_key repo_clone postgres env_files caddy_config first_deploy pm2_start codex_runtime_check)
+  local phases=(app_user base_directories system_dependencies deploy_key repo_clone postgres env_files integration_bootstrap caddy_config first_deploy pm2_start codex_runtime_check)
   local phase status message printed=0
 
   log_step "Operator follow-up actions"
@@ -833,7 +984,7 @@ print_follow_up_actions() {
 }
 
 finalize_installation() {
-  local required_steps=(app_user base_directories system_dependencies repo_clone postgres env_files caddy_config first_deploy pm2_start codex_runtime_check)
+  local required_steps=(app_user base_directories system_dependencies repo_clone postgres env_files integration_bootstrap caddy_config first_deploy pm2_start codex_runtime_check)
   local step
   for step in "${required_steps[@]}"; do
     if [[ "$(step_status "$step")" != "complete" ]]; then
@@ -879,6 +1030,7 @@ main() {
   refresh_paths_from_repo_dir
   ensure_postgres_setup
   ensure_env_files
+  ensure_integration_bootstrap
   ensure_caddy_config
   run_first_deploy
   ensure_pm2_start
