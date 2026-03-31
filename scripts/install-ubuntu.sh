@@ -671,8 +671,22 @@ ensure_env_files() {
   fi
   maybe_mark_phase_forced env_files
 
-  if [[ ! -d "$REPO_DIR" ]]; then
-    record_step_status env_files pending "repository directory does not exist yet"
+  if ! step_is_complete repo_clone; then
+    record_step_status env_files pending "repository clone is not complete yet"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
+
+  if [[ ! -d "$REPO_DIR" || ! -d "$APP_API_DIR" || ! -d "$APP_UI_DIR" ]]; then
+    record_step_status env_files pending "repository checkout is missing required target directories"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
+
+  if ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    record_step_status env_files pending "repository checkout is not a valid git work tree"
     record_install_state backend_env_status "pending"
     record_install_state frontend_env_status "pending"
     return 0

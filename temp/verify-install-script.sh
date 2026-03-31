@@ -16,6 +16,12 @@ probe_env_backend="$probe_repo_dir/agent-api/.env"
 probe_env_frontend="$probe_repo_dir/agent-ui/.env.production"
 probe_first_log="$probe_root/first.log"
 probe_resume_log="$probe_root/resume.log"
+probe_blocked_root="$probe_root/blocked-install-root"
+probe_blocked_state="$probe_root/blocked-state.json"
+probe_blocked_log="$probe_root/blocked.log"
+probe_blocked_repo_dir="$probe_blocked_root/custom-agent-studio"
+probe_blocked_env_backend="$probe_blocked_repo_dir/agent-api/.env"
+probe_blocked_env_frontend="$probe_blocked_repo_dir/agent-ui/.env.production"
 
 cleanup() {
   rm -rf "$probe_root"
@@ -58,6 +64,7 @@ grep -q 'record_step_status first_deploy attempted' "$script"
 grep -q 'refresh_app_paths' "$script"
 grep -q 'deploy_key_guidance_shown' "$script"
 grep -q 'Continue to repository clone now?' "$script"
+grep -q 'repository clone is not complete yet' "$script"
 grep -q 'pg_roles' "$script"
 grep -q 'pg_database' "$script"
 grep -q 'installer_complete' "$script"
@@ -127,4 +134,35 @@ assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
 assert state.get("backend_env_file") == f"{sys.argv[2]}/agent-api/.env", state.get("backend_env_file")
 assert state.get("backend_env_mode") == "600", state.get("backend_env_mode")
 assert state.get("frontend_env_mode") == "600", state.get("frontend_env_mode")
+PY
+
+# Probe 3: env generation stays blocked when clone is skipped even if the target tree exists.
+mkdir -p "$probe_blocked_repo_dir/agent-api" "$probe_blocked_repo_dir/agent-ui"
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-blocked" \
+INSTALL_ROOT="$probe_blocked_root" \
+CADDY_CONFIG_FILE="$probe_blocked_root/Caddyfile" \
+DEPLOY_KEY_PATH="$probe_blocked_root/.ssh/id_ed25519_agent_studio_deploy" \
+bash "$script" \
+  --state-file "$probe_blocked_state" \
+  --domain example.com \
+  --repo-dir "$probe_blocked_repo_dir" \
+  --skip-codex-check \
+  --yes \
+  --no-clone >"$probe_blocked_log" 2>&1
+grep -q 'clone disabled by --no-clone' "$probe_blocked_log"
+test ! -e "$probe_blocked_env_backend"
+test ! -e "$probe_blocked_env_frontend"
+python3 - "$probe_blocked_state" "$probe_blocked_repo_dir" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("repo_clone_status") == "skipped", state.get("repo_clone_status")
+assert state.get("env_files_status") == "pending", state.get("env_files_status")
+assert state.get("backend_env_status") == "pending", state.get("backend_env_status")
+assert state.get("frontend_env_status") == "pending", state.get("frontend_env_status")
+assert state.get("installer_complete") == "false", state.get("installer_complete")
+assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
 PY
