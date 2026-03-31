@@ -23,7 +23,7 @@ Deploy Agent Studio on an Ubuntu host.
 Options:
   --repo-dir <path>      Repository checkout path [default: $APP_REPO_DIR]
   --remote <name>        Git remote name [default: $GIT_REMOTE]
-  --ref <name>           Git branch or ref to deploy [default: $GIT_REF]
+  --ref <name>           Git branch to deploy [default: $GIT_REF]
   --api-host <host>      Host written into PM2 env [default: $API_HOST]
   --api-port <port>      Port written into PM2 env [default: $API_PORT]
   --skip-git-pull        Rebuild current checkout without fetching or pulling
