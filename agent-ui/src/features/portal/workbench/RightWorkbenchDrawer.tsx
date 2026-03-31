@@ -19,16 +19,16 @@ export function RightWorkbenchDrawer(props: {
       open={props.open}
       onClose={props.onClose}
       destroyOnClose={false}
+      forceRender
     >
       <Tabs
         activeKey={props.activeTab}
         onChange={(key) => props.onTabChange(key as WorkbenchTab)}
         items={[
-          { key: "writing", label: "写作", children: props.writingContent },
-          { key: "collaboration", label: "协作", children: props.collaborationContent }
+          { key: "writing", label: "写作", forceRender: true, children: props.writingContent },
+          { key: "collaboration", label: "协作", forceRender: true, children: props.collaborationContent }
         ]}
       />
     </Drawer>
   );
 }
-

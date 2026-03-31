@@ -1,6 +1,7 @@
 import { Button, Space, Tag } from "antd";
 
 export function PortalTopBar(props: {
+  sessionRailCollapsed?: boolean;
   onToggleRail(): void;
   onOpenAdvancedSettings(): void;
   onOpenDrawer(): void;
@@ -10,7 +11,11 @@ export function PortalTopBar(props: {
   return (
     <header className="portal-topbar" aria-label="工作台顶栏">
       <Space>
-        <Button type="text" aria-label="展开会话栏" onClick={props.onToggleRail}>
+        <Button
+          type="text"
+          aria-label={props.sessionRailCollapsed !== false ? "展开会话栏" : "收起会话栏"}
+          onClick={props.onToggleRail}
+        >
           会话
         </Button>
         <Button aria-label="高级设置" onClick={props.onOpenAdvancedSettings}>
@@ -27,4 +32,3 @@ export function PortalTopBar(props: {
     </header>
   );
 }
-

@@ -44,6 +44,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
+import { ConfigProvider } from "antd";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import {
@@ -69,6 +70,21 @@ import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel, resolveWorkspaceOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
+import { PortalTopBar } from "./workbench/PortalTopBar";
+import { SessionRail } from "./workbench/SessionRail";
+import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
+import { WritingWorkbenchPanel } from "./workbench/WritingWorkbenchPanel";
+import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
+import {
+  closeWorkbenchDrawer,
+  createInitialLayoutState,
+  openWorkbenchDrawer,
+  switchWorkbenchTab,
+  toggleSessionRail
+} from "./workbench/layout-state";
+import { PORTAL_STARTER_SUGGESTIONS } from "./workbench/starter-suggestions";
+import { PORTAL_ANTD_THEME } from "./workbench/theme";
+import "./workbench/workbench.css";
 
 type SessionOut = {
   session_id: string;
@@ -207,6 +223,7 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
 ];
 const DEFAULT_RUNNING_STAGE_TEXT = "正在等待模型响应";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
+const SessionSearchContext = createContext("");
 
 const AssistantMarkdownText = makeMarkdownText();
 
@@ -1115,10 +1132,12 @@ const AgentThreadListItem: FC = () => {
   const aui = useAui();
   const threadItemId = useAuiState((s) => s.threadListItem.id);
   const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
+  const sessionSearchQuery = useContext(SessionSearchContext).trim().toLowerCase();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const threadTitleForFilter = threadTitle.trim() || "新对话";
 
   useEffect(() => {
     setIsRenaming(false);
@@ -1182,6 +1201,10 @@ const AgentThreadListItem: FC = () => {
       cancelRename();
     }
   };
+
+  if (sessionSearchQuery && !threadTitleForFilter.toLowerCase().includes(sessionSearchQuery)) {
+    return null;
+  }
 
   return (
     <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
@@ -1392,6 +1415,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
   const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
   const [runtimeMode, setRuntimeMode] = useState("standard");
+  const [layoutState, setLayoutState] = useState(createInitialLayoutState());
+  const [sessionSearchValue, setSessionSearchValue] = useState("");
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
   const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
@@ -1871,6 +1896,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const sharedThreadReadonly = Boolean(
     activeThreadCollaboration && activeThreadCollaboration.access.canRead && !activeThreadCollaboration.access.canRun
   );
+  const selectedModelLabel = MODEL_OPTIONS.find((item) => item.value === appliedConfig.model)?.label || appliedConfig.model;
+  const selectedReasoningLabel =
+    reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort;
+  const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "当前用户";
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2414,7 +2443,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               title: { fallback: "新对话" }
             }
           },
-          welcome: { message: "你好，我是 Agent Studio。请直接提问。" },
           composer: {
             input: {
               placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
@@ -2422,6 +2450,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             send: { tooltip: "发送消息" },
             cancel: { tooltip: "停止生成" }
           }
+        }}
+        welcome={{
+          message: "你好，我是 Agent Studio。请直接提问。",
+          suggestions: PORTAL_STARTER_SUGGESTIONS
         }}
         components={{
           AssistantMessage: AgentAssistantMessage
@@ -2451,210 +2483,232 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <RunningStageTextContext.Provider value={runningStageText}>
-        <div className="agent-shell two-col">
-        <aside className="agent-sidebar">
-          <div className="sidebar-header">
-            <h1>Agent Studio</h1>
-            <p>Agent Workspace</p>
-          </div>
-          {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact /> : null}
-          {props.onOpenAdmin ? (
-            <div className="shell-switch-row compact">
-              <button type="button" className="picker-btn shell-switch-btn" onClick={props.onOpenAdmin}>
-                进入管理台
-              </button>
+        <ConfigProvider theme={PORTAL_ANTD_THEME}>
+          <div className="portal-workbench-root">
+            <PortalTopBar
+              sessionRailCollapsed={layoutState.isSessionRailCollapsed}
+              onToggleRail={() => setLayoutState((prev) => toggleSessionRail(prev))}
+              onOpenAdvancedSettings={() =>
+                setLayoutState((prev) => ({
+                  ...prev,
+                  isAdvancedSettingsOpen: true
+                }))
+              }
+              onOpenDrawer={() => setLayoutState((prev) => openWorkbenchDrawer(prev, "writing"))}
+              modelTag={appliedConfig.model}
+              modeTag={selectedModeLabel}
+            />
+
+            <div className="portal-workbench-body">
+              <ThreadList.Root>
+                <SessionRail
+                  collapsed={layoutState.isSessionRailCollapsed}
+                  userName={currentUserName}
+                  searchValue={sessionSearchValue}
+                  onSearchChange={setSessionSearchValue}
+                  onCreateThread={() => undefined}
+                  onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                  newThreadSlot={<ThreadList.New aria-label="新会话" className="session-rail-new-btn" />}
+                  footer={
+                    <div className="session-rail-footer-stack">
+                      {props.currentUser ? (
+                        <UserIdentitySummary user={props.currentUser} compact />
+                      ) : (
+                        <p className="session-rail-user-fallback">{currentUserName}</p>
+                      )}
+                      {props.onOpenAdmin ? (
+                        <button type="button" className="picker-btn shell-switch-btn" onClick={props.onOpenAdmin}>
+                          进入管理台
+                        </button>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  <SessionSearchContext.Provider value={sessionSearchValue}>
+                    <ThreadList.Items
+                      components={{
+                        ThreadListItem: AgentThreadListItem as any
+                      }}
+                    />
+                  </SessionSearchContext.Provider>
+                </SessionRail>
+              </ThreadList.Root>
+
+              <main className="portal-workbench-chat">
+                <div className="chat-header">
+                  <h2>Studio Chat</h2>
+                  <div className="config-tags">
+                    <span className="tag">{appliedConfig.model}</span>
+                    <span className="tag">{appliedConfig.reasoningEffort}</span>
+                    <span className="tag">{selectedModeLabel}</span>
+                    <span className="tag">{selectedWorkspaceLabel}</span>
+                    <div className={`context-usage-indicator context-usage-${contextUsageView.tone}`}>
+                      <button
+                        type="button"
+                        className="context-usage-trigger"
+                        aria-label={contextUsageView.ariaLabel}
+                      >
+                        <span className="context-usage-battery" aria-hidden="true">
+                          <span className="context-usage-fill" style={{ width: `${contextUsageView.usedPercent}%` }} />
+                          <span className="context-usage-percent">{contextUsageView.usedPercent}%</span>
+                        </span>
+                        <span className="context-usage-cap" aria-hidden="true" />
+                      </button>
+                      <div className="context-usage-tooltip" role="tooltip">
+                        <p>{contextUsageView.summaryLine}</p>
+                        <p>{contextUsageView.detailLine}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="thread-wrap">
+                  {canUpload && !sharedThreadReadonly ? (
+                    <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+                  ) : (
+                    threadContent
+                  )}
+                </div>
+              </main>
             </div>
-          ) : null}
 
-          <section className="panel">
-            <div className="panel-title-row">
-              <h2>会话</h2>
-            </div>
-            <ThreadList.Root>
-              <ThreadList.New />
-              <ThreadList.Items
-                components={{
-                  ThreadListItem: AgentThreadListItem as any
-                }}
-              />
-            </ThreadList.Root>
-          </section>
-
-          <section className="panel">
-            <div className="panel-title-row">
-              <h2>运行配置</h2>
-            </div>
-
-            <div className="section-title">基础配置</div>
-
-            <div className="field">
-              <span className="field-label">模型</span>
-              <div className="field-input" aria-readonly="true">
-                {MODEL_OPTIONS.find((item) => item.value === appliedConfig.model)?.label || appliedConfig.model}
-              </div>
-              <span className="field-help">当前由平台默认模型驱动，员工端不直接修改。</span>
-            </div>
-
-            <div className="field">
-              <span className="field-label">思考深度</span>
-              <div className="field-input" aria-readonly="true">
-                {reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort}
-              </div>
-              <span className="field-help">当前由平台策略控制，员工端不直接修改。</span>
-            </div>
-
-            <label className="field">
-              <span className="field-label">工作目录</span>
-              <select
-                className="field-input"
-                value={appliedConfig.workspace}
-                onChange={(e) => setAppliedConfig((prev) => ({ ...prev, workspace: e.target.value }))}
-                disabled={!runtimeOptions}
-              >
-                {workspaceOptions.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                    {item.isDefault ? "（默认）" : ""}
-                  </option>
-                ))}
-              </select>
-              <span className="field-help">工作目录由后端允许列表提供，前端仅展示可选策略。</span>
-            </label>
-
-            <div className="knowledge-set-shell">
-              {portalResources ? (
-                <KnowledgeSetPicker
-                  defaultKnowledgeSets={selectedWorkspaceResources?.default_knowledge_sets ?? []}
-                  optionalKnowledgeSets={selectedWorkspaceResources?.optional_knowledge_sets ?? []}
-                  selectedIds={selectedOptionalKnowledgeSetIds}
-                  onChange={(ids) => {
-                    setSelectedOptionalKnowledgeSetIdsByWorkspace((prev) => ({
-                      ...prev,
-                      [appliedConfig.workspace]: ids
-                    }));
+            <RightWorkbenchDrawer
+              open={layoutState.isRightDrawerOpen}
+              activeTab={layoutState.activeRightDrawerTab}
+              onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+              onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
+              writingContent={
+                <WritingWorkbenchPanel
+                  onUsePrompt={(prompt) => {
+                    const preview = prompt.length > 28 ? `${prompt.slice(0, 28)}...` : prompt;
+                    setStatusText(`写作提示词已就绪：${preview}`);
+                    setLayoutState((prev) => closeWorkbenchDrawer(prev));
                   }}
                 />
-              ) : (
-                <p className="field-help knowledge-set-loading">知识集资源加载中...</p>
-              )}
-              {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
-            </div>
-
-            <label className="field checkbox-field">
-              <span className="field-label">显示过程轨迹</span>
-              <input
-                type="checkbox"
-                checked={showProcessTrace}
-                onChange={(e) => setShowProcessTrace(e.target.checked)}
-              />
-              <span className="field-help">在消息中显示思考摘要、工具调用与执行步骤。</span>
-            </label>
-
-            <label className="field checkbox-field">
-              <span className="field-label">完成后折叠最终步骤</span>
-              <input
-                type="checkbox"
-                checked={collapseFinalTraceOnDone}
-                onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
-                disabled={!showProcessTrace}
-              />
-              <span className="field-help">启用后，仅保留最终结论文本展开；完成轨迹默认收起。</span>
-            </label>
-
-            <div className="section-title">运行策略</div>
-
-            <label className="field">
-              <span className="field-label">策略模式</span>
-              <select
-                className="field-input"
-                value={runtimeMode}
-                onChange={(e) => setRuntimeMode(e.target.value)}
-                disabled={!runtimeOptions}
-              >
-                {modeOptions.map((mode) => (
-                  <option key={mode.id} value={mode.id}>
-                    {mode.label}
-                  </option>
-                ))}
-              </select>
-              <span className="field-help">由 `/api/portal/runtime-options` 提供，员工仅能选择允许的策略。</span>
-            </label>
-
-            {selectedMode ? (
-              <div className="field">
-                <span className="field-label">策略快照</span>
-                <RuntimeProfileView profile={selectedMode.runtimeProfile} />
-                <span className="field-help">以下运行参数由当前策略模式绑定的 run profile 决定。</span>
-              </div>
-            ) : null}
-
-            <div className="status-box">
-              <p>
-                <strong>状态：</strong>
-                {statusText}
-              </p>
-              <p>
-                <strong>附件策略：</strong>
-                {runtimeOptions?.canUpload ? "允许上传" : "当前禁止上传"}
-              </p>
-              <p className="field-help">运行配置修改后将自动在下一轮对话生效。</p>
-              {errorText ? <p className="err-text">{errorText}</p> : null}
-            </div>
-          </section>
-
-          <ZendeskIntegrationPanel />
-        </aside>
-
-        <main className="agent-main">
-          <div className="chat-header">
-            <h2>Studio Chat</h2>
-            <div className="config-tags">
-              <span className="tag">{appliedConfig.model}</span>
-              <span className="tag">{appliedConfig.reasoningEffort}</span>
-              <span className="tag">{selectedModeLabel}</span>
-              <span className="tag">{selectedWorkspaceLabel}</span>
-              <div className={`context-usage-indicator context-usage-${contextUsageView.tone}`}>
-                <button
-                  type="button"
-                  className="context-usage-trigger"
-                  aria-label={contextUsageView.ariaLabel}
-                >
-                  <span className="context-usage-battery" aria-hidden="true">
-                    <span className="context-usage-fill" style={{ width: `${contextUsageView.usedPercent}%` }} />
-                    <span className="context-usage-percent">{contextUsageView.usedPercent}%</span>
-                  </span>
-                  <span className="context-usage-cap" aria-hidden="true" />
-                </button>
-                <div className="context-usage-tooltip" role="tooltip">
-                  <p>{contextUsageView.summaryLine}</p>
-                  <p>{contextUsageView.detailLine}</p>
+              }
+              collaborationContent={
+                <div className="workbench-collaboration-content">
+                  <section className="workbench-priority-card">
+                    <h3>优先项 B：评论与 @ 提及</h3>
+                    <p>先同步上下文和分歧，评论会实时留痕，便于后续追踪。</p>
+                  </section>
+                  <section className="workbench-priority-card">
+                    <h3>优先项 D：负责人和跟进</h3>
+                    <p>锁定 owner 与 followers，确保每个动作都能有人接住。</p>
+                  </section>
+                  <ThreadCollaborationPanel
+                    threadId={String(activeThreadIdentity.remoteId || "").trim()}
+                    collaboration={activeThreadCollaboration}
+                    loading={threadCollaborationLoading}
+                    errorText={threadCollaborationErrorText}
+                    onCollaborationChange={(next) => {
+                      const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
+                      if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
+                      setThreadCollaboration(next);
+                    }}
+                  />
                 </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="portal-thread-layout">
-            <div className="thread-wrap">
-              {canUpload && !sharedThreadReadonly ? (
-                <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
-              ) : (
-                threadContent
-              )}
-            </div>
-            <ThreadCollaborationPanel
-              threadId={String(activeThreadIdentity.remoteId || "").trim()}
-              collaboration={activeThreadCollaboration}
-              loading={threadCollaborationLoading}
-              errorText={threadCollaborationErrorText}
-              onCollaborationChange={(next) => {
-                const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
-                if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
-                setThreadCollaboration(next);
-              }}
+              }
             />
+
+            <AdvancedSettingsPanel
+              open={layoutState.isAdvancedSettingsOpen}
+              onClose={() =>
+                setLayoutState((prev) => ({
+                  ...prev,
+                  isAdvancedSettingsOpen: false
+                }))
+              }
+              modelLabel={selectedModelLabel}
+              reasoningLabel={selectedReasoningLabel}
+              workspaceValue={appliedConfig.workspace}
+              workspaceOptions={workspaceOptions}
+              onWorkspaceChange={(value) => setAppliedConfig((prev) => ({ ...prev, workspace: value }))}
+            >
+              <div className="advanced-settings-content">
+                <div className="knowledge-set-shell">
+                  {portalResources ? (
+                    <KnowledgeSetPicker
+                      defaultKnowledgeSets={selectedWorkspaceResources?.default_knowledge_sets ?? []}
+                      optionalKnowledgeSets={selectedWorkspaceResources?.optional_knowledge_sets ?? []}
+                      selectedIds={selectedOptionalKnowledgeSetIds}
+                      onChange={(ids) => {
+                        setSelectedOptionalKnowledgeSetIdsByWorkspace((prev) => ({
+                          ...prev,
+                          [appliedConfig.workspace]: ids
+                        }));
+                      }}
+                    />
+                  ) : (
+                    <p className="field-help knowledge-set-loading">知识集资源加载中...</p>
+                  )}
+                  {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
+                </div>
+
+                <label className="field checkbox-field">
+                  <span className="field-label">显示过程轨迹</span>
+                  <input
+                    type="checkbox"
+                    checked={showProcessTrace}
+                    onChange={(e) => setShowProcessTrace(e.target.checked)}
+                  />
+                  <span className="field-help">在消息中显示思考摘要、工具调用与执行步骤。</span>
+                </label>
+
+                <label className="field checkbox-field">
+                  <span className="field-label">完成后折叠最终步骤</span>
+                  <input
+                    type="checkbox"
+                    checked={collapseFinalTraceOnDone}
+                    onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
+                    disabled={!showProcessTrace}
+                  />
+                  <span className="field-help">启用后，仅保留最终结论文本展开；完成轨迹默认收起。</span>
+                </label>
+
+                <label className="field">
+                  <span className="field-label">策略模式</span>
+                  <select
+                    className="field-input"
+                    value={runtimeMode}
+                    onChange={(e) => setRuntimeMode(e.target.value)}
+                    disabled={!runtimeOptions}
+                  >
+                    {modeOptions.map((mode) => (
+                      <option key={mode.id} value={mode.id}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-help">由 `/api/portal/runtime-options` 提供，员工仅能选择允许的策略。</span>
+                </label>
+
+                {selectedMode ? (
+                  <div className="field">
+                    <span className="field-label">策略快照</span>
+                    <RuntimeProfileView profile={selectedMode.runtimeProfile} />
+                    <span className="field-help">以下运行参数由当前策略模式绑定的 run profile 决定。</span>
+                  </div>
+                ) : null}
+
+                <div className="status-box">
+                  <p>
+                    <strong>状态：</strong>
+                    {statusText}
+                  </p>
+                  <p>
+                    <strong>附件策略：</strong>
+                    {runtimeOptions?.canUpload ? "允许上传" : "当前禁止上传"}
+                  </p>
+                  <p className="field-help">运行配置修改后将自动在下一轮对话生效。</p>
+                  {errorText ? <p className="err-text">{errorText}</p> : null}
+                </div>
+
+                <ZendeskIntegrationPanel />
+              </div>
+            </AdvancedSettingsPanel>
           </div>
-        </main>
-        </div>
+        </ConfigProvider>
         {pickerOpen ? (
           <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
             <div className="dir-modal" onClick={(e) => e.stopPropagation()}>

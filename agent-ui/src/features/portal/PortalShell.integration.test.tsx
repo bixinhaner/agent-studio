@@ -12,6 +12,7 @@ let capturedChatAdapter: {
     abortSignal?: AbortSignal;
   }): AsyncGenerator<unknown>;
 } | null = null;
+let capturedThreadProps: Record<string, unknown> | null = null;
 let currentThreadListItemState = {
   id: "",
   remoteId: "",
@@ -86,10 +87,13 @@ vi.mock("@assistant-ui/react-ui", () => {
       Content: passthrough
     },
     BranchPicker: () => null,
-    Thread: passthrough,
+    Thread: (props: any) => {
+      capturedThreadProps = props;
+      return passthrough(props);
+    },
     ThreadList: {
       Root: passthrough,
-      New: () => null,
+      New: (props: any) => <button {...props}>{props.children ?? "新会话"}</button>,
       Items: () => null
     },
     makeMarkdownText: () => () => null
@@ -140,6 +144,7 @@ describe("PortalShell knowledge set integration", () => {
   beforeEach(() => {
     capturedThreadListAdapter = null;
     capturedChatAdapter = null;
+    capturedThreadProps = null;
     currentThreadListItemState = {
       id: "",
       remoteId: "",
@@ -207,9 +212,10 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("gpt-5.4-pro").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/xhigh/i).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "高级设置" }));
     expect(await screen.findByText("FAQ")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Runbooks" })).toBeTruthy();
   });
@@ -282,6 +288,7 @@ describe("PortalShell knowledge set integration", () => {
       />
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
     expect(await screen.findByText("Eve Employee")).toBeTruthy();
     expect(screen.getByText("员工")).toBeTruthy();
     expect(screen.getByText("eve@example.com")).toBeTruthy();
@@ -347,8 +354,127 @@ describe("PortalShell knowledge set integration", () => {
       />
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
     fireEvent.click(await screen.findByRole("button", { name: "进入管理台" }));
     expect(onOpenAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts with session rail collapsed and can expand from top bar", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: []
+      });
+
+    render(<PortalShell />);
+    expect(screen.queryByPlaceholderText("搜索会话")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "展开会话栏" }));
+    expect(await screen.findByPlaceholderText("搜索会话")).toBeTruthy();
+  });
+
+  it("opens right drawer tabs and injects approved starter suggestions", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: []
+      });
+
+    render(<PortalShell />);
+    fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
+
+    expect(await screen.findByRole("tab", { name: "写作" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "协作" })).toBeTruthy();
+
+    const welcome = (capturedThreadProps?.welcome ?? {}) as Record<string, unknown>;
+    const suggestions = Array.isArray(welcome.suggestions) ? welcome.suggestions : [];
+    expect(suggestions.length).toBeGreaterThanOrEqual(3);
+    expect(
+      suggestions.some((item) => {
+        if (!item || typeof item !== "object") return false;
+        const prompt = (item as Record<string, unknown>).prompt;
+        return typeof prompt === "string" && prompt.includes("结构化");
+      })
+    ).toBe(true);
   });
 
   it("includes selected knowledge_set_ids in thread and session creation requests", async () => {
@@ -457,6 +583,7 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "高级设置" }));
     fireEvent.click(await screen.findByRole("checkbox", { name: "Runbooks" }));
 
     expect(capturedThreadListAdapter).toBeTruthy();
@@ -585,7 +712,8 @@ describe("PortalShell knowledge set integration", () => {
 
     const view = render(<PortalShell />);
 
-    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {
       await capturedThreadListAdapter?.initialize("thread-1");
@@ -681,7 +809,8 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {
       await capturedThreadListAdapter?.initialize("thread-1");
@@ -782,7 +911,7 @@ describe("PortalShell knowledge set integration", () => {
 
     render(<PortalShell />);
 
-    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
 
     await act(async () => {
       await capturedThreadListAdapter?.initialize("thread-1");
@@ -935,7 +1064,8 @@ describe("PortalShell knowledge set integration", () => {
 
     const view = render(<PortalShell />);
 
-    expect(await screen.findByDisplayValue("代码助手")).toBeTruthy();
+    expect((await screen.findAllByText("代码助手")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByRole("button", { name: "打开工作台抽屉" }));
 
     await act(async () => {
       await capturedThreadListAdapter?.initialize("thread-1");
