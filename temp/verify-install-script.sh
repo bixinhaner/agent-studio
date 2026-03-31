@@ -70,6 +70,7 @@ PY
 APP_USER="$current_user" \
 APP_HOME="$probe_skip_root/home" \
 INSTALL_ROOT="$probe_skip_root" \
+CADDY_CONFIG_FILE="$probe_skip_root/Caddyfile" \
 bash "$script" \
   --state-file "$probe_skip_state" \
   --domain example.com \
