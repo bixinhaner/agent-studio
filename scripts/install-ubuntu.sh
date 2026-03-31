@@ -10,13 +10,19 @@ source "$script_dir/lib/common.sh"
 
 DOMAIN="${DOMAIN:-}"
 REPO_URL="${REPO_URL:-}"
-SKIP_CODEX_CHECK="${SKIP_CODEX_CHECK:-0}"
-ASSUME_YES="${ASSUME_YES:-0}"
 REPO_DIR="${REPO_DIR:-$APP_REPO_DIR}"
 DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$HOME/.ssh/id_ed25519_agent_studio_deploy}"
+SKIP_CODEX_CHECK="${SKIP_CODEX_CHECK:-0}"
+ASSUME_YES="${ASSUME_YES:-0}"
 STATE_FILE_OVERRIDE="${STATE_FILE_OVERRIDE:-}"
-SHOW_HELP=0
+REPO_DIR_EXPLICIT=0
+DEPLOY_KEY_PATH_EXPLICIT=0
 RUN_CLONE=1
+SHOW_HELP=0
+POSTGRES_DB_NAME="${POSTGRES_DB_NAME:-agent_studio}"
+POSTGRES_DB_USER="${POSTGRES_DB_USER:-agentstudio}"
+POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 
 usage() {
   cat <<USAGE
@@ -32,12 +38,21 @@ Options:
   --skip-codex-check        Mark Codex runtime verification as skipped
   --yes                     Use defaults for prompts where possible
   --state-file <path>       Override install state file path
-  --no-clone                Skip the clone step and stop after recording state
+  --no-clone                Skip the clone attempt and record it as skipped
   -h, --help                Show this help text
 
-This installer is intentionally resumable. Re-run it to continue from the
-last recorded state after resolving skipped steps.
+This installer is resumable. Re-run it to continue from the last recorded state
+after resolving any skipped or pending prerequisites.
 USAGE
+}
+
+state_bool() {
+  local raw="${1:-}"
+  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  case "$raw" in
+    1|true|yes|y|on) printf '%s' "true" ;;
+    *) printf '%s' "false" ;;
+  esac
 }
 
 record_install_state() {
@@ -52,13 +67,136 @@ record_install_json() {
   state_write_json "$key" "$value"
 }
 
-state_bool() {
-  local raw="${1:-}"
-  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
-  case "$raw" in
-    1|true|yes|y|on) printf '%s' "true" ;;
-    *) printf '%s' "false" ;;
-  esac
+record_step_status() {
+  local step="$1"
+  local status="$2"
+  local reason="${3:-}"
+
+  state_write "${step}_status" "$status"
+  if [[ -n "$reason" ]]; then
+    state_write "${step}_reason" "$reason"
+  fi
+  if [[ "$status" == "skipped" ]]; then
+    state_write "${step}_skipped" "true"
+  fi
+}
+
+step_status() {
+  state_read "${1}_status" ""
+}
+
+step_is_complete() {
+  [[ "$(step_status "$1")" == "complete" ]]
+}
+
+ensure_state_defaults() {
+  record_install_state script_version "task2-resumable-installer"
+  record_install_state install_root "$INSTALL_ROOT"
+  record_install_state install_state_file "$INSTALL_STATE_FILE"
+  record_install_state resume_enabled "true"
+  record_install_state app_user "$APP_USER"
+  record_install_state app_home "$APP_HOME"
+  record_install_state repo_dir "$REPO_DIR"
+  record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
+  record_install_state domain "$DOMAIN"
+  record_install_state repo_url "$REPO_URL"
+  record_install_state skip_codex_check "$(state_bool "$SKIP_CODEX_CHECK")"
+  record_install_state postgres_db_name "$POSTGRES_DB_NAME"
+  record_install_state postgres_db_user "$POSTGRES_DB_USER"
+  record_install_state postgres_host "$POSTGRES_HOST"
+  record_install_state postgres_port "$POSTGRES_PORT"
+}
+
+resolve_state_file() {
+  if [[ -n "$STATE_FILE_OVERRIDE" ]]; then
+    INSTALL_STATE_FILE="$STATE_FILE_OVERRIDE"
+  fi
+}
+
+load_existing_state() {
+  [[ -f "$INSTALL_STATE_FILE" ]] || return 0
+
+  if [[ -z "$DOMAIN" ]]; then
+    DOMAIN="$(state_read domain "")"
+  fi
+  if [[ -z "$REPO_URL" ]]; then
+    REPO_URL="$(state_read repo_url "")"
+  fi
+  if [[ "$REPO_DIR_EXPLICIT" == "0" ]] && state_has repo_dir; then
+    REPO_DIR="$(state_read repo_dir "$REPO_DIR")"
+  fi
+  if [[ "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]] && state_has deploy_key_path; then
+    DEPLOY_KEY_PATH="$(state_read deploy_key_path "$DEPLOY_KEY_PATH")"
+  fi
+  if state_has skip_codex_check; then
+    SKIP_CODEX_CHECK="$(state_read_bool skip_codex_check "$SKIP_CODEX_CHECK")"
+  fi
+  if state_has postgres_db_name; then
+    POSTGRES_DB_NAME="$(state_read postgres_db_name "$POSTGRES_DB_NAME")"
+  fi
+  if state_has postgres_db_user; then
+    POSTGRES_DB_USER="$(state_read postgres_db_user "$POSTGRES_DB_USER")"
+  fi
+  if state_has postgres_host; then
+    POSTGRES_HOST="$(state_read postgres_host "$POSTGRES_HOST")"
+  fi
+  if state_has postgres_port; then
+    POSTGRES_PORT="$(state_read postgres_port "$POSTGRES_PORT")"
+  fi
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --domain)
+        [[ $# -ge 2 ]] || die "--domain requires a value"
+        DOMAIN="$2"
+        shift 2
+        ;;
+      --repo-url)
+        [[ $# -ge 2 ]] || die "--repo-url requires a value"
+        REPO_URL="$2"
+        shift 2
+        ;;
+      --repo-dir)
+        [[ $# -ge 2 ]] || die "--repo-dir requires a value"
+        REPO_DIR="$2"
+        REPO_DIR_EXPLICIT=1
+        shift 2
+        ;;
+      --deploy-key-path)
+        [[ $# -ge 2 ]] || die "--deploy-key-path requires a value"
+        DEPLOY_KEY_PATH="$2"
+        DEPLOY_KEY_PATH_EXPLICIT=1
+        shift 2
+        ;;
+      --skip-codex-check)
+        SKIP_CODEX_CHECK=1
+        shift
+        ;;
+      --yes)
+        ASSUME_YES=1
+        shift
+        ;;
+      --state-file)
+        [[ $# -ge 2 ]] || die "--state-file requires a value"
+        STATE_FILE_OVERRIDE="$2"
+        INSTALL_STATE_FILE="$2"
+        shift 2
+        ;;
+      --no-clone)
+        RUN_CLONE=0
+        shift
+        ;;
+      -h|--help)
+        SHOW_HELP=1
+        shift
+        ;;
+      *)
+        die "Unknown argument: $1"
+        ;;
+    esac
+  done
 }
 
 prompt_with_default() {
@@ -102,96 +240,9 @@ confirm_or_default() {
   prompt_confirm "$prompt" "$default"
 }
 
-resolve_state_file() {
-  if [[ -n "$STATE_FILE_OVERRIDE" ]]; then
-    INSTALL_STATE_FILE="$STATE_FILE_OVERRIDE"
-  fi
-}
-
-load_existing_state() {
-  if [[ -f "$INSTALL_STATE_FILE" ]]; then
-    DOMAIN="${DOMAIN:-$(state_read domain "")}"
-    REPO_URL="${REPO_URL:-$(state_read repo_url "")}"
-    REPO_DIR="${REPO_DIR:-$(state_read repo_dir "$REPO_DIR")}"
-    DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$(state_read deploy_key_path "$DEPLOY_KEY_PATH")}"
-    SKIP_CODEX_CHECK="$(state_read_bool skip_codex_check "$(state_bool "$SKIP_CODEX_CHECK")")"
-  fi
-}
-
-trim_value() {
-  local value="${1:-}"
-  value="${value#${value%%[![:space:]]*}}"
-  value="${value%${value##*[![:space:]]}}"
-  printf '%s' "$value"
-}
-
-parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --domain)
-        [[ $# -ge 2 ]] || die "--domain requires a value"
-        DOMAIN="$2"
-        shift 2
-        ;;
-      --repo-url)
-        [[ $# -ge 2 ]] || die "--repo-url requires a value"
-        REPO_URL="$2"
-        shift 2
-        ;;
-      --repo-dir)
-        [[ $# -ge 2 ]] || die "--repo-dir requires a value"
-        REPO_DIR="$2"
-        shift 2
-        ;;
-      --deploy-key-path)
-        [[ $# -ge 2 ]] || die "--deploy-key-path requires a value"
-        DEPLOY_KEY_PATH="$2"
-        shift 2
-        ;;
-      --skip-codex-check)
-        SKIP_CODEX_CHECK=1
-        shift
-        ;;
-      --yes)
-        ASSUME_YES=1
-        shift
-        ;;
-      --state-file)
-        [[ $# -ge 2 ]] || die "--state-file requires a value"
-        STATE_FILE_OVERRIDE="$2"
-        INSTALL_STATE_FILE="$2"
-        shift 2
-        ;;
-      --no-clone)
-        RUN_CLONE=0
-        shift
-        ;;
-      -h|--help)
-        SHOW_HELP=1
-        shift
-        ;;
-      *)
-        die "Unknown argument: $1"
-        ;;
-    esac
-  done
-}
-
 ensure_writable_parent() {
   local path="$1"
   ensure_dir "$(dirname "$path")"
-}
-
-ensure_state_defaults() {
-  record_install_state script_version "task2"
-  record_install_state app_user "$APP_USER"
-  record_install_state install_root "$INSTALL_ROOT"
-  record_install_state repo_dir "$REPO_DIR"
-  record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
-  record_install_state domain "$DOMAIN"
-  record_install_state repo_url "$REPO_URL"
-  record_install_state skip_codex_check "$(state_bool "$SKIP_CODEX_CHECK")"
-  record_install_state resume_enabled "true"
 }
 
 prompt_for_missing_values() {
@@ -210,6 +261,8 @@ summarize_configuration() {
   log_step "Installer configuration"
   log_info "install root: $INSTALL_ROOT"
   log_info "state file: $INSTALL_STATE_FILE"
+  log_info "app user: $APP_USER"
+  log_info "app home: $APP_HOME"
   log_info "repo dir: $REPO_DIR"
   log_info "domain: ${DOMAIN:-<unset>}"
   log_info "repo url: $(redact_url "$REPO_URL")"
@@ -217,89 +270,429 @@ summarize_configuration() {
   log_info "skip codex check: $(state_bool "$SKIP_CODEX_CHECK")"
 }
 
-ensure_private_repo_access() {
-  if [[ -d "$REPO_DIR/.git" ]]; then
-    record_install_state repo_clone_completed "true"
-    record_install_state clone_status "present"
+ensure_app_user() {
+  if step_is_complete app_user; then
+    log_info "App user already recorded as complete"
     return 0
   fi
 
-  record_install_state repo_clone_completed "false"
-  record_install_state clone_status "missing"
-  record_install_state clone_pending_reason "repository not cloned yet"
+  if [[ "$(id -un)" == "$APP_USER" ]]; then
+    record_step_status app_user complete "current shell user already matches app user"
+    return 0
+  fi
 
-  log_step "Private repository access"
-  log_info "The repository is not present at $REPO_DIR."
-  log_info "This installer can guide a deploy-key flow so you can add the key to GitHub before cloning."
+  if id "$APP_USER" >/dev/null 2>&1; then
+    record_step_status app_user complete "app user already exists"
+    return 0
+  fi
 
-  if [[ -f "$DEPLOY_KEY_PATH" ]]; then
-    log_info "Using existing deploy key: $DEPLOY_KEY_PATH"
+  if [[ "$(id -u)" -ne 0 ]]; then
+    record_step_status app_user pending "root privileges are required to create $APP_USER"
+    log_warn "App user $APP_USER does not exist and this shell is not root; recorded pending status"
+    return 0
+  fi
+
+  if ! command -v useradd >/dev/null 2>&1; then
+    record_step_status app_user pending "useradd is not available"
+    log_warn "useradd is unavailable; recorded pending app-user status"
+    return 0
+  fi
+
+  if ! confirm_or_default "Create the $APP_USER system user now?" "y"; then
+    record_step_status app_user skipped "operator skipped user creation"
+    return 0
+  fi
+
+  if useradd --system --create-home --home-dir "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"; then
+    record_step_status app_user complete "created $APP_USER system user"
   else
-    log_info "No deploy key found at $DEPLOY_KEY_PATH"
-    if confirm_or_default "Generate a new SSH deploy key now?" "y"; then
-      ensure_writable_parent "$DEPLOY_KEY_PATH"
-      if ! command -v ssh-keygen >/dev/null 2>&1; then
-        record_install_state clone_status "blocked"
-        record_install_state clone_pending_reason "ssh-keygen missing"
-        die "ssh-keygen is required to generate the deploy key"
-      fi
-      ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null
-      record_install_state deploy_key_generated "true"
-      log_info "Generated deploy key: $DEPLOY_KEY_PATH"
-    else
-      record_install_state deploy_key_generated "false"
-      record_install_state clone_status "blocked"
-      record_install_state clone_pending_reason "deploy key generation skipped"
-      log_warn "Deploy key generation was skipped. Re-run the installer after creating a key."
+    record_step_status app_user failed "useradd failed"
+  fi
+}
+
+ensure_base_directories() {
+  if step_is_complete base_directories; then
+    log_info "Base directories already recorded as complete"
+    return 0
+  fi
+
+  local dirs=(
+    "$INSTALL_ROOT"
+    "$STATE_DIR"
+    "$DATA_ROOT"
+    "$WORKSPACE_ROOT"
+    "$SESSION_UPLOAD_ROOT"
+    "$KNOWLEDGE_SET_ROOT"
+    "$(dirname "$PM2_ECOSYSTEM_FILE")"
+    "$APP_HOME"
+    "$(dirname "$INSTALL_STATE_FILE")"
+  )
+  local dir
+
+  for dir in "${dirs[@]}"; do
+    if ! ensure_dir "$dir"; then
+      record_step_status base_directories pending "failed to create $dir"
       return 0
     fi
+  done
+
+  record_step_status base_directories complete "base directories exist"
+}
+
+ensure_deploy_key() {
+  if step_is_complete deploy_key; then
+    log_info "Deploy key already recorded as complete"
+    return 0
   fi
 
-  if [[ -f "$DEPLOY_KEY_PATH.pub" ]]; then
-    log_step "Add this public key to GitHub as a deploy key"
-    cat "$DEPLOY_KEY_PATH.pub"
-    printf '\n'
-    log_info "Add the key as a read-only deploy key for the private repository, then return here and continue."
+  if [[ -f "$DEPLOY_KEY_PATH" && -f "$DEPLOY_KEY_PATH.pub" ]]; then
+    record_step_status deploy_key complete "deploy key already present"
+    record_install_state deploy_key_generated "false"
+    return 0
   fi
 
-  if ! confirm_or_default "Continue after the deploy key has been added to GitHub?" "y"; then
-    record_install_state clone_status "blocked"
-    record_install_state clone_pending_reason "waiting for deploy key authorization"
-    log_warn "Paused safely. Re-run this installer after the key is added to GitHub."
+  if ! command -v ssh-keygen >/dev/null 2>&1; then
+    record_step_status deploy_key pending "ssh-keygen is not available"
+    return 0
+  fi
+
+  if ! confirm_or_default "Generate an SSH deploy key for private repo access now?" "y"; then
+    record_step_status deploy_key skipped "operator skipped deploy key generation"
+    return 0
+  fi
+
+  ensure_writable_parent "$DEPLOY_KEY_PATH"
+  if ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null; then
+    record_step_status deploy_key complete "generated deploy key"
+    record_install_state deploy_key_generated "true"
+    if [[ -f "$DEPLOY_KEY_PATH.pub" ]]; then
+      log_step "Add this public key to GitHub as a deploy key"
+      cat "$DEPLOY_KEY_PATH.pub"
+      printf '\n'
+      log_info "Add the key as a read-only deploy key, then continue here."
+    fi
+  else
+    record_step_status deploy_key failed "ssh-keygen failed"
+  fi
+}
+
+attempt_clone() {
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    record_step_status repo_clone complete "repository already cloned"
+    return 0
+  fi
+
+  if [[ "$RUN_CLONE" != "1" ]]; then
+    record_step_status repo_clone skipped "clone disabled by --no-clone"
     return 0
   fi
 
   if [[ -z "$REPO_URL" ]]; then
-    record_install_state clone_status "blocked"
-    record_install_state clone_pending_reason "missing repository URL"
-    log_warn "Repository URL is still missing. Re-run with --repo-url or enter it when prompted."
+    record_step_status repo_clone pending "repository URL is missing"
     return 0
   fi
 
-  ensure_dir "$REPO_DIR"
-  record_install_state clone_status "pending"
-  record_install_state clone_pending_reason "git clone not attempted in this task"
-  log_info "Repository clone is intentionally not performed in this task. The installer has recorded the pending clone step."
-}
+  if ! confirm_or_default "Attempt to clone the repository now?" "y"; then
+    record_step_status repo_clone skipped "operator deferred clone"
+    return 0
+  fi
 
-ensure_codex_check_marker() {
-  if [[ "$(state_bool "$SKIP_CODEX_CHECK")" == "true" ]]; then
-    record_install_state codex_runtime_check "skipped"
-    record_install_state codex_runtime_check_skipped "true"
-    log_info "Codex runtime check marked as skipped by request."
+  if [[ -d "$REPO_DIR" && -n "$(find "$REPO_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]; then
+    record_step_status repo_clone pending "target directory exists and is not empty"
+    return 0
+  fi
+
+  ensure_dir "$(dirname "$REPO_DIR")"
+
+  local git_clone_env=()
+  if [[ -f "$DEPLOY_KEY_PATH" ]]; then
+    git_clone_env=(GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY_PATH -o IdentitiesOnly=yes")
+  fi
+
+  log_step "Cloning repository"
+  if env "${git_clone_env[@]}" git clone "$REPO_URL" "$REPO_DIR"; then
+    record_step_status repo_clone complete "repository cloned"
   else
-    record_install_state codex_runtime_check "pending"
-    record_install_state codex_runtime_check_skipped "false"
-    log_info "Codex runtime check has not been run yet; it remains pending for later tasks."
+    record_step_status repo_clone failed "git clone failed"
   fi
 }
 
-stop_at_safe_checkpoint() {
-  record_install_state last_safe_checkpoint "installer-configuration-recorded"
-  record_install_state installer_complete "false"
-  log_step "Safe checkpoint"
-  log_info "The installer recorded its state and stopped before privileged provisioning."
-  log_info "Re-run the script to continue after the missing prerequisites are resolved."
+ensure_postgres_setup() {
+  if step_is_complete postgres; then
+    log_info "PostgreSQL setup already recorded as complete"
+    return 0
+  fi
+
+  if ! command -v psql >/dev/null 2>&1; then
+    record_step_status postgres pending "psql is not available"
+    record_install_state postgres_user_status "pending"
+    record_install_state postgres_db_status "pending"
+    return 0
+  fi
+
+  if ! confirm_or_default "Probe PostgreSQL connectivity now?" "y"; then
+    record_step_status postgres skipped "operator deferred PostgreSQL probe"
+    record_install_state postgres_user_status "skipped"
+    record_install_state postgres_db_status "skipped"
+    return 0
+  fi
+
+  if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
+    record_step_status postgres complete "PostgreSQL connectivity probe succeeded"
+    record_install_state postgres_user_status "complete"
+    record_install_state postgres_db_status "complete"
+  else
+    record_step_status postgres pending "PostgreSQL probe failed or server not ready"
+    record_install_state postgres_user_status "pending"
+    record_install_state postgres_db_status "pending"
+  fi
+}
+
+copy_template_file() {
+  local template="$1"
+  local destination="$2"
+
+  ensure_dir "$(dirname "$destination")"
+  cp "$template" "$destination"
+}
+
+render_caddy_config() {
+  local template="$1"
+  local destination="$2"
+  local domain="$3"
+  local ui_root="$4"
+
+  ensure_dir "$(dirname "$destination")"
+  python3 - "$template" "$destination" "$domain" "$ui_root" <<'PY'
+from pathlib import Path
+import sys
+
+template = Path(sys.argv[1]).read_text()
+destination = Path(sys.argv[2])
+domain = sys.argv[3]
+ui_root = sys.argv[4]
+rendered = template.replace("{$DOMAIN}", domain).replace("{$UI_DIST_ROOT}", ui_root)
+destination.write_text(rendered)
+PY
+}
+
+ensure_env_files() {
+  if step_is_complete env_files; then
+    log_info "Environment files already recorded as complete"
+    return 0
+  fi
+
+  if [[ ! -d "$REPO_DIR" ]]; then
+    record_step_status env_files pending "repository directory does not exist yet"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
+
+  local backend_template="$script_dir/../templates/agent-api.env.template"
+  local frontend_template="$script_dir/../templates/agent-ui.env.production.template"
+
+  if [[ ! -f "$backend_template" || ! -f "$frontend_template" ]]; then
+    record_step_status env_files pending "environment templates are missing"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+    return 0
+  fi
+
+  if [[ ! -f "$BACKEND_ENV_FILE" ]]; then
+    copy_template_file "$backend_template" "$BACKEND_ENV_FILE"
+  fi
+  if [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
+    copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"
+  fi
+
+  if [[ -f "$BACKEND_ENV_FILE" && -f "$FRONTEND_ENV_FILE" ]]; then
+    record_step_status env_files complete "backend and frontend env files are present"
+    record_install_state backend_env_status "complete"
+    record_install_state frontend_env_status "complete"
+  else
+    record_step_status env_files pending "failed to write one or more env files"
+    record_install_state backend_env_status "pending"
+    record_install_state frontend_env_status "pending"
+  fi
+}
+
+ensure_caddy_config() {
+  if step_is_complete caddy_config; then
+    log_info "Caddy config already recorded as complete"
+    return 0
+  fi
+
+  local template="$script_dir/../templates/Caddyfile.template"
+  if [[ ! -f "$template" ]]; then
+    record_step_status caddy_config pending "Caddy template is missing"
+    return 0
+  fi
+
+  if [[ -z "$DOMAIN" ]]; then
+    record_step_status caddy_config pending "domain is missing"
+    return 0
+  fi
+
+  if ! confirm_or_default "Render the Caddy config now?" "y"; then
+    record_step_status caddy_config skipped "operator deferred Caddy config render"
+    return 0
+  fi
+
+  if render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist"; then
+    record_step_status caddy_config complete "Caddy config rendered"
+  else
+    record_step_status caddy_config pending "failed to render Caddy config"
+  fi
+}
+
+run_first_deploy() {
+  if step_is_complete first_deploy; then
+    log_info "First deploy already recorded as complete"
+    return 0
+  fi
+
+  if ! step_is_complete repo_clone; then
+    record_step_status first_deploy pending "repository has not been cloned yet"
+    return 0
+  fi
+
+  if ! step_is_complete env_files; then
+    record_step_status first_deploy pending "environment files are not ready yet"
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    record_step_status first_deploy pending "npm is not available"
+    return 0
+  fi
+
+  if ! confirm_or_default "Run the initial deploy preflight now?" "y"; then
+    record_step_status first_deploy skipped "operator deferred first deploy"
+    return 0
+  fi
+
+  if [[ -f "$REPO_DIR/agent-api/package.json" && -f "$REPO_DIR/agent-ui/package.json" ]]; then
+    record_step_status first_deploy attempted "deploy preflight prerequisites are present"
+    if run_as_app_user_shell "cd '$REPO_DIR/agent-api' && npm --version >/dev/null && cd '$REPO_DIR/agent-ui' && npm --version >/dev/null"; then
+      record_step_status first_deploy complete "deploy preflight executed"
+    else
+      record_step_status first_deploy pending "deploy preflight command failed"
+    fi
+  else
+    record_step_status first_deploy pending "package manifests are missing"
+  fi
+}
+
+ensure_pm2_start() {
+  if step_is_complete pm2_start; then
+    log_info "PM2 status already recorded as complete"
+    return 0
+  fi
+
+  if ! step_is_complete first_deploy; then
+    record_step_status pm2_start pending "first deploy is not ready yet"
+    return 0
+  fi
+
+  if ! command -v pm2 >/dev/null 2>&1; then
+    record_step_status pm2_start pending "pm2 is not available"
+    return 0
+  fi
+
+  if ! confirm_or_default "Attempt to start or refresh the PM2 app state now?" "y"; then
+    record_step_status pm2_start skipped "operator deferred PM2 start"
+    return 0
+  fi
+
+  if [[ -f "$PM2_ECOSYSTEM_FILE" ]]; then
+    record_step_status pm2_start attempted "pm2 ecosystem file is present"
+    if run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$PM2_APP_NAME' --update-env"; then
+      record_step_status pm2_start complete "PM2 app start attempted successfully"
+    else
+      record_step_status pm2_start pending "pm2 start failed"
+    fi
+  else
+    record_step_status pm2_start pending "pm2 ecosystem file is missing"
+  fi
+}
+
+ensure_codex_verification() {
+  if step_is_complete codex_runtime_check; then
+    log_info "Codex verification already recorded as complete"
+    return 0
+  fi
+
+  if [[ "$(state_bool "$SKIP_CODEX_CHECK")" == "true" ]]; then
+    record_step_status codex_runtime_check skipped "operator requested skip-codex-check"
+    record_install_state codex_runtime_check_skipped "true"
+    return 0
+  fi
+
+  if ! command -v codex >/dev/null 2>&1; then
+    record_step_status codex_runtime_check pending "codex binary is not available"
+    record_install_state codex_runtime_check_skipped "false"
+    return 0
+  fi
+
+  if ! confirm_or_default "Run a Codex runtime verification now?" "y"; then
+    record_step_status codex_runtime_check skipped "operator deferred Codex verification"
+    record_install_state codex_runtime_check_skipped "true"
+    return 0
+  fi
+
+  if codex --version >/dev/null 2>&1; then
+    record_step_status codex_runtime_check complete "codex runtime probe succeeded"
+    record_install_state codex_runtime_check_skipped "false"
+  else
+    record_step_status codex_runtime_check pending "codex runtime probe failed"
+    record_install_state codex_runtime_check_skipped "false"
+  fi
+}
+
+render_phase_summary() {
+  log_step "Install state summary"
+  log_info "app user: $(step_status app_user)"
+  log_info "base directories: $(step_status base_directories)"
+  log_info "repo clone: $(step_status repo_clone)"
+  log_info "postgres: $(step_status postgres)"
+  log_info "backend env: $(state_read backend_env_status pending)"
+  log_info "frontend env: $(state_read frontend_env_status pending)"
+  log_info "caddy config: $(step_status caddy_config)"
+  log_info "first deploy: $(step_status first_deploy)"
+  log_info "pm2 start: $(step_status pm2_start)"
+  log_info "codex runtime: $(step_status codex_runtime_check)"
+}
+
+finalize_installation() {
+  local required_steps=(
+    app_user
+    base_directories
+    repo_clone
+    postgres
+    env_files
+    caddy_config
+    first_deploy
+    pm2_start
+    codex_runtime_check
+  )
+  local all_complete=1
+  local step
+
+  for step in "${required_steps[@]}"; do
+    if [[ "$(step_status "$step")" != "complete" && "$(step_status "$step")" != "skipped" ]]; then
+      all_complete=0
+      break
+    fi
+  done
+
+  if [[ "$all_complete" -eq 1 ]]; then
+    record_install_state installer_complete "true"
+    record_install_state last_safe_checkpoint "all-resumable-phases-complete"
+  else
+    record_install_state installer_complete "false"
+    record_install_state last_safe_checkpoint "resumable-phases-recorded"
+  fi
 }
 
 main() {
@@ -316,16 +709,18 @@ main() {
   ensure_state_defaults
   summarize_configuration
 
-  if [[ "$RUN_CLONE" == "1" ]]; then
-    ensure_private_repo_access
-  else
-    record_install_state clone_status "skipped"
-    record_install_state clone_pending_reason "clone step disabled by --no-clone"
-    log_info "Clone step skipped by request."
-  fi
-
-  ensure_codex_check_marker
-  stop_at_safe_checkpoint
+  ensure_app_user
+  ensure_base_directories
+  ensure_deploy_key
+  attempt_clone
+  ensure_postgres_setup
+  ensure_env_files
+  ensure_caddy_config
+  run_first_deploy
+  ensure_pm2_start
+  ensure_codex_verification
+  render_phase_summary
+  finalize_installation
 }
 
 main "$@"
