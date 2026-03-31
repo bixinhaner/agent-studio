@@ -22,6 +22,12 @@ probe_blocked_log="$probe_root/blocked.log"
 probe_blocked_repo_dir="$probe_blocked_root/custom-agent-studio"
 probe_blocked_env_backend="$probe_blocked_repo_dir/agent-api/.env"
 probe_blocked_env_frontend="$probe_blocked_repo_dir/agent-ui/.env.production"
+probe_override_root="$probe_root/override-install-root"
+probe_override_state="$probe_root/override-state.json"
+probe_override_log="$probe_root/override.log"
+probe_override_repo_dir="$probe_override_root/custom-agent-studio"
+probe_override_backend_env="$probe_root/explicit-backend.env"
+probe_override_frontend_env="$probe_root/explicit-frontend.env"
 
 cleanup() {
   rm -rf "$probe_root"
@@ -62,6 +68,7 @@ grep -q 'print_follow_up_actions' "$script"
 grep -q 'follow_up_message_for_step' "$script"
 grep -q 'record_step_status first_deploy attempted' "$script"
 grep -q 'refresh_app_paths' "$script"
+grep -q 'APP_REPO_DIR_EXPLICIT' "$script"
 grep -q 'deploy_key_guidance_shown' "$script"
 grep -q 'Continue to repository clone now?' "$script"
 grep -q 'repository clone is not complete yet' "$script"
@@ -164,5 +171,41 @@ assert state.get("env_files_status") == "pending", state.get("env_files_status")
 assert state.get("backend_env_status") == "pending", state.get("backend_env_status")
 assert state.get("frontend_env_status") == "pending", state.get("frontend_env_status")
 assert state.get("installer_complete") == "false", state.get("installer_complete")
+assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
+PY
+
+# Probe 4: explicit env-file overrides are preserved and a valid checkout keeps repo_clone complete under --no-clone.
+mkdir -p "$probe_override_repo_dir/agent-api" "$probe_override_repo_dir/agent-ui"
+git init -q "$probe_override_repo_dir"
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-override" \
+INSTALL_ROOT="$probe_override_root" \
+CADDY_CONFIG_FILE="$probe_override_root/Caddyfile" \
+BACKEND_ENV_FILE="$probe_override_backend_env" \
+FRONTEND_ENV_FILE="$probe_override_frontend_env" \
+bash "$script" \
+  --state-file "$probe_override_state" \
+  --domain example.com \
+  --repo-dir "$probe_override_repo_dir" \
+  --skip-codex-check \
+  --yes \
+  --no-clone >"$probe_override_log" 2>&1
+grep -q 'clone disabled by --no-clone; existing checkout is already usable' "$probe_override_log"
+test -f "$probe_override_backend_env"
+test -f "$probe_override_frontend_env"
+test ! -e "$probe_override_repo_dir/agent-api/.env"
+test ! -e "$probe_override_repo_dir/agent-ui/.env.production"
+python3 - "$probe_override_state" "$probe_override_repo_dir" "$probe_override_backend_env" "$probe_override_frontend_env" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("repo_clone_status") == "complete", state.get("repo_clone_status")
+assert state.get("env_files_status") == "complete", state.get("env_files_status")
+assert state.get("backend_env_file") == sys.argv[3], state.get("backend_env_file")
+assert state.get("frontend_env_file") == sys.argv[4], state.get("frontend_env_file")
+assert state.get("backend_env_status") == "complete", state.get("backend_env_status")
+assert state.get("frontend_env_status") == "complete", state.get("frontend_env_status")
 assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
 PY

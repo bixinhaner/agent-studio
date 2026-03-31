@@ -20,11 +20,21 @@ BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$APP_API_DIR/.env}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-$APP_UI_DIR/.env.production}"
 
 refresh_app_paths() {
-  APP_REPO_DIR="$REPO_DIR"
-  APP_API_DIR="$APP_REPO_DIR/agent-api"
-  APP_UI_DIR="$APP_REPO_DIR/agent-ui"
-  BACKEND_ENV_FILE="$APP_API_DIR/.env"
-  FRONTEND_ENV_FILE="$APP_UI_DIR/.env.production"
+  if [[ "${APP_REPO_DIR_EXPLICIT:-0}" != "1" ]]; then
+    APP_REPO_DIR="$REPO_DIR"
+  fi
+  if [[ "${APP_API_DIR_EXPLICIT:-0}" != "1" ]]; then
+    APP_API_DIR="$APP_REPO_DIR/agent-api"
+  fi
+  if [[ "${APP_UI_DIR_EXPLICIT:-0}" != "1" ]]; then
+    APP_UI_DIR="$APP_REPO_DIR/agent-ui"
+  fi
+  if [[ "${BACKEND_ENV_FILE_EXPLICIT:-0}" != "1" ]]; then
+    BACKEND_ENV_FILE="$APP_API_DIR/.env"
+  fi
+  if [[ "${FRONTEND_ENV_FILE_EXPLICIT:-0}" != "1" ]]; then
+    FRONTEND_ENV_FILE="$APP_UI_DIR/.env.production"
+  fi
 }
 
 log_ts() {

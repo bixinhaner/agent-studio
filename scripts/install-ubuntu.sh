@@ -3,6 +3,19 @@ set -euo pipefail
 IFS=$'\n\t'
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+APP_REPO_DIR_EXPLICIT="${APP_REPO_DIR_EXPLICIT:-0}"
+APP_API_DIR_EXPLICIT="${APP_API_DIR_EXPLICIT:-0}"
+APP_UI_DIR_EXPLICIT="${APP_UI_DIR_EXPLICIT:-0}"
+BACKEND_ENV_FILE_EXPLICIT="${BACKEND_ENV_FILE_EXPLICIT:-0}"
+FRONTEND_ENV_FILE_EXPLICIT="${FRONTEND_ENV_FILE_EXPLICIT:-0}"
+
+if [[ -n "${APP_REPO_DIR+x}" ]]; then APP_REPO_DIR_EXPLICIT=1; fi
+if [[ -n "${APP_API_DIR+x}" ]]; then APP_API_DIR_EXPLICIT=1; fi
+if [[ -n "${APP_UI_DIR+x}" ]]; then APP_UI_DIR_EXPLICIT=1; fi
+if [[ -n "${BACKEND_ENV_FILE+x}" ]]; then BACKEND_ENV_FILE_EXPLICIT=1; fi
+if [[ -n "${FRONTEND_ENV_FILE+x}" ]]; then FRONTEND_ENV_FILE_EXPLICIT=1; fi
+
 # shellcheck source=/dev/null
 source "$script_dir/lib/common.sh"
 
@@ -235,6 +248,10 @@ load_existing_state() {
 
 refresh_paths_from_repo_dir() {
   refresh_app_paths
+}
+
+repo_checkout_is_usable() {
+  [[ -d "$REPO_DIR/.git" ]] && git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
 parse_args() {
@@ -527,14 +544,18 @@ backup_existing_repo_dir() {
 }
 
 attempt_clone() {
-  if [[ -d "$REPO_DIR/.git" ]] && ! phase_forced repo_clone; then
+  if repo_checkout_is_usable && ! phase_forced repo_clone; then
     record_step_status repo_clone complete "repository already cloned"
     return 0
   fi
   maybe_mark_phase_forced repo_clone
 
   if [[ "$RUN_CLONE" != "1" ]]; then
-    record_step_status repo_clone skipped "clone disabled by --no-clone"
+    if repo_checkout_is_usable; then
+      record_step_status repo_clone complete "repository checkout already exists"
+    else
+      record_step_status repo_clone skipped "clone disabled by --no-clone"
+    fi
     return 0
   fi
 
@@ -995,9 +1016,15 @@ main() {
     fi
     attempt_clone
   else
-    record_step_status deploy_key skipped "clone disabled by --no-clone"
-    record_step_status repo_clone skipped "clone disabled by --no-clone"
-    record_install_state deploy_key_skipped "true"
+    if repo_checkout_is_usable; then
+      record_step_status repo_clone complete "repository checkout already exists"
+      record_step_status deploy_key skipped "clone disabled by --no-clone; existing checkout is already usable"
+      record_install_state deploy_key_skipped "true"
+    else
+      record_step_status deploy_key skipped "clone disabled by --no-clone"
+      record_step_status repo_clone skipped "clone disabled by --no-clone"
+      record_install_state deploy_key_skipped "true"
+    fi
   fi
   ensure_postgres_setup
   ensure_env_files
