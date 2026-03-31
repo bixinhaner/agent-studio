@@ -83,6 +83,44 @@ maybe_mark_phase_forced() {
   fi
 }
 
+follow_up_message_for_step() {
+  case "$1" in
+    app_user)
+      printf '%s' "Create or confirm the $APP_USER user, then rerun with root privileges if creation is still needed."
+      ;;
+    base_directories)
+      printf '%s' "Create the install directories under $INSTALL_ROOT, or rerun as a user allowed to create them."
+      ;;
+    deploy_key)
+      printf '%s' "Generate the deploy key at $DEPLOY_KEY_PATH, add the public key to GitHub, then rerun."
+      ;;
+    repo_clone)
+      printf '%s' "Provide a valid repository URL and rerun; use --force-phase repo_clone to overwrite an existing target directory intentionally."
+      ;;
+    postgres)
+      printf '%s' "Install PostgreSQL, create the $POSTGRES_DB_USER role and $POSTGRES_DB_NAME database, then rerun."
+      ;;
+    env_files)
+      printf '%s' "Ensure the repository is present, then rerun; use --force-phase env_files to overwrite existing env files intentionally."
+      ;;
+    caddy_config)
+      printf '%s' "Provide --domain and rerun; use --force-phase caddy_config to rewrite the Caddy config intentionally."
+      ;;
+    first_deploy)
+      printf '%s' "Install the build toolchain and rerun after the deploy command can actually produce build artifacts; use --force-phase first_deploy to retry intentionally."
+      ;;
+    pm2_start)
+      printf '%s' "Install pm2 and ensure first deploy is complete, then rerun; use --force-phase pm2_start to retry intentionally."
+      ;;
+    codex_runtime_check)
+      printf '%s' "Install the codex CLI or pass --skip-codex-check, then rerun."
+      ;;
+    *)
+      printf '%s' "Rerun after resolving the recorded prerequisite."
+      ;;
+  esac
+}
+
 record_install_state() {
   local key="$1"
   local value="${2:-}"
@@ -388,32 +426,52 @@ ensure_deploy_key() {
   if [[ -f "$DEPLOY_KEY_PATH" && -f "$DEPLOY_KEY_PATH.pub" ]]; then
     record_step_status deploy_key complete "deploy key already present"
     record_install_state deploy_key_generated "false"
-    return 0
-  fi
-
-  if ! command -v ssh-keygen >/dev/null 2>&1; then
+  elif ! command -v ssh-keygen >/dev/null 2>&1; then
     record_step_status deploy_key pending "ssh-keygen is not available"
     return 0
+  elif ! confirm_or_default "Generate an SSH deploy key for private repo access now?" "y"; then
+    record_step_status deploy_key skipped "operator skipped deploy key generation"
+    return 0
+  else
+    ensure_writable_parent "$DEPLOY_KEY_PATH"
+    if ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null; then
+      record_step_status deploy_key complete "generated deploy key"
+      record_install_state deploy_key_generated "true"
+    else
+      record_step_status deploy_key failed "ssh-keygen failed"
+      return 0
+    fi
   fi
 
-  if ! confirm_or_default "Generate an SSH deploy key for private repo access now?" "y"; then
-    record_step_status deploy_key skipped "operator skipped deploy key generation"
+  if [[ -f "$DEPLOY_KEY_PATH.pub" ]]; then
+    log_step "Add this public key to GitHub as a deploy key"
+    log_info "Public key path: $DEPLOY_KEY_PATH.pub"
+    cat "$DEPLOY_KEY_PATH.pub"
+    printf '\n'
+    log_info "Add the key as a read-only deploy key, then continue here."
+  else
+    record_step_status deploy_key pending "public key file is missing"
+  fi
+}
+
+repo_dir_has_entries() {
+  [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]
+}
+
+backup_existing_repo_dir() {
+  local backup_dir="$REPO_DIR.forced-backup-$(date '+%Y%m%d%H%M%S')"
+
+  if [[ ! -e "$REPO_DIR" ]]; then
     return 0
   fi
 
-  ensure_writable_parent "$DEPLOY_KEY_PATH"
-  if ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null; then
-    record_step_status deploy_key complete "generated deploy key"
-    record_install_state deploy_key_generated "true"
-    if [[ -f "$DEPLOY_KEY_PATH.pub" ]]; then
-      log_step "Add this public key to GitHub as a deploy key"
-      cat "$DEPLOY_KEY_PATH.pub"
-      printf '\n'
-      log_info "Add the key as a read-only deploy key, then continue here."
-    fi
-  else
-    record_step_status deploy_key failed "ssh-keygen failed"
+  if mv "$REPO_DIR" "$backup_dir"; then
+    record_install_state repo_clone_backup "$backup_dir"
+    log_info "Moved existing repository directory to $backup_dir before forced clone"
+    return 0
   fi
+
+  return 1
 }
 
 attempt_clone() {
@@ -438,9 +496,16 @@ attempt_clone() {
     return 0
   fi
 
-  if [[ -d "$REPO_DIR" && -n "$(find "$REPO_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]; then
-    record_step_status repo_clone pending "target directory exists and is not empty"
-    return 0
+  if repo_dir_has_entries "$REPO_DIR"; then
+    if phase_forced repo_clone; then
+      if ! backup_existing_repo_dir; then
+        record_step_status repo_clone pending "unable to move existing target directory before forced clone"
+        return 0
+      fi
+    else
+      record_step_status repo_clone pending "target directory exists and is not empty"
+      return 0
+    fi
   fi
 
   ensure_dir "$(dirname "$REPO_DIR")"
@@ -479,14 +544,41 @@ ensure_postgres_setup() {
     return 0
   fi
 
-  if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
-    record_step_status postgres complete "PostgreSQL connectivity probe succeeded"
-    record_install_state postgres_user_status "complete"
-    record_install_state postgres_db_status "complete"
-  else
+  local role_exists=""
+  local db_exists=""
+
+  if ! psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
     record_step_status postgres pending "PostgreSQL probe failed or server not ready"
     record_install_state postgres_user_status "pending"
     record_install_state postgres_db_status "pending"
+    return 0
+  fi
+
+  role_exists="$(
+    psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -Atqc "select 1 from pg_roles where rolname = :'role' limit 1" -v role="$POSTGRES_DB_USER" 2>/dev/null || true
+  )"
+  db_exists="$(
+    psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -Atqc "select 1 from pg_database where datname = :'dbname' limit 1" -v dbname="$POSTGRES_DB_NAME" 2>/dev/null || true
+  )"
+
+  if [[ "$role_exists" == "1" ]]; then
+    record_install_state postgres_user_status "complete"
+  else
+    record_install_state postgres_user_status "pending"
+    record_install_state postgres_user_reason "PostgreSQL role $POSTGRES_DB_USER is missing"
+  fi
+
+  if [[ "$db_exists" == "1" ]]; then
+    record_install_state postgres_db_status "complete"
+  else
+    record_install_state postgres_db_status "pending"
+    record_install_state postgres_db_reason "PostgreSQL database $POSTGRES_DB_NAME is missing"
+  fi
+
+  if [[ "$role_exists" == "1" && "$db_exists" == "1" ]]; then
+    record_step_status postgres complete "PostgreSQL role and database exist"
+  else
+    record_step_status postgres pending "PostgreSQL connectivity succeeded but the app role/database are missing"
   fi
 }
 
@@ -542,10 +634,10 @@ ensure_env_files() {
     return 0
   fi
 
-  if [[ ! -f "$BACKEND_ENV_FILE" ]]; then
+  if phase_forced env_files || [[ ! -f "$BACKEND_ENV_FILE" ]]; then
     copy_template_file "$backend_template" "$BACKEND_ENV_FILE"
   fi
-  if [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
+  if phase_forced env_files || [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
     copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"
   fi
 
@@ -726,6 +818,49 @@ render_phase_summary() {
   log_info "codex runtime: $(step_status codex_runtime_check)"
 }
 
+print_follow_up_actions() {
+  local phases=(
+    app_user
+    base_directories
+    deploy_key
+    repo_clone
+    postgres
+    env_files
+    caddy_config
+    first_deploy
+    pm2_start
+    codex_runtime_check
+  )
+  local phase
+  local status
+  local message
+  local printed=0
+
+  log_step "Operator follow-up actions"
+  for phase in "${phases[@]}"; do
+    status="$(step_status "$phase")"
+    case "$status" in
+      complete)
+        continue
+        ;;
+      "")
+        continue
+        ;;
+    esac
+
+    message="$(follow_up_message_for_step "$phase")"
+    printf '[%s] FOLLOW-UP %s: %s\n' "$(log_ts)" "$phase" "$message"
+    if [[ -n "$(state_read "${phase}_reason" "")" ]]; then
+      printf '[%s] DETAIL %s: %s\n' "$(log_ts)" "$phase" "$(state_read "${phase}_reason" "")"
+    fi
+    printed=1
+  done
+
+  if [[ "$printed" -eq 0 ]]; then
+    log_info "No pending or skipped phases remain."
+  fi
+}
+
 finalize_installation() {
   local required_steps=(
     app_user
@@ -782,6 +917,7 @@ main() {
   ensure_pm2_start
   ensure_codex_verification
   render_phase_summary
+  print_follow_up_actions
   finalize_installation
 }
 
