@@ -100,6 +100,7 @@ check_required_files() {
   [[ -f "$FRONTEND_ENV_FILE" ]] || die "missing frontend env file: $FRONTEND_ENV_FILE"
   [[ -f "$CADDY_CONFIG_FILE" ]] || die "missing Caddy config: $CADDY_CONFIG_FILE"
   [[ -f "$APP_API_DIR/dist/codex-runtime.js" ]] || die "missing backend build output: $APP_API_DIR/dist/codex-runtime.js"
+  [[ -f "$APP_UI_DIR/dist/index.html" ]] || die "missing frontend build output: $APP_UI_DIR/dist/index.html"
   print_ok "required files are present"
 }
 
@@ -120,6 +121,21 @@ check_backend_env() {
   [[ -n "$database_url" ]] || die "DATABASE_URL is empty in $BACKEND_ENV_FILE"
   DATABASE_URL="$database_url"
   print_ok "backend env includes DATABASE_URL"
+}
+
+check_frontend_env() {
+  python3 - "$FRONTEND_ENV_FILE" <<'PY'
+from pathlib import Path
+import sys
+
+for lineno, raw_line in enumerate(Path(sys.argv[1]).read_text().splitlines(), start=1):
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    if "=" not in line:
+        raise SystemExit(f"frontend env line {lineno} is not KEY=VALUE")
+PY
+  print_ok "frontend env is parseable"
 }
 
 check_postgres() {
@@ -169,6 +185,7 @@ main() {
   check_commands
   check_required_files
   check_backend_env
+  check_frontend_env
   check_postgres
   check_pm2
   check_caddy
