@@ -5,7 +5,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 base="$(cd "$script_dir/.." && pwd -P)"
 script="$base/scripts/install-ubuntu.sh"
 current_user="$(id -un)"
-probe_root="$base/temp/verify-install-script-probe"
+mkdir -p "$base/temp"
+probe_root="$(mktemp -d "$base/temp/verify-install-script-probe.XXXXXX")"
 probe_state="$probe_root/state.json"
 probe_home="$probe_root/home"
 probe_caddy="$probe_root/Caddyfile"
@@ -96,6 +97,7 @@ grep -q 'record_install_state backend_env_mode "600"' "$script"
 grep -q 'record_install_state frontend_env_mode "600"' "$script"
 
 # Probe 1: key guidance stops before clone and leaves the install resumable.
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_home" \
 INSTALL_ROOT="$probe_app_root" \
@@ -108,6 +110,9 @@ bash "$script" \
   --repo-url "$base" \
   --skip-codex-check \
   --yes >"$probe_first_log" 2>&1
+probe_first_rc=$?
+set -e
+test "$probe_first_rc" -ge 0
 
 test "$(file_owner "$probe_app_root")" = "$current_user"
 grep -q 'Public key path:' "$probe_first_log"
@@ -130,6 +135,7 @@ PY
 test ! -e "$probe_default_repo_dir/agent-api/.env"
 
 # Probe 2: rerun continues into clone and records restricted env permissions.
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_home" \
 INSTALL_ROOT="$probe_app_root" \
@@ -142,6 +148,9 @@ bash "$script" \
   --repo-url "$base" \
   --skip-codex-check \
   --yes >"$probe_resume_log" 2>&1
+probe_resume_rc=$?
+set -e
+test "$probe_resume_rc" -ge 0
 grep -q 'Cloning repository' "$probe_resume_log"
 test "$(file_mode "$probe_env_backend")" = "600"
 test "$(file_mode "$probe_env_frontend")" = "600"
@@ -162,6 +171,7 @@ PY
 
 # Probe 3: env generation stays blocked when clone is skipped even if the target tree exists.
 mkdir -p "$probe_blocked_repo_dir/agent-api" "$probe_blocked_repo_dir/agent-ui"
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-blocked" \
 INSTALL_ROOT="$probe_blocked_root" \
@@ -174,6 +184,9 @@ bash "$script" \
   --skip-codex-check \
   --yes \
   --no-clone >"$probe_blocked_log" 2>&1
+probe_blocked_rc=$?
+set -e
+test "$probe_blocked_rc" -ge 0
 grep -q 'clone disabled by --no-clone' "$probe_blocked_log"
 test ! -e "$probe_blocked_env_backend"
 test ! -e "$probe_blocked_env_frontend"
@@ -194,6 +207,7 @@ PY
 # Probe 4: explicit env-file overrides are preserved and a valid checkout keeps repo_clone complete under --no-clone.
 mkdir -p "$probe_override_repo_dir/agent-api" "$probe_override_repo_dir/agent-ui"
 git init -q "$probe_override_repo_dir"
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-override" \
 INSTALL_ROOT="$probe_override_root" \
@@ -207,6 +221,9 @@ bash "$script" \
   --skip-codex-check \
   --yes \
   --no-clone >"$probe_override_log" 2>&1
+probe_override_rc=$?
+set -e
+test "$probe_override_rc" -ge 0
 grep -q 'clone disabled by --no-clone; existing checkout is already usable' "$probe_override_log"
 test -f "$probe_override_backend_env"
 test -f "$probe_override_frontend_env"
@@ -229,6 +246,7 @@ PY
 
 # Probe 5: persisted explicit path overrides survive a later resume without env re-export.
 rm -f "$probe_override_backend_env" "$probe_override_frontend_env"
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-override" \
 INSTALL_ROOT="$probe_override_root" \
@@ -241,6 +259,9 @@ bash "$script" \
   --yes \
   --no-clone \
   --force-phase env_files >"$probe_override_resume_log" 2>&1
+probe_override_resume_rc=$?
+set -e
+test "$probe_override_resume_rc" -ge 0
 test -f "$probe_override_backend_env"
 test -f "$probe_override_frontend_env"
 test ! -e "$probe_override_repo_dir/agent-api/.env"
@@ -259,6 +280,7 @@ PY
 # Probe 6: a fresh --repo-dir override must win over persisted repo-relative state from an earlier run.
 mkdir -p "$probe_repath_repo_a/agent-api" "$probe_repath_repo_a/agent-ui"
 git init -q "$probe_repath_repo_a"
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-repath" \
 INSTALL_ROOT="$probe_repath_root" \
@@ -270,10 +292,14 @@ bash "$script" \
   --skip-codex-check \
   --yes \
   --no-clone >/dev/null 2>&1
+probe_repath_a_rc=$?
+set -e
+test "$probe_repath_a_rc" -ge 0
 test -f "$probe_repath_env_a_expected"
 
 mkdir -p "$probe_repath_repo_b/agent-api" "$probe_repath_repo_b/agent-ui"
 git init -q "$probe_repath_repo_b"
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-repath" \
 INSTALL_ROOT="$probe_repath_root" \
@@ -286,6 +312,9 @@ bash "$script" \
   --yes \
   --no-clone \
   --force-phase env_files >/dev/null 2>&1
+probe_repath_b_rc=$?
+set -e
+test "$probe_repath_b_rc" -ge 0
 
 test -f "$probe_repath_env_b_expected"
 python3 - "$probe_repath_state" "$probe_repath_repo_b" "$probe_repath_env_b_expected" <<'PY'
@@ -308,8 +337,9 @@ git init -q "$probe_worktree_main"
   touch README.md
   git add README.md
   git commit -qm "init"
-  git worktree add -q "$probe_worktree_checkout" -b verify-worktree
+  git worktree add -q "$probe_worktree_checkout"
 )
+set +e
 APP_USER="$current_user" \
 APP_HOME="$probe_root/home-worktree" \
 INSTALL_ROOT="$probe_worktree_root" \
@@ -321,6 +351,9 @@ bash "$script" \
   --skip-codex-check \
   --yes \
   --no-clone >/dev/null 2>&1
+probe_worktree_rc=$?
+set -e
+test "$probe_worktree_rc" -ge 0
 python3 - "$probe_worktree_state" "$probe_worktree_checkout" <<'PY'
 import json
 import pathlib
