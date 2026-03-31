@@ -94,6 +94,7 @@ phase_forced() {
 maybe_mark_phase_forced() {
   local phase="$1"
   phase_forced "$phase" && record_install_state "${phase}_forced" "true"
+  return 0
 }
 
 record_install_state() {
