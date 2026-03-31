@@ -15,6 +15,8 @@ probe_env_backend="$probe_repo_dir/agent-api/.env"
 probe_env_frontend="$probe_repo_dir/agent-ui/.env.production"
 probe_skip_root="$probe_root/skip-install-root"
 probe_skip_state="$probe_root/skip-state.json"
+probe_skip_deploy_key="$probe_skip_root/.ssh/id_ed25519_agent_studio_deploy"
+probe_skip_log="$probe_root/skip.log"
 
 cleanup() {
   rm -rf "$probe_root"
@@ -71,12 +73,16 @@ APP_USER="$current_user" \
 APP_HOME="$probe_skip_root/home" \
 INSTALL_ROOT="$probe_skip_root" \
 CADDY_CONFIG_FILE="$probe_skip_root/Caddyfile" \
+DEPLOY_KEY_PATH="$probe_skip_deploy_key" \
 bash "$script" \
   --state-file "$probe_skip_state" \
   --domain example.com \
   --skip-codex-check \
   --yes \
-  --no-clone
+  --no-clone >"$probe_skip_log" 2>&1
+grep -q 'clone disabled by --no-clone' "$probe_skip_log"
+! grep -q 'Public key path:' "$probe_skip_log"
+test ! -e "$probe_skip_deploy_key"
 python3 - "$probe_skip_state" <<'PY'
 import json
 import pathlib
@@ -85,4 +91,5 @@ import sys
 state = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert state.get("installer_complete") == "false", state.get("installer_complete")
 assert state.get("repo_clone_status") == "skipped", state.get("repo_clone_status")
+assert state.get("deploy_key_status") == "skipped", state.get("deploy_key_status")
 PY

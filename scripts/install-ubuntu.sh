@@ -941,8 +941,14 @@ main() {
 
   ensure_app_user
   ensure_base_directories
-  ensure_deploy_key
-  attempt_clone
+  if [[ "$RUN_CLONE" == "1" ]]; then
+    ensure_deploy_key
+    attempt_clone
+  else
+    record_step_status deploy_key skipped "clone disabled by --no-clone"
+    record_step_status repo_clone skipped "clone disabled by --no-clone"
+    record_install_state deploy_key_skipped "true"
+  fi
   ensure_postgres_setup
   ensure_env_files
   ensure_caddy_config
