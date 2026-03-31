@@ -39,9 +39,15 @@ probe_worktree_root="$probe_root/worktree-install-root"
 probe_worktree_state="$probe_root/worktree-state.json"
 probe_worktree_main="$probe_root/worktree-main"
 probe_worktree_checkout="$probe_worktree_root/worktree-checkout"
-
 cleanup() {
-  rm -rf "$probe_root"
+  if (( ${BASH_SUBSHELL:-0} > 0 )); then
+    return 0
+  fi
+  if [[ -d "$probe_worktree_main/.git" ]] && [[ -e "$probe_worktree_checkout" ]]; then
+    git -C "$probe_worktree_main" worktree remove --force "$probe_worktree_checkout" >/dev/null 2>&1 || true
+    git -C "$probe_worktree_main" worktree prune >/dev/null 2>&1 || true
+  fi
+  rm -rf "$probe_root" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 cleanup
