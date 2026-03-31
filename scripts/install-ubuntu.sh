@@ -19,6 +19,8 @@ REPO_DIR_EXPLICIT=0
 DEPLOY_KEY_PATH_EXPLICIT=0
 RUN_CLONE=1
 SHOW_HELP=0
+FORCE_ALL=0
+declare -a FORCE_PHASES=()
 POSTGRES_DB_NAME="${POSTGRES_DB_NAME:-agent_studio}"
 POSTGRES_DB_USER="${POSTGRES_DB_USER:-agentstudio}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
@@ -39,6 +41,8 @@ Options:
   --yes                     Use defaults for prompts where possible
   --state-file <path>       Override install state file path
   --no-clone                Skip the clone attempt and record it as skipped
+  --force-phase <name>      Force a completed phase to run again (repeatable)
+  --force-all               Force all completed phases to run again
   -h, --help                Show this help text
 
 This installer is resumable. Re-run it to continue from the last recorded state
@@ -53,6 +57,30 @@ state_bool() {
     1|true|yes|y|on) printf '%s' "true" ;;
     *) printf '%s' "false" ;;
   esac
+}
+
+phase_forced() {
+  local phase="$1"
+  local forced
+
+  if [[ "$FORCE_ALL" == "1" ]]; then
+    return 0
+  fi
+
+  for forced in "${FORCE_PHASES[@]:-}"; do
+    if [[ "$forced" == "$phase" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+maybe_mark_phase_forced() {
+  local phase="$1"
+  if phase_forced "$phase"; then
+    record_install_state "${phase}_forced" "true"
+  fi
 }
 
 record_install_state() {
@@ -188,6 +216,15 @@ parse_args() {
         RUN_CLONE=0
         shift
         ;;
+      --force-phase)
+        [[ $# -ge 2 ]] || die "--force-phase requires a phase name"
+        FORCE_PHASES+=("$2")
+        shift 2
+        ;;
+      --force-all)
+        FORCE_ALL=1
+        shift
+        ;;
       -h|--help)
         SHOW_HELP=1
         shift
@@ -271,10 +308,11 @@ summarize_configuration() {
 }
 
 ensure_app_user() {
-  if step_is_complete app_user; then
+  if step_is_complete app_user && ! phase_forced app_user; then
     log_info "App user already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced app_user
 
   if [[ "$(id -un)" == "$APP_USER" ]]; then
     record_step_status app_user complete "current shell user already matches app user"
@@ -311,10 +349,11 @@ ensure_app_user() {
 }
 
 ensure_base_directories() {
-  if step_is_complete base_directories; then
+  if step_is_complete base_directories && ! phase_forced base_directories; then
     log_info "Base directories already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced base_directories
 
   local dirs=(
     "$INSTALL_ROOT"
@@ -340,10 +379,11 @@ ensure_base_directories() {
 }
 
 ensure_deploy_key() {
-  if step_is_complete deploy_key; then
+  if step_is_complete deploy_key && ! phase_forced deploy_key; then
     log_info "Deploy key already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced deploy_key
 
   if [[ -f "$DEPLOY_KEY_PATH" && -f "$DEPLOY_KEY_PATH.pub" ]]; then
     record_step_status deploy_key complete "deploy key already present"
@@ -377,10 +417,11 @@ ensure_deploy_key() {
 }
 
 attempt_clone() {
-  if [[ -d "$REPO_DIR/.git" ]]; then
+  if [[ -d "$REPO_DIR/.git" ]] && ! phase_forced repo_clone; then
     record_step_status repo_clone complete "repository already cloned"
     return 0
   fi
+  maybe_mark_phase_forced repo_clone
 
   if [[ "$RUN_CLONE" != "1" ]]; then
     record_step_status repo_clone skipped "clone disabled by --no-clone"
@@ -418,10 +459,11 @@ attempt_clone() {
 }
 
 ensure_postgres_setup() {
-  if step_is_complete postgres; then
+  if step_is_complete postgres && ! phase_forced postgres; then
     log_info "PostgreSQL setup already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced postgres
 
   if ! command -v psql >/dev/null 2>&1; then
     record_step_status postgres pending "psql is not available"
@@ -477,10 +519,11 @@ PY
 }
 
 ensure_env_files() {
-  if step_is_complete env_files; then
+  if step_is_complete env_files && ! phase_forced env_files; then
     log_info "Environment files already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced env_files
 
   if [[ ! -d "$REPO_DIR" ]]; then
     record_step_status env_files pending "repository directory does not exist yet"
@@ -518,10 +561,11 @@ ensure_env_files() {
 }
 
 ensure_caddy_config() {
-  if step_is_complete caddy_config; then
+  if step_is_complete caddy_config && ! phase_forced caddy_config; then
     log_info "Caddy config already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced caddy_config
 
   local template="$script_dir/../templates/Caddyfile.template"
   if [[ ! -f "$template" ]]; then
@@ -547,10 +591,11 @@ ensure_caddy_config() {
 }
 
 run_first_deploy() {
-  if step_is_complete first_deploy; then
+  if step_is_complete first_deploy && ! phase_forced first_deploy; then
     log_info "First deploy already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced first_deploy
 
   if ! step_is_complete repo_clone; then
     record_step_status first_deploy pending "repository has not been cloned yet"
@@ -572,23 +617,39 @@ run_first_deploy() {
     return 0
   fi
 
-  if [[ -f "$REPO_DIR/agent-api/package.json" && -f "$REPO_DIR/agent-ui/package.json" ]]; then
-    record_step_status first_deploy attempted "deploy preflight prerequisites are present"
-    if run_as_app_user_shell "cd '$REPO_DIR/agent-api' && npm --version >/dev/null && cd '$REPO_DIR/agent-ui' && npm --version >/dev/null"; then
-      record_step_status first_deploy complete "deploy preflight executed"
+  if [[ ! -f "$REPO_DIR/agent-api/package.json" ]]; then
+    record_step_status first_deploy pending "agent-api package manifest is missing"
+    return 0
+  fi
+
+  record_step_status first_deploy attempted "actual deploy execution started"
+  if run_as_app_user_shell "cd '$REPO_DIR/agent-api' && npm run build"; then
+    local backend_artifact="$REPO_DIR/agent-api/dist/index.js"
+    local frontend_artifact="$REPO_DIR/agent-ui/dist/index.html"
+
+    if [[ -f "$REPO_DIR/agent-ui/package.json" ]]; then
+      if ! run_as_app_user_shell "cd '$REPO_DIR/agent-ui' && npm run build"; then
+        record_step_status first_deploy pending "frontend build failed during actual deploy execution"
+        return 0
+      fi
+    fi
+
+    if [[ -f "$backend_artifact" && ( ! -f "$REPO_DIR/agent-ui/package.json" || -f "$frontend_artifact" ) ]]; then
+      record_step_status first_deploy complete "actual deploy execution completed"
     else
-      record_step_status first_deploy pending "deploy preflight command failed"
+      record_step_status first_deploy pending "deploy command ran but required build artifacts are missing"
     fi
   else
-    record_step_status first_deploy pending "package manifests are missing"
+    record_step_status first_deploy pending "actual deploy execution failed or is unavailable in this environment"
   fi
 }
 
 ensure_pm2_start() {
-  if step_is_complete pm2_start; then
+  if step_is_complete pm2_start && ! phase_forced pm2_start; then
     log_info "PM2 status already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced pm2_start
 
   if ! step_is_complete first_deploy; then
     record_step_status pm2_start pending "first deploy is not ready yet"
@@ -618,10 +679,11 @@ ensure_pm2_start() {
 }
 
 ensure_codex_verification() {
-  if step_is_complete codex_runtime_check; then
+  if step_is_complete codex_runtime_check && ! phase_forced codex_runtime_check; then
     log_info "Codex verification already recorded as complete"
     return 0
   fi
+  maybe_mark_phase_forced codex_runtime_check
 
   if [[ "$(state_bool "$SKIP_CODEX_CHECK")" == "true" ]]; then
     record_step_status codex_runtime_check skipped "operator requested skip-codex-check"
