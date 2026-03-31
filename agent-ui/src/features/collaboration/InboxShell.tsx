@@ -36,7 +36,7 @@ export function InboxShell() {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [activeTab, setActiveTab] = useState<InboxTab>("all");
-  const [pendingItemId, setPendingItemId] = useState("");
+  const [pendingItemIds, setPendingItemIds] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -70,7 +70,7 @@ export function InboxShell() {
   }, [activeTab, items]);
 
   async function applyItemUpdate(itemId: string, action: (targetItemId: string) => Promise<InboxItemRecord>) {
-    setPendingItemId(itemId);
+    setPendingItemIds((current) => (current.includes(itemId) ? current : [...current, itemId]));
     setErrorText("");
     try {
       const next = await action(itemId);
@@ -78,7 +78,7 @@ export function InboxShell() {
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "更新通知状态失败");
     } finally {
-      setPendingItemId("");
+      setPendingItemIds((current) => current.filter((currentItemId) => currentItemId !== itemId));
     }
   }
 
@@ -112,7 +112,7 @@ export function InboxShell() {
       <div className="inbox-list">
         {!loading && filteredItems.length === 0 ? <p className="field-help">当前筛选下暂无消息。</p> : null}
         {filteredItems.map((item) => {
-          const busy = pendingItemId === item.id;
+          const busy = pendingItemIds.includes(item.id);
           return (
             <article key={item.id} className={`inbox-card inbox-card-${item.status}`}>
               <div className="inbox-card-header">

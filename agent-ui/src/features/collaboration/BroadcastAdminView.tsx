@@ -39,11 +39,23 @@ function parseTargets(value: string): BroadcastTargetInput[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
     const separatorIndex = trimmed.indexOf(":");
-    const rawType = (separatorIndex >= 0 ? trimmed.slice(0, separatorIndex) : trimmed).trim();
+    const rawType = (separatorIndex >= 0 ? trimmed.slice(0, separatorIndex) : "").trim();
     const rawId = separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1).trim() : "";
-    const targetType: BroadcastTargetType =
-      rawType === "department" || rawType === "role" || rawType === "all_users" ? rawType : "all_users";
-    const targetId = targetType === "all_users" ? undefined : rawId || undefined;
+    let targetType: BroadcastTargetType;
+    let targetId: string | undefined;
+
+    if (trimmed === "all_users") {
+      targetType = "all_users";
+    } else if (rawType === "department" || rawType === "role") {
+      if (!rawId) {
+        throw new Error(`目标格式无效: ${trimmed}`);
+      }
+      targetType = rawType;
+      targetId = rawId;
+    } else {
+      throw new Error(`目标格式无效: ${trimmed}`);
+    }
+
     const key = `${targetType}:${targetId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -67,6 +79,15 @@ function draftFromBroadcast(broadcast: BroadcastRecord): BroadcastDraft {
     bodyMarkdown: broadcast.bodyMarkdown,
     targets: targetsToDraft(broadcast.targets),
     dingtalkDeliveryEnabled: broadcast.dingtalkDeliveryEnabled
+  };
+}
+
+function buildBroadcastInput(draft: BroadcastDraft) {
+  return {
+    title: draft.title,
+    bodyMarkdown: draft.bodyMarkdown,
+    dingtalkDeliveryEnabled: draft.dingtalkDeliveryEnabled,
+    targets: parseTargets(draft.targets)
   };
 }
 
@@ -118,12 +139,7 @@ export function BroadcastAdminView() {
     setErrorText("");
     setSuccessText("");
     try {
-      const input = {
-        title: draft.title,
-        bodyMarkdown: draft.bodyMarkdown,
-        dingtalkDeliveryEnabled: draft.dingtalkDeliveryEnabled,
-        targets: parseTargets(draft.targets)
-      };
+      const input = buildBroadcastInput(draft);
       const next = editingId
         ? await updateBroadcastDraft(editingId, input)
         : await createBroadcastDraft(input);
@@ -146,9 +162,15 @@ export function BroadcastAdminView() {
     setErrorText("");
     setSuccessText("");
     try {
-      const next = await publishBroadcast(broadcastId);
-      setBroadcasts((current) => current.map((item) => (item.id === broadcastId ? next : item)));
+      let publishTargetId = broadcastId;
       if (editingId === broadcastId) {
+        const savedDraft = await updateBroadcastDraft(broadcastId, buildBroadcastInput(draft));
+        publishTargetId = savedDraft.id;
+        setBroadcasts((current) => current.map((item) => (item.id === savedDraft.id ? savedDraft : item)));
+      }
+      const next = await publishBroadcast(publishTargetId);
+      setBroadcasts((current) => current.map((item) => (item.id === publishTargetId ? next : item)));
+      if (editingId === publishTargetId) {
         resetForm();
       }
       setSuccessText("广播已发布");

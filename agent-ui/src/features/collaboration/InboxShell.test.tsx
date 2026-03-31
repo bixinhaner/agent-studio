@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", () => ({
@@ -120,13 +120,45 @@ describe("InboxShell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "归档" }));
     await waitFor(() => expect(mockedArchiveInboxItem).toHaveBeenCalledWith("inbox-2"));
-    expect(screen.getByText("当前筛选下暂无消息。")) .toBeTruthy();
+    expect(screen.getByText("当前筛选下暂无消息。")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: "广播" }));
     expect(screen.getByText("节假日值班安排")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "取消归档" }));
     await waitFor(() => expect(mockedUnarchiveInboxItem).toHaveBeenCalledWith("inbox-3"));
     expect(await screen.findByRole("button", { name: "归档" })).toBeTruthy();
+  });
+
+  it("tracks pending state per item so other rows stay actionable", async () => {
+    const items = buildItems();
+    let resolveRead: ((value: InboxItemRecord) => void) | undefined;
+    mockedFetchInboxItems.mockResolvedValue(items);
+    mockedMarkInboxItemRead.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRead = resolve;
+        })
+    );
+    mockedMarkInboxItemUnread.mockResolvedValue({ ...items[1], status: "unread", readAt: undefined });
+
+    render(<InboxShell />);
+
+    await screen.findByRole("heading", { name: "通知中心" });
+    const readButton = screen.getByRole("button", { name: "标记已读" }) as HTMLButtonElement;
+    const unreadButton = screen.getByRole("button", { name: "标记未读" }) as HTMLButtonElement;
+
+    fireEvent.click(readButton);
+    expect(readButton.disabled).toBe(true);
+    expect(unreadButton.disabled).toBe(false);
+
+    fireEvent.click(unreadButton);
+    await waitFor(() => expect(mockedMarkInboxItemUnread).toHaveBeenCalledWith("inbox-2"));
+
+    await act(async () => {
+      resolveRead?.({ ...items[0], status: "read", readAt: "2026-03-31T01:05:00.000Z" });
+    });
+
+    expect(await screen.findAllByRole("button", { name: "归档" })).toHaveLength(2);
   });
 
   it("shows an error state when loading fails", async () => {

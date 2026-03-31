@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", () => ({
@@ -135,7 +135,70 @@ describe("BroadcastAdminView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "发布 平台升级公告（修订）" }));
     await waitFor(() => expect(mockedPublishBroadcast).toHaveBeenCalledWith("broadcast-1"));
-    expect(await screen.findByText("已于")) .toBeTruthy();
+    expect(await screen.findByText("已于")).toBeTruthy();
+  });
+
+  it("rejects malformed target lines and blocks saving", async () => {
+    mockedFetchAdminBroadcasts.mockResolvedValue(buildBroadcasts());
+
+    render(<BroadcastAdminView />);
+
+    await screen.findByRole("heading", { name: "广播管理" });
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "错误广播" } });
+    fireEvent.change(screen.getByLabelText("正文"), { target: { value: "正文" } });
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "ops-team\ndepartment" } });
+    fireEvent.click(screen.getByRole("button", { name: "新建草稿" }));
+
+    expect(await screen.findByText("目标格式无效: ops-team")).toBeTruthy();
+    expect(mockedCreateBroadcastDraft).not.toHaveBeenCalled();
+  });
+
+  it("publishes the current unsaved draft instead of stale server content", async () => {
+    const initial = buildBroadcasts();
+    mockedFetchAdminBroadcasts.mockResolvedValue(initial);
+    mockedUpdateBroadcastDraft.mockResolvedValue({
+      ...initial[0],
+      title: "平台升级公告（立即发布）",
+      bodyMarkdown: "立即发布新窗口",
+      dingtalkDeliveryEnabled: true,
+      updatedAt: "2026-03-31T01:15:00.000Z",
+      targets: [{ id: "target-9", broadcastId: "broadcast-1", targetType: "role", targetId: "release", createdAt: "2026-03-31T01:15:00.000Z" }]
+    });
+    mockedPublishBroadcast.mockResolvedValue({
+      id: "broadcast-1",
+      title: "平台升级公告（立即发布）",
+      bodyMarkdown: "立即发布新窗口",
+      status: "published",
+      createdByUserId: "admin-1",
+      publishedAt: "2026-03-31T01:20:00.000Z",
+      publishedByUserId: "admin-2",
+      dingtalkDeliveryEnabled: true,
+      createdAt: "2026-03-31T01:00:00.000Z",
+      updatedAt: "2026-03-31T01:20:00.000Z",
+      targets: [{ id: "target-9", broadcastId: "broadcast-1", targetType: "role", targetId: "release", createdAt: "2026-03-31T01:15:00.000Z" }]
+    });
+
+    render(<BroadcastAdminView />);
+
+    await screen.findByRole("heading", { name: "广播管理" });
+    fireEvent.click(screen.getByRole("button", { name: "编辑 平台升级公告" }));
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "平台升级公告（立即发布）" } });
+    fireEvent.change(screen.getByLabelText("正文"), { target: { value: "立即发布新窗口" } });
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "role:release" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "同步发送到钉钉" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "发布 平台升级公告" }));
+
+    await waitFor(() => {
+      expect(mockedUpdateBroadcastDraft).toHaveBeenCalledWith("broadcast-1", {
+        title: "平台升级公告（立即发布）",
+        bodyMarkdown: "立即发布新窗口",
+        dingtalkDeliveryEnabled: true,
+        targets: [{ targetType: "role", targetId: "release" }]
+      });
+    });
+    await waitFor(() => expect(mockedPublishBroadcast).toHaveBeenCalledWith("broadcast-1"));
+    expect(mockedUpdateBroadcastDraft.mock.invocationCallOrder[0]).toBeLessThan(mockedPublishBroadcast.mock.invocationCallOrder[0]);
   });
 
   it("shows request failures inline", async () => {
