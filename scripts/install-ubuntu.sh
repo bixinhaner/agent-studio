@@ -20,6 +20,8 @@ DEPLOY_KEY_PATH_EXPLICIT=0
 RUN_CLONE=1
 SHOW_HELP=0
 FORCE_ALL=0
+DEPLOY_KEY_SAFE_CHECKPOINT=0
+DEPLOY_KEY_CONTINUE_TO_CLONE=0
 declare -a FORCE_PHASES=()
 POSTGRES_DB_NAME="${POSTGRES_DB_NAME:-agent_studio}"
 POSTGRES_DB_USER="${POSTGRES_DB_USER:-agentstudio}"
@@ -441,8 +443,20 @@ ensure_base_directories() {
 }
 
 ensure_deploy_key() {
+  DEPLOY_KEY_SAFE_CHECKPOINT=0
+  DEPLOY_KEY_CONTINUE_TO_CLONE=0
+
   if step_is_complete deploy_key && ! phase_forced deploy_key; then
-    log_info "Deploy key already recorded as complete"
+    if state_read_bool deploy_key_guidance_shown "false"; then
+      if confirm_or_default "Deploy key guidance was already shown. Continue to repository clone now?" "y"; then
+        DEPLOY_KEY_CONTINUE_TO_CLONE=1
+      else
+        record_step_status repo_clone skipped "operator deferred after deploy key guidance"
+        DEPLOY_KEY_SAFE_CHECKPOINT=1
+      fi
+    else
+      log_info "Deploy key already recorded as complete"
+    fi
     return 0
   fi
   maybe_mark_phase_forced deploy_key
@@ -473,6 +487,8 @@ ensure_deploy_key() {
     cat "$DEPLOY_KEY_PATH.pub"
     printf '\n'
     log_info "Add the key as a read-only deploy key, then continue here."
+    record_install_state deploy_key_guidance_shown "true"
+    DEPLOY_KEY_SAFE_CHECKPOINT=1
   else
     record_step_status deploy_key pending "public key file is missing"
   fi
@@ -943,6 +959,13 @@ main() {
   ensure_base_directories
   if [[ "$RUN_CLONE" == "1" ]]; then
     ensure_deploy_key
+    if [[ "$DEPLOY_KEY_SAFE_CHECKPOINT" == "1" && "$DEPLOY_KEY_CONTINUE_TO_CLONE" != "1" ]]; then
+      record_step_status repo_clone pending "deploy key guidance shown; rerun to continue clone"
+      render_phase_summary
+      print_follow_up_actions
+      finalize_installation
+      exit 0
+    fi
     attempt_clone
   else
     record_step_status deploy_key skipped "clone disabled by --no-clone"

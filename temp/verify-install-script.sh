@@ -13,10 +13,8 @@ probe_app_root="$probe_root/install-root"
 probe_repo_dir="$probe_app_root/app/agent-studio"
 probe_env_backend="$probe_repo_dir/agent-api/.env"
 probe_env_frontend="$probe_repo_dir/agent-ui/.env.production"
-probe_skip_root="$probe_root/skip-install-root"
-probe_skip_state="$probe_root/skip-state.json"
-probe_skip_deploy_key="$probe_skip_root/.ssh/id_ed25519_agent_studio_deploy"
-probe_skip_log="$probe_root/skip.log"
+probe_first_log="$probe_root/first.log"
+probe_resume_log="$probe_root/resume.log"
 
 cleanup() {
   rm -rf "$probe_root"
@@ -34,13 +32,15 @@ grep -q 'ensure_secure_file_mode' "$script"
 grep -q 'print_follow_up_actions' "$script"
 grep -q 'follow_up_message_for_step' "$script"
 grep -q 'record_step_status first_deploy attempted' "$script"
+grep -q 'deploy_key_guidance_shown' "$script"
+grep -q 'Continue to repository clone now?' "$script"
 grep -q 'pg_roles' "$script"
 grep -q 'pg_database' "$script"
 grep -q 'installer_complete' "$script"
 grep -q 'record_install_state backend_env_mode "600"' "$script"
 grep -q 'record_install_state frontend_env_mode "600"' "$script"
 
-# Probe 1: ownership and env permissions in a temp install root.
+# Probe 1: key guidance stops before clone and leaves the install resumable.
 APP_USER="$current_user" \
 APP_HOME="$probe_home" \
 INSTALL_ROOT="$probe_app_root" \
@@ -51,9 +51,38 @@ bash "$script" \
   --domain example.com \
   --repo-url "$base" \
   --skip-codex-check \
-  --yes
+  --yes >"$probe_first_log" 2>&1
 
 test "$(stat -f %Su "$probe_app_root")" = "$current_user"
+grep -q 'Public key path:' "$probe_first_log"
+grep -q 'Add this public key to GitHub as a deploy key' "$probe_first_log"
+! grep -q 'Cloning repository' "$probe_first_log"
+test ! -d "$probe_repo_dir/.git"
+python3 - "$probe_state" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("installer_complete") == "false", state.get("installer_complete")
+assert state.get("deploy_key_guidance_shown") == "true", state.get("deploy_key_guidance_shown")
+assert state.get("repo_clone_status") == "pending", state.get("repo_clone_status")
+assert state.get("repo_clone_reason") == "deploy key guidance shown; rerun to continue clone", state.get("repo_clone_reason")
+PY
+
+# Probe 2: rerun continues into clone and records restricted env permissions.
+APP_USER="$current_user" \
+APP_HOME="$probe_home" \
+INSTALL_ROOT="$probe_app_root" \
+CADDY_CONFIG_FILE="$probe_caddy" \
+DEPLOY_KEY_PATH="$probe_app_root/.ssh/id_ed25519_agent_studio_deploy" \
+bash "$script" \
+  --state-file "$probe_state" \
+  --domain example.com \
+  --repo-url "$base" \
+  --skip-codex-check \
+  --yes >"$probe_resume_log" 2>&1
+grep -q 'Cloning repository' "$probe_resume_log"
 test "$(stat -f %Lp "$probe_env_backend")" = "600"
 test "$(stat -f %Lp "$probe_env_frontend")" = "600"
 python3 - "$probe_state" <<'PY'
@@ -63,33 +92,7 @@ import sys
 
 state = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert state.get("installer_complete") == "false", state.get("installer_complete")
-assert state.get("first_deploy_status") == "pending", state.get("first_deploy_status")
+assert state.get("repo_clone_status") == "complete", state.get("repo_clone_status")
 assert state.get("backend_env_mode") == "600", state.get("backend_env_mode")
 assert state.get("frontend_env_mode") == "600", state.get("frontend_env_mode")
-PY
-
-# Probe 2: skipped required work keeps the install incomplete.
-APP_USER="$current_user" \
-APP_HOME="$probe_skip_root/home" \
-INSTALL_ROOT="$probe_skip_root" \
-CADDY_CONFIG_FILE="$probe_skip_root/Caddyfile" \
-DEPLOY_KEY_PATH="$probe_skip_deploy_key" \
-bash "$script" \
-  --state-file "$probe_skip_state" \
-  --domain example.com \
-  --skip-codex-check \
-  --yes \
-  --no-clone >"$probe_skip_log" 2>&1
-grep -q 'clone disabled by --no-clone' "$probe_skip_log"
-! grep -q 'Public key path:' "$probe_skip_log"
-test ! -e "$probe_skip_deploy_key"
-python3 - "$probe_skip_state" <<'PY'
-import json
-import pathlib
-import sys
-
-state = json.loads(pathlib.Path(sys.argv[1]).read_text())
-assert state.get("installer_complete") == "false", state.get("installer_complete")
-assert state.get("repo_clone_status") == "skipped", state.get("repo_clone_status")
-assert state.get("deploy_key_status") == "skipped", state.get("deploy_key_status")
 PY
