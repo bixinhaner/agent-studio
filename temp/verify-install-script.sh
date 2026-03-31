@@ -25,6 +25,7 @@ probe_blocked_env_frontend="$probe_blocked_repo_dir/agent-ui/.env.production"
 probe_override_root="$probe_root/override-install-root"
 probe_override_state="$probe_root/override-state.json"
 probe_override_log="$probe_root/override.log"
+probe_override_resume_log="$probe_root/override-resume.log"
 probe_override_repo_dir="$probe_override_root/custom-agent-studio"
 probe_override_backend_env="$probe_root/explicit-backend.env"
 probe_override_frontend_env="$probe_root/explicit-frontend.env"
@@ -208,4 +209,33 @@ assert state.get("frontend_env_file") == sys.argv[4], state.get("frontend_env_fi
 assert state.get("backend_env_status") == "complete", state.get("backend_env_status")
 assert state.get("frontend_env_status") == "complete", state.get("frontend_env_status")
 assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
+PY
+
+# Probe 5: persisted explicit path overrides survive a later resume without env re-export.
+rm -f "$probe_override_backend_env" "$probe_override_frontend_env"
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-override" \
+INSTALL_ROOT="$probe_override_root" \
+CADDY_CONFIG_FILE="$probe_override_root/Caddyfile" \
+bash "$script" \
+  --state-file "$probe_override_state" \
+  --domain example.com \
+  --repo-dir "$probe_override_repo_dir" \
+  --skip-codex-check \
+  --yes \
+  --no-clone \
+  --force-phase env_files >"$probe_override_resume_log" 2>&1
+test -f "$probe_override_backend_env"
+test -f "$probe_override_frontend_env"
+test ! -e "$probe_override_repo_dir/agent-api/.env"
+test ! -e "$probe_override_repo_dir/agent-ui/.env.production"
+python3 - "$probe_override_state" "$probe_override_backend_env" "$probe_override_frontend_env" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("backend_env_file") == sys.argv[2], state.get("backend_env_file")
+assert state.get("frontend_env_file") == sys.argv[3], state.get("frontend_env_file")
+assert state.get("env_files_status") == "complete", state.get("env_files_status")
 PY

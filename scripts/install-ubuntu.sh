@@ -231,6 +231,26 @@ load_existing_state() {
   if [[ "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]] && state_has deploy_key_path; then
     DEPLOY_KEY_PATH="$(state_read deploy_key_path "$DEPLOY_KEY_PATH")"
   fi
+  if [[ "$APP_REPO_DIR_EXPLICIT" == "0" ]] && state_has app_repo_dir; then
+    APP_REPO_DIR="$(state_read app_repo_dir "$APP_REPO_DIR")"
+    APP_REPO_DIR_EXPLICIT=1
+  fi
+  if [[ "$APP_API_DIR_EXPLICIT" == "0" ]] && state_has app_api_dir; then
+    APP_API_DIR="$(state_read app_api_dir "$APP_API_DIR")"
+    APP_API_DIR_EXPLICIT=1
+  fi
+  if [[ "$APP_UI_DIR_EXPLICIT" == "0" ]] && state_has app_ui_dir; then
+    APP_UI_DIR="$(state_read app_ui_dir "$APP_UI_DIR")"
+    APP_UI_DIR_EXPLICIT=1
+  fi
+  if [[ "$BACKEND_ENV_FILE_EXPLICIT" == "0" ]] && state_has backend_env_file; then
+    BACKEND_ENV_FILE="$(state_read backend_env_file "$BACKEND_ENV_FILE")"
+    BACKEND_ENV_FILE_EXPLICIT=1
+  fi
+  if [[ "$FRONTEND_ENV_FILE_EXPLICIT" == "0" ]] && state_has frontend_env_file; then
+    FRONTEND_ENV_FILE="$(state_read frontend_env_file "$FRONTEND_ENV_FILE")"
+    FRONTEND_ENV_FILE_EXPLICIT=1
+  fi
   if state_has skip_codex_check; then
     SKIP_CODEX_CHECK="$(state_read_bool skip_codex_check "$SKIP_CODEX_CHECK")"
   fi
