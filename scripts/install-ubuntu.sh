@@ -88,9 +88,13 @@ phase_forced() {
   local phase="$1"
   local forced
 
-  [[ "$FORCE_ALL" == "1" ]] && return 0
+  if [[ "$FORCE_ALL" == "1" ]]; then
+    return 0
+  fi
   for forced in "${FORCE_PHASES[@]:-}"; do
-    [[ "$forced" == "$phase" ]] && return 0
+    if [[ "$forced" == "$phase" ]]; then
+      return 0
+    fi
   done
   return 1
 }
@@ -140,19 +144,37 @@ resolve_state_file() {
 }
 
 load_existing_state() {
-  [[ -f "$INSTALL_STATE_FILE" ]] || return 0
+  if [[ ! -f "$INSTALL_STATE_FILE" ]]; then
+    return 0
+  fi
 
-  [[ -z "$DOMAIN" ]] && DOMAIN="$(state_read domain "")"
-  [[ -z "$REPO_URL" ]] && REPO_URL="$(state_read repo_url "")"
-  [[ -z "$REPO_DIR" ]] && REPO_DIR="$(state_read repo_dir "")"
+  if [[ -z "$DOMAIN" ]]; then
+    DOMAIN="$(state_read domain "")"
+  fi
+  if [[ -z "$REPO_URL" ]]; then
+    REPO_URL="$(state_read repo_url "")"
+  fi
+  if [[ -z "$REPO_DIR" ]]; then
+    REPO_DIR="$(state_read repo_dir "")"
+  fi
   if [[ -z "$DEPLOY_KEY_PATH" || "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]]; then
     DEPLOY_KEY_PATH="$(state_read deploy_key_path "$DEPLOY_KEY_PATH")"
   fi
-  [[ -z "$POSTGRES_DB_PASSWORD" ]] && POSTGRES_DB_PASSWORD="$(state_read postgres_db_password "")"
-  [[ -z "$SESSION_COOKIE_SECRET" ]] && SESSION_COOKIE_SECRET="$(state_read session_cookie_secret "")"
-  [[ -z "$DINGTALK_CLIENT_ID" ]] && DINGTALK_CLIENT_ID="$(state_read dingtalk_client_id "")"
-  [[ -z "$DINGTALK_REDIRECT_URI" ]] && DINGTALK_REDIRECT_URI="$(state_read dingtalk_redirect_uri "")"
-  [[ -z "$DINGTALK_SCOPE" ]] && DINGTALK_SCOPE="$(state_read dingtalk_scope "openid")"
+  if [[ -z "$POSTGRES_DB_PASSWORD" ]]; then
+    POSTGRES_DB_PASSWORD="$(state_read postgres_db_password "")"
+  fi
+  if [[ -z "$SESSION_COOKIE_SECRET" ]]; then
+    SESSION_COOKIE_SECRET="$(state_read session_cookie_secret "")"
+  fi
+  if [[ -z "$DINGTALK_CLIENT_ID" ]]; then
+    DINGTALK_CLIENT_ID="$(state_read dingtalk_client_id "")"
+  fi
+  if [[ -z "$DINGTALK_REDIRECT_URI" ]]; then
+    DINGTALK_REDIRECT_URI="$(state_read dingtalk_redirect_uri "")"
+  fi
+  if [[ -z "$DINGTALK_SCOPE" ]]; then
+    DINGTALK_SCOPE="$(state_read dingtalk_scope "openid")"
+  fi
 }
 
 normalize_legacy_state_defaults() {
@@ -207,7 +229,10 @@ repo_checkout_is_usable() {
 }
 
 repo_dir_has_entries() {
-  [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]
+  if [[ ! -d "$1" ]]; then
+    return 1
+  fi
+  [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]
 }
 
 prompt_with_default() {
@@ -732,10 +757,18 @@ ensure_integration_bootstrap() {
   existing_dingtalk_redirect_uri="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI)"
   existing_dingtalk_scope="$(read_env_value_if_exists "$BACKEND_ENV_FILE" DINGTALK_SCOPE)"
 
-  [[ -z "$DINGTALK_CLIENT_ID" ]] && DINGTALK_CLIENT_ID="$existing_dingtalk_client_id"
-  [[ -z "$DINGTALK_CLIENT_SECRET" ]] && DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
-  [[ -z "$DINGTALK_REDIRECT_URI" ]] && DINGTALK_REDIRECT_URI="$existing_dingtalk_redirect_uri"
-  [[ -z "$DINGTALK_SCOPE" ]] && DINGTALK_SCOPE="${existing_dingtalk_scope:-openid}"
+  if [[ -z "$DINGTALK_CLIENT_ID" ]]; then
+    DINGTALK_CLIENT_ID="$existing_dingtalk_client_id"
+  fi
+  if [[ -z "$DINGTALK_CLIENT_SECRET" ]]; then
+    DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
+  fi
+  if [[ -z "$DINGTALK_REDIRECT_URI" ]]; then
+    DINGTALK_REDIRECT_URI="$existing_dingtalk_redirect_uri"
+  fi
+  if [[ -z "$DINGTALK_SCOPE" ]]; then
+    DINGTALK_SCOPE="${existing_dingtalk_scope:-openid}"
+  fi
 
   if [[ -z "$DINGTALK_REDIRECT_URI" && -n "$default_redirect_uri" ]]; then
     DINGTALK_REDIRECT_URI="$default_redirect_uri"
@@ -744,15 +777,21 @@ ensure_integration_bootstrap() {
   if [[ -n "$DINGTALK_CLIENT_ID" && -n "$DINGTALK_CLIENT_SECRET" ]]; then
     write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_ID "$DINGTALK_CLIENT_ID"
     write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_CLIENT_SECRET "$DINGTALK_CLIENT_SECRET"
-    [[ -n "$DINGTALK_REDIRECT_URI" ]] && write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "$DINGTALK_REDIRECT_URI"
-    [[ -n "$DINGTALK_SCOPE" ]] && write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_SCOPE "$DINGTALK_SCOPE"
+    if [[ -n "$DINGTALK_REDIRECT_URI" ]]; then
+      write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "$DINGTALK_REDIRECT_URI"
+    fi
+    if [[ -n "$DINGTALK_SCOPE" ]]; then
+      write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_SCOPE "$DINGTALK_SCOPE"
+    fi
     dingtalk_status="configured"
   else
     if confirm_or_default "Configure DingTalk OAuth now?" "y"; then
       prompt_optional DINGTALK_CLIENT_ID "Enter DINGTALK_CLIENT_ID" "$DINGTALK_CLIENT_ID"
       if [[ -n "$DINGTALK_CLIENT_ID" ]]; then
         prompt_secret DINGTALK_CLIENT_SECRET "Enter DINGTALK_CLIENT_SECRET"
-        [[ -z "$DINGTALK_CLIENT_SECRET" ]] && DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
+        if [[ -z "$DINGTALK_CLIENT_SECRET" ]]; then
+          DINGTALK_CLIENT_SECRET="$existing_dingtalk_client_secret"
+        fi
       fi
       prompt_optional DINGTALK_REDIRECT_URI "Enter DINGTALK_REDIRECT_URI" "${DINGTALK_REDIRECT_URI:-$default_redirect_uri}"
       prompt_optional DINGTALK_SCOPE "Enter DINGTALK_SCOPE" "${DINGTALK_SCOPE:-openid}"
@@ -980,7 +1019,9 @@ print_follow_up_actions() {
     fi
     printed=1
   done
-  [[ "$printed" -eq 0 ]] && log_info "No pending or skipped phases remain."
+  if [[ "$printed" -eq 0 ]]; then
+    log_info "No pending or skipped phases remain."
+  fi
 }
 
 finalize_installation() {
