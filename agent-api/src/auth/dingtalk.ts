@@ -441,7 +441,7 @@ export function createDingTalkClient(
         {
           method: "GET",
           headers: {
-            authorization: `Bearer ${accessToken}`
+            "x-acs-dingtalk-access-token": accessToken
           }
         },
         fetchImpl

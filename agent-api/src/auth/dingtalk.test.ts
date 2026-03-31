@@ -327,6 +327,74 @@ describe("createDingTalkClient", () => {
     );
   });
 
+  it("exchanges an oauth code using the user access token and reads the current user with the ACS access-token header", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "user-token-1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            unionId: "union-123",
+            openId: "open-123",
+            nick: "Agent User",
+            email: "agent@example.com"
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      );
+
+    const client = createDingTalkClient(
+      {
+        clientId: "ding-client-id",
+        clientSecret: "ding-client-secret",
+        redirectUri: "https://agent.example.com/auth/dingtalk/callback",
+        scope: "openid"
+      },
+      fetchMock
+    );
+
+    await expect(client.exchangeCode("auth-code")).resolves.toEqual({
+      unionId: "union-123",
+      openId: "open-123",
+      email: "agent@example.com",
+      displayName: "Agent User"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          clientId: "ding-client-id",
+          clientSecret: "ding-client-secret",
+          code: "auth-code",
+          grantType: "authorization_code",
+          redirectUri: "https://agent.example.com/auth/dingtalk/callback"
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.dingtalk.com/v1.0/contact/users/me",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          "x-acs-dingtalk-access-token": "user-token-1"
+        }
+      })
+    );
+  });
+
   it("rejects a DingTalk user profile that lacks unionId", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
