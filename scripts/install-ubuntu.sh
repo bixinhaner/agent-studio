@@ -23,47 +23,51 @@ if [[ -n "${DEPLOY_KEY_PATH+x}" ]]; then DEPLOY_KEY_PATH_EXPLICIT=1; fi
 # shellcheck source=/dev/null
 source "$script_dir/lib/common.sh"
 
-# INSTALL_STATE_FILE defaults to /usr/local/agent-studio/install-state.json in scripts/lib/common.sh.
-
 DOMAIN="${DOMAIN:-}"
 REPO_URL="${REPO_URL:-}"
-REPO_DIR="${REPO_DIR:-$APP_REPO_DIR}"
-DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$HOME/.ssh/id_ed25519_agent_studio_deploy}"
+REPO_DIR="${REPO_DIR:-}"
+DEPLOY_KEY_PATH="${DEPLOY_KEY_PATH:-$APP_HOME/.ssh/id_ed25519_agent_studio_deploy}"
 SKIP_CODEX_CHECK="${SKIP_CODEX_CHECK:-0}"
 ASSUME_YES="${ASSUME_YES:-0}"
 STATE_FILE_OVERRIDE="${STATE_FILE_OVERRIDE:-}"
 RUN_CLONE=1
 SHOW_HELP=0
 FORCE_ALL=0
-DEPLOY_KEY_SAFE_CHECKPOINT=0
-DEPLOY_KEY_CONTINUE_TO_CLONE=0
 declare -a FORCE_PHASES=()
 POSTGRES_DB_NAME="${POSTGRES_DB_NAME:-agent_studio}"
 POSTGRES_DB_USER="${POSTGRES_DB_USER:-agentstudio}"
+POSTGRES_DB_PASSWORD="${POSTGRES_DB_PASSWORD:-}"
 POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+DEFAULT_MODEL="${DEFAULT_MODEL:-gpt-5.4}"
+DEFAULT_REASONING_EFFORT="${DEFAULT_REASONING_EFFORT:-high}"
+SESSION_COOKIE_SECRET="${SESSION_COOKIE_SECRET:-}"
+DEPLOY_KEY_SAFE_CHECKPOINT=0
+DEPLOY_KEY_CONTINUE_TO_CLONE=0
 
 usage() {
   cat <<USAGE
 Usage: $(basename "$0") [options]
 
-Resumable Ubuntu installer for Agent Studio.
+Root-only Ubuntu installer for Agent Studio.
+
+Default behavior:
+  - if the current working directory is a git checkout, it is used as the repo
+  - otherwise the repo defaults to $INSTALL_ROOT
+  - if no local checkout exists, the installer can clone into $INSTALL_ROOT
 
 Options:
   --domain <name>           Public domain to configure for Caddy
-  --repo-url <url>          Private Git repository clone URL
-  --repo-dir <path>         Target repository directory [default: $APP_REPO_DIR]
-  --deploy-key-path <path>  SSH deploy key path [default: $HOME/.ssh/id_ed25519_agent_studio_deploy]
-  --skip-codex-check        Mark Codex runtime verification as skipped
-  --yes                     Use defaults for prompts where possible
+  --repo-url <url>          Git repository clone URL (used when clone is needed)
+  --repo-dir <path>         Repository directory override
+  --deploy-key-path <path>  SSH deploy key path [default: $APP_HOME/.ssh/id_ed25519_agent_studio_deploy]
+  --skip-codex-check        Skip Codex runtime verification
+  --yes                     Accept defaults for prompts where possible
   --state-file <path>       Override install state file path
-  --no-clone                Skip the clone attempt and record it as skipped
+  --no-clone                Skip clone if no local checkout exists
   --force-phase <name>      Force a completed phase to run again (repeatable)
   --force-all               Force all completed phases to run again
   -h, --help                Show this help text
-
-This installer is resumable. Re-run it to continue from the last recorded state
-after resolving any skipped or pending prerequisites.
 USAGE
 }
 
@@ -80,89 +84,22 @@ phase_forced() {
   local phase="$1"
   local forced
 
-  if [[ "$FORCE_ALL" == "1" ]]; then
-    return 0
-  fi
-
+  [[ "$FORCE_ALL" == "1" ]] && return 0
   for forced in "${FORCE_PHASES[@]:-}"; do
-    if [[ "$forced" == "$phase" ]]; then
-      return 0
-    fi
+    [[ "$forced" == "$phase" ]] && return 0
   done
-
   return 1
 }
 
 maybe_mark_phase_forced() {
   local phase="$1"
-  if phase_forced "$phase"; then
-    record_install_state "${phase}_forced" "true"
-  fi
-}
-
-follow_up_message_for_step() {
-  case "$1" in
-    app_user)
-      printf '%s' "Create or confirm the $APP_USER user, then rerun with root privileges if creation is still needed."
-      ;;
-    base_directories)
-      printf '%s' "Create the install directories under $INSTALL_ROOT, or rerun as a user allowed to create them."
-      ;;
-    deploy_key)
-      printf '%s' "Generate the deploy key at $DEPLOY_KEY_PATH, add the public key to GitHub, then rerun."
-      ;;
-    repo_clone)
-      printf '%s' "Provide a valid repository URL and rerun; use --force-phase repo_clone to overwrite an existing target directory intentionally."
-      ;;
-    postgres)
-      printf '%s' "Install PostgreSQL, create the $POSTGRES_DB_USER role and $POSTGRES_DB_NAME database, then rerun."
-      ;;
-    env_files)
-      printf '%s' "Ensure the repository is present, then rerun; use --force-phase env_files to overwrite existing env files intentionally."
-      ;;
-    caddy_config)
-      printf '%s' "Provide --domain and rerun; use --force-phase caddy_config to rewrite the Caddy config intentionally."
-      ;;
-    first_deploy)
-      printf '%s' "Install the build toolchain and rerun after the deploy command can actually produce build artifacts; use --force-phase first_deploy to retry intentionally."
-      ;;
-    pm2_start)
-      printf '%s' "Install pm2 and ensure first deploy is complete, then rerun; use --force-phase pm2_start to retry intentionally."
-      ;;
-    codex_runtime_check)
-      printf '%s' "Install the codex CLI or pass --skip-codex-check, then rerun."
-      ;;
-    *)
-      printf '%s' "Rerun after resolving the recorded prerequisite."
-      ;;
-  esac
-}
-
-ensure_owned_path() {
-  local path="$1"
-  local label="$2"
-
-  if apply_app_user_ownership "$path"; then
-    record_install_state "${label}_owner" "$APP_USER"
-    record_install_state "${label}_ownership_status" "complete"
-    return 0
-  fi
-
-  record_install_state "${label}_ownership_status" "pending"
-  record_install_state "${label}_ownership_reason" "ownership should be applied by $APP_USER or root"
-  return 1
+  phase_forced "$phase" && record_install_state "${phase}_forced" "true"
 }
 
 record_install_state() {
   local key="$1"
   local value="${2:-}"
   state_write "$key" "$value"
-}
-
-record_install_json() {
-  local key="$1"
-  local value="${2:-null}"
-  state_write_json "$key" "$value"
 }
 
 record_step_status() {
@@ -173,9 +110,13 @@ record_step_status() {
   state_write "${step}_status" "$status"
   if [[ -n "$reason" ]]; then
     state_write "${step}_reason" "$reason"
+  else
+    state_delete "${step}_reason"
   fi
   if [[ "$status" == "skipped" ]]; then
     state_write "${step}_skipped" "true"
+  else
+    state_delete "${step}_skipped"
   fi
 }
 
@@ -187,34 +128,6 @@ step_is_complete() {
   [[ "$(step_status "$1")" == "complete" ]]
 }
 
-ensure_state_defaults() {
-  record_install_state script_version "task2-resumable-installer"
-  record_install_state install_root "$INSTALL_ROOT"
-  record_install_state install_state_file "$INSTALL_STATE_FILE"
-  record_install_state resume_enabled "true"
-  record_install_state app_user "$APP_USER"
-  record_install_state app_home "$APP_HOME"
-  record_install_state repo_dir "$REPO_DIR"
-  record_install_state app_repo_dir "$APP_REPO_DIR"
-  record_install_state app_repo_dir_explicit "$(state_bool "$APP_REPO_DIR_EXPLICIT")"
-  record_install_state app_api_dir "$APP_API_DIR"
-  record_install_state app_api_dir_explicit "$(state_bool "$APP_API_DIR_EXPLICIT")"
-  record_install_state app_ui_dir "$APP_UI_DIR"
-  record_install_state app_ui_dir_explicit "$(state_bool "$APP_UI_DIR_EXPLICIT")"
-  record_install_state backend_env_file "$BACKEND_ENV_FILE"
-  record_install_state backend_env_file_explicit "$(state_bool "$BACKEND_ENV_FILE_EXPLICIT")"
-  record_install_state frontend_env_file "$FRONTEND_ENV_FILE"
-  record_install_state frontend_env_file_explicit "$(state_bool "$FRONTEND_ENV_FILE_EXPLICIT")"
-  record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
-  record_install_state domain "$DOMAIN"
-  record_install_state repo_url "$REPO_URL"
-  record_install_state skip_codex_check "$(state_bool "$SKIP_CODEX_CHECK")"
-  record_install_state postgres_db_name "$POSTGRES_DB_NAME"
-  record_install_state postgres_db_user "$POSTGRES_DB_USER"
-  record_install_state postgres_host "$POSTGRES_HOST"
-  record_install_state postgres_port "$POSTGRES_PORT"
-}
-
 resolve_state_file() {
   if [[ -n "$STATE_FILE_OVERRIDE" ]]; then
     INSTALL_STATE_FILE="$STATE_FILE_OVERRIDE"
@@ -224,52 +137,31 @@ resolve_state_file() {
 load_existing_state() {
   [[ -f "$INSTALL_STATE_FILE" ]] || return 0
 
-  if [[ -z "$DOMAIN" ]]; then
-    DOMAIN="$(state_read domain "")"
-  fi
-  if [[ -z "$REPO_URL" ]]; then
-    REPO_URL="$(state_read repo_url "")"
-  fi
-  if [[ "$REPO_DIR_EXPLICIT" == "0" ]] && state_has repo_dir; then
-    REPO_DIR="$(state_read repo_dir "$REPO_DIR")"
-  fi
-  if [[ "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]] && state_has deploy_key_path; then
+  [[ -z "$DOMAIN" ]] && DOMAIN="$(state_read domain "")"
+  [[ -z "$REPO_URL" ]] && REPO_URL="$(state_read repo_url "")"
+  [[ -z "$REPO_DIR" ]] && REPO_DIR="$(state_read repo_dir "")"
+  if [[ -z "$DEPLOY_KEY_PATH" || "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]]; then
     DEPLOY_KEY_PATH="$(state_read deploy_key_path "$DEPLOY_KEY_PATH")"
   fi
-  if [[ "$APP_REPO_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_repo_dir_explicit "false")" == "true" ]] && state_has app_repo_dir; then
-    APP_REPO_DIR="$(state_read app_repo_dir "$APP_REPO_DIR")"
-    APP_REPO_DIR_EXPLICIT=1
+  [[ -z "$POSTGRES_DB_PASSWORD" ]] && POSTGRES_DB_PASSWORD="$(state_read postgres_db_password "")"
+  [[ -z "$SESSION_COOKIE_SECRET" ]] && SESSION_COOKIE_SECRET="$(state_read session_cookie_secret "")"
+}
+
+detect_default_repo_dir() {
+  if [[ "$REPO_DIR_EXPLICIT" == "1" && -n "$REPO_DIR" ]]; then
+    return 0
   fi
-  if [[ "$APP_API_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_api_dir_explicit "false")" == "true" ]] && state_has app_api_dir; then
-    APP_API_DIR="$(state_read app_api_dir "$APP_API_DIR")"
-    APP_API_DIR_EXPLICIT=1
+
+  if [[ -n "$REPO_DIR" ]]; then
+    return 0
   fi
-  if [[ "$APP_UI_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_ui_dir_explicit "false")" == "true" ]] && state_has app_ui_dir; then
-    APP_UI_DIR="$(state_read app_ui_dir "$APP_UI_DIR")"
-    APP_UI_DIR_EXPLICIT=1
-  fi
-  if [[ "$BACKEND_ENV_FILE_EXPLICIT" == "0" ]] && [[ "$(state_read_bool backend_env_file_explicit "false")" == "true" ]] && state_has backend_env_file; then
-    BACKEND_ENV_FILE="$(state_read backend_env_file "$BACKEND_ENV_FILE")"
-    BACKEND_ENV_FILE_EXPLICIT=1
-  fi
-  if [[ "$FRONTEND_ENV_FILE_EXPLICIT" == "0" ]] && [[ "$(state_read_bool frontend_env_file_explicit "false")" == "true" ]] && state_has frontend_env_file; then
-    FRONTEND_ENV_FILE="$(state_read frontend_env_file "$FRONTEND_ENV_FILE")"
-    FRONTEND_ENV_FILE_EXPLICIT=1
-  fi
-  if state_has skip_codex_check; then
-    SKIP_CODEX_CHECK="$(state_read_bool skip_codex_check "$SKIP_CODEX_CHECK")"
-  fi
-  if state_has postgres_db_name; then
-    POSTGRES_DB_NAME="$(state_read postgres_db_name "$POSTGRES_DB_NAME")"
-  fi
-  if state_has postgres_db_user; then
-    POSTGRES_DB_USER="$(state_read postgres_db_user "$POSTGRES_DB_USER")"
-  fi
-  if state_has postgres_host; then
-    POSTGRES_HOST="$(state_read postgres_host "$POSTGRES_HOST")"
-  fi
-  if state_has postgres_port; then
-    POSTGRES_PORT="$(state_read postgres_port "$POSTGRES_PORT")"
+
+  if current_dir_is_git_checkout; then
+    REPO_DIR="$(pwd -P)"
+    record_install_state repo_resolution "current_directory_checkout"
+  else
+    REPO_DIR="$INSTALL_ROOT"
+    record_install_state repo_resolution "install_root_default"
   fi
 }
 
@@ -279,34 +171,65 @@ refresh_paths_from_repo_dir() {
 
 repo_checkout_is_usable() {
   [[ -d "$REPO_DIR" ]] || return 1
+  git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  [[ -f "$REPO_DIR/agent-api/package.json" ]] || return 1
+  [[ -f "$REPO_DIR/agent-ui/package.json" ]] || return 1
+  return 0
+}
 
-  local repo_root
-  repo_root="$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null)" || return 1
+repo_dir_has_entries() {
+  [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]
+}
 
-  [[ "$repo_root" == "$(cd "$REPO_DIR" && pwd -P)" ]]
+prompt_with_default() {
+  local __var_name="$1"
+  local prompt="$2"
+  local default="$3"
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    printf -v "$__var_name" '%s' "$default"
+    return 0
+  fi
+  prompt_input "$__var_name" "$prompt" "$default"
+}
+
+prompt_optional() {
+  local __var_name="$1"
+  local prompt="$2"
+  local default="${3:-}"
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    printf -v "$__var_name" '%s' "$default"
+    return 0
+  fi
+  prompt_input "$__var_name" "$prompt" "$default"
+}
+
+confirm_or_default() {
+  local prompt="$1"
+  local default="${2:-y}"
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    [[ "$(printf '%s' "$default" | tr '[:upper:]' '[:lower:]')" =~ ^(y|yes)$ ]]
+    return
+  fi
+  prompt_confirm "$prompt" "$default"
 }
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --domain)
-        [[ $# -ge 2 ]] || die "--domain requires a value"
         DOMAIN="$2"
         shift 2
         ;;
       --repo-url)
-        [[ $# -ge 2 ]] || die "--repo-url requires a value"
         REPO_URL="$2"
         shift 2
         ;;
       --repo-dir)
-        [[ $# -ge 2 ]] || die "--repo-dir requires a value"
         REPO_DIR="$2"
         REPO_DIR_EXPLICIT=1
         shift 2
         ;;
       --deploy-key-path)
-        [[ $# -ge 2 ]] || die "--deploy-key-path requires a value"
         DEPLOY_KEY_PATH="$2"
         DEPLOY_KEY_PATH_EXPLICIT=1
         shift 2
@@ -320,9 +243,7 @@ parse_args() {
         shift
         ;;
       --state-file)
-        [[ $# -ge 2 ]] || die "--state-file requires a value"
         STATE_FILE_OVERRIDE="$2"
-        INSTALL_STATE_FILE="$2"
         shift 2
         ;;
       --no-clone)
@@ -330,7 +251,6 @@ parse_args() {
         shift
         ;;
       --force-phase)
-        [[ $# -ge 2 ]] || die "--force-phase requires a phase name"
         FORCE_PHASES+=("$2")
         shift 2
         ;;
@@ -349,58 +269,13 @@ parse_args() {
   done
 }
 
-prompt_with_default() {
-  local __var_name="$1"
-  local prompt="$2"
-  local default="$3"
-
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    printf -v "$__var_name" '%s' "$default"
-    return 0
-  fi
-
-  prompt_input "$__var_name" "$prompt" "$default"
-}
-
-prompt_optional() {
-  local __var_name="$1"
-  local prompt="$2"
-  local default="${3:-}"
-
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    printf -v "$__var_name" '%s' "$default"
-    return 0
-  fi
-
-  if [[ -n "$default" ]]; then
-    prompt_input "$__var_name" "$prompt" "$default"
-  else
-    prompt_input "$__var_name" "$prompt"
-  fi
-}
-
-confirm_or_default() {
-  local prompt="$1"
-  local default="${2:-y}"
-
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    return 0
-  fi
-
-  prompt_confirm "$prompt" "$default"
-}
-
-ensure_writable_parent() {
-  local path="$1"
-  ensure_dir "$(dirname "$path")"
-}
-
 prompt_for_missing_values() {
   if [[ -z "$DOMAIN" ]]; then
     prompt_with_default DOMAIN "Enter the public domain for Caddy" ""
   fi
-  if [[ -z "$REPO_URL" ]]; then
-    prompt_optional REPO_URL "Enter the private Git repository URL" ""
+
+  if ! repo_checkout_is_usable && [[ -z "$REPO_URL" ]]; then
+    prompt_optional REPO_URL "Enter the Git repository URL only if clone is needed" ""
   fi
 
   record_install_state domain "$DOMAIN"
@@ -420,50 +295,52 @@ summarize_configuration() {
   log_info "skip codex check: $(state_bool "$SKIP_CODEX_CHECK")"
 }
 
+ensure_state_defaults() {
+  record_install_state install_root "$INSTALL_ROOT"
+  record_install_state install_state_file "$INSTALL_STATE_FILE"
+  record_install_state app_user "$APP_USER"
+  record_install_state app_home "$APP_HOME"
+  record_install_state repo_dir "$REPO_DIR"
+  record_install_state app_repo_dir "$APP_REPO_DIR"
+  record_install_state app_api_dir "$APP_API_DIR"
+  record_install_state app_ui_dir "$APP_UI_DIR"
+  record_install_state backend_env_file "$BACKEND_ENV_FILE"
+  record_install_state frontend_env_file "$FRONTEND_ENV_FILE"
+  record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
+  record_install_state postgres_db_name "$POSTGRES_DB_NAME"
+  record_install_state postgres_db_user "$POSTGRES_DB_USER"
+  record_install_state postgres_host "$POSTGRES_HOST"
+  record_install_state postgres_port "$POSTGRES_PORT"
+}
+
+ensure_owned_path() {
+  local path="$1"
+  local label="$2"
+  if apply_app_user_ownership "$path"; then
+    record_install_state "${label}_ownership_status" "complete"
+    return 0
+  fi
+  record_install_state "${label}_ownership_status" "pending"
+  return 1
+}
+
 ensure_app_user() {
   if step_is_complete app_user && ! phase_forced app_user; then
-    log_info "App user already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced app_user
-
-  if [[ "$(id -un)" == "$APP_USER" ]]; then
-    record_step_status app_user complete "current shell user already matches app user"
-    return 0
-  fi
 
   if id "$APP_USER" >/dev/null 2>&1; then
     record_step_status app_user complete "app user already exists"
     return 0
   fi
 
-  if [[ "$(id -u)" -ne 0 ]]; then
-    record_step_status app_user pending "root privileges are required to create $APP_USER"
-    log_warn "App user $APP_USER does not exist and this shell is not root; recorded pending status"
-    return 0
-  fi
-
-  if ! command -v useradd >/dev/null 2>&1; then
-    record_step_status app_user pending "useradd is not available"
-    log_warn "useradd is unavailable; recorded pending app-user status"
-    return 0
-  fi
-
-  if ! confirm_or_default "Create the $APP_USER system user now?" "y"; then
-    record_step_status app_user skipped "operator skipped user creation"
-    return 0
-  fi
-
-  if useradd --system --create-home --home-dir "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"; then
-    record_step_status app_user complete "created $APP_USER system user"
-  else
-    record_step_status app_user failed "useradd failed"
-  fi
+  useradd --system --create-home --home-dir "$APP_HOME" --shell /bin/bash "$APP_USER"
+  record_step_status app_user complete "created app user"
 }
 
 ensure_base_directories() {
   if step_is_complete base_directories && ! phase_forced base_directories; then
-    log_info "Base directories already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced base_directories
@@ -475,48 +352,80 @@ ensure_base_directories() {
     "$WORKSPACE_ROOT"
     "$SESSION_UPLOAD_ROOT"
     "$KNOWLEDGE_SET_ROOT"
-    "$(dirname "$PM2_ECOSYSTEM_FILE")"
-    "$APP_HOME"
     "$(dirname "$INSTALL_STATE_FILE")"
+    "$(dirname "$PM2_ECOSYSTEM_FILE")"
   )
   local dir
 
   for dir in "${dirs[@]}"; do
-    if ! ensure_dir "$dir"; then
-      record_step_status base_directories pending "failed to create $dir"
-      return 0
-    fi
+    ensure_dir "$dir"
   done
 
-  if ensure_owned_path "$INSTALL_ROOT" "install_root"; then
-    record_install_state base_directories_owner "$APP_USER"
-  fi
-  ensure_owned_path "$DATA_ROOT" "data_root" || true
-  ensure_owned_path "$WORKSPACE_ROOT" "workspace_root" || true
-  ensure_owned_path "$SESSION_UPLOAD_ROOT" "session_upload_root" || true
-  ensure_owned_path "$KNOWLEDGE_SET_ROOT" "knowledge_set_root" || true
-  ensure_owned_path "$APP_HOME" "app_home" || true
+  ensure_owned_path "$INSTALL_ROOT" install_root || true
+  ensure_owned_path "$DATA_ROOT" data_root || true
+  ensure_owned_path "$WORKSPACE_ROOT" workspace_root || true
+  ensure_owned_path "$SESSION_UPLOAD_ROOT" session_upload_root || true
+  ensure_owned_path "$KNOWLEDGE_SET_ROOT" knowledge_set_root || true
+  ensure_owned_path "$APP_HOME" app_home || true
 
   record_step_status base_directories complete "base directories exist"
+}
+
+ensure_system_dependencies() {
+  if step_is_complete system_dependencies && ! phase_forced system_dependencies; then
+    return 0
+  fi
+  maybe_mark_phase_forced system_dependencies
+
+  if [[ ! -f /etc/os-release ]] || ! grep -qi 'ubuntu' /etc/os-release; then
+    record_step_status system_dependencies pending "automatic dependency installation currently targets Ubuntu"
+    return 0
+  fi
+
+  ensure_ubuntu_apt_packages \
+    sudo git curl ca-certificates build-essential python3 openssl unzip \
+    gnupg debian-keyring debian-archive-keyring apt-transport-https \
+    postgresql postgresql-contrib
+
+  if ! command_exists caddy; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -y
+    apt-get install -y caddy
+  fi
+
+  ensure_nodesource_nodejs
+  ensure_global_pm2
+
+  command_exists git || die "git install failed"
+  command_exists sudo || die "sudo install failed"
+  command_exists curl || die "curl install failed"
+  command_exists python3 || die "python3 install failed"
+  command_exists psql || die "postgresql client install failed"
+  command_exists caddy || die "caddy install failed"
+  command_exists node || die "node install failed"
+  command_exists npm || die "npm install failed"
+  command_exists pm2 || die "pm2 install failed"
+
+  record_step_status system_dependencies complete "system dependencies are installed"
 }
 
 ensure_deploy_key() {
   DEPLOY_KEY_SAFE_CHECKPOINT=0
   DEPLOY_KEY_CONTINUE_TO_CLONE=0
 
+  if repo_checkout_is_usable; then
+    record_step_status deploy_key complete "local repository checkout already exists"
+    return 0
+  fi
+
   if step_is_complete deploy_key && ! phase_forced deploy_key; then
-    if step_is_complete repo_clone; then
-      DEPLOY_KEY_CONTINUE_TO_CLONE=1
-      log_info "Repository clone is already complete; deploy key checkpoint is satisfied"
-    elif state_read_bool deploy_key_guidance_shown "false"; then
+    if [[ "$(state_read_bool deploy_key_guidance_shown false)" == "true" ]]; then
       if confirm_or_default "Deploy key guidance was already shown. Continue to repository clone now?" "y"; then
         DEPLOY_KEY_CONTINUE_TO_CLONE=1
       else
-        record_step_status repo_clone skipped "operator deferred after deploy key guidance"
         DEPLOY_KEY_SAFE_CHECKPOINT=1
       fi
-    else
-      log_info "Deploy key already recorded as complete"
     fi
     return 0
   fi
@@ -524,70 +433,51 @@ ensure_deploy_key() {
 
   if [[ -f "$DEPLOY_KEY_PATH" && -f "$DEPLOY_KEY_PATH.pub" ]]; then
     record_step_status deploy_key complete "deploy key already present"
-    record_install_state deploy_key_generated "false"
-  elif ! command -v ssh-keygen >/dev/null 2>&1; then
-    record_step_status deploy_key pending "ssh-keygen is not available"
+    if [[ "$(state_read_bool deploy_key_guidance_shown false)" == "true" ]]; then
+      DEPLOY_KEY_CONTINUE_TO_CLONE=1
+    fi
     return 0
-  elif ! confirm_or_default "Generate an SSH deploy key for private repo access now?" "y"; then
+  fi
+
+  if ! confirm_or_default "Generate an SSH deploy key for private repo access now?" "n"; then
     record_step_status deploy_key skipped "operator skipped deploy key generation"
     return 0
-  else
-    ensure_writable_parent "$DEPLOY_KEY_PATH"
-    if ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null; then
-      record_step_status deploy_key complete "generated deploy key"
-      record_install_state deploy_key_generated "true"
-    else
-      record_step_status deploy_key failed "ssh-keygen failed"
-      return 0
-    fi
   fi
 
-  if [[ -f "$DEPLOY_KEY_PATH.pub" ]]; then
-    log_step "Add this public key to GitHub as a deploy key"
-    log_info "Public key path: $DEPLOY_KEY_PATH.pub"
-    cat "$DEPLOY_KEY_PATH.pub"
-    printf '\n'
-    log_info "Add the key as a read-only deploy key, then continue here."
-    record_install_state deploy_key_guidance_shown "true"
-    DEPLOY_KEY_SAFE_CHECKPOINT=1
-  else
-    record_step_status deploy_key pending "public key file is missing"
-  fi
-}
-
-repo_dir_has_entries() {
-  [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]
+  ensure_dir "$(dirname "$DEPLOY_KEY_PATH")"
+  ssh-keygen -t ed25519 -f "$DEPLOY_KEY_PATH" -N "" -C "agent-studio deploy key" >/dev/null
+  ensure_secure_file_mode "$DEPLOY_KEY_PATH" 600
+  ensure_secure_file_mode "$DEPLOY_KEY_PATH.pub" 644
+  record_step_status deploy_key complete "generated deploy key"
+  record_install_state deploy_key_guidance_shown "true"
+  log_step "Add this public key to GitHub as a read-only deploy key"
+  log_info "Public key path: $DEPLOY_KEY_PATH.pub"
+  cat "$DEPLOY_KEY_PATH.pub"
+  printf '\n'
+  DEPLOY_KEY_SAFE_CHECKPOINT=1
 }
 
 backup_existing_repo_dir() {
   local backup_dir="$REPO_DIR.forced-backup-$(date '+%Y%m%d%H%M%S')"
-
-  if [[ ! -e "$REPO_DIR" ]]; then
-    return 0
-  fi
-
-  if mv "$REPO_DIR" "$backup_dir"; then
-    record_install_state repo_clone_backup "$backup_dir"
-    log_info "Moved existing repository directory to $backup_dir before forced clone"
-    return 0
-  fi
-
-  return 1
+  [[ -e "$REPO_DIR" ]] || return 0
+  mv "$REPO_DIR" "$backup_dir"
+  record_install_state repo_clone_backup "$backup_dir"
 }
 
 attempt_clone() {
   if repo_checkout_is_usable && ! phase_forced repo_clone; then
-    record_step_status repo_clone complete "repository already cloned"
+    record_step_status repo_clone complete "repository already available locally"
     return 0
   fi
   maybe_mark_phase_forced repo_clone
 
+  if repo_checkout_is_usable; then
+    record_step_status repo_clone complete "repository already available locally"
+    return 0
+  fi
+
   if [[ "$RUN_CLONE" != "1" ]]; then
-    if repo_checkout_is_usable; then
-      record_step_status repo_clone complete "clone disabled by --no-clone; existing checkout is already usable"
-    else
-      record_step_status repo_clone skipped "clone disabled by --no-clone"
-    fi
+    record_step_status repo_clone skipped "clone disabled and no local checkout exists"
     return 0
   fi
 
@@ -603,10 +493,7 @@ attempt_clone() {
 
   if repo_dir_has_entries "$REPO_DIR"; then
     if phase_forced repo_clone; then
-      if ! backup_existing_repo_dir; then
-        record_step_status repo_clone pending "unable to move existing target directory before forced clone"
-        return 0
-      fi
+      backup_existing_repo_dir
     else
       record_step_status repo_clone pending "target directory exists and is not empty"
       return 0
@@ -614,95 +501,67 @@ attempt_clone() {
   fi
 
   ensure_dir "$(dirname "$REPO_DIR")"
-
-  local git_clone_env=()
   if [[ -f "$DEPLOY_KEY_PATH" ]]; then
-    git_clone_env=(GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY_PATH -o IdentitiesOnly=yes")
-  fi
-
-  log_step "Cloning repository"
-  if env "${git_clone_env[@]}" git clone "$REPO_URL" "$REPO_DIR"; then
-    ensure_owned_path "$REPO_DIR" "repo_clone" || true
-    record_step_status repo_clone complete "repository cloned"
+    GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY_PATH -o IdentitiesOnly=yes" git clone "$REPO_URL" "$REPO_DIR"
   else
-    record_step_status repo_clone failed "git clone failed"
+    git clone "$REPO_URL" "$REPO_DIR"
   fi
+  ensure_owned_path "$REPO_DIR" repo_clone || true
+  refresh_paths_from_repo_dir
+  record_step_status repo_clone complete "repository cloned"
 }
 
 ensure_postgres_setup() {
   if step_is_complete postgres && ! phase_forced postgres; then
-    log_info "PostgreSQL setup already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced postgres
 
-  if ! command -v psql >/dev/null 2>&1; then
-    record_step_status postgres pending "psql is not available"
-    record_install_state postgres_user_status "pending"
-    record_install_state postgres_db_status "pending"
+  ensure_service_started postgresql
+  require_command psql
+
+  [[ -n "$POSTGRES_DB_PASSWORD" ]] || POSTGRES_DB_PASSWORD="$(generate_random_secret 24)"
+  record_install_state postgres_db_password "$POSTGRES_DB_PASSWORD"
+
+  if [[ ! "$POSTGRES_DB_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    record_step_status postgres pending "invalid PostgreSQL role name"
+    return 0
+  fi
+  if [[ ! "$POSTGRES_DB_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    record_step_status postgres pending "invalid PostgreSQL database name"
     return 0
   fi
 
-  if ! confirm_or_default "Probe PostgreSQL connectivity now?" "y"; then
-    record_step_status postgres skipped "operator deferred PostgreSQL probe"
-    record_install_state postgres_user_status "skipped"
-    record_install_state postgres_db_status "skipped"
-    return 0
-  fi
+  local escaped_password
+  escaped_password="${POSTGRES_DB_PASSWORD//\'/\'\'}"
 
-  local role_exists=""
-  local db_exists=""
+  sudo -u postgres psql <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$POSTGRES_DB_USER') THEN
+    CREATE ROLE $POSTGRES_DB_USER LOGIN PASSWORD '$escaped_password';
+  ELSE
+    ALTER ROLE $POSTGRES_DB_USER WITH LOGIN PASSWORD '$escaped_password';
+  END IF;
+END
+\$\$;
+SELECT 'CREATE DATABASE $POSTGRES_DB_NAME OWNER $POSTGRES_DB_USER'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB_NAME')\gexec
+ALTER DATABASE $POSTGRES_DB_NAME OWNER TO $POSTGRES_DB_USER;
+SQL
 
-  if ! psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
-    record_step_status postgres pending "PostgreSQL probe failed or server not ready"
-    record_install_state postgres_user_status "pending"
-    record_install_state postgres_db_status "pending"
-    return 0
-  fi
-
-  role_exists="$(
-    psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -Atqc "select 1 from pg_roles where rolname = :'role' limit 1" -v role="$POSTGRES_DB_USER" 2>/dev/null || true
-  )"
-  db_exists="$(
-    psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -d postgres -Atqc "select 1 from pg_database where datname = :'dbname' limit 1" -v dbname="$POSTGRES_DB_NAME" 2>/dev/null || true
-  )"
-
-  if [[ "$role_exists" == "1" ]]; then
-    record_install_state postgres_user_status "complete"
-  else
-    record_install_state postgres_user_status "pending"
-    record_install_state postgres_user_reason "PostgreSQL role $POSTGRES_DB_USER is missing"
-  fi
-
-  if [[ "$db_exists" == "1" ]]; then
-    record_install_state postgres_db_status "complete"
-  else
-    record_install_state postgres_db_status "pending"
-    record_install_state postgres_db_reason "PostgreSQL database $POSTGRES_DB_NAME is missing"
-  fi
-
-  if [[ "$role_exists" == "1" && "$db_exists" == "1" ]]; then
-    record_step_status postgres complete "PostgreSQL role and database exist"
-  else
-    record_step_status postgres pending "PostgreSQL connectivity succeeded but the app role/database are missing"
-  fi
+  record_install_state postgres_user_status complete
+  record_install_state postgres_db_status complete
+  record_install_state postgres_database_url "postgresql://$POSTGRES_DB_USER:$POSTGRES_DB_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME?schema=public"
+  record_step_status postgres complete "PostgreSQL role and database are ready"
 }
 
 copy_template_file() {
   local template="$1"
   local destination="$2"
-
-  if ! ensure_dir "$(dirname "$destination")"; then
-    return 1
-  fi
-  if ! cp "$template" "$destination"; then
-    return 1
-  fi
-  if ! ensure_secure_file_mode "$destination" 600; then
-    return 1
-  fi
-
-  return 0
+  ensure_dir "$(dirname "$destination")"
+  cp "$template" "$destination"
+  ensure_secure_file_mode "$destination" 600
 }
 
 render_caddy_config() {
@@ -720,243 +579,167 @@ template = Path(sys.argv[1]).read_text()
 destination = Path(sys.argv[2])
 domain = sys.argv[3]
 ui_root = sys.argv[4]
-rendered = template.replace("{$DOMAIN}", domain).replace("{$UI_DIST_ROOT}", ui_root)
-destination.write_text(rendered)
+destination.write_text(template.replace("{$DOMAIN}", domain).replace("{$UI_DIST_ROOT}", ui_root))
 PY
 }
 
 ensure_env_files() {
   if step_is_complete env_files && ! phase_forced env_files; then
-    log_info "Environment files already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced env_files
 
-  if ! step_is_complete repo_clone; then
-    record_step_status env_files pending "repository clone is not complete yet"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
-    return 0
-  fi
-
-  if [[ ! -d "$REPO_DIR" || ! -d "$APP_API_DIR" || ! -d "$APP_UI_DIR" ]]; then
-    record_step_status env_files pending "repository checkout is missing required target directories"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
-    return 0
-  fi
-
-  if ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    record_step_status env_files pending "repository checkout is not a valid git work tree"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
+  if ! repo_checkout_is_usable; then
+    record_step_status env_files pending "repository checkout is not ready yet"
+    record_install_state backend_env_status pending
+    record_install_state frontend_env_status pending
     return 0
   fi
 
   local backend_template="$script_dir/../templates/agent-api.env.template"
   local frontend_template="$script_dir/../templates/agent-ui.env.production.template"
-
-  if [[ ! -f "$backend_template" || ! -f "$frontend_template" ]]; then
-    record_step_status env_files pending "environment templates are missing"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
-    return 0
-  fi
+  [[ -f "$backend_template" ]] || { record_step_status env_files pending "backend env template is missing"; return 0; }
+  [[ -f "$frontend_template" ]] || { record_step_status env_files pending "frontend env template is missing"; return 0; }
 
   if phase_forced env_files || [[ ! -f "$BACKEND_ENV_FILE" ]]; then
-    if ! copy_template_file "$backend_template" "$BACKEND_ENV_FILE"; then
-      record_step_status env_files pending "failed to write backend env file"
-      record_install_state backend_env_status "pending"
-      record_install_state frontend_env_status "pending"
-      return 0
-    fi
+    copy_template_file "$backend_template" "$BACKEND_ENV_FILE"
   fi
   if phase_forced env_files || [[ ! -f "$FRONTEND_ENV_FILE" ]]; then
-    if ! copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"; then
-      record_step_status env_files pending "failed to write frontend env file"
-      record_install_state backend_env_status "pending"
-      record_install_state frontend_env_status "pending"
-      return 0
-    fi
+    copy_template_file "$frontend_template" "$FRONTEND_ENV_FILE"
   fi
 
-  ensure_owned_path "$BACKEND_ENV_FILE" "backend_env" || true
-  ensure_owned_path "$FRONTEND_ENV_FILE" "frontend_env" || true
-  if ! ensure_secure_file_mode "$BACKEND_ENV_FILE" 600; then
-    record_step_status env_files pending "failed to set backend env permissions"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
-    return 0
-  fi
-  if ! ensure_secure_file_mode "$FRONTEND_ENV_FILE" 600; then
-    record_step_status env_files pending "failed to set frontend env permissions"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
-    return 0
-  fi
-  record_install_state backend_env_mode "600"
-  record_install_state frontend_env_mode "600"
+  [[ -n "$SESSION_COOKIE_SECRET" ]] || SESSION_COOKIE_SECRET="$(generate_random_secret 32)"
+  record_install_state session_cookie_secret "$SESSION_COOKIE_SECRET"
 
-  if [[ -f "$BACKEND_ENV_FILE" && -f "$FRONTEND_ENV_FILE" ]]; then
-    record_step_status env_files complete "backend and frontend env files are present"
-    record_install_state backend_env_status "complete"
-    record_install_state frontend_env_status "complete"
-  else
-    record_step_status env_files pending "failed to write one or more env files"
-    record_install_state backend_env_status "pending"
-    record_install_state frontend_env_status "pending"
+  local database_url="postgresql://$POSTGRES_DB_USER:$POSTGRES_DB_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME?schema=public"
+  write_env_key_value "$BACKEND_ENV_FILE" DATABASE_URL "$database_url"
+  write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_MODEL "$DEFAULT_MODEL"
+  write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_REASONING_EFFORT "$DEFAULT_REASONING_EFFORT"
+  write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_WORKSPACE "$WORKSPACE_ROOT"
+  write_env_key_value "$BACKEND_ENV_FILE" WORKSPACE_WHITELIST "$WORKSPACE_ROOT"
+  write_env_key_value "$BACKEND_ENV_FILE" UPLOAD_TEMP_ROOT "$SESSION_UPLOAD_ROOT"
+  write_env_key_value "$BACKEND_ENV_FILE" KNOWLEDGE_SET_STORAGE_ROOT "$KNOWLEDGE_SET_ROOT"
+  write_env_key_value "$BACKEND_ENV_FILE" SESSION_COOKIE_SECRET "$SESSION_COOKIE_SECRET"
+  write_env_key_value "$BACKEND_ENV_FILE" SESSION_COOKIE_SECURE true
+  if [[ -n "$DOMAIN" ]]; then
+    write_env_key_value "$BACKEND_ENV_FILE" DINGTALK_REDIRECT_URI "https://$DOMAIN/auth/dingtalk/callback"
   fi
+
+  write_env_key_value "$FRONTEND_ENV_FILE" VITE_AGENT_API_BASE ""
+  write_env_key_value "$FRONTEND_ENV_FILE" VITE_AGENT_API_TOKEN ""
+
+  ensure_owned_path "$BACKEND_ENV_FILE" backend_env || true
+  ensure_owned_path "$FRONTEND_ENV_FILE" frontend_env || true
+  ensure_secure_file_mode "$BACKEND_ENV_FILE" 600
+  ensure_secure_file_mode "$FRONTEND_ENV_FILE" 600
+
+  record_install_state backend_env_mode 600
+  record_install_state frontend_env_mode 600
+  record_install_state backend_env_status complete
+  record_install_state frontend_env_status complete
+  record_step_status env_files complete "environment files rendered and populated"
 }
 
 ensure_caddy_config() {
   if step_is_complete caddy_config && ! phase_forced caddy_config; then
-    log_info "Caddy config already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced caddy_config
 
   local template="$script_dir/../templates/Caddyfile.template"
-  if [[ ! -f "$template" ]]; then
-    record_step_status caddy_config pending "Caddy template is missing"
-    return 0
-  fi
-
+  [[ -f "$template" ]] || { record_step_status caddy_config pending "Caddy template is missing"; return 0; }
   if [[ -z "$DOMAIN" ]]; then
     record_step_status caddy_config pending "domain is missing"
     return 0
   fi
 
-  if ! confirm_or_default "Render the Caddy config now?" "y"; then
-    record_step_status caddy_config skipped "operator deferred Caddy config render"
-    return 0
+  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist"
+  if command_exists caddy; then
+    caddy validate --config "$CADDY_CONFIG_FILE" >/dev/null 2>&1 || true
+    if command_exists systemctl; then
+      systemctl reload caddy >/dev/null 2>&1 || true
+    fi
   fi
-
-  if render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist"; then
-    record_step_status caddy_config complete "Caddy config rendered"
-  else
-    record_step_status caddy_config pending "failed to render Caddy config"
-  fi
+  record_step_status caddy_config complete "Caddy config rendered"
 }
 
 run_first_deploy() {
   if step_is_complete first_deploy && ! phase_forced first_deploy; then
-    log_info "First deploy already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced first_deploy
 
-  if ! step_is_complete repo_clone; then
-    record_step_status first_deploy pending "repository has not been cloned yet"
+  if ! repo_checkout_is_usable; then
+    record_step_status first_deploy pending "repository checkout is not ready yet"
     return 0
   fi
-
   if ! step_is_complete env_files; then
     record_step_status first_deploy pending "environment files are not ready yet"
     return 0
   fi
-
-  if ! command -v npm >/dev/null 2>&1; then
-    record_step_status first_deploy pending "npm is not available"
+  if ! step_is_complete system_dependencies; then
+    record_step_status first_deploy pending "system dependencies are not ready yet"
+    return 0
+  fi
+  if ! step_is_complete postgres; then
+    record_step_status first_deploy pending "PostgreSQL is not ready yet"
     return 0
   fi
 
-  if ! confirm_or_default "Run the initial deploy preflight now?" "y"; then
-    record_step_status first_deploy skipped "operator deferred first deploy"
-    return 0
-  fi
+  bash "$script_dir/deploy-agent-studio.sh" --repo-dir "$REPO_DIR" --skip-git-pull
 
-  if [[ ! -f "$REPO_DIR/agent-api/package.json" ]]; then
-    record_step_status first_deploy pending "agent-api package manifest is missing"
-    return 0
-  fi
-
-  record_step_status first_deploy attempted "actual deploy execution started"
-  if run_as_app_user_shell "cd '$REPO_DIR/agent-api' && npm run build"; then
-    local backend_artifact="$REPO_DIR/agent-api/dist/index.js"
-    local frontend_artifact="$REPO_DIR/agent-ui/dist/index.html"
-
-    if [[ -f "$REPO_DIR/agent-ui/package.json" ]]; then
-      if ! run_as_app_user_shell "cd '$REPO_DIR/agent-ui' && npm run build"; then
-        record_step_status first_deploy pending "frontend build failed during actual deploy execution"
-        return 0
-      fi
-    fi
-
-    if [[ -f "$backend_artifact" && ( ! -f "$REPO_DIR/agent-ui/package.json" || -f "$frontend_artifact" ) ]]; then
-      record_step_status first_deploy complete "actual deploy execution completed"
-    else
-      record_step_status first_deploy pending "deploy command ran but required build artifacts are missing"
-    fi
+  if [[ -f "$APP_API_DIR/dist/index.js" && -f "$APP_UI_DIR/dist/index.html" ]]; then
+    record_step_status first_deploy complete "initial deploy completed"
   else
-    record_step_status first_deploy pending "actual deploy execution failed or is unavailable in this environment"
+    record_step_status first_deploy pending "deploy finished without expected build artifacts"
   fi
 }
 
 ensure_pm2_start() {
   if step_is_complete pm2_start && ! phase_forced pm2_start; then
-    log_info "PM2 status already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced pm2_start
 
   if ! step_is_complete first_deploy; then
-    record_step_status pm2_start pending "first deploy is not ready yet"
+    record_step_status pm2_start pending "first deploy is not complete yet"
     return 0
   fi
 
-  if ! command -v pm2 >/dev/null 2>&1; then
-    record_step_status pm2_start pending "pm2 is not available"
-    return 0
-  fi
-
-  if ! confirm_or_default "Attempt to start or refresh the PM2 app state now?" "y"; then
-    record_step_status pm2_start skipped "operator deferred PM2 start"
-    return 0
-  fi
-
-  if [[ -f "$PM2_ECOSYSTEM_FILE" ]]; then
-    record_step_status pm2_start attempted "pm2 ecosystem file is present"
-    if run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$PM2_APP_NAME' --update-env"; then
-      record_step_status pm2_start complete "PM2 app start attempted successfully"
-    else
-      record_step_status pm2_start pending "pm2 start failed"
-    fi
+  env PATH="$PATH" pm2 startup systemd -u "$APP_USER" --hp "$APP_HOME" >/tmp/agent-studio-pm2-startup.log 2>&1 || true
+  run_as_app_user_shell "pm2 save"
+  if run_as_app_user_shell "pm2 status '$PM2_APP_NAME' >/dev/null 2>&1"; then
+    record_step_status pm2_start complete "PM2 app is running"
   else
-    record_step_status pm2_start pending "pm2 ecosystem file is missing"
+    record_step_status pm2_start pending "PM2 app is not running yet"
   fi
 }
 
 ensure_codex_verification() {
   if step_is_complete codex_runtime_check && ! phase_forced codex_runtime_check; then
-    log_info "Codex verification already recorded as complete"
     return 0
   fi
   maybe_mark_phase_forced codex_runtime_check
 
   if [[ "$(state_bool "$SKIP_CODEX_CHECK")" == "true" ]]; then
     record_step_status codex_runtime_check skipped "operator requested skip-codex-check"
-    record_install_state codex_runtime_check_skipped "true"
     return 0
   fi
 
-  if ! command -v codex >/dev/null 2>&1; then
-    record_step_status codex_runtime_check pending "codex binary is not available"
-    record_install_state codex_runtime_check_skipped "false"
+  if ! step_is_complete first_deploy; then
+    record_step_status codex_runtime_check pending "first deploy is not complete yet"
     return 0
   fi
 
-  if ! confirm_or_default "Run a Codex runtime verification now?" "y"; then
-    record_step_status codex_runtime_check skipped "operator deferred Codex verification"
-    record_install_state codex_runtime_check_skipped "true"
-    return 0
-  fi
-
-  if codex --version >/dev/null 2>&1; then
-    record_step_status codex_runtime_check complete "codex runtime probe succeeded"
-    record_install_state codex_runtime_check_skipped "false"
+  if run_as_app_user_shell "cd '$APP_API_DIR' && node --input-type=module <<'EON'
+import { CodexRuntime } from './dist/codex-runtime.js';
+const runtime = new CodexRuntime();
+await runtime.validateProvider({ model: 'gpt-5.4', reasoningEffort: 'high' });
+console.log('codex runtime ok');
+EON"; then
+    record_step_status codex_runtime_check complete "Codex runtime validation passed"
   else
-    record_step_status codex_runtime_check pending "codex runtime probe failed"
-    record_install_state codex_runtime_check_skipped "false"
+    record_step_status codex_runtime_check pending "Codex runtime validation failed"
   fi
 }
 
@@ -964,6 +747,7 @@ render_phase_summary() {
   log_step "Install state summary"
   log_info "app user: $(step_status app_user)"
   log_info "base directories: $(step_status base_directories)"
+  log_info "system dependencies: $(step_status system_dependencies)"
   log_info "repo clone: $(step_status repo_clone)"
   log_info "postgres: $(step_status postgres)"
   log_info "backend env: $(state_read backend_env_status pending)"
@@ -974,36 +758,48 @@ render_phase_summary() {
   log_info "codex runtime: $(step_status codex_runtime_check)"
 }
 
+follow_up_message_for_step() {
+  case "$1" in
+    system_dependencies)
+      printf '%s' "Ensure the host is Ubuntu and rerun as root so the installer can install git, nodejs, pm2, postgresql, and caddy."
+      ;;
+    repo_clone)
+      printf '%s' "If the current directory already contains the repository, rerun from that checkout; otherwise provide a valid repo URL and rerun."
+      ;;
+    postgres)
+      printf '%s' "Check PostgreSQL service health and rerun; the installer will create the app role and database automatically."
+      ;;
+    env_files)
+      printf '%s' "Ensure the repository checkout is available, then rerun so the installer can render env files."
+      ;;
+    caddy_config)
+      printf '%s' "Provide a public domain, then rerun so the installer can render the Caddy config."
+      ;;
+    first_deploy)
+      printf '%s' "Rerun after dependencies, PostgreSQL, and env files are ready so the installer can run the first deployment."
+      ;;
+    pm2_start)
+      printf '%s' "Rerun after the first deployment succeeds so the installer can register PM2 startup and verify the app is running."
+      ;;
+    codex_runtime_check)
+      printf '%s' "Prepare the server user's default Codex authentication context and rerun, or pass --skip-codex-check."
+      ;;
+    *)
+      printf '%s' "Rerun after resolving the recorded prerequisite."
+      ;;
+  esac
+}
+
 print_follow_up_actions() {
-  local phases=(
-    app_user
-    base_directories
-    deploy_key
-    repo_clone
-    postgres
-    env_files
-    caddy_config
-    first_deploy
-    pm2_start
-    codex_runtime_check
-  )
-  local phase
-  local status
-  local message
-  local printed=0
+  local phases=(app_user base_directories system_dependencies deploy_key repo_clone postgres env_files caddy_config first_deploy pm2_start codex_runtime_check)
+  local phase status message printed=0
 
   log_step "Operator follow-up actions"
   for phase in "${phases[@]}"; do
     status="$(step_status "$phase")"
     case "$status" in
-      complete)
-        continue
-        ;;
-      "")
-        continue
-        ;;
+      complete|"") continue ;;
     esac
-
     message="$(follow_up_message_for_step "$phase")"
     printf '[%s] FOLLOW-UP %s: %s\n' "$(log_ts)" "$phase" "$message"
     if [[ -n "$(state_read "${phase}_reason" "")" ]]; then
@@ -1011,41 +807,19 @@ print_follow_up_actions() {
     fi
     printed=1
   done
-
-  if [[ "$printed" -eq 0 ]]; then
-    log_info "No pending or skipped phases remain."
-  fi
+  [[ "$printed" -eq 0 ]] && log_info "No pending or skipped phases remain."
 }
 
 finalize_installation() {
-  local required_steps=(
-    app_user
-    base_directories
-    repo_clone
-    postgres
-    env_files
-    caddy_config
-    first_deploy
-    pm2_start
-    codex_runtime_check
-  )
-  local all_complete=1
+  local required_steps=(app_user base_directories system_dependencies repo_clone postgres env_files caddy_config first_deploy pm2_start codex_runtime_check)
   local step
-
   for step in "${required_steps[@]}"; do
     if [[ "$(step_status "$step")" != "complete" ]]; then
-      all_complete=0
-      break
+      record_install_state installer_complete false
+      return 0
     fi
   done
-
-  if [[ "$all_complete" -eq 1 ]]; then
-    record_install_state installer_complete "true"
-    record_install_state last_safe_checkpoint "all-resumable-phases-complete"
-  else
-    record_install_state installer_complete "false"
-    record_install_state last_safe_checkpoint "resumable-phases-recorded"
-  fi
+  record_install_state installer_complete true
 }
 
 main() {
@@ -1057,7 +831,9 @@ main() {
     exit 0
   fi
 
+  require_root_shell
   load_existing_state
+  detect_default_repo_dir
   refresh_paths_from_repo_dir
   prompt_for_missing_values
   ensure_state_defaults
@@ -1065,27 +841,19 @@ main() {
 
   ensure_app_user
   ensure_base_directories
-  if [[ "$RUN_CLONE" == "1" ]]; then
-    ensure_deploy_key
-    if [[ "$DEPLOY_KEY_SAFE_CHECKPOINT" == "1" && "$DEPLOY_KEY_CONTINUE_TO_CLONE" != "1" ]] && ! step_is_complete repo_clone; then
-      record_step_status repo_clone pending "deploy key guidance shown; rerun to continue clone"
-      render_phase_summary
-      print_follow_up_actions
-      finalize_installation
-      exit 0
-    fi
-    attempt_clone
-  else
-    if repo_checkout_is_usable; then
-      record_step_status repo_clone complete "clone disabled by --no-clone; existing checkout is already usable"
-      record_step_status deploy_key skipped "clone disabled by --no-clone; existing checkout is already usable"
-      record_install_state deploy_key_skipped "true"
-    else
-      record_step_status deploy_key skipped "clone disabled by --no-clone"
-      record_step_status repo_clone skipped "clone disabled by --no-clone"
-      record_install_state deploy_key_skipped "true"
-    fi
+  ensure_system_dependencies
+  ensure_deploy_key
+
+  if [[ "$DEPLOY_KEY_SAFE_CHECKPOINT" == "1" && "$DEPLOY_KEY_CONTINUE_TO_CLONE" != "1" ]] && ! repo_checkout_is_usable; then
+    record_step_status repo_clone pending "deploy key guidance shown; rerun to continue clone"
+    render_phase_summary
+    print_follow_up_actions
+    finalize_installation
+    exit 0
   fi
+
+  attempt_clone
+  refresh_paths_from_repo_dir
   ensure_postgres_setup
   ensure_env_files
   ensure_caddy_config

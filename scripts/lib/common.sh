@@ -5,7 +5,7 @@ INSTALL_STATE_FILE="${INSTALL_STATE_FILE:-$INSTALL_ROOT/install-state.json}"
 APP_USER="${APP_USER:-agentstudio}"
 APP_GROUP="${APP_GROUP:-agentstudio}"
 APP_HOME="${APP_HOME:-/home/$APP_USER}"
-APP_REPO_DIR="${APP_REPO_DIR:-$INSTALL_ROOT/app/agent-studio}"
+APP_REPO_DIR="${APP_REPO_DIR:-$INSTALL_ROOT}"
 APP_API_DIR="${APP_API_DIR:-$APP_REPO_DIR/agent-api}"
 APP_UI_DIR="${APP_UI_DIR:-$APP_REPO_DIR/agent-ui}"
 DATA_ROOT="${DATA_ROOT:-$INSTALL_ROOT/data}"
@@ -303,6 +303,14 @@ is_app_user() {
   [[ "$(id -un)" == "$APP_USER" ]]
 }
 
+is_root() {
+  [[ "$(id -u)" -eq 0 ]]
+}
+
+require_root_shell() {
+  is_root || die "this script must be run as root"
+}
+
 run_as_app_user() {
   if is_app_user; then
     "$@"
@@ -323,7 +331,7 @@ run_as_app_user_shell() {
 }
 
 run_as_root() {
-  if [[ "$(id -u)" -eq 0 ]]; then
+  if is_root; then
     "$@"
     return 0
   fi
@@ -331,8 +339,12 @@ run_as_root() {
   sudo -- "$@"
 }
 
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+  command_exists "$1" || die "missing required command: $1"
 }
 
 current_user() {
@@ -341,6 +353,10 @@ current_user() {
 
 current_uid() {
   id -u
+}
+
+current_dir_is_git_checkout() {
+  git -C "$(pwd -P)" rev-parse --show-toplevel >/dev/null 2>&1
 }
 
 can_own_path_as_app_user() {
@@ -367,4 +383,92 @@ ensure_secure_file_mode() {
   local mode="${2:-600}"
 
   chmod "$mode" "$path"
+}
+
+generate_random_secret() {
+  local bytes="${1:-24}"
+  if command_exists openssl; then
+    openssl rand -hex "$bytes"
+    return 0
+  fi
+
+  python3 - "$bytes" <<'PY'
+import secrets
+import sys
+
+print(secrets.token_hex(int(sys.argv[1])))
+PY
+}
+
+ensure_ubuntu_apt_packages() {
+  local packages=("$@")
+
+  [[ "${#packages[@]}" -gt 0 ]] || return 0
+  require_root_shell
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y "${packages[@]}"
+}
+
+ensure_nodesource_nodejs() {
+  require_root_shell
+  if command_exists node && command_exists npm; then
+    return 0
+  fi
+
+  require_command curl
+  bash -lc "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
+  apt-get install -y nodejs
+}
+
+ensure_global_pm2() {
+  require_root_shell
+  command_exists npm || die "npm is required before installing pm2"
+  command_exists pm2 || npm install -g pm2
+}
+
+ensure_service_started() {
+  local service_name="$1"
+
+  require_root_shell
+  if command_exists systemctl; then
+    systemctl enable --now "$service_name"
+    return 0
+  fi
+
+  service "$service_name" start
+}
+
+write_env_key_value() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+
+  python3 - "$env_file" "$key" "$value" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+
+lines = []
+found = False
+if path.exists():
+    lines = path.read_text().splitlines()
+
+rendered = []
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if stripped.startswith(f"{key}="):
+        rendered.append(f"{key}={value}")
+        found = True
+    else:
+        rendered.append(raw_line)
+
+if not found:
+    rendered.append(f"{key}={value}")
+
+path.write_text("\n".join(rendered) + "\n")
+PY
 }

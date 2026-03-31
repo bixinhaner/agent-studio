@@ -20,6 +20,10 @@ When `scripts/install-ubuntu.sh` does not find a usable checkout, it can:
 2. print the public key path and public key contents
 3. stop before clone at a safe checkpoint
 
+Default key location:
+
+- `/home/agentstudio/.ssh/id_ed25519_agent_studio_deploy`
+
 At that point:
 
 1. open the GitHub repository settings

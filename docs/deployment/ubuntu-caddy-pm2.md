@@ -11,17 +11,28 @@ This repository ships a resumable Ubuntu deployment flow for single-host product
 
 ## Initial install
 
-1. Prepare an Ubuntu host with `sudo` access.
-2. Run the guided installer:
+Run the installer as `root` from the repository checkout:
 
 ```bash
-cd /path/to/agent-studio
-bash scripts/install-ubuntu.sh
+sudo bash scripts/install-ubuntu.sh
 ```
 
-3. If the repository has not been cloned yet, the installer will generate a deploy key and stop at a safe checkpoint.
-4. Add the generated public key to GitHub as a read-only deploy key.
-5. Re-run `scripts/install-ubuntu.sh` until all required steps are marked complete.
+Default behavior:
+
+- if the current working directory is already the Agent Studio Git checkout, the installer uses it directly
+- otherwise it defaults the checkout target to `/usr/local/agent-studio`
+- if a private repository must be cloned, the installer can generate a deploy key and stop at a safe checkpoint until the key is added in GitHub
+
+The installer now performs the full host bootstrap:
+
+- creates the `agentstudio` user
+- creates `/usr/local/agent-studio` data directories
+- installs system packages (`git`, `curl`, `nodejs`, `pm2`, `postgresql`, `caddy`, and common build/runtime tools)
+- creates the PostgreSQL role and database automatically
+- renders backend/frontend env files
+- renders the Caddy configuration
+- runs the first deploy
+- starts PM2 and registers startup
 
 ## Ongoing deploys
 

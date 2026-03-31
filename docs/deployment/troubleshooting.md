@@ -1,55 +1,64 @@
 # Deployment Troubleshooting
 
-## Installer stops after deploy key generation
+## Installer says it must be run as root
 
-Expected behavior.
+Expected for the zero-argument bootstrap path.
+
+Run:
+
+```bash
+sudo bash scripts/install-ubuntu.sh
+```
+
+## Installer stopped after deploy key generation
+
+Expected behavior for a private repository clone checkpoint.
 
 Action:
 
 1. copy the generated public key
-2. add it to GitHub as a deploy key
+2. add it to GitHub as a read-only deploy key
 3. rerun `scripts/install-ubuntu.sh`
 
-## Repository clone stays skipped
+## Installer did not clone the repository
 
-Common causes:
-
-- `--no-clone` was used
-- target directory is not a valid Git checkout
-- deploy key has not been registered
+The installer now prefers the current working directory when it is already a valid Git checkout. It only clones when no usable local checkout exists.
 
 Check:
 
 ```bash
-bash scripts/doctor.sh
+git rev-parse --is-inside-work-tree
 ```
 
-## `prisma migrate deploy` fails
+If this prints `true`, rerun the installer from that checkout.
+
+## PostgreSQL bootstrap fails
 
 Common causes:
 
-- PostgreSQL is not reachable
-- `DATABASE_URL` is wrong
-- the database or role was not created
+- the host is not Ubuntu
+- PostgreSQL service failed to start
+- local package mirrors are unavailable
 
 Check:
 
 ```bash
 bash scripts/check-env.sh --skip-codex-check
+systemctl status postgresql
 ```
 
 ## PM2 restart fails
 
 Common causes:
 
+- first deploy did not finish
 - `agent-api/dist` has not been built
-- `pm2` is not installed for the runtime user
-- the ecosystem file is stale
+- PM2 startup registration needs another rerun after package install
 
 Check:
 
 ```bash
-pm2 status
+runuser -u agentstudio -- pm2 status
 bash scripts/doctor.sh
 ```
 
@@ -84,13 +93,3 @@ Run:
 ```bash
 bash scripts/doctor.sh
 ```
-
-That collects:
-
-- PM2 status
-- PM2 logs
-- API health probe
-- Caddy validation
-- PostgreSQL connectivity probe
-- Codex runtime validation
-- `journalctl` output for Caddy
