@@ -196,10 +196,15 @@ ensure_state_defaults() {
   record_install_state app_home "$APP_HOME"
   record_install_state repo_dir "$REPO_DIR"
   record_install_state app_repo_dir "$APP_REPO_DIR"
+  record_install_state app_repo_dir_explicit "$(state_bool "$APP_REPO_DIR_EXPLICIT")"
   record_install_state app_api_dir "$APP_API_DIR"
+  record_install_state app_api_dir_explicit "$(state_bool "$APP_API_DIR_EXPLICIT")"
   record_install_state app_ui_dir "$APP_UI_DIR"
+  record_install_state app_ui_dir_explicit "$(state_bool "$APP_UI_DIR_EXPLICIT")"
   record_install_state backend_env_file "$BACKEND_ENV_FILE"
+  record_install_state backend_env_file_explicit "$(state_bool "$BACKEND_ENV_FILE_EXPLICIT")"
   record_install_state frontend_env_file "$FRONTEND_ENV_FILE"
+  record_install_state frontend_env_file_explicit "$(state_bool "$FRONTEND_ENV_FILE_EXPLICIT")"
   record_install_state deploy_key_path "$DEPLOY_KEY_PATH"
   record_install_state domain "$DOMAIN"
   record_install_state repo_url "$REPO_URL"
@@ -231,23 +236,23 @@ load_existing_state() {
   if [[ "$DEPLOY_KEY_PATH_EXPLICIT" == "0" ]] && state_has deploy_key_path; then
     DEPLOY_KEY_PATH="$(state_read deploy_key_path "$DEPLOY_KEY_PATH")"
   fi
-  if [[ "$APP_REPO_DIR_EXPLICIT" == "0" ]] && state_has app_repo_dir; then
+  if [[ "$APP_REPO_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_repo_dir_explicit "false")" == "true" ]] && state_has app_repo_dir; then
     APP_REPO_DIR="$(state_read app_repo_dir "$APP_REPO_DIR")"
     APP_REPO_DIR_EXPLICIT=1
   fi
-  if [[ "$APP_API_DIR_EXPLICIT" == "0" ]] && state_has app_api_dir; then
+  if [[ "$APP_API_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_api_dir_explicit "false")" == "true" ]] && state_has app_api_dir; then
     APP_API_DIR="$(state_read app_api_dir "$APP_API_DIR")"
     APP_API_DIR_EXPLICIT=1
   fi
-  if [[ "$APP_UI_DIR_EXPLICIT" == "0" ]] && state_has app_ui_dir; then
+  if [[ "$APP_UI_DIR_EXPLICIT" == "0" ]] && [[ "$(state_read_bool app_ui_dir_explicit "false")" == "true" ]] && state_has app_ui_dir; then
     APP_UI_DIR="$(state_read app_ui_dir "$APP_UI_DIR")"
     APP_UI_DIR_EXPLICIT=1
   fi
-  if [[ "$BACKEND_ENV_FILE_EXPLICIT" == "0" ]] && state_has backend_env_file; then
+  if [[ "$BACKEND_ENV_FILE_EXPLICIT" == "0" ]] && [[ "$(state_read_bool backend_env_file_explicit "false")" == "true" ]] && state_has backend_env_file; then
     BACKEND_ENV_FILE="$(state_read backend_env_file "$BACKEND_ENV_FILE")"
     BACKEND_ENV_FILE_EXPLICIT=1
   fi
-  if [[ "$FRONTEND_ENV_FILE_EXPLICIT" == "0" ]] && state_has frontend_env_file; then
+  if [[ "$FRONTEND_ENV_FILE_EXPLICIT" == "0" ]] && [[ "$(state_read_bool frontend_env_file_explicit "false")" == "true" ]] && state_has frontend_env_file; then
     FRONTEND_ENV_FILE="$(state_read frontend_env_file "$FRONTEND_ENV_FILE")"
     FRONTEND_ENV_FILE_EXPLICIT=1
   fi
@@ -273,7 +278,12 @@ refresh_paths_from_repo_dir() {
 }
 
 repo_checkout_is_usable() {
-  [[ -d "$REPO_DIR/.git" ]] && git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
+  [[ -d "$REPO_DIR" ]] || return 1
+
+  local repo_root
+  repo_root="$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null)" || return 1
+
+  [[ "$repo_root" == "$(cd "$REPO_DIR" && pwd -P)" ]]
 }
 
 parse_args() {
@@ -574,7 +584,7 @@ attempt_clone() {
 
   if [[ "$RUN_CLONE" != "1" ]]; then
     if repo_checkout_is_usable; then
-      record_step_status repo_clone complete "repository checkout already exists"
+      record_step_status repo_clone complete "clone disabled by --no-clone; existing checkout is already usable"
     else
       record_step_status repo_clone skipped "clone disabled by --no-clone"
     fi
@@ -1067,7 +1077,7 @@ main() {
     attempt_clone
   else
     if repo_checkout_is_usable; then
-      record_step_status repo_clone complete "repository checkout already exists"
+      record_step_status repo_clone complete "clone disabled by --no-clone; existing checkout is already usable"
       record_step_status deploy_key skipped "clone disabled by --no-clone; existing checkout is already usable"
       record_install_state deploy_key_skipped "true"
     else

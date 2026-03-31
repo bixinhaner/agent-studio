@@ -29,6 +29,16 @@ probe_override_resume_log="$probe_root/override-resume.log"
 probe_override_repo_dir="$probe_override_root/custom-agent-studio"
 probe_override_backend_env="$probe_root/explicit-backend.env"
 probe_override_frontend_env="$probe_root/explicit-frontend.env"
+probe_repath_root="$probe_root/repath-install-root"
+probe_repath_state="$probe_root/repath-state.json"
+probe_repath_repo_a="$probe_repath_root/repo-a"
+probe_repath_repo_b="$probe_repath_root/repo-b"
+probe_repath_env_a_expected="$probe_repath_repo_a/agent-api/.env"
+probe_repath_env_b_expected="$probe_repath_repo_b/agent-api/.env"
+probe_worktree_root="$probe_root/worktree-install-root"
+probe_worktree_state="$probe_root/worktree-state.json"
+probe_worktree_main="$probe_root/worktree-main"
+probe_worktree_checkout="$probe_worktree_root/worktree-checkout"
 
 cleanup() {
   rm -rf "$probe_root"
@@ -238,4 +248,80 @@ state = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert state.get("backend_env_file") == sys.argv[2], state.get("backend_env_file")
 assert state.get("frontend_env_file") == sys.argv[3], state.get("frontend_env_file")
 assert state.get("env_files_status") == "complete", state.get("env_files_status")
+PY
+
+# Probe 6: a fresh --repo-dir override must win over persisted repo-relative state from an earlier run.
+mkdir -p "$probe_repath_repo_a/agent-api" "$probe_repath_repo_a/agent-ui"
+git init -q "$probe_repath_repo_a"
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-repath" \
+INSTALL_ROOT="$probe_repath_root" \
+CADDY_CONFIG_FILE="$probe_repath_root/Caddyfile" \
+bash "$script" \
+  --state-file "$probe_repath_state" \
+  --domain example.com \
+  --repo-dir "$probe_repath_repo_a" \
+  --skip-codex-check \
+  --yes \
+  --no-clone >/dev/null 2>&1
+test -f "$probe_repath_env_a_expected"
+
+mkdir -p "$probe_repath_repo_b/agent-api" "$probe_repath_repo_b/agent-ui"
+git init -q "$probe_repath_repo_b"
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-repath" \
+INSTALL_ROOT="$probe_repath_root" \
+CADDY_CONFIG_FILE="$probe_repath_root/Caddyfile" \
+bash "$script" \
+  --state-file "$probe_repath_state" \
+  --domain example.com \
+  --repo-dir "$probe_repath_repo_b" \
+  --skip-codex-check \
+  --yes \
+  --no-clone \
+  --force-phase env_files >/dev/null 2>&1
+
+test -f "$probe_repath_env_b_expected"
+python3 - "$probe_repath_state" "$probe_repath_repo_b" "$probe_repath_env_b_expected" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("repo_dir") == sys.argv[2], state.get("repo_dir")
+assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
+assert state.get("backend_env_file") == sys.argv[3], state.get("backend_env_file")
+PY
+
+# Probe 7: a valid git worktree checkout should count as a usable existing checkout under --no-clone.
+git init -q "$probe_worktree_main"
+(
+  cd "$probe_worktree_main"
+  git config user.name test
+  git config user.email test@example.com
+  touch README.md
+  git add README.md
+  git commit -qm "init"
+  git worktree add -q "$probe_worktree_checkout" -b verify-worktree
+)
+APP_USER="$current_user" \
+APP_HOME="$probe_root/home-worktree" \
+INSTALL_ROOT="$probe_worktree_root" \
+CADDY_CONFIG_FILE="$probe_worktree_root/Caddyfile" \
+bash "$script" \
+  --state-file "$probe_worktree_state" \
+  --domain example.com \
+  --repo-dir "$probe_worktree_checkout" \
+  --skip-codex-check \
+  --yes \
+  --no-clone >/dev/null 2>&1
+python3 - "$probe_worktree_state" "$probe_worktree_checkout" <<'PY'
+import json
+import pathlib
+import sys
+
+state = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert state.get("repo_clone_status") == "complete", state.get("repo_clone_status")
+assert state.get("repo_clone_reason") == "clone disabled by --no-clone; existing checkout is already usable", state.get("repo_clone_reason")
+assert state.get("app_repo_dir") == sys.argv[2], state.get("app_repo_dir")
 PY
