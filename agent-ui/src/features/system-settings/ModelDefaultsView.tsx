@@ -1,3 +1,5 @@
+import { Input } from "antd";
+
 import type { SystemSettingsFieldErrors, SystemSettingsPlatformDefaults } from "./types";
 import { getFieldError } from "./validation";
 
@@ -25,8 +27,7 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
       <div className="resource-center-form-grid">
         <label className="field">
           <span className="field-label">默认提供方</span>
-          <input
-            className="field-input"
+          <Input
             value={value.provider}
             aria-invalid={Boolean(providerError)}
             disabled={disabled}
@@ -37,8 +38,7 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
 
         <label className="field">
           <span className="field-label">默认模型</span>
-          <input
-            className="field-input"
+          <Input
             value={value.model}
             aria-invalid={Boolean(modelError)}
             disabled={disabled}
@@ -49,8 +49,7 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
 
         <label className="field">
           <span className="field-label">默认推理强度</span>
-          <input
-            className="field-input"
+          <Input
             value={value.reasoningEffort}
             aria-invalid={Boolean(reasoningEffortError)}
             disabled={disabled}

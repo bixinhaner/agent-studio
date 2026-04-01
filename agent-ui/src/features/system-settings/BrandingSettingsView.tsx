@@ -1,3 +1,5 @@
+import { Input } from "antd";
+
 import type { SystemSettingsBehavior, SystemSettingsBranding, SystemSettingsFieldErrors } from "./types";
 import { getFieldError } from "./validation";
 
@@ -11,6 +13,7 @@ type BrandingSettingsViewProps = {
 };
 
 export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, onChange, onBehaviorChange }: BrandingSettingsViewProps) {
+  const { TextArea } = Input;
   const platformNameError = getFieldError(fieldErrors, "branding.platformName");
   const headerSubtitleError = getFieldError(fieldErrors, "branding.headerSubtitle");
   const loginCopyError = getFieldError(fieldErrors, "branding.loginCopy");
@@ -32,8 +35,7 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
       <div className="resource-center-form-grid">
         <label className="field">
           <span className="field-label">平台名称</span>
-          <input
-            className="field-input"
+          <Input
             value={value.platformName}
             aria-invalid={Boolean(platformNameError)}
             disabled={disabled}
@@ -44,8 +46,7 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
         <label className="field">
           <span className="field-label">页眉副标题</span>
-          <input
-            className="field-input"
+          <Input
             value={value.headerSubtitle}
             aria-invalid={Boolean(headerSubtitleError)}
             disabled={disabled}
@@ -56,8 +57,8 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
         <label className="field resource-center-form-span-2">
           <span className="field-label">登录页文案</span>
-          <textarea
-            className="field-input textarea"
+          <TextArea
+            autoSize={{ minRows: 3, maxRows: 7 }}
             value={value.loginCopy}
             aria-invalid={Boolean(loginCopyError)}
             disabled={disabled}
@@ -68,8 +69,7 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
         <label className="field">
           <span className="field-label">Logo URL</span>
-          <input
-            className="field-input"
+          <Input
             value={value.logoUrl}
             aria-invalid={Boolean(logoUrlError)}
             disabled={disabled}
@@ -80,8 +80,7 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
         <label className="field">
           <span className="field-label">图标 URL</span>
-          <input
-            className="field-input"
+          <Input
             value={value.iconUrl}
             aria-invalid={Boolean(iconUrlError)}
             disabled={disabled}
@@ -102,8 +101,8 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
         <div className="resource-center-form-grid">
           <label className="field">
             <span className="field-label">欢迎摘要</span>
-            <textarea
-              className="field-input textarea"
+            <TextArea
+              autoSize={{ minRows: 3, maxRows: 7 }}
               value={behavior.welcomeSummary}
               aria-invalid={Boolean(welcomeSummaryError)}
               disabled={disabled}
@@ -114,8 +113,8 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
           <label className="field">
             <span className="field-label">使用摘要</span>
-            <textarea
-              className="field-input textarea"
+            <TextArea
+              autoSize={{ minRows: 3, maxRows: 7 }}
               value={behavior.usageSummary}
               aria-invalid={Boolean(usageSummaryError)}
               disabled={disabled}
@@ -126,8 +125,8 @@ export function BrandingSettingsView({ value, behavior, fieldErrors, disabled, o
 
           <label className="field resource-center-form-span-2">
             <span className="field-label">Markdown 指南</span>
-            <textarea
-              className="field-input textarea"
+            <TextArea
+              autoSize={{ minRows: 5, maxRows: 12 }}
               value={behavior.markdown}
               aria-invalid={Boolean(markdownError)}
               disabled={disabled}

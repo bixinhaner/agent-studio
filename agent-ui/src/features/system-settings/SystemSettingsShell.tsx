@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Space, Tabs } from "antd";
 
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "./api";
 import { BrandingSettingsView } from "./BrandingSettingsView";
@@ -381,25 +382,30 @@ export function SystemSettingsShell() {
         </div>
       </div>
 
-      {errorText ? <p className="err-text">{errorText}</p> : null}
-      {successText ? <p className="resource-center-success">{successText}</p> : null}
+      <div className="system-settings-toolbar">
+        <p className="system-settings-toolbar-copy">建议先保存草稿，再发布到线上环境。</p>
+        <Space wrap className="system-settings-action-group">
+          <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
+            {saving ? "保存中..." : "保存草稿"}
+          </Button>
+          <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
+            {publishing ? "发布中..." : "发布设置"}
+          </Button>
+        </Space>
+      </div>
 
-      <div className="admin-nav" role="tablist" aria-label="系统设置分区">
-        {SECTIONS.map((item) => {
-          const active = section === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={active ? "admin-nav-btn active" : "admin-nav-btn"}
-              onClick={() => setSection(item.id)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+
+      <div className="system-settings-tabs-wrap">
+        <Tabs
+          activeKey={section}
+          onChange={(key) => setSection(key as SystemSettingsSection)}
+          items={SECTIONS.map((item) => ({
+            key: item.id,
+            label: item.label
+          }))}
+        />
       </div>
 
       {section === "branding" ? (
@@ -433,10 +439,6 @@ export function SystemSettingsShell() {
         <PublishHistoryView
           draftMeta={draftMeta}
           publishedMeta={publishedMeta}
-          saving={saving}
-          publishing={publishing}
-          onSave={() => void handleSaveDraft()}
-          onPublish={() => void handlePublish()}
         />
       ) : null}
 

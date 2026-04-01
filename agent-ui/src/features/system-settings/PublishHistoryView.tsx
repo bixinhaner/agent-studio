@@ -3,10 +3,6 @@ import type { SystemSettingsVersionMeta } from "./types";
 type PublishHistoryViewProps = {
   draftMeta: SystemSettingsVersionMeta;
   publishedMeta: SystemSettingsVersionMeta | null;
-  saving: boolean;
-  publishing: boolean;
-  onSave(): void;
-  onPublish(): void;
 };
 
 function formatLocalDateTime(value: string | null | undefined) {
@@ -21,21 +17,13 @@ function describeVersion(meta: SystemSettingsVersionMeta | null) {
   return `v${meta.versionNumber}`;
 }
 
-export function PublishHistoryView({ draftMeta, publishedMeta, saving, publishing, onSave, onPublish }: PublishHistoryViewProps) {
+export function PublishHistoryView({ draftMeta, publishedMeta }: PublishHistoryViewProps) {
   return (
     <section className="resource-center-section">
       <div className="resource-center-section-header">
         <div>
           <h3>发布记录</h3>
           <p>草稿修改不会影响运行，必须显式发布后才会成为新默认值。</p>
-        </div>
-        <div className="system-settings-action-group">
-          <button type="button" className="admin-secondary-btn" disabled={saving || publishing} onClick={onSave}>
-            {saving ? "保存中..." : "保存草稿"}
-          </button>
-          <button type="button" className="admin-action-btn" disabled={saving || publishing} onClick={onPublish}>
-            {publishing ? "发布中..." : "发布设置"}
-          </button>
         </div>
       </div>
 

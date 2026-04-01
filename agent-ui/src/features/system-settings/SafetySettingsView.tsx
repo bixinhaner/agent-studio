@@ -1,3 +1,5 @@
+import { Switch } from "antd";
+
 import type { SystemSettingsSafety } from "./types";
 
 type SafetySettingsViewProps = {
@@ -18,7 +20,11 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
 
       <div className="system-settings-toggle-grid">
         <label className="field checkbox-field system-settings-toggle-row">
-          <input type="checkbox" checked={value.allowDangerFullAccess} disabled={disabled} onChange={(event) => onChange({ allowDangerFullAccess: event.target.checked })} />
+          <Switch
+            checked={value.allowDangerFullAccess}
+            disabled={disabled}
+            onChange={(checked) => onChange({ allowDangerFullAccess: checked })}
+          />
           <span>
             <span className="field-label">允许 danger-full-access</span>
             <span className="field-help">关闭后，任何运行配置都不能启用全访问沙箱。</span>
@@ -26,7 +32,11 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
         </label>
 
         <label className="field checkbox-field system-settings-toggle-row">
-          <input type="checkbox" checked={value.allowNetworkAccess} disabled={disabled} onChange={(event) => onChange({ allowNetworkAccess: event.target.checked })} />
+          <Switch
+            checked={value.allowNetworkAccess}
+            disabled={disabled}
+            onChange={(checked) => onChange({ allowNetworkAccess: checked })}
+          />
           <span>
             <span className="field-label">允许联网</span>
             <span className="field-help">关闭后，新会话和运行配置不能开启出网。</span>
@@ -34,7 +44,11 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
         </label>
 
         <label className="field checkbox-field system-settings-toggle-row">
-          <input type="checkbox" checked={value.allowLiveWebSearch} disabled={disabled} onChange={(event) => onChange({ allowLiveWebSearch: event.target.checked })} />
+          <Switch
+            checked={value.allowLiveWebSearch}
+            disabled={disabled}
+            onChange={(checked) => onChange({ allowLiveWebSearch: checked })}
+          />
           <span>
             <span className="field-label">允许实时网页搜索</span>
             <span className="field-help">关闭后，运行配置不能选择 live 搜索模式。</span>
@@ -42,7 +56,11 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
         </label>
 
         <label className="field checkbox-field system-settings-toggle-row">
-          <input type="checkbox" checked={value.allowCustomAdditionalDirectories} disabled={disabled} onChange={(event) => onChange({ allowCustomAdditionalDirectories: event.target.checked })} />
+          <Switch
+            checked={value.allowCustomAdditionalDirectories}
+            disabled={disabled}
+            onChange={(checked) => onChange({ allowCustomAdditionalDirectories: checked })}
+          />
           <span>
             <span className="field-label">允许自定义附加目录</span>
             <span className="field-help">关闭后，用户侧不可自由选择额外目录。</span>
@@ -50,7 +68,11 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
         </label>
 
         <label className="field checkbox-field system-settings-toggle-row">
-          <input type="checkbox" checked={value.allowFilesystemMutations} disabled={disabled} onChange={(event) => onChange({ allowFilesystemMutations: event.target.checked })} />
+          <Switch
+            checked={value.allowFilesystemMutations}
+            disabled={disabled}
+            onChange={(checked) => onChange({ allowFilesystemMutations: checked })}
+          />
           <span>
             <span className="field-label">允许文件系统写入</span>
             <span className="field-help">关闭后，新会话只能使用只读工作流。</span>

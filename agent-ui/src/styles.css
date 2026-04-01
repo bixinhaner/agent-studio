@@ -1797,6 +1797,10 @@ body {
 .admin-shell-nav-group {
   display: grid;
   gap: 8px;
+  padding: 10px;
+  border: 1px solid #dbe6f5;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fcfdff 0%, #f6faff 100%);
 }
 
 .admin-shell-nav-group-title {
@@ -1815,12 +1819,13 @@ body {
   width: 100%;
   text-align: left;
   border: 1px solid #d7e3f6;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #f8fbff;
-  padding: 10px 12px;
+  padding: 8px 10px;
   cursor: pointer;
   height: auto;
   white-space: normal;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 .admin-shell-nav-btn.ant-btn-primary,
@@ -1848,6 +1853,30 @@ body {
   display: grid;
   gap: 2px;
   justify-items: start;
+  min-width: 0;
+}
+
+.admin-shell-nav-btn-inner {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.admin-shell-nav-btn-prefix {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  border: 1px solid #cddcf4;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .admin-shell-nav-btn-label {
@@ -2016,7 +2045,7 @@ body {
   align-content: start;
   justify-items: stretch;
   gap: 16px;
-  overflow: auto;
+  overflow: visible;
 }
 
 .system-settings-meta-pill-group,
@@ -2038,6 +2067,36 @@ body {
   color: #1e3a8a;
   font-size: 12px;
   font-weight: 600;
+}
+
+.system-settings-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid #d7e3f6;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(6px);
+}
+
+.system-settings-toolbar-copy {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.system-settings-tabs-wrap .ant-tabs-nav {
+  margin-bottom: 10px;
+}
+
+.system-settings-tabs-wrap .ant-tabs-tab {
+  border-radius: 10px;
 }
 
 .system-settings-subsection {
@@ -2880,6 +2939,10 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .admin-shell-nav-group {
+    padding: 8px;
+  }
+
   .admin-console-banner .ant-card-body {
     flex-direction: column;
   }
@@ -2888,6 +2951,10 @@ body {
     max-height: none;
     overflow: visible;
     padding-right: 0;
+  }
+
+  .system-settings-toolbar {
+    position: static;
   }
 
   .admin-banner-meta {

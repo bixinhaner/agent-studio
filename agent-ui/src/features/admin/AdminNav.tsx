@@ -63,9 +63,14 @@ export function AdminNav(props: {
                     block
                     onClick={() => props.onChange(item.id)}
                   >
-                    <span className="admin-shell-nav-btn-copy">
-                      <Typography.Text className="admin-shell-nav-btn-label">{item.label}</Typography.Text>
-                      <Typography.Text className="admin-shell-nav-btn-desc">{item.description}</Typography.Text>
+                    <span className="admin-shell-nav-btn-inner">
+                      <span className="admin-shell-nav-btn-prefix" aria-hidden="true">
+                        {item.label.slice(0, 1)}
+                      </span>
+                      <span className="admin-shell-nav-btn-copy">
+                        <Typography.Text className="admin-shell-nav-btn-label">{item.label}</Typography.Text>
+                        <Typography.Text className="admin-shell-nav-btn-desc">{item.description}</Typography.Text>
+                      </span>
                     </span>
                   </Button>
                 );
