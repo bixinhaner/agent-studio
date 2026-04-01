@@ -2518,7 +2518,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               <PanelGroup orientation="horizontal" className="portal-workbench-layout">
                 {!layoutState.isSessionRailCollapsed && (
                   <>
-                    <Panel defaultSize={20} minSize={15} maxSize={30} collapsible>
+                    <Panel defaultSize="20" minSize="15" maxSize="30" collapsible>
                       <ThreadList.Root>
                 <SessionRail
                   collapsed={layoutState.isSessionRailCollapsed}
@@ -2557,7 +2557,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 </>
                 )}
 
-                <Panel minSize={30}>
+                <Panel minSize="30">
                   <main className="portal-workbench-chat">
                     <div className="thread-wrap">
                       {canUpload && !sharedThreadReadonly ? (
@@ -2572,7 +2572,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 {layoutState.isRightDrawerOpen && (
                   <>
                     <PanelResizeHandle className="Resizer" />
-                    <Panel defaultSize={25} minSize={20} maxSize={40} className="right-drawer-panel">
+                    <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
 
             <RightWorkbenchDrawer
               open={layoutState.isRightDrawerOpen}

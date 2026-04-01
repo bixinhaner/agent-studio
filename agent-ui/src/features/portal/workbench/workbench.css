@@ -122,7 +122,14 @@
   background-color: var(--workbench-accent-strong);
 }
 
+[data-thread-list-root] {
+  height: 100%;
+  width: 100%;
+  display: flex;
+}
+
 .session-rail {
+  flex: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -243,9 +250,19 @@
 }
 
 /* @assistant-ui customized tokens */
+.aui-thread-viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+}
+
 .aui-thread-root {
   --aui-thread-max-width: 800px;
   height: 100%;
+  flex: 1;
 }
 .aui-composer-root {
   border: 1px solid var(--workbench-border);
