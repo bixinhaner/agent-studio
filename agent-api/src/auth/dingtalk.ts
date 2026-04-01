@@ -119,8 +119,8 @@ function normalizeUserIdentity(payload: unknown): DingTalkUserIdentity {
     openId,
     userId: getString(result, ["userId", "userid", "user_id"]),
     corpId: getString(result, ["corpId", "corpid", "corp_id"]),
-    email: getString(result, ["email"]),
-    displayName: getString(result, ["nick", "name", "displayName", "display_name"]),
+    email: getString(result, ["email", "org_email", "orgEmail"]),
+    displayName: getString(result, ["nickName", "nick_name", "nick", "name", "displayName", "display_name"]),
     avatarUrl: getString(result, ["avatarUrl", "avatar", "avatar_url"]),
     mobile: getString(result, ["mobile"])
   };
@@ -404,6 +404,16 @@ export function createDingTalkClient(
     );
   };
 
+  const getUserIdByUnionId = async (unionId: string): Promise<string | undefined> => {
+    const normalizedUnionId = normalizeString(unionId);
+    if (!normalizedUnionId) return undefined;
+
+    const payload = await requestOrgApi("/topapi/user/getbyunionid", { unionid: normalizedUnionId });
+    const payloadRecord = asRecord(payload);
+    const payloadResult = asRecord(payloadRecord?.result) ?? payloadRecord;
+    return getString(payloadResult, ["userid", "userId", "user_id"]);
+  };
+
   return {
     async exchangeCode(code: string): Promise<DingTalkUserIdentity> {
       const normalizedCode = trimOrUndefined(code);
@@ -446,7 +456,30 @@ export function createDingTalkClient(
         },
         fetchImpl
       );
-      return normalizeUserIdentity(userPayload);
+      const identity = normalizeUserIdentity(userPayload);
+      const shouldHydrateProfile = !identity.displayName || !identity.email;
+      if (!shouldHydrateProfile) {
+        return identity;
+      }
+
+      const profileUserId = identity.userId ?? (await getUserIdByUnionId(identity.unionId));
+      if (!profileUserId) {
+        return identity;
+      }
+
+      const profile = await this.getUser({ userId: profileUserId });
+      if (!profile) {
+        return { ...identity, userId: profileUserId };
+      }
+
+      return {
+        ...identity,
+        userId: identity.userId ?? profile.userId,
+        openId: identity.openId ?? profile.openId,
+        corpId: identity.corpId ?? profile.corpId,
+        email: identity.email ?? profile.email,
+        displayName: identity.displayName ?? profile.displayName
+      };
     },
     async validateCredentials(): Promise<void> {
       await getAppAccessToken();

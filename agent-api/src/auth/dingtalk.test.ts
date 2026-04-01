@@ -395,6 +395,82 @@ describe("createDingTalkClient", () => {
     );
   });
 
+  it("hydrates missing display name and email from the app-authorized user detail api after oauth exchange", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "user-token-2" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            unionId: "union-456",
+            userId: "ding-user-456"
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ accessToken: "app-token-4" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              userid: "ding-user-456",
+              name: "Recovered User",
+              org_email: "recovered@example.com"
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        )
+      );
+
+    const client = createDingTalkClient(
+      {
+        clientId: "ding-client-id",
+        clientSecret: "ding-client-secret",
+        redirectUri: "https://agent.example.com/auth/dingtalk/callback",
+        scope: "openid"
+      },
+      fetchMock
+    );
+
+    await expect(client.exchangeCode("auth-code")).resolves.toEqual({
+      unionId: "union-456",
+      userId: "ding-user-456",
+      email: "recovered@example.com",
+      displayName: "Recovered User"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://api.dingtalk.com/topapi/v2/user/get",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-acs-dingtalk-access-token": "app-token-4"
+        },
+        body: JSON.stringify({
+          userid: "ding-user-456"
+        })
+      })
+    );
+  });
+
   it("rejects a DingTalk user profile that lacks unionId", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

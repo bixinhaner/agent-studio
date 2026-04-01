@@ -34,6 +34,11 @@ type FakeDepartmentMembershipRow = {
 class FakeDepartmentDb {
   private departmentCounter = 0;
   private membershipCounter = 0;
+  lastDepartmentFindManyArgs:
+    | {
+        orderBy?: { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" } | Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }>;
+      }
+    | undefined;
 
   constructor(
     readonly departments: FakeDepartmentRow[] = [],
@@ -52,16 +57,18 @@ class FakeDepartmentDb {
     findMany: async ({
       orderBy
     }: {
-      orderBy?: { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" };
+      orderBy?: { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" } | Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }>;
     } = {}) => {
+      this.lastDepartmentFindManyArgs = { orderBy };
       const rows = [...this.departments];
+      const normalizedOrderBy = Array.isArray(orderBy) ? Object.assign({}, ...orderBy) : orderBy;
       rows.sort((left, right) => {
-        if (orderBy?.sortOrder) {
+        if (normalizedOrderBy?.sortOrder) {
           const diff = left.sortOrder - right.sortOrder;
-          if (diff !== 0) return orderBy.sortOrder === "asc" ? diff : -diff;
+          if (diff !== 0) return normalizedOrderBy.sortOrder === "asc" ? diff : -diff;
         }
         const diff = left.createdAt.getTime() - right.createdAt.getTime();
-        return orderBy?.createdAt === "desc" ? -diff : diff;
+        return normalizedOrderBy?.createdAt === "desc" ? -diff : diff;
       });
       return clone(rows);
     },
@@ -188,6 +195,44 @@ describe("DepartmentRepository", () => {
     const child = await repository.getByExternalId("rd");
     expect(root).toBeTruthy();
     expect(child?.parentDepartmentId).toBe(root?.id);
+  });
+
+  it("lists the department tree using prisma-compatible array orderBy clauses", async () => {
+    const db = new FakeDepartmentDb([
+        {
+          id: "department-root",
+          organizationId: null,
+          externalId: "root",
+          name: "总部",
+          parentDepartmentId: null,
+          sortOrder: 20,
+          status: "active",
+          lastSyncedAt: null,
+          createdAt: new Date("2026-03-28T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-28T00:00:00.000Z")
+        },
+        {
+          id: "department-child",
+          organizationId: null,
+          externalId: "child",
+          name: "子部门",
+          parentDepartmentId: null,
+          sortOrder: 10,
+          status: "active",
+          lastSyncedAt: null,
+          createdAt: new Date("2026-03-29T00:00:00.000Z"),
+          updatedAt: new Date("2026-03-29T00:00:00.000Z")
+        }
+      ]);
+    const repository = new DepartmentRepository(db as never);
+
+    await expect(repository.listTree()).resolves.toMatchObject([
+      { externalId: "child" },
+      { externalId: "root" }
+    ]);
+    expect(db.lastDepartmentFindManyArgs).toEqual({
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+    });
   });
 
   it("resolves parentDepartmentId from an existing parent outside the current batch", async () => {

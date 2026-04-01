@@ -30,7 +30,7 @@ type DepartmentRow = {
 
 type DepartmentTable = {
   findUnique(args: { where: { id?: string; externalId?: string } }): Promise<DepartmentRow | null>;
-  findMany(args?: { orderBy?: { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" } }): Promise<DepartmentRow[]>;
+  findMany(args?: { orderBy?: Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }> }): Promise<DepartmentRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<DepartmentRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<DepartmentRow>;
 };
@@ -150,7 +150,7 @@ export class DepartmentRepository {
 
   async listTree(): Promise<DepartmentTreeNode[]> {
     const rows = await this.db.department.findMany({
-      orderBy: { sortOrder: "asc", createdAt: "asc" }
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
     });
     const nodeById = new Map<string, DepartmentTreeNode>();
     for (const row of rows) {
