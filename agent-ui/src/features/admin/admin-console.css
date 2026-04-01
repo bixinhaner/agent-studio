@@ -1,0 +1,668 @@
+.admin-console-root {
+  --admin-bg: #eff4fb;
+  --admin-surface: #ffffff;
+  --admin-surface-alt: #f7fbff;
+  --admin-border: #d8e1ee;
+  --admin-border-strong: #c4d3e7;
+  --admin-text: #192534;
+  --admin-subtle: #5f7189;
+  --admin-accent: #0b6ca8;
+  --admin-accent-soft: #deefff;
+  --admin-highlight: #f0a238;
+  height: 100vh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 4% 0%, #dce9fb 0%, rgba(220, 233, 251, 0) 34%),
+    radial-gradient(circle at 94% 8%, rgba(11, 108, 168, 0.11) 0%, rgba(11, 108, 168, 0) 28%),
+    linear-gradient(150deg, #eff4fb 0%, #edf3f8 55%, #f7fafc 100%);
+  color: var(--admin-text);
+  font-family:
+    "IBM Plex Sans",
+    "PingFang SC",
+    "Noto Sans SC",
+    "Segoe UI",
+    sans-serif;
+}
+
+.admin-console-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 70px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(25, 37, 52, 0.09);
+  backdrop-filter: blur(12px);
+  background: rgba(248, 251, 255, 0.86);
+}
+
+.admin-console-topbar-left {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.admin-console-menu-btn {
+  flex: 0 0 auto;
+}
+
+.admin-console-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.admin-console-brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background:
+    linear-gradient(160deg, var(--admin-accent) 0%, #0a4b75 100%);
+  box-shadow: 0 8px 20px rgba(11, 108, 168, 0.25);
+}
+
+.admin-console-brand-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #3d7cad;
+  font-weight: 700;
+}
+
+.admin-console-brand strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 17px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--admin-text);
+}
+
+.admin-console-breadcrumb {
+  min-width: 0;
+}
+
+.admin-console-breadcrumb .ant-breadcrumb-link,
+.admin-console-breadcrumb .ant-breadcrumb-separator {
+  color: var(--admin-subtle);
+}
+
+.admin-console-breadcrumb .ant-breadcrumb-link {
+  font-size: 12px;
+}
+
+.admin-console-topbar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-console-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.admin-console-nav {
+  min-height: 0;
+}
+
+.admin-console-nav-surface {
+  height: 100%;
+  border: 1px solid var(--admin-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 14px 40px rgba(22, 43, 73, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-console-nav-search {
+  padding: 14px;
+  border-bottom: 1px solid rgba(19, 37, 54, 0.08);
+  background: linear-gradient(180deg, rgba(244, 249, 255, 0.9) 0%, rgba(255, 255, 255, 0.4) 100%);
+}
+
+.admin-console-nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-console-nav-group {
+  border: 1px solid rgba(10, 67, 107, 0.12);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(238, 246, 255, 0.7) 0%, rgba(255, 255, 255, 0.86) 100%);
+  padding: 10px;
+}
+
+.admin-console-nav-group-head h4 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: #0b4870;
+}
+
+.admin-console-nav-group-head p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--admin-subtle);
+}
+
+.admin-console-nav-items {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-console-nav-item {
+  width: 100%;
+  border: 1px solid rgba(17, 55, 84, 0.14);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--admin-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.admin-console-nav-item:hover {
+  border-color: rgba(11, 108, 168, 0.46);
+  background: #f4f9ff;
+  transform: translateY(-1px);
+}
+
+.admin-console-nav-item.active {
+  border-color: rgba(11, 108, 168, 0.7);
+  background: linear-gradient(160deg, rgba(222, 239, 255, 0.94) 0%, rgba(255, 255, 255, 1) 100%);
+  box-shadow: 0 7px 16px rgba(11, 108, 168, 0.18);
+}
+
+.admin-console-nav-item-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: rgba(11, 108, 168, 0.1);
+  color: #0a588c;
+}
+
+.admin-console-nav-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-console-nav-item-copy strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.admin-console-nav-item-copy small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--admin-subtle);
+}
+
+.admin-console-nav-empty {
+  border: 1px dashed var(--admin-border-strong);
+  border-radius: 12px;
+  padding: 16px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--admin-subtle);
+  background: rgba(246, 251, 255, 0.84);
+}
+
+.admin-console-nav-foot {
+  border-top: 1px solid rgba(19, 37, 54, 0.08);
+  background: #fff;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-console-portal-btn {
+  height: 36px;
+}
+
+.admin-console-main {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+
+.admin-console-hero {
+  border-radius: 18px;
+  border: 1px solid rgba(11, 108, 168, 0.16);
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.98) 0%, rgba(233, 245, 255, 0.75) 100%),
+    radial-gradient(circle at 92% 0%, rgba(11, 108, 168, 0.16) 0%, rgba(11, 108, 168, 0) 34%);
+}
+
+.admin-console-hero .ant-card-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-console-hero-copy p {
+  margin: 8px 0 0;
+  color: #314761;
+}
+
+.admin-console-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-console-quick-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-console-quick-item {
+  height: 34px;
+  border: 1px solid rgba(11, 108, 168, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #164160;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.admin-console-quick-item-icon {
+  color: inherit;
+}
+
+.admin-console-quick-item:hover {
+  border-color: rgba(11, 108, 168, 0.56);
+  background: #f3f9ff;
+}
+
+.admin-console-quick-item.active {
+  border-color: rgba(11, 108, 168, 0.68);
+  background: #0b6ca8;
+  color: #fff;
+}
+
+.admin-console-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-console-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-console-overview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.admin-console-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.admin-console-overview-metric-card {
+  border: 1px solid rgba(11, 108, 168, 0.16);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(250, 253, 255, 1) 0%, rgba(239, 248, 255, 0.72) 100%);
+}
+
+.admin-console-overview-state {
+  margin-top: 10px;
+}
+
+.admin-console-overview-map {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-console-overview-map-item {
+  border: 1px solid rgba(11, 108, 168, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 249, 255, 0.8) 100%);
+  color: var(--admin-text);
+  display: flex;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.admin-console-overview-map-item:hover {
+  border-color: rgba(11, 108, 168, 0.62);
+  box-shadow: 0 8px 18px rgba(11, 108, 168, 0.14);
+  transform: translateY(-1px);
+}
+
+.admin-console-overview-map-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 108, 168, 0.13);
+  color: #0c5f95;
+  flex: 0 0 auto;
+}
+
+.admin-console-overview-map-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-console-overview-map-copy strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.admin-console-overview-map-copy small {
+  color: var(--admin-subtle);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.admin-console-organization-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-console-root .admin-card,
+.admin-console-root .ant-card {
+  border-radius: 16px;
+  border: 1px solid rgba(20, 43, 66, 0.11);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(21, 43, 70, 0.08);
+}
+
+.admin-console-root .admin-card h2,
+.admin-console-root .admin-card h3,
+.admin-console-root .admin-card h4,
+.admin-console-root .admin-card h5 {
+  color: var(--admin-text);
+}
+
+.admin-console-root .admin-card p,
+.admin-console-root .admin-card .ant-typography {
+  color: #334a63;
+}
+
+.admin-console-root .admin-alert-inline {
+  margin: 8px 0;
+}
+
+.admin-console-root .admin-list-card,
+.admin-console-root .admin-inline-editor,
+.admin-console-root .resource-center-section,
+.admin-console-root .resource-center-item,
+.admin-console-root .resource-center-list-item {
+  border-color: rgba(16, 62, 98, 0.14);
+  border-radius: 12px;
+}
+
+.admin-console-root .field-input,
+.admin-console-root .ant-input,
+.admin-console-root .ant-input-affix-wrapper,
+.admin-console-root textarea,
+.admin-console-root select {
+  border-radius: 10px;
+  border-color: rgba(14, 66, 103, 0.24);
+}
+
+.admin-console-root .field-input:focus,
+.admin-console-root .ant-input:focus,
+.admin-console-root .ant-input-affix-wrapper-focused,
+.admin-console-root textarea:focus,
+.admin-console-root select:focus {
+  border-color: rgba(11, 108, 168, 0.84);
+  box-shadow: 0 0 0 2px rgba(11, 108, 168, 0.14);
+  outline: none;
+}
+
+.admin-console-root .admin-action-btn,
+.admin-console-root .admin-nav-btn.active,
+.admin-console-root .ant-btn-primary,
+.admin-console-root .resource-center-type-tab.active {
+  background: linear-gradient(160deg, #0b6ca8 0%, #0a507d 100%);
+  border-color: #0b6ca8;
+  color: #fff;
+}
+
+.admin-console-root .admin-action-btn:hover,
+.admin-console-root .admin-nav-btn.active:hover,
+.admin-console-root .ant-btn-primary:hover,
+.admin-console-root .resource-center-type-tab.active:hover {
+  background: linear-gradient(160deg, #0c74b3 0%, #0a5687 100%);
+  border-color: #0c74b3;
+}
+
+.admin-console-root .admin-secondary-btn,
+.admin-console-root .admin-nav-btn,
+.admin-console-root .resource-center-type-tab,
+.admin-console-root .ant-btn-default {
+  border-color: rgba(13, 63, 100, 0.26);
+  color: #1e4868;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.admin-console-root .admin-secondary-btn:hover,
+.admin-console-root .admin-nav-btn:hover,
+.admin-console-root .resource-center-type-tab:hover,
+.admin-console-root .ant-btn-default:hover {
+  border-color: rgba(11, 108, 168, 0.62);
+  color: #0c5d91;
+}
+
+.admin-console-root .ant-tag-blue {
+  background: rgba(11, 108, 168, 0.1);
+  border-color: rgba(11, 108, 168, 0.26);
+  color: #0b5e92;
+}
+
+.admin-console-root .ant-tag-geekblue {
+  background: rgba(67, 98, 176, 0.14);
+  border-color: rgba(67, 98, 176, 0.36);
+  color: #2a4b98;
+}
+
+.admin-console-root .ant-tag-processing {
+  background: rgba(240, 162, 56, 0.16);
+  border-color: rgba(240, 162, 56, 0.4);
+  color: #8d5f19;
+}
+
+.admin-console-root .ant-tag-success {
+  background: rgba(33, 151, 96, 0.14);
+}
+
+.admin-console-nav-drawer .ant-drawer-body {
+  padding: 0;
+}
+
+.admin-console-nav-drawer .admin-console-nav-surface {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.admin-console-root .user-identity-card {
+  margin: 0;
+  border-color: rgba(13, 74, 117, 0.2);
+  background: linear-gradient(180deg, #f8fcff 0%, #eef6ff 100%);
+}
+
+.admin-console-root .user-identity-action-btn {
+  border-color: rgba(13, 74, 117, 0.26);
+}
+
+.admin-console-root .user-identity-action-btn:hover {
+  border-color: rgba(11, 108, 168, 0.56);
+  color: #0a588b;
+}
+
+.admin-console-main::-webkit-scrollbar,
+.admin-console-nav-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-console-main::-webkit-scrollbar-thumb,
+.admin-console-nav-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(12, 74, 115, 0.22);
+}
+
+.admin-console-main::-webkit-scrollbar-thumb:hover,
+.admin-console-nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(12, 74, 115, 0.36);
+}
+
+@media (max-width: 1400px) {
+  .admin-console-frame {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+
+  .admin-console-overview-map {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1200px) {
+  .admin-console-frame {
+    display: flex;
+    padding: 10px;
+  }
+
+  .admin-console-main {
+    padding-right: 0;
+  }
+
+  .admin-console-topbar {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 960px) {
+  .admin-console-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-console-topbar-left,
+  .admin-console-topbar-actions {
+    width: 100%;
+  }
+
+  .admin-console-topbar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .admin-console-breadcrumb {
+    display: none;
+  }
+
+  .admin-console-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-organization-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-console-hero .ant-card-body {
+    padding: 14px;
+  }
+
+  .admin-console-overview-head {
+    flex-direction: column;
+  }
+
+  .admin-console-overview-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-quick-item {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .admin-console-topbar-actions .ant-btn {
+    height: 34px;
+  }
+}

@@ -1,140 +1,204 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Space, Spin, Statistic, Tag, Typography } from "antd";
+import {
+  AppstoreOutlined,
+  AuditOutlined,
+  BellOutlined,
+  ClusterOutlined,
+  DashboardOutlined,
+  DeploymentUnitOutlined,
+  MenuOutlined,
+  ReloadOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  ToolOutlined
+} from "@ant-design/icons";
+import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Statistic, Tag, Typography } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-import { fetchAdminOverview } from "./api";
-import { AdminNav, type AdminNavSection } from "./AdminNav";
-import { DepartmentTreeView } from "./DepartmentTreeView";
-import { OrgSyncView } from "./OrgSyncView";
-import { RolesView } from "../rbac/RolesView";
-import type { AdminOverview } from "./types";
-import { IntegrationCenterShell } from "../integration-center/IntegrationCenterShell";
-import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
-import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
-import { UsersView } from "./UsersView";
-import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
-import { BroadcastAdminView } from "../collaboration/BroadcastAdminView";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
+import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
+import { BroadcastAdminView } from "../collaboration/BroadcastAdminView";
+import { IntegrationCenterShell } from "../integration-center/IntegrationCenterShell";
 import { MonitoringShell } from "../monitoring/MonitoringShell";
+import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
+import { RolesView } from "../rbac/RolesView";
+import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
+import { fetchAdminOverview } from "./api";
+import { DepartmentTreeView } from "./DepartmentTreeView";
+import { OrgSyncView } from "./OrgSyncView";
+import type { AdminOverview, AdminSection } from "./types";
+import { UsersView } from "./UsersView";
 
-const SECTION_META: Record<AdminNavSection, { title: string; description: string; scope: string; cadence: string }> = {
+import "./admin-console.css";
+
+type AdminConsoleSection = AdminSection | "broadcasts";
+type AdminConsoleGroup = "operations" | "governance" | "runtime";
+
+type AdminSectionMeta = {
+  id: AdminConsoleSection;
+  title: string;
+  description: string;
+  scope: string;
+  cadence: string;
+  group: AdminConsoleGroup;
+  keywords: string[];
+  icon: ReactNode;
+};
+
+type AdminGroupMeta = {
+  id: AdminConsoleGroup;
+  label: string;
+  description: string;
+};
+
+type AdminNavigationGroupView = AdminGroupMeta & {
+  items: AdminSectionMeta[];
+};
+
+const ADMIN_HASH_PREFIX = "#admin/";
+
+const GROUPS: AdminGroupMeta[] = [
+  {
+    id: "operations",
+    label: "运营总览",
+    description: "平台状态、监控告警与广播运营。"
+  },
+  {
+    id: "governance",
+    label: "组织治理",
+    description: "用户、组织结构和权限审计。"
+  },
+  {
+    id: "runtime",
+    label: "运行能力",
+    description: "资源、能力、集成和系统默认策略。"
+  }
+];
+
+const SECTION_ORDER: AdminConsoleSection[] = [
+  "overview",
+  "monitoring",
+  "broadcasts",
+  "users",
+  "organization",
+  "rbac",
+  "resources",
+  "capabilities",
+  "integrations",
+  "system-settings"
+];
+
+const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   overview: {
+    id: "overview",
     title: "平台概览",
-    description: "统一查看平台规模、运行状态和基础接入健康。",
+    description: "统一查看平台规模、活跃状态与核心运营指标。",
     scope: "全局管理域",
-    cadence: "建议每小时刷新一次"
-  },
-  users: {
-    title: "用户治理",
-    description: "管理用户身份、状态与同步信息，保障组织成员可控可审计。",
-    scope: "身份与组织",
-    cadence: "建议每日巡检"
-  },
-  resources: {
-    title: "资源配置中心",
-    description: "集中维护资料集、文件来源与访问授权。",
-    scope: "资源与授权",
-    cadence: "按项目变更维护"
-  },
-  capabilities: {
-    title: "能力配置总览",
-    description: "统一管理 Agent 模式、技能包与运行策略。",
-    scope: "运行能力",
-    cadence: "按发布节奏更新"
-  },
-  integrations: {
-    title: "集成中心",
-    description: "配置第三方平台接入并跟踪连接健康状态。",
-    scope: "外部平台连接",
-    cadence: "建议每周复核"
-  },
-  broadcasts: {
-    title: "广播管理",
-    description: "维护系统广播模板与触达配置，保证公告发布有序可追踪。",
-    scope: "运营触达",
-    cadence: "按活动排期维护"
-  },
-  "system-settings": {
-    title: "系统设置",
-    description: "管理平台默认行为、策略开关与发布版本。",
-    scope: "平台默认参数",
-    cadence: "变更前评审后发布"
-  },
-  organization: {
-    title: "组织同步",
-    description: "查看部门树和同步任务，确保组织数据一致。",
-    scope: "组织架构",
-    cadence: "按同步任务节奏"
-  },
-  rbac: {
-    title: "角色权限",
-    description: "维护角色模板和授权矩阵，统一权限治理。",
-    scope: "角色与权限",
-    cadence: "建议双周审计"
+    cadence: "建议每小时刷新",
+    group: "operations",
+    keywords: ["概览", "运营", "数据看板", "dashboard"],
+    icon: <DashboardOutlined />
   },
   monitoring: {
+    id: "monitoring",
     title: "审计监控",
-    description: "追踪请求、成本、配额、告警与资源访问轨迹。",
+    description: "追踪请求、成本、配额、告警和资源访问轨迹。",
     scope: "运行审计",
-    cadence: "建议实时关注"
+    cadence: "建议持续观察",
+    group: "operations",
+    keywords: ["审计", "监控", "告警", "成本", "配额"],
+    icon: <AuditOutlined />
+  },
+  broadcasts: {
+    id: "broadcasts",
+    title: "广播管理",
+    description: "维护系统广播模板与触达策略，支持运营发布节奏。",
+    scope: "运营触达",
+    cadence: "按活动排期维护",
+    group: "operations",
+    keywords: ["广播", "公告", "触达", "通知"],
+    icon: <BellOutlined />
+  },
+  users: {
+    id: "users",
+    title: "用户治理",
+    description: "管理用户状态、身份资料与本地治理字段。",
+    scope: "身份与成员",
+    cadence: "建议每日巡检",
+    group: "governance",
+    keywords: ["用户", "成员", "账号", "身份"],
+    icon: <TeamOutlined />
+  },
+  organization: {
+    id: "organization",
+    title: "组织同步",
+    description: "查看部门树与同步任务，定位组织数据偏差。",
+    scope: "组织架构",
+    cadence: "按同步任务节奏",
+    group: "governance",
+    keywords: ["组织", "部门", "同步", "结构"],
+    icon: <ClusterOutlined />
+  },
+  rbac: {
+    id: "rbac",
+    title: "角色权限",
+    description: "维护角色模板和权限矩阵，保障授权可追溯。",
+    scope: "权限体系",
+    cadence: "建议双周审计",
+    group: "governance",
+    keywords: ["角色", "权限", "RBAC", "授权"],
+    icon: <SafetyCertificateOutlined />
+  },
+  resources: {
+    id: "resources",
+    title: "资源配置中心",
+    description: "集中维护资料集、文件来源与资源授权策略。",
+    scope: "资源与授权",
+    cadence: "按项目变更维护",
+    group: "runtime",
+    keywords: ["资源", "资料集", "文件", "knowledge set"],
+    icon: <AppstoreOutlined />
+  },
+  capabilities: {
+    id: "capabilities",
+    title: "能力配置中心",
+    description: "统一管理 Agent 模式、技能包和运行策略。",
+    scope: "运行能力",
+    cadence: "按发布节奏更新",
+    group: "runtime",
+    keywords: ["能力", "mode", "skill", "run profile"],
+    icon: <ToolOutlined />
+  },
+  integrations: {
+    id: "integrations",
+    title: "集成中心",
+    description: "配置第三方平台连接并追踪实例健康状态。",
+    scope: "外部平台连接",
+    cadence: "建议每周复核",
+    group: "runtime",
+    keywords: ["集成", "dingtalk", "zendesk", "openai"],
+    icon: <DeploymentUnitOutlined />
+  },
+  "system-settings": {
+    id: "system-settings",
+    title: "系统设置",
+    description: "维护平台默认参数、策略开关和版本发布记录。",
+    scope: "平台默认参数",
+    cadence: "变更前评审后发布",
+    group: "runtime",
+    keywords: ["系统", "配置", "默认值", "发布"],
+    icon: <SettingOutlined />
   }
 };
 
-function OverviewCard(props: { overview: AdminOverview | null; loading: boolean; errorText: string }) {
-  return (
-    <Card className="admin-card antd-admin-card">
-      <Typography.Title level={4} className="admin-card-heading">
-        运行概览
-      </Typography.Title>
-      {props.loading ? <Spin size="small" /> : null}
-      {props.errorText ? (
-        <Alert
-          type="error"
-          showIcon
-          className="admin-alert-inline"
-          message={props.errorText}
-        />
-      ) : null}
-      {props.overview ? (
-        <Space direction="vertical" size={16} className="admin-full-width">
-          <div className="admin-metric-grid">
-            <Card size="small" className="admin-metric-card">
-              <Statistic title="用户" value={props.overview.counts.users} />
-            </Card>
-            <Card size="small" className="admin-metric-card">
-              <Statistic title="线程" value={props.overview.counts.threads} />
-            </Card>
-            <Card size="small" className="admin-metric-card">
-              <Statistic title="活跃会话" value={props.overview.counts.activeSessions} />
-            </Card>
-          </div>
-          {props.overview.integrations?.zendesk ? (
-            <div className="admin-integration-note">
-              <Tag color={props.overview.integrations.zendesk.ready ? "success" : "warning"}>
-                Zendesk {props.overview.integrations.zendesk.ready ? "已就绪" : "待补配置"}
-              </Tag>
-            </div>
-          ) : null}
-        </Space>
-      ) : null}
-    </Card>
-  );
-}
-
-function ConsolePulse(props: { overview: AdminOverview | null; loading: boolean }) {
-  return (
-    <div className="admin-console-pulse">
-      <Card size="small" className="admin-console-pulse-card">
-        <Statistic title="用户" value={props.loading ? "-" : props.overview?.counts.users ?? "-"} />
-      </Card>
-      <Card size="small" className="admin-console-pulse-card">
-        <Statistic title="线程" value={props.loading ? "-" : props.overview?.counts.threads ?? "-"} />
-      </Card>
-      <Card size="small" className="admin-console-pulse-card">
-        <Statistic title="活跃会话" value={props.loading ? "-" : props.overview?.counts.activeSessions ?? "-"} />
-      </Card>
-    </div>
-  );
+function sectionFromHash(hash: string): AdminConsoleSection | null {
+  if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
+  const value = decodeURIComponent(hash.slice(ADMIN_HASH_PREFIX.length)).trim();
+  if (!SECTION_ORDER.includes(value as AdminConsoleSection)) return null;
+  return value as AdminConsoleSection;
 }
 
 function formatLocalTimestamp(value: Date | null): string {
@@ -142,26 +206,214 @@ function formatLocalTimestamp(value: Date | null): string {
   return value.toLocaleString();
 }
 
-function SectionContext(props: { section: AdminNavSection }) {
-  const meta = SECTION_META[props.section];
+function nextSectionInOrder(current: AdminConsoleSection, offset: number): AdminConsoleSection {
+  const index = SECTION_ORDER.indexOf(current);
+  if (index < 0) return "overview";
+  const length = SECTION_ORDER.length;
+  const nextIndex = (index + offset + length) % length;
+  return SECTION_ORDER[nextIndex] ?? "overview";
+}
+
+function AdminNavigationPanel(props: {
+  section: AdminConsoleSection;
+  search: string;
+  onSearchChange(value: string): void;
+  onSectionChange(section: AdminConsoleSection): void;
+  groups: AdminNavigationGroupView[];
+  currentUser?: AuthUser;
+  onOpenPortal?: () => void;
+  onSignOut?: () => void;
+}) {
   return (
-    <Card size="small" className="admin-section-context-card">
-      <div className="admin-section-context-grid">
-        <article className="admin-section-context-item">
-          <span className="admin-section-context-label">治理范围</span>
-          <strong className="admin-section-context-value">{meta.scope}</strong>
-        </article>
-        <article className="admin-section-context-item">
-          <span className="admin-section-context-label">巡检节奏</span>
-          <strong className="admin-section-context-value">{meta.cadence}</strong>
-        </article>
-        <article className="admin-section-context-item">
-          <span className="admin-section-context-label">系统品牌</span>
-          <strong className="admin-section-context-value">Agent Studio</strong>
-        </article>
+    <div className="admin-console-nav-surface">
+      <div className="admin-console-nav-search">
+        <Input
+          id="admin-nav-search"
+          value={props.search}
+          onChange={(event) => props.onSearchChange(event.target.value)}
+          allowClear
+          placeholder="搜索功能（Cmd/Ctrl + K）"
+          prefix={<SearchOutlined />}
+          aria-label="搜索管理功能"
+        />
       </div>
-    </Card>
+
+      <div className="admin-console-nav-scroll">
+        {props.groups.map((group) => (
+          <section key={group.id} className="admin-console-nav-group">
+            <div className="admin-console-nav-group-head">
+              <h4>{group.label}</h4>
+              <p>{group.description}</p>
+            </div>
+            <div className="admin-console-nav-items">
+              {group.items.map((item) => {
+                const active = props.section === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    title={item.description}
+                    className={active ? "admin-console-nav-item active" : "admin-console-nav-item"}
+                    onClick={() => props.onSectionChange(item.id)}
+                  >
+                    <span className="admin-console-nav-item-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span className="admin-console-nav-item-copy">
+                      <strong>{item.title}</strong>
+                      <small>{item.description}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+        {props.groups.length === 0 ? <div className="admin-console-nav-empty">未匹配到管理功能，请调整搜索词。</div> : null}
+      </div>
+
+      <div className="admin-console-nav-foot">
+        {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
+        {props.onOpenPortal ? (
+          <Button block className="admin-console-portal-btn" onClick={props.onOpenPortal}>
+            进入工作台
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
+}
+
+function OverviewWorkspace(props: {
+  overview: AdminOverview | null;
+  loading: boolean;
+  errorText: string;
+  refreshedAt: Date | null;
+  onRefresh(): void;
+  onSectionChange(section: AdminConsoleSection): void;
+}) {
+  return (
+    <div className="admin-console-overview-grid">
+      <Card className="admin-card antd-admin-card">
+        <div className="admin-console-overview-head">
+          <div>
+            <Typography.Title level={4} className="admin-card-heading">
+              运行概览
+            </Typography.Title>
+            <Typography.Paragraph>平台级核心指标，统一按当前登录者本地时区展示。</Typography.Paragraph>
+          </div>
+          <Space wrap>
+            <Tag color="blue">更新时间：{formatLocalTimestamp(props.refreshedAt)}</Tag>
+            <Button icon={<ReloadOutlined />} onClick={props.onRefresh} loading={props.loading}>
+              刷新
+            </Button>
+          </Space>
+        </div>
+        {props.errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={props.errorText} /> : null}
+        <div className="admin-console-overview-metrics">
+          <Card size="small" className="admin-console-overview-metric-card">
+            <Statistic title="用户" value={props.loading ? "-" : props.overview?.counts.users ?? "-"} />
+          </Card>
+          <Card size="small" className="admin-console-overview-metric-card">
+            <Statistic title="线程" value={props.loading ? "-" : props.overview?.counts.threads ?? "-"} />
+          </Card>
+          <Card size="small" className="admin-console-overview-metric-card">
+            <Statistic title="活跃会话" value={props.loading ? "-" : props.overview?.counts.activeSessions ?? "-"} />
+          </Card>
+        </div>
+        {props.overview?.integrations?.zendesk ? (
+          <div className="admin-console-overview-state">
+            <Tag color={props.overview.integrations.zendesk.ready ? "success" : "warning"}>
+              Zendesk {props.overview.integrations.zendesk.ready ? "已就绪" : "待补配置"}
+            </Tag>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="admin-card antd-admin-card">
+        <Typography.Title level={4} className="admin-card-heading">
+          功能地图
+        </Typography.Title>
+        <Typography.Paragraph>按功能域进入对应工作区，管理动线与交互遵循统一控制台结构。</Typography.Paragraph>
+        <div className="admin-console-overview-map">
+          {SECTION_ORDER.filter((item) => item !== "overview").map((item) => {
+            const meta = SECTION_META[item];
+            return (
+              <button
+                key={item}
+                type="button"
+                className="admin-console-overview-map-item"
+                onClick={() => props.onSectionChange(item)}
+              >
+                <span className="admin-console-overview-map-icon" aria-hidden="true">
+                  {meta.icon}
+                </span>
+                <span className="admin-console-overview-map-copy">
+                  <strong>{meta.title}</strong>
+                  <small>{meta.scope}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function AdminSectionContent(props: {
+  section: AdminConsoleSection;
+  overview: AdminOverview | null;
+  loading: boolean;
+  errorText: string;
+  refreshedAt: Date | null;
+  onRefresh(): void;
+  onSectionChange(section: AdminConsoleSection): void;
+}) {
+  if (props.section === "overview") {
+    return (
+      <OverviewWorkspace
+        overview={props.overview}
+        loading={props.loading}
+        errorText={props.errorText}
+        refreshedAt={props.refreshedAt}
+        onRefresh={props.onRefresh}
+        onSectionChange={props.onSectionChange}
+      />
+    );
+  }
+  if (props.section === "users") {
+    return <UsersView />;
+  }
+  if (props.section === "resources") {
+    return <ResourceCenterShell />;
+  }
+  if (props.section === "capabilities") {
+    return <CapabilityCenterShell />;
+  }
+  if (props.section === "integrations") {
+    return <IntegrationCenterShell />;
+  }
+  if (props.section === "broadcasts") {
+    return <BroadcastAdminView />;
+  }
+  if (props.section === "system-settings") {
+    return <SystemSettingsShell />;
+  }
+  if (props.section === "rbac") {
+    return <RolesView />;
+  }
+  if (props.section === "organization") {
+    return (
+      <div className="admin-console-organization-grid">
+        <DepartmentTreeView />
+        <OrgSyncView />
+      </div>
+    );
+  }
+  return <MonitoringShell />;
 }
 
 export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {
@@ -169,10 +421,41 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [overviewRefreshedAt, setOverviewRefreshedAt] = useState<Date | null>(null);
-  const [section, setSection] = useState<AdminNavSection>("overview");
+  const [section, setSection] = useState<AdminConsoleSection>(() => {
+    if (typeof window === "undefined") return "overview";
+    return sectionFromHash(window.location.hash) ?? "overview";
+  });
+  const [navSearch, setNavSearch] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [compactLayout, setCompactLayout] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 1200px)").matches;
+  });
   const mountedRef = useRef(true);
-  const mainContentRef = useRef<HTMLElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  const timezoneLabel = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区", []);
+
   const currentSectionMeta = SECTION_META[section];
+  const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
+
+  const filteredGroups = useMemo<AdminNavigationGroupView[]>(() => {
+    const query = navSearch.trim().toLowerCase();
+    return GROUPS.map((group) => {
+      const items = SECTION_ORDER.map((sectionId) => SECTION_META[sectionId]).filter((item) => {
+        if (item.group !== group.id) return false;
+        if (!query) return true;
+        const haystack = [item.title, item.description, item.scope, item.cadence, ...item.keywords].join(" ").toLowerCase();
+        return haystack.includes(query);
+      });
+      return {
+        ...group,
+        items
+      };
+    }).filter((group) => group.items.length > 0);
+  }, [navSearch]);
+
+  const quickSwitches = useMemo(() => filteredGroups.flatMap((group) => group.items).slice(0, 6), [filteredGroups]);
 
   const loadOverview = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -201,79 +484,208 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   }, [loadOverview]);
 
   useEffect(() => {
-    if (mainContentRef.current) {
-      mainContentRef.current.scrollTop = 0;
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 1200px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      setCompactLayout(event.matches);
+    };
+    setCompactLayout(media.matches);
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
     }
+    media.addListener(onChange);
+    return () => media.removeListener(onChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHashChange = () => {
+      const fromHash = sectionFromHash(window.location.hash);
+      if (fromHash) setSection(fromHash);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextHash = `${ADMIN_HASH_PREFIX}${encodeURIComponent(section)}`;
+    if (window.location.hash === nextHash) return;
+    window.history.replaceState(
+      window.history.state,
+      document.title,
+      `${window.location.pathname}${window.location.search}${nextHash}`
+    );
   }, [section]);
 
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+    if (compactLayout) {
+      setMobileNavOpen(false);
+    }
+  }, [section, compactLayout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onKeydown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && key === "k") {
+        event.preventDefault();
+        const input = document.querySelector<HTMLInputElement>("#admin-nav-search");
+        input?.focus();
+        input?.select();
+        return;
+      }
+      if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      if (key === "arrowleft") {
+        event.preventDefault();
+        setSection((current) => nextSectionInOrder(current, -1));
+      } else if (key === "arrowright") {
+        event.preventDefault();
+        setSection((current) => nextSectionInOrder(current, 1));
+      }
+    };
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, []);
+
   return (
-    <div className="admin-shell admin-shell-layout">
-      <Card className="admin-card admin-shell-sidebar" styles={{ body: { padding: 20 } }}>
-        <div className="admin-shell-brand">
-          <span className="admin-shell-brand-mark" aria-hidden="true">
-            AS
-          </span>
-          <div>
-            <p className="auth-eyebrow">Agent Studio Admin</p>
-            <Typography.Title level={3} className="admin-shell-title">
-              管理控制台
-            </Typography.Title>
-          </div>
-        </div>
-        <p className="admin-description">统一管理用户、权限、资源、运行策略、系统设置和平台监控。</p>
-        {props.currentUser ? <UserIdentitySummary user={props.currentUser} onSignOut={props.onSignOut} /> : null}
-        {props.onOpenPortal ? (
-          <div className="shell-switch-row">
-            <Button type="default" className="shell-switch-btn" onClick={props.onOpenPortal}>
-              进入工作台
-            </Button>
-          </div>
-        ) : null}
-        <AdminNav section={section} onChange={setSection} />
-      </Card>
-
-      <main className="admin-main-content" ref={mainContentRef}>
-        <Card className="admin-card admin-console-banner" styles={{ body: { padding: 20 } }}>
-          <div className="admin-console-copy">
-            <p className="auth-eyebrow">当前分区</p>
-            <div className="admin-banner-meta">
-              <Tag color="blue">{currentSectionMeta.title}</Tag>
-              <Tag>{currentSectionMeta.scope}</Tag>
-              <Tag>概览更新时间：{formatLocalTimestamp(overviewRefreshedAt)}</Tag>
-            </div>
-            <Typography.Title level={1} className="admin-banner-title">
-              {currentSectionMeta.title}
-            </Typography.Title>
-            <p>{currentSectionMeta.description}</p>
-            <div className="admin-banner-actions">
-              <Button type="default" size="small" onClick={() => void loadOverview()} loading={loading}>
-                刷新概览
-              </Button>
-              <Tag color="processing">本地时区展示</Tag>
-            </div>
-          </div>
-          <ConsolePulse overview={overview} loading={loading} />
-        </Card>
-        <SectionContext section={section} />
-
-        <div className="admin-main-panels">
-          {section === "overview" ? <OverviewCard overview={overview} loading={loading} errorText={errorText} /> : null}
-          {section === "users" ? <UsersView /> : null}
-          {section === "resources" ? <ResourceCenterShell /> : null}
-          {section === "capabilities" ? <CapabilityCenterShell /> : null}
-          {section === "integrations" ? <IntegrationCenterShell /> : null}
-          {section === "broadcasts" ? <BroadcastAdminView /> : null}
-          {section === "system-settings" ? <SystemSettingsShell /> : null}
-          {section === "rbac" ? <RolesView /> : null}
-          {section === "organization" ? (
-            <div className="admin-stack-grid">
-              <DepartmentTreeView />
-              <OrgSyncView />
-            </div>
+    <div className="admin-console-root">
+      <header className="admin-console-topbar">
+        <div className="admin-console-topbar-left">
+          {compactLayout ? (
+            <Button
+              type="text"
+              icon={<MenuOutlined />}
+              aria-label="打开导航"
+              className="admin-console-menu-btn"
+              onClick={() => setMobileNavOpen(true)}
+            />
           ) : null}
-          {section === "monitoring" ? <MonitoringShell /> : null}
+          <div className="admin-console-brand">
+            <span className="admin-console-brand-mark" aria-hidden="true">
+              AS
+            </span>
+            <div>
+              <p className="admin-console-brand-eyebrow">Agent Studio Console</p>
+              <strong>管理控制台</strong>
+            </div>
+          </div>
+          <Breadcrumb
+            className="admin-console-breadcrumb"
+            items={[
+              { title: "管理控制台" },
+              { title: currentGroupMeta.label },
+              { title: currentSectionMeta.title }
+            ]}
+          />
         </div>
-      </main>
+
+        <div className="admin-console-topbar-actions">
+          <Tag color="geekblue">时区：{timezoneLabel}</Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => void loadOverview()} loading={loading}>
+            刷新概览
+          </Button>
+          {props.onOpenPortal ? (
+            <Button type="default" onClick={props.onOpenPortal}>
+              工作台
+            </Button>
+          ) : null}
+        </div>
+      </header>
+
+      <div className="admin-console-frame">
+        {!compactLayout ? (
+          <aside className="admin-console-nav">
+            <AdminNavigationPanel
+              section={section}
+              search={navSearch}
+              onSearchChange={setNavSearch}
+              onSectionChange={setSection}
+              groups={filteredGroups}
+              currentUser={props.currentUser}
+              onOpenPortal={props.onOpenPortal}
+              onSignOut={props.onSignOut}
+            />
+          </aside>
+        ) : null}
+
+        <div className="admin-console-main" ref={contentRef}>
+          <Card className="admin-card admin-console-hero antd-admin-card">
+            <div className="admin-console-hero-copy">
+              <p className="admin-console-brand-eyebrow">当前分区</p>
+              <Typography.Title level={2} className="admin-banner-title">
+                {currentSectionMeta.title}
+              </Typography.Title>
+              <Typography.Paragraph>{currentSectionMeta.description}</Typography.Paragraph>
+            </div>
+
+            <div className="admin-console-hero-meta">
+              <Tag>{currentSectionMeta.scope}</Tag>
+              <Tag>{currentSectionMeta.cadence}</Tag>
+              <Tag>概览：{formatLocalTimestamp(overviewRefreshedAt)}</Tag>
+              <Tag color={errorText ? "error" : "processing"}>{errorText ? "概览加载异常" : "概览在线"}</Tag>
+            </div>
+
+            {quickSwitches.length > 0 ? (
+              <div className="admin-console-quick-switch" role="tablist" aria-label="快速切换功能">
+                {quickSwitches.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={section === item.id}
+                    className={section === item.id ? "admin-console-quick-item active" : "admin-console-quick-item"}
+                    onClick={() => setSection(item.id)}
+                  >
+                    <span className="admin-console-quick-item-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span>{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </Card>
+
+          <div className="admin-console-content">
+            <AdminSectionContent
+              section={section}
+              overview={overview}
+              loading={loading}
+              errorText={errorText}
+              refreshedAt={overviewRefreshedAt}
+              onRefresh={() => void loadOverview()}
+              onSectionChange={setSection}
+            />
+          </div>
+        </div>
+      </div>
+
+      {compactLayout ? (
+        <Drawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          title="管理导航"
+          placement="left"
+          width={360}
+          className="admin-console-nav-drawer"
+        >
+          <AdminNavigationPanel
+            section={section}
+            search={navSearch}
+            onSearchChange={setNavSearch}
+            onSectionChange={setSection}
+            groups={filteredGroups}
+            currentUser={props.currentUser}
+            onOpenPortal={props.onOpenPortal}
+            onSignOut={props.onSignOut}
+          />
+        </Drawer>
+      ) : null}
     </div>
   );
 }
