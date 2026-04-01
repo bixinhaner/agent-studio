@@ -1,11 +1,9 @@
 import { Button } from "antd";
 
 import type { AgentModeInstructionSourceInput, InstructionSourceType } from "./types";
-import type { WorkspaceRecord } from "../resources-center/types";
 
 type InstructionSourceEditorProps = {
   instructionSources: AgentModeInstructionSourceInput[];
-  workspaces: WorkspaceRecord[];
   onChange: (instructionSources: AgentModeInstructionSourceInput[]) => void;
   disabled?: boolean;
 };
@@ -45,36 +43,7 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
   return next;
 }
 
-function workspaceLabel(workspace: WorkspaceRecord) {
-  return `${workspace.name} (${workspace.slug})`;
-}
-
-function workspaceOptionsForSource(sourceRef: string, workspaces: WorkspaceRecord[]) {
-  if (!sourceRef || workspaces.some((workspace) => workspace.id === sourceRef)) {
-    return workspaces.map((workspace) => ({
-      id: workspace.id,
-      label: workspaceLabel(workspace)
-    }));
-  }
-
-  return [
-    {
-      id: sourceRef,
-      label: `${sourceRef} (unavailable)`
-    },
-    ...workspaces.map((workspace) => ({
-      id: workspace.id,
-      label: workspaceLabel(workspace)
-    }))
-  ];
-}
-
-export function InstructionSourceEditor({
-  instructionSources,
-  workspaces,
-  onChange,
-  disabled = false
-}: InstructionSourceEditorProps) {
+export function InstructionSourceEditor({ instructionSources, onChange, disabled = false }: InstructionSourceEditorProps) {
   const items = normalizeInstructionSources(instructionSources);
 
   function emit(next: EditableInstructionSource[]) {
@@ -98,16 +67,6 @@ export function InstructionSourceEditor({
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= items.length) return;
     emit(moveItem(items, index, nextIndex));
-  }
-
-  function handleSourceTypeChange(index: number, nextSourceType: InstructionSourceType) {
-    const current = items[index];
-    if (!current) return;
-    if (nextSourceType === "workspace_agents_md" && !workspaces.some((workspace) => workspace.id === current.sourceRef)) {
-      updateSource(index, { sourceType: nextSourceType, sourceRef: workspaces[0]?.id ?? "" });
-      return;
-    }
-    updateSource(index, { sourceType: nextSourceType });
   }
 
   return (
@@ -151,7 +110,7 @@ export function InstructionSourceEditor({
                   aria-label={`来源类型 ${index + 1}`}
                   disabled={disabled}
                   value={source.sourceType}
-                  onChange={(event) => handleSourceTypeChange(index, event.target.value as InstructionSourceType)}
+                  onChange={(event) => updateSource(index, { sourceType: event.target.value as InstructionSourceType })}
                 >
                   <option value="inline_text">inline</option>
                   <option value="workspace_agents_md">workspace_agents_md</option>
@@ -159,25 +118,7 @@ export function InstructionSourceEditor({
                 </select>
               </label>
 
-              {source.sourceType === "workspace_agents_md" ? (
-                <label className="field">
-                  <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <select
-                    className="field-input"
-                    aria-label={`来源引用 ${index + 1}`}
-                    disabled={disabled}
-                    value={source.sourceRef}
-                    onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
-                  >
-                    <option value="">请选择工作区</option>
-                    {workspaceOptionsForSource(source.sourceRef, workspaces).map((workspace) => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspace.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : source.sourceType === "inline_text" ? (
+              {source.sourceType === "inline_text" ? (
                 <label className="field resource-center-form-span-2">
                   <span className="field-label">{`来源引用 ${index + 1}`}</span>
                   <textarea
@@ -186,6 +127,18 @@ export function InstructionSourceEditor({
                     disabled={disabled}
                     value={source.sourceRef}
                     placeholder="直接填写内联指令文本"
+                    onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
+                  />
+                </label>
+              ) : source.sourceType === "workspace_agents_md" ? (
+                <label className="field resource-center-form-span-2">
+                  <span className="field-label">{`来源引用 ${index + 1}`}</span>
+                  <input
+                    className="field-input"
+                    aria-label={`来源引用 ${index + 1}`}
+                    disabled={disabled}
+                    value={source.sourceRef}
+                    placeholder="AGENTS.md 路径（如 /data/agents/AGENTS.md）"
                     onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
                   />
                 </label>

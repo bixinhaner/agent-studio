@@ -1,24 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Tag } from "antd";
 
-import { putAgentModeInstructionSources, putAgentModeSkillPackages, putAgentModeWorkspaces, updateAgentMode } from "./api";
+import { putAgentModeInstructionSources, putAgentModeSkillPackages, updateAgentMode } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
 import { InstructionSourceEditor } from "./InstructionSourceEditor";
 import type {
   AgentModeInstructionSourceInput,
   AgentModeRecord,
-  AgentModeWorkspaceRuleInput,
   RunProfileRecord,
   SkillPackageRecord,
   UpdateAgentModeInput
 } from "./types";
-import type { WorkspaceRecord } from "../resources-center/types";
 
 type AgentModeDetailViewProps = {
   agentMode: AgentModeRecord;
   runProfiles: RunProfileRecord[];
   skillPackages: SkillPackageRecord[];
-  workspaces: WorkspaceRecord[];
   onAgentModeUpdated: (agentMode: AgentModeRecord) => void;
 };
 
@@ -41,17 +38,6 @@ function toSkillPackageIds(agentMode: AgentModeRecord) {
   return agentMode.skillPackages.map((item) => item.skillPackageId);
 }
 
-function toWorkspaceRules(agentMode: AgentModeRecord): AgentModeWorkspaceRuleInput[] {
-  const source = agentMode.workspaceRules.length > 0 ? agentMode.workspaceRules : agentMode.workspaces ?? [];
-  return source.map((rule) => ({
-    workspaceId: rule.workspaceId,
-    isDefault: rule.isDefault,
-    allowDirectorySelection: rule.allowDirectorySelection,
-    directoryScope: rule.directoryScope,
-    loadWorkspaceAgentsMd: rule.loadWorkspaceAgentsMd
-  }));
-}
-
 function toInstructionSources(agentMode: AgentModeRecord): AgentModeInstructionSourceInput[] {
   return [...agentMode.instructionSources]
     .sort((left, right) => {
@@ -65,36 +51,10 @@ function toInstructionSources(agentMode: AgentModeRecord): AgentModeInstructionS
     }));
 }
 
-function workspaceLabel(workspace: WorkspaceRecord) {
-  return `${workspace.name} (${workspace.slug})`;
-}
-
-function normalizeWorkspaceRules(
-  workspaceRules: AgentModeWorkspaceRuleInput[],
-  preferredDefaultWorkspaceId?: string
-): AgentModeWorkspaceRuleInput[] {
-  if (workspaceRules.length === 0) {
-    return [];
-  }
-
-  const selectedDefaultWorkspaceId =
-    (preferredDefaultWorkspaceId &&
-      workspaceRules.some((rule) => rule.workspaceId === preferredDefaultWorkspaceId) &&
-      preferredDefaultWorkspaceId) ||
-    workspaceRules.find((rule) => rule.isDefault)?.workspaceId ||
-    workspaceRules[0]?.workspaceId;
-
-  return workspaceRules.map((rule) => ({
-    ...rule,
-    isDefault: rule.workspaceId === selectedDefaultWorkspaceId
-  }));
-}
-
 export function AgentModeDetailView({
   agentMode,
   runProfiles,
   skillPackages,
-  workspaces,
   onAgentModeUpdated
 }: AgentModeDetailViewProps) {
   const [activeTab, setActiveTab] = useState<AgentModeTab>("basic");
@@ -105,8 +65,6 @@ export function AgentModeDetailView({
   const [visibleToUsers, setVisibleToUsers] = useState(agentMode.visibleToUsers);
   const [runProfileId, setRunProfileId] = useState(agentMode.runProfileId);
   const [skillPackageIds, setSkillPackageIds] = useState<string[]>(() => toSkillPackageIds(agentMode));
-  const [workspaceRules, setWorkspaceRules] = useState<AgentModeWorkspaceRuleInput[]>(() => toWorkspaceRules(agentMode));
-  const [workspaceSelection, setWorkspaceSelection] = useState("");
   const [instructionSources, setInstructionSources] = useState<AgentModeInstructionSourceInput[]>(() =>
     toInstructionSources(agentMode)
   );
@@ -123,32 +81,13 @@ export function AgentModeDetailView({
     setVisibleToUsers(agentMode.visibleToUsers);
     setRunProfileId(agentMode.runProfileId);
     setSkillPackageIds(toSkillPackageIds(agentMode));
-    setWorkspaceRules(toWorkspaceRules(agentMode));
     setInstructionSources(toInstructionSources(agentMode));
     setErrorText("");
     setSuccessText("");
   }, [agentMode]);
 
-  useEffect(() => {
-    const selectedWorkspaceIds = new Set(workspaceRules.map((rule) => rule.workspaceId));
-    const nextSelection = workspaces.find((workspace) => !selectedWorkspaceIds.has(workspace.id))?.id ?? "";
-    if (!workspaceSelection && nextSelection) {
-      setWorkspaceSelection(nextSelection);
-      return;
-    }
-    if (workspaceSelection && (selectedWorkspaceIds.has(workspaceSelection) || !workspaces.some((workspace) => workspace.id === workspaceSelection))) {
-      setWorkspaceSelection(nextSelection);
-    }
-  }, [workspaceRules, workspaceSelection, workspaces]);
-
   const createdAt = useMemo(() => formatLocalDateTime(agentMode.createdAt), [agentMode.createdAt]);
   const updatedAt = useMemo(() => formatLocalDateTime(agentMode.updatedAt), [agentMode.updatedAt]);
-
-  const selectedWorkspaceIds = useMemo(() => new Set(workspaceRules.map((rule) => rule.workspaceId)), [workspaceRules]);
-  const availableWorkspaces = useMemo(
-    () => workspaces.filter((workspace) => !selectedWorkspaceIds.has(workspace.id)),
-    [selectedWorkspaceIds, workspaces]
-  );
 
   const selectedRunProfileLabel = useMemo(
     () => runProfiles.find((item) => item.id === runProfileId)?.name ?? runProfileId,
@@ -178,38 +117,6 @@ export function AgentModeDetailView({
     setSuccessText("");
   }
 
-  function updateWorkspaceRule(index: number, patch: Partial<AgentModeWorkspaceRuleInput>) {
-    setWorkspaceRules((current) => {
-      const next = current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule));
-      const preferredDefaultWorkspaceId = patch.isDefault ? next[index]?.workspaceId : undefined;
-      return normalizeWorkspaceRules(next, preferredDefaultWorkspaceId);
-    });
-    setSuccessText("");
-  }
-
-  function addWorkspaceRule() {
-    if (!workspaceSelection) return;
-    if (workspaceRules.some((rule) => rule.workspaceId === workspaceSelection)) return;
-    setWorkspaceRules((current) =>
-      normalizeWorkspaceRules([
-        ...current,
-        {
-          workspaceId: workspaceSelection,
-          isDefault: current.length === 0,
-          allowDirectorySelection: false,
-          directoryScope: "workspace_only",
-          loadWorkspaceAgentsMd: false
-        }
-      ])
-    );
-    setSuccessText("");
-  }
-
-  function removeWorkspaceRule(index: number) {
-    setWorkspaceRules((current) => normalizeWorkspaceRules(current.filter((_, ruleIndex) => ruleIndex !== index)));
-    setSuccessText("");
-  }
-
   async function handleSave() {
     setSaving(true);
     setErrorText("");
@@ -227,7 +134,6 @@ export function AgentModeDetailView({
     try {
       await updateAgentMode(agentMode.id, payload);
       await putAgentModeSkillPackages(agentMode.id, skillPackageIds);
-      await putAgentModeWorkspaces(agentMode.id, normalizeWorkspaceRules(workspaceRules));
       const response = await putAgentModeInstructionSources(agentMode.id, instructionSources);
       onAgentModeUpdated(response.agentMode);
       setSuccessText("模式已保存");
@@ -244,7 +150,7 @@ export function AgentModeDetailView({
         <div className="resource-center-section-header">
           <div>
             <h3>{agentMode.name}</h3>
-            <p>维护模式元数据、绑定关系、工作区规则和指令源。</p>
+            <p>维护模式元数据、绑定关系和指令源。</p>
           </div>
           <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
@@ -332,7 +238,6 @@ export function AgentModeDetailView({
               <div className="capability-mode-preview-list">
                 <p>运行策略：{selectedRunProfileLabel || "-"}</p>
                 <p>技能包：{selectedSkillPackageNames.length > 0 ? selectedSkillPackageNames.join("、") : "-"}</p>
-                <p>工作区规则：{workspaceRules.length}</p>
                 <p>指令源：{instructionSources.length}</p>
               </div>
             </div>
@@ -385,126 +290,7 @@ export function AgentModeDetailView({
             </section>
 
             <section className="capability-mode-binding-section">
-              <div className="resource-center-section-header">
-                <div>
-                  <h4>工作区规则</h4>
-                  <p>维护允许的工作区、目录范围和 AGENTS.md 加载策略。</p>
-                </div>
-                <Button type="default" disabled={saving || availableWorkspaces.length === 0} onClick={addWorkspaceRule}>
-                  添加工作区
-                </Button>
-              </div>
-
-              <div className="capability-mode-add-row">
-                <label className="field">
-                  <span className="field-label">工作区选择</span>
-                  <select
-                    className="field-input"
-                    aria-label="工作区选择"
-                    value={workspaceSelection}
-                    disabled={saving || availableWorkspaces.length === 0}
-                    onChange={(event) => setWorkspaceSelection(event.target.value)}
-                  >
-                    <option value="">{availableWorkspaces.length === 0 ? "没有可选工作区" : "请选择工作区"}</option>
-                    {availableWorkspaces.map((workspace) => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspaceLabel(workspace)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <Button type="default" disabled={saving || availableWorkspaces.length === 0 || !workspaceSelection} onClick={addWorkspaceRule}>
-                  添加选中工作区
-                </Button>
-              </div>
-
-              <div className="capability-mode-workspace-list">
-                {workspaceRules.map((rule, index) => {
-                  const workspace = workspaces.find((item) => item.id === rule.workspaceId);
-                  return (
-                    <article key={`${rule.workspaceId}-${index}`} className="capability-mode-workspace-card">
-                      <div className="capability-mode-workspace-header">
-                        <div>
-                          <h5>{workspace ? workspaceLabel(workspace) : rule.workspaceId}</h5>
-                          <p>{`工作区规则 ${index + 1}`}</p>
-                        </div>
-                        <Button type="default" disabled={saving} onClick={() => removeWorkspaceRule(index)}>
-                          {`删除工作区规则 ${index + 1}`}
-                        </Button>
-                      </div>
-
-                      <div className="resource-center-form-grid capability-mode-workspace-grid">
-                        <label className="field">
-                          <span className="field-label">{`默认工作区 ${index + 1}`}</span>
-                          <select
-                            className="field-input"
-                            aria-label={`默认工作区 ${index + 1}`}
-                            value={rule.isDefault ? "true" : "false"}
-                            disabled={saving}
-                            onChange={(event) => updateWorkspaceRule(index, { isDefault: event.target.value === "true" })}
-                          >
-                            <option value="false">false</option>
-                            <option value="true">true</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span className="field-label">{`允许选择目录 ${index + 1}`}</span>
-                          <select
-                            className="field-input"
-                            aria-label={`允许选择目录 ${index + 1}`}
-                            value={rule.allowDirectorySelection ? "true" : "false"}
-                            disabled={saving}
-                            onChange={(event) => updateWorkspaceRule(index, { allowDirectorySelection: event.target.value === "true" })}
-                          >
-                            <option value="false">false</option>
-                            <option value="true">true</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span className="field-label">{`目录范围 ${index + 1}`}</span>
-                          <select
-                            className="field-input"
-                            aria-label={`目录范围 ${index + 1}`}
-                            value={rule.directoryScope}
-                            disabled={saving}
-                            onChange={(event) =>
-                              updateWorkspaceRule(index, {
-                                directoryScope: event.target.value as AgentModeWorkspaceRuleInput["directoryScope"]
-                              })
-                            }
-                          >
-                            <option value="workspace_only">workspace_only</option>
-                            <option value="descendants_only">descendants_only</option>
-                            <option value="authorized_workspace_and_knowledge_set">authorized_workspace_and_knowledge_set</option>
-                          </select>
-                        </label>
-
-                        <label className="field">
-                          <span className="field-label">{`加载 AGENTS.md ${index + 1}`}</span>
-                          <select
-                            className="field-input"
-                            aria-label={`加载 AGENTS.md ${index + 1}`}
-                            value={rule.loadWorkspaceAgentsMd ? "true" : "false"}
-                            disabled={saving}
-                            onChange={(event) => updateWorkspaceRule(index, { loadWorkspaceAgentsMd: event.target.value === "true" })}
-                          >
-                            <option value="false">false</option>
-                            <option value="true">true</option>
-                          </select>
-                        </label>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-
-              {workspaceRules.length === 0 ? <p className="resource-center-empty">当前还没有工作区规则。</p> : null}
-            </section>
-
-            <section className="capability-mode-binding-section">
-              <InstructionSourceEditor instructionSources={instructionSources} workspaces={workspaces} disabled={saving} onChange={setInstructionSources} />
+              <InstructionSourceEditor instructionSources={instructionSources} disabled={saving} onChange={setInstructionSources} />
             </section>
 
             <section className="capability-mode-binding-section">

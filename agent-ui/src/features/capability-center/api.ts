@@ -4,7 +4,6 @@ import type {
   AgentModeInstructionSourceInput,
   AgentModeListResponse,
   AgentModeResponse,
-  AgentModeWorkspaceRuleInput,
   CapabilityPoliciesResponse,
   CapabilityPolicyInput,
   CapabilityResourceType,
@@ -100,13 +99,6 @@ export async function putAgentModeSkillPackages(id: string, skillPackageIds: str
   return api<AgentModeResponse>(`/api/admin/agent-modes/${encodeURIComponent(id)}/skill-packages`, {
     method: "PUT",
     json: { skillPackageIds }
-  });
-}
-
-export async function putAgentModeWorkspaces(id: string, workspaces: AgentModeWorkspaceRuleInput[]): Promise<AgentModeResponse> {
-  return api<AgentModeResponse>(`/api/admin/agent-modes/${encodeURIComponent(id)}/workspaces`, {
-    method: "PUT",
-    json: { workspaces }
   });
 }
 

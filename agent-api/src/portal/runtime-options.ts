@@ -11,18 +11,11 @@ export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult):
       runtimeProfile: mode.runtimeProfile,
       allowDirectorySelection: mode.allowDirectorySelection,
       skillPackages: mode.skillPackages,
-      workspaces: mode.workspaces,
       instructionSources: mode.instructionSources
-    })),
-    workspaces: input.workspaces.map((workspace) => ({
-      id: workspace.id,
-      label: workspace.label,
-      isDefault: workspace.isDefault
     })),
     canUpload: input.canUpload,
     defaults: {
-      mode: input.defaults.mode,
-      workspace: input.defaults.workspace
+      mode: input.defaults.mode
     }
   };
 }

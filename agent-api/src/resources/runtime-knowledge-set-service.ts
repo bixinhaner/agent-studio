@@ -1,10 +1,8 @@
-import path from "node:path";
-
-type WorkspaceRecord = {
-  id: string;
-  status: string;
-  rootPath?: string | null;
-};
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 
 type KnowledgeSetRecord = {
   id: string;
@@ -13,19 +11,8 @@ type KnowledgeSetRecord = {
   rootPath?: string | null;
 };
 
-type WorkspaceBindingRecord = {
-  workspaceId: string;
-  knowledgeSetId: string;
-  mountType: string;
-};
-
-type WorkspaceRepositoryLike = {
-  list(): Promise<WorkspaceRecord[]>;
-};
-
 type KnowledgeSetRepositoryLike = {
   list(): Promise<KnowledgeSetRecord[]>;
-  listWorkspaceBindings(workspaceId: string): Promise<WorkspaceBindingRecord[]>;
 };
 
 type PolicyServiceLike = {
@@ -33,7 +20,7 @@ type PolicyServiceLike = {
     userId: string;
     roleIds: string[];
     departmentIds: string[];
-    resourceType: "workspace" | "knowledge_set";
+    resourceType: "knowledge_set";
     candidateIds: string[];
   }): Promise<string[]>;
 };
@@ -44,7 +31,7 @@ type KnowledgeSetStorageLike = {
 
 type KnowledgeSetRuntimeMetadata = {
   workspacePath: string;
-  selectedOptionalIds: string[];
+  selectedIds: string[];
   mountPaths: string[];
 };
 
@@ -73,19 +60,6 @@ type SecurityAlertServiceLike = {
 };
 
 const KNOWLEDGE_SET_METADATA_KEY = "_agentStudioKnowledgeSets";
-
-function trimOrUndefined(value: string | null | undefined): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function isSamePathOrDescendant(candidatePath: string, rootPath: string): boolean {
-  const resolvedCandidate = path.resolve(candidatePath);
-  const resolvedRoot = path.resolve(rootPath);
-  if (resolvedCandidate === resolvedRoot) return true;
-  return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
-}
 
 function normalizeIdList(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
@@ -142,14 +116,16 @@ function readKnowledgeSetRuntimeMetadata(value: unknown): KnowledgeSetRuntimeMet
   const workspacePathValue = (raw as Record<string, unknown>).workspacePath;
   const workspacePath = trimOrUndefined(typeof workspacePathValue === "string" ? workspacePathValue : undefined);
   if (!workspacePath) return undefined;
+  const rawSelectedIds =
+    (raw as Record<string, unknown>).selectedIds ?? (raw as Record<string, unknown>).selectedOptionalIds;
   return {
     workspacePath,
-    selectedOptionalIds: normalizeIdList((raw as Record<string, unknown>).selectedOptionalIds as string[] | undefined),
+    selectedIds: normalizeIdList(rawSelectedIds as string[] | undefined),
     mountPaths: normalizeAdditionalDirectories((raw as Record<string, unknown>).mountPaths)
   };
 }
 
-function resolveSelectedOptionalKnowledgeSetIds(input: {
+function resolveSelectedKnowledgeSetIds(input: {
   workspacePath: string;
   knowledgeSetIds?: string[];
   codexRunConfig?: Record<string, unknown>;
@@ -160,7 +136,7 @@ function resolveSelectedOptionalKnowledgeSetIds(input: {
 
   const previousMetadata = readKnowledgeSetRuntimeMetadata(input.codexRunConfig);
   if (previousMetadata?.workspacePath === input.workspacePath) {
-    return previousMetadata.selectedOptionalIds;
+    return previousMetadata.selectedIds;
   }
   return [];
 }
@@ -168,7 +144,6 @@ function resolveSelectedOptionalKnowledgeSetIds(input: {
 export class RuntimeKnowledgeSetService {
   constructor(
     private readonly options: {
-      workspaces: WorkspaceRepositoryLike;
       knowledgeSets: KnowledgeSetRepositoryLike;
       policies: PolicyServiceLike;
       storage: KnowledgeSetStorageLike;
@@ -187,87 +162,14 @@ export class RuntimeKnowledgeSetService {
   }): Promise<Record<string, unknown> | undefined> {
     const workspacePath = trimOrUndefined(input.workspacePath);
     if (!workspacePath) {
-      throw new Error("workspace 不存在或无权限");
+      throw new Error("会话目录不存在或无效");
     }
 
-    const workspaces = (await this.options.workspaces.list()).filter(
-      (workspace) => workspace.status === "active" && trimOrUndefined(workspace.rootPath)
-    );
-    const allowedWorkspaceIds = new Set(
-      await this.options.policies.filterAllowedResources({
-        userId: input.userId,
-        roleIds: input.roleIds,
-        departmentIds: input.departmentIds,
-        resourceType: "workspace",
-        candidateIds: workspaces.map((workspace) => workspace.id)
-      })
-    );
-    const workspace = workspaces.find((candidate) => {
-      if (!allowedWorkspaceIds.has(candidate.id)) return false;
-      const rootPath = trimOrUndefined(candidate.rootPath);
-      if (!rootPath) return false;
-      return isSamePathOrDescendant(workspacePath, rootPath);
-    });
-    if (!workspace) {
-      await this.options.securityAlerts?.evaluateSecurityEvent({
-        scopeType: input.departmentIds[0] ? "department" : "platform",
-        scopeId: input.departmentIds[0] ?? "platform",
-        resourceType: "workspace",
-        resourceId: workspacePath,
-        actionType: "mount",
-        resultStatus: "denied",
-        userId: input.userId
-      });
-      throw new Error("workspace 不存在或无权限");
-    }
-
-    const bindings = await this.options.knowledgeSets.listWorkspaceBindings(workspace.id);
-    const defaultKnowledgeSetIds = bindings
-      .filter((binding) => binding.mountType === "default")
-      .map((binding) => binding.knowledgeSetId);
-    const optionalKnowledgeSetIdSet = new Set(
-      bindings.filter((binding) => binding.mountType === "optional").map((binding) => binding.knowledgeSetId)
-    );
-    const selectedOptionalKnowledgeSetIds = resolveSelectedOptionalKnowledgeSetIds({
+    const selectedKnowledgeSetIds = resolveSelectedKnowledgeSetIds({
       workspacePath,
       knowledgeSetIds: input.knowledgeSetIds,
       codexRunConfig: input.codexRunConfig
     });
-    if (selectedOptionalKnowledgeSetIds.some((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId))) {
-      await this.options.securityAlerts?.evaluateSecurityEvent({
-        scopeType: input.departmentIds[0] ? "department" : "platform",
-        scopeId: input.departmentIds[0] ?? "platform",
-        resourceType: "knowledge_set",
-        resourceId: selectedOptionalKnowledgeSetIds.find((knowledgeSetId) => !optionalKnowledgeSetIdSet.has(knowledgeSetId)),
-        actionType: "mount",
-        resultStatus: "denied",
-        userId: input.userId
-      });
-      throw new Error("knowledge set 未授权或未绑定到当前 workspace");
-    }
-    const resolvedKnowledgeSetIds = [...defaultKnowledgeSetIds, ...selectedOptionalKnowledgeSetIds];
-
-    const allowedKnowledgeSetIds = new Set(
-      await this.options.policies.filterAllowedResources({
-        userId: input.userId,
-        roleIds: input.roleIds,
-        departmentIds: input.departmentIds,
-        resourceType: "knowledge_set",
-        candidateIds: resolvedKnowledgeSetIds
-      })
-    );
-    if (resolvedKnowledgeSetIds.some((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId))) {
-      await this.options.securityAlerts?.evaluateSecurityEvent({
-        scopeType: input.departmentIds[0] ? "department" : "platform",
-        scopeId: input.departmentIds[0] ?? "platform",
-        resourceType: "knowledge_set",
-        resourceId: resolvedKnowledgeSetIds.find((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId)),
-        actionType: "mount",
-        resultStatus: "denied",
-        userId: input.userId
-      });
-      throw new Error("knowledge set 未授权或未绑定到当前 workspace");
-    }
 
     const knowledgeSetById = new Map(
       (await this.options.knowledgeSets.list())
@@ -275,10 +177,47 @@ export class RuntimeKnowledgeSetService {
         .map((knowledgeSet) => [knowledgeSet.id, knowledgeSet] as const)
     );
 
-    const mountPaths = resolvedKnowledgeSetIds.map((knowledgeSetId) => {
+    const unavailableKnowledgeSetId = selectedKnowledgeSetIds.find((knowledgeSetId) => !knowledgeSetById.has(knowledgeSetId));
+    if (unavailableKnowledgeSetId) {
+      await this.options.securityAlerts?.evaluateSecurityEvent({
+        scopeType: input.departmentIds[0] ? "department" : "platform",
+        scopeId: input.departmentIds[0] ?? "platform",
+        resourceType: "knowledge_set",
+        resourceId: unavailableKnowledgeSetId,
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: input.userId
+      });
+      throw new Error("knowledge set 不存在或未启用");
+    }
+
+    const allowedKnowledgeSetIds = new Set(
+      await this.options.policies.filterAllowedResources({
+        userId: input.userId,
+        roleIds: input.roleIds,
+        departmentIds: input.departmentIds,
+        resourceType: "knowledge_set",
+        candidateIds: selectedKnowledgeSetIds
+      })
+    );
+    const deniedKnowledgeSetId = selectedKnowledgeSetIds.find((knowledgeSetId) => !allowedKnowledgeSetIds.has(knowledgeSetId));
+    if (deniedKnowledgeSetId) {
+      await this.options.securityAlerts?.evaluateSecurityEvent({
+        scopeType: input.departmentIds[0] ? "department" : "platform",
+        scopeId: input.departmentIds[0] ?? "platform",
+        resourceType: "knowledge_set",
+        resourceId: deniedKnowledgeSetId,
+        actionType: "mount",
+        resultStatus: "denied",
+        userId: input.userId
+      });
+      throw new Error("knowledge set 未授权");
+    }
+
+    const mountPaths = selectedKnowledgeSetIds.map((knowledgeSetId) => {
       const knowledgeSet = knowledgeSetById.get(knowledgeSetId);
       if (!knowledgeSet) {
-        throw new Error("knowledge set 未授权或未绑定到当前 workspace");
+        throw new Error("knowledge set 不存在或未启用");
       }
       if (knowledgeSet.sourceType === "managed_upload") {
         return this.options.storage.resolveReadableMountPath(knowledgeSetId);
@@ -292,19 +231,7 @@ export class RuntimeKnowledgeSetService {
 
     if (this.options.resourceAccessLogs) {
       const departmentIdSnapshot = input.departmentIds[0];
-      await this.options.resourceAccessLogs.record({
-        userId: input.userId,
-        departmentIdSnapshot,
-        resourceType: "workspace",
-        resourceId: workspace.id,
-        actionType: "mount",
-        resultStatus: "success",
-        metadata: {
-          workspacePath
-        }
-      });
-
-      for (const knowledgeSetId of resolvedKnowledgeSetIds) {
+      for (const knowledgeSetId of selectedKnowledgeSetIds) {
         const knowledgeSet = knowledgeSetById.get(knowledgeSetId);
         if (!knowledgeSet) continue;
         await this.options.resourceAccessLogs.record({
@@ -315,8 +242,7 @@ export class RuntimeKnowledgeSetService {
           actionType: "mount",
           resultStatus: "success",
           metadata: {
-            sourceType: knowledgeSet.sourceType,
-            workspaceId: workspace.id
+            sourceType: knowledgeSet.sourceType
           }
         });
       }
@@ -324,7 +250,7 @@ export class RuntimeKnowledgeSetService {
 
     return replaceManagedKnowledgeSetDirectories(input.codexRunConfig, {
       workspacePath,
-      selectedOptionalIds: selectedOptionalKnowledgeSetIds,
+      selectedIds: selectedKnowledgeSetIds,
       mountPaths
     });
   }

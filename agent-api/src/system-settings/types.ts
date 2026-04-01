@@ -1,6 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { DEFAULT_MODEL, REASONING_EFFORT_VALUES } from "../model-config.js";
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const defaultSessionWorkspaceRoot = path.resolve(moduleDir, "..", "..", "..", "sessions");
 
 export const systemSettingsVersionStatusSchema = z.enum(["draft", "published"]);
 export type SystemSettingsVersionStatus = z.infer<typeof systemSettingsVersionStatusSchema>;
@@ -38,7 +43,8 @@ export const systemSettingsBrandingSchema = z.object({
 export const systemSettingsPlatformDefaultsSchema = z.object({
   provider: z.string().trim().min(1),
   model: z.string().trim().min(1),
-  reasoningEffort: z.enum(REASONING_EFFORT_VALUES)
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES),
+  sessionWorkspaceRoot: z.string().trim().min(1).default(defaultSessionWorkspaceRoot)
 });
 
 export const systemSettingsRetentionSchema = z.object({
@@ -150,7 +156,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   platformDefaults: {
     provider: "openai_codex",
     model: DEFAULT_MODEL,
-    reasoningEffort: "high"
+    reasoningEffort: "high",
+    sessionWorkspaceRoot: defaultSessionWorkspaceRoot
   },
   retention: {
     sessionDays: 30,

@@ -20,14 +20,6 @@ export type RuntimeModeSnapshot = {
   runtimeProfile: RuntimeProfileSnapshot;
   allowDirectorySelection: boolean;
   skillPackages: Array<{ id: string; label: string }>;
-  workspaces: Array<{
-    id: string;
-    label: string;
-    isDefault: boolean;
-    allowDirectorySelection: boolean;
-    directoryScope: string;
-    loadWorkspaceAgentsMd: boolean;
-  }>;
   instructionSources: Array<{
     sourceType: string;
     sourceRef: string;
@@ -37,14 +29,8 @@ export type RuntimeModeSnapshot = {
 
 export type PortalRuntimeOptions = {
   modes: RuntimeModeSnapshot[];
-  workspaces: Array<{
-    id: string;
-    label: string;
-    isDefault: boolean;
-  }>;
   canUpload: boolean;
   defaults: {
     mode: string;
-    workspace: string;
   };
 };

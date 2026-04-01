@@ -1,5 +1,6 @@
 import "dotenv/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { DEFAULT_MODEL, REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 
@@ -17,6 +18,7 @@ const schema = z.object({
   DEFAULT_MODEL: z.string().default(DEFAULT_MODEL),
   DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
+  SESSION_WORKSPACE_ROOT: z.string().optional(),
   SESSION_TTL_MINUTES: z.string().default("180"),
   SESSION_COOKIE_NAME: z.string().default("agent_studio_session"),
   SESSION_COOKIE_SECRET: z.string().optional(),
@@ -44,6 +46,14 @@ const sessionCookieMaxAgeMs =
 const defaultModel = normalizeModel(env.DEFAULT_MODEL);
 const defaultReasoningEffort = normalizeReasoningEffortForModel(defaultModel, env.DEFAULT_REASONING_EFFORT);
 const defaultWorkspace = path.resolve(process.cwd(), env.DEFAULT_WORKSPACE);
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const defaultSessionWorkspaceRoot = path.resolve(moduleDir, "..", "..", "sessions");
+const sessionWorkspaceRootInput = (env.SESSION_WORKSPACE_ROOT || "").trim();
+const sessionWorkspaceRoot = sessionWorkspaceRootInput
+  ? path.isAbsolute(sessionWorkspaceRootInput)
+    ? sessionWorkspaceRootInput
+    : path.resolve(process.cwd(), sessionWorkspaceRootInput)
+  : defaultSessionWorkspaceRoot;
 const whitelist = env.WORKSPACE_WHITELIST.split(",")
   .map((item) => item.trim())
   .filter(Boolean)
@@ -103,6 +113,7 @@ export const appConfig = {
   defaultModel,
   defaultReasoningEffort,
   defaultWorkspace,
+  sessionWorkspaceRoot,
   sessionTtlMs: ttlMs,
   sessionCookie: {
     name: (env.SESSION_COOKIE_NAME || "").trim() || "agent_studio_session",

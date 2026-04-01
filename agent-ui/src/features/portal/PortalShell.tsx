@@ -66,10 +66,9 @@ import { fetchThreadCollaboration } from "../collaboration/api";
 import type { ThreadCollaborationView } from "../collaboration/types";
 import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
-import { resolvePortalWorkspaceResources } from "../resources/workspace-resources";
 import type { PortalResourcesResponse } from "../resources/types";
 import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
-import { resolveModeLabel, resolveModeOptions, resolveWorkspaceLabel } from "./runtime-labels";
+import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { PortalTopBar } from "./workbench/PortalTopBar";
@@ -1475,9 +1474,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [showProcessTrace, setShowProcessTrace] = useState(true);
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
-  const [selectedOptionalKnowledgeSetIdsByWorkspace, setSelectedOptionalKnowledgeSetIdsByWorkspace] = useState<
-    Record<string, string[]>
-  >({});
+  const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -1497,7 +1494,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
-  const selectedOptionalKnowledgeSetIdsByWorkspaceRef = useRef(selectedOptionalKnowledgeSetIdsByWorkspace);
+  const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const threadCollaborationLoadingRef = useRef(false);
@@ -1510,7 +1507,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   showProcessTraceRef.current = showProcessTrace;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
-  selectedOptionalKnowledgeSetIdsByWorkspaceRef.current = selectedOptionalKnowledgeSetIdsByWorkspace;
+  selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
   activeThreadIdentityRef.current = activeThreadIdentity;
   threadCollaborationRef.current = threadCollaboration;
   threadCollaborationLoadingRef.current = threadCollaborationLoading;
@@ -1528,17 +1525,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         );
         setAppliedConfig((prev) => {
           const nextMode = findRuntimeMode(next, next.defaults.mode || next.modes[0]?.id || "");
-          const candidateWorkspaces = nextMode?.workspaces.length ? nextMode.workspaces : next.workspaces;
-          const workspaceIds = new Set(candidateWorkspaces.map((item) => item.id));
-          const currentWorkspace = prev.workspace.trim();
           const runtimeProfile = nextMode?.runtimeProfile;
-          const nextWorkspace =
-            currentWorkspace && workspaceIds.has(currentWorkspace)
-              ? currentWorkspace
-              : next.defaults.workspace || candidateWorkspaces.find((item) => item.isDefault)?.id || candidateWorkspaces[0]?.id || prev.workspace;
           return {
             ...prev,
-            workspace: nextWorkspace,
             model: runtimeProfile?.defaultModel || prev.model,
             reasoningEffort: normalizeReasoningEffortForModel(
               runtimeProfile?.defaultModel || prev.model,
@@ -1597,17 +1586,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
     if (!selectedMode) return;
-    const candidateWorkspaces = selectedMode.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
     setAppliedConfig((prev) => {
-      const currentWorkspace = prev.workspace.trim();
-      const workspaceIds = new Set(candidateWorkspaces.map((item) => item.id));
-      const nextWorkspace =
-        currentWorkspace && workspaceIds.has(currentWorkspace)
-          ? currentWorkspace
-          : candidateWorkspaces.find((item) => item.isDefault)?.id || candidateWorkspaces[0]?.id || prev.workspace;
       return {
         ...prev,
-        workspace: nextWorkspace,
         model: selectedMode.runtimeProfile.defaultModel,
         reasoningEffort: normalizeReasoningEffortForModel(
           selectedMode.runtimeProfile.defaultModel,
@@ -1630,6 +1611,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!active) return;
         setResourceErrorText("");
         setPortalResources(next);
+        const allowedIds = new Set((next.knowledgeSets || []).map((item) => item.id));
+        setSelectedKnowledgeSetIds((prev) => prev.filter((id) => allowedIds.has(id)));
       } catch (error) {
         if (!active) return;
         setResourceErrorText(error instanceof Error ? error.message : "加载知识集资源失败");
@@ -1821,16 +1804,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       },
       async initialize(threadId: string) {
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
-        const knowledgeSetIds = normalizeKnowledgeSetIds(
-          selectedOptionalKnowledgeSetIdsByWorkspaceRef.current[cfg.workspace] ?? []
-        );
+        const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const created = await api<ThreadCreateOut>("/api/threads", {
           method: "POST",
           json: {
             external_id: threadId,
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
-            workspace: cfg.workspace,
             knowledge_set_ids: knowledgeSetIds,
             codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
           }
@@ -1926,14 +1906,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const reasoningOptions = useMemo(() => reasoningOptionsForModel(appliedConfig.model), [appliedConfig.model]);
   const canUpload = runtimeOptions?.canUpload ?? false;
   const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
-  const modeScopedWorkspaces = selectedMode?.workspaces.length ? selectedMode.workspaces : runtimeOptions?.workspaces ?? [];
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
-  const selectedWorkspaceResources = resolvePortalWorkspaceResources(
-    portalResources?.workspaces ?? [],
-    appliedConfig.workspace
-  );
-  const selectedOptionalKnowledgeSetIds = selectedOptionalKnowledgeSetIdsByWorkspace[appliedConfig.workspace] ?? [];
+  const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
   const activeThreadCollaboration =
     threadCollaboration && threadCollaboration.threadId === activeRemoteThreadId ? threadCollaboration : null;
@@ -1985,15 +1960,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
-        const knowledgeSetIds = normalizeKnowledgeSetIds(
-          selectedOptionalKnowledgeSetIdsByWorkspaceRef.current[cfg.workspace] ?? []
-        );
+        const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
           method: "POST",
           json: {
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
-            workspace: cfg.workspace,
             knowledge_set_ids: knowledgeSetIds,
             codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
           }
@@ -2151,8 +2123,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
                   payload && typeof payload.reasoning_effort === "string" ? payload.reasoning_effort : "";
-                const workspaceId = payload && typeof payload.workspace === "string" ? payload.workspace : "";
-                const workspace = resolveWorkspaceLabel(runtimeOptionsRef.current?.workspaces ?? [], workspaceId);
                 updates.push({
                   type: "data",
                   name: "codex_process",
@@ -2160,7 +2130,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     kind: "meta",
                     at: new Date().toISOString(),
                     title: "会话已开始",
-                    detail: [model, reasoning, workspace].filter(Boolean).join(" / ")
+                    detail: [model, reasoning].filter(Boolean).join(" / ")
                   } satisfies ProcessData
                 });
               }
@@ -2646,15 +2616,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 <div className="knowledge-set-shell">
                   {portalResources ? (
                     <KnowledgeSetPicker
-                      defaultKnowledgeSets={selectedWorkspaceResources?.default_knowledge_sets ?? []}
-                      optionalKnowledgeSets={selectedWorkspaceResources?.optional_knowledge_sets ?? []}
-                      selectedIds={selectedOptionalKnowledgeSetIds}
-                      onChange={(ids) => {
-                        setSelectedOptionalKnowledgeSetIdsByWorkspace((prev) => ({
-                          ...prev,
-                          [appliedConfig.workspace]: ids
-                        }));
-                      }}
+                      knowledgeSets={portalResources.knowledgeSets ?? []}
+                      selectedIds={selectedKnowledgeSetIdsNormalized}
+                      onChange={setSelectedKnowledgeSetIds}
                     />
                   ) : (
                     <p className="field-help knowledge-set-loading">知识集资源加载中...</p>

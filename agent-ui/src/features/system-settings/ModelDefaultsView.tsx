@@ -14,6 +14,7 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
   const providerError = getFieldError(fieldErrors, "platformDefaults.provider");
   const modelError = getFieldError(fieldErrors, "platformDefaults.model");
   const reasoningEffortError = getFieldError(fieldErrors, "platformDefaults.reasoningEffort");
+  const sessionWorkspaceRootError = getFieldError(fieldErrors, "platformDefaults.sessionWorkspaceRoot");
 
   return (
     <section className="resource-center-section">
@@ -56,6 +57,17 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
             onChange={(event) => onChange({ reasoningEffort: event.target.value })}
           />
           {reasoningEffortError ? <p className="field-error">{reasoningEffortError}</p> : null}
+        </label>
+
+        <label className="field">
+          <span className="field-label">会话根目录</span>
+          <Input
+            value={value.sessionWorkspaceRoot}
+            aria-invalid={Boolean(sessionWorkspaceRootError)}
+            disabled={disabled}
+            onChange={(event) => onChange({ sessionWorkspaceRoot: event.target.value })}
+          />
+          {sessionWorkspaceRootError ? <p className="field-error">{sessionWorkspaceRootError}</p> : null}
         </label>
       </div>
     </section>

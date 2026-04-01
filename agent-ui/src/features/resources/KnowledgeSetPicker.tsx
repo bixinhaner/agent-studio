@@ -1,15 +1,13 @@
 import type { KnowledgeSetOption } from "./types";
 
 type KnowledgeSetPickerProps = {
-  defaultKnowledgeSets: KnowledgeSetOption[];
-  optionalKnowledgeSets: KnowledgeSetOption[];
+  knowledgeSets: KnowledgeSetOption[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
 };
 
 export function KnowledgeSetPicker({
-  defaultKnowledgeSets,
-  optionalKnowledgeSets,
+  knowledgeSets,
   selectedIds,
   onChange
 }: KnowledgeSetPickerProps) {
@@ -24,35 +22,17 @@ export function KnowledgeSetPicker({
     <section className="knowledge-set-panel" aria-label="知识集">
       <div className="knowledge-set-copy">
         <h3>知识集</h3>
-        <p>默认知识集始终挂载，授权的可选知识集可以按工作区单独勾选。</p>
+        <p>可按当前 Agent 选择挂载资料集，也可以不选择。</p>
       </div>
 
       <div className="knowledge-set-group">
         <div className="knowledge-set-group-header">
-          <span className="knowledge-set-group-label">默认知识集</span>
-          <span className="knowledge-set-group-hint">自动挂载</span>
-        </div>
-        {defaultKnowledgeSets.length > 0 ? (
-          <ul className="knowledge-set-default-list">
-            {defaultKnowledgeSets.map((item) => (
-              <li key={item.id} className="knowledge-set-default-item">
-                {item.label}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="knowledge-set-empty">当前工作区没有默认知识集。</p>
-        )}
-      </div>
-
-      <div className="knowledge-set-group">
-        <div className="knowledge-set-group-header">
-          <span className="knowledge-set-group-label">可选知识集</span>
+          <span className="knowledge-set-group-label">可用知识集</span>
           <span className="knowledge-set-group-hint">仅显示已授权项</span>
         </div>
-        {optionalKnowledgeSets.length > 0 ? (
+        {knowledgeSets.length > 0 ? (
           <div className="knowledge-set-option-list">
-            {optionalKnowledgeSets.map((item) => {
+            {knowledgeSets.map((item) => {
               const checked = selectedIds.includes(item.id);
               const inputId = `knowledge-set-option-${item.id}`;
               return (
@@ -69,7 +49,7 @@ export function KnowledgeSetPicker({
             })}
           </div>
         ) : (
-          <p className="knowledge-set-empty">当前工作区没有可选知识集。</p>
+          <p className="knowledge-set-empty">当前没有可选知识集。</p>
         )}
       </div>
     </section>

@@ -449,6 +449,7 @@ export function SystemSettingsShell() {
           <p>
             {draftPayload.platformDefaults.provider} / {draftPayload.platformDefaults.model}
           </p>
+          <p>{draftPayload.platformDefaults.sessionWorkspaceRoot}</p>
           <p>{draftPayload.behavior.welcomeSummary}</p>
         </article>
         <article className="system-settings-preview-card">
@@ -459,6 +460,7 @@ export function SystemSettingsShell() {
               <p>
                 {publishedPayload.platformDefaults.provider} / {publishedPayload.platformDefaults.model}
               </p>
+              <p>{publishedPayload.platformDefaults.sessionWorkspaceRoot}</p>
               <p>{publishedPayload.behavior.welcomeSummary}</p>
             </>
           ) : (

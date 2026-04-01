@@ -98,6 +98,7 @@ import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
+import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { initSSE, sendSSE } from "./sse.js";
 
 const app = express();
@@ -133,6 +134,7 @@ const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourceP
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
+const systemSettings = new SystemSettingsRepository(db as never);
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
@@ -355,13 +357,11 @@ const requirePermission = createRequirePermission(permissionService, {
 });
 const portalRuntimeOptions = new PortalRuntimeOptionService({
   modes: agentModes,
-  workspaces,
   runProfiles,
   skillPackages,
   policies: policyService
 });
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
-  workspaces,
   knowledgeSets,
   policies: policyService,
   storage: knowledgeSetStorage,
@@ -404,7 +404,6 @@ const createSessionSchema = z.object({
   session_id: z.string().optional(),
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
-  workspace: z.string().optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -420,7 +419,6 @@ const createThreadSchema = z.object({
   external_id: z.string().optional(),
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
-  workspace: z.string().optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -430,14 +428,12 @@ const patchThreadSchema = z.object({
   status: z.enum(["regular", "archived"]).optional(),
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
-  workspace: z.string().optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
 const ensureThreadSessionSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
-  workspace: z.string().optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
@@ -471,9 +467,8 @@ type SessionOptions = {
   codexRunConfig?: Record<string, unknown>;
 };
 
-type WorkspaceSelection = {
+type ModeSelection = {
   modeId: string;
-  workspaceId: string;
   workspaceRootPath: string;
 };
 
@@ -545,35 +540,60 @@ function sanitizePathSegment(value: string, fallback: string): string {
   return normalized || fallback;
 }
 
+function formatSessionDateSegment(value: Date = new Date()): string {
+  const year = String(value.getFullYear()).padStart(4, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function resolveSessionWorkspaceRoot(input: string | null | undefined): string | undefined {
+  const raw = trimOrUndefined(input);
+  if (!raw) return undefined;
+  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+}
+
+async function resolveEffectiveSessionWorkspaceRootPath(): Promise<string> {
+  try {
+    const published = await systemSettings.getCurrentPublished();
+    const configured = resolveSessionWorkspaceRoot(published?.payload.platformDefaults.sessionWorkspaceRoot);
+    if (configured) {
+      return configured;
+    }
+  } catch {
+    // Fall back to static config when system settings are unavailable.
+  }
+  return appConfig.sessionWorkspaceRoot;
+}
+
 function buildThreadWorkspacePath(rootPath: string, userId: string, threadId: string): string {
+  const dateSegment = formatSessionDateSegment();
   return path.join(
     rootPath,
-    ".agent-studio",
-    "sessions",
     sanitizePathSegment(userId, "user"),
-    sanitizePathSegment(threadId, "thread")
+    dateSegment,
+    `thread-${sanitizePathSegment(threadId, "thread")}`
   );
 }
 
 function buildDetachedSessionWorkspacePath(rootPath: string, userId: string): string {
   const suffix = `${Date.now()}-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const dateSegment = formatSessionDateSegment();
   return path.join(
     rootPath,
-    ".agent-studio",
-    "sessions",
     sanitizePathSegment(userId, "user"),
+    dateSegment,
     `session-${suffix}`
   );
 }
 
-async function resolveWorkspaceSelection(input: {
+async function resolveModeSelection(input: {
   currentUser: {
     id: string;
     role?: string;
   };
   modeHint?: string;
-  workspaceHint?: string;
-}): Promise<WorkspaceSelection> {
+}): Promise<ModeSelection> {
   const roleIds = [input.currentUser.role ?? "employee"];
   const departmentIds = await departmentMemberships.listIdsForUser(input.currentUser.id);
   const runtimeOptions = await portalRuntimeOptions.resolve({
@@ -594,63 +614,9 @@ async function resolveWorkspaceSelection(input: {
     throw new Error("当前账号无可用 Agent 模式");
   }
 
-  const candidateWorkspaces = selectedMode.workspaces.length ? selectedMode.workspaces : runtimeOptions.workspaces;
-  if (!candidateWorkspaces.length) {
-    throw new Error("当前模式未绑定可用 workspace");
-  }
-
-  const workspaceRows = await workspaces.list();
-  const workspaceById = new Map(workspaceRows.map((workspace) => [workspace.id, workspace] as const));
-
-  const workspaceHint = trimOrUndefined(input.workspaceHint);
-  let selectedWorkspaceId = workspaceHint && candidateWorkspaces.some((workspace) => workspace.id === workspaceHint)
-    ? workspaceHint
-    : undefined;
-
-  if (!selectedWorkspaceId && workspaceHint) {
-    try {
-      const resolvedHintPath = resolveWorkspace(workspaceHint);
-      selectedWorkspaceId = candidateWorkspaces.find((workspace) => {
-        const rootPath = trimOrUndefined(workspaceById.get(workspace.id)?.rootPath);
-        if (!rootPath) return false;
-        try {
-          return resolveWorkspace(rootPath) === resolvedHintPath;
-        } catch {
-          return false;
-        }
-      })?.id;
-    } catch {
-      // Ignore invalid path-style hints and continue with mode defaults.
-    }
-  }
-
-  if (!selectedWorkspaceId) {
-    const defaultWorkspaceId = trimOrUndefined(runtimeOptions.defaults.workspace);
-    selectedWorkspaceId =
-      candidateWorkspaces.find((workspace) => workspace.isDefault)?.id ||
-      (defaultWorkspaceId && candidateWorkspaces.some((workspace) => workspace.id === defaultWorkspaceId)
-        ? defaultWorkspaceId
-        : undefined) ||
-      candidateWorkspaces[0]?.id;
-  }
-  if (!selectedWorkspaceId) {
-    throw new Error("当前模式未绑定可用 workspace");
-  }
-
-  const selectedWorkspace = workspaceById.get(selectedWorkspaceId);
-  if (!selectedWorkspace || selectedWorkspace.status !== "active") {
-    throw new Error("workspace 不存在或无权限");
-  }
-
-  const workspaceRoot = trimOrUndefined(selectedWorkspace.rootPath);
-  if (!workspaceRoot) {
-    throw new Error("workspace 缺少根目录配置");
-  }
-
   return {
     modeId: selectedMode.id,
-    workspaceId: selectedWorkspaceId,
-    workspaceRootPath: resolveWorkspace(workspaceRoot)
+    workspaceRootPath: await resolveEffectiveSessionWorkspaceRootPath()
   };
 }
 
@@ -661,12 +627,10 @@ async function allocateThreadWorkspacePath(input: {
   };
   threadId: string;
   modeHint?: string;
-  workspaceHint?: string;
-}): Promise<WorkspaceSelection & { workspacePath: string }> {
-  const selection = await resolveWorkspaceSelection({
+}): Promise<ModeSelection & { workspacePath: string }> {
+  const selection = await resolveModeSelection({
     currentUser: input.currentUser,
-    modeHint: input.modeHint,
-    workspaceHint: input.workspaceHint
+    modeHint: input.modeHint
   });
   const workspacePath = buildThreadWorkspacePath(selection.workspaceRootPath, input.currentUser.id, input.threadId);
   await fs.mkdir(workspacePath, { recursive: true });
@@ -682,12 +646,10 @@ async function allocateDetachedSessionWorkspacePath(input: {
     role?: string;
   };
   modeHint?: string;
-  workspaceHint?: string;
-}): Promise<WorkspaceSelection & { workspacePath: string }> {
-  const selection = await resolveWorkspaceSelection({
+}): Promise<ModeSelection & { workspacePath: string }> {
+  const selection = await resolveModeSelection({
     currentUser: input.currentUser,
-    modeHint: input.modeHint,
-    workspaceHint: input.workspaceHint
+    modeHint: input.modeHint
   });
   const workspacePath = buildDetachedSessionWorkspacePath(selection.workspaceRootPath, input.currentUser.id);
   await fs.mkdir(workspacePath, { recursive: true });
@@ -819,7 +781,6 @@ async function ensureThreadSession(
   patch?: {
     model?: string;
     reasoning_effort?: ReasoningEffort;
-    workspace?: string;
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
   }
@@ -832,8 +793,7 @@ async function ensureThreadSession(
   const workspaceSelection = await allocateThreadWorkspacePath({
     currentUser,
     threadId,
-    modeHint,
-    workspaceHint: patch?.workspace
+    modeHint
   });
   const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, workspaceSelection.modeId);
   const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
@@ -869,7 +829,6 @@ async function ensureThreadSession(
   if (
     patch?.model ||
     patch?.reasoning_effort ||
-    patch?.workspace ||
     patch?.knowledge_set_ids ||
     patch?.codex_run_config ||
     shouldPersistNormalizedThread
@@ -1077,7 +1036,6 @@ registerCommonApiRoutes(app, {
     listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
   }),
   resourcesPortalRouter: createResourcesPortalRouter({
-    workspaces,
     knowledgeSets,
     policies: policyService,
     listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
@@ -1199,7 +1157,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
         if (!liveRuntimeThreads.has(existing.sessionId)) {
           await sessions.remove(existing.sessionId);
           liveRuntimeThreads.delete(existing.sessionId);
-        } else if (input.model || input.reasoning_effort || input.workspace || input.knowledge_set_ids || input.codex_run_config) {
+        } else if (input.model || input.reasoning_effort || input.knowledge_set_ids || input.codex_run_config) {
           const nextSourceCodexRunConfig = input.codex_run_config ?? existing.codexRunConfig;
           const modeHint = modeIdFromRunConfig(nextSourceCodexRunConfig) ?? modeIdFromRunConfig(existing.codexRunConfig);
 
@@ -1209,26 +1167,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
             const allocated = await allocateThreadWorkspacePath({
               currentUser,
               threadId: existing.threadId,
-              modeHint,
-              workspaceHint: input.workspace ?? existing.workspace
+              modeHint
             });
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
-          } else if (input.workspace || input.codex_run_config || !workspace || !modeId) {
+          } else if (input.codex_run_config || !workspace || !modeId) {
             const allocated = await allocateDetachedSessionWorkspacePath({
               currentUser,
-              modeHint,
-              workspaceHint: input.workspace ?? existing.workspace
+              modeHint
             });
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
           }
 
           if (!modeId) {
-            const fallback = await resolveWorkspaceSelection({
+            const fallback = await resolveModeSelection({
               currentUser,
-              modeHint: undefined,
-              workspaceHint: workspace
+              modeHint: undefined
             });
             modeId = fallback.modeId;
           }
@@ -1275,8 +1230,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
     const allocated = await allocateDetachedSessionWorkspacePath({
       currentUser,
-      modeHint,
-      workspaceHint: input.workspace
+      modeHint
     });
     const sessionOptions = await resolveSessionOptions(
       {
@@ -1318,8 +1272,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     const allocated = await allocateThreadWorkspacePath({
       currentUser,
       threadId,
-      modeHint,
-      workspaceHint: input.workspace
+      modeHint
     });
     const options = await resolveSessionOptions(
       {
@@ -1391,7 +1344,6 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
         input.reasoning_effort ?? existing.reasoningEffort
       );
     }
-    if (input.workspace !== undefined) patch.workspace = resolveWorkspace(input.workspace);
     if (input.codex_run_config !== undefined) patch.codexRunConfig = input.codex_run_config;
     const updated = await threads.update(threadId, patch);
     res.json({ thread: threadOut(updated) });

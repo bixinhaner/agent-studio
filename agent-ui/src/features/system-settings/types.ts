@@ -18,6 +18,7 @@ export type SystemSettingsPlatformDefaults = {
   provider: string;
   model: string;
   reasoningEffort: string;
+  sessionWorkspaceRoot: string;
 };
 
 export type SystemSettingsRetention = {

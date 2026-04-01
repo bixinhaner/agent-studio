@@ -23,8 +23,6 @@ import type {
   RunProfileRecord,
   SkillPackageRecord
 } from "./types";
-import { fetchWorkspaces } from "../resources-center/api";
-import type { WorkspaceRecord } from "../resources-center/types";
 
 type CreatePanelState =
   | {
@@ -213,10 +211,6 @@ function CapabilitySummaryCard(props: {
             <p>{agentMode.skillPackages.length}</p>
           </div>
           <div>
-            <span className="field-label">工作区规则</span>
-            <p>{agentMode.workspaceRules.length}</p>
-          </div>
-          <div>
             <span className="field-label">指令源</span>
             <p>{agentMode.instructionSources.length}</p>
           </div>
@@ -330,10 +324,8 @@ export function CapabilityCenterShell() {
   const [runProfiles, setRunProfiles] = useState<RunProfileRecord[]>([]);
   const [skillPackages, setSkillPackages] = useState<SkillPackageRecord[]>([]);
   const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
-  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
-  const [workspaceWarningText, setWorkspaceWarningText] = useState("");
   const [tab, setTab] = useState<CapabilityCenterTab>("agent_mode");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CapabilityStatusFilter>("all");
@@ -352,24 +344,16 @@ export function CapabilityCenterShell() {
     async function load() {
       setLoading(true);
       setErrorText("");
-      setWorkspaceWarningText("");
       try {
-        let nextWorkspaceWarning = "";
-        const [runProfileResponse, skillPackageResponse, agentModeResponse, workspaceResponse] = await Promise.all([
+        const [runProfileResponse, skillPackageResponse, agentModeResponse] = await Promise.all([
           fetchRunProfiles(),
           fetchSkillPackages(),
-          fetchAgentModes(),
-          fetchWorkspaces().catch((error) => {
-            nextWorkspaceWarning = error instanceof Error ? error.message : "加载工作区失败";
-            return { workspaces: [] };
-          })
+          fetchAgentModes()
         ]);
         if (!active) return;
         setRunProfiles(runProfileResponse.runProfiles);
         setSkillPackages(skillPackageResponse.skillPackages);
         setAgentModes(agentModeResponse.agentModes);
-        setWorkspaces(workspaceResponse.workspaces);
-        setWorkspaceWarningText(nextWorkspaceWarning);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载能力配置中心失败");
@@ -432,7 +416,6 @@ export function CapabilityCenterShell() {
           item.description,
           item.runProfileId,
           item.skillPackages.map((item) => item.skillPackageId).join(" "),
-          item.workspaceRules.map((item) => item.workspaceId).join(" "),
           item.instructionSources.map((item) => item.sourceRef).join(" ")
         ]);
       });
@@ -681,15 +664,6 @@ export function CapabilityCenterShell() {
 
       {loading ? <Spin size="small" /> : null}
       {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
-      {!loading && !errorText && tab === "agent_mode" && workspaceWarningText ? (
-        <Alert
-          className="admin-alert-inline"
-          type="warning"
-          showIcon
-          message={`工作区加载失败，Agent Mode 绑定编辑已降级：${workspaceWarningText}`}
-        />
-      ) : null}
-
       <div className="resource-center-body capability-center-body">
         <aside className="resource-center-sidebar">
           <div className="resource-center-sidebar-header">
@@ -1068,7 +1042,6 @@ export function CapabilityCenterShell() {
               agentMode={selectedAgentMode}
               runProfiles={runProfiles}
               skillPackages={skillPackages}
-              workspaces={workspaces}
               onAgentModeUpdated={(updatedAgentMode) =>
                 setAgentModes((current) => current.map((item) => (item.id === updatedAgentMode.id ? updatedAgentMode : item)))
               }
