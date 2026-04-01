@@ -1,7 +1,8 @@
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
-import { AdminShell } from "./features/admin/AdminShell";
-import { PortalShell } from "./features/portal/PortalShell";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+
+const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
+const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then((module) => ({ default: module.PortalShell })));
 
 type AppShellView = "portal" | "admin";
 
@@ -53,15 +54,21 @@ function AppContent() {
   }
 
   if (adminEligible && view === "admin") {
-    return <AdminShell currentUser={auth.user} onOpenPortal={() => setView("portal")} onSignOut={() => void auth.signOut()} />;
+    return (
+      <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>管理控制台加载中...</p></div></div>}>
+        <AdminShellLazy currentUser={auth.user} onOpenPortal={() => setView("portal")} onSignOut={() => void auth.signOut()} />
+      </Suspense>
+    );
   }
 
   return (
-    <PortalShell
-      currentUser={auth.user}
-      onOpenAdmin={adminEligible ? () => setView("admin") : undefined}
-      onSignOut={() => void auth.signOut()}
-    />
+    <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>工作台加载中...</p></div></div>}>
+      <PortalShellLazy
+        currentUser={auth.user}
+        onOpenAdmin={adminEligible ? () => setView("admin") : undefined}
+        onSignOut={() => void auth.signOut()}
+      />
+    </Suspense>
   );
 }
 

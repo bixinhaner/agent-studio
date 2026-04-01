@@ -1,4 +1,5 @@
-import { Button } from "antd";
+import { useState } from "react";
+import { Button, Input, Select } from "antd";
 
 import type { AgentModeInstructionSourceInput, InstructionSourceType } from "./types";
 
@@ -17,6 +18,12 @@ const DEFAULT_SOURCE: EditableInstructionSource = {
   sourceType: "inline_text",
   sourceRef: ""
 };
+
+const SOURCE_TYPE_OPTIONS = [
+  { label: "inline", value: "inline_text" },
+  { label: "workspace_agents_md", value: "workspace_agents_md" },
+  { label: "knowledge_set_document", value: "knowledge_set_document" }
+];
 
 function normalizeInstructionSources(instructionSources: AgentModeInstructionSourceInput[]): EditableInstructionSource[] {
   if (instructionSources.length === 0) {
@@ -45,6 +52,7 @@ function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
 
 export function InstructionSourceEditor({ instructionSources, onChange, disabled = false }: InstructionSourceEditorProps) {
   const items = normalizeInstructionSources(instructionSources);
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
   function emit(next: EditableInstructionSource[]) {
     onChange(toPayload(next));
@@ -69,6 +77,21 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
     emit(moveItem(items, index, nextIndex));
   }
 
+  function handleDragStart(index: number) {
+    if (disabled) return;
+    setDraggingIndex(index);
+  }
+
+  function handleDrop(targetIndex: number) {
+    if (disabled) return;
+    if (draggingIndex == null || draggingIndex === targetIndex) {
+      setDraggingIndex(null);
+      return;
+    }
+    emit(moveItem(items, draggingIndex, targetIndex));
+    setDraggingIndex(null);
+  }
+
   return (
     <section className="capability-mode-instruction-editor">
       <div className="resource-center-section-header">
@@ -83,13 +106,28 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
 
       <div className="capability-mode-instruction-list">
         {items.map((source, index) => (
-          <article key={`${source.sourceType}-${index}`} className="capability-mode-instruction-card">
+          <article
+            key={`${source.sourceType}-${index}`}
+            className={
+              draggingIndex === index
+                ? "capability-mode-instruction-card capability-mode-instruction-card dragging"
+                : "capability-mode-instruction-card"
+            }
+            draggable={!disabled}
+            onDragStart={() => handleDragStart(index)}
+            onDragEnd={() => setDraggingIndex(null)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => handleDrop(index)}
+          >
             <div className="capability-mode-instruction-card-header">
               <div>
                 <h5>{`指令源 ${index + 1}`}</h5>
                 <p>{source.sourceType}</p>
               </div>
               <div className="capability-mode-instruction-row-actions">
+                <Button type="text" disabled>
+                  拖拽排序
+                </Button>
                 <Button type="default" disabled={disabled || index === 0} onClick={() => moveSource(index, -1)}>
                   {`上移 ${index + 1}`}
                 </Button>
@@ -105,26 +143,22 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
             <div className="resource-center-form-grid capability-mode-instruction-grid">
               <label className="field">
                 <span className="field-label">{`来源类型 ${index + 1}`}</span>
-                <select
-                  className="field-input"
+                <Select
                   aria-label={`来源类型 ${index + 1}`}
                   disabled={disabled}
                   value={source.sourceType}
-                  onChange={(event) => updateSource(index, { sourceType: event.target.value as InstructionSourceType })}
-                >
-                  <option value="inline_text">inline</option>
-                  <option value="workspace_agents_md">workspace_agents_md</option>
-                  <option value="knowledge_set_document">knowledge_set_document</option>
-                </select>
+                  options={SOURCE_TYPE_OPTIONS}
+                  onChange={(value) => updateSource(index, { sourceType: value as InstructionSourceType })}
+                />
               </label>
 
               {source.sourceType === "inline_text" ? (
                 <label className="field resource-center-form-span-2">
                   <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <textarea
-                    className="field-input textarea"
+                  <Input.TextArea
                     aria-label={`来源引用 ${index + 1}`}
                     disabled={disabled}
+                    rows={4}
                     value={source.sourceRef}
                     placeholder="直接填写内联指令文本"
                     onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
@@ -133,8 +167,7 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
               ) : source.sourceType === "workspace_agents_md" ? (
                 <label className="field resource-center-form-span-2">
                   <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <input
-                    className="field-input"
+                  <Input
                     aria-label={`来源引用 ${index + 1}`}
                     disabled={disabled}
                     value={source.sourceRef}
@@ -145,8 +178,7 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
               ) : (
                 <label className="field resource-center-form-span-2">
                   <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <input
-                    className="field-input"
+                  <Input
                     aria-label={`来源引用 ${index + 1}`}
                     disabled={disabled}
                     value={source.sourceRef}

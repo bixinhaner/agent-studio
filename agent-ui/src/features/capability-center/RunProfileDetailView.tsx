@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Tag } from "antd";
+import { Alert, Button, Card, Input, Segmented, Select, Switch, Tag } from "antd";
 
 import { updateRunProfile } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -23,6 +23,39 @@ const RUN_PROFILE_TABS: Array<{ id: RunProfileTab; label: string }> = [
   { id: "basic", label: "基本信息" },
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" }
+];
+
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" }
+];
+
+const REASONING_OPTIONS = [
+  { label: "none", value: "none" },
+  { label: "minimal", value: "minimal" },
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+  { label: "xhigh", value: "xhigh" }
+];
+
+const SANDBOX_OPTIONS = [
+  { label: "read-only", value: "read-only" },
+  { label: "workspace-write", value: "workspace-write" },
+  { label: "danger-full-access", value: "danger-full-access" }
+];
+
+const APPROVAL_OPTIONS = [
+  { label: "never", value: "never" },
+  { label: "on-request", value: "on-request" },
+  { label: "on-failure", value: "on-failure" },
+  { label: "untrusted", value: "untrusted" }
+];
+
+const SEARCH_OPTIONS = [
+  { label: "disabled", value: "disabled" },
+  { label: "cached", value: "cached" },
+  { label: "live", value: "live" }
 ];
 
 function toAllowedModelsText(allowedModels: string[]) {
@@ -170,18 +203,12 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="运行策略详情标签">
-          {RUN_PROFILE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={activeTab === tab.id ? "capability-center-detail-tab active" : "capability-center-detail-tab"}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <Segmented
+            block
+            value={activeTab}
+            options={RUN_PROFILE_TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+            onChange={(value) => setActiveTab(value as RunProfileTab)}
+          />
         </div>
 
         {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
@@ -192,42 +219,44 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
             <div className="resource-center-form-grid">
               <label className="field">
                 <span className="field-label">运行策略名称</span>
-                <input className="field-input" aria-label="运行策略名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
+                <Input aria-label="运行策略名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
               </label>
 
               <label className="field">
                 <span className="field-label">运行策略 slug</span>
-                <input className="field-input" aria-label="运行策略 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
+                <Input aria-label="运行策略 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
               </label>
 
               <label className="field resource-center-form-span-2">
                 <span className="field-label">运行策略描述</span>
-                <textarea
-                  className="field-input textarea"
+                <Input.TextArea
                   aria-label="运行策略描述"
                   value={description}
                   disabled={saving}
+                  rows={4}
                   onChange={(event) => setDescription(event.target.value)}
                 />
               </label>
 
               <label className="field">
                 <span className="field-label">运行策略状态</span>
-                <select className="field-input" aria-label="运行策略状态" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
-                  <option value="active">active</option>
-                  <option value="disabled">disabled</option>
-                </select>
+                <Select
+                  aria-label="运行策略状态"
+                  value={status}
+                  disabled={saving}
+                  options={STATUS_OPTIONS}
+                  onChange={(value) => setStatus(value)}
+                />
               </label>
 
               <label className="field">
                 <span className="field-label">默认模型</span>
-                <input className="field-input" aria-label="默认模型" value={defaultModel} disabled={saving} onChange={(event) => setDefaultModel(event.target.value)} />
+                <Input aria-label="默认模型" value={defaultModel} disabled={saving} onChange={(event) => setDefaultModel(event.target.value)} />
               </label>
 
               <label className="field resource-center-form-span-2">
                 <span className="field-label">可选模型</span>
-                <input
-                  className="field-input"
+                <Input
                   aria-label="可选模型"
                   value={allowedModels}
                   disabled={saving}
@@ -237,56 +266,58 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
 
               <label className="field">
                 <span className="field-label">推理强度</span>
-                <select className="field-input" aria-label="推理强度" value={reasoningEffort} disabled={saving} onChange={(event) => setReasoningEffort(event.target.value as ReasoningEffort)}>
-                  <option value="none">none</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                </select>
+                <Select
+                  aria-label="推理强度"
+                  value={reasoningEffort}
+                  disabled={saving}
+                  options={REASONING_OPTIONS}
+                  onChange={(value) => setReasoningEffort(value as ReasoningEffort)}
+                />
               </label>
 
               <label className="field">
                 <span className="field-label">沙箱模式</span>
-                <select className="field-input" aria-label="沙箱模式" value={sandboxMode} disabled={saving} onChange={(event) => setSandboxMode(event.target.value as SandboxMode)}>
-                  <option value="read-only">read-only</option>
-                  <option value="workspace-write">workspace-write</option>
-                  <option value="danger-full-access">danger-full-access</option>
-                </select>
+                <Select
+                  aria-label="沙箱模式"
+                  value={sandboxMode}
+                  disabled={saving}
+                  options={SANDBOX_OPTIONS}
+                  onChange={(value) => setSandboxMode(value as SandboxMode)}
+                />
               </label>
 
               <label className="field">
                 <span className="field-label">审批策略</span>
-                <select className="field-input" aria-label="审批策略" value={approvalPolicy} disabled={saving} onChange={(event) => setApprovalPolicy(event.target.value as ApprovalPolicy)}>
-                  <option value="never">never</option>
-                  <option value="on-request">on-request</option>
-                  <option value="on-failure">on-failure</option>
-                  <option value="untrusted">untrusted</option>
-                </select>
+                <Select
+                  aria-label="审批策略"
+                  value={approvalPolicy}
+                  disabled={saving}
+                  options={APPROVAL_OPTIONS}
+                  onChange={(value) => setApprovalPolicy(value as ApprovalPolicy)}
+                />
               </label>
 
-              <label className="field">
-                <span className="field-label">联网</span>
-                <select
-                  className="field-input"
+              <label className="field checkbox-field resource-center-toggle-row">
+                <Switch
                   aria-label="联网"
-                  value={networkAccessEnabled ? "enabled" : "disabled"}
+                  checked={networkAccessEnabled}
                   disabled={saving}
-                  onChange={(event) => setNetworkAccessEnabled(event.target.value === "enabled")}
-                >
-                  <option value="disabled">disabled</option>
-                  <option value="enabled">enabled</option>
-                </select>
+                  checkedChildren="联网"
+                  unCheckedChildren="离线"
+                  onChange={(checked) => setNetworkAccessEnabled(checked)}
+                />
+                <span className="field-label">网络访问</span>
               </label>
 
               <label className="field">
                 <span className="field-label">搜索模式</span>
-                <select className="field-input" aria-label="搜索模式" value={webSearchMode} disabled={saving} onChange={(event) => setWebSearchMode(event.target.value as WebSearchMode)}>
-                  <option value="disabled">disabled</option>
-                  <option value="cached">cached</option>
-                  <option value="live">live</option>
-                </select>
+                <Select
+                  aria-label="搜索模式"
+                  value={webSearchMode}
+                  disabled={saving}
+                  options={SEARCH_OPTIONS}
+                  onChange={(value) => setWebSearchMode(value as WebSearchMode)}
+                />
               </label>
             </div>
 

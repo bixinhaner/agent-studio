@@ -2781,6 +2781,11 @@ body {
   gap: 12px;
 }
 
+.resource-center-mobile-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .resource-center-stats-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3095,6 +3100,37 @@ body {
   gap: 12px;
   margin-bottom: 16px;
   align-items: end;
+}
+
+.knowledge-set-inline-field {
+  min-width: 180px;
+}
+
+.knowledge-set-upload-task-list {
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-set-upload-task-item {
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-set-upload-task-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.knowledge-set-upload-task-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .knowledge-set-tree-list {
@@ -3552,6 +3588,12 @@ body {
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
 }
 
+.capability-mode-instruction-card.dragging {
+  opacity: 0.75;
+  border-color: #93c5fd;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+}
+
 .capability-mode-workspace-header,
 .capability-mode-instruction-card-header {
   display: flex;
@@ -3612,32 +3654,26 @@ body {
   gap: 1rem;
 }
 
-.capability-skill-package-table-wrap {
-  overflow-x: auto;
+.capability-skill-package-card-list {
+  display: grid;
+  gap: 0.9rem;
 }
 
-.capability-skill-package-table {
-  width: 100%;
-  min-width: 780px;
-  border-collapse: collapse;
+.capability-skill-package-item-card {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 0.95rem 1rem;
+  display: grid;
+  gap: 0.85rem;
 }
 
-.capability-skill-package-table th,
-.capability-skill-package-table td {
-  border-top: 1px solid rgba(15, 23, 42, 0.12);
-  padding: 0.75rem;
-  text-align: left;
-  vertical-align: top;
-}
-
-.capability-skill-package-table th {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: rgba(15, 23, 42, 0.68);
-}
-
-.capability-skill-package-table td .field-input {
-  min-width: 0;
+.capability-skill-package-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .capability-skill-package-binding {
@@ -3645,8 +3681,7 @@ body {
   font-family: "SFMono-Regular", "Menlo", monospace;
 }
 
-.capability-skill-package-binding-list,
-.capability-skill-package-row-actions {
+.capability-skill-package-binding-list {
   display: grid;
   gap: 0.65rem;
 }
@@ -3654,4 +3689,16 @@ body {
 .capability-skill-package-binding-card {
   display: grid;
   gap: 0.5rem;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.75rem;
+}
+
+.capability-skill-package-binding-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }

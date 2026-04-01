@@ -1,7 +1,8 @@
-import { useMemo } from "react";
-import { Button } from "antd";
+import { useMemo, useState } from "react";
+import { Button, Input, Modal, Typography } from "antd";
 
 import type { KnowledgeSetItemRecord } from "./types";
+import { openWarningConfirm } from "../../lib/warning-modal";
 
 type KnowledgeSetFileTreeProps = {
   items: KnowledgeSetItemRecord[];
@@ -67,12 +68,11 @@ function formatSize(sizeBytes?: string) {
 type DirectoryListProps = {
   node: DirectoryNode;
   disabled: boolean;
-  requireRenameConfirm: boolean;
-  onDelete: KnowledgeSetFileTreeProps["onDelete"];
-  onRename: KnowledgeSetFileTreeProps["onRename"];
+  onRequestDelete(relativePath: string): void;
+  onRequestRename(relativePath: string): void;
 };
 
-function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRename }: DirectoryListProps) {
+function DirectoryList({ node, disabled, onRequestDelete, onRequestRename }: DirectoryListProps) {
   const directories = [...node.directories.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
   const files = [...node.files].sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"));
 
@@ -86,9 +86,8 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
           <DirectoryList
             node={directory}
             disabled={disabled}
-            requireRenameConfirm={requireRenameConfirm}
-            onDelete={onDelete}
-            onRename={onRename}
+            onRequestDelete={onRequestDelete}
+            onRequestRename={onRequestRename}
           />
         </li>
       ))}
@@ -114,16 +113,7 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
                   type="default"
                   disabled={disabled}
                   aria-label="重命名文件"
-                  onClick={() => {
-                    const nextRelativePath = window.prompt("输入新的相对路径", item.relativePath);
-                    if (!nextRelativePath || !nextRelativePath.trim() || nextRelativePath === item.relativePath) {
-                      return;
-                    }
-                    if (requireRenameConfirm && !window.confirm(`确认将 ${item.relativePath} 重命名为 ${nextRelativePath.trim()} 吗？`)) {
-                      return;
-                    }
-                    void onRename(item.relativePath, nextRelativePath.trim());
-                  }}
+                  onClick={() => onRequestRename(item.relativePath)}
                 >
                   重命名
                 </Button>
@@ -131,10 +121,7 @@ function DirectoryList({ node, disabled, requireRenameConfirm, onDelete, onRenam
                   type="default"
                   disabled={disabled}
                   aria-label="删除文件"
-                  onClick={() => {
-                    if (!window.confirm(`确认删除 ${item.relativePath} 吗？`)) return;
-                    void onDelete(item.relativePath);
-                  }}
+                  onClick={() => onRequestDelete(item.relativePath)}
                 >
                   删除
                 </Button>
@@ -155,18 +142,99 @@ export function KnowledgeSetFileTree({
   onRename
 }: KnowledgeSetFileTreeProps) {
   const tree = useMemo(() => buildTree(items), [items]);
+  const [renameDraft, setRenameDraft] = useState<{ sourcePath: string; nextPath: string } | null>(null);
+  const [renameErrorText, setRenameErrorText] = useState("");
+
+  async function handleDeleteRequest(relativePath: string) {
+    const confirmed = await openWarningConfirm({
+      title: "确认删除文件",
+      content: `确认删除 ${relativePath} 吗？`,
+      description: "删除后将立即从资料集移除，请谨慎操作。",
+      dangerLevel: "danger",
+      okText: "删除",
+      cancelText: "取消"
+    });
+    if (!confirmed) return;
+    await onDelete(relativePath);
+  }
+
+  function handleRenameRequest(relativePath: string) {
+    setRenameErrorText("");
+    setRenameDraft({ sourcePath: relativePath, nextPath: relativePath });
+  }
+
+  async function handleRenameConfirm() {
+    if (!renameDraft) return;
+    const nextRelativePath = renameDraft.nextPath.trim();
+    if (!nextRelativePath) {
+      setRenameErrorText("新的相对路径不能为空");
+      return;
+    }
+
+    if (nextRelativePath === renameDraft.sourcePath) {
+      setRenameDraft(null);
+      return;
+    }
+
+    if (requireRenameConfirm) {
+      const confirmed = await openWarningConfirm({
+        title: "确认重命名文件",
+        content: `确认将 ${renameDraft.sourcePath} 重命名为 ${nextRelativePath} 吗？`,
+        dangerLevel: "warning",
+        okText: "确认重命名",
+        cancelText: "取消",
+        okButtonDanger: false
+      });
+      if (!confirmed) return;
+    }
+
+    await onRename(renameDraft.sourcePath, nextRelativePath);
+    setRenameDraft(null);
+  }
 
   if (items.length === 0) {
     return <p className="resource-center-empty">当前资料集没有文件清单。</p>;
   }
 
   return (
-    <DirectoryList
-      node={tree}
-      disabled={disabled}
-      requireRenameConfirm={requireRenameConfirm}
-      onDelete={onDelete}
-      onRename={onRename}
-    />
+    <>
+      <DirectoryList
+        node={tree}
+        disabled={disabled}
+        onRequestDelete={(relativePath) => void handleDeleteRequest(relativePath)}
+        onRequestRename={handleRenameRequest}
+      />
+
+      <Modal
+        title="重命名文件"
+        open={Boolean(renameDraft)}
+        onCancel={() => setRenameDraft(null)}
+        onOk={() => void handleRenameConfirm()}
+        okText="保存"
+        cancelText="取消"
+        maskClosable={!disabled}
+        okButtonProps={{ disabled }}
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary">
+          更新文件相对路径后，资料集清单会同步变更。
+        </Typography.Paragraph>
+        <label className="field">
+          <span className="field-label">原路径</span>
+          <Input value={renameDraft?.sourcePath ?? ""} disabled />
+        </label>
+        <label className="field">
+          <span className="field-label">新路径</span>
+          <Input
+            autoFocus
+            value={renameDraft?.nextPath ?? ""}
+            onChange={(event) =>
+              setRenameDraft((current) => (current ? { ...current, nextPath: event.target.value } : current))
+            }
+          />
+        </label>
+        {renameErrorText ? <Typography.Text type="danger">{renameErrorText}</Typography.Text> : null}
+      </Modal>
+    </>
   );
 }

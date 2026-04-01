@@ -1,6 +1,21 @@
 import { ReloadOutlined } from "@ant-design/icons";
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from "antd";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Drawer,
+  Empty,
+  Input,
+  Segmented,
+  Select,
+  Space,
+  Spin,
+  Steps,
+  Switch,
+  Tag,
+  Typography
+} from "antd";
 
 import {
   createAgentMode,
@@ -10,9 +25,10 @@ import {
   fetchRunProfiles,
   fetchSkillPackages
 } from "./api";
-import { AgentModeDetailView } from "./AgentModeDetailView";
-import { RunProfileDetailView } from "./RunProfileDetailView";
-import { SkillPackageDetailView } from "./SkillPackageDetailView";
+import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { openWarningConfirm } from "../../lib/warning-modal";
+import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
 import type {
   AgentModeRecord,
   CapabilityCenterTab,
@@ -24,6 +40,16 @@ import type {
   RunProfileRecord,
   SkillPackageRecord
 } from "./types";
+
+const AgentModeDetailViewLazy = lazy(() =>
+  import("./AgentModeDetailView").then((module) => ({ default: module.AgentModeDetailView }))
+);
+const RunProfileDetailViewLazy = lazy(() =>
+  import("./RunProfileDetailView").then((module) => ({ default: module.RunProfileDetailView }))
+);
+const SkillPackageDetailViewLazy = lazy(() =>
+  import("./SkillPackageDetailView").then((module) => ({ default: module.SkillPackageDetailView }))
+);
 
 type CreatePanelState =
   | {
@@ -82,6 +108,44 @@ const VISIBILITY_FILTER_OPTIONS: Array<{ label: string; value: CapabilityVisibil
   { label: VISIBILITY_FILTER_LABELS.hidden, value: "hidden" }
 ];
 
+const CREATE_STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" }
+];
+
+const CREATE_VISIBILITY_OPTIONS = [
+  { label: "仅管理员", value: "hidden" },
+  { label: "对用户可见", value: "visible" }
+];
+
+const CREATE_REASONING_OPTIONS = [
+  { label: "none", value: "none" },
+  { label: "minimal", value: "minimal" },
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+  { label: "xhigh", value: "xhigh" }
+];
+
+const CREATE_SANDBOX_OPTIONS = [
+  { label: "read-only", value: "read-only" },
+  { label: "workspace-write", value: "workspace-write" },
+  { label: "danger-full-access", value: "danger-full-access" }
+];
+
+const CREATE_APPROVAL_OPTIONS = [
+  { label: "never", value: "never" },
+  { label: "on-request", value: "on-request" },
+  { label: "on-failure", value: "on-failure" },
+  { label: "untrusted", value: "untrusted" }
+];
+
+const CREATE_SEARCH_OPTIONS = [
+  { label: "disabled", value: "disabled" },
+  { label: "cached", value: "cached" },
+  { label: "live", value: "live" }
+];
+
 const DEFAULT_RUN_PROFILE_MODEL = "gpt-5.4";
 
 function panelKindForTab(tab: CapabilityCenterTab): CreatePanelState["kind"] {
@@ -111,6 +175,54 @@ function defaultSlugBase(kind: CreatePanelState["kind"]) {
   if (kind === "agent_mode") return "agent-mode";
   if (kind === "skill_package") return "skill-package";
   return "run-profile";
+}
+
+function createStepsForKind(kind: CreatePanelState["kind"]) {
+  if (kind === "agent_mode") {
+    return [
+      { title: "基础信息", description: "名称、slug、描述" },
+      { title: "绑定策略", description: "运行策略与可见性" },
+      { title: "确认创建", description: "检查配置后提交" }
+    ];
+  }
+  if (kind === "skill_package") {
+    return [
+      { title: "基础信息", description: "名称、slug、描述" },
+      { title: "可见性", description: "状态与用户可见范围" },
+      { title: "确认创建", description: "检查配置后提交" }
+    ];
+  }
+  return [
+    { title: "基础信息", description: "名称、slug、描述" },
+    { title: "运行参数", description: "模型与执行策略" },
+    { title: "确认创建", description: "检查配置后提交" }
+  ];
+}
+
+function createStepValidationMessage(
+  panel: CreatePanelState,
+  step: number,
+  runProfileCount: number
+): string | null {
+  if (step === 0) {
+    if (!panel.name.trim()) return "请填写能力名称";
+    if (!panel.slug.trim()) return "请填写能力 slug";
+    return null;
+  }
+
+  if (step !== 1) return null;
+  if (!panel.status.trim()) return "请设置状态";
+  if (panel.kind === "agent_mode") {
+    if (runProfileCount === 0) return "请先创建至少一个运行策略";
+    if (!panel.runProfileId.trim()) return "请绑定运行策略";
+    return null;
+  }
+  if (panel.kind === "run_profile") {
+    if (!panel.defaultModel.trim()) return "请填写默认模型";
+    if (!panel.allowedModels.trim()) return "请填写至少一个可选模型";
+    return null;
+  }
+  return null;
 }
 
 function slugifyValue(value: string) {
@@ -172,6 +284,16 @@ function createInitialPanelState(tab: CapabilityCenterTab, runProfiles: RunProfi
     networkAccessEnabled: true,
     webSearchMode: "live"
   };
+}
+
+function hasCreatePanelChanges(
+  currentPanel: CreatePanelState | null,
+  initialPanel: CreatePanelState | null,
+  currentStep: number
+): boolean {
+  if (!currentPanel || !initialPanel) return false;
+  if (currentStep > 0) return true;
+  return !deepEqual(normalizeRecordForCompare(currentPanel), normalizeRecordForCompare(initialPanel));
 }
 
 function toListText(items: string[]) {
@@ -354,10 +476,14 @@ export function CapabilityCenterShell() {
   const [selectedSkillPackageId, setSelectedSkillPackageId] = useState<string | null>(null);
   const [selectedRunProfileId, setSelectedRunProfileId] = useState<string | null>(null);
   const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
+  const [createPanelInitial, setCreatePanelInitial] = useState<CreatePanelState | null>(null);
+  const [createStep, setCreateStep] = useState(0);
   const [createSlugEdited, setCreateSlugEdited] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const isNarrowScreen = useIsNarrowScreen(980);
 
   useEffect(() => {
     let active = true;
@@ -399,7 +525,10 @@ export function CapabilityCenterShell() {
   useEffect(() => {
     if (!createPanel) return;
     if (createPanel.kind === panelKindForTab(tab)) return;
-    setCreatePanel(createInitialPanelState(tab, runProfiles));
+    const nextInitial = createInitialPanelState(tab, runProfiles);
+    setCreatePanel(nextInitial);
+    setCreatePanelInitial(nextInitial);
+    setCreateStep(0);
     setCreateSlugEdited(false);
     setCreateErrorText("");
     setCreateSaving(false);
@@ -484,17 +613,43 @@ export function CapabilityCenterShell() {
     return tab === "agent_mode" ? agentModes.find((item) => item.id === selectedAgentModeId) ?? null : null;
   }, [agentModes, selectedAgentModeId, tab]);
 
-  function closeCreatePanel() {
+  function resetCreatePanel() {
     setCreatePanel(null);
+    setCreatePanelInitial(null);
+    setCreateStep(0);
     setCreateSlugEdited(false);
     setCreateErrorText("");
     setCreateSaving(false);
   }
 
+  async function closeCreatePanel(forceClose = false) {
+    if (
+      !forceClose &&
+      hasCreatePanelChanges(createPanel, createPanelInitial, createStep)
+    ) {
+      const confirmed = await openWarningConfirm({
+        title: "确认关闭创建流程",
+        content: "当前存在未保存内容，关闭后将丢失本次填写。",
+        description: "建议先完成创建，或确认放弃当前输入。",
+        okText: "放弃并关闭",
+        cancelText: "继续编辑",
+        dangerLevel: "warning",
+        okButtonDanger: false
+      });
+      if (!confirmed) return;
+    }
+
+    resetCreatePanel();
+  }
+
   function openCreatePanel() {
-    setCreatePanel(createInitialPanelState(tab, runProfiles));
+    const nextInitial = createInitialPanelState(tab, runProfiles);
+    setCreatePanel(nextInitial);
+    setCreatePanelInitial(nextInitial);
+    setCreateStep(0);
     setCreateSlugEdited(false);
     setCreateErrorText("");
+    setCreateSaving(false);
   }
 
   function selectResource(id: string) {
@@ -502,17 +657,20 @@ export function CapabilityCenterShell() {
       setSelectedAgentModeId(id);
       setSelectedSkillPackageId(null);
       setSelectedRunProfileId(null);
+      if (isNarrowScreen) setMobileDetailOpen(true);
       return;
     }
     if (tab === "skill_package") {
       setSelectedSkillPackageId(id);
       setSelectedAgentModeId(null);
       setSelectedRunProfileId(null);
+      if (isNarrowScreen) setMobileDetailOpen(true);
       return;
     }
     setSelectedRunProfileId(id);
     setSelectedAgentModeId(null);
     setSelectedSkillPackageId(null);
+    if (isNarrowScreen) setMobileDetailOpen(true);
   }
 
   async function handleCreateSave() {
@@ -533,7 +691,7 @@ export function CapabilityCenterShell() {
         const response = await createAgentMode(payload);
         setAgentModes((current) => [...current, response.agentMode]);
         setSelectedAgentModeId(response.agentMode.id);
-        setCreatePanel(null);
+        resetCreatePanel();
       } else if (createPanel.kind === "skill_package") {
         const payload: CreateSkillPackageInput = {
           name: createPanel.name.trim(),
@@ -545,7 +703,7 @@ export function CapabilityCenterShell() {
         const response = await createSkillPackage(payload);
         setSkillPackages((current) => [...current, response.skillPackage]);
         setSelectedSkillPackageId(response.skillPackage.id);
-        setCreatePanel(null);
+        resetCreatePanel();
       } else {
         const allowedModels = createPanel.allowedModels
           .split(",")
@@ -567,7 +725,7 @@ export function CapabilityCenterShell() {
         const response = await createRunProfile(payload);
         setRunProfiles((current) => [...current, response.runProfile]);
         setSelectedRunProfileId(response.runProfile.id);
-        setCreatePanel(null);
+        resetCreatePanel();
       }
     } catch (error) {
       setCreateErrorText(error instanceof Error ? error.message : "创建能力资源失败");
@@ -576,6 +734,7 @@ export function CapabilityCenterShell() {
   }
 
   const visibilityDisabled = tab === "run_profile";
+  const mobileFilterCount = (search.trim() ? 1 : 0) + (statusFilter !== "all" ? 1 : 0) + (visibilityFilter !== "all" ? 1 : 0);
   const resourceLabel = resourceTitle(tab);
   const noResultsLabel = tab === "agent_mode" ? "没有可用能力资源" : `当前筛选条件下没有${resourceLabel}`;
   const visibleCount = visibleItems.length;
@@ -583,6 +742,15 @@ export function CapabilityCenterShell() {
   const resourceCountLabel = tab === "agent_mode" ? "模式资源总数" : tab === "skill_package" ? "技能包总数" : "运行策略总数";
   const sidebarTitle = tab === "agent_mode" ? "模式列表" : tab === "skill_package" ? "技能包列表" : "运行策略列表";
   const selectedResourceSummary = selectedResource?.name ? `已选：${selectedResource.name}` : "未选择";
+  const createPanelKind = createPanel?.kind ?? panelKindForTab(tab);
+  const createSteps = useMemo(() => createStepsForKind(createPanelKind), [createPanelKind]);
+  const maxCreateStep = createSteps.length - 1;
+  const activeCreateStep = Math.min(createStep, maxCreateStep);
+
+  useEffect(() => {
+    if (createStep <= maxCreateStep) return;
+    setCreateStep(maxCreateStep);
+  }, [createStep, maxCreateStep]);
 
   function handleRunProfileUpdated(updatedRunProfile: RunProfileRecord) {
     setRunProfiles((current) => current.map((item) => (item.id === updatedRunProfile.id ? updatedRunProfile : item)));
@@ -592,6 +760,88 @@ export function CapabilityCenterShell() {
   function handleSkillPackageUpdated(updatedSkillPackage: SkillPackageRecord) {
     setSkillPackages((current) => current.map((item) => (item.id === updatedSkillPackage.id ? updatedSkillPackage : item)));
     setSelectedSkillPackageId(updatedSkillPackage.id);
+  }
+
+  function handleCreateNextStep() {
+    if (!createPanel) return;
+    const errorMessage = createStepValidationMessage(createPanel, activeCreateStep, runProfiles.length);
+    if (errorMessage) {
+      setCreateErrorText(errorMessage);
+      return;
+    }
+    setCreateErrorText("");
+    setCreateStep((current) => Math.min(current + 1, maxCreateStep));
+  }
+
+  function handleCreatePreviousStep() {
+    setCreateErrorText("");
+    setCreateStep((current) => Math.max(current - 1, 0));
+  }
+
+  useEffect(() => {
+    if (!isNarrowScreen) {
+      setMobileDetailOpen(false);
+    }
+  }, [isNarrowScreen]);
+
+  function renderSelectedDetail() {
+    if (selectedAgentMode) {
+      return (
+        <Suspense
+          fallback={(
+            <div className="admin-workspace-loading">
+              <Spin size="small" />
+            </div>
+          )}
+        >
+          <AgentModeDetailViewLazy
+            agentMode={selectedAgentMode}
+            runProfiles={runProfiles}
+            skillPackages={skillPackages}
+            onAgentModeUpdated={(updatedAgentMode) =>
+              setAgentModes((current) => current.map((item) => (item.id === updatedAgentMode.id ? updatedAgentMode : item)))
+            }
+          />
+        </Suspense>
+      );
+    }
+    if (selectedRunProfile) {
+      return (
+        <Suspense
+          fallback={(
+            <div className="admin-workspace-loading">
+              <Spin size="small" />
+            </div>
+          )}
+        >
+          <RunProfileDetailViewLazy runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
+        </Suspense>
+      );
+    }
+    if (selectedSkillPackage) {
+      return (
+        <Suspense
+          fallback={(
+            <div className="admin-workspace-loading">
+              <Spin size="small" />
+            </div>
+          )}
+        >
+          <SkillPackageDetailViewLazy skillPackage={selectedSkillPackage} onSkillPackageUpdated={handleSkillPackageUpdated} />
+        </Suspense>
+      );
+    }
+    if (selectedResource) {
+      return (
+        <CapabilitySummaryCard tab={tab} resource={selectedResource as AgentModeRecord | SkillPackageRecord | RunProfileRecord} />
+      );
+    }
+    return (
+      <div className="resource-center-placeholder empty">
+        <h3>{resourceLabel}</h3>
+        <p>请选择左侧能力资源以继续配置。</p>
+      </div>
+    );
   }
 
   return (
@@ -624,39 +874,79 @@ export function CapabilityCenterShell() {
         />
       </div>
 
-      <div className="resource-center-toolbar capability-center-toolbar admin-workspace-toolbar">
-        <label className="field resource-center-search">
-          <span className="field-label">搜索资源</span>
-          <Input
-            aria-label="搜索资源"
-            placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            allowClear
-          />
-        </label>
+      {isNarrowScreen ? (
+        <div className="resource-center-mobile-toolbar">
+          <MobileFilterDrawer title="筛选能力资源" filterCount={mobileFilterCount}>
+            <Space direction="vertical" size={12} className="admin-full-width">
+              <label className="field">
+                <span className="field-label">搜索资源</span>
+                <Input
+                  aria-label="搜索资源"
+                  placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  allowClear
+                />
+              </label>
 
-        <label className="field resource-center-filter admin-workspace-filter">
-          <span className="field-label">状态筛选</span>
-          <Select
-            aria-label="状态筛选"
-            value={statusFilter}
-            options={STATUS_FILTER_OPTIONS}
-            onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
-          />
-        </label>
+              <label className="field">
+                <span className="field-label">状态筛选</span>
+                <Select
+                  aria-label="状态筛选"
+                  value={statusFilter}
+                  options={STATUS_FILTER_OPTIONS}
+                  onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
+                />
+              </label>
 
-        <label className="field resource-center-filter admin-workspace-filter">
-          <span className="field-label">可见性筛选</span>
-          <Select
-            aria-label="可见性筛选"
-            value={visibilityDisabled ? "all" : visibilityFilter}
-            disabled={visibilityDisabled}
-            options={VISIBILITY_FILTER_OPTIONS}
-            onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
-          />
-        </label>
-      </div>
+              <label className="field">
+                <span className="field-label">可见性筛选</span>
+                <Select
+                  aria-label="可见性筛选"
+                  value={visibilityDisabled ? "all" : visibilityFilter}
+                  disabled={visibilityDisabled}
+                  options={VISIBILITY_FILTER_OPTIONS}
+                  onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
+                />
+              </label>
+            </Space>
+          </MobileFilterDrawer>
+        </div>
+      ) : (
+        <div className="resource-center-toolbar capability-center-toolbar admin-workspace-toolbar">
+          <label className="field resource-center-search">
+            <span className="field-label">搜索资源</span>
+            <Input
+              aria-label="搜索资源"
+              placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              allowClear
+            />
+          </label>
+
+          <label className="field resource-center-filter admin-workspace-filter">
+            <span className="field-label">状态筛选</span>
+            <Select
+              aria-label="状态筛选"
+              value={statusFilter}
+              options={STATUS_FILTER_OPTIONS}
+              onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
+            />
+          </label>
+
+          <label className="field resource-center-filter admin-workspace-filter">
+            <span className="field-label">可见性筛选</span>
+            <Select
+              aria-label="可见性筛选"
+              value={visibilityDisabled ? "all" : visibilityFilter}
+              disabled={visibilityDisabled}
+              options={VISIBILITY_FILTER_OPTIONS}
+              onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
+            />
+          </label>
+        </div>
+      )}
 
       <div className="resource-center-stats-row capability-center-stats-row" aria-label="能力统计">
         <article className="resource-center-stat-card">
@@ -745,28 +1035,69 @@ export function CapabilityCenterShell() {
           ) : null}
         </aside>
 
-        <section className="resource-center-detail capability-center-detail">
-          {createPanel ? (
-            <section className="resource-center-section capability-center-create-panel">
-              <div className="resource-center-section-header">
-                <div>
-                  <h3>新建能力资源</h3>
-                  <p>{resourceLabel} 创建后会立即出现在左侧列表中。</p>
-                </div>
-              </div>
+        {!isNarrowScreen ? <section className="resource-center-detail capability-center-detail">{renderSelectedDetail()}</section> : null}
+      </div>
 
-              {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
+      {isNarrowScreen ? (
+        <Drawer
+          title={selectedResource ? `${resourceLabel}：${selectedResource.name}` : `${resourceLabel}详情`}
+          placement="right"
+          width="94%"
+          open={mobileDetailOpen && Boolean(selectedResource)}
+          onClose={() => setMobileDetailOpen(false)}
+          destroyOnClose={false}
+        >
+          {renderSelectedDetail()}
+        </Drawer>
+      ) : null}
 
-              <div className="resource-center-form-grid capability-center-create-grid">
-                <div className="resource-center-form-span-2 admin-form-inline-section-head">
-                  <h4>基础信息</h4>
-                  <p>名称用于展示，slug 用于稳定识别，状态用于控制是否可用。</p>
-                </div>
+      <Drawer
+        title={`新建${resourceLabel}`}
+        width={560}
+        open={Boolean(createPanel)}
+        onClose={() => void closeCreatePanel()}
+        destroyOnClose
+        maskClosable={!createSaving}
+        footer={(
+          <Space>
+            <Button onClick={() => void closeCreatePanel()} disabled={createSaving}>
+              取消
+            </Button>
+            {activeCreateStep > 0 ? (
+              <Button onClick={handleCreatePreviousStep} disabled={createSaving}>
+                上一步
+              </Button>
+            ) : null}
+            {activeCreateStep < maxCreateStep ? (
+              <Button type="primary" onClick={handleCreateNextStep} disabled={createSaving}>
+                下一步
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                loading={createSaving}
+                disabled={createSaving || (createPanel?.kind === "agent_mode" && runProfiles.length === 0)}
+                onClick={() => void handleCreateSave()}
+              >
+                创建能力
+              </Button>
+            )}
+          </Space>
+        )}
+      >
+        {createPanel ? (
+          <Space direction="vertical" size={16} className="admin-full-width">
+            <Steps direction="vertical" size="small" current={activeCreateStep} items={createSteps} />
+
+            {createErrorText ? <Alert type="error" showIcon className="admin-alert-inline" message={createErrorText} /> : null}
+
+            {activeCreateStep === 0 ? (
+              <Space direction="vertical" size={12} className="admin-full-width">
                 <label className="field">
                   <span className="field-label">能力名称</span>
-                  <input
-                    className="field-input"
+                  <Input
                     aria-label="能力名称"
+                    maxLength={128}
                     disabled={createSaving}
                     value={createPanel.name}
                     onChange={(event) =>
@@ -784,13 +1115,13 @@ export function CapabilityCenterShell() {
                       })
                     }
                   />
-                  <small className="field-help">建议使用业务语义明确的名称，便于运营同学检索。</small>
                 </label>
+
                 <label className="field">
                   <span className="field-label">能力 slug</span>
-                  <input
-                    className="field-input"
+                  <Input
                     aria-label="能力 slug"
+                    maxLength={128}
                     disabled={createSaving}
                     value={createPanel.slug}
                     onChange={(event) => {
@@ -798,106 +1129,80 @@ export function CapabilityCenterShell() {
                       setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current));
                     }}
                   />
-                  <small className="field-help">建议使用小写英文和连字符，创建后尽量不要频繁变更。</small>
                 </label>
 
-                <label className="field resource-center-form-span-2">
+                <label className="field">
                   <span className="field-label">能力描述</span>
-                  <textarea
-                    className="field-input textarea"
+                  <Input.TextArea
                     aria-label="能力描述"
+                    rows={4}
                     disabled={createSaving}
                     value={createPanel.description}
                     onChange={(event) =>
                       setCreatePanel((current) => (current ? { ...current, description: event.target.value } : current))
                     }
                   />
-                  <small className="field-help">可填写目标用户、适用场景和注意事项。</small>
                 </label>
+              </Space>
+            ) : null}
 
+            {activeCreateStep === 1 ? (
+              <Space direction="vertical" size={12} className="admin-full-width">
                 <label className="field">
                   <span className="field-label">状态</span>
-                  <select
-                    className="field-input"
+                  <Select
                     aria-label="状态"
-                    disabled={createSaving}
                     value={createPanel.status}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, status: event.target.value } : current))
+                    disabled={createSaving}
+                    options={CREATE_STATUS_OPTIONS}
+                    onChange={(value) =>
+                      setCreatePanel((current) => (current ? { ...current, status: value } : current))
                     }
-                  >
-                    <option value="active">active</option>
-                    <option value="disabled">disabled</option>
-                  </select>
-                  <small className="field-help">`active` 可被选择，`disabled` 仅保留配置记录。</small>
+                  />
                 </label>
 
                 {createPanel.kind !== "run_profile" ? (
                   <label className="field">
                     <span className="field-label">对用户可见</span>
-                    <select
-                      className="field-input"
+                    <Select
                       aria-label="对用户可见"
-                      disabled={createSaving}
                       value={createPanel.visibleToUsers ? "visible" : "hidden"}
-                      onChange={(event) =>
+                      disabled={createSaving}
+                      options={CREATE_VISIBILITY_OPTIONS}
+                      onChange={(value) =>
                         setCreatePanel((current) =>
                           current && current.kind !== "run_profile"
-                            ? { ...current, visibleToUsers: event.target.value === "visible" }
+                            ? { ...current, visibleToUsers: value === "visible" }
                             : current
                         )
                       }
-                    >
-                      <option value="hidden">hidden</option>
-                      <option value="visible">visible</option>
-                    </select>
-                    <small className="field-help">`visible` 会出现在用户端，`hidden` 仅管理员可见。</small>
+                    />
                   </label>
                 ) : null}
 
                 {createPanel.kind === "agent_mode" ? (
-                  <>
-                    <div className="resource-center-form-span-2 admin-form-inline-section-head">
-                      <h4>Agent 模式配置</h4>
-                      <p>为该 Agent 模式绑定运行策略，决定模型和执行权限。</p>
-                    </div>
-                    <label className="field resource-center-form-span-2">
-                      <span className="field-label">运行策略</span>
-                      <select
-                        className="field-input"
-                        aria-label="运行策略"
-                        disabled={createSaving || runProfiles.length === 0}
-                        value={createPanel.runProfileId}
-                        onChange={(event) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "agent_mode"
-                              ? { ...current, runProfileId: event.target.value }
-                              : current
-                          )
-                        }
-                      >
-                        <option value="">请选择运行策略</option>
-                        {runProfiles.map((runProfile) => (
-                          <option key={runProfile.id} value={runProfile.id}>
-                            {runProfile.name}
-                          </option>
-                        ))}
-                      </select>
-                      <small className="field-help">未绑定运行策略时，Agent 模式无法保存。</small>
-                    </label>
-                  </>
+                  <label className="field">
+                    <span className="field-label">运行策略</span>
+                    <Select
+                      aria-label="运行策略"
+                      placeholder="请选择运行策略"
+                      disabled={createSaving || runProfiles.length === 0}
+                      value={createPanel.runProfileId || undefined}
+                      options={runProfiles.map((runProfile) => ({ label: runProfile.name, value: runProfile.id }))}
+                      onChange={(value) =>
+                        setCreatePanel((current) =>
+                          current && current.kind === "agent_mode" ? { ...current, runProfileId: value } : current
+                        )
+                      }
+                    />
+                  </label>
                 ) : null}
 
                 {createPanel.kind === "run_profile" ? (
                   <>
-                    <div className="resource-center-form-span-2 admin-form-inline-section-head">
-                      <h4>运行策略配置</h4>
-                      <p>统一配置模型、推理强度和执行安全策略。</p>
-                    </div>
                     <label className="field">
                       <span className="field-label">默认模型</span>
-                      <input
-                        className="field-input"
+                      <Input
                         aria-label="默认模型"
                         disabled={createSaving}
                         value={createPanel.defaultModel}
@@ -909,12 +1214,11 @@ export function CapabilityCenterShell() {
                           )
                         }
                       />
-                      <small className="field-help">新会话默认使用该模型，可与下方可选模型配合控制范围。</small>
                     </label>
+
                     <label className="field">
-                      <span className="field-label">可选模型</span>
-                      <input
-                        className="field-input"
+                      <span className="field-label">可选模型（逗号分隔）</span>
+                      <Input
                         aria-label="可选模型"
                         disabled={createSaving}
                         value={createPanel.allowedModels}
@@ -926,160 +1230,130 @@ export function CapabilityCenterShell() {
                           )
                         }
                       />
-                      <small className="field-help">多个模型用英文逗号分隔，例如 `gpt-5.4,gpt-5.4-mini`。</small>
                     </label>
+
                     <label className="field">
                       <span className="field-label">推理强度</span>
-                      <select
-                        className="field-input"
+                      <Select
                         aria-label="推理强度"
-                        disabled={createSaving}
                         value={createPanel.defaultReasoningEffort}
-                        onChange={(event) =>
+                        disabled={createSaving}
+                        options={CREATE_REASONING_OPTIONS}
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, defaultReasoningEffort: event.target.value as CreateRunProfileInput["defaultReasoningEffort"] }
+                              ? { ...current, defaultReasoningEffort: value as CreateRunProfileInput["defaultReasoningEffort"] }
                               : current
                           )
                         }
-                      >
-                        <option value="none">none</option>
-                        <option value="minimal">minimal</option>
-                        <option value="low">low</option>
-                        <option value="medium">medium</option>
-                        <option value="high">high</option>
-                        <option value="xhigh">xhigh</option>
-                      </select>
-                      <small className="field-help">值越高通常质量更好，但耗时和成本也更高。</small>
+                      />
                     </label>
+
                     <label className="field">
                       <span className="field-label">沙箱模式</span>
-                      <select
-                        className="field-input"
+                      <Select
                         aria-label="沙箱模式"
-                        disabled={createSaving}
                         value={createPanel.sandboxMode}
-                        onChange={(event) =>
+                        disabled={createSaving}
+                        options={CREATE_SANDBOX_OPTIONS}
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, sandboxMode: event.target.value as CreateRunProfileInput["sandboxMode"] }
+                              ? { ...current, sandboxMode: value as CreateRunProfileInput["sandboxMode"] }
                               : current
                           )
                         }
-                      >
-                        <option value="read-only">read-only</option>
-                        <option value="workspace-write">workspace-write</option>
-                        <option value="danger-full-access">danger-full-access</option>
-                      </select>
-                      <small className="field-help">建议默认 `workspace-write`，仅在必要时启用更高权限。</small>
+                      />
                     </label>
+
                     <label className="field">
                       <span className="field-label">审批策略</span>
-                      <select
-                        className="field-input"
+                      <Select
                         aria-label="审批策略"
-                        disabled={createSaving}
                         value={createPanel.approvalPolicy}
-                        onChange={(event) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, approvalPolicy: event.target.value as CreateRunProfileInput["approvalPolicy"] }
-                              : current
-                          )
-                        }
-                      >
-                        <option value="never">never</option>
-                        <option value="on-request">on-request</option>
-                        <option value="on-failure">on-failure</option>
-                        <option value="untrusted">untrusted</option>
-                      </select>
-                      <small className="field-help">控制执行敏感命令时是否需要人工确认。</small>
-                    </label>
-                    <label className="field">
-                      <span className="field-label">联网</span>
-                      <select
-                        className="field-input"
-                        aria-label="联网"
                         disabled={createSaving}
-                        value={createPanel.networkAccessEnabled ? "enabled" : "disabled"}
-                        onChange={(event) =>
+                        options={CREATE_APPROVAL_OPTIONS}
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, networkAccessEnabled: event.target.value === "enabled" }
+                              ? { ...current, approvalPolicy: value as CreateRunProfileInput["approvalPolicy"] }
                               : current
                           )
                         }
-                      >
-                        <option value="disabled">disabled</option>
-                        <option value="enabled">enabled</option>
-                      </select>
-                      <small className="field-help">关闭后模型无法访问外部网络，仅可用本地上下文。</small>
+                      />
                     </label>
+
+                    <label className="field checkbox-field resource-center-toggle-row">
+                      <Switch
+                        checked={createPanel.networkAccessEnabled}
+                        disabled={createSaving}
+                        checkedChildren="联网"
+                        unCheckedChildren="离线"
+                        onChange={(checked) =>
+                          setCreatePanel((current) =>
+                            current && current.kind === "run_profile"
+                              ? { ...current, networkAccessEnabled: checked }
+                              : current
+                          )
+                        }
+                      />
+                      <span className="field-label">网络访问</span>
+                    </label>
+
                     <label className="field">
                       <span className="field-label">搜索模式</span>
-                      <select
-                        className="field-input"
+                      <Select
                         aria-label="搜索模式"
-                        disabled={createSaving}
                         value={createPanel.webSearchMode}
-                        onChange={(event) =>
+                        disabled={createSaving}
+                        options={CREATE_SEARCH_OPTIONS}
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, webSearchMode: event.target.value as CreateRunProfileInput["webSearchMode"] }
+                              ? { ...current, webSearchMode: value as CreateRunProfileInput["webSearchMode"] }
                               : current
                           )
                         }
-                      >
-                        <option value="disabled">disabled</option>
-                        <option value="cached">cached</option>
-                        <option value="live">live</option>
-                      </select>
-                      <small className="field-help">`live` 获取实时信息，`cached` 适合稳定场景。</small>
+                      />
                     </label>
                   </>
                 ) : null}
-              </div>
+              </Space>
+            ) : null}
 
-              <div className="resource-center-actions">
-                <Button
-                  type="primary"
-                  aria-label="创建能力"
-                  disabled={createSaving || (createPanel.kind === "agent_mode" && runProfiles.length === 0)}
-                  onClick={() => void handleCreateSave()}
-                >
-                  {createSaving ? "创建中..." : "创建能力"}
-                </Button>
-                <Button aria-label="取消创建" disabled={createSaving} onClick={closeCreatePanel}>
-                  取消创建
-                </Button>
-              </div>
-            </section>
-          ) : selectedAgentMode ? (
-            <AgentModeDetailView
-              agentMode={selectedAgentMode}
-              runProfiles={runProfiles}
-              skillPackages={skillPackages}
-              onAgentModeUpdated={(updatedAgentMode) =>
-                setAgentModes((current) => current.map((item) => (item.id === updatedAgentMode.id ? updatedAgentMode : item)))
-              }
-            />
-          ) : selectedRunProfile ? (
-            <RunProfileDetailView runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
-          ) : selectedSkillPackage ? (
-            <SkillPackageDetailView
-              skillPackage={selectedSkillPackage}
-              onSkillPackageUpdated={handleSkillPackageUpdated}
-            />
-          ) : selectedResource ? (
-            <CapabilitySummaryCard tab={tab} resource={selectedResource as AgentModeRecord | SkillPackageRecord | RunProfileRecord} />
-          ) : (
-            <div className="resource-center-placeholder empty">
-              <h3>{resourceLabel}</h3>
-              <p>请选择左侧能力资源以继续配置。</p>
-            </div>
-          )}
-        </section>
-      </div>
+            {activeCreateStep === 2 ? (
+              <Card size="small" className="admin-workspace-help-card">
+                <Space direction="vertical" size={6} className="admin-full-width">
+                  <Typography.Text strong>{createPanel.name || "-"}</Typography.Text>
+                  <Typography.Text type="secondary">slug: {createPanel.slug || "-"}</Typography.Text>
+                  <Typography.Text type="secondary">状态: {createPanel.status || "-"}</Typography.Text>
+                  {createPanel.kind !== "run_profile" ? (
+                    <Typography.Text type="secondary">
+                      可见性: {createPanel.visibleToUsers ? "对用户可见" : "仅管理员"}
+                    </Typography.Text>
+                  ) : null}
+                  {createPanel.kind === "agent_mode" ? (
+                    <Typography.Text type="secondary">运行策略: {createPanel.runProfileId || "-"}</Typography.Text>
+                  ) : null}
+                  {createPanel.kind === "run_profile" ? (
+                    <>
+                      <Typography.Text type="secondary">默认模型: {createPanel.defaultModel || "-"}</Typography.Text>
+                      <Typography.Text type="secondary">可选模型: {createPanel.allowedModels || "-"}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        推理/沙箱/审批: {createPanel.defaultReasoningEffort} / {createPanel.sandboxMode} / {createPanel.approvalPolicy}
+                      </Typography.Text>
+                    </>
+                  ) : null}
+                  <Typography.Paragraph type="secondary" className="resource-center-inline-muted">
+                    {createPanel.description?.trim() || "未填写描述"}
+                  </Typography.Paragraph>
+                </Space>
+              </Card>
+            ) : null}
+
+          </Space>
+        ) : null}
+      </Drawer>
     </Card>
   );
 }

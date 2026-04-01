@@ -13,26 +13,39 @@ import {
   TeamOutlined,
   ToolOutlined
 } from "@ant-design/icons";
-import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Statistic, Tag, Typography } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Spin, Statistic, Tag, Typography } from "antd";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
-import { CapabilityCenterShell } from "../capability-center/CapabilityCenterShell";
-import { BroadcastAdminView } from "../collaboration/BroadcastAdminView";
-import { IntegrationCenterShell } from "../integration-center/IntegrationCenterShell";
-import { MonitoringShell } from "../monitoring/MonitoringShell";
-import { ResourceCenterShell } from "../resources-center/ResourceCenterShell";
-import { RolesView } from "../rbac/RolesView";
-import { SystemSettingsShell } from "../system-settings/SystemSettingsShell";
 import { fetchAdminOverview } from "./api";
-import { DepartmentTreeView } from "./DepartmentTreeView";
-import { OrgSyncView } from "./OrgSyncView";
 import type { AdminOverview, AdminSection } from "./types";
-import { UsersView } from "./UsersView";
 
 import "./admin-console.css";
+
+const MonitoringShellLazy = lazy(() => import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell })));
+const BroadcastAdminViewLazy = lazy(() =>
+  import("../collaboration/BroadcastAdminView").then((module) => ({ default: module.BroadcastAdminView }))
+);
+const UsersViewLazy = lazy(() => import("./UsersView").then((module) => ({ default: module.UsersView })));
+const DepartmentTreeViewLazy = lazy(() =>
+  import("./DepartmentTreeView").then((module) => ({ default: module.DepartmentTreeView }))
+);
+const OrgSyncViewLazy = lazy(() => import("./OrgSyncView").then((module) => ({ default: module.OrgSyncView })));
+const RolesViewLazy = lazy(() => import("../rbac/RolesView").then((module) => ({ default: module.RolesView })));
+const ResourceCenterShellLazy = lazy(() =>
+  import("../resources-center/ResourceCenterShell").then((module) => ({ default: module.ResourceCenterShell }))
+);
+const CapabilityCenterShellLazy = lazy(() =>
+  import("../capability-center/CapabilityCenterShell").then((module) => ({ default: module.CapabilityCenterShell }))
+);
+const IntegrationCenterShellLazy = lazy(() =>
+  import("../integration-center/IntegrationCenterShell").then((module) => ({ default: module.IntegrationCenterShell }))
+);
+const SystemSettingsShellLazy = lazy(() =>
+  import("../system-settings/SystemSettingsShell").then((module) => ({ default: module.SystemSettingsShell }))
+);
 
 type AdminConsoleSection = AdminSection | "broadcasts";
 type AdminConsoleGroup = "operations" | "governance" | "runtime";
@@ -363,6 +376,14 @@ function OverviewWorkspace(props: {
   );
 }
 
+function AdminSectionLazyFallback() {
+  return (
+    <div className="admin-workspace-loading">
+      <Spin size="small" />
+    </div>
+  );
+}
+
 function AdminSectionContent(props: {
   section: AdminConsoleSection;
   overview: AdminOverview | null;
@@ -385,35 +406,71 @@ function AdminSectionContent(props: {
     );
   }
   if (props.section === "users") {
-    return <UsersView />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <UsersViewLazy />
+      </Suspense>
+    );
   }
   if (props.section === "resources") {
-    return <ResourceCenterShell />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <ResourceCenterShellLazy />
+      </Suspense>
+    );
   }
   if (props.section === "capabilities") {
-    return <CapabilityCenterShell />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <CapabilityCenterShellLazy />
+      </Suspense>
+    );
   }
   if (props.section === "integrations") {
-    return <IntegrationCenterShell />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <IntegrationCenterShellLazy />
+      </Suspense>
+    );
   }
   if (props.section === "broadcasts") {
-    return <BroadcastAdminView />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <BroadcastAdminViewLazy />
+      </Suspense>
+    );
   }
   if (props.section === "system-settings") {
-    return <SystemSettingsShell />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <SystemSettingsShellLazy />
+      </Suspense>
+    );
   }
   if (props.section === "rbac") {
-    return <RolesView />;
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <RolesViewLazy />
+      </Suspense>
+    );
   }
   if (props.section === "organization") {
     return (
       <div className="admin-console-organization-grid">
-        <DepartmentTreeView />
-        <OrgSyncView />
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <DepartmentTreeViewLazy />
+        </Suspense>
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <OrgSyncViewLazy />
+        </Suspense>
       </div>
     );
   }
-  return <MonitoringShell />;
+  return (
+    <Suspense fallback={<AdminSectionLazyFallback />}>
+      <MonitoringShellLazy />
+    </Suspense>
+  );
 }
 
 export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {

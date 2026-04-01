@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Card, Collapse, Input, Segmented, Select, Space, Tag } from "antd";
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
@@ -15,6 +16,21 @@ const TABS: Array<{ id: OpenAITab; label: string }> = [
   { id: "history", label: "验证与历史" }
 ];
 
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" },
+  { label: "draft", value: "draft" }
+];
+
+const REASONING_OPTIONS = [
+  { label: "none", value: "none" },
+  { label: "minimal", value: "minimal" },
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+  { label: "xhigh", value: "xhigh" }
+];
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -26,6 +42,12 @@ function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
     defaultModel: asString(detail.config.defaultModel),
     defaultReasoningEffort: asString(detail.config.defaultReasoningEffort)
   };
+}
+
+function optionsWithCurrent(options: Array<{ label: string; value: string }>, value: string) {
+  if (!value) return options;
+  if (options.some((item) => item.value === value)) return options;
+  return [{ label: value, value }, ...options];
 }
 
 export function OpenAICodexIntegrationView(props: {
@@ -98,95 +120,129 @@ export function OpenAICodexIntegrationView(props: {
 
   return (
     <section className="resource-center-detail-stack">
-      <section className="resource-center-section capability-center-summary">
+      <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{props.detail.instance.name}</h3>
             <p>管理模型供应方配置、默认模型和默认推理强度。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="OpenAI-Codex 详情标签">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={activeTab === tab.id ? "capability-center-detail-tab active" : "capability-center-detail-tab"}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <Segmented
+            block
+            value={activeTab}
+            options={TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+            onChange={(value) => setActiveTab(value as OpenAITab)}
+          />
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         {activeTab === "basic" ? (
           <>
-            <div className="resource-center-form-grid">
-              <label className="field">
-                <span className="field-label">实例名称</span>
-                <input className="field-input" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
-              </label>
-              <label className="field">
-                <span className="field-label">实例 slug</span>
-                <input className="field-input" value={props.detail.instance.slug} disabled />
-              </label>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">实例描述</span>
-                <textarea className="field-input textarea" value={description} disabled={saving} onChange={(event) => setDescription(event.target.value)} />
-              </label>
-              <label className="field">
-                <span className="field-label">状态</span>
-                <select className="field-input" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
-                  <option value="active">active</option>
-                  <option value="disabled">disabled</option>
-                  <option value="draft">draft</option>
-                </select>
-              </label>
-              <div className="field">
-                <span className="field-label">密钥状态</span>
-                <p className="resource-center-subtle">
-                  {props.detail.secretState.hasSecrets ? "已保存 API key" : "未保存 API key"}
-                </p>
-              </div>
-
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">Base URL</span>
-                <input className="field-input" value={draft.baseUrl} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">API Key</span>
-                <input
-                  className="field-input"
-                  type="password"
-                  value={draft.apiKeyDraft}
-                  placeholder="留空则保持现状"
-                  disabled={saving}
-                  onChange={(event) => setDraft((current) => ({ ...current, apiKeyDraft: event.target.value }))}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">默认模型</span>
-                <input className="field-input" value={draft.defaultModel} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, defaultModel: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">默认推理强度</span>
-                <input className="field-input" value={draft.defaultReasoningEffort} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, defaultReasoningEffort: event.target.value }))} />
-              </label>
-            </div>
+            <Collapse
+              size="small"
+              defaultActiveKey={["identity", "provider"]}
+              items={[
+                {
+                  key: "identity",
+                  label: "基础信息",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field">
+                        <span className="field-label">实例名称</span>
+                        <Input value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">实例 slug</span>
+                        <Input value={props.detail.instance.slug} disabled />
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">实例描述</span>
+                        <Input.TextArea
+                          rows={4}
+                          value={description}
+                          disabled={saving}
+                          onChange={(event) => setDescription(event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">状态</span>
+                        <Select
+                          value={status}
+                          options={STATUS_OPTIONS}
+                          disabled={saving}
+                          onChange={(value) => setStatus(value)}
+                        />
+                      </label>
+                      <div className="field">
+                        <span className="field-label">密钥状态</span>
+                        <p className="resource-center-subtle">
+                          {props.detail.secretState.hasSecrets ? "已保存 API key" : "未保存 API key"}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  key: "provider",
+                  label: "供应方连接与默认模型",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">Base URL</span>
+                        <Input
+                          value={draft.baseUrl}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">API Key</span>
+                        <Input.Password
+                          value={draft.apiKeyDraft}
+                          placeholder="留空则保持现状"
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, apiKeyDraft: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">默认模型</span>
+                        <Input
+                          value={draft.defaultModel}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, defaultModel: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">默认推理强度</span>
+                        <Select
+                          value={draft.defaultReasoningEffort}
+                          options={optionsWithCurrent(REASONING_OPTIONS, draft.defaultReasoningEffort)}
+                          disabled={saving}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, defaultReasoningEffort: value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  )
+                }
+              ]}
+            />
 
             <div className="resource-center-actions">
-              <button type="button" className="admin-secondary-btn" onClick={() => void handleValidate()} disabled={saving || validating}>
-                {validating ? "验证中..." : "验证连接"}
-              </button>
-              <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving || validating}>
-                {saving ? "保存中..." : "保存实例"}
-              </button>
+              <Space>
+                <Button onClick={() => void handleValidate()} disabled={saving || validating}>
+                  {validating ? "验证中..." : "验证连接"}
+                </Button>
+                <Button type="primary" onClick={() => void handleSave()} disabled={saving || validating}>
+                  {saving ? "保存中..." : "保存实例"}
+                </Button>
+              </Space>
             </div>
           </>
         ) : null}
@@ -194,7 +250,7 @@ export function OpenAICodexIntegrationView(props: {
         {activeTab === "bindings" ? <IntegrationBindingsEditor instanceId={props.detail.instance.id} /> : null}
         {activeTab === "policies" ? <IntegrationPolicyEditor instanceId={props.detail.instance.id} /> : null}
         {activeTab === "history" ? <IntegrationValidationHistory items={props.detail.validationHistory.items} /> : null}
-      </section>
+      </Card>
     </section>
   );
 }

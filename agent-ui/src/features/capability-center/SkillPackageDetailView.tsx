@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Tag } from "antd";
+import { Alert, Button, Card, Input, Segmented, Select, Tag } from "antd";
 
 import { putSkillPackageItems, putSkillPackageRuntimeBindings, updateSkillPackage } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -17,6 +17,16 @@ const SKILL_PACKAGE_TABS: Array<{ id: SkillPackageTab; label: string }> = [
   { id: "basic", label: "基本信息" },
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" }
+];
+
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" }
+];
+
+const VISIBILITY_OPTIONS = [
+  { label: "hidden", value: "hidden" },
+  { label: "visible", value: "visible" }
 ];
 
 function toEditableItems(skillPackage: SkillPackageRecord): SkillPackageItemInput[] {
@@ -96,18 +106,12 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="技能包详情标签">
-          {SKILL_PACKAGE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={activeTab === tab.id ? "capability-center-detail-tab active" : "capability-center-detail-tab"}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <Segmented
+            block
+            value={activeTab}
+            options={SKILL_PACKAGE_TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+            onChange={(value) => setActiveTab(value as SkillPackageTab)}
+          />
         </div>
 
         {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
@@ -118,45 +122,45 @@ export function SkillPackageDetailView({ skillPackage, onSkillPackageUpdated }: 
             <div className="resource-center-form-grid">
               <label className="field">
                 <span className="field-label">技能包名称</span>
-                <input className="field-input" aria-label="技能包名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
+                <Input aria-label="技能包名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
               </label>
 
               <label className="field">
                 <span className="field-label">技能包 slug</span>
-                <input className="field-input" aria-label="技能包 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
+                <Input aria-label="技能包 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
               </label>
 
               <label className="field resource-center-form-span-2">
                 <span className="field-label">技能包描述</span>
-                <textarea
-                  className="field-input textarea"
+                <Input.TextArea
                   aria-label="技能包描述"
                   value={description}
                   disabled={saving}
+                  rows={4}
                   onChange={(event) => setDescription(event.target.value)}
                 />
               </label>
 
               <label className="field">
                 <span className="field-label">技能包状态</span>
-                <select className="field-input" aria-label="技能包状态" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
-                  <option value="active">active</option>
-                  <option value="disabled">disabled</option>
-                </select>
+                <Select
+                  aria-label="技能包状态"
+                  value={status}
+                  disabled={saving}
+                  options={STATUS_OPTIONS}
+                  onChange={(value) => setStatus(value)}
+                />
               </label>
 
               <label className="field">
                 <span className="field-label">对用户可见</span>
-                <select
-                  className="field-input"
+                <Select
                   aria-label="对用户可见"
                   value={visibleToUsers ? "visible" : "hidden"}
+                  options={VISIBILITY_OPTIONS}
                   disabled={saving}
-                  onChange={(event) => setVisibleToUsers(event.target.value === "visible")}
-                >
-                  <option value="hidden">hidden</option>
-                  <option value="visible">visible</option>
-                </select>
+                  onChange={(value) => setVisibleToUsers(value === "visible")}
+                />
               </label>
             </div>
 

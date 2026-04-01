@@ -15,6 +15,10 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
+import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
+import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { openWarningConfirm } from "../../lib/warning-modal";
 import { createKnowledgeSet, fetchKnowledgeSets } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import type { KnowledgeSetRecord, ResourceStatusFilter } from "./types";
@@ -70,7 +74,10 @@ export function ResourceCenterShell() {
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [createInitialValues, setCreateInitialValues] = useState<CreatePanelState>(createInitialPanelState());
   const [createForm] = Form.useForm<CreatePanelState>();
+  const isNarrowScreen = useIsNarrowScreen(980);
 
   useEffect(() => {
     let active = true;
@@ -127,6 +134,7 @@ export function ResourceCenterShell() {
   const activeListCount = filteredKnowledgeSets.length;
   const activeEnabledCount = filteredKnowledgeSets.filter((item) => item.status === "active").length;
   const activeDisabledCount = Math.max(activeListCount - activeEnabledCount, 0);
+  const mobileFilterCount = (search.trim() ? 1 : 0) + (statusFilter !== "all" ? 1 : 0);
 
   function handleKnowledgeSetUpdated(updatedKnowledgeSet: KnowledgeSetRecord) {
     setKnowledgeSets((current) =>
@@ -135,13 +143,43 @@ export function ResourceCenterShell() {
   }
 
   function openCreatePanel() {
-    createForm.setFieldsValue(createInitialPanelState());
+    const initial = createInitialPanelState();
+    setCreateInitialValues(initial);
+    createForm.setFieldsValue(initial);
     setCreateErrorText("");
     setCreateSaving(false);
     setCreatePanelOpen(true);
   }
 
-  function closeCreatePanel() {
+  function handleKnowledgeSetSelect(knowledgeSetId: string) {
+    setSelectedKnowledgeSetId(knowledgeSetId);
+    if (isNarrowScreen) {
+      setMobileDetailOpen(true);
+    }
+  }
+
+  useEffect(() => {
+    if (!isNarrowScreen) {
+      setMobileDetailOpen(false);
+    }
+  }, [isNarrowScreen]);
+
+  async function closeCreatePanel(forceClose = false) {
+    const currentValues = createForm.getFieldsValue();
+    if (
+      !forceClose &&
+      !deepEqual(normalizeRecordForCompare(currentValues), normalizeRecordForCompare(createInitialValues))
+    ) {
+      const confirmed = await openWarningConfirm({
+        title: "确认关闭新建资料集",
+        content: "当前未保存的资料集信息将丢失。",
+        dangerLevel: "warning",
+        okButtonDanger: false,
+        okText: "放弃并关闭",
+        cancelText: "继续编辑"
+      });
+      if (!confirmed) return;
+    }
     setCreatePanelOpen(false);
     setCreateErrorText("");
     setCreateSaving(false);
@@ -173,7 +211,7 @@ export function ResourceCenterShell() {
       setSelectedKnowledgeSetId(response.knowledgeSet.id);
       setSearch("");
       setStatusFilter("all");
-      closeCreatePanel();
+      await closeCreatePanel(true);
     } catch (error) {
       setCreateErrorText(error instanceof Error ? error.message : "创建资料集失败");
       setCreateSaving(false);
@@ -215,28 +253,57 @@ export function ResourceCenterShell() {
         </div>
       </section>
 
-      <div className="resource-center-toolbar admin-workspace-toolbar">
-        <label className="field resource-center-search">
-          <span className="field-label">搜索资料集</span>
-          <Input
-            aria-label="搜索资料集"
-            placeholder="名称、slug、描述"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            allowClear
-          />
-        </label>
+      {isNarrowScreen ? (
+        <div className="resource-center-mobile-toolbar">
+          <MobileFilterDrawer title="筛选资料集" filterCount={mobileFilterCount}>
+            <Space direction="vertical" size={12} className="admin-full-width">
+              <label className="field">
+                <span className="field-label">搜索资料集</span>
+                <Input
+                  aria-label="搜索资料集"
+                  placeholder="名称、slug、描述"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  allowClear
+                />
+              </label>
 
-        <label className="field resource-center-filter admin-workspace-filter">
-          <span className="field-label">状态筛选</span>
-          <Select
-            aria-label="状态筛选"
-            value={statusFilter}
-            options={STATUS_FILTER_OPTIONS}
-            onChange={(value) => setStatusFilter(value)}
-          />
-        </label>
-      </div>
+              <label className="field">
+                <span className="field-label">状态筛选</span>
+                <Select
+                  aria-label="状态筛选"
+                  value={statusFilter}
+                  options={STATUS_FILTER_OPTIONS}
+                  onChange={(value) => setStatusFilter(value)}
+                />
+              </label>
+            </Space>
+          </MobileFilterDrawer>
+        </div>
+      ) : (
+        <div className="resource-center-toolbar admin-workspace-toolbar">
+          <label className="field resource-center-search">
+            <span className="field-label">搜索资料集</span>
+            <Input
+              aria-label="搜索资料集"
+              placeholder="名称、slug、描述"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              allowClear
+            />
+          </label>
+
+          <label className="field resource-center-filter admin-workspace-filter">
+            <span className="field-label">状态筛选</span>
+            <Select
+              aria-label="状态筛选"
+              value={statusFilter}
+              options={STATUS_FILTER_OPTIONS}
+              onChange={(value) => setStatusFilter(value)}
+            />
+          </label>
+        </div>
+      )}
 
       <div className="resource-center-stats-row" aria-label="资源统计">
         <article className="resource-center-stat-card">
@@ -280,7 +347,7 @@ export function ResourceCenterShell() {
                     <button
                       type="button"
                       className={active ? "resource-center-item active" : "resource-center-item"}
-                      onClick={() => setSelectedKnowledgeSetId(knowledgeSet.id)}
+                      onClick={() => handleKnowledgeSetSelect(knowledgeSet.id)}
                     >
                       <span className="resource-center-item-title-row">
                         <span className="resource-center-item-title">{knowledgeSet.name}</span>
@@ -307,28 +374,47 @@ export function ResourceCenterShell() {
           ) : null}
         </aside>
 
-        <section className="resource-center-detail admin-workspace-detail">
+        {!isNarrowScreen ? (
+          <section className="resource-center-detail admin-workspace-detail">
+            {selectedKnowledgeSet ? (
+              <KnowledgeSetDetailView knowledgeSet={selectedKnowledgeSet} onKnowledgeSetUpdated={handleKnowledgeSetUpdated} />
+            ) : (
+              <div className="resource-center-placeholder empty">
+                <h3>资料集详情</h3>
+                <p>请选择左侧资料集以继续配置。</p>
+              </div>
+            )}
+          </section>
+        ) : null}
+      </div>
+
+      {isNarrowScreen ? (
+        <Drawer
+          title={selectedKnowledgeSet ? `资料集：${selectedKnowledgeSet.name}` : "资料集详情"}
+          placement="right"
+          width="94%"
+          open={mobileDetailOpen && Boolean(selectedKnowledgeSet)}
+          onClose={() => setMobileDetailOpen(false)}
+          destroyOnClose={false}
+        >
           {selectedKnowledgeSet ? (
             <KnowledgeSetDetailView knowledgeSet={selectedKnowledgeSet} onKnowledgeSetUpdated={handleKnowledgeSetUpdated} />
           ) : (
-            <div className="resource-center-placeholder empty">
-              <h3>资料集详情</h3>
-              <p>请选择左侧资料集以继续配置。</p>
-            </div>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择资料集。" />
           )}
-        </section>
-      </div>
+        </Drawer>
+      ) : null}
 
       <Drawer
         title="新建资料集"
         width={520}
         open={createPanelOpen}
-        onClose={closeCreatePanel}
+        onClose={() => void closeCreatePanel()}
         destroyOnClose
         maskClosable={!createSaving}
         footer={(
           <Space>
-            <Button onClick={closeCreatePanel} disabled={createSaving}>
+            <Button onClick={() => void closeCreatePanel()} disabled={createSaving}>
               取消
             </Button>
             <Button type="primary" onClick={() => void handleCreateSave()} loading={createSaving}>

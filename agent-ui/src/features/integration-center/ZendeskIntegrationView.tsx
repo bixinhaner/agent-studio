@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Card, Collapse, Input, InputNumber, Segmented, Select, Space, Switch, Tag } from "antd";
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
@@ -13,6 +14,58 @@ const TABS: Array<{ id: ZendeskTab; label: string }> = [
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" },
   { id: "history", label: "验证与历史" }
+];
+
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" },
+  { label: "draft", value: "draft" }
+];
+
+const RESPONSE_MODE_OPTIONS = [
+  { label: "public_reply", value: "public_reply" },
+  { label: "internal_note", value: "internal_note" }
+];
+
+const FALLBACK_MODE_OPTIONS = [
+  { label: "internal_note", value: "internal_note" },
+  { label: "public_reply", value: "public_reply" },
+  { label: "disabled", value: "disabled" }
+];
+
+const AUTO_STATUS_OPTIONS = [
+  { label: "pending", value: "pending" },
+  { label: "open", value: "open" },
+  { label: "hold", value: "hold" },
+  { label: "solved", value: "solved" }
+];
+
+const REASONING_OPTIONS = [
+  { label: "none", value: "none" },
+  { label: "minimal", value: "minimal" },
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+  { label: "xhigh", value: "xhigh" }
+];
+
+const SANDBOX_OPTIONS = [
+  { label: "read-only", value: "read-only" },
+  { label: "workspace-write", value: "workspace-write" },
+  { label: "danger-full-access", value: "danger-full-access" }
+];
+
+const APPROVAL_OPTIONS = [
+  { label: "never", value: "never" },
+  { label: "on-request", value: "on-request" },
+  { label: "on-failure", value: "on-failure" },
+  { label: "untrusted", value: "untrusted" }
+];
+
+const WEB_SEARCH_OPTIONS = [
+  { label: "disabled", value: "disabled" },
+  { label: "cached", value: "cached" },
+  { label: "live", value: "live" }
 ];
 
 function asString(value: unknown) {
@@ -61,6 +114,12 @@ function parseList(value: string) {
     .split(/,|\n/g)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function optionsWithCurrent(options: Array<{ label: string; value: string }>, value: string) {
+  if (!value) return options;
+  if (options.some((item) => item.value === value)) return options;
+  return [{ label: value, value }, ...options];
 }
 
 export function ZendeskIntegrationView(props: {
@@ -152,157 +211,292 @@ export function ZendeskIntegrationView(props: {
 
   return (
     <section className="resource-center-detail-stack">
-      <section className="resource-center-section capability-center-summary">
+      <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
         <div className="resource-center-section-header">
           <div>
             <h3>{props.detail.instance.name}</h3>
             <p>管理 Zendesk 站点、Webhook、模型与运行参数。</p>
           </div>
-          <span className={status === "active" ? "resource-center-badge" : "resource-center-badge muted"}>{status}</span>
+          <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="Zendesk 详情标签">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={activeTab === tab.id ? "capability-center-detail-tab active" : "capability-center-detail-tab"}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <Segmented
+            block
+            value={activeTab}
+            options={TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+            onChange={(value) => setActiveTab(value as ZendeskTab)}
+          />
         </div>
 
-        {errorText ? <p className="err-text">{errorText}</p> : null}
-        {successText ? <p className="resource-center-success">{successText}</p> : null}
+        {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+        {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
 
         {activeTab === "basic" ? (
           <>
-            <div className="resource-center-form-grid">
-              <label className="field">
-                <span className="field-label">实例名称</span>
-                <input className="field-input" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
-              </label>
-              <label className="field">
-                <span className="field-label">实例 slug</span>
-                <input className="field-input" value={props.detail.instance.slug} disabled />
-              </label>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">实例描述</span>
-                <textarea className="field-input textarea" value={description} disabled={saving} onChange={(event) => setDescription(event.target.value)} />
-              </label>
-              <label className="field">
-                <span className="field-label">状态</span>
-                <select className="field-input" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
-                  <option value="active">active</option>
-                  <option value="disabled">disabled</option>
-                  <option value="draft">draft</option>
-                </select>
-              </label>
-              <label className="field">
-                <span className="field-label">启用集成</span>
-                <select className="field-input" value={draft.enabled ? "true" : "false"} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.value === "true" }))}>
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </label>
-              <div className="field">
-                <span className="field-label">密钥状态</span>
-                <p className="resource-center-subtle">
-                  {props.detail.secretState.hasSecrets ? "已保存 Zendesk 凭证" : "未保存 Zendesk 凭证"}
-                </p>
-              </div>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">Public Base URL</span>
-                <input className="field-input" value={draft.publicBaseUrl} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, publicBaseUrl: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Zendesk Base URL</span>
-                <input className="field-input" value={draft.zendeskBaseUrl} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, zendeskBaseUrl: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Zendesk Email</span>
-                <input className="field-input" value={draft.zendeskEmail} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, zendeskEmail: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Zendesk API Token</span>
-                <input className="field-input" type="password" value={draft.zendeskApiTokenDraft} placeholder="留空则保持现状" disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, zendeskApiTokenDraft: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Webhook Secret</span>
-                <input className="field-input" type="password" value={draft.webhookSigningSecretDraft} placeholder="留空则保持现状" disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, webhookSigningSecretDraft: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Response Mode</span>
-                <input className="field-input" value={draft.responseMode} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, responseMode: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Fallback Mode</span>
-                <input className="field-input" value={draft.fallbackMode} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, fallbackMode: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Auto Status</span>
-                <input className="field-input" value={draft.autoStatus} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, autoStatus: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Workspace</span>
-                <input className="field-input" value={draft.workspace} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, workspace: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Model</span>
-                <input className="field-input" value={draft.model} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Reasoning Effort</span>
-                <input className="field-input" value={draft.reasoningEffort} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, reasoningEffort: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Sandbox Mode</span>
-                <input className="field-input" value={draft.sandboxMode} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, sandboxMode: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Approval Policy</span>
-                <input className="field-input" value={draft.approvalPolicy} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, approvalPolicy: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">Web Search Mode</span>
-                <input className="field-input" value={draft.webSearchMode} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, webSearchMode: event.target.value }))} />
-              </label>
-              <label className="field">
-                <span className="field-label">允许联网</span>
-                <select className="field-input" value={draft.networkAccessEnabled ? "true" : "false"} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, networkAccessEnabled: event.target.value === "true" }))}>
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              </label>
-              <label className="field">
-                <span className="field-label">最大评论历史</span>
-                <input className="field-input" type="number" value={draft.maxCommentHistory} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, maxCommentHistory: Number(event.target.value) || 12 }))} />
-              </label>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">排除标签</span>
-                <input className="field-input" value={draft.excludedTagsRaw} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, excludedTagsRaw: event.target.value }))} />
-              </label>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">附加目录</span>
-                <input className="field-input" value={draft.additionalDirectoriesRaw} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, additionalDirectoriesRaw: event.target.value }))} />
-              </label>
-              <label className="field resource-center-form-span-2">
-                <span className="field-label">System Prompt</span>
-                <textarea className="field-input textarea integration-center-large-textarea" value={draft.systemPrompt} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))} />
-              </label>
-            </div>
+            <Collapse
+              size="small"
+              defaultActiveKey={["identity", "connection", "runtime", "advanced"]}
+              items={[
+                {
+                  key: "identity",
+                  label: "基础信息",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field">
+                        <span className="field-label">实例名称</span>
+                        <Input value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">实例 slug</span>
+                        <Input value={props.detail.instance.slug} disabled />
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">实例描述</span>
+                        <Input.TextArea
+                          rows={4}
+                          value={description}
+                          disabled={saving}
+                          onChange={(event) => setDescription(event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">状态</span>
+                        <Select value={status} options={STATUS_OPTIONS} disabled={saving} onChange={(value) => setStatus(value)} />
+                      </label>
+                      <label className="field checkbox-field resource-center-toggle-row">
+                        <Switch
+                          checked={draft.enabled}
+                          disabled={saving}
+                          checkedChildren="启用"
+                          unCheckedChildren="停用"
+                          onChange={(checked) => setDraft((current) => ({ ...current, enabled: checked }))}
+                        />
+                        <span className="field-label">启用集成</span>
+                      </label>
+                      <div className="field">
+                        <span className="field-label">密钥状态</span>
+                        <p className="resource-center-subtle">
+                          {props.detail.secretState.hasSecrets ? "已保存 Zendesk 凭证" : "未保存 Zendesk 凭证"}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  key: "connection",
+                  label: "连接与密钥",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">Public Base URL</span>
+                        <Input
+                          value={draft.publicBaseUrl}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, publicBaseUrl: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Zendesk Base URL</span>
+                        <Input
+                          value={draft.zendeskBaseUrl}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, zendeskBaseUrl: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Zendesk Email</span>
+                        <Input
+                          value={draft.zendeskEmail}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, zendeskEmail: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Zendesk API Token</span>
+                        <Input.Password
+                          value={draft.zendeskApiTokenDraft}
+                          placeholder="留空则保持现状"
+                          disabled={saving}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, zendeskApiTokenDraft: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Webhook Secret</span>
+                        <Input.Password
+                          value={draft.webhookSigningSecretDraft}
+                          placeholder="留空则保持现状"
+                          disabled={saving}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, webhookSigningSecretDraft: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "runtime",
+                  label: "运行参数",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field">
+                        <span className="field-label">Response Mode</span>
+                        <Select
+                          value={draft.responseMode}
+                          options={optionsWithCurrent(RESPONSE_MODE_OPTIONS, draft.responseMode)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, responseMode: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Fallback Mode</span>
+                        <Select
+                          value={draft.fallbackMode}
+                          options={optionsWithCurrent(FALLBACK_MODE_OPTIONS, draft.fallbackMode)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, fallbackMode: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Auto Status</span>
+                        <Select
+                          value={draft.autoStatus}
+                          options={optionsWithCurrent(AUTO_STATUS_OPTIONS, draft.autoStatus)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, autoStatus: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Workspace</span>
+                        <Input
+                          value={draft.workspace}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, workspace: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Model</span>
+                        <Input
+                          value={draft.model}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Reasoning Effort</span>
+                        <Select
+                          value={draft.reasoningEffort}
+                          options={optionsWithCurrent(REASONING_OPTIONS, draft.reasoningEffort)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, reasoningEffort: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Sandbox Mode</span>
+                        <Select
+                          value={draft.sandboxMode}
+                          options={optionsWithCurrent(SANDBOX_OPTIONS, draft.sandboxMode)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, sandboxMode: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Approval Policy</span>
+                        <Select
+                          value={draft.approvalPolicy}
+                          options={optionsWithCurrent(APPROVAL_OPTIONS, draft.approvalPolicy)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, approvalPolicy: value }))}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Web Search Mode</span>
+                        <Select
+                          value={draft.webSearchMode}
+                          options={optionsWithCurrent(WEB_SEARCH_OPTIONS, draft.webSearchMode)}
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, webSearchMode: value }))}
+                        />
+                      </label>
+                      <label className="field checkbox-field resource-center-toggle-row">
+                        <Switch
+                          checked={draft.networkAccessEnabled}
+                          disabled={saving}
+                          checkedChildren="联网"
+                          unCheckedChildren="离线"
+                          onChange={(checked) => setDraft((current) => ({ ...current, networkAccessEnabled: checked }))}
+                        />
+                        <span className="field-label">允许联网</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">最大评论历史</span>
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          value={Number(draft.maxCommentHistory) || 12}
+                          disabled={saving}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, maxCommentHistory: Number(value) || 12 }))
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "advanced",
+                  label: "高级配置",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">排除标签</span>
+                        <Input.TextArea
+                          rows={2}
+                          value={draft.excludedTagsRaw}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, excludedTagsRaw: event.target.value }))}
+                        />
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">附加目录</span>
+                        <Input.TextArea
+                          rows={2}
+                          value={draft.additionalDirectoriesRaw}
+                          disabled={saving}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, additionalDirectoriesRaw: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">System Prompt</span>
+                        <Input.TextArea
+                          className="integration-center-large-textarea"
+                          rows={8}
+                          value={draft.systemPrompt}
+                          disabled={saving}
+                          onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  )
+                }
+              ]}
+            />
 
             <div className="resource-center-actions">
-              <button type="button" className="admin-secondary-btn" onClick={() => void handleValidate()} disabled={saving || validating}>
-                {validating ? "验证中..." : "验证实例"}
-              </button>
-              <button type="button" className="admin-action-btn" onClick={() => void handleSave()} disabled={saving || validating}>
-                {saving ? "保存中..." : "保存实例"}
-              </button>
+              <Space>
+                <Button onClick={() => void handleValidate()} disabled={saving || validating}>
+                  {validating ? "验证中..." : "验证实例"}
+                </Button>
+                <Button type="primary" onClick={() => void handleSave()} disabled={saving || validating}>
+                  {saving ? "保存中..." : "保存实例"}
+                </Button>
+              </Space>
             </div>
           </>
         ) : null}
@@ -310,7 +504,7 @@ export function ZendeskIntegrationView(props: {
         {activeTab === "bindings" ? <IntegrationBindingsEditor instanceId={props.detail.instance.id} /> : null}
         {activeTab === "policies" ? <IntegrationPolicyEditor instanceId={props.detail.instance.id} /> : null}
         {activeTab === "history" ? <IntegrationValidationHistory items={props.detail.validationHistory.items} /> : null}
-      </section>
+      </Card>
     </section>
   );
 }

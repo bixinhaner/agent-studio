@@ -1,12 +1,23 @@
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Drawer, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
+import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
+import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { openWarningConfirm } from "../../lib/warning-modal";
 import { createIntegrationInstance, fetchIntegrationDetail, fetchIntegrationInstances } from "./api";
-import { DingTalkIntegrationView } from "./DingTalkIntegrationView";
-import { OpenAICodexIntegrationView } from "./OpenAICodexIntegrationView";
 import type { CreateIntegrationInstanceInput, IntegrationCenterTab, IntegrationDetail, IntegrationListItem } from "./types";
-import { ZendeskIntegrationView } from "./ZendeskIntegrationView";
+
+const DingTalkIntegrationViewLazy = lazy(() =>
+  import("./DingTalkIntegrationView").then((module) => ({ default: module.DingTalkIntegrationView }))
+);
+const ZendeskIntegrationViewLazy = lazy(() =>
+  import("./ZendeskIntegrationView").then((module) => ({ default: module.ZendeskIntegrationView }))
+);
+const OpenAICodexIntegrationViewLazy = lazy(() =>
+  import("./OpenAICodexIntegrationView").then((module) => ({ default: module.OpenAICodexIntegrationView }))
+);
 
 const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "dingtalk", label: "DingTalk" },
@@ -70,6 +81,9 @@ export function IntegrationCenterShell() {
   const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() => buildCreateDraft("dingtalk"));
+  const [createDraftInitial, setCreateDraftInitial] = useState<CreateDraft>(() => buildCreateDraft("dingtalk"));
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const isNarrowScreen = useIsNarrowScreen(980);
 
   useEffect(() => {
     let active = true;
@@ -98,6 +112,7 @@ export function IntegrationCenterShell() {
 
     void load();
     setCreateDraft(buildCreateDraft(tab));
+    setCreateDraftInitial(buildCreateDraft(tab));
     setCreatePanelOpen(false);
     setCreateErrorText("");
     return () => {
@@ -136,6 +151,7 @@ export function IntegrationCenterShell() {
   const filteredItems = useMemo(() => {
     return items.filter((item) => matchesSearch(search, [item.name, item.slug, item.description]));
   }, [items, search]);
+  const mobileFilterCount = search.trim() ? 1 : 0;
 
   const activeCount = filteredItems.filter((item) => item.status === "active").length;
 
@@ -147,15 +163,37 @@ export function IntegrationCenterShell() {
   function openCreatePanel() {
     setCreateErrorText("");
     setCreateSaving(false);
-    setCreateDraft(buildCreateDraft(tab));
+    const initial = buildCreateDraft(tab);
+    setCreateDraft(initial);
+    setCreateDraftInitial(initial);
     setCreatePanelOpen(true);
   }
 
-  function closeCreatePanel() {
+  async function closeCreatePanel(forceClose = false) {
     if (createSaving) return;
+    if (
+      !forceClose &&
+      !deepEqual(normalizeRecordForCompare(createDraft), normalizeRecordForCompare(createDraftInitial))
+    ) {
+      const confirmed = await openWarningConfirm({
+        title: "确认关闭新建实例",
+        content: "当前未保存的新建实例信息将丢失。",
+        dangerLevel: "warning",
+        okButtonDanger: false,
+        okText: "放弃并关闭",
+        cancelText: "继续编辑"
+      });
+      if (!confirmed) return;
+    }
     setCreatePanelOpen(false);
     setCreateErrorText("");
   }
+
+  useEffect(() => {
+    if (!isNarrowScreen) {
+      setMobileDetailOpen(false);
+    }
+  }, [isNarrowScreen]);
 
   async function handleCreate() {
     const payload: CreateIntegrationInstanceInput = {
@@ -182,7 +220,7 @@ export function IntegrationCenterShell() {
       setItems((current) => [...current, next.instance]);
       setSelectedId(next.instance.id);
       setDetail(next);
-      setCreatePanelOpen(false);
+      await closeCreatePanel(true);
       setSearch("");
     } catch (error) {
       setCreateErrorText(error instanceof Error ? error.message : "创建集成实例失败");
@@ -221,18 +259,35 @@ export function IntegrationCenterShell() {
         />
       </div>
 
-      <div className="resource-center-toolbar admin-workspace-toolbar">
-        <label className="field resource-center-search">
-          <span className="field-label">搜索实例</span>
-          <Input
-            aria-label="搜索实例"
-            placeholder="名称、slug、描述"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            allowClear
-          />
-        </label>
-      </div>
+      {isNarrowScreen ? (
+        <div className="resource-center-mobile-toolbar">
+          <MobileFilterDrawer title="筛选实例" filterCount={mobileFilterCount}>
+            <label className="field">
+              <span className="field-label">搜索实例</span>
+              <Input
+                aria-label="搜索实例"
+                placeholder="名称、slug、描述"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                allowClear
+              />
+            </label>
+          </MobileFilterDrawer>
+        </div>
+      ) : (
+        <div className="resource-center-toolbar admin-workspace-toolbar">
+          <label className="field resource-center-search">
+            <span className="field-label">搜索实例</span>
+            <Input
+              aria-label="搜索实例"
+              placeholder="名称、slug、描述"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              allowClear
+            />
+          </label>
+        </div>
+      )}
 
       {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
 
@@ -250,12 +305,15 @@ export function IntegrationCenterShell() {
 
           <div className="resource-center-list">
             {filteredItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={selectedId === item.id ? "resource-center-list-item active" : "resource-center-list-item"}
-                onClick={() => setSelectedId(item.id)}
-              >
+            <button
+              key={item.id}
+              type="button"
+              className={selectedId === item.id ? "resource-center-list-item active" : "resource-center-list-item"}
+              onClick={() => {
+                setSelectedId(item.id);
+                if (isNarrowScreen) setMobileDetailOpen(true);
+              }}
+            >
                 <strong>{item.name}</strong>
                 <span>{item.slug}</span>
                 <span className="resource-center-list-item-meta">
@@ -267,7 +325,71 @@ export function IntegrationCenterShell() {
           </div>
         </aside>
 
-        <div className="resource-center-detail admin-workspace-detail">
+        {!isNarrowScreen ? (
+          <div className="resource-center-detail admin-workspace-detail">
+            {detailLoading ? (
+              <div className="admin-workspace-loading">
+                <Spin size="small" />
+              </div>
+            ) : null}
+
+            {!detailLoading && !detail ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description="请选择一个集成实例。" />
+            ) : null}
+
+          {detail && detail.instance.type === "dingtalk" ? (
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
+            >
+              <DingTalkIntegrationViewLazy
+                instanceId={detail.instance.id}
+                onInstanceUpdated={(instance) => {
+                  setDetail((current) => (current && current.instance.id === instance.id ? { ...current, instance } : current));
+                  setItems((current) => current.map((item) => (item.id === instance.id ? instance : item)));
+                }}
+              />
+            </Suspense>
+          ) : null}
+
+            {detail && detail.instance.type === "zendesk" ? (
+              <Suspense
+                fallback={(
+                  <div className="admin-workspace-loading">
+                    <Spin size="small" />
+                  </div>
+                )}
+              >
+                <ZendeskIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              </Suspense>
+            ) : null}
+            {detail && detail.instance.type === "openai_codex" ? (
+              <Suspense
+                fallback={(
+                  <div className="admin-workspace-loading">
+                    <Spin size="small" />
+                  </div>
+                )}
+              >
+                <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              </Suspense>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {isNarrowScreen ? (
+        <Drawer
+          title={detail ? `实例：${detail.instance.name}` : "集成详情"}
+          placement="right"
+          width="94%"
+          open={mobileDetailOpen && Boolean(detail)}
+          onClose={() => setMobileDetailOpen(false)}
+          destroyOnClose={false}
+        >
           {detailLoading ? (
             <div className="admin-workspace-loading">
               <Spin size="small" />
@@ -279,30 +401,58 @@ export function IntegrationCenterShell() {
           ) : null}
 
           {detail && detail.instance.type === "dingtalk" ? (
-            <DingTalkIntegrationView
-              instanceId={detail.instance.id}
-              onInstanceUpdated={(instance) => {
-                setDetail((current) => (current && current.instance.id === instance.id ? { ...current, instance } : current));
-                setItems((current) => current.map((item) => (item.id === instance.id ? instance : item)));
-              }}
-            />
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
+            >
+              <DingTalkIntegrationViewLazy
+                instanceId={detail.instance.id}
+                onInstanceUpdated={(instance) => {
+                  setDetail((current) => (current && current.instance.id === instance.id ? { ...current, instance } : current));
+                  setItems((current) => current.map((item) => (item.id === instance.id ? instance : item)));
+                }}
+              />
+            </Suspense>
           ) : null}
 
-          {detail && detail.instance.type === "zendesk" ? <ZendeskIntegrationView detail={detail} onUpdated={handleUpdated} /> : null}
-          {detail && detail.instance.type === "openai_codex" ? <OpenAICodexIntegrationView detail={detail} onUpdated={handleUpdated} /> : null}
-        </div>
-      </div>
+          {detail && detail.instance.type === "zendesk" ? (
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
+            >
+              <ZendeskIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+            </Suspense>
+          ) : null}
+          {detail && detail.instance.type === "openai_codex" ? (
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
+            >
+              <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+            </Suspense>
+          ) : null}
+        </Drawer>
+      ) : null}
 
       <Drawer
         title="新建集成实例"
         width={520}
         open={createPanelOpen}
-        onClose={closeCreatePanel}
+        onClose={() => void closeCreatePanel()}
         destroyOnClose
         maskClosable={!createSaving}
         footer={(
           <Space>
-            <Button onClick={closeCreatePanel} disabled={createSaving}>
+            <Button onClick={() => void closeCreatePanel()} disabled={createSaving}>
               取消
             </Button>
             <Button type="primary" onClick={() => void handleCreate()} loading={createSaving}>

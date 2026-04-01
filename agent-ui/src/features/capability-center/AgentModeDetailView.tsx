@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Tag } from "antd";
+import { Alert, Button, Card, Checkbox, Input, Segmented, Select, Tag } from "antd";
 
 import { putAgentModeInstructionSources, putAgentModeSkillPackages, updateAgentMode } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
@@ -25,6 +25,16 @@ const AGENT_MODE_TABS: Array<{ id: AgentModeTab; label: string }> = [
   { id: "basic", label: "基本信息" },
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" }
+];
+
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "disabled", value: "disabled" }
+];
+
+const VISIBILITY_OPTIONS = [
+  { label: "hidden", value: "hidden" },
+  { label: "visible", value: "visible" }
 ];
 
 function formatLocalDateTime(value?: string) {
@@ -171,18 +181,12 @@ export function AgentModeDetailView({
         </div>
 
         <div className="capability-center-detail-tabs" role="tablist" aria-label="Agent Mode 详情标签">
-          {AGENT_MODE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={activeTab === tab.id ? "capability-center-detail-tab active" : "capability-center-detail-tab"}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <Segmented
+            block
+            value={activeTab}
+            options={AGENT_MODE_TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+            onChange={(value) => setActiveTab(value as AgentModeTab)}
+          />
         </div>
 
         {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
@@ -192,45 +196,45 @@ export function AgentModeDetailView({
           <div className="resource-center-form-grid">
             <label className="field">
               <span className="field-label">模式名称</span>
-              <input className="field-input" aria-label="模式名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
+              <Input aria-label="模式名称" value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
             </label>
 
             <label className="field">
               <span className="field-label">模式 slug</span>
-              <input className="field-input" aria-label="模式 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
+              <Input aria-label="模式 slug" value={slug} disabled={saving} onChange={(event) => setSlug(event.target.value)} />
             </label>
 
             <label className="field resource-center-form-span-2">
               <span className="field-label">模式描述</span>
-              <textarea
-                className="field-input textarea"
+              <Input.TextArea
                 aria-label="模式描述"
                 value={description}
                 disabled={saving}
+                rows={4}
                 onChange={(event) => setDescription(event.target.value)}
               />
             </label>
 
             <label className="field">
               <span className="field-label">模式状态</span>
-              <select className="field-input" aria-label="模式状态" value={status} disabled={saving} onChange={(event) => setStatus(event.target.value)}>
-                <option value="active">active</option>
-                <option value="disabled">disabled</option>
-              </select>
+              <Select
+                aria-label="模式状态"
+                value={status}
+                options={STATUS_OPTIONS}
+                disabled={saving}
+                onChange={(value) => setStatus(value)}
+              />
             </label>
 
             <label className="field">
               <span className="field-label">对用户可见</span>
-              <select
-                className="field-input"
+              <Select
                 aria-label="对用户可见"
                 value={visibleToUsers ? "visible" : "hidden"}
+                options={VISIBILITY_OPTIONS}
                 disabled={saving}
-                onChange={(event) => setVisibleToUsers(event.target.value === "visible")}
-              >
-                <option value="hidden">hidden</option>
-                <option value="visible">visible</option>
-              </select>
+                onChange={(value) => setVisibleToUsers(value === "visible")}
+              />
             </label>
 
             <div className="resource-center-form-span-2 capability-mode-preview">
@@ -256,13 +260,13 @@ export function AgentModeDetailView({
 
               <label className="field">
                 <span className="field-label">运行策略</span>
-                <select className="field-input" aria-label="运行策略" value={runProfileId} disabled={saving} onChange={(event) => setRunProfileId(event.target.value)}>
-                  {runProfiles.map((runProfile) => (
-                    <option key={runProfile.id} value={runProfile.id}>
-                      {runProfile.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  aria-label="运行策略"
+                  value={runProfileId}
+                  disabled={saving}
+                  options={runProfiles.map((runProfile) => ({ label: runProfile.name, value: runProfile.id }))}
+                  onChange={(value) => setRunProfileId(value)}
+                />
               </label>
             </section>
 
@@ -277,8 +281,7 @@ export function AgentModeDetailView({
               <div className="capability-mode-skill-grid">
                 {skillPackages.map((skillPackage) => (
                   <label key={skillPackage.id} className="capability-mode-skill-option">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={skillPackageIds.includes(skillPackage.id)}
                       disabled={saving}
                       onChange={() => toggleSkillPackage(skillPackage.id)}
