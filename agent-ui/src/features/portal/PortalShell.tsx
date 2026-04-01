@@ -17,7 +17,6 @@ import {
   RuntimeAdapterProvider,
   ThreadListItemPrimitive,
   useAui,
-  useAuiEvent,
   useLocalRuntime,
   unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
   type ChatModelAdapter,
@@ -25,9 +24,7 @@ import {
   type ThreadMessage
 } from "@assistant-ui/react";
 import {
-  AssistantActionBar,
   AssistantMessage,
-  BranchPicker,
   Thread,
   ThreadList,
   makeMarkdownText
@@ -1162,8 +1159,6 @@ const AgentAssistantMessage: FC = () => {
           data: { Fallback: ProcessDataFallback as any }
         }}
       />
-      <BranchPicker />
-      <AssistantActionBar />
     </AssistantMessage.Root>
   );
 };
@@ -1327,48 +1322,7 @@ const AgentThreadListItem: FC = () => {
 };
 
 const ComposerActivationGuard: FC = () => {
-  const aui = useAui();
-  const threadItemId = useAuiState((s) => s.threadListItem.id);
-  const isComposerEditing = useAuiState((s) => s.composer.isEditing);
-  const composerType = useAuiState((s) => s.composer.type);
-  const threadLoading = useAuiState((s) => s.thread.isLoading);
-  const recoveredThreadIdRef = useRef("");
-
-  const ensureComposerReady = useCallback(() => {
-    if (threadLoading || isComposerEditing) {
-      recoveredThreadIdRef.current = "";
-      return;
-    }
-
-    const normalizedThreadId = String(threadItemId || "").trim();
-    if (!normalizedThreadId) return;
-    if (recoveredThreadIdRef.current === normalizedThreadId) return;
-    recoveredThreadIdRef.current = normalizedThreadId;
-
-    if (composerType === "edit") {
-      try {
-        aui.composer().beginEdit();
-      } catch {
-        // ignore, runtime may not expose beginEdit yet
-      }
-      return;
-    }
-
-    try {
-      // Re-select active thread to recover from stale no-op composer bindings.
-      aui.threadListItem().switchTo();
-    } catch {
-      // ignore switch failures; next thread event will retry
-    }
-  }, [aui, composerType, isComposerEditing, threadItemId, threadLoading]);
-
-  useEffect(() => {
-    ensureComposerReady();
-  }, [ensureComposerReady]);
-
-  useAuiEvent("thread.initialize", ensureComposerReady);
-  useAuiEvent("threadListItem.switchedTo", ensureComposerReady);
-
+  // Keep placeholder to preserve call site; active guard is disabled to avoid runtime re-entrancy during thread switch.
   return null;
 };
 
@@ -2493,6 +2447,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </div>
       ) : null}
       <Thread
+        key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
         strings={{
           threadList: {
             new: { label: "新会话" },
