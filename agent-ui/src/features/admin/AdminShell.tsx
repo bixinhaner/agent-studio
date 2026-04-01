@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Space, Spin, Statistic, Tag, Typography } from "antd";
 
 import { fetchAdminOverview } from "./api";
@@ -127,6 +127,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [section, setSection] = useState<AdminNavSection>("overview");
+  const mainContentRef = useRef<HTMLElement | null>(null);
   const currentSectionMeta = SECTION_META[section];
 
   useEffect(() => {
@@ -149,6 +150,12 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [section]);
 
   return (
     <div className="admin-shell admin-shell-layout">
@@ -176,9 +183,9 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
         <AdminNav section={section} onChange={setSection} />
       </Card>
 
-      <main className="admin-main-content">
+      <main className="admin-main-content" ref={mainContentRef}>
         <Card className="admin-card admin-console-banner" styles={{ body: { padding: 20 } }}>
-          <div>
+          <div className="admin-console-copy">
             <p className="auth-eyebrow">当前分区</p>
             <div className="admin-banner-meta">
               <Tag color="blue">{currentSectionMeta.title}</Tag>
