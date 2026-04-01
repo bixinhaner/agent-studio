@@ -88,7 +88,13 @@ export function QuotaRulesView() {
           <Typography.Paragraph>支持平台和部门级软阻断，不影响已经运行中的会话。</Typography.Paragraph>
         </div>
       </div>
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      {message ? <Alert type="success" showIcon className="admin-alert-inline" message={message} /> : null}
       <form className="monitoring-form" onSubmit={handleSubmit}>
+        <div className="monitoring-form-span-full admin-form-inline-section-head">
+          <h4>范围配置</h4>
+          <p>先确定规则覆盖范围，再决定限制阈值。</p>
+        </div>
         <label className="field">
           <span className="field-label">作用域类型</span>
           <select
@@ -100,6 +106,7 @@ export function QuotaRulesView() {
             <option value="department">部门</option>
             <option value="platform">平台</option>
           </select>
+          <small className="field-help">平台规则用于全局预算；部门规则用于精细治理。</small>
         </label>
         <label className="field">
           <span className="field-label">{scopeType === "platform" ? "平台范围" : "部门范围"}</span>
@@ -110,10 +117,12 @@ export function QuotaRulesView() {
             onChange={(event) => setScopeId(event.target.value)}
             placeholder={scopeType === "platform" ? "platform" : "dept-rd"}
           />
+          <small className="field-help">建议保持与组织同步中的部门 External ID 一致。</small>
         </label>
         <label className="field">
           <span className="field-label">功能维度</span>
           <input className="field-input" value={featureType} onChange={(event) => setFeatureType(event.target.value)} />
+          <small className="field-help">如 `chat`、`agent_run`，用于按功能拆分额度。</small>
         </label>
         <label className="field">
           <span className="field-label">计量方式</span>
@@ -127,10 +136,16 @@ export function QuotaRulesView() {
             <option value="total_tokens">total_tokens</option>
             <option value="request_count">request_count</option>
           </select>
+          <small className="field-help">建议优先使用 `internal_cost`，与成本看板口径一致。</small>
         </label>
+        <div className="monitoring-form-span-full admin-form-inline-section-head">
+          <h4>策略配置</h4>
+          <p>设置阈值和执行方式，控制到达阈值后的行为。</p>
+        </div>
         <label className="field">
           <span className="field-label">阈值</span>
           <input className="field-input" aria-label="阈值" value={thresholdValue} onChange={(event) => setThresholdValue(event.target.value)} />
+          <small className="field-help">建议先使用较保守阈值并观察一周波动。</small>
         </label>
         <label className="field">
           <span className="field-label">执行方式</span>
@@ -142,14 +157,13 @@ export function QuotaRulesView() {
             <option value="soft_block">soft_block</option>
             <option value="alert_only">alert_only</option>
           </select>
+          <small className="field-help">`soft_block` 会限制继续调用，`alert_only` 仅告警。</small>
         </label>
         <Button className="monitoring-action-btn" type="primary" htmlType="submit" aria-label="保存配额规则" loading={saving}>
           {saving ? "保存中..." : "保存配额规则"}
         </Button>
       </form>
       {loading ? <Spin size="small" /> : null}
-      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-      {message ? <p className="monitoring-success">{message}</p> : null}
       <div className="monitoring-table-wrap">
         <table className="monitoring-table">
           <thead>

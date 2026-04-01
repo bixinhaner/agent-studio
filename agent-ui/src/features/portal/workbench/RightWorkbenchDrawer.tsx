@@ -15,11 +15,12 @@ export function RightWorkbenchDrawer(props: {
     <Drawer
       title="工作台工具"
       placement="right"
-      width={420}
+      width="min(420px, calc(100vw - 16px))"
       open={props.open}
       onClose={props.onClose}
       destroyOnClose={false}
       forceRender
+      rootClassName="workbench-right-drawer"
     >
       <Tabs
         activeKey={props.activeTab}

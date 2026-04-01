@@ -16,7 +16,9 @@ export function SessionRail(
   return (
     <aside className={props.collapsed ? "session-rail collapsed" : "session-rail"}>
       <div className="session-rail-head">
-        <Button onClick={props.onToggleCollapsed}>{props.collapsed ? "展开" : "收起"}</Button>
+        <Button aria-label={props.collapsed ? "展开侧栏" : "收起侧栏"} onClick={props.onToggleCollapsed}>
+          {props.collapsed ? "展开" : "收起"}
+        </Button>
         {!props.collapsed ? (
           <>
             {props.newThreadSlot ?? (
@@ -25,9 +27,11 @@ export function SessionRail(
               </Button>
             )}
             <Input
+              aria-label="搜索会话"
               placeholder="搜索会话"
               value={props.searchValue}
               onChange={(event) => props.onSearchChange(event.target.value)}
+              allowClear
             />
           </>
         ) : null}

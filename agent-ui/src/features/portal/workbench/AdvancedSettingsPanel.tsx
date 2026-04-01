@@ -9,7 +9,14 @@ export function AdvancedSettingsPanel(props: {
   children?: ReactNode;
 }) {
   return (
-    <Drawer title="运行配置" placement="left" width={420} open={props.open} onClose={props.onClose}>
+    <Drawer
+      title="运行配置"
+      placement="left"
+      width="min(420px, calc(100vw - 16px))"
+      open={props.open}
+      onClose={props.onClose}
+      rootClassName="workbench-left-drawer"
+    >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
         <Typography.Text strong>模型</Typography.Text>
         <Typography.Paragraph>{props.modelLabel}</Typography.Paragraph>

@@ -4,7 +4,10 @@
   --workbench-border: #d6e2f3;
   --workbench-surface: #ffffff;
   --workbench-muted-text: #64748b;
+  min-height: 100vh;
   height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -37,6 +40,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -68,8 +73,15 @@
   color: #0f172a;
 }
 
-.portal-topbar-runtime {
-  max-width: min(42vw, 460px);
+.portal-topbar-runtime-chip {
+  max-width: min(44vw, 500px);
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #dbe7fa;
+  border-radius: 999px;
+  background: #f8fbff;
+  padding: 0 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -93,6 +105,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
+  overflow: hidden;
 }
 
 .session-rail {
@@ -167,7 +180,7 @@
 }
 
 .portal-workbench-chat .thread-wrap .aui-thread-root {
-  --aui-thread-max-width: min(1420px, calc(100vw - 210px));
+  --aui-thread-max-width: min(1380px, calc(100vw - 220px));
 }
 
 .portal-workbench-chat .aui-thread-viewport {
@@ -227,7 +240,7 @@
 
 .portal-workbench-chat .aui-thread-viewport-footer {
   margin-top: auto;
-  padding-bottom: 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, #ffffff 26%, #ffffff 100%);
   position: sticky;
   bottom: 0;
@@ -291,6 +304,16 @@
   gap: 10px;
 }
 
+.workbench-card-desc.ant-typography {
+  margin-bottom: 10px;
+  color: #475569;
+}
+
+.workbench-collapse-note {
+  color: #475569;
+  line-height: 1.5;
+}
+
 .workbench-priority-card {
   padding: 10px 12px;
   border: 1px solid #dbe6f5;
@@ -315,6 +338,11 @@
   gap: 12px;
 }
 
+.workbench-left-drawer .ant-drawer-body,
+.workbench-right-drawer .ant-drawer-body {
+  padding-bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
+}
+
 @media (max-width: 1180px) {
   .portal-workbench-root {
     height: auto;
@@ -335,6 +363,10 @@
     --aui-thread-max-width: 100%;
     height: 72vh;
   }
+
+  .portal-topbar-runtime-chip {
+    max-width: min(66vw, 100%);
+  }
 }
 
 @media (max-width: 980px) {
@@ -352,7 +384,7 @@
     justify-content: space-between;
   }
 
-  .portal-topbar-runtime {
+  .portal-topbar-runtime-chip {
     display: none;
   }
 

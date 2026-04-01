@@ -2132,6 +2132,44 @@ body {
   margin: 6px 0 0;
 }
 
+.admin-form-section {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-form-section + .admin-form-section {
+  margin-top: 16px;
+}
+
+.admin-form-section-header,
+.admin-form-inline-section-head {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f1f6ff;
+}
+
+.admin-form-section-header h4,
+.admin-form-inline-section-head h4 {
+  margin: 0;
+  font-size: 13px;
+  color: #1e3a8a;
+}
+
+.admin-form-section-header p,
+.admin-form-inline-section-head p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.admin-form-section .field {
+  margin-bottom: 0;
+}
+
 .admin-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2180,6 +2218,12 @@ body {
 .admin-trigger-inline {
   flex: 1;
   min-width: 260px;
+  align-items: flex-end;
+}
+
+.admin-trigger-field {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .admin-sync-meta {
@@ -2370,6 +2414,10 @@ body {
 
 .monitoring-form .field {
   margin-bottom: 0;
+}
+
+.monitoring-form-span-full {
+  grid-column: 1 / -1;
 }
 
 .monitoring-action-btn,

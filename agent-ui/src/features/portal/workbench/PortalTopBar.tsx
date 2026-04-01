@@ -44,7 +44,7 @@ export function PortalTopBar(props: {
       </div>
       <div className="portal-topbar-right">
         {props.runtimeSummary ? (
-          <span className="portal-topbar-runtime" title={props.runtimeSummary}>
+          <span className="portal-topbar-runtime-chip" title={props.runtimeSummary}>
             {props.runtimeSummary}
           </span>
         ) : null}

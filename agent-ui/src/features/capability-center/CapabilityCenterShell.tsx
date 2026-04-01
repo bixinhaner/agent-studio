@@ -724,6 +724,10 @@ export function CapabilityCenterShell() {
               {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
 
               <div className="resource-center-form-grid capability-center-create-grid">
+                <div className="resource-center-form-span-2 admin-form-inline-section-head">
+                  <h4>基础信息</h4>
+                  <p>名称用于展示，slug 用于稳定识别，状态用于控制是否可用。</p>
+                </div>
                 <label className="field">
                   <span className="field-label">能力名称</span>
                   <input
@@ -735,6 +739,7 @@ export function CapabilityCenterShell() {
                       setCreatePanel((current) => (current ? { ...current, name: event.target.value } : current))
                     }
                   />
+                  <small className="field-help">建议使用业务语义明确的名称，便于运营同学检索。</small>
                 </label>
                 <label className="field">
                   <span className="field-label">能力 slug</span>
@@ -747,6 +752,7 @@ export function CapabilityCenterShell() {
                       setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current))
                     }
                   />
+                  <small className="field-help">建议使用小写英文和连字符，创建后尽量不要频繁变更。</small>
                 </label>
 
                 <label className="field resource-center-form-span-2">
@@ -760,6 +766,7 @@ export function CapabilityCenterShell() {
                       setCreatePanel((current) => (current ? { ...current, description: event.target.value } : current))
                     }
                   />
+                  <small className="field-help">可填写目标用户、适用场景和注意事项。</small>
                 </label>
 
                 <label className="field">
@@ -776,6 +783,7 @@ export function CapabilityCenterShell() {
                     <option value="active">active</option>
                     <option value="disabled">disabled</option>
                   </select>
+                  <small className="field-help">`active` 可被选择，`disabled` 仅保留配置记录。</small>
                 </label>
 
                 {createPanel.kind !== "run_profile" ? (
@@ -797,37 +805,49 @@ export function CapabilityCenterShell() {
                       <option value="hidden">hidden</option>
                       <option value="visible">visible</option>
                     </select>
+                    <small className="field-help">`visible` 会出现在用户端，`hidden` 仅管理员可见。</small>
                   </label>
                 ) : null}
 
                 {createPanel.kind === "agent_mode" ? (
-                  <label className="field resource-center-form-span-2">
-                    <span className="field-label">运行策略</span>
-                    <select
-                      className="field-input"
-                      aria-label="运行策略"
-                      disabled={createSaving || runProfiles.length === 0}
-                      value={createPanel.runProfileId}
-                      onChange={(event) =>
-                        setCreatePanel((current) =>
-                          current && current.kind === "agent_mode"
-                            ? { ...current, runProfileId: event.target.value }
-                            : current
-                        )
-                      }
-                    >
-                      <option value="">请选择运行策略</option>
-                      {runProfiles.map((runProfile) => (
-                        <option key={runProfile.id} value={runProfile.id}>
-                          {runProfile.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <div className="resource-center-form-span-2 admin-form-inline-section-head">
+                      <h4>Agent 模式配置</h4>
+                      <p>为该 Agent 模式绑定运行策略，决定模型和执行权限。</p>
+                    </div>
+                    <label className="field resource-center-form-span-2">
+                      <span className="field-label">运行策略</span>
+                      <select
+                        className="field-input"
+                        aria-label="运行策略"
+                        disabled={createSaving || runProfiles.length === 0}
+                        value={createPanel.runProfileId}
+                        onChange={(event) =>
+                          setCreatePanel((current) =>
+                            current && current.kind === "agent_mode"
+                              ? { ...current, runProfileId: event.target.value }
+                              : current
+                          )
+                        }
+                      >
+                        <option value="">请选择运行策略</option>
+                        {runProfiles.map((runProfile) => (
+                          <option key={runProfile.id} value={runProfile.id}>
+                            {runProfile.name}
+                          </option>
+                        ))}
+                      </select>
+                      <small className="field-help">未绑定运行策略时，Agent 模式无法保存。</small>
+                    </label>
+                  </>
                 ) : null}
 
                 {createPanel.kind === "run_profile" ? (
                   <>
+                    <div className="resource-center-form-span-2 admin-form-inline-section-head">
+                      <h4>运行策略配置</h4>
+                      <p>统一配置模型、推理强度和执行安全策略。</p>
+                    </div>
                     <label className="field">
                       <span className="field-label">默认模型</span>
                       <input
@@ -843,6 +863,7 @@ export function CapabilityCenterShell() {
                           )
                         }
                       />
+                      <small className="field-help">新会话默认使用该模型，可与下方可选模型配合控制范围。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">可选模型</span>
@@ -859,6 +880,7 @@ export function CapabilityCenterShell() {
                           )
                         }
                       />
+                      <small className="field-help">多个模型用英文逗号分隔，例如 `gpt-5.4,gpt-5.4-mini`。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">推理强度</span>
@@ -882,6 +904,7 @@ export function CapabilityCenterShell() {
                         <option value="high">high</option>
                         <option value="xhigh">xhigh</option>
                       </select>
+                      <small className="field-help">值越高通常质量更好，但耗时和成本也更高。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">沙箱模式</span>
@@ -902,6 +925,7 @@ export function CapabilityCenterShell() {
                         <option value="workspace-write">workspace-write</option>
                         <option value="danger-full-access">danger-full-access</option>
                       </select>
+                      <small className="field-help">建议默认 `workspace-write`，仅在必要时启用更高权限。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">审批策略</span>
@@ -923,6 +947,7 @@ export function CapabilityCenterShell() {
                         <option value="on-failure">on-failure</option>
                         <option value="untrusted">untrusted</option>
                       </select>
+                      <small className="field-help">控制执行敏感命令时是否需要人工确认。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">联网</span>
@@ -942,6 +967,7 @@ export function CapabilityCenterShell() {
                         <option value="disabled">disabled</option>
                         <option value="enabled">enabled</option>
                       </select>
+                      <small className="field-help">关闭后模型无法访问外部网络，仅可用本地上下文。</small>
                     </label>
                     <label className="field">
                       <span className="field-label">搜索模式</span>
@@ -962,6 +988,7 @@ export function CapabilityCenterShell() {
                         <option value="cached">cached</option>
                         <option value="live">live</option>
                       </select>
+                      <small className="field-help">`live` 获取实时信息，`cached` 适合稳定场景。</small>
                     </label>
                   </>
                 ) : null}

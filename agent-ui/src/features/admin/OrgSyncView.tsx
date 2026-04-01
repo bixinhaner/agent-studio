@@ -101,39 +101,53 @@ export function OrgSyncView() {
           <Tag color="processing">同步周期：{formatCadence(config.intervalMinutes)}</Tag>
         </div>
       ) : null}
-      <div className="admin-trigger-grid">
-        <Button type="primary" disabled={submitting} onClick={() => void handleTrigger(triggerFullOrgSync)}>
-          立即全量同步
-        </Button>
-        <div className="admin-trigger-inline">
-          <Input
-            aria-label="部门 External ID"
-            value={departmentId}
-            onChange={(event) => setDepartmentId(event.target.value)}
-            placeholder="部门 External ID"
-          />
-          <Button
-            disabled={submitting || !departmentId.trim()}
-            onClick={() => void handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}
-          >
-            按部门同步
-          </Button>
+      <section className="admin-form-section">
+        <div className="admin-form-section-header">
+          <h4>同步触发</h4>
+          <p>支持全量、部门和用户级补同步；建议优先使用小范围同步。</p>
         </div>
-        <div className="admin-trigger-inline">
-          <Input
-            aria-label="用户 External ID"
-            value={userId}
-            onChange={(event) => setUserId(event.target.value)}
-            placeholder="用户 External ID"
-          />
-          <Button
-            disabled={submitting || !userId.trim()}
-            onClick={() => void handleTrigger(() => triggerUserOrgSync(userId.trim()))}
-          >
-            按用户补同步
+        <div className="admin-trigger-grid">
+          <Button type="primary" disabled={submitting} onClick={() => void handleTrigger(triggerFullOrgSync)}>
+            立即全量同步
           </Button>
+          <div className="admin-trigger-inline">
+            <label className="field admin-trigger-field">
+              <span className="field-label">部门 External ID</span>
+              <Input
+                aria-label="部门 External ID"
+                value={departmentId}
+                onChange={(event) => setDepartmentId(event.target.value)}
+                placeholder="部门 External ID"
+              />
+              <small className="field-help">示例：`dept-rd`，用于增量补齐该部门人员和结构。</small>
+            </label>
+            <Button
+              disabled={submitting || !departmentId.trim()}
+              onClick={() => void handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}
+            >
+              按部门同步
+            </Button>
+          </div>
+          <div className="admin-trigger-inline">
+            <label className="field admin-trigger-field">
+              <span className="field-label">用户 External ID</span>
+              <Input
+                aria-label="用户 External ID"
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+                placeholder="用户 External ID"
+              />
+              <small className="field-help">示例：`ding-u1`，用于补齐单个用户信息。</small>
+            </label>
+            <Button
+              disabled={submitting || !userId.trim()}
+              onClick={() => void handleTrigger(() => triggerUserOrgSync(userId.trim()))}
+            >
+              按用户补同步
+            </Button>
+          </div>
         </div>
-      </div>
+      </section>
       <div className="admin-job-list">
         <Typography.Title level={5} className="admin-card-subheading">
           同步任务

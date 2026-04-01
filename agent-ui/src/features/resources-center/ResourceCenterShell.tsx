@@ -374,6 +374,10 @@ export function ResourceCenterShell() {
               {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
 
               <div className="resource-center-form-grid">
+                <div className="resource-center-form-span-2 admin-form-inline-section-head">
+                  <h4>基础信息</h4>
+                  <p>名称用于展示，slug 用于唯一标识。</p>
+                </div>
                 <label className="field">
                   <span className="field-label">{createPanel.kind === "workspace" ? "新建工作区名称" : "新建资料集名称"}</span>
                   <input
@@ -383,6 +387,7 @@ export function ResourceCenterShell() {
                     disabled={createSaving}
                     onChange={(event) => setCreatePanel((current) => (current ? { ...current, name: event.target.value } : current))}
                   />
+                  <small className="field-help">建议使用业务可识别名称，便于后续搜索定位。</small>
                 </label>
 
                 <label className="field">
@@ -394,6 +399,7 @@ export function ResourceCenterShell() {
                     disabled={createSaving}
                     onChange={(event) => setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current))}
                   />
+                  <small className="field-help">仅允许稳定标识，建议使用小写英文和连字符。</small>
                 </label>
 
                 {createPanel.kind === "knowledge_set" ? (
@@ -420,6 +426,7 @@ export function ResourceCenterShell() {
                       <option value="filesystem">filesystem</option>
                       <option value="managed_upload">managed_upload</option>
                     </select>
+                    <small className="field-help">`filesystem` 直接读取目录；`managed_upload` 使用托管文件。</small>
                   </label>
                 ) : null}
 
@@ -435,7 +442,13 @@ export function ResourceCenterShell() {
                     <option value="active">active</option>
                     <option value="disabled">disabled</option>
                   </select>
+                  <small className="field-help">禁用后不会被新会话默认加载。</small>
                 </label>
+
+                <div className="resource-center-form-span-2 admin-form-inline-section-head">
+                  <h4>来源配置</h4>
+                  <p>根据来源类型填写目录或存储键。</p>
+                </div>
 
                 {createPanel.kind === "workspace" || createPanel.sourceType === "filesystem" ? (
                   <label className="field resource-center-form-span-2">
@@ -449,6 +462,7 @@ export function ResourceCenterShell() {
                       disabled={createSaving}
                       onChange={(event) => setCreatePanel((current) => (current ? { ...current, rootPath: event.target.value } : current))}
                     />
+                    <small className="field-help">填写服务端可访问的绝对路径。</small>
                   </label>
                 ) : null}
 
@@ -466,6 +480,7 @@ export function ResourceCenterShell() {
                         )
                       }
                     />
+                    <small className="field-help">用于对象存储分桶或命名空间，保持全局唯一。</small>
                   </label>
                 ) : null}
 
@@ -478,6 +493,7 @@ export function ResourceCenterShell() {
                     disabled={createSaving}
                     onChange={(event) => setCreatePanel((current) => (current ? { ...current, description: event.target.value } : current))}
                   />
+                  <small className="field-help">可写业务用途、维护人和使用边界。</small>
                 </label>
               </div>
 

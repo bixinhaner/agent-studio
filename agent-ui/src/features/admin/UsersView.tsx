@@ -170,31 +170,40 @@ export function UsersView() {
           title={`编辑 ${editingUser.synced.displayName || editingUser.id}`}
         >
           <section className="admin-inline-editor" aria-label="用户编辑表单">
-            <label className="field">
-              <span className="field-label">角色</span>
-              <select aria-label="角色" className="field-input" value={role} onChange={(event) => setRole(event.target.value)}>
-                <option value="employee">employee</option>
-                <option value="admin">admin</option>
-              </select>
-            </label>
-            <label className="field field-checkbox">
-              <span className="field-label">手动禁用</span>
-              <input
-                aria-label="手动禁用"
-                type="checkbox"
-                checked={manualDisabled}
-                onChange={(event) => setManualDisabled(event.target.checked)}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">备注</span>
-              <textarea
-                aria-label="备注"
-                className="field-input admin-textarea"
-                value={adminNote}
-                onChange={(event) => setAdminNote(event.target.value)}
-              />
-            </label>
+            <div className="admin-form-section">
+              <div className="admin-form-section-header">
+                <h4>本地治理字段</h4>
+                <p>仅影响本地策略，不会覆盖钉钉同步信息。</p>
+              </div>
+              <label className="field">
+                <span className="field-label">角色</span>
+                <select aria-label="角色" className="field-input" value={role} onChange={(event) => setRole(event.target.value)}>
+                  <option value="employee">employee</option>
+                  <option value="admin">admin</option>
+                </select>
+                <small className="field-help">控制管理入口和运营能力范围。</small>
+              </label>
+              <label className="field field-checkbox">
+                <span className="field-label">手动禁用</span>
+                <input
+                  aria-label="手动禁用"
+                  type="checkbox"
+                  checked={manualDisabled}
+                  onChange={(event) => setManualDisabled(event.target.checked)}
+                />
+              </label>
+              <small className="field-help">启用后将阻止该用户继续发起新会话。</small>
+              <label className="field">
+                <span className="field-label">备注</span>
+                <textarea
+                  aria-label="备注"
+                  className="field-input admin-textarea"
+                  value={adminNote}
+                  onChange={(event) => setAdminNote(event.target.value)}
+                />
+                <small className="field-help">建议写明调整原因，便于后续审计。</small>
+              </label>
+            </div>
             <Space wrap>
               <Button type="primary" aria-label="保存" onClick={() => void handleSave()} loading={saving}>
                 保存
