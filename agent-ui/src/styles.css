@@ -18,8 +18,8 @@ body {
   font-family: "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   color: #0f172a;
   background:
-    radial-gradient(circle at 0% 0%, #dfeafe 0%, #eef3fb 42%),
-    linear-gradient(180deg, #eef3fb 0%, #e8effa 100%);
+    none,
+    #f1f5f9;
   overflow: hidden;
 }
 
@@ -39,7 +39,7 @@ body {
   border: 1px solid #d6e2f3;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
   padding: 24px 28px;
   backdrop-filter: blur(10px);
 }
@@ -133,7 +133,7 @@ body {
   border-radius: 12px;
   padding: 14px;
   background: #fff;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .sidebar-header h1 {
@@ -157,7 +157,7 @@ body {
   padding: 12px 14px;
   border: 1px solid #dbe6f5;
   border-radius: 14px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f3f8ff 100%);
+  background: #ffffff;
 }
 
 .user-identity-card.compact {
@@ -254,7 +254,7 @@ body {
   border-radius: 12px;
   padding: 12px;
   background: #fff;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .panel h2 {
@@ -465,7 +465,7 @@ body {
   padding: 12px;
   border: 1px solid #d6e2f3;
   border-radius: 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  background: #ffffff;
 }
 
 .knowledge-set-copy h3 {
@@ -584,7 +584,7 @@ body {
   border: 1px solid #d6e2f3;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -643,7 +643,7 @@ body {
   padding: 12px;
   border: 1px solid #dbe6f5;
   border-radius: 12px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f7fbff 100%);
+  background: #ffffff;
 }
 
 .collaboration-panel-section h3 {
@@ -735,7 +735,7 @@ body {
   padding: 14px;
   border: 1px solid #dbe6f5;
   border-radius: 14px;
-  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  background: #ffffff;
 }
 
 .inbox-card-unread {
@@ -879,7 +879,7 @@ body {
 }
 
 .context-usage-warn .context-usage-fill {
-  background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+  background: #ffffff;
 }
 
 .context-usage-critical .context-usage-fill {
@@ -968,7 +968,7 @@ body {
   padding: 10px 12px;
   border: 1px solid #f1d49a;
   border-radius: 12px;
-  background: linear-gradient(135deg, #fff8e7 0%, #fff2d6 100%);
+  background: #ffffff;
   color: #8a4b08;
   font-size: 12px;
 }
@@ -1069,7 +1069,7 @@ body {
   border: 1px solid #c7dcff;
   border-radius: 12px;
   padding: 10px 12px;
-  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  background: #ffffff;
   box-shadow: 0 6px 14px rgba(59, 130, 246, 0.08);
 }
 
@@ -1902,7 +1902,7 @@ body {
   padding: 10px;
   border: 1px solid #dbe6f5;
   border-radius: 14px;
-  background: linear-gradient(180deg, #fcfdff 0%, #f6faff 100%);
+  background: #ffffff;
 }
 
 .admin-shell-nav-group-title {
@@ -2069,7 +2069,7 @@ body {
 .admin-section-context-card {
   border: 1px solid #d6e2f3;
   border-radius: 16px;
-  background: linear-gradient(180deg, #fcfdff 0%, #f6faff 100%);
+  background: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(214, 226, 243, 0.45);
 }
 
@@ -2285,7 +2285,7 @@ body {
   border: 1px solid #d6e2f3;
   border-radius: 14px;
   padding: 14px;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  background: #ffffff;
 }
 
 .system-settings-history-card h4,
@@ -2586,7 +2586,7 @@ body {
   padding: 14px;
   border: 1px solid #d6e2f3;
   border-radius: 16px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  background: #ffffff;
 }
 
 .monitoring-subcard h3 {
@@ -2730,7 +2730,7 @@ body {
   gap: 12px;
   border: 1px solid #d6e2f3;
   border-radius: 14px;
-  background: linear-gradient(120deg, rgba(248, 251, 255, 0.95) 0%, rgba(239, 246, 255, 0.82) 100%);
+  background: #ffffff;
   padding: 14px 16px;
 }
 
@@ -3585,7 +3585,7 @@ body {
   border-radius: 14px;
   background: #fff;
   padding: 0.9rem 1rem;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .capability-mode-instruction-card.dragging {

@@ -378,3 +378,67 @@
   min-width: 0;
   width: 100%;
 }
+
+/* Restored Sub-page Formats */
+.admin-workspace-shell > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-workspace-segmented {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--admin-surface);
+}
+
+.admin-workspace-segmented .ant-segmented {
+  background: transparent;
+}
+
+.admin-workspace-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.admin-workspace-filter {
+  min-width: 200px;
+}
+
+.admin-workspace-detail {
+  min-height: 380px;
+}
+
+.admin-workspace-loading {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-workspace-help-card {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: #f9f9f9;
+}
+
+/* Resource Center Fixes */
+.admin-console-root .resource-center-section,
+.admin-console-root .resource-center-item,
+.admin-console-root .resource-center-list-item {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+}
+
+.admin-console-root .resource-center-type-tab.active {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: var(--admin-text);
+}
+
+.admin-console-root .resource-center-inline-muted {
+  color: var(--admin-subtle);
+  font-size: 12px;
+}
