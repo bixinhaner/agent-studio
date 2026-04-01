@@ -46,7 +46,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
-import { ConfigProvider, Tag } from "antd";
+import { ConfigProvider } from "antd";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import {
@@ -1148,24 +1148,6 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
 
   return rows;
 }
-
-const AssistantThinkingFooter: FC = () => {
-  const isRunning = useAuiState((s) => s.message.status?.type === "running");
-  if (!isRunning) return null;
-
-  return (
-    <div className="assistant-thinking-row" role="status" aria-live="polite" aria-label="Assistant is thinking">
-      <Tag className="assistant-thinking-tag" color="processing">
-        <span className="assistant-thinking-label">Thinking</span>
-        <span className="assistant-thinking-dots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-      </Tag>
-    </div>
-  );
-};
 
 const AgentAssistantMessage: FC = () => {
   return (
@@ -2539,7 +2521,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           allowFeedbackPositive: true,
           allowFeedbackNegative: true,
           components: {
-            Footer: AssistantThinkingFooter as any,
             ToolFallback: HiddenToolFallback as any
           }
         }}

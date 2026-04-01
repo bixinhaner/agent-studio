@@ -1155,62 +1155,57 @@ body {
   margin-right: 0;
 }
 
-.assistant-thinking-row {
-  display: flex;
-  align-items: center;
+.thread-wrap :where(.aui-md-running):empty::after,
+.thread-wrap :where(.aui-md-running) > :where(:not(ol):not(ul):not(pre)):last-child::after,
+.thread-wrap :where(.aui-md-running) > pre:last-child code::after,
+.thread-wrap :where(.aui-md-running) > :where(:is(ol, ul):last-child) > :where(li:last-child:not(:has(* > li)))::after,
+.thread-wrap
+  :where(.aui-md-running)
+  > :where(:is(ol, ul):last-child)
+  > :where(li:last-child)
+  > :where(:is(ol, ul):last-child)
+  > :where(li:last-child:not(:has(* > li)))::after,
+.thread-wrap
+  :where(.aui-md-running)
+  > :where(:is(ol, ul):last-child)
+  > :where(li:last-child)
+  > :where(:is(ol, ul):last-child)
+  > :where(li:last-child)
+  > :where(:is(ol, ul):last-child)
+  > :where(li:last-child)::after {
+  content: none;
+  animation: none;
+  margin-left: 0;
+  margin-right: 0;
 }
 
-.assistant-thinking-tag.ant-tag {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.thread-wrap .aui-md-running::after {
+  content: "Thinking...";
+  display: block;
+  width: fit-content;
+  margin-top: 8px;
+  border: 1px solid #91caff;
   border-radius: 999px;
   padding: 2px 10px;
-  border-color: #91caff;
-  background: linear-gradient(180deg, #f0f5ff 0%, #e6f4ff 100%);
+  background:
+    linear-gradient(90deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.08)),
+    linear-gradient(180deg, #f0f5ff 0%, #e6f4ff 100%);
   color: #1d4ed8;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  animation: assistant-thinking-pulse 1.15s ease-in-out infinite;
 }
 
-.assistant-thinking-label {
-  line-height: 1.2;
-}
-
-.assistant-thinking-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.assistant-thinking-dots span {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: currentColor;
-  opacity: 0.28;
-  animation: assistant-thinking-dot 1.15s ease-in-out infinite;
-}
-
-.assistant-thinking-dots span:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.assistant-thinking-dots span:nth-child(3) {
-  animation-delay: 0.32s;
-}
-
-@keyframes assistant-thinking-dot {
+@keyframes assistant-thinking-pulse {
   0%,
   100% {
+    opacity: 0.72;
     transform: translateY(0);
-    opacity: 0.28;
   }
-  45% {
-    transform: translateY(-2px);
+  50% {
     opacity: 1;
+    transform: translateY(-1px);
   }
 }
 
