@@ -390,13 +390,14 @@ export function createDingTalkClient(
 
   const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
     const accessToken = await getAppAccessToken();
+    const input = new URL(`${orgApiBaseUrl}${path}`);
+    input.searchParams.set("access_token", accessToken);
     return requestTopApiJson(
-      `${orgApiBaseUrl}${path}`,
+      input.toString(),
       {
         method: "POST",
         headers: {
-          "content-type": "application/json",
-          "x-acs-dingtalk-access-token": accessToken
+          "content-type": "application/json"
         },
         body: JSON.stringify(body)
       },

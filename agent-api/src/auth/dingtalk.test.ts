@@ -99,12 +99,11 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://oapi.dingtalk.com/topapi/v2/department/listsub",
+      "https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=app-token-1",
       expect.objectContaining({
         method: "POST",
         headers: {
-          "content-type": "application/json",
-          "x-acs-dingtalk-access-token": "app-token-1"
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           dept_id: "0"
@@ -234,12 +233,11 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://oapi.dingtalk.com/topapi/v2/user/list",
+      "https://oapi.dingtalk.com/topapi/v2/user/list?access_token=app-token-2",
       expect.objectContaining({
         method: "POST",
         headers: {
-          "content-type": "application/json",
-          "x-acs-dingtalk-access-token": "app-token-2"
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           dept_id: "1"
@@ -313,12 +311,11 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://oapi.dingtalk.com/topapi/v2/user/get",
+      "https://oapi.dingtalk.com/topapi/v2/user/get?access_token=app-token-3",
       expect.objectContaining({
         method: "POST",
         headers: {
-          "content-type": "application/json",
-          "x-acs-dingtalk-access-token": "app-token-3"
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           userid: "u-disabled"
@@ -457,12 +454,11 @@ describe("createDingTalkClient", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "https://oapi.dingtalk.com/topapi/v2/user/get",
+      "https://oapi.dingtalk.com/topapi/v2/user/get?access_token=app-token-4",
       expect.objectContaining({
         method: "POST",
         headers: {
-          "content-type": "application/json",
-          "x-acs-dingtalk-access-token": "app-token-4"
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           userid: "ding-user-456"
