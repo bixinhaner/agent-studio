@@ -1,18 +1,19 @@
 import {
-  AppstoreOutlined,
-  AuditOutlined,
-  BellOutlined,
-  ClusterOutlined,
-  DashboardOutlined,
-  DeploymentUnitOutlined,
-  MenuOutlined,
-  ReloadOutlined,
-  SafetyCertificateOutlined,
-  SearchOutlined,
-  SettingOutlined,
-  TeamOutlined,
-  ToolOutlined
-} from "@ant-design/icons";
+  LayoutDashboard,
+  Activity,
+  Bell,
+  Users,
+  Network,
+  ShieldCheck,
+  Database,
+  Wrench,
+  Component,
+  Settings,
+  Search,
+  Menu,
+  RefreshCcw,
+  ArrowRight
+} from "lucide-react";
 import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Spin, Statistic, Tag, Typography } from "antd";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -113,7 +114,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "建议每小时刷新",
     group: "operations",
     keywords: ["概览", "运营", "数据看板", "dashboard"],
-    icon: <DashboardOutlined />
+    icon: <LayoutDashboard size={18} />
   },
   monitoring: {
     id: "monitoring",
@@ -123,7 +124,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "建议持续观察",
     group: "operations",
     keywords: ["审计", "监控", "告警", "成本", "配额"],
-    icon: <AuditOutlined />
+    icon: <Activity size={18} />
   },
   broadcasts: {
     id: "broadcasts",
@@ -133,7 +134,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "按活动排期维护",
     group: "operations",
     keywords: ["广播", "公告", "触达", "通知"],
-    icon: <BellOutlined />
+    icon: <Bell size={18} />
   },
   users: {
     id: "users",
@@ -143,7 +144,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "建议每日巡检",
     group: "governance",
     keywords: ["用户", "成员", "账号", "身份"],
-    icon: <TeamOutlined />
+    icon: <Users size={18} />
   },
   organization: {
     id: "organization",
@@ -153,7 +154,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "按同步任务节奏",
     group: "governance",
     keywords: ["组织", "部门", "同步", "结构"],
-    icon: <ClusterOutlined />
+    icon: <Network size={18} />
   },
   rbac: {
     id: "rbac",
@@ -163,7 +164,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "建议双周审计",
     group: "governance",
     keywords: ["角色", "权限", "RBAC", "授权"],
-    icon: <SafetyCertificateOutlined />
+    icon: <ShieldCheck size={18} />
   },
   resources: {
     id: "resources",
@@ -173,7 +174,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "按项目变更维护",
     group: "runtime",
     keywords: ["资源", "资料集", "文件", "knowledge set"],
-    icon: <AppstoreOutlined />
+    icon: <Database size={18} />
   },
   capabilities: {
     id: "capabilities",
@@ -183,7 +184,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "按发布节奏更新",
     group: "runtime",
     keywords: ["能力", "mode", "skill", "run profile"],
-    icon: <ToolOutlined />
+    icon: <Wrench size={18} />
   },
   integrations: {
     id: "integrations",
@@ -193,7 +194,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "建议每周复核",
     group: "runtime",
     keywords: ["集成", "dingtalk", "zendesk", "openai"],
-    icon: <DeploymentUnitOutlined />
+    icon: <Component size={18} />
   },
   "system-settings": {
     id: "system-settings",
@@ -203,7 +204,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     cadence: "变更前评审后发布",
     group: "runtime",
     keywords: ["系统", "配置", "默认值", "发布"],
-    icon: <SettingOutlined />
+    icon: <Settings size={18} />
   }
 };
 
@@ -246,7 +247,7 @@ function AdminNavigationPanel(props: {
           onChange={(event) => props.onSearchChange(event.target.value)}
           allowClear
           placeholder="搜索功能（Cmd/Ctrl + K）"
-          prefix={<SearchOutlined />}
+          prefix={<Search size={16} />}
           aria-label="搜索管理功能"
         />
       </div>
@@ -319,7 +320,7 @@ function OverviewWorkspace(props: {
           </div>
           <Space wrap>
             <Tag color="blue">更新时间：{formatLocalTimestamp(props.refreshedAt)}</Tag>
-            <Button icon={<ReloadOutlined />} onClick={props.onRefresh} loading={props.loading}>
+            <Button icon={<RefreshCcw size={14} />} onClick={props.onRefresh} loading={props.loading}>
               刷新
             </Button>
           </Space>
@@ -616,7 +617,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           {compactLayout ? (
             <Button
               type="text"
-              icon={<MenuOutlined />}
+              icon={<Menu size={16} />}
               aria-label="打开导航"
               className="admin-console-menu-btn"
               onClick={() => setMobileNavOpen(true)}
@@ -643,7 +644,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
 
         <div className="admin-console-topbar-actions">
           <Tag color="geekblue">时区：{timezoneLabel}</Tag>
-          <Button icon={<ReloadOutlined />} onClick={() => void loadOverview()} loading={loading}>
+          <Button icon={<RefreshCcw size={14} />} onClick={() => void loadOverview()} loading={loading}>
             刷新概览
           </Button>
           {props.onOpenPortal ? (
@@ -671,43 +672,16 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
         ) : null}
 
         <div className="admin-console-main" ref={contentRef}>
-          <Card className="admin-card admin-console-hero antd-admin-card">
-            <div className="admin-console-hero-copy">
-              <p className="admin-console-brand-eyebrow">当前分区</p>
-              <Typography.Title level={2} className="admin-banner-title">
-                {currentSectionMeta.title}
-              </Typography.Title>
-              <Typography.Paragraph>{currentSectionMeta.description}</Typography.Paragraph>
+          <div className="admin-console-header">
+            <div>
+              <h2 className="admin-console-header-title">{currentSectionMeta.title}</h2>
+              <p className="admin-console-header-desc">{currentSectionMeta.description}</p>
             </div>
-
-            <div className="admin-console-hero-meta">
+            <div className="admin-console-header-meta">
               <Tag>{currentSectionMeta.scope}</Tag>
               <Tag>{currentSectionMeta.cadence}</Tag>
-              <Tag>概览：{formatLocalTimestamp(overviewRefreshedAt)}</Tag>
-              <Tag color={errorText ? "error" : "processing"}>{errorText ? "概览加载异常" : "概览在线"}</Tag>
             </div>
-
-            {quickSwitches.length > 0 ? (
-              <div className="admin-console-quick-switch" role="tablist" aria-label="快速切换功能">
-                {quickSwitches.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={section === item.id}
-                    className={section === item.id ? "admin-console-quick-item active" : "admin-console-quick-item"}
-                    onClick={() => setSection(item.id)}
-                  >
-                    <span className="admin-console-quick-item-icon" aria-hidden="true">
-                      {item.icon}
-                    </span>
-                    <span>{item.title}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </Card>
-
+          </div>
           <div className="admin-console-content">
             <AdminSectionContent
               section={section}
