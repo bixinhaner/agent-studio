@@ -5,6 +5,7 @@ export type AuthUserRole = "employee" | "admin" | "super_admin" | string;
 export type AuthUser = {
   id: string;
   role: AuthUserRole;
+  externalId?: string | null;
   displayName?: string;
   email?: string;
   status?: string;
@@ -13,6 +14,42 @@ export type AuthUser = {
 export type WhoAmIResponse = {
   user: AuthUser;
 };
+
+type AuthUserPayload = {
+  id: string;
+  role: AuthUserRole;
+  external_id?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+  status?: string | null;
+};
+
+type WhoAmIPayload = {
+  user: AuthUserPayload;
+};
+
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizeAuthUser(user: AuthUserPayload): AuthUser {
+  return {
+    id: user.id,
+    role: user.role,
+    externalId: user.external_id ?? null,
+    displayName: trimOrUndefined(user.display_name),
+    email: trimOrUndefined(user.email),
+    status: trimOrUndefined(user.status)
+  };
+}
+
+function normalizeWhoAmIResponse(payload: WhoAmIPayload): WhoAmIResponse {
+  return {
+    user: normalizeAuthUser(payload.user)
+  };
+}
 
 export type DingTalkConfigResponse = {
   config: {
@@ -26,7 +63,8 @@ export type DingTalkConfigResponse = {
 };
 
 export async function fetchWhoAmI(): Promise<WhoAmIResponse> {
-  return await api<WhoAmIResponse>("/api/auth/whoami");
+  const payload = await api<WhoAmIPayload>("/api/auth/whoami");
+  return normalizeWhoAmIResponse(payload);
 }
 
 export async function fetchDingTalkConfig(): Promise<DingTalkConfigResponse> {
@@ -38,10 +76,11 @@ export async function createDingTalkSession(input: {
   state: string;
   nonce: string;
 }): Promise<WhoAmIResponse> {
-  return await api<WhoAmIResponse>("/api/auth/dingtalk/session", {
+  const payload = await api<WhoAmIPayload>("/api/auth/dingtalk/session", {
     method: "POST",
     json: input
   });
+  return normalizeWhoAmIResponse(payload);
 }
 
 export async function logoutSession(): Promise<void> {
