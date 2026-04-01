@@ -344,6 +344,7 @@ export function createDingTalkClient(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
 ): DingTalkClient {
   let appAccessTokenPromise: Promise<string> | undefined;
+  const orgApiBaseUrl = "https://oapi.dingtalk.com";
 
   const getResolvedConfig = () => {
     const resolved = resolveDingTalkConfig(config);
@@ -388,10 +389,9 @@ export function createDingTalkClient(
   };
 
   const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
-    const resolved = getResolvedConfig();
     const accessToken = await getAppAccessToken();
     return requestTopApiJson(
-      `${resolved.config.apiBaseUrl}${path}`,
+      `${orgApiBaseUrl}${path}`,
       {
         method: "POST",
         headers: {

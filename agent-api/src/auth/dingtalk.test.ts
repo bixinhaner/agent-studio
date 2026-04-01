@@ -99,7 +99,7 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://api.dingtalk.com/topapi/v2/department/listsub",
+      "https://oapi.dingtalk.com/topapi/v2/department/listsub",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -234,7 +234,7 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://api.dingtalk.com/topapi/v2/user/list",
+      "https://oapi.dingtalk.com/topapi/v2/user/list",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -313,7 +313,7 @@ describe("createDingTalkClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://api.dingtalk.com/topapi/v2/user/get",
+      "https://oapi.dingtalk.com/topapi/v2/user/get",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -457,7 +457,7 @@ describe("createDingTalkClient", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "https://api.dingtalk.com/topapi/v2/user/get",
+      "https://oapi.dingtalk.com/topapi/v2/user/get",
       expect.objectContaining({
         method: "POST",
         headers: {
