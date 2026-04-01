@@ -40,10 +40,31 @@ type CreatePanelState =
       storageKey: string;
     };
 
+const RESOURCE_TAB_META: Record<ResourceCenterTab, { title: string; description: string }> = {
+  workspace: {
+    title: "工作区管理",
+    description: "维护工作区目录、启停状态和资料集绑定关系。"
+  },
+  knowledge_set: {
+    title: "资料集管理",
+    description: "维护资料元数据、上传来源和授权策略。"
+  }
+};
+
 function matchesSearch(input: string, values: Array<string | undefined>) {
   const normalized = input.trim().toLowerCase();
   if (!normalized) return true;
   return values.some((value) => (value || "").toLowerCase().includes(normalized));
+}
+
+function formatLocalDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
 }
 
 function createInitialPanelState(tab: ResourceCenterTab): CreatePanelState {
@@ -83,6 +104,7 @@ export function ResourceCenterShell() {
   const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
+  const currentTabMeta = RESOURCE_TAB_META[tab];
 
   useEffect(() => {
     let active = true;
@@ -116,18 +138,34 @@ export function ResourceCenterShell() {
   }, [tab, typeFilter]);
 
   const filteredWorkspaces = useMemo(() => {
-    return workspaces.filter((workspace) => {
+    const matched = workspaces.filter((workspace) => {
       if (statusFilter !== "all" && workspace.status !== statusFilter) return false;
       if (typeFilter !== "all" && workspace.sourceType !== typeFilter) return false;
       return matchesSearch(search, [workspace.name, workspace.slug, workspace.description, workspace.rootPath]);
     });
+    return matched.sort((left, right) => {
+      const leftTime = Date.parse(left.updatedAt);
+      const rightTime = Date.parse(right.updatedAt);
+      if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+        return left.name.localeCompare(right.name, "zh-CN");
+      }
+      return rightTime - leftTime;
+    });
   }, [search, statusFilter, typeFilter, workspaces]);
 
   const filteredKnowledgeSets = useMemo(() => {
-    return knowledgeSets.filter((knowledgeSet) => {
+    const matched = knowledgeSets.filter((knowledgeSet) => {
       if (statusFilter !== "all" && knowledgeSet.status !== statusFilter) return false;
       if (typeFilter !== "all" && knowledgeSet.sourceType !== typeFilter) return false;
       return matchesSearch(search, [knowledgeSet.name, knowledgeSet.slug, knowledgeSet.description, knowledgeSet.rootPath]);
+    });
+    return matched.sort((left, right) => {
+      const leftTime = Date.parse(left.updatedAt);
+      const rightTime = Date.parse(right.updatedAt);
+      if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+        return left.name.localeCompare(right.name, "zh-CN");
+      }
+      return rightTime - leftTime;
     });
   }, [knowledgeSets, search, statusFilter, typeFilter]);
 
@@ -138,10 +176,38 @@ export function ResourceCenterShell() {
     tab === "workspace"
       ? filteredWorkspaces.filter((workspace) => workspace.status === "active").length
       : filteredKnowledgeSets.filter((knowledgeSet) => knowledgeSet.status === "active").length;
+  const activeDisabledCount = Math.max(activeListCount - activeEnabledCount, 0);
+  const selectedResourceSource = (() => {
+    if (tab === "workspace") {
+      return selectedWorkspace?.rootPath || "未设置";
+    }
+    return selectedKnowledgeSet?.rootPath || selectedKnowledgeSet?.storageKey || "未设置";
+  })();
+  const selectedResourceUpdatedAt = tab === "workspace" ? selectedWorkspace?.updatedAt : selectedKnowledgeSet?.updatedAt;
   const selectedResourceSummary = (() => {
     const name = tab === "workspace" ? selectedWorkspace?.name : selectedKnowledgeSet?.name;
     return name ? `已选：${name}` : "未选择";
   })();
+
+  useEffect(() => {
+    if (tab !== "workspace") return;
+    if (createPanel?.kind === "workspace") return;
+    if (filteredWorkspaces.length === 0) return;
+    const selectedStillVisible = filteredWorkspaces.some((workspace) => workspace.id === selected.workspaceId);
+    if (!selectedStillVisible) {
+      setSelected((current) => ({ ...current, workspaceId: filteredWorkspaces[0].id }));
+    }
+  }, [createPanel?.kind, filteredWorkspaces, selected.workspaceId, tab]);
+
+  useEffect(() => {
+    if (tab !== "knowledge_set") return;
+    if (createPanel?.kind === "knowledge_set") return;
+    if (filteredKnowledgeSets.length === 0) return;
+    const selectedStillVisible = filteredKnowledgeSets.some((knowledgeSet) => knowledgeSet.id === selected.knowledgeSetId);
+    if (!selectedStillVisible) {
+      setSelected((current) => ({ ...current, knowledgeSetId: filteredKnowledgeSets[0].id }));
+    }
+  }, [createPanel?.kind, filteredKnowledgeSets, selected.knowledgeSetId, tab]);
 
   function handleWorkspaceUpdated(updatedWorkspace: WorkspaceRecord) {
     setWorkspaces((current) =>
@@ -224,6 +290,21 @@ export function ResourceCenterShell() {
         </div>
       </div>
 
+      <section className="resource-center-hero">
+        <div>
+          <p className="auth-eyebrow">Agent Studio Resources</p>
+          <Typography.Title level={5} className="admin-card-subheading">
+            {currentTabMeta.title}
+          </Typography.Title>
+          <Typography.Paragraph>{currentTabMeta.description}</Typography.Paragraph>
+        </div>
+        <div className="resource-center-hero-meta">
+          <Tag color="blue">当前类型：{tab === "workspace" ? "工作区" : "资料集"}</Tag>
+          <Tag>{selectedResourceSummary}</Tag>
+          <Tag>最近更新：{formatLocalDateTime(selectedResourceUpdatedAt)}</Tag>
+        </div>
+      </section>
+
       <div className="resource-center-type-tabs" role="tablist" aria-label="资源类型">
         <Button
           type={tab === "workspace" ? "primary" : "default"}
@@ -298,8 +379,12 @@ export function ResourceCenterShell() {
           <strong className="resource-center-stat-value">{activeEnabledCount}</strong>
         </article>
         <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">选中资源</span>
-          <strong className="resource-center-stat-value">{selectedResourceSummary}</strong>
+          <span className="resource-center-stat-label">停用中</span>
+          <strong className="resource-center-stat-value">{activeDisabledCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">选中资源来源</span>
+          <strong className="resource-center-stat-value">{selectedResourceSource}</strong>
         </article>
       </div>
 
@@ -323,12 +408,17 @@ export function ResourceCenterShell() {
                         <button
                           type="button"
                           className={active ? "resource-center-item active" : "resource-center-item"}
-                          onClick={() => setSelected((current) => ({ ...current, workspaceId: workspace.id }))}
+                          onClick={() => setSelected({ workspaceId: workspace.id, knowledgeSetId: null })}
                         >
-                          <span className="resource-center-item-title">{workspace.name}</span>
-                          <span className="resource-center-item-meta">
-                            <Tag>{workspace.sourceType}</Tag> · <Tag color={workspace.status === "active" ? "success" : "default"}>{workspace.status}</Tag>
+                          <span className="resource-center-item-title-row">
+                            <span className="resource-center-item-title">{workspace.name}</span>
+                            <Tag color={workspace.status === "active" ? "success" : "default"}>{workspace.status}</Tag>
                           </span>
+                          <span className="resource-center-item-slug">{workspace.slug}</span>
+                          <span className="resource-center-item-meta">
+                            <Tag>{workspace.sourceType}</Tag>
+                          </span>
+                          <span className="resource-center-item-note">{workspace.rootPath || "未设置根目录"}</span>
                         </button>
                       </li>
                     );
@@ -340,11 +430,18 @@ export function ResourceCenterShell() {
                         <button
                           type="button"
                           className={active ? "resource-center-item active" : "resource-center-item"}
-                          onClick={() => setSelected((current) => ({ ...current, knowledgeSetId: knowledgeSet.id }))}
+                          onClick={() => setSelected({ workspaceId: null, knowledgeSetId: knowledgeSet.id })}
                         >
-                          <span className="resource-center-item-title">{knowledgeSet.name}</span>
+                          <span className="resource-center-item-title-row">
+                            <span className="resource-center-item-title">{knowledgeSet.name}</span>
+                            <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>{knowledgeSet.status}</Tag>
+                          </span>
+                          <span className="resource-center-item-slug">{knowledgeSet.slug}</span>
                           <span className="resource-center-item-meta">
-                            <Tag>{knowledgeSet.sourceType}</Tag> · <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>{knowledgeSet.status}</Tag>
+                            <Tag>{knowledgeSet.sourceType}</Tag>
+                          </span>
+                          <span className="resource-center-item-note">
+                            {knowledgeSet.rootPath || knowledgeSet.storageKey || "未设置来源"}
                           </span>
                         </button>
                       </li>

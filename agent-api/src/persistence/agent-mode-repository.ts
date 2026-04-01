@@ -131,7 +131,9 @@ type AgentModeWorkspaceTable = {
 type AgentModeInstructionSourceTable = {
   findMany(args: {
     where: { agentModeId: string };
-    orderBy?: { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" };
+    orderBy?:
+      | { sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }
+      | Array<{ sortOrder?: "asc" | "desc"; createdAt?: "asc" | "desc" }>;
   }): Promise<AgentModeInstructionSourceRow[]>;
   deleteMany(args: { where: { agentModeId: string } }): Promise<{ count: number }>;
   create(args: { data: Record<string, unknown> }): Promise<AgentModeInstructionSourceRow>;
@@ -419,7 +421,7 @@ export class AgentModeRepository {
       db.agentModeInstructionSource
         .findMany({
           where: { agentModeId: row.id },
-          orderBy: { sortOrder: "asc", createdAt: "asc" }
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
         })
         .then((records) => records.map(mapInstructionSource))
     ]);
