@@ -1,0 +1,5 @@
+Cleanup scope requested by user:
+- delete high-confidence and confirm-first targets (excluding agent-api/.env)
+- delete non-source test files
+- delete source test files in agent-api/src and agent-ui/src
+- commit on main and push to GitHub
