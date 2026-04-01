@@ -18,12 +18,6 @@ export function SessionRail(
     <aside className={props.collapsed ? "session-rail collapsed" : "session-rail"} style={{ width: '100%', borderRight: 'none' }}>
       <div className="session-rail-head">
         {!props.collapsed ? (
-          <div className="session-rail-title-row">
-            <h2 className="session-rail-eyebrow">会话工作区</h2>
-          </div>
-        ) : null}
-        
-        {!props.collapsed ? (
           <div className="session-rail-controls">
             {props.newThreadSlot ?? (
               <Button aria-label="新会话" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>

@@ -200,6 +200,10 @@ type TimelineRow = {
   at?: string;
 };
 
+type SessionGroupLabelContextValue = {
+  groupHeaderByRemoteId: Record<string, string>;
+};
+
 const DEFAULT_WORKSPACE = ".";
 
 const SANDBOX_OPTIONS: Array<{ value: SandboxMode; label: string }> = [
@@ -223,6 +227,9 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
 const DEFAULT_RUNNING_STAGE_TEXT = "正在等待模型响应";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
+const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
+  groupHeaderByRemoteId: {}
+});
 
 const AssistantMarkdownText = makeMarkdownText();
 
@@ -536,6 +543,26 @@ function normalizeProcessTime(value: string | undefined): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(at);
+}
+
+function formatThreadGroupLabel(value: string | undefined, referenceDate = new Date()): string {
+  if (!value) return "";
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return "";
+  const dayMs = 24 * 60 * 60 * 1000;
+  const currentDay = new Date(referenceDate);
+  currentDay.setHours(0, 0, 0, 0);
+  const targetDay = new Date(at);
+  targetDay.setHours(0, 0, 0, 0);
+  let diffDays = Math.floor((currentDay.getTime() - targetDay.getTime()) / dayMs);
+  if (diffDays < 0) diffDays = 0;
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays <= 7) return "7天";
+  if (diffDays <= 30) return "30天";
+  const year = targetDay.getFullYear();
+  const month = String(targetDay.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 function timelineKindLabel(kind: TimelineRow["kind"]): string {
@@ -1167,12 +1194,16 @@ const AgentAssistantMessage: FC = () => {
 const AgentThreadListItem: FC = () => {
   const aui = useAui();
   const threadItemId = useAuiState((s) => s.threadListItem.id);
+  const threadRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
   const sessionSearchQuery = useContext(SessionSearchContext).trim().toLowerCase();
+  const groupHeaderByRemoteId = useContext(SessionGroupLabelContext).groupHeaderByRemoteId;
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const remoteId = String(threadRemoteId || "").trim();
+  const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
   const threadTitleForFilter = threadTitle.trim() || "新对话";
 
   useEffect(() => {
@@ -1243,82 +1274,85 @@ const AgentThreadListItem: FC = () => {
   }
 
   return (
-    <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
-      {isRenaming ? (
-        <div className="thread-title-edit-wrap" onClick={(event) => event.stopPropagation()}>
-          <input
-            ref={renameInputRef}
-            className="thread-title-edit-input"
-            value={renameDraft}
-            onChange={(event) => setRenameDraft(event.target.value)}
-            onKeyDown={onRenameInputKeyDown}
-            placeholder="输入会话名称"
-            disabled={renameSaving}
-          />
-        </div>
-      ) : (
-        <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
-          <p className="aui-thread-list-item-title">
-            <ThreadListItemPrimitive.Title fallback="新对话" />
-          </p>
-        </ThreadListItemPrimitive.Trigger>
-      )}
-      <div className="agent-thread-item-actions">
+    <>
+      {!sessionSearchQuery && groupLabel ? <p className="session-rail-group-divider">{groupLabel}</p> : null}
+      <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
         {isRenaming ? (
-          <>
-            <button
-              type="button"
-              className="thread-item-action-btn thread-item-save-btn"
-              title="保存会话名称"
-              aria-label="保存会话名称"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                void submitRename();
-              }}
+          <div className="thread-title-edit-wrap" onClick={(event) => event.stopPropagation()}>
+            <input
+              ref={renameInputRef}
+              className="thread-title-edit-input"
+              value={renameDraft}
+              onChange={(event) => setRenameDraft(event.target.value)}
+              onKeyDown={onRenameInputKeyDown}
+              placeholder="输入会话名称"
               disabled={renameSaving}
-            >
-              <CheckIcon size={14} />
-            </button>
+            />
+          </div>
+        ) : (
+          <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
+            <p className="aui-thread-list-item-title">
+              <ThreadListItemPrimitive.Title fallback="新对话" />
+            </p>
+          </ThreadListItemPrimitive.Trigger>
+        )}
+        <div className="agent-thread-item-actions">
+          {isRenaming ? (
+            <>
+              <button
+                type="button"
+                className="thread-item-action-btn thread-item-save-btn"
+                title="保存会话名称"
+                aria-label="保存会话名称"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void submitRename();
+                }}
+                disabled={renameSaving}
+              >
+                <CheckIcon size={14} />
+              </button>
+              <button
+                type="button"
+                className="thread-item-action-btn"
+                title="取消修改"
+                aria-label="取消修改"
+                onClick={cancelRename}
+                disabled={renameSaving}
+              >
+                <XIcon size={14} />
+              </button>
+            </>
+          ) : (
             <button
               type="button"
               className="thread-item-action-btn"
-              title="取消修改"
-              aria-label="取消修改"
-              onClick={cancelRename}
-              disabled={renameSaving}
+              title="重命名会话"
+              aria-label="重命名会话"
+              onClick={beginRename}
             >
-              <XIcon size={14} />
+              <PencilIcon size={14} />
             </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="thread-item-action-btn"
-            title="重命名会话"
-            aria-label="重命名会话"
-            onClick={beginRename}
+          )}
+          <ThreadListItemPrimitive.Delete
+            className="thread-item-action-btn thread-item-delete-btn"
+            title="删除会话"
+            aria-label="删除会话"
+            disabled={isRenaming}
+            onClick={(e) => {
+              const confirmed = window.confirm("确认永久删除该会话吗？该操作不可恢复。");
+              if (!confirmed) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
           >
-            <PencilIcon size={14} />
-          </button>
-        )}
-        <ThreadListItemPrimitive.Delete
-          className="thread-item-action-btn thread-item-delete-btn"
-          title="删除会话"
-          aria-label="删除会话"
-          disabled={isRenaming}
-          onClick={(e) => {
-            const confirmed = window.confirm("确认永久删除该会话吗？该操作不可恢复。");
-            if (!confirmed) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
-          }}
-        >
-          <Trash2Icon size={14} />
-        </ThreadListItemPrimitive.Delete>
-      </div>
-    </ThreadListItemPrimitive.Root>
+            <Trash2Icon size={14} />
+          </ThreadListItemPrimitive.Delete>
+        </div>
+      </ThreadListItemPrimitive.Root>
+    </>
   );
 };
 
@@ -1459,6 +1493,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [runtimeMode, setRuntimeMode] = useState("standard");
   const [layoutState, setLayoutState] = useState(createInitialLayoutState());
   const [sessionSearchValue, setSessionSearchValue] = useState("");
+  const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
+    groupHeaderByRemoteId: {}
+  });
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
   const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
@@ -1790,6 +1827,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     () => ({
       async list() {
         const out = await api<ThreadListOut>("/api/threads");
+        const groupHeaderByRemoteId: Record<string, string> = {};
+        let previousGroupLabel = "";
+        for (const thread of out.threads || []) {
+          const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at);
+          if (groupLabel && groupLabel !== previousGroupLabel) {
+            groupHeaderByRemoteId[thread.id] = groupLabel;
+            previousGroupLabel = groupLabel;
+          }
+        }
+        setSessionGroupLabelContext({ groupHeaderByRemoteId });
         return {
           threads: (out.threads || []).map((thread) => ({
             status: thread.status,
@@ -2508,7 +2555,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   isAdvancedSettingsOpen: true
                 }))
               }
-              onOpenDrawer={() => setLayoutState((prev) => openWorkbenchDrawer(prev, "writing"))}
+              onToggleDrawer={() =>
+                setLayoutState((prev) => (prev.isRightDrawerOpen ? closeWorkbenchDrawer(prev) : openWorkbenchDrawer(prev)))
+              }
+              onOpenAdmin={props.onOpenAdmin}
               runtimeSummary={runtimeSummaryText}
               drawerOpen={layoutState.isRightDrawerOpen}
               activeDrawerTab={layoutState.activeRightDrawerTab}
@@ -2535,21 +2585,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       ) : (
                         <p className="session-rail-user-fallback">{currentUserName}</p>
                       )}
-                      {props.onOpenAdmin ? (
-                        <button type="button" className="picker-btn shell-switch-btn" onClick={props.onOpenAdmin}>
-                          进入管理台
-                        </button>
-                      ) : null}
                     </div>
                   }
                 >
                   <SessionSearchContext.Provider value={sessionSearchValue}>
-                    <ThreadList.Items
-                      components={{
-                        ThreadListItem: AgentThreadListItem as any
-                      }}
-                    />
-                      </SessionSearchContext.Provider>
+                    <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+                      <ThreadList.Items
+                        components={{
+                          ThreadListItem: AgentThreadListItem as any
+                        }}
+                      />
+                    </SessionGroupLabelContext.Provider>
+                  </SessionSearchContext.Provider>
                     </SessionRail>
                   </ThreadList.Root>
                 </Panel>

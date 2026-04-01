@@ -1,5 +1,5 @@
 import { Button, Space, Tooltip } from "antd";
-import { LayoutPanelLeft, Settings, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { LayoutPanelLeft, Settings, PanelRightClose, PanelRightOpen, Shield } from "lucide-react";
 
 import type { WorkbenchTab } from "./layout-state";
 
@@ -12,7 +12,8 @@ export function PortalTopBar(props: {
   sessionRailCollapsed?: boolean;
   onToggleRail(): void;
   onOpenAdvancedSettings(): void;
-  onOpenDrawer(): void;
+  onToggleDrawer(): void;
+  onOpenAdmin?: () => void;
   runtimeSummary?: string;
   drawerOpen?: boolean;
   activeDrawerTab?: WorkbenchTab;
@@ -52,6 +53,18 @@ export function PortalTopBar(props: {
         ) : null}
 
         <Space size={8} className="portal-topbar-action-group">
+          {props.onOpenAdmin ? (
+            <Tooltip title="进入管理台" placement="bottom">
+              <Button
+                type="text"
+                className="portal-topbar-ghost-btn"
+                icon={<Shield size={18} />}
+                onClick={props.onOpenAdmin}
+                style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+                aria-label="进入管理台"
+              />
+            </Tooltip>
+          ) : null}
           <Tooltip title="运行参数" placement="bottom">
             <Button 
               type="text" 
@@ -62,14 +75,14 @@ export function PortalTopBar(props: {
               aria-label="高级设置"
             />
           </Tooltip>
-          <Tooltip title={isRightPanelOpen ? "关闭工具台" : "打开工具台"} placement="bottomLeft">
+          <Tooltip title={isRightPanelOpen ? "关闭工作台" : "打开工作台"} placement="bottomLeft">
             <Button 
               type="text" 
               className="portal-topbar-ghost-btn"
               icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
-              onClick={props.onOpenDrawer}
+              onClick={props.onToggleDrawer}
               style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="打开/关闭工具台"
+              aria-label="打开/关闭工作台"
             />
           </Tooltip>
         </Space>
