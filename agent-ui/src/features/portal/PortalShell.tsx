@@ -46,7 +46,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, Tag } from "antd";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import {
@@ -825,6 +825,47 @@ function extractLatestPrompt(messages: unknown): string {
   return "";
 }
 
+function isBlobFile(value: unknown): value is Blob {
+  if (typeof Blob === "undefined") return false;
+  return value instanceof Blob;
+}
+
+function sanitizeUserAttachments(raw: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((attachment) => {
+      const obj = asRecord(attachment);
+      if (!obj) return null;
+
+      const cleaned: Record<string, unknown> = { ...obj };
+      if (!isBlobFile(cleaned.file)) {
+        delete cleaned.file;
+      }
+
+      if (!Array.isArray(cleaned.content)) {
+        cleaned.content = [];
+      }
+
+      return cleaned;
+    })
+    .filter((attachment): attachment is Record<string, unknown> => !!attachment);
+}
+
+function sanitizeMessageForPersistence(message: unknown): unknown {
+  const obj = asRecord(message);
+  if (!obj) return message;
+
+  if (obj.role !== "user") {
+    return message;
+  }
+
+  return {
+    ...obj,
+    attachments: sanitizeUserAttachments(obj.attachments)
+  };
+}
+
 function reviveMessage(message: unknown): unknown {
   const obj = asRecord(message);
   if (!obj) return message;
@@ -865,8 +906,8 @@ function reviveMessage(message: unknown): unknown {
     }
   }
 
-  if (role === "user" && !Array.isArray(revived.attachments)) {
-    revived.attachments = [];
+  if (role === "user") {
+    revived.attachments = sanitizeUserAttachments(revived.attachments);
   }
 
   revived.metadata = fixedMetadata;
@@ -1107,6 +1148,24 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
 
   return rows;
 }
+
+const AssistantThinkingFooter: FC = () => {
+  const isRunning = useAuiState((s) => s.message.status?.type === "running");
+  if (!isRunning) return null;
+
+  return (
+    <div className="assistant-thinking-row" role="status" aria-live="polite" aria-label="Assistant is thinking">
+      <Tag className="assistant-thinking-tag" color="processing">
+        <span className="assistant-thinking-label">Thinking</span>
+        <span className="assistant-thinking-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </Tag>
+    </div>
+  );
+};
 
 const AgentAssistantMessage: FC = () => {
   return (
@@ -1369,18 +1428,19 @@ const AgentRuntimeAdapterProvider: FC<
         const init = await aui.threadListItem().initialize();
         const remoteId = init.remoteId;
         const state = aui.threadListItem().getState();
+        const messageForPersistence = sanitizeMessageForPersistence(item.message);
         const hasTitle =
           state.remoteId === remoteId && typeof state.title === "string" && state.title.trim().length > 0;
         await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
           method: "POST",
           json: {
             parent_id: item.parentId ?? null,
-            message: item.message,
+            message: messageForPersistence,
             run_config: item.runConfig
           }
         });
 
-        const firstUserText = userTextFromUnknownMessage(item.message);
+        const firstUserText = userTextFromUnknownMessage(messageForPersistence);
         const shouldGenerateTitle =
           !hasTitle &&
           !!firstUserText &&
@@ -2479,6 +2539,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           allowFeedbackPositive: true,
           allowFeedbackNegative: true,
           components: {
+            Footer: AssistantThinkingFooter as any,
             ToolFallback: HiddenToolFallback as any
           }
         }}
