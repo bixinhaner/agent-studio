@@ -7,11 +7,14 @@ type KnowledgeSetRecord = {
   name: string;
   slug: string;
   status: string;
+  sourceType: string;
 };
 
 type KnowledgeSetRepositoryLike = {
   list(): Promise<KnowledgeSetRecord[]>;
 };
+
+const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
 
 export function createResourcesPortalRouter(options: {
   knowledgeSets: KnowledgeSetRepositoryLike;
@@ -31,7 +34,9 @@ export function createResourcesPortalRouter(options: {
     const departmentIds = await options.listDepartmentIdsForUser(currentUser.id);
 
     const allKnowledgeSets = await options.knowledgeSets.list();
-    const activeKnowledgeSets = allKnowledgeSets.filter((knowledgeSet) => knowledgeSet.status === "active");
+    const activeKnowledgeSets = allKnowledgeSets.filter(
+      (knowledgeSet) => knowledgeSet.status === "active" && knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE
+    );
     const visibleKnowledgeSetIds = await options.policies.filterAllowedResources({
       userId: currentUser.id,
       roleIds,

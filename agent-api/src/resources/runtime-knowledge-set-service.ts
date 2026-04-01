@@ -60,6 +60,7 @@ type SecurityAlertServiceLike = {
 };
 
 const KNOWLEDGE_SET_METADATA_KEY = "_agentStudioKnowledgeSets";
+const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
 
 function normalizeIdList(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
@@ -173,7 +174,10 @@ export class RuntimeKnowledgeSetService {
 
     const knowledgeSetById = new Map(
       (await this.options.knowledgeSets.list())
-        .filter((knowledgeSet) => knowledgeSet.status === "active")
+        .filter(
+          (knowledgeSet) =>
+            knowledgeSet.status === "active" && trimOrUndefined(knowledgeSet.sourceType) === MANAGED_UPLOAD_SOURCE_TYPE
+        )
         .map((knowledgeSet) => [knowledgeSet.id, knowledgeSet] as const)
     );
 
@@ -219,14 +223,7 @@ export class RuntimeKnowledgeSetService {
       if (!knowledgeSet) {
         throw new Error("knowledge set 不存在或未启用");
       }
-      if (knowledgeSet.sourceType === "managed_upload") {
-        return this.options.storage.resolveReadableMountPath(knowledgeSetId);
-      }
-      const mountPath = trimOrUndefined(knowledgeSet.rootPath);
-      if (!mountPath) {
-        throw new Error("knowledge set 缺少可挂载路径");
-      }
-      return mountPath;
+      return this.options.storage.resolveReadableMountPath(knowledgeSetId);
     });
 
     if (this.options.resourceAccessLogs) {

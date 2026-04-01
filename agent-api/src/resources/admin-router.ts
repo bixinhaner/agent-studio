@@ -5,8 +5,10 @@ import type { ResourcePolicyRecord } from "../persistence/resource-policy-reposi
 import { deleteFile, renameFile, scanDirectory } from "./filesystem-knowledge-set-ops.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
+const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
+
 type KnowledgeSetRepositoryLike = {
-  list(): Promise<unknown[]>;
+  list(): Promise<Array<{ sourceType?: string; slug?: string } & Record<string, unknown>>>;
   create(payload: {
     organizationId?: string;
     name: string;
@@ -95,6 +97,15 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
 
+function detailFromKnowledgeSetCreateError(error: unknown): string {
+  const message = detailFromError(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes("unique constraint failed") && normalized.includes("slug")) {
+    return "资料集 slug 已存在，请更换资料集名称后重试";
+  }
+  return message;
+}
+
 function isNotFoundError(error: unknown): boolean {
   const message = detailFromError(error).toLowerCase();
   return message.includes("不存在") || message.includes("not found");
@@ -127,15 +138,75 @@ function withMultipartFiles(fieldName: string) {
   };
 }
 
-function requireFilesystemRootPath(
-  validateFilesystemPath: (input?: string | null) => string,
-  sourceType: string,
-  rootPath: string | undefined
-): string | undefined {
-  if (sourceType !== "filesystem") {
-    return rootPath;
+function normalizeKnowledgeSetSourceType(value: unknown): typeof MANAGED_UPLOAD_SOURCE_TYPE {
+  const sourceType = toTrimmedString(value) ?? MANAGED_UPLOAD_SOURCE_TYPE;
+  if (sourceType !== MANAGED_UPLOAD_SOURCE_TYPE) {
+    throw new Error("filesystem 资料集已下线，仅支持 managed_upload");
   }
-  return validateFilesystemPath(rootPath);
+  return MANAGED_UPLOAD_SOURCE_TYPE;
+}
+
+function normalizeKnowledgeSetName(value: unknown): string {
+  const name = toTrimmedString(value);
+  if (!name) {
+    throw new Error("资料集名称不能为空");
+  }
+  return name;
+}
+
+function slugifyValue(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function normalizeKnowledgeSetSlug(value: unknown): string | undefined {
+  const rawSlug = toTrimmedString(value);
+  if (!rawSlug) return undefined;
+  const normalized = slugifyValue(rawSlug);
+  if (!normalized) {
+    throw new Error("资料集 slug 仅支持英文、数字和连字符");
+  }
+  return normalized;
+}
+
+function suggestUniqueSlug(base: string, existingSlugs: Iterable<string>): string {
+  const seed = slugifyValue(base) || "knowledge-set";
+  const taken = new Set(
+    Array.from(existingSlugs)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!taken.has(seed)) return seed;
+  let index = 2;
+  let candidate = `${seed}-${index}`;
+  while (taken.has(candidate)) {
+    index += 1;
+    candidate = `${seed}-${index}`;
+  }
+  return candidate;
+}
+
+function resolveCreateKnowledgeSetSlug(input: {
+  requestedSlug: unknown;
+  name: string;
+  existingKnowledgeSets: Array<{ slug?: string } & Record<string, unknown>>;
+}): string {
+  const existingSlugs = input.existingKnowledgeSets
+    .map((knowledgeSet) => toTrimmedString(knowledgeSet.slug))
+    .filter((slug): slug is string => Boolean(slug));
+  const requestedSlug = normalizeKnowledgeSetSlug(input.requestedSlug);
+  if (requestedSlug) {
+    const taken = new Set(existingSlugs.map((item) => item.toLowerCase()));
+    if (taken.has(requestedSlug)) {
+      throw new Error("资料集 slug 已存在，请更换资料集名称后重试");
+    }
+    return requestedSlug;
+  }
+  return suggestUniqueSlug(input.name, existingSlugs);
 }
 
 function parsePolicyArray(body: unknown, options?: { requireExplicitArray?: boolean }): unknown[] {
@@ -207,16 +278,12 @@ function parsePatchKnowledgeSetItem(body: unknown): { action: "rename"; relative
 function resolveKnowledgeSetRoot(
   knowledgeSet: { sourceType?: string; rootPath?: string },
   storage: KnowledgeSetStorage,
-  validateFilesystemPath: (input?: string | null) => string,
   knowledgeSetId: string
 ): string {
-  if (knowledgeSet.sourceType === "managed_upload") {
+  if (knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE) {
     return storage.resolveReadableMountPath(knowledgeSetId);
   }
-  if (knowledgeSet.sourceType === "filesystem") {
-    return validateFilesystemPath(knowledgeSet.rootPath);
-  }
-  throw new Error("knowledge set sourceType does not support filesystem operations");
+  throw new Error("filesystem 资料集已下线，仅支持 managed_upload");
 }
 
 function parseReplacePoliciesRequest(body: unknown): {
@@ -319,33 +386,41 @@ export function createResourcesAdminRouter(options: {
   resourcePolicies: ResourcePolicyRepositoryLike;
   storage: KnowledgeSetStorage;
   requirePermission?: (permissionKey: string) => RequestHandler;
-  validateFilesystemPath?: (input?: string | null) => string;
   resourceAccessLogs?: ResourceAccessLogServiceLike;
 }): Router {
   const router = Router();
-  const validateFilesystemPath = options.validateFilesystemPath ?? ((input?: string | null) => input?.trim() ?? "");
   const requirePermission = options.requirePermission ?? ((_permissionKey: string) => (_req, _res, next) => next());
 
   router.get("/knowledge-sets", async (_req: Request, res: Response) => {
-    res.json({ knowledgeSets: await options.knowledgeSets.list() });
+    const knowledgeSets = await options.knowledgeSets.list();
+    res.json({
+      knowledgeSets: knowledgeSets.filter((knowledgeSet) => knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE)
+    });
   });
 
   router.post("/knowledge-sets", async (req: Request, res: Response) => {
     try {
-      const sourceType = String(req.body?.sourceType ?? "");
+      const name = normalizeKnowledgeSetName(req.body?.name);
+      const sourceType = normalizeKnowledgeSetSourceType(req.body?.sourceType);
+      const existingKnowledgeSets = await options.knowledgeSets.list();
+      const slug = resolveCreateKnowledgeSetSlug({
+        requestedSlug: req.body?.slug,
+        name,
+        existingKnowledgeSets
+      });
       const knowledgeSet = await options.knowledgeSets.create({
         organizationId: toTrimmedString(req.body?.organizationId),
-        name: String(req.body?.name ?? ""),
-        slug: String(req.body?.slug ?? ""),
+        name,
+        slug,
         description: toTrimmedString(req.body?.description),
-        status: toTrimmedString(req.body?.status),
+        status: toTrimmedString(req.body?.status) ?? "active",
         sourceType,
-        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, toTrimmedString(req.body?.rootPath)),
+        rootPath: undefined,
         storageKey: toTrimmedString(req.body?.storageKey)
       });
       res.status(201).json({ knowledgeSet });
     } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
+      res.status(400).json({ detail: detailFromKnowledgeSetCreateError(error) });
     }
   });
 
@@ -356,15 +431,20 @@ export function createResourcesAdminRouter(options: {
         res.status(404).json({ detail: "knowledge set 不存在" });
         return;
       }
-      const sourceType = String(req.body?.sourceType ?? existing.sourceType ?? "");
+      const sourceType = normalizeKnowledgeSetSourceType(req.body?.sourceType ?? existing.sourceType);
+      const nextName = req.body?.name === undefined ? undefined : normalizeKnowledgeSetName(req.body?.name);
+      const nextSlug = req.body?.slug === undefined ? undefined : normalizeKnowledgeSetSlug(req.body?.slug);
+      if (req.body?.slug !== undefined && !nextSlug) {
+        throw new Error("资料集 slug 不能为空");
+      }
       const knowledgeSet = await options.knowledgeSets.update(req.params.knowledgeSetId, {
         organizationId: req.body?.organizationId,
-        name: req.body?.name,
-        slug: req.body?.slug,
+        name: nextName,
+        slug: nextSlug,
         description: req.body?.description,
         status: req.body?.status,
         sourceType,
-        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, req.body?.rootPath ?? existing.rootPath),
+        rootPath: undefined,
         storageKey: req.body?.storageKey
       });
       res.json({ knowledgeSet });
@@ -393,7 +473,7 @@ export function createResourcesAdminRouter(options: {
           res.status(404).json({ detail: "knowledge set 不存在" });
           return;
         }
-        const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+        const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, knowledgeSetId);
         const items = await scanDirectory(rootPath);
         await options.knowledgeSets.replaceItems(knowledgeSetId, items);
         if (options.resourceAccessLogs) {
@@ -426,7 +506,7 @@ export function createResourcesAdminRouter(options: {
         return;
       }
       const { relativePath } = parseDeleteKnowledgeSetItem(req.body);
-      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, knowledgeSetId);
       await deleteFile(rootPath, relativePath);
       const items = await scanDirectory(rootPath);
       await options.knowledgeSets.replaceItems(knowledgeSetId, items);
@@ -458,7 +538,7 @@ export function createResourcesAdminRouter(options: {
         return;
       }
       const { relativePath, nextRelativePath } = parsePatchKnowledgeSetItem(req.body);
-      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, validateFilesystemPath, knowledgeSetId);
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, knowledgeSetId);
       await renameFile(rootPath, relativePath, nextRelativePath);
       const items = await scanDirectory(rootPath);
       await options.knowledgeSets.replaceItems(knowledgeSetId, items);

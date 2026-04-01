@@ -1125,7 +1125,6 @@ registerCommonApiRoutes(app, {
     resourcePolicies,
     storage: knowledgeSetStorage,
     requirePermission,
-    validateFilesystemPath: resolveWorkspace,
     resourceAccessLogs
   }),
   modeAdminRouter: createModeAdminRouter({

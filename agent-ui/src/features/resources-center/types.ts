@@ -1,5 +1,5 @@
 export type ResourceStatusFilter = "all" | "active" | "disabled";
-export type ResourceTypeFilter = "all" | "filesystem" | "managed_upload";
+export type ResourceTypeFilter = "all" | "managed_upload";
 
 export type ResourcePolicySubjectType = "role" | "department" | "user";
 export type ResourcePolicyEffect = "allow" | "deny";
@@ -22,10 +22,10 @@ export type KnowledgeSetRecord = {
 export type CreateKnowledgeSetInput = {
   organizationId?: string;
   name: string;
-  slug: string;
+  slug?: string;
   description?: string;
   status?: string;
-  sourceType: string;
+  sourceType?: string;
   rootPath?: string;
   storageKey?: string;
 };

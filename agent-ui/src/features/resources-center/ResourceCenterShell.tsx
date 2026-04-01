@@ -4,20 +4,13 @@ import { Alert, Button, Card, Input, Spin, Tag, Typography } from "antd";
 import { createKnowledgeSet, fetchKnowledgeSets } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
 import type {
-  CreateKnowledgeSetInput,
   KnowledgeSetRecord,
-  ResourceStatusFilter,
-  ResourceTypeFilter
+  ResourceStatusFilter
 } from "./types";
 
 type CreatePanelState = {
   name: string;
-  slug: string;
   description: string;
-  sourceType: "filesystem" | "managed_upload";
-  status: string;
-  rootPath: string;
-  storageKey: string;
 };
 
 function matchesSearch(input: string, values: Array<string | undefined>) {
@@ -39,13 +32,14 @@ function formatLocalDateTime(value: string | null | undefined): string {
 function createInitialPanelState(): CreatePanelState {
   return {
     name: "",
-    slug: "",
-    description: "",
-    sourceType: "filesystem",
-    status: "active",
-    rootPath: "",
-    storageKey: ""
+    description: ""
   };
+}
+
+function knowledgeSetCardSummary(knowledgeSet: KnowledgeSetRecord): string {
+  const description = knowledgeSet.description?.trim();
+  if (description) return description;
+  return "创建后可在详情中上传文件或压缩包。";
 }
 
 export function ResourceCenterShell() {
@@ -54,7 +48,6 @@ export function ResourceCenterShell() {
   const [errorText, setErrorText] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ResourceStatusFilter>("all");
-  const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [selectedKnowledgeSetId, setSelectedKnowledgeSetId] = useState<string | null>(null);
   const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
   const [createSaving, setCreateSaving] = useState(false);
@@ -86,8 +79,7 @@ export function ResourceCenterShell() {
   const filteredKnowledgeSets = useMemo(() => {
     const matched = knowledgeSets.filter((knowledgeSet) => {
       if (statusFilter !== "all" && knowledgeSet.status !== statusFilter) return false;
-      if (typeFilter !== "all" && knowledgeSet.sourceType !== typeFilter) return false;
-      return matchesSearch(search, [knowledgeSet.name, knowledgeSet.slug, knowledgeSet.description, knowledgeSet.rootPath]);
+      return matchesSearch(search, [knowledgeSet.name, knowledgeSet.slug, knowledgeSet.description]);
     });
     return matched.sort((left, right) => {
       const leftTime = Date.parse(left.updatedAt);
@@ -97,7 +89,7 @@ export function ResourceCenterShell() {
       }
       return rightTime - leftTime;
     });
-  }, [knowledgeSets, search, statusFilter, typeFilter]);
+  }, [knowledgeSets, search, statusFilter]);
 
   const selectedKnowledgeSet = filteredKnowledgeSets.find((item) => item.id === selectedKnowledgeSetId) ?? null;
 
@@ -116,8 +108,6 @@ export function ResourceCenterShell() {
   const activeListCount = filteredKnowledgeSets.length;
   const activeEnabledCount = filteredKnowledgeSets.filter((item) => item.status === "active").length;
   const activeDisabledCount = Math.max(activeListCount - activeEnabledCount, 0);
-  const selectedResourceSource =
-    selectedKnowledgeSet?.rootPath || selectedKnowledgeSet?.storageKey || "未设置";
 
   function handleKnowledgeSetUpdated(updatedKnowledgeSet: KnowledgeSetRecord) {
     setKnowledgeSets((current) =>
@@ -140,25 +130,22 @@ export function ResourceCenterShell() {
 
   async function handleCreateSave() {
     if (!createPanel) return;
+    const trimmedName = createPanel.name.trim();
+    if (!trimmedName) {
+      setCreateErrorText("请填写资料集名称");
+      return;
+    }
     setCreateSaving(true);
     setCreateErrorText("");
     try {
-      const payload: CreateKnowledgeSetInput = {
-        name: createPanel.name.trim(),
-        slug: createPanel.slug.trim(),
-        description: createPanel.description.trim(),
-        status: createPanel.status,
-        sourceType: createPanel.sourceType,
-        ...(createPanel.sourceType === "filesystem"
-          ? { rootPath: createPanel.rootPath.trim() }
-          : { storageKey: createPanel.storageKey.trim() })
-      };
-      const response = await createKnowledgeSet(payload);
+      const response = await createKnowledgeSet({
+        name: trimmedName,
+        description: createPanel.description.trim()
+      });
       setKnowledgeSets((current) => [...current, response.knowledgeSet]);
       setSelectedKnowledgeSetId(response.knowledgeSet.id);
       setSearch("");
       setStatusFilter("all");
-      setTypeFilter("all");
       closeCreatePanel();
     } catch (error) {
       setCreateErrorText(error instanceof Error ? error.message : "创建资料集失败");
@@ -202,7 +189,7 @@ export function ResourceCenterShell() {
           <span className="field-label">搜索资料集</span>
           <Input
             aria-label="搜索资料集"
-            placeholder="名称、slug、路径或描述"
+            placeholder="名称或描述"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             allowClear
@@ -223,19 +210,6 @@ export function ResourceCenterShell() {
           </select>
         </label>
 
-        <label className="field resource-center-filter">
-          <span className="field-label">类型筛选</span>
-          <select
-            className="field-input"
-            aria-label="类型筛选"
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value as ResourceTypeFilter)}
-          >
-            <option value="all">全部类型</option>
-            <option value="filesystem">filesystem</option>
-            <option value="managed_upload">managed_upload</option>
-          </select>
-        </label>
       </div>
 
       <div className="resource-center-stats-row" aria-label="资源统计">
@@ -252,8 +226,8 @@ export function ResourceCenterShell() {
           <strong className="resource-center-stat-value">{activeDisabledCount}</strong>
         </article>
         <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">选中资源来源</span>
-          <strong className="resource-center-stat-value">{selectedResourceSource}</strong>
+          <span className="resource-center-stat-label">新建默认状态</span>
+          <strong className="resource-center-stat-value">active</strong>
         </article>
       </div>
 
@@ -284,12 +258,11 @@ export function ResourceCenterShell() {
                           {knowledgeSet.status}
                         </Tag>
                       </span>
-                      <span className="resource-center-item-slug">{knowledgeSet.slug}</span>
                       <span className="resource-center-item-meta">
-                        <Tag>{knowledgeSet.sourceType}</Tag>
+                        <Tag>{knowledgeSet.sourceType === "managed_upload" ? "托管上传" : knowledgeSet.sourceType}</Tag>
                       </span>
                       <span className="resource-center-item-note">
-                        {knowledgeSet.rootPath || knowledgeSet.storageKey || "未设置来源"}
+                        {knowledgeSetCardSummary(knowledgeSet)}
                       </span>
                     </button>
                   </li>
@@ -309,7 +282,7 @@ export function ResourceCenterShell() {
               <div className="resource-center-section-header">
                 <div>
                   <h3>新建资料集</h3>
-                  <p>填写最小必需字段后创建资料集，创建成功后会自动进入详情页。</p>
+                  <p>只需填写名称。系统会自动生成标识并默认启用，创建后进入详情继续上传资料。</p>
                 </div>
               </div>
 
@@ -318,7 +291,7 @@ export function ResourceCenterShell() {
               ) : null}
 
               <div className="resource-center-form-grid">
-                <label className="field">
+                <label className="field resource-center-form-span-2">
                   <span className="field-label">新建资料集名称</span>
                   <input
                     className="field-input"
@@ -332,88 +305,14 @@ export function ResourceCenterShell() {
                 </label>
 
                 <label className="field">
-                  <span className="field-label">新建资料集 slug</span>
-                  <input
-                    className="field-input"
-                    aria-label="新建资料集 slug"
-                    value={createPanel.slug}
-                    disabled={createSaving}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current))
-                    }
-                  />
+                  <span className="field-label">资料来源</span>
+                  <input className="field-input" aria-label="资料来源" value="托管上传" disabled />
                 </label>
 
                 <label className="field">
-                  <span className="field-label">新建资料集类型</span>
-                  <select
-                    className="field-input"
-                    aria-label="新建资料集类型"
-                    value={createPanel.sourceType}
-                    disabled={createSaving}
-                    onChange={(event) =>
-                      setCreatePanel((current) =>
-                        current
-                          ? {
-                              ...current,
-                              sourceType: event.target.value as "filesystem" | "managed_upload",
-                              rootPath: event.target.value === "filesystem" ? current.rootPath : "",
-                              storageKey: event.target.value === "managed_upload" ? current.storageKey : ""
-                            }
-                          : current
-                      )
-                    }
-                  >
-                    <option value="filesystem">filesystem</option>
-                    <option value="managed_upload">managed_upload</option>
-                  </select>
+                  <span className="field-label">默认状态</span>
+                  <input className="field-input" aria-label="默认状态" value="active" disabled />
                 </label>
-
-                <label className="field">
-                  <span className="field-label">新建资料集状态</span>
-                  <select
-                    className="field-input"
-                    aria-label="新建资料集状态"
-                    value={createPanel.status}
-                    disabled={createSaving}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, status: event.target.value } : current))
-                    }
-                  >
-                    <option value="active">active</option>
-                    <option value="disabled">disabled</option>
-                  </select>
-                </label>
-
-                {createPanel.sourceType === "filesystem" ? (
-                  <label className="field resource-center-form-span-2">
-                    <span className="field-label">新建资料集根目录</span>
-                    <input
-                      className="field-input"
-                      aria-label="新建资料集根目录"
-                      value={createPanel.rootPath}
-                      disabled={createSaving}
-                      onChange={(event) =>
-                        setCreatePanel((current) => (current ? { ...current, rootPath: event.target.value } : current))
-                      }
-                    />
-                  </label>
-                ) : null}
-
-                {createPanel.sourceType === "managed_upload" ? (
-                  <label className="field resource-center-form-span-2">
-                    <span className="field-label">新建资料集存储键</span>
-                    <input
-                      className="field-input"
-                      aria-label="新建资料集存储键"
-                      value={createPanel.storageKey}
-                      disabled={createSaving}
-                      onChange={(event) =>
-                        setCreatePanel((current) => (current ? { ...current, storageKey: event.target.value } : current))
-                      }
-                    />
-                  </label>
-                ) : null}
 
                 <label className="field resource-center-form-span-2">
                   <span className="field-label">新建资料集描述</span>
