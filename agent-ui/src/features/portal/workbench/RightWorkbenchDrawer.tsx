@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Drawer, Tabs } from "antd";
+import { Tabs } from "antd";
 
 import type { WorkbenchTab } from "./layout-state";
 
@@ -11,17 +11,10 @@ export function RightWorkbenchDrawer(props: {
   writingContent: ReactNode;
   collaborationContent: ReactNode;
 }) {
+  if (!props.open) return null;
+
   return (
-    <Drawer
-      title="工具台"
-      placement="right"
-      width="min(420px, calc(100vw - 16px))"
-      open={props.open}
-      onClose={props.onClose}
-      destroyOnClose={false}
-      forceRender
-      rootClassName="workbench-right-drawer"
-    >
+    <div style={{ padding: '16px', height: '100%', overflowY: 'auto' }}>
       <Tabs
         activeKey={props.activeTab}
         onChange={(key) => props.onTabChange(key as WorkbenchTab)}
@@ -30,6 +23,6 @@ export function RightWorkbenchDrawer(props: {
           { key: "collaboration", label: "协作面板", forceRender: true, children: props.collaborationContent }
         ]}
       />
-    </Drawer>
+    </div>
   );
 }

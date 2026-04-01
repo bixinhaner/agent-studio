@@ -44,6 +44,7 @@ import {
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
 import { ConfigProvider } from "antd";
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import {
@@ -2514,7 +2515,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             />
 
             <div className="portal-workbench-body">
-              <ThreadList.Root>
+              <PanelGroup orientation="horizontal" className="portal-workbench-layout">
+                {!layoutState.isSessionRailCollapsed && (
+                  <>
+                    <Panel defaultSize={20} minSize={15} maxSize={30} collapsible>
+                      <ThreadList.Root>
                 <SessionRail
                   collapsed={layoutState.isSessionRailCollapsed}
                   userName={currentUserName}
@@ -2544,20 +2549,30 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         ThreadListItem: AgentThreadListItem as any
                       }}
                     />
-                  </SessionSearchContext.Provider>
-                </SessionRail>
-              </ThreadList.Root>
+                      </SessionSearchContext.Provider>
+                    </SessionRail>
+                  </ThreadList.Root>
+                </Panel>
+                <PanelResizeHandle className="Resizer" />
+                </>
+                )}
 
-              <main className="portal-workbench-chat">
-                <div className="thread-wrap">
-                  {canUpload && !sharedThreadReadonly ? (
-                    <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
-                  ) : (
-                    threadContent
-                  )}
-                </div>
-              </main>
-            </div>
+                <Panel minSize={30}>
+                  <main className="portal-workbench-chat">
+                    <div className="thread-wrap">
+                      {canUpload && !sharedThreadReadonly ? (
+                        <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+                      ) : (
+                        threadContent
+                      )}
+                    </div>
+                  </main>
+                </Panel>
+
+                {layoutState.isRightDrawerOpen && (
+                  <>
+                    <PanelResizeHandle className="Resizer" />
+                    <Panel defaultSize={25} minSize={20} maxSize={40} className="right-drawer-panel">
 
             <RightWorkbenchDrawer
               open={layoutState.isRightDrawerOpen}
@@ -2597,6 +2612,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 </div>
               }
             />
+                    </Panel>
+                  </>
+                )}
+              </PanelGroup>
+            </div>
 
             <AdvancedSettingsPanel
               open={layoutState.isAdvancedSettingsOpen}
