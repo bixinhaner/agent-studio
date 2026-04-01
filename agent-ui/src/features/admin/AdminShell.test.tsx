@@ -85,6 +85,7 @@ const mockedFetchAdminOverview = vi.mocked(fetchAdminOverview);
 describe("AdminShell", () => {
   beforeEach(() => {
     mockedFetchAdminOverview.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("switches between overview, users, resources, capabilities, integrations, broadcasts, rbac, organization, and monitoring views", async () => {
@@ -199,12 +200,42 @@ describe("AdminShell", () => {
           displayName: "Alice Admin",
           email: "alice@example.com"
         }}
+        onSignOut={() => undefined}
       />
     );
 
     expect(await screen.findByText("Alice Admin")).toBeTruthy();
     expect(screen.getByText("超级管理员")).toBeTruthy();
     expect(screen.getByText("alice@example.com")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeTruthy();
+  });
+
+  it("confirms before signing out from the admin identity card", async () => {
+    mockedFetchAdminOverview.mockResolvedValue({
+      counts: {
+        users: 7,
+        threads: 13,
+        activeSessions: 3
+      }
+    });
+    const onSignOut = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <AdminShell
+        currentUser={{
+          id: "admin-1",
+          role: "super_admin",
+          displayName: "Alice Admin",
+          email: "alice@example.com"
+        }}
+        onSignOut={onSignOut}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "退出登录" }));
+    expect(window.confirm).toHaveBeenCalledWith("确认退出当前登录状态？");
+    expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
   it("renders a switch button back to the portal when provided", async () => {

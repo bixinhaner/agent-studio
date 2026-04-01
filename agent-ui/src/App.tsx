@@ -53,10 +53,16 @@ function AppContent() {
   }
 
   if (adminEligible && view === "admin") {
-    return <AdminShell currentUser={auth.user} onOpenPortal={() => setView("portal")} />;
+    return <AdminShell currentUser={auth.user} onOpenPortal={() => setView("portal")} onSignOut={() => void auth.signOut()} />;
   }
 
-  return <PortalShell currentUser={auth.user} onOpenAdmin={adminEligible ? () => setView("admin") : undefined} />;
+  return (
+    <PortalShell
+      currentUser={auth.user}
+      onOpenAdmin={adminEligible ? () => setView("admin") : undefined}
+      onSignOut={() => void auth.signOut()}
+    />
+  );
 }
 
 export default function App() {

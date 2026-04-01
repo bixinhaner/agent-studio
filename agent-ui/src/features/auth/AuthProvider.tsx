@@ -5,6 +5,7 @@ import {
   buildDingTalkAuthorizeUrl,
   createDingTalkSession,
   fetchDingTalkConfig,
+  logoutSession,
   fetchWhoAmI,
   redirectTo,
   type AuthUser
@@ -16,6 +17,7 @@ type AuthContextValue = {
   error: string | null;
   reload: () => Promise<void>;
   startSignIn: () => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -95,13 +97,25 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }
 
+  async function signOut() {
+    setError(null);
+    try {
+      await logoutSession();
+    } finally {
+      window.sessionStorage.removeItem(DINGTALK_NONCE_KEY);
+      setUser(null);
+      setLoading(false);
+    }
+  }
+
   const value = useMemo<AuthContextValue>(
     () => ({
       loading,
       user,
       error,
       reload,
-      startSignIn
+      startSignIn,
+      signOut
     }),
     [error, loading, user]
   );

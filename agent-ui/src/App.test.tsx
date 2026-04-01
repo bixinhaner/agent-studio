@@ -6,22 +6,28 @@ vi.mock("./features/auth/api", () => ({
 }));
 
 vi.mock("./features/admin/AdminShell", () => ({
-  AdminShell: (props: { onOpenPortal?: () => void }) => (
+  AdminShell: (props: { onOpenPortal?: () => void; onSignOut?: () => void }) => (
     <div>
       <div>admin-shell</div>
       <button type="button" onClick={() => props.onOpenPortal?.()}>
         to-portal
+      </button>
+      <button type="button" onClick={() => props.onSignOut?.()}>
+        sign-out
       </button>
     </div>
   )
 }));
 
 vi.mock("./features/portal/PortalShell", () => ({
-  PortalShell: (props: { onOpenAdmin?: () => void }) => (
+  PortalShell: (props: { onOpenAdmin?: () => void; onSignOut?: () => void }) => (
     <div>
       <div>portal-shell</div>
       <button type="button" onClick={() => props.onOpenAdmin?.()}>
         to-admin
+      </button>
+      <button type="button" onClick={() => props.onSignOut?.()}>
+        sign-out
       </button>
     </div>
   )

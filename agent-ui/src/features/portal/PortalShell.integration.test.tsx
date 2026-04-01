@@ -189,6 +189,7 @@ describe("PortalShell knowledge set integration", () => {
     mockThreadListItemSwitchTo.mockReset();
     mockComposerBeginEdit.mockReset();
     mockedApi.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("renders default and optional knowledge sets for the runtime workspace path", async () => {
@@ -324,12 +325,80 @@ describe("PortalShell knowledge set integration", () => {
           displayName: "Eve Employee",
           email: "eve@example.com"
         }}
+        onSignOut={() => undefined}
       />
     );
 
     expect(await screen.findByText("Eve Employee")).toBeTruthy();
     expect(screen.getByText("员工")).toBeTruthy();
     expect(screen.getByText("eve@example.com")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "退出登录" })).toBeTruthy();
+  });
+
+  it("confirms before signing out from the portal identity card", async () => {
+    mockedApi
+      .mockResolvedValueOnce({
+        modes: [
+          {
+            id: "mode-code",
+            label: "代码助手",
+            description: "面向代码任务",
+            runtimeProfile: {
+              id: "profile-code",
+              name: "Coding Default",
+              slug: "profile-code",
+              status: "active",
+              defaultModel: "gpt-5.4-pro",
+              allowedModels: ["gpt-5.4-pro"],
+              defaultReasoningEffort: "xhigh",
+              sandboxMode: "workspace-write",
+              approvalPolicy: "never",
+              networkAccessEnabled: true,
+              webSearchMode: "live"
+            },
+            allowDirectorySelection: true,
+            skillPackages: [{ id: "skill-package-code", label: "Code Tools" }],
+            workspaces: [
+              {
+                id: "/workspace/default",
+                label: "default",
+                isDefault: true,
+                allowDirectorySelection: true,
+                directoryScope: "descendants_only",
+                loadWorkspaceAgentsMd: true
+              }
+            ],
+            instructionSources: []
+          }
+        ],
+        workspaces: [{ id: "/workspace/default", label: "default", isDefault: true }],
+        canUpload: true,
+        defaults: {
+          mode: "mode-code",
+          workspace: "/workspace/default"
+        }
+      })
+      .mockResolvedValueOnce({
+        workspaces: []
+      });
+    const onSignOut = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(
+      <PortalShell
+        currentUser={{
+          id: "employee-1",
+          role: "employee",
+          displayName: "Eve Employee",
+          email: "eve@example.com"
+        }}
+        onSignOut={onSignOut}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "退出登录" }));
+    expect(window.confirm).toHaveBeenCalledWith("确认退出当前登录状态？");
+    expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
   it("renders an admin switch button for privileged users", async () => {

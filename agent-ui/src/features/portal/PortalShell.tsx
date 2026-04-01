@@ -1447,7 +1447,7 @@ const AgentRuntimeAdapterProvider: FC<
   return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
 };
 
-export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void }) {
+export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -2559,7 +2559,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   footer={
                     <div className="session-rail-footer-stack">
                       {props.currentUser ? (
-                        <UserIdentitySummary user={props.currentUser} compact />
+                        <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} />
                       ) : (
                         <p className="session-rail-user-fallback">{currentUserName}</p>
                       )}

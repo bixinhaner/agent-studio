@@ -44,6 +44,12 @@ export async function createDingTalkSession(input: {
   });
 }
 
+export async function logoutSession(): Promise<void> {
+  await api("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
 export function buildDingTalkAuthorizeUrl(config: DingTalkConfigResponse["config"]): string {
   const search = new URLSearchParams({
     client_id: config.client_id,

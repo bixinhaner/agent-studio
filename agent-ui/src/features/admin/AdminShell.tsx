@@ -122,7 +122,7 @@ function ConsolePulse(props: { overview: AdminOverview | null; loading: boolean 
   );
 }
 
-export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void }) {
+export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
@@ -172,7 +172,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           </div>
         </div>
         <p className="admin-description">统一管理用户、权限、资源、运行策略、系统设置和平台监控。</p>
-        {props.currentUser ? <UserIdentitySummary user={props.currentUser} /> : null}
+        {props.currentUser ? <UserIdentitySummary user={props.currentUser} onSignOut={props.onSignOut} /> : null}
         {props.onOpenPortal ? (
           <div className="shell-switch-row">
             <Button type="default" className="shell-switch-btn" onClick={props.onOpenPortal}>

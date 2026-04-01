@@ -152,6 +152,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  justify-content: space-between;
   margin-top: 14px;
   padding: 12px 14px;
   border: 1px solid #dbe6f5;
@@ -166,6 +167,7 @@ body {
 
 .user-identity-copy {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .user-identity-name {
@@ -191,6 +193,45 @@ body {
 .user-identity-divider {
   margin: 0 6px;
   color: #94a3b8;
+}
+
+.user-identity-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.user-identity-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #cbd9ee;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #475569;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background-color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.user-identity-action-btn:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+  background: #fff;
+}
+
+.user-identity-action-btn:active {
+  transform: scale(0.98);
+}
+
+.user-identity-action-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .shell-switch-row {
