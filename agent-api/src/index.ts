@@ -472,7 +472,19 @@ type ModeSelection = {
 
 function stableJson(value: unknown): string {
   try {
-    return JSON.stringify(value ?? null);
+    return JSON.stringify(value ?? null, (_key, currentValue) => {
+      if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
+        const record = currentValue as Record<string, unknown>;
+        const sorted = Object.keys(record)
+          .sort((left, right) => left.localeCompare(right))
+          .reduce<Record<string, unknown>>((acc, key) => {
+            acc[key] = record[key];
+            return acc;
+          }, {});
+        return sorted;
+      }
+      return currentValue;
+    });
   } catch {
     return String(value);
   }
