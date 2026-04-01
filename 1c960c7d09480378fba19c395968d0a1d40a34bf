@@ -1,0 +1,7 @@
+Session rail scroll lock hotfix
+
+- 修正选择器：补充 .aui-thread-list-root，避免根容器高度约束失效
+
+- 增加 min-height/flex/overflow 约束，阻止整列跟随滚动
+
+- 会话列表补充 overflow-x: hidden，仅允许纵向滚动
