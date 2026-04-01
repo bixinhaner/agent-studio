@@ -642,8 +642,16 @@ async function resolveEffectiveSessionWorkspaceRootPath(): Promise<string> {
   return appConfig.sessionWorkspaceRoot;
 }
 
-function buildThreadWorkspacePath(rootPath: string, userId: string, threadId: string): string {
-  const dateSegment = formatSessionDateSegment();
+function buildThreadWorkspacePath(
+  rootPath: string,
+  userId: string,
+  threadId: string,
+  createdAt?: string
+): string {
+  const parsedCreatedAt = createdAt ? new Date(createdAt) : undefined;
+  const dateSegment = formatSessionDateSegment(
+    parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime()) ? parsedCreatedAt : new Date()
+  );
   return path.join(
     rootPath,
     sanitizePathSegment(userId, "user"),
@@ -740,19 +748,34 @@ function getThreadUploadTempDir(threadId: string): string {
   return path.join(appConfig.uploadTempRoot, safeThreadId);
 }
 
+function getThreadWorkspaceUploadDir(workspacePath: string): string {
+  return path.join(workspacePath, ".uploads");
+}
+
+function ensureThreadUploadDirsInRunConfig(
+  codexRunConfig: Record<string, unknown> | undefined,
+  threadId: string,
+  workspacePath: string
+): Record<string, unknown> {
+  const withWorkspaceUpload = ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath));
+  return ensureThreadUploadInRunConfig(withWorkspaceUpload, getThreadUploadTempDir(threadId));
+}
+
 async function createSession(options: SessionOptions, threadId?: string) {
   if (threadId) {
-    await fs.mkdir(getThreadUploadTempDir(threadId), { recursive: true });
+    await fs.mkdir(getThreadWorkspaceUploadDir(options.workspace), { recursive: true });
   }
+
+  const sessionCodexRunConfig = threadId
+    ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
+    : options.codexRunConfig;
 
   const started = await startLiveRuntimeSession({
     runtime,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: options.codexRunConfig,
-    threadId,
-    getThreadUploadDir: getThreadUploadTempDir
+    codexRunConfig: sessionCodexRunConfig
   });
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
@@ -868,12 +891,15 @@ async function ensureThreadSession(
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
-  const workspaceSelection = await allocateThreadWorkspacePath({
+  const modeSelection = await resolveModeSelection({
     currentUser,
-    threadId,
     modeHint
   });
-  const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, workspaceSelection.modeId);
+  const workspacePath =
+    trimOrUndefined(thread.workspace) ||
+    buildThreadWorkspacePath(modeSelection.workspaceRootPath, currentUser.id, threadId, thread.createdAt);
+  await fs.mkdir(workspacePath, { recursive: true });
+  const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId);
   const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
   const desiredReasoning = normalizeReasoningEffortForModel(
     desiredModel,
@@ -881,20 +907,17 @@ async function ensureThreadSession(
   );
   const desiredBaseCodexRunConfig = await resolveKnowledgeSetRunConfig({
     currentUser,
-    workspacePath: workspaceSelection.workspacePath,
+    workspacePath,
     knowledgeSetIds: patch?.knowledge_set_ids,
     codexRunConfig: normalizedSourceCodexRunConfig
   });
-  const desiredCodexRunConfig = ensureThreadUploadInRunConfig(
-    desiredBaseCodexRunConfig,
-    getThreadUploadTempDir(threadId)
-  );
+  const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
 
   const desired: SessionOptions = {
     userId: thread.userId ?? currentUser.id,
     model: desiredModel,
     reasoningEffort: desiredReasoning,
-    workspace: workspaceSelection.workspacePath,
+    workspace: workspacePath,
     codexRunConfig: desiredCodexRunConfig
   };
 
@@ -1201,7 +1224,14 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
       return;
     }
 
-    const uploadDir = getThreadUploadTempDir(threadId);
+    let workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
+      workspacePath = buildThreadWorkspacePath(workspaceRootPath, currentUser.id, threadId, thread.createdAt);
+      await threads.update(threadId, { workspace: workspacePath });
+    }
+
+    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
     await fs.mkdir(uploadDir, { recursive: true });
 
     const id = randomUUID().replace(/-/g, "").slice(0, 12);
@@ -1246,13 +1276,20 @@ app.post("/api/session", async (req: Request, res: Response) => {
           let workspace = existing.workspace;
           let modeId = modeHint;
           if (existing.threadId) {
-            const allocated = await allocateThreadWorkspacePath({
+            const selection = await resolveModeSelection({
               currentUser,
-              threadId: existing.threadId,
               modeHint
             });
-            workspace = allocated.workspacePath;
-            modeId = allocated.modeId;
+            modeId = selection.modeId;
+            const ownedThread = await threads.getOwned(existing.threadId, currentUser.id);
+            workspace =
+              trimOrUndefined(ownedThread?.workspace) ||
+              trimOrUndefined(workspace) ||
+              buildThreadWorkspacePath(selection.workspaceRootPath, currentUser.id, existing.threadId, ownedThread?.createdAt);
+            await fs.mkdir(workspace, { recursive: true });
+            if (ownedThread && trimOrUndefined(ownedThread.workspace) !== workspace) {
+              await threads.update(existing.threadId, { workspace });
+            }
           } else if (input.codex_run_config || !workspace || !modeId) {
             const allocated = await allocateDetachedSessionWorkspacePath({
               currentUser,
@@ -1277,6 +1314,13 @@ app.post("/api/session", async (req: Request, res: Response) => {
             knowledgeSetIds: input.knowledge_set_ids,
             codexRunConfig: normalizedSourceCodexRunConfig
           });
+          const runtimeCodexRunConfig =
+            existing.threadId && trimOrUndefined(workspace)
+              ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existing.threadId, workspace)
+              : nextCodexRunConfig;
+          if (existing.threadId && trimOrUndefined(workspace)) {
+            await fs.mkdir(getThreadWorkspaceUploadDir(workspace), { recursive: true });
+          }
           await assertQuotaAllowsNewSession({
             currentUser,
             model: (input.model || existing.model).trim(),
@@ -1290,8 +1334,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
             workspace,
-            codexRunConfig: nextCodexRunConfig,
-            getThreadUploadDir: getThreadUploadTempDir,
+            codexRunConfig: runtimeCodexRunConfig,
             persist: async (payload) =>
               sessions.update(existingId, {
                 model: payload.model,
@@ -1449,7 +1492,11 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
       await sessions.remove(thread.sessionId);
       liveRuntimeThreads.delete(thread.sessionId);
     }
+    const workspacePath = trimOrUndefined(thread.workspace);
     await threads.delete(threadId);
+    if (workspacePath) {
+      await fs.rm(workspacePath, { recursive: true, force: true });
+    }
     await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });
     res.json({ ok: true });
   } catch (error) {
