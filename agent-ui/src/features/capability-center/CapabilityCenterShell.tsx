@@ -1,5 +1,6 @@
+import { ReloadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Input, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from "antd";
 
 import {
   createAgentMode,
@@ -68,6 +69,18 @@ const VISIBILITY_FILTER_LABELS: Record<CapabilityVisibilityFilter, string> = {
   visible: "仅对用户可见",
   hidden: "仅管理员可见"
 };
+
+const STATUS_FILTER_OPTIONS: Array<{ label: string; value: CapabilityStatusFilter }> = [
+  { label: "全部状态", value: "all" },
+  { label: "启用中", value: "active" },
+  { label: "已禁用", value: "disabled" }
+];
+
+const VISIBILITY_FILTER_OPTIONS: Array<{ label: string; value: CapabilityVisibilityFilter }> = [
+  { label: VISIBILITY_FILTER_LABELS.all, value: "all" },
+  { label: VISIBILITY_FILTER_LABELS.visible, value: "visible" },
+  { label: VISIBILITY_FILTER_LABELS.hidden, value: "hidden" }
+];
 
 const DEFAULT_RUN_PROFILE_MODEL = "gpt-5.4";
 
@@ -165,6 +178,13 @@ function toListText(items: string[]) {
   return items.length > 0 ? items.join(", ") : "-";
 }
 
+function statusTagColor(status: string): string {
+  if (status === "active") return "success";
+  if (status === "draft") return "warning";
+  if (status === "error") return "error";
+  return "default";
+}
+
 function CapabilitySummaryCard(props: {
   tab: CapabilityCenterTab;
   resource: AgentModeRecord | SkillPackageRecord | RunProfileRecord;
@@ -216,7 +236,7 @@ function CapabilitySummaryCard(props: {
           </div>
         </div>
 
-        <p className="capability-center-detail-note">后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。</p>
+        <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
       </section>
     );
   }
@@ -264,7 +284,7 @@ function CapabilitySummaryCard(props: {
           </div>
         </div>
 
-        <p className="capability-center-detail-note">后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。</p>
+        <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
       </section>
     );
   }
@@ -315,7 +335,7 @@ function CapabilitySummaryCard(props: {
         </div>
       </div>
 
-      <p className="capability-center-detail-note">后续任务会在这里接入完整的编辑器、绑定编辑和授权编辑。</p>
+      <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
     </section>
   );
 }
@@ -337,6 +357,7 @@ export function CapabilityCenterShell() {
   const [createSlugEdited, setCreateSlugEdited] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -367,7 +388,7 @@ export function CapabilityCenterShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadNonce]);
 
   useEffect(() => {
     if (tab === "run_profile" && visibilityFilter !== "all") {
@@ -574,38 +595,36 @@ export function CapabilityCenterShell() {
   }
 
   return (
-    <Card className="admin-card capability-center-shell resource-center-shell antd-admin-card">
-      <div className="admin-section-header">
+    <Card className="admin-card capability-center-shell resource-center-shell antd-admin-card admin-workspace-shell">
+      <div className="admin-section-header admin-workspace-header">
         <div>
           <Typography.Title level={4} className="admin-card-heading">
             能力配置中心
           </Typography.Title>
           <Typography.Paragraph>统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Paragraph>
         </div>
-        <div className="resource-center-create-row">
+        <Space wrap>
+          <Tag color="blue">{resourceCountLabel} {visibleCount}</Tag>
+          <Tag color={enabledCount > 0 ? "success" : "default"}>active {enabledCount}</Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
+            刷新列表
+          </Button>
           <Button type="primary" onClick={openCreatePanel} disabled={loading}>
             新建能力资源
           </Button>
-        </div>
+        </Space>
       </div>
 
-      <div className="resource-center-type-tabs" role="tablist" aria-label="能力资源类型">
-        {CAPABILITY_TABS.map((item) => (
-          <Button
-            key={item.id}
-            type={tab === item.id ? "primary" : "default"}
-            role="tab"
-            aria-selected={tab === item.id}
-            aria-label={item.label}
-            className={tab === item.id ? "resource-center-type-tab active" : "resource-center-type-tab"}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </Button>
-        ))}
+      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="能力资源类型">
+        <Segmented
+          block
+          value={tab}
+          options={CAPABILITY_TABS.map((item) => ({ label: item.label, value: item.id }))}
+          onChange={(value) => setTab(value as CapabilityCenterTab)}
+        />
       </div>
 
-      <div className="resource-center-toolbar capability-center-toolbar">
+      <div className="resource-center-toolbar capability-center-toolbar admin-workspace-toolbar">
         <label className="field resource-center-search">
           <span className="field-label">搜索资源</span>
           <Input
@@ -617,33 +636,25 @@ export function CapabilityCenterShell() {
           />
         </label>
 
-        <label className="field resource-center-filter">
+        <label className="field resource-center-filter admin-workspace-filter">
           <span className="field-label">状态筛选</span>
-          <select
-            className="field-input"
+          <Select
             aria-label="状态筛选"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as CapabilityStatusFilter)}
-          >
-            <option value="all">全部状态</option>
-            <option value="active">启用中</option>
-            <option value="disabled">已禁用</option>
-          </select>
+            options={STATUS_FILTER_OPTIONS}
+            onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
+          />
         </label>
 
-        <label className="field resource-center-filter">
+        <label className="field resource-center-filter admin-workspace-filter">
           <span className="field-label">可见性筛选</span>
-          <select
-            className="field-input"
+          <Select
             aria-label="可见性筛选"
             value={visibilityDisabled ? "all" : visibilityFilter}
             disabled={visibilityDisabled}
-            onChange={(event) => setVisibilityFilter(event.target.value as CapabilityVisibilityFilter)}
-          >
-            <option value="all">{VISIBILITY_FILTER_LABELS.all}</option>
-            <option value="visible">{VISIBILITY_FILTER_LABELS.visible}</option>
-            <option value="hidden">{VISIBILITY_FILTER_LABELS.hidden}</option>
-          </select>
+            options={VISIBILITY_FILTER_OPTIONS}
+            onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
+          />
         </label>
       </div>
 
@@ -662,7 +673,11 @@ export function CapabilityCenterShell() {
         </article>
       </div>
 
-      {loading ? <Spin size="small" /> : null}
+      {loading ? (
+        <div className="admin-workspace-loading">
+          <Spin size="small" />
+        </div>
+      ) : null}
       {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
       <div className="resource-center-body capability-center-body">
         <aside className="resource-center-sidebar">
@@ -680,16 +695,16 @@ export function CapabilityCenterShell() {
                         type="button"
                         className={selectedAgentModeId === item.id ? "resource-center-item active" : "resource-center-item"}
                         onClick={() => selectResource(item.id)}
-                      >
-                        <span className="resource-center-item-title">{item.name}</span>
-                        <span className="resource-center-item-meta capability-center-item-meta">
-                          {item.slug}
-                          {` · ${item.visibleToUsers ? "visible" : "hidden"}`}
-                          {` · ${item.status}`}
-                        </span>
-                      </button>
-                    </li>
-                  ))
+                        >
+                          <span className="resource-center-item-title">{item.name}</span>
+                          <span className="resource-center-item-meta capability-center-item-meta">
+                            <span>{item.slug}</span>
+                            <Tag>{item.visibleToUsers ? "visible" : "hidden"}</Tag>
+                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
+                          </span>
+                        </button>
+                      </li>
+                    ))
                 : tab === "skill_package"
                   ? (visibleItems as SkillPackageRecord[]).map((item) => (
                       <li key={item.id}>
@@ -700,9 +715,9 @@ export function CapabilityCenterShell() {
                         >
                           <span className="resource-center-item-title">{item.name}</span>
                           <span className="resource-center-item-meta capability-center-item-meta">
-                            {item.slug}
-                            {` · ${item.visibleToUsers ? "visible" : "hidden"}`}
-                            {` · ${item.status}`}
+                            <span>{item.slug}</span>
+                            <Tag>{item.visibleToUsers ? "visible" : "hidden"}</Tag>
+                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
                           </span>
                         </button>
                       </li>
@@ -716,8 +731,8 @@ export function CapabilityCenterShell() {
                         >
                           <span className="resource-center-item-title">{item.name}</span>
                           <span className="resource-center-item-meta capability-center-item-meta">
-                            {item.slug}
-                            {` · ${item.status}`}
+                            <span>{item.slug}</span>
+                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
                           </span>
                         </button>
                       </li>
@@ -725,7 +740,9 @@ export function CapabilityCenterShell() {
             </ul>
           </div>
 
-          {visibleItems.length === 0 && !loading ? <p className="resource-center-empty">{noResultsLabel}</p> : null}
+          {visibleItems.length === 0 && !loading ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description={noResultsLabel} />
+          ) : null}
         </aside>
 
         <section className="resource-center-detail capability-center-detail">

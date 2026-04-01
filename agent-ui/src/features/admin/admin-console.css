@@ -346,6 +346,80 @@
   gap: 12px;
 }
 
+.admin-workspace-shell > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-workspace-header {
+  gap: 14px;
+}
+
+.admin-workspace-segmented {
+  border: 1px solid rgba(11, 108, 168, 0.18);
+  border-radius: 12px;
+  padding: 6px;
+  background: linear-gradient(180deg, rgba(247, 251, 255, 0.95) 0%, rgba(238, 247, 255, 0.84) 100%);
+}
+
+.admin-workspace-segmented .ant-segmented {
+  background: transparent;
+}
+
+.admin-workspace-toolbar {
+  align-items: flex-end;
+}
+
+.admin-workspace-filter {
+  min-width: 220px;
+}
+
+.admin-workspace-body {
+  min-height: 460px;
+}
+
+.admin-workspace-detail {
+  min-height: 380px;
+}
+
+.admin-workspace-loading {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-workspace-help-card {
+  border: 1px solid rgba(11, 108, 168, 0.16);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(250, 253, 255, 1) 0%, rgba(240, 248, 255, 0.76) 100%);
+}
+
+.admin-console-root .resource-center-inline-muted {
+  color: #5f7189;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.admin-console-root .resource-center-empty-block {
+  margin: 8px 0;
+}
+
+.admin-console-root .resource-center-list-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-console-root .resource-center-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .admin-console-overview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

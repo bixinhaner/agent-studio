@@ -1,19 +1,23 @@
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Drawer, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  createIntegrationInstance,
-  fetchIntegrationDetail,
-  fetchIntegrationInstances
-} from "./api";
+import { createIntegrationInstance, fetchIntegrationDetail, fetchIntegrationInstances } from "./api";
 import { DingTalkIntegrationView } from "./DingTalkIntegrationView";
 import { OpenAICodexIntegrationView } from "./OpenAICodexIntegrationView";
-import { ZendeskIntegrationView } from "./ZendeskIntegrationView";
 import type { CreateIntegrationInstanceInput, IntegrationCenterTab, IntegrationDetail, IntegrationListItem } from "./types";
+import { ZendeskIntegrationView } from "./ZendeskIntegrationView";
 
 const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "dingtalk", label: "DingTalk" },
   { id: "zendesk", label: "Zendesk" },
-  { id: "openai_codex", label: "OpenAI-Codex" }
+  { id: "openai_codex", label: "OpenAI Codex" }
+];
+
+const STATUS_OPTIONS = [
+  { label: "active", value: "active" },
+  { label: "draft", value: "draft" },
+  { label: "disabled", value: "disabled" }
 ];
 
 type CreateDraft = {
@@ -38,6 +42,20 @@ function buildCreateDraft(tab: IntegrationCenterTab): CreateDraft {
   };
 }
 
+function formatLocalDateTime(value: string | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleString();
+}
+
+function statusTagColor(status: string): string {
+  if (status === "active") return "success";
+  if (status === "draft") return "warning";
+  if (status === "error") return "error";
+  return "default";
+}
+
 export function IntegrationCenterShell() {
   const [tab, setTab] = useState<IntegrationCenterTab>("dingtalk");
   const [items, setItems] = useState<IntegrationListItem[]>([]);
@@ -48,7 +66,9 @@ export function IntegrationCenterShell() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [createErrorText, setCreateErrorText] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [createDraft, setCreateDraft] = useState<CreateDraft>(() => buildCreateDraft("dingtalk"));
 
   useEffect(() => {
@@ -60,8 +80,12 @@ export function IntegrationCenterShell() {
         const response = await fetchIntegrationInstances(tab);
         if (!active) return;
         setItems(response.items);
-        const nextSelectedId = response.items[0]?.id ?? null;
-        setSelectedId(nextSelectedId);
+        setSelectedId((current) => {
+          if (current && response.items.some((item) => item.id === current)) {
+            return current;
+          }
+          return response.items[0]?.id ?? null;
+        });
       } catch (error) {
         if (!active) return;
         setItems([]);
@@ -71,14 +95,15 @@ export function IntegrationCenterShell() {
         if (active) setLoading(false);
       }
     }
+
     void load();
     setCreateDraft(buildCreateDraft(tab));
-    setShowCreate(false);
+    setCreatePanelOpen(false);
     setCreateErrorText("");
     return () => {
       active = false;
     };
-  }, [tab]);
+  }, [reloadNonce, tab]);
 
   useEffect(() => {
     let active = true;
@@ -101,6 +126,7 @@ export function IntegrationCenterShell() {
         if (active) setDetailLoading(false);
       }
     }
+
     void loadDetail();
     return () => {
       active = false;
@@ -111,9 +137,24 @@ export function IntegrationCenterShell() {
     return items.filter((item) => matchesSearch(search, [item.name, item.slug, item.description]));
   }, [items, search]);
 
+  const activeCount = filteredItems.filter((item) => item.status === "active").length;
+
   function handleUpdated(next: IntegrationDetail) {
     setDetail(next);
     setItems((current) => current.map((item) => (item.id === next.instance.id ? next.instance : item)));
+  }
+
+  function openCreatePanel() {
+    setCreateErrorText("");
+    setCreateSaving(false);
+    setCreateDraft(buildCreateDraft(tab));
+    setCreatePanelOpen(true);
+  }
+
+  function closeCreatePanel() {
+    if (createSaving) return;
+    setCreatePanelOpen(false);
+    setCreateErrorText("");
   }
 
   async function handleCreate() {
@@ -124,97 +165,89 @@ export function IntegrationCenterShell() {
       description: createDraft.description.trim() || null,
       status: createDraft.status
     };
+
+    if (!payload.name) {
+      setCreateErrorText("请填写实例名称");
+      return;
+    }
+    if (!payload.slug) {
+      setCreateErrorText("请填写实例 slug");
+      return;
+    }
+
+    setCreateSaving(true);
+    setCreateErrorText("");
     try {
       const next = await createIntegrationInstance(payload);
       setItems((current) => [...current, next.instance]);
       setSelectedId(next.instance.id);
       setDetail(next);
-      setShowCreate(false);
-      setCreateErrorText("");
+      setCreatePanelOpen(false);
+      setSearch("");
     } catch (error) {
       setCreateErrorText(error instanceof Error ? error.message : "创建集成实例失败");
+    } finally {
+      setCreateSaving(false);
     }
   }
 
   return (
-    <section className="admin-card resource-center-shell integration-center-shell">
-      <div className="admin-section-header">
+    <Card className="admin-card resource-center-shell integration-center-shell antd-admin-card admin-workspace-shell">
+      <div className="admin-section-header admin-workspace-header">
         <div>
-          <h2>集成中心</h2>
-          <p>统一管理 DingTalk、Zendesk 和 OpenAI/Codex 实例、验证记录和授权范围。</p>
+          <Typography.Title level={4} className="admin-card-heading">
+            集成中心
+          </Typography.Title>
+          <Typography.Paragraph>统一管理 DingTalk、Zendesk、OpenAI/Codex 实例和授权策略。</Typography.Paragraph>
         </div>
-        <button type="button" className="admin-action-btn" onClick={() => setShowCreate((current) => !current)}>
-          {showCreate ? "取消新建" : "新建实例"}
-        </button>
+        <Space wrap>
+          <Tag color="blue">实例总数 {items.length}</Tag>
+          <Tag color={activeCount > 0 ? "success" : "default"}>active {activeCount}</Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
+            刷新列表
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
+            新建实例
+          </Button>
+        </Space>
       </div>
 
-      <div className="resource-center-type-tabs" role="tablist" aria-label="集成类型">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? "resource-center-type-tab active" : "resource-center-type-tab"}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="集成类型">
+        <Segmented
+          block
+          value={tab}
+          options={TABS.map((item) => ({ label: item.label, value: item.id }))}
+          onChange={(value) => setTab(value as IntegrationCenterTab)}
+        />
       </div>
 
-      {showCreate ? (
-        <section className="resource-center-create-panel integration-center-create-panel">
-          <div className="resource-center-section-header">
-            <div>
-              <h3>新建实例</h3>
-              <p>先创建实例元数据，配置细节在右侧详情里维护。</p>
-            </div>
-          </div>
-          {createErrorText ? <p className="err-text">{createErrorText}</p> : null}
-          <div className="resource-center-form-grid">
-            <label className="field">
-              <span className="field-label">实例名称</span>
-              <input className="field-input" value={createDraft.name} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span className="field-label">实例 slug</span>
-              <input className="field-input" value={createDraft.slug} onChange={(event) => setCreateDraft((current) => ({ ...current, slug: event.target.value }))} />
-            </label>
-            <label className="field resource-center-form-span-2">
-              <span className="field-label">实例描述</span>
-              <textarea className="field-input textarea" value={createDraft.description} onChange={(event) => setCreateDraft((current) => ({ ...current, description: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span className="field-label">初始状态</span>
-              <select className="field-input" value={createDraft.status} onChange={(event) => setCreateDraft((current) => ({ ...current, status: event.target.value }))}>
-                <option value="active">active</option>
-                <option value="draft">draft</option>
-                <option value="disabled">disabled</option>
-              </select>
-            </label>
-          </div>
-          <div className="resource-center-actions">
-            <button type="button" className="admin-action-btn" onClick={() => void handleCreate()}>
-              创建实例
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      <div className="resource-center-toolbar">
+      <div className="resource-center-toolbar admin-workspace-toolbar">
         <label className="field resource-center-search">
           <span className="field-label">搜索实例</span>
-          <input className="field-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名称、slug、描述" />
+          <Input
+            aria-label="搜索实例"
+            placeholder="名称、slug、描述"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            allowClear
+          />
         </label>
       </div>
 
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
 
-      <div className="resource-center-content">
+      <div className="resource-center-content admin-workspace-body">
         <aside className="resource-center-sidebar">
-          {loading ? <p className="resource-center-subtle">加载实例列表中...</p> : null}
-          {!loading && filteredItems.length === 0 ? <p className="resource-center-empty">当前类型还没有实例。</p> : null}
+          {loading ? (
+            <div className="admin-workspace-loading">
+              <Spin size="small" />
+            </div>
+          ) : null}
+
+          {!loading && filteredItems.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description="当前类型还没有实例。" />
+          ) : null}
+
           <div className="resource-center-list">
             {filteredItems.map((item) => (
               <button
@@ -225,15 +258,26 @@ export function IntegrationCenterShell() {
               >
                 <strong>{item.name}</strong>
                 <span>{item.slug}</span>
-                <span className="resource-center-subtle">{item.status}</span>
+                <span className="resource-center-list-item-meta">
+                  <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
+                  <span className="resource-center-inline-muted">{formatLocalDateTime(item.updatedAt)}</span>
+                </span>
               </button>
             ))}
           </div>
         </aside>
 
-        <div className="resource-center-detail">
-          {detailLoading ? <p className="resource-center-subtle">加载集成详情中...</p> : null}
-          {!detailLoading && !detail ? <p className="resource-center-empty">请选择一个集成实例。</p> : null}
+        <div className="resource-center-detail admin-workspace-detail">
+          {detailLoading ? (
+            <div className="admin-workspace-loading">
+              <Spin size="small" />
+            </div>
+          ) : null}
+
+          {!detailLoading && !detail ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description="请选择一个集成实例。" />
+          ) : null}
+
           {detail && detail.instance.type === "dingtalk" ? (
             <DingTalkIntegrationView
               instanceId={detail.instance.id}
@@ -243,10 +287,74 @@ export function IntegrationCenterShell() {
               }}
             />
           ) : null}
+
           {detail && detail.instance.type === "zendesk" ? <ZendeskIntegrationView detail={detail} onUpdated={handleUpdated} /> : null}
           {detail && detail.instance.type === "openai_codex" ? <OpenAICodexIntegrationView detail={detail} onUpdated={handleUpdated} /> : null}
         </div>
       </div>
-    </section>
+
+      <Drawer
+        title="新建集成实例"
+        width={520}
+        open={createPanelOpen}
+        onClose={closeCreatePanel}
+        destroyOnClose
+        maskClosable={!createSaving}
+        footer={(
+          <Space>
+            <Button onClick={closeCreatePanel} disabled={createSaving}>
+              取消
+            </Button>
+            <Button type="primary" onClick={() => void handleCreate()} loading={createSaving}>
+              创建实例
+            </Button>
+          </Space>
+        )}
+      >
+        {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
+
+        <Space direction="vertical" size={14} className="admin-full-width">
+          <label className="field">
+            <span className="field-label">实例名称</span>
+            <Input
+              value={createDraft.name}
+              maxLength={128}
+              disabled={createSaving}
+              onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))}
+            />
+          </label>
+
+          <label className="field">
+            <span className="field-label">实例 slug</span>
+            <Input
+              value={createDraft.slug}
+              maxLength={128}
+              disabled={createSaving}
+              onChange={(event) => setCreateDraft((current) => ({ ...current, slug: event.target.value }))}
+            />
+          </label>
+
+          <label className="field">
+            <span className="field-label">实例描述</span>
+            <Input.TextArea
+              rows={5}
+              value={createDraft.description}
+              disabled={createSaving}
+              onChange={(event) => setCreateDraft((current) => ({ ...current, description: event.target.value }))}
+            />
+          </label>
+
+          <label className="field">
+            <span className="field-label">初始状态</span>
+            <Select
+              value={createDraft.status}
+              options={STATUS_OPTIONS}
+              disabled={createSaving}
+              onChange={(value) => setCreateDraft((current) => ({ ...current, status: value }))}
+            />
+          </label>
+        </Space>
+      </Drawer>
+    </Card>
   );
 }

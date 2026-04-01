@@ -1,17 +1,34 @@
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Button,
+  Card,
+  Drawer,
+  Empty,
+  Form,
+  Input,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography
+} from "antd";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Input, Spin, Tag, Typography } from "antd";
 
 import { createKnowledgeSet, fetchKnowledgeSets } from "./api";
 import { KnowledgeSetDetailView } from "./KnowledgeSetDetailView";
-import type {
-  KnowledgeSetRecord,
-  ResourceStatusFilter
-} from "./types";
+import type { KnowledgeSetRecord, ResourceStatusFilter } from "./types";
 
 type CreatePanelState = {
   name: string;
   description: string;
 };
+
+const STATUS_FILTER_OPTIONS: Array<{ label: string; value: ResourceStatusFilter }> = [
+  { label: "全部状态", value: "all" },
+  { label: "启用中", value: "active" },
+  { label: "已禁用", value: "disabled" }
+];
 
 function matchesSearch(input: string, values: Array<string | undefined>) {
   const normalized = input.trim().toLowerCase();
@@ -49,9 +66,11 @@ export function ResourceCenterShell() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ResourceStatusFilter>("all");
   const [selectedKnowledgeSetId, setSelectedKnowledgeSetId] = useState<string | null>(null);
-  const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [createForm] = Form.useForm<CreatePanelState>();
 
   useEffect(() => {
     let active = true;
@@ -74,7 +93,7 @@ export function ResourceCenterShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadNonce]);
 
   const filteredKnowledgeSets = useMemo(() => {
     const matched = knowledgeSets.filter((knowledgeSet) => {
@@ -94,7 +113,7 @@ export function ResourceCenterShell() {
   const selectedKnowledgeSet = filteredKnowledgeSets.find((item) => item.id === selectedKnowledgeSetId) ?? null;
 
   useEffect(() => {
-    if (createPanel) return;
+    if (createPanelOpen) return;
     if (filteredKnowledgeSets.length === 0) {
       setSelectedKnowledgeSetId(null);
       return;
@@ -103,7 +122,7 @@ export function ResourceCenterShell() {
     if (!stillExists) {
       setSelectedKnowledgeSetId(filteredKnowledgeSets[0].id);
     }
-  }, [createPanel, filteredKnowledgeSets, selectedKnowledgeSetId]);
+  }, [createPanelOpen, filteredKnowledgeSets, selectedKnowledgeSetId]);
 
   const activeListCount = filteredKnowledgeSets.length;
   const activeEnabledCount = filteredKnowledgeSets.filter((item) => item.status === "active").length;
@@ -111,36 +130,44 @@ export function ResourceCenterShell() {
 
   function handleKnowledgeSetUpdated(updatedKnowledgeSet: KnowledgeSetRecord) {
     setKnowledgeSets((current) =>
-      current.map((knowledgeSet) =>
-        knowledgeSet.id === updatedKnowledgeSet.id ? updatedKnowledgeSet : knowledgeSet
-      )
+      current.map((knowledgeSet) => (knowledgeSet.id === updatedKnowledgeSet.id ? updatedKnowledgeSet : knowledgeSet))
     );
   }
 
   function openCreatePanel() {
-    setCreatePanel(createInitialPanelState());
+    createForm.setFieldsValue(createInitialPanelState());
     setCreateErrorText("");
+    setCreateSaving(false);
+    setCreatePanelOpen(true);
   }
 
   function closeCreatePanel() {
-    setCreatePanel(null);
+    setCreatePanelOpen(false);
     setCreateErrorText("");
     setCreateSaving(false);
+    createForm.resetFields();
   }
 
   async function handleCreateSave() {
-    if (!createPanel) return;
-    const trimmedName = createPanel.name.trim();
+    let values: CreatePanelState;
+    try {
+      values = await createForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const trimmedName = values.name.trim();
     if (!trimmedName) {
       setCreateErrorText("请填写资料集名称");
       return;
     }
+
     setCreateSaving(true);
     setCreateErrorText("");
     try {
       const response = await createKnowledgeSet({
         name: trimmedName,
-        description: createPanel.description.trim()
+        description: values.description.trim()
       });
       setKnowledgeSets((current) => [...current, response.knowledgeSet]);
       setSelectedKnowledgeSetId(response.knowledgeSet.id);
@@ -154,26 +181,30 @@ export function ResourceCenterShell() {
   }
 
   return (
-    <Card className="admin-card resource-center-shell antd-admin-card">
-      <div className="admin-section-header">
+    <Card className="admin-card resource-center-shell antd-admin-card admin-workspace-shell">
+      <div className="admin-section-header admin-workspace-header">
         <div>
           <Typography.Title level={4} className="admin-card-heading">
             资料配置中心
           </Typography.Title>
           <Typography.Paragraph>统一管理资料集、文件清单与资源授权策略。</Typography.Paragraph>
         </div>
-        <div className="resource-center-create-row">
-          <Button type="primary" onClick={openCreatePanel}>
+        <Space wrap>
+          <Tag color="blue">总计 {knowledgeSets.length}</Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
+            刷新列表
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
             新建资料集
           </Button>
-        </div>
+        </Space>
       </div>
 
-      <section className="resource-center-hero">
+      <section className="resource-center-hero admin-workspace-hero">
         <div>
           <p className="auth-eyebrow">Agent Studio Knowledge Sets</p>
           <Typography.Title level={5} className="admin-card-subheading">
-            资料集管理
+            资料集工作区
           </Typography.Title>
           <Typography.Paragraph>维护资料元数据、来源配置、文件列表和访问授权。</Typography.Paragraph>
         </div>
@@ -184,32 +215,27 @@ export function ResourceCenterShell() {
         </div>
       </section>
 
-      <div className="resource-center-toolbar">
+      <div className="resource-center-toolbar admin-workspace-toolbar">
         <label className="field resource-center-search">
           <span className="field-label">搜索资料集</span>
           <Input
             aria-label="搜索资料集"
-            placeholder="名称或描述"
+            placeholder="名称、slug、描述"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             allowClear
           />
         </label>
 
-        <label className="field resource-center-filter">
+        <label className="field resource-center-filter admin-workspace-filter">
           <span className="field-label">状态筛选</span>
-          <select
-            className="field-input"
+          <Select
             aria-label="状态筛选"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as ResourceStatusFilter)}
-          >
-            <option value="all">全部状态</option>
-            <option value="active">启用中</option>
-            <option value="disabled">已禁用</option>
-          </select>
+            options={STATUS_FILTER_OPTIONS}
+            onChange={(value) => setStatusFilter(value)}
+          />
         </label>
-
       </div>
 
       <div className="resource-center-stats-row" aria-label="资源统计">
@@ -231,10 +257,14 @@ export function ResourceCenterShell() {
         </article>
       </div>
 
-      {loading ? <Spin size="small" /> : null}
+      {loading ? (
+        <div className="admin-workspace-loading">
+          <Spin size="small" />
+        </div>
+      ) : null}
       {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
 
-      <div className="resource-center-body">
+      <div className="resource-center-body admin-workspace-body">
         <aside className="resource-center-sidebar">
           <div className="resource-center-sidebar-header">
             <span>资料集列表</span>
@@ -254,16 +284,13 @@ export function ResourceCenterShell() {
                     >
                       <span className="resource-center-item-title-row">
                         <span className="resource-center-item-title">{knowledgeSet.name}</span>
-                        <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>
-                          {knowledgeSet.status}
-                        </Tag>
+                        <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>{knowledgeSet.status}</Tag>
                       </span>
                       <span className="resource-center-item-meta">
                         <Tag>{knowledgeSet.sourceType === "managed_upload" ? "托管上传" : knowledgeSet.sourceType}</Tag>
+                        <span className="resource-center-inline-muted">更新于 {formatLocalDateTime(knowledgeSet.updatedAt)}</span>
                       </span>
-                      <span className="resource-center-item-note">
-                        {knowledgeSetCardSummary(knowledgeSet)}
-                      </span>
+                      <span className="resource-center-item-note">{knowledgeSetCardSummary(knowledgeSet)}</span>
                     </button>
                   </li>
                 );
@@ -272,90 +299,76 @@ export function ResourceCenterShell() {
           </div>
 
           {filteredKnowledgeSets.length === 0 ? (
-            <p className="resource-center-empty">当前筛选条件下没有资料集。</p>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              className="resource-center-empty-block"
+              description="当前筛选条件下没有资料集。"
+            />
           ) : null}
         </aside>
 
-        <section className="resource-center-detail">
-          {createPanel ? (
-            <section className="resource-center-section resource-center-create-panel">
-              <div className="resource-center-section-header">
-                <div>
-                  <h3>新建资料集</h3>
-                  <p>只需填写名称。系统会自动生成标识并默认启用，创建后进入详情继续上传资料。</p>
-                </div>
-              </div>
-
-              {createErrorText ? (
-                <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} />
-              ) : null}
-
-              <div className="resource-center-form-grid">
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">新建资料集名称</span>
-                  <input
-                    className="field-input"
-                    aria-label="新建资料集名称"
-                    value={createPanel.name}
-                    disabled={createSaving}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, name: event.target.value } : current))
-                    }
-                  />
-                </label>
-
-                <label className="field">
-                  <span className="field-label">资料来源</span>
-                  <input className="field-input" aria-label="资料来源" value="托管上传" disabled />
-                </label>
-
-                <label className="field">
-                  <span className="field-label">默认状态</span>
-                  <input className="field-input" aria-label="默认状态" value="active" disabled />
-                </label>
-
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">新建资料集描述</span>
-                  <textarea
-                    className="field-input textarea"
-                    aria-label="新建资料集描述"
-                    value={createPanel.description}
-                    disabled={createSaving}
-                    onChange={(event) =>
-                      setCreatePanel((current) =>
-                        current ? { ...current, description: event.target.value } : current
-                      )
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="resource-center-actions">
-                <Button type="primary" disabled={createSaving} onClick={() => void handleCreateSave()}>
-                  {createSaving ? "创建中..." : "保存新资料集"}
-                </Button>
-                <Button disabled={createSaving} onClick={closeCreatePanel}>
-                  取消创建
-                </Button>
-              </div>
-            </section>
-          ) : null}
-
-          {!createPanel && selectedKnowledgeSet ? (
-            <KnowledgeSetDetailView
-              knowledgeSet={selectedKnowledgeSet}
-              onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
-            />
-          ) : null}
-
-          {!createPanel && !selectedKnowledgeSet ? (
+        <section className="resource-center-detail admin-workspace-detail">
+          {selectedKnowledgeSet ? (
+            <KnowledgeSetDetailView knowledgeSet={selectedKnowledgeSet} onKnowledgeSetUpdated={handleKnowledgeSetUpdated} />
+          ) : (
             <div className="resource-center-placeholder empty">
               <h3>资料集详情</h3>
               <p>请选择左侧资料集以继续配置。</p>
             </div>
-          ) : null}
+          )}
         </section>
       </div>
+
+      <Drawer
+        title="新建资料集"
+        width={520}
+        open={createPanelOpen}
+        onClose={closeCreatePanel}
+        destroyOnClose
+        maskClosable={!createSaving}
+        footer={(
+          <Space>
+            <Button onClick={closeCreatePanel} disabled={createSaving}>
+              取消
+            </Button>
+            <Button type="primary" onClick={() => void handleCreateSave()} loading={createSaving}>
+              保存新资料集
+            </Button>
+          </Space>
+        )}
+      >
+        {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
+
+        <Form form={createForm} layout="vertical" requiredMark={false} initialValues={createInitialPanelState()}>
+          <Form.Item
+            label="资料集名称"
+            name="name"
+            rules={[{ required: true, whitespace: true, message: "请填写资料集名称" }]}
+          >
+            <Input aria-label="新建资料集名称" maxLength={128} placeholder="例如：售后知识库" />
+          </Form.Item>
+
+          <Form.Item label="资料来源">
+            <Input value="托管上传" disabled />
+          </Form.Item>
+
+          <Form.Item label="默认状态">
+            <Input value="active" disabled />
+          </Form.Item>
+
+          <Form.Item label="资料集描述" name="description">
+            <Input.TextArea aria-label="新建资料集描述" rows={5} placeholder="可选：描述资料覆盖范围与维护负责人" />
+          </Form.Item>
+
+          <Card size="small" className="admin-workspace-help-card">
+            <Space direction="vertical" size={4}>
+              <Typography.Text strong>创建后建议操作</Typography.Text>
+              <Typography.Text type="secondary">1. 上传文件或压缩包并检查解析结果。</Typography.Text>
+              <Typography.Text type="secondary">2. 配置访问策略，限制角色/部门可见范围。</Typography.Text>
+            </Space>
+          </Card>
+        </Form>
+      </Drawer>
     </Card>
   );
 }
