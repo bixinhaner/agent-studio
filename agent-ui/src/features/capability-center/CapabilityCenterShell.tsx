@@ -96,6 +96,35 @@ function resourceTitle(tab: CapabilityCenterTab) {
   return CAPABILITY_TABS.find((item) => item.id === tab)?.label ?? "能力资源";
 }
 
+function defaultSlugBase(kind: CreatePanelState["kind"]) {
+  if (kind === "agent_mode") return "agent-mode";
+  if (kind === "skill_package") return "skill-package";
+  return "run-profile";
+}
+
+function slugifyValue(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function suggestUniqueSlug(base: string, existingSlugs: string[]) {
+  const normalizedBase = slugifyValue(base);
+  const seed = normalizedBase || "resource";
+  const taken = new Set(existingSlugs.map((item) => item.trim().toLowerCase()).filter(Boolean));
+  if (!taken.has(seed)) return seed;
+  let index = 2;
+  let candidate = `${seed}-${index}`;
+  while (taken.has(candidate)) {
+    index += 1;
+    candidate = `${seed}-${index}`;
+  }
+  return candidate;
+}
+
 function createInitialPanelState(tab: CapabilityCenterTab, runProfiles: RunProfileRecord[]): CreatePanelState {
   if (tab === "agent_mode") {
     return {
@@ -313,6 +342,7 @@ export function CapabilityCenterShell() {
   const [selectedSkillPackageId, setSelectedSkillPackageId] = useState<string | null>(null);
   const [selectedRunProfileId, setSelectedRunProfileId] = useState<string | null>(null);
   const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
+  const [createSlugEdited, setCreateSlugEdited] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
   const [createErrorText, setCreateErrorText] = useState("");
 
@@ -365,9 +395,20 @@ export function CapabilityCenterShell() {
     if (!createPanel) return;
     if (createPanel.kind === panelKindForTab(tab)) return;
     setCreatePanel(createInitialPanelState(tab, runProfiles));
+    setCreateSlugEdited(false);
     setCreateErrorText("");
     setCreateSaving(false);
   }, [createPanel, runProfiles, tab]);
+
+  const existingSlugsForCreate = useMemo(() => {
+    if (tab === "agent_mode") {
+      return agentModes.map((item) => item.slug);
+    }
+    if (tab === "skill_package") {
+      return skillPackages.map((item) => item.slug);
+    }
+    return runProfiles.map((item) => item.slug);
+  }, [agentModes, runProfiles, skillPackages, tab]);
 
   useEffect(() => {
     if (!createPanel || createPanel.kind !== "agent_mode") return;
@@ -441,12 +482,14 @@ export function CapabilityCenterShell() {
 
   function closeCreatePanel() {
     setCreatePanel(null);
+    setCreateSlugEdited(false);
     setCreateErrorText("");
     setCreateSaving(false);
   }
 
   function openCreatePanel() {
     setCreatePanel(createInitialPanelState(tab, runProfiles));
+    setCreateSlugEdited(false);
     setCreateErrorText("");
   }
 
@@ -736,7 +779,18 @@ export function CapabilityCenterShell() {
                     disabled={createSaving}
                     value={createPanel.name}
                     onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, name: event.target.value } : current))
+                      setCreatePanel((current) => {
+                        if (!current) return current;
+                        const nextName = event.target.value;
+                        if (createSlugEdited) {
+                          return { ...current, name: nextName };
+                        }
+                        const nextSlug = suggestUniqueSlug(
+                          slugifyValue(nextName) || defaultSlugBase(current.kind),
+                          existingSlugsForCreate
+                        );
+                        return { ...current, name: nextName, slug: nextSlug };
+                      })
                     }
                   />
                   <small className="field-help">建议使用业务语义明确的名称，便于运营同学检索。</small>
@@ -748,9 +802,10 @@ export function CapabilityCenterShell() {
                     aria-label="能力 slug"
                     disabled={createSaving}
                     value={createPanel.slug}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current))
-                    }
+                    onChange={(event) => {
+                      setCreateSlugEdited(true);
+                      setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current));
+                    }}
                   />
                   <small className="field-help">建议使用小写英文和连字符，创建后尽量不要频繁变更。</small>
                 </label>

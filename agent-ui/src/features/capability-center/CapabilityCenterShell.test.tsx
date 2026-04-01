@@ -135,7 +135,7 @@ describe("CapabilityCenterShell", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Agent Modes" }));
     fireEvent.click(screen.getByRole("button", { name: "新建能力资源" }));
     fireEvent.change(screen.getByLabelText("能力名称"), { target: { value: "Coding Copy" } });
-    fireEvent.change(screen.getByLabelText("能力 slug"), { target: { value: "coding-copy" } });
+    expect((screen.getByLabelText("能力 slug") as HTMLInputElement).value).toBe("coding-copy");
     fireEvent.click(screen.getByRole("button", { name: "创建能力" }));
 
     expect(mockedCreateAgentMode).toHaveBeenCalledWith(
@@ -145,6 +145,57 @@ describe("CapabilityCenterShell", () => {
       })
     );
     expect(await screen.findByRole("heading", { name: "Coding Copy" })).toBeTruthy();
+  });
+
+  it("suggests a unique slug for new agent modes based on the name", async () => {
+    mockedFetchRunProfiles.mockResolvedValue({
+      runProfiles: [
+        {
+          id: "run-profile-1",
+          name: "Coding Default",
+          slug: "coding-default",
+          description: "default",
+          status: "active",
+          defaultModel: "gpt-5.4",
+          allowedModels: ["gpt-5.4"],
+          defaultReasoningEffort: "high",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "never",
+          networkAccessEnabled: true,
+          webSearchMode: "live",
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+    mockedFetchWorkspaces.mockResolvedValue({ workspaces: [] });
+    mockedFetchSkillPackages.mockResolvedValue({ skillPackages: [] });
+    mockedFetchAgentModes.mockResolvedValue({
+      agentModes: [
+        {
+          id: "agent-mode-1",
+          name: "Coding",
+          slug: "coding",
+          description: "",
+          status: "active",
+          visibleToUsers: true,
+          runProfileId: "run-profile-1",
+          skillPackages: [],
+          workspaceRules: [],
+          instructionSources: [],
+          createdAt: "2026-03-30T00:00:00.000Z",
+          updatedAt: "2026-03-30T00:00:00.000Z"
+        }
+      ]
+    });
+
+    render(<CapabilityCenterShell />);
+
+    expect(await screen.findByText("Coding")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "新建能力资源" }));
+    fireEvent.change(screen.getByLabelText("能力名称"), { target: { value: "Coding" } });
+
+    expect((screen.getByLabelText("能力 slug") as HTMLInputElement).value).toBe("coding-2");
   });
 
   it("resets the create draft when switching tabs so the active tab controls the created resource type", async () => {

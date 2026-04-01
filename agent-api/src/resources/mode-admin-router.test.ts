@@ -521,6 +521,41 @@ describe("mode admin router", () => {
     });
   });
 
+  it("returns a readable error when creating an agent mode with a duplicate slug", async () => {
+    const { app, cookies, adminUser, runProfiles, agentModes } = await buildModeAdminApp();
+    const runProfile = await runProfiles.create({
+      name: "Standard Profile",
+      slug: "standard-profile",
+      defaultModel: "gpt-5.4",
+      allowedModels: ["gpt-5.4"],
+      defaultReasoningEffort: "high",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      networkAccessEnabled: true,
+      webSearchMode: "disabled"
+    });
+
+    await agentModes.create({
+      name: "Existing Mode",
+      slug: "coding-assistant",
+      runProfileId: runProfile.id,
+      visibleToUsers: true
+    });
+
+    const response = await request(app)
+      .post("/api/admin/agent-modes")
+      .set("Cookie", cookies.create(adminUser.id))
+      .send({
+        name: "Coding Assistant",
+        slug: "coding-assistant",
+        runProfileId: runProfile.id,
+        visibleToUsers: true
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.detail).toBe("agent mode slug 已存在，请更换一个新的 slug");
+  });
+
   it("reads and writes capability resource policies for run profiles, skill packages, and agent modes", async () => {
     const { app, cookies, adminUser, runProfiles, skillPackages, agentModes } = await buildModeAdminApp();
     const runProfile = await runProfiles.create({
@@ -1054,6 +1089,9 @@ class FakeAgentModeRepository {
     visibleToUsers?: boolean;
     runProfileId: string;
   }): Promise<AgentModeRecord> {
+    if (this.records.some((item) => item.slug === payload.slug)) {
+      throw new Error("Unique constraint failed on the fields: (`slug`)");
+    }
     const now = new Date().toISOString();
     const record: AgentModeRecord = {
       id: `agent-mode-${++this.modeCounter}`,
@@ -1096,6 +1134,9 @@ class FakeAgentModeRepository {
   ): Promise<AgentModeRecord> {
     const record = this.records.find((item) => item.id === id);
     if (!record) throw new Error("agent mode 不存在");
+    if (payload.slug && this.records.some((item) => item.id !== id && item.slug === payload.slug)) {
+      throw new Error("Unique constraint failed on the fields: (`slug`)");
+    }
     Object.assign(record, {
       organizationId: payload.organizationId === undefined ? record.organizationId : trimOrUndefined(payload.organizationId),
       name: payload.name ?? record.name,

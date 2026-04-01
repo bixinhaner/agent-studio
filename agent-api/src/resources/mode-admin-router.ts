@@ -16,6 +16,15 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
 
+function detailFromCreateConflict(error: unknown, resourceLabel: string): string {
+  const message = detailFromError(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes("unique constraint failed") && normalized.includes("slug")) {
+    return `${resourceLabel} slug 已存在，请更换一个新的 slug`;
+  }
+  return message;
+}
+
 function isNotFoundError(error: unknown): boolean {
   const message = detailFromError(error).toLowerCase();
   return message.includes("不存在") || message.includes("not found");
@@ -447,7 +456,7 @@ export function createModeAdminRouter(options: {
       );
       res.status(201).json({ runProfile });
     } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
+      res.status(400).json({ detail: detailFromCreateConflict(error, "run profile") });
     }
   });
 
@@ -495,7 +504,7 @@ export function createModeAdminRouter(options: {
       );
       res.status(201).json({ runProfile });
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromCreateConflict(error, "run profile") });
     }
   });
 
@@ -580,7 +589,7 @@ export function createModeAdminRouter(options: {
       const skillPackage = await options.skillPackages.create(parsed.data);
       res.status(201).json({ skillPackage });
     } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
+      res.status(400).json({ detail: detailFromCreateConflict(error, "skill package") });
     }
   });
 
@@ -631,7 +640,7 @@ export function createModeAdminRouter(options: {
         items.length > 0 ? await options.skillPackages.replaceItems(created.id, items) : await options.skillPackages.get(created.id);
       res.status(201).json({ skillPackage });
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromCreateConflict(error, "skill package") });
     }
   });
 
@@ -740,7 +749,7 @@ export function createModeAdminRouter(options: {
       const agentMode = await options.agentModes.create(parsed.data);
       res.status(201).json({ agentMode });
     } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
+      res.status(400).json({ detail: detailFromCreateConflict(error, "agent mode") });
     }
   });
 
@@ -800,7 +809,7 @@ export function createModeAdminRouter(options: {
       const agentMode = withWorkspaceAlias((await options.agentModes.get(created.id)) as { workspaceRules?: unknown });
       res.status(201).json({ agentMode });
     } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromCreateConflict(error, "agent mode") });
     }
   });
 
