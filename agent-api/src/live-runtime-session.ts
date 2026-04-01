@@ -135,7 +135,7 @@ export async function startLiveRuntimeSession<TThread>(input: {
   codexRunConfig?: Record<string, unknown>;
   threadId?: string;
   getThreadUploadDir?: (threadId: string) => string;
-}): Promise<{ liveThread: TThread; codexRunConfig?: Record<string, unknown> }> {
+}): Promise<{ liveThread: TThread; codexRunConfig?: Record<string, unknown>; codexThreadId?: string }> {
   const codexRunConfig =
     input.threadId && input.getThreadUploadDir
       ? ensureThreadUploadInRunConfig(input.codexRunConfig, input.getThreadUploadDir(input.threadId))
@@ -148,9 +148,15 @@ export async function startLiveRuntimeSession<TThread>(input: {
     codexRunConfig: stripInternalRunConfigMetadata(codexRunConfig)
   });
 
+  const codexThreadId =
+    typeof (liveThread as { id?: unknown })?.id === "string"
+      ? trimOrUndefined((liveThread as { id?: string }).id)
+      : undefined;
+
   return {
     liveThread,
-    codexRunConfig
+    codexRunConfig,
+    codexThreadId
   };
 }
 
@@ -176,6 +182,7 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     reasoningEffort: ReasoningEffort;
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
+    codexThreadId?: string;
   }): Promise<TPersisted>;
 }): Promise<TPersisted> {
   const started = await startLiveRuntimeSession({
@@ -191,7 +198,8 @@ export async function replaceLiveRuntimeSession<TThread, TPersisted>(input: {
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     workspace: input.workspace,
-    codexRunConfig: started.codexRunConfig
+    codexRunConfig: started.codexRunConfig,
+    codexThreadId: started.codexThreadId
   });
   input.liveRuntimeThreads.set(input.sessionId, started.liveThread);
   return persisted;

@@ -10,6 +10,7 @@ export type SessionRecord = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  codexThreadId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -19,6 +20,7 @@ type RuntimeSessionMetadata = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  codexThreadId?: string;
 };
 
 type RuntimeSessionRow = {
@@ -66,14 +68,15 @@ function parseMetadata(value: unknown): RuntimeSessionMetadata {
     model: typeof obj?.model === "string" ? obj.model : "",
     reasoningEffort: (typeof obj?.reasoningEffort === "string" ? obj.reasoningEffort : "high") as ReasoningEffort,
     workspace: typeof obj?.workspace === "string" ? obj.workspace : "",
-    codexRunConfig: asRecord(obj?.codexRunConfig ?? undefined) ?? undefined
+    codexRunConfig: asRecord(obj?.codexRunConfig ?? undefined) ?? undefined,
+    codexThreadId: typeof obj?.codexThreadId === "string" ? obj.codexThreadId : undefined
   };
 }
 
 export class SessionRepository {
   constructor(
     private readonly db: SessionRepositoryDb,
-    private readonly ttlMs: number
+    private readonly ttlMs: number | null
   ) {}
 
   async create(payload: Omit<SessionRecord, "sessionId" | "createdAt" | "updatedAt">): Promise<SessionRecord> {
@@ -89,7 +92,8 @@ export class SessionRepository {
           model: payload.model,
           reasoningEffort: payload.reasoningEffort,
           workspace: payload.workspace,
-          codexRunConfig: payload.codexRunConfig
+          codexRunConfig: payload.codexRunConfig,
+          codexThreadId: payload.codexThreadId
         }
       }
     });
@@ -133,12 +137,17 @@ export class SessionRepository {
     const row = await this.db.runtimeSession.findUnique({ where: { externalId: sessionId } });
     if (!row || !row.externalId) return undefined;
 
+    const ttlMs = this.ttlMs;
+    if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs <= 0) {
+      return this.mapSession(row);
+    }
+
     const updatedAt = new Date(row.updatedAt);
     if (Number.isNaN(updatedAt.getTime())) {
       return this.mapSession(row);
     }
 
-    if (Date.now() - updatedAt.getTime() > this.ttlMs) {
+    if (Date.now() - updatedAt.getTime() > ttlMs) {
       await this.remove(sessionId);
       return undefined;
     }
@@ -148,7 +157,7 @@ export class SessionRepository {
 
   async update(
     sessionId: string,
-    patch: Partial<Pick<SessionRecord, "model" | "reasoningEffort" | "workspace" | "codexRunConfig">>
+    patch: Partial<Pick<SessionRecord, "model" | "reasoningEffort" | "workspace" | "codexRunConfig" | "codexThreadId">>
   ): Promise<SessionRecord> {
     const row = await this.db.runtimeSession.findUnique({ where: { externalId: sessionId } });
     if (!row || !row.externalId) {
@@ -156,6 +165,7 @@ export class SessionRepository {
     }
 
     const metadata = parseMetadata(row.metadata);
+    const hasCodexThreadIdPatch = Object.prototype.hasOwnProperty.call(patch, "codexThreadId");
     const updated = await this.db.runtimeSession.update({
       where: { externalId: sessionId },
       data: {
@@ -163,7 +173,8 @@ export class SessionRepository {
           model: patch.model ?? metadata.model,
           reasoningEffort: patch.reasoningEffort ?? metadata.reasoningEffort,
           workspace: patch.workspace ?? metadata.workspace,
-          codexRunConfig: patch.codexRunConfig ?? metadata.codexRunConfig
+          codexRunConfig: patch.codexRunConfig ?? metadata.codexRunConfig,
+          codexThreadId: hasCodexThreadIdPatch ? patch.codexThreadId : metadata.codexThreadId
         }
       }
     });
@@ -178,7 +189,12 @@ export class SessionRepository {
   }
 
   async cleanupExpired(): Promise<string[]> {
-    const cutoff = new Date(Date.now() - this.ttlMs);
+    const ttlMs = this.ttlMs;
+    if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs <= 0) {
+      return [];
+    }
+
+    const cutoff = new Date(Date.now() - ttlMs);
     const expired = await this.db.runtimeSession.findMany({
       where: { updatedAt: { lt: cutoff } },
       select: { externalId: true }
@@ -204,6 +220,7 @@ export class SessionRepository {
       reasoningEffort: metadata.reasoningEffort,
       workspace: metadata.workspace,
       codexRunConfig: metadata.codexRunConfig,
+      codexThreadId: metadata.codexThreadId,
       createdAt: toIsoString(row.createdAt),
       updatedAt: toIsoString(row.updatedAt)
     };

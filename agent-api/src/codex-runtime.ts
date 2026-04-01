@@ -105,14 +105,17 @@ export class CodexRuntime {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
   }): Promise<any> {
-    const threadOptions: Record<string, unknown> = {
-      model: options.model,
-      workingDirectory: options.workspace,
-      skipGitRepoCheck: true,
-      modelReasoningEffort: options.reasoningEffort,
-      ...(options.codexRunConfig || {})
-    };
-    return await Promise.resolve(this.codex.startThread(threadOptions));
+    return await Promise.resolve(this.codex.startThread(this.buildThreadOptions(options)));
+  }
+
+  async resumeThreadWithOptions(options: {
+    threadId: string;
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<any> {
+    return await Promise.resolve(this.codex.resumeThread(options.threadId, this.buildThreadOptions(options)));
   }
 
   async *runStreamed(
@@ -142,5 +145,20 @@ export class CodexRuntime {
       skipGitRepoCheck: true
     });
     await thread.run("Reply with the single word OK.");
+  }
+
+  private buildThreadOptions(options: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Record<string, unknown> {
+    return {
+      model: options.model,
+      workingDirectory: options.workspace,
+      skipGitRepoCheck: true,
+      modelReasoningEffort: options.reasoningEffort,
+      ...(options.codexRunConfig || {})
+    };
   }
 }

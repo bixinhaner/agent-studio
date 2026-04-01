@@ -42,12 +42,13 @@ import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrati
 import {
   ensureThreadUploadInRunConfig,
   replaceLiveRuntimeSession,
+  stripInternalRunConfigMetadata,
   startLiveRuntimeSession,
   streamRuntimeCompletionWithBestEffortUsage
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
-import { SessionRepository, type SessionRepositoryDb } from "./persistence/session-repository.js";
+import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
   ThreadCollaborationRepository,
   type ThreadCollaborationRepositoryDb
@@ -398,6 +399,71 @@ const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function extractCodexThreadIdFromRuntimeEvent(event: { type?: string; raw?: unknown }): string | undefined {
+  if (event.type !== "thread.started") return undefined;
+  const raw = asRecord(event.raw);
+  const threadId = typeof raw?.thread_id === "string" ? raw.thread_id.trim() : "";
+  return threadId || undefined;
+}
+
+async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRuntimeThread | undefined> {
+  const cached = liveRuntimeThreads.get(session.sessionId);
+  if (cached) {
+    return cached;
+  }
+
+  const codexThreadId = trimOrUndefined(session.codexThreadId);
+  if (!codexThreadId) {
+    return undefined;
+  }
+
+  try {
+    const liveThread = await runtime.resumeThreadWithOptions({
+      threadId: codexThreadId,
+      model: session.model,
+      reasoningEffort: session.reasoningEffort,
+      workspace: session.workspace,
+      codexRunConfig: stripInternalRunConfigMetadata(session.codexRunConfig)
+    });
+    liveRuntimeThreads.set(session.sessionId, liveThread);
+    return liveThread;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn("failed to resume codex thread", {
+      sessionId: session.sessionId,
+      codexThreadId,
+      detail
+    });
+    return undefined;
+  }
+}
+
+async function persistSessionCodexThreadId(session: SessionRecord, codexThreadId: string): Promise<SessionRecord> {
+  const normalized = trimOrUndefined(codexThreadId);
+  if (!normalized) {
+    return session;
+  }
+  if (trimOrUndefined(session.codexThreadId) === normalized) {
+    return session;
+  }
+  try {
+    return await sessions.update(session.sessionId, { codexThreadId: normalized });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn("failed to persist codex thread id", {
+      sessionId: session.sessionId,
+      codexThreadId: normalized,
+      detail
+    });
+    return session;
+  }
+}
+
 const createSessionSchema = z.object({
   session_id: z.string().optional(),
   model: z.string().optional(),
@@ -689,13 +755,15 @@ async function createSession(options: SessionOptions, threadId?: string) {
     getThreadUploadDir: getThreadUploadTempDir
   });
   const codexRunConfig = started.codexRunConfig;
+  const codexThreadId = started.codexThreadId;
   const session = await sessions.create({
     userId: options.userId,
     threadId,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig
+    codexRunConfig,
+    codexThreadId
   });
   liveRuntimeThreads.set(session.sessionId, started.liveThread);
   return session;
@@ -852,9 +920,12 @@ async function ensureThreadSession(
   }
 
   const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
+  const hasLiveRuntime = active
+    ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
+    : false;
   const changed =
     !active ||
-    !liveRuntimeThreads.has(active.sessionId) ||
+    !hasLiveRuntime ||
     active.model !== desired.model ||
     active.reasoningEffort !== desired.reasoningEffort ||
     active.workspace !== desired.workspace ||
@@ -1163,7 +1234,9 @@ app.post("/api/session", async (req: Request, res: Response) => {
     if (existingId) {
       const existing = await sessions.getOwned(existingId, currentUser.id);
       if (existing) {
-        if (!liveRuntimeThreads.has(existing.sessionId)) {
+        const hasLiveRuntime =
+          liveRuntimeThreads.has(existing.sessionId) || Boolean(await restoreLiveRuntimeThread(existing));
+        if (!hasLiveRuntime) {
           await sessions.remove(existing.sessionId);
           liveRuntimeThreads.delete(existing.sessionId);
         } else if (input.model || input.reasoning_effort || input.knowledge_set_ids || input.codex_run_config) {
@@ -1224,7 +1297,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
                 model: payload.model,
                 reasoningEffort: payload.reasoningEffort,
                 workspace: payload.workspace,
-                codexRunConfig: payload.codexRunConfig
+                codexRunConfig: payload.codexRunConfig,
+                codexThreadId: payload.codexThreadId
               })
           });
           res.json(sessionOut(updated));
@@ -1497,8 +1571,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   try {
     const currentUser = req.currentUser!;
     const input = streamSchema.parse(req.body || {});
-    const session = await sessions.getOwned(input.session_id, currentUser.id);
-    const liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
+    let session = await sessions.getOwned(input.session_id, currentUser.id);
+    let liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
+    if (!liveThread && session) {
+      liveThread = await restoreLiveRuntimeThread(session);
+    }
     if (!session || !liveThread) {
       if (session?.sessionId) {
         await sessions.remove(session.sessionId);
@@ -1508,9 +1585,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       res.end();
       return;
     }
+    const ensuredLiveThread = liveThread;
+    let currentSession: SessionRecord = session;
     const requestedThreadId = String(input.thread_id || "").trim();
     if (requestedThreadId) {
-      const boundThreadId = String(session.threadId || "").trim();
+      const boundThreadId = String(currentSession.threadId || "").trim();
       if (!boundThreadId) {
         sendSSE(res, "error", { detail: "session 未绑定 thread，请刷新后重试" });
         res.end();
@@ -1527,27 +1606,33 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     // terminating any turn that is already in flight.
     await assertQuotaAllowsNewSession({
       currentUser,
-      model: session.model,
+      model: currentSession.model,
       featureType: "chat"
     });
 
     sendSSE(res, "meta", {
-      session_id: session.sessionId,
-      thread_id: session.threadId,
-      model: session.model,
-      reasoning_effort: session.reasoningEffort,
-      workspace: session.workspace,
+      session_id: currentSession.sessionId,
+      thread_id: currentSession.threadId,
+      model: currentSession.model,
+      reasoning_effort: currentSession.reasoningEffort,
+      workspace: currentSession.workspace,
       started_at: new Date().toISOString()
     });
 
     await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(liveThread, input.message),
+      events: runtime.runStreamed(ensuredLiveThread, input.message),
       onEvent(event) {
+        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+        if (codexThreadId) {
+          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+            currentSession = updated;
+          });
+        }
         sendSSE(res, "codex", event);
       },
       async onDone(payload) {
         sendSSE(res, "done", {
-          session_id: session.sessionId,
+          session_id: currentSession.sessionId,
           answer: payload.answer,
           completed_at: new Date().toISOString()
         });
@@ -1557,9 +1642,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         await usageIngestion.record({
           userId: currentUser.id,
           departmentIdSnapshot,
-          threadId: session.threadId ?? undefined,
-          sessionId: session.sessionId,
-          model: session.model,
+          threadId: currentSession.threadId ?? undefined,
+          sessionId: currentSession.sessionId,
+          model: currentSession.model,
           featureType: "chat",
           inputTokens: usage.inputTokens,
           cachedInputTokens: usage.cachedInputTokens,
@@ -1573,7 +1658,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       onTelemetryError(error) {
         const detail = error instanceof Error ? error.message : String(error);
         console.warn("usage telemetry ingestion failed", {
-          sessionId: session.sessionId,
+          sessionId: currentSession.sessionId,
           detail
         });
       }

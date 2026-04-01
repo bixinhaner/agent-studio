@@ -19,7 +19,7 @@ const schema = z.object({
   DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
   SESSION_WORKSPACE_ROOT: z.string().optional(),
-  SESSION_TTL_MINUTES: z.string().default("180"),
+  SESSION_TTL_MINUTES: z.string().default("0"),
   SESSION_COOKIE_NAME: z.string().default("agent_studio_session"),
   SESSION_COOKIE_SECRET: z.string().optional(),
   SESSION_COOKIE_MAX_AGE_DAYS: z.string().default("7"),
@@ -35,8 +35,8 @@ const schema = z.object({
 
 const env = schema.parse(process.env);
 
-const ttlMinutes = Number(env.SESSION_TTL_MINUTES);
-const ttlMs = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes * 60 * 1000 : 180 * 60 * 1000;
+// Runtime sessions are kept until they are explicitly replaced or the thread is deleted.
+const ttlMs: number | null = null;
 const sessionCookieDays = Number(env.SESSION_COOKIE_MAX_AGE_DAYS);
 const sessionCookieMaxAgeMs =
   Number.isFinite(sessionCookieDays) && sessionCookieDays > 0
