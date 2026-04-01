@@ -257,7 +257,6 @@ function AdminNavigationPanel(props: {
           <section key={group.id} className="admin-console-nav-group">
             <div className="admin-console-nav-group-head">
               <h4>{group.label}</h4>
-              <p>{group.description}</p>
             </div>
             <div className="admin-console-nav-items">
               {group.items.map((item) => {
@@ -277,7 +276,6 @@ function AdminNavigationPanel(props: {
                     </span>
                     <span className="admin-console-nav-item-copy">
                       <strong>{item.title}</strong>
-                      <small>{item.description}</small>
                     </span>
                   </button>
                 );
@@ -678,8 +676,9 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
               <p className="admin-console-header-desc">{currentSectionMeta.description}</p>
             </div>
             <div className="admin-console-header-meta">
-              <Tag>{currentSectionMeta.scope}</Tag>
-              <Tag>{currentSectionMeta.cadence}</Tag>
+              <span>{currentSectionMeta.scope}</span>
+              <span className="admin-console-header-meta-dot">•</span>
+              <span>{currentSectionMeta.cadence}</span>
             </div>
           </div>
           <div className="admin-console-content">

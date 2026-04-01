@@ -190,6 +190,13 @@
 .admin-console-header-meta {
   display: flex;
   gap: 8px;
+  align-items: center;
+  color: var(--admin-subtle);
+  font-size: 13px;
+}
+
+.admin-console-header-meta-dot {
+  color: #cbd5e1;
 }
 
 .admin-console-content {
@@ -306,4 +313,68 @@
 }
 .admin-workspace-header {
   gap: 14px;
+}
+
+/* Enhanced Typography for Metrics */
+.admin-console-root .ant-statistic-content-value,
+.admin-console-root .ant-statistic-content-suffix {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight: 600;
+  font-size: 26px;
+  color: var(--admin-text);
+  letter-spacing: -0.02em;
+}
+
+.admin-console-root .ant-statistic-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--admin-subtle);
+  margin-bottom: 6px;
+}
+
+/* Polished Form Inputs & Textareas */
+.admin-console-root .ant-input,
+.admin-console-root .ant-input-number,
+.admin-console-root .ant-select-selector {
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease;
+}
+
+.admin-console-root .ant-input {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.admin-console-root .ant-input:focus,
+.admin-console-root .ant-input-focused,
+.admin-console-root .ant-input-affix-wrapper-focused,
+.admin-console-root .ant-select-focused .ant-select-selector {
+  border-color: #336df4 !important;
+  box-shadow: 0 0 0 3px rgba(51, 109, 244, 0.15) !important;
+}
+
+/* Generous Card Paddings */
+.admin-console-root .admin-card .ant-card-body,
+.admin-console-root .antd-admin-card .ant-card-body {
+  padding: 24px;
+}
+
+.admin-console-overview-metric-card .ant-card-body,
+.admin-console-root .ant-card-small .ant-card-body {
+  padding: 16px 20px;
+}
+
+/* Prevent layout crushing in workspaces */
+.admin-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.admin-workspace-body,
+.admin-console-content > * {
+  min-width: 0;
+  width: 100%;
 }
