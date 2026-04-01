@@ -14,7 +14,7 @@ import {
   RefreshCcw,
   ArrowRight
 } from "lucide-react";
-import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Spin, Statistic, Tag, Typography } from "antd";
+import { Alert, Breadcrumb, Button, Card, Drawer, Input, Space, Spin, Statistic, Tag, Typography, ConfigProvider } from "antd";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -23,6 +23,7 @@ import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { fetchAdminOverview } from "./api";
 import type { AdminOverview, AdminSection } from "./types";
 
+import { ADMIN_PREMIUM_THEME } from "./admin-theme";
 import "./admin-console.css";
 
 const MonitoringShellLazy = lazy(() => import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell })));
@@ -609,8 +610,9 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   }, []);
 
   return (
-    <div className="admin-console-root">
-      <header className="admin-console-topbar">
+    <ConfigProvider theme={ADMIN_PREMIUM_THEME}>
+      <div className="admin-console-root">
+        <header className="admin-console-topbar">
         <div className="admin-console-topbar-left">
           {compactLayout ? (
             <Button
@@ -716,7 +718,8 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           />
         </Drawer>
       ) : null}
-    </div>
+      </div>
+    </ConfigProvider>
   );
 }
 

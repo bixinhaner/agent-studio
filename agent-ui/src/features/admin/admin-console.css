@@ -442,3 +442,78 @@
   color: var(--admin-subtle);
   font-size: 12px;
 }
+
+/* ----------------------------------------------------
+ * SHADCN-UI SIMULATION: DEEP OVERRIDES 
+ * ----------------------------------------------------*/
+
+/* Ghost Buttons & Interactive Elements */
+.admin-console-root .ant-btn-default {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+.admin-console-root .ant-btn-default:not(:disabled):hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+/* Premium Tables */
+.admin-console-root .ant-table-wrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+.admin-console-root .ant-table {
+  background: #ffffff;
+}
+.admin-console-root .ant-table-thead > tr > th {
+  background: #f8fafc !important;
+  color: #475569 !important;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+.admin-console-root .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #f1f5f9;
+  transition: colors 0.15s ease, background-color 0.15s ease;
+}
+.admin-console-root .ant-table-tbody > tr:hover > td {
+  background: #f8fafc !important;
+}
+
+/* Shadcn style Tabs (Segmented Look) */
+.admin-console-root .ant-tabs-nav::before {
+  border-bottom: 1px solid #e2e8f0;
+}
+.admin-console-root .ant-tabs-tab {
+  padding: 8px 16px !important;
+  transition: all 0.2s ease;
+}
+.admin-console-root .ant-tabs-tab.ant-tabs-tab-active {
+  background: transparent;
+}
+.admin-console-root .ant-tabs-ink-bar {
+  height: 2px !important;
+  background: #0f172a !important;
+}
+
+/* Premium Alerts */
+.admin-console-root .ant-alert {
+  border-radius: 6px;
+  border-width: 1px;
+  padding: 12px 16px;
+}
+.admin-console-root .ant-alert-info {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+.admin-console-root .ant-alert-info .ant-alert-icon {
+  color: #64748b;
+}
+
+/* Smooth Input Form Groups */
+.admin-console-root .ant-form-item-label > label {
+  color: #334155;
+  font-weight: 500;
+}
