@@ -11,15 +11,6 @@ export type KnowledgeSetItemRecord = {
   updatedAt: string;
 };
 
-export type WorkspaceKnowledgeSetRecord = {
-  id: string;
-  workspaceId: string;
-  knowledgeSetId: string;
-  mountType: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type KnowledgeSetRecord = {
   id: string;
   organizationId?: string;
@@ -33,7 +24,6 @@ export type KnowledgeSetRecord = {
   createdAt: string;
   updatedAt: string;
   items: KnowledgeSetItemRecord[];
-  workspaceBindings: WorkspaceKnowledgeSetRecord[];
 };
 
 type CreateKnowledgeSetPayload = {
@@ -56,11 +46,6 @@ type ReplaceKnowledgeSetItemsPayload = Array<{
   sizeBytes?: bigint;
   checksum?: string;
   sourceArchiveName?: string;
-}>;
-
-type ReplaceWorkspaceBindingsPayload = Array<{
-  knowledgeSetId: string;
-  mountType: string;
 }>;
 
 type KnowledgeSetRow = {
@@ -91,15 +76,6 @@ type KnowledgeSetItemRow = {
   updatedAt: Date | string;
 };
 
-type WorkspaceKnowledgeSetRow = {
-  id: string;
-  workspaceId: string;
-  knowledgeSetId: string;
-  mountType: string;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-};
-
 type KnowledgeSetTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<KnowledgeSetRow | null>;
   findMany(args?: { orderBy?: { createdAt?: "asc" | "desc"; updatedAt?: "asc" | "desc" } }): Promise<KnowledgeSetRow[]>;
@@ -113,39 +89,9 @@ type KnowledgeSetItemTable = {
   create(args: { data: Record<string, unknown> }): Promise<KnowledgeSetItemRow>;
 };
 
-type WorkspaceKnowledgeSetTable = {
-  findMany(args: {
-    where: { workspaceId?: string; knowledgeSetId?: string };
-    orderBy?: { createdAt?: "asc" | "desc" };
-  }): Promise<WorkspaceKnowledgeSetRow[]>;
-  deleteMany(args: { where: { workspaceId?: string; knowledgeSetId?: string } }): Promise<{ count: number }>;
-  create(args: { data: Record<string, unknown> }): Promise<WorkspaceKnowledgeSetRow>;
-};
-
-type WorkspaceRow = {
-  id: string;
-  organizationId: string | null;
-  name: string;
-  slug: string;
-  description: string | null;
-  status: string | null;
-  sourceType: string;
-  rootPath: string | null;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-};
-
-type WorkspaceTable = {
-  findUnique(args: { where: { id?: string; slug?: string } }): Promise<WorkspaceRow | null>;
-  create(args: { data: Record<string, unknown> }): Promise<WorkspaceRow>;
-  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<WorkspaceRow>;
-};
-
 export type KnowledgeSetRepositoryDb = {
-  workspace: WorkspaceTable;
   knowledgeSet: KnowledgeSetTable;
   knowledgeSetItem: KnowledgeSetItemTable;
-  workspaceKnowledgeSet: WorkspaceKnowledgeSetTable;
   $transaction<T>(callback: (tx: KnowledgeSetRepositoryDb) => Promise<T>): Promise<T>;
 };
 
@@ -176,17 +122,6 @@ function mapKnowledgeSetItem(row: KnowledgeSetItemRow): KnowledgeSetItemRecord {
     sizeBytes: row.sizeBytes === null ? undefined : row.sizeBytes.toString(),
     checksum: trimOrUndefined(row.checksum),
     sourceArchiveName: trimOrUndefined(row.sourceArchiveName),
-    createdAt: toIsoString(row.createdAt),
-    updatedAt: toIsoString(row.updatedAt)
-  };
-}
-
-function mapWorkspaceKnowledgeSet(row: WorkspaceKnowledgeSetRow): WorkspaceKnowledgeSetRecord {
-  return {
-    id: row.id,
-    workspaceId: row.workspaceId,
-    knowledgeSetId: row.knowledgeSetId,
-    mountType: row.mountType,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
   };
@@ -295,59 +230,6 @@ export class KnowledgeSetRepository {
     });
   }
 
-  async replaceWorkspaceBindings(
-    workspaceId: string,
-    bindings: ReplaceWorkspaceBindingsPayload
-  ): Promise<WorkspaceKnowledgeSetRecord[]> {
-    return this.db.$transaction(async (tx) => {
-      const normalizedWorkspaceId = trimOrUndefined(workspaceId);
-      if (!normalizedWorkspaceId) {
-        throw new Error("workspace 不存在");
-      }
-      const workspace = await tx.workspace.findUnique({ where: { id: normalizedWorkspaceId } });
-      if (!workspace) {
-        throw new Error("workspace 不存在");
-      }
-      await tx.workspaceKnowledgeSet.deleteMany({ where: { workspaceId: normalizedWorkspaceId } });
-      for (const binding of bindings) {
-        await tx.workspaceKnowledgeSet.create({
-          data: {
-            knowledgeSetId: binding.knowledgeSetId,
-            workspaceId: normalizedWorkspaceId,
-            mountType: binding.mountType
-          }
-        });
-      }
-      await tx.workspace.update({
-        where: { id: normalizedWorkspaceId },
-        data: {
-          updatedAt: new Date()
-        }
-      });
-      const rows = await tx.workspaceKnowledgeSet.findMany({
-        where: { workspaceId: normalizedWorkspaceId },
-        orderBy: { createdAt: "asc" }
-      });
-      return rows.map(mapWorkspaceKnowledgeSet);
-    });
-  }
-
-  async listWorkspaceBindings(workspaceId: string): Promise<WorkspaceKnowledgeSetRecord[]> {
-    const normalizedWorkspaceId = trimOrUndefined(workspaceId);
-    if (!normalizedWorkspaceId) {
-      throw new Error("workspace 不存在");
-    }
-    const workspace = await this.db.workspace.findUnique({ where: { id: normalizedWorkspaceId } });
-    if (!workspace) {
-      throw new Error("workspace 不存在");
-    }
-    const rows = await this.db.workspaceKnowledgeSet.findMany({
-      where: { workspaceId: normalizedWorkspaceId },
-      orderBy: { createdAt: "asc" }
-    });
-    return rows.map(mapWorkspaceKnowledgeSet);
-  }
-
   private async requireKnowledgeSet(db: KnowledgeSetRepositoryDb, knowledgeSetId: string): Promise<KnowledgeSetRow> {
     const normalized = trimOrUndefined(knowledgeSetId);
     if (!normalized) {
@@ -361,20 +243,12 @@ export class KnowledgeSetRepository {
   }
 
   private async loadRecord(db: KnowledgeSetRepositoryDb, row: KnowledgeSetRow): Promise<KnowledgeSetRecord> {
-    const [items, workspaceBindings] = await Promise.all([
-      db.knowledgeSetItem
-        .findMany({
-          where: { knowledgeSetId: row.id },
-          orderBy: { relativePath: "asc" }
-        })
-        .then((records) => records.map(mapKnowledgeSetItem)),
-      db.workspaceKnowledgeSet
-        .findMany({
-          where: { knowledgeSetId: row.id },
-          orderBy: { createdAt: "asc" }
-        })
-        .then((records) => records.map(mapWorkspaceKnowledgeSet))
-    ]);
+    const items = await db.knowledgeSetItem
+      .findMany({
+        where: { knowledgeSetId: row.id },
+        orderBy: { relativePath: "asc" }
+      })
+      .then((records) => records.map(mapKnowledgeSetItem));
 
     return {
       id: row.id,
@@ -388,8 +262,7 @@ export class KnowledgeSetRepository {
       storageKey: trimOrUndefined(row.storageKey),
       createdAt: toIsoString(row.createdAt),
       updatedAt: toIsoString(row.updatedAt),
-      items,
-      workspaceBindings
+      items
     };
   }
 }

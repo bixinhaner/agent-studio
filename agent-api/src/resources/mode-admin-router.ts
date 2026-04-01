@@ -59,11 +59,6 @@ const stringListSchema = z.array(z.string().trim().min(1));
 const statusSchema = z.enum(["active", "disabled"]);
 const runtimeTypeSchema = z.enum(["codex", "claude_code"]);
 const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint"]);
-const directoryScopeSchema = z.enum([
-  "workspace_only",
-  "descendants_only",
-  "authorized_workspace_and_knowledge_set"
-]);
 const instructionSourceTypeSchema = z.enum(["inline_text", "knowledge_set_document", "workspace_agents_md"]);
 const policySubjectTypeSchema = z.enum(["role", "department", "user"]);
 const policyEffectSchema = z.enum(["allow", "deny"]);
@@ -185,30 +180,6 @@ const agentModeSkillPackagesReplaceSchema = z.object({
   skillPackageIds: stringListSchema
 });
 
-const workspaceRuleSchema = z.object({
-  workspaceId: z.string().trim().min(1),
-  isDefault: z.boolean().optional(),
-  allowDirectorySelection: z.boolean().optional(),
-  directoryScope: directoryScopeSchema,
-  loadWorkspaceAgentsMd: z.boolean().optional()
-});
-
-const agentModeWorkspaceRulesReplaceSchema = z
-  .object({
-    workspaces: z.array(workspaceRuleSchema).optional(),
-    workspaceRules: z.array(workspaceRuleSchema).optional()
-  })
-  .superRefine((value, ctx) => {
-    const workspaces = value.workspaces ?? value.workspaceRules;
-    if (!workspaces) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["workspaces"],
-        message: "Required"
-      });
-    }
-  });
-
 const agentModeInstructionSourcesReplaceSchema = z.object({
   instructionSources: z.array(
     z.object({
@@ -316,16 +287,6 @@ type AgentModeRepositoryLike = {
     }
   ): Promise<unknown>;
   replaceSkillPackages(id: string, skillPackageIds: string[]): Promise<unknown>;
-  replaceWorkspaceRules(
-    id: string,
-    workspaceRules: Array<{
-      workspaceId: string;
-      isDefault?: boolean;
-      allowDirectorySelection?: boolean;
-      directoryScope: string;
-      loadWorkspaceAgentsMd?: boolean;
-    }>
-  ): Promise<unknown>;
   replaceInstructionSources(
     id: string,
     instructionSources: Array<{
@@ -363,13 +324,6 @@ type ResourcePolicyRepositoryLike = {
     }>;
   }): Promise<unknown[]>;
 };
-
-function withWorkspaceAlias<T extends { workspaceRules?: unknown }>(record: T): T & { workspaces: unknown } {
-  return {
-    ...record,
-    workspaces: record.workspaceRules ?? []
-  };
-}
 
 export function createModeAdminRouter(options: {
   runProfiles: RunProfileRepositoryLike;
@@ -766,13 +720,6 @@ export function createModeAdminRouter(options: {
             description?: string;
             runProfileId: string;
             skillPackages?: Array<{ skillPackageId: string }>;
-            workspaceRules?: Array<{
-              workspaceId: string;
-              isDefault?: boolean;
-              allowDirectorySelection?: boolean;
-              directoryScope: string;
-              loadWorkspaceAgentsMd?: boolean;
-            }>;
             instructionSources?: Array<{
               sourceType: string;
               sourceRef: string;
@@ -800,13 +747,10 @@ export function createModeAdminRouter(options: {
           existing.skillPackages!.map((item) => item.skillPackageId)
         );
       }
-      if ((existing.workspaceRules ?? []).length > 0) {
-        await options.agentModes.replaceWorkspaceRules(created.id, existing.workspaceRules!);
-      }
       if ((existing.instructionSources ?? []).length > 0) {
         await options.agentModes.replaceInstructionSources(created.id, existing.instructionSources!);
       }
-      const agentMode = withWorkspaceAlias((await options.agentModes.get(created.id)) as { workspaceRules?: unknown });
+      const agentMode = await options.agentModes.get(created.id);
       res.status(201).json({ agentMode });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromCreateConflict(error, "agent mode") });
@@ -846,21 +790,6 @@ export function createModeAdminRouter(options: {
     }
   });
 
-  router.put("/agent-modes/:id/workspaces", async (req: Request, res: Response) => {
-    const parsed = agentModeWorkspaceRulesReplaceSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      sendValidationError(res, parsed.error);
-      return;
-    }
-    try {
-      const workspaceRules = parsed.data.workspaces ?? parsed.data.workspaceRules ?? [];
-      const agentMode = await options.agentModes.replaceWorkspaceRules(req.params.id, workspaceRules);
-      res.json({ agentMode: withWorkspaceAlias(agentMode as { workspaceRules?: unknown }) });
-    } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
-    }
-  });
-
   router.put("/agent-modes/:id/instruction-sources", async (req: Request, res: Response) => {
     const parsed = agentModeInstructionSourcesReplaceSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -869,7 +798,7 @@ export function createModeAdminRouter(options: {
     }
     try {
       const agentMode = await options.agentModes.replaceInstructionSources(req.params.id, parsed.data.instructionSources);
-      res.json({ agentMode: withWorkspaceAlias(agentMode as { workspaceRules?: unknown }) });
+      res.json({ agentMode });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }

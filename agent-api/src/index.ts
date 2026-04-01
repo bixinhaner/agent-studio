@@ -71,7 +71,6 @@ import { RolePermissionRepository, type RolePermissionRepositoryDb } from "./per
 import { AdminAuditLogRepository, type AdminAuditLogRepositoryDb } from "./persistence/admin-audit-log-repository.js";
 import { AlertEventRepository, type AlertEventRepositoryDb } from "./persistence/alert-event-repository.js";
 import { AlertRuleRepository, type AlertRuleRepositoryDb } from "./persistence/alert-rule-repository.js";
-import { WorkspaceRepository, type WorkspaceRepositoryDb } from "./persistence/workspace-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
 import { NotificationRecordRepository, type NotificationRecordRepositoryDb } from "./persistence/notification-record-repository.js";
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
@@ -128,7 +127,6 @@ const usageEventRepository = new UsageEventRepository(db as unknown as UsageEven
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
 const quotaPolicies = new QuotaPolicyRepository(db as unknown as QuotaPolicyRepositoryDb);
-const workspaces = new WorkspaceRepository(db as unknown as WorkspaceRepositoryDb);
 const knowledgeSets = new KnowledgeSetRepository(db as unknown as KnowledgeSetRepositoryDb);
 const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourcePolicyRepositoryDb);
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
@@ -1017,7 +1015,6 @@ registerCommonApiRoutes(app, {
     notificationRecords
   }),
   resourcesAdminRouter: createResourcesAdminRouter({
-    workspaces,
     knowledgeSets,
     resourcePolicies,
     storage: knowledgeSetStorage,

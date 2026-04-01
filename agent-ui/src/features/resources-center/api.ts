@@ -2,24 +2,20 @@ import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/ap
 
 import type {
   CreateKnowledgeSetInput,
-  CreateWorkspaceInput,
   KnowledgeSetItemsResponse,
   KnowledgeSetListResponse,
   KnowledgeSetResponse,
   ResourcePoliciesResponse,
   ResourcePolicyInput,
   ResourcePolicyResourceType,
-  UpdateKnowledgeSetInput,
-  UpdateWorkspaceInput,
-  WorkspaceKnowledgeSetBinding,
-  WorkspaceKnowledgeSetBindingsResponse,
-  WorkspaceListResponse,
-  WorkspaceResponse
+  UpdateKnowledgeSetInput
 } from "./types";
 
 function resourcePolicyPath(resourceType: ResourcePolicyResourceType, resourceId: string) {
-  const segment = resourceType === "workspace" ? "workspaces" : "knowledge-sets";
-  return `/api/admin/resources/${segment}/${encodeURIComponent(resourceId)}/policies`;
+  if (resourceType !== "knowledge_set") {
+    throw new Error("unsupported resource policy resource type");
+  }
+  return `/api/admin/resources/knowledge-sets/${encodeURIComponent(resourceId)}/policies`;
 }
 
 async function requestWithFetch<T>(path: string, init: RequestInit): Promise<T> {
@@ -44,21 +40,6 @@ async function requestWithFetch<T>(path: string, init: RequestInit): Promise<T> 
   return data as T;
 }
 
-export async function fetchWorkspaces(): Promise<WorkspaceListResponse> {
-  return api<WorkspaceListResponse>("/api/admin/workspaces");
-}
-
-export async function createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceResponse> {
-  return api<WorkspaceResponse>("/api/admin/workspaces", { method: "POST", json: input });
-}
-
-export async function updateWorkspace(workspaceId: string, input: UpdateWorkspaceInput): Promise<WorkspaceResponse> {
-  return api<WorkspaceResponse>(`/api/admin/workspaces/${encodeURIComponent(workspaceId)}`, {
-    method: "PATCH",
-    json: input
-  });
-}
-
 export async function fetchKnowledgeSets(): Promise<KnowledgeSetListResponse> {
   return api<KnowledgeSetListResponse>("/api/admin/knowledge-sets");
 }
@@ -75,27 +56,6 @@ export async function updateKnowledgeSet(
     method: "PATCH",
     json: input
   });
-}
-
-export async function fetchWorkspaceKnowledgeSetBindings(
-  workspaceId: string
-): Promise<WorkspaceKnowledgeSetBindingsResponse> {
-  return api<WorkspaceKnowledgeSetBindingsResponse>(
-    `/api/admin/workspaces/${encodeURIComponent(workspaceId)}/knowledge-sets`
-  );
-}
-
-export async function putWorkspaceKnowledgeSetBindings(
-  workspaceId: string,
-  bindings: WorkspaceKnowledgeSetBinding[]
-): Promise<WorkspaceKnowledgeSetBindingsResponse> {
-  return api<WorkspaceKnowledgeSetBindingsResponse>(
-    `/api/admin/workspaces/${encodeURIComponent(workspaceId)}/knowledge-sets`,
-    {
-      method: "PUT",
-      json: { bindings }
-    }
-  );
 }
 
 export async function fetchResourcePolicies(

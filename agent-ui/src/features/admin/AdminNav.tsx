@@ -30,7 +30,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     id: "runtime",
     label: "资源与运行",
     items: [
-      { id: "resources", label: "资源配置中心", description: "管理工作区、资料集及绑定关系。" },
+      { id: "resources", label: "资源配置中心", description: "管理资料集、文件来源与授权策略。" },
       { id: "capabilities", label: "能力配置中心", description: "管理 Agent 模式、技能包、运行策略。" },
       { id: "integrations", label: "集成中心", description: "配置外部系统连接与健康状态。" },
       { id: "system-settings", label: "系统设置", description: "维护平台默认参数与发布版本。" }

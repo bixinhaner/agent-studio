@@ -5,32 +5,6 @@ import type { ResourcePolicyRecord } from "../persistence/resource-policy-reposi
 import { deleteFile, renameFile, scanDirectory } from "./filesystem-knowledge-set-ops.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
-type WorkspaceRepositoryLike = {
-  list(): Promise<unknown[]>;
-  create(payload: {
-    organizationId?: string;
-    name: string;
-    slug: string;
-    description?: string;
-    status?: string;
-    sourceType: string;
-    rootPath?: string;
-  }): Promise<unknown>;
-  update(
-    id: string,
-    payload: {
-      organizationId?: string;
-      name?: string;
-      slug?: string;
-      description?: string;
-      status?: string;
-      sourceType?: string;
-      rootPath?: string;
-    }
-  ): Promise<unknown>;
-  get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string } | undefined>;
-};
-
 type KnowledgeSetRepositoryLike = {
   list(): Promise<unknown[]>;
   create(payload: {
@@ -70,11 +44,6 @@ type KnowledgeSetRepositoryLike = {
       sourceArchiveName?: string;
     }>
   ): Promise<unknown>;
-  listWorkspaceBindings(workspaceId: string): Promise<unknown[]>;
-  replaceWorkspaceBindings(
-    workspaceId: string,
-    bindings: Array<{ knowledgeSetId: string; mountType: string }>
-  ): Promise<unknown[]>;
 };
 
 type ResourcePolicyRepositoryLike = {
@@ -267,7 +236,7 @@ function parseReplacePoliciesRequest(body: unknown): {
     if (!(subjectType === "role" || subjectType === "department" || subjectType === "user")) {
       throw new Error(`invalid resource policy subjectType at index ${index}`);
     }
-    if (!(resourceType === "workspace" || resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
+    if (!(resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
       throw new Error(`invalid resource policy resourceType at index ${index}`);
     }
     if (!(effect === "allow" || effect === "deny")) {
@@ -306,7 +275,7 @@ function parseReplacePoliciesRequest(body: unknown): {
     if (!(subjectType === "role" || subjectType === "department" || subjectType === "user")) {
       throw new Error(`invalid resource policy group subjectType at index ${index}`);
     }
-    if (!(resourceType === "workspace" || resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
+    if (!(resourceType === "knowledge_set" || resourceType === "agent_mode" || resourceType === "skill_package" || resourceType === "run_profile")) {
       throw new Error(`invalid resource policy group resourceType at index ${index}`);
     }
     if (!subjectId) {
@@ -346,7 +315,6 @@ function buildScopedResourcePolicyReplacement(
 }
 
 export function createResourcesAdminRouter(options: {
-  workspaces: WorkspaceRepositoryLike;
   knowledgeSets: KnowledgeSetRepositoryLike;
   resourcePolicies: ResourcePolicyRepositoryLike;
   storage: KnowledgeSetStorage;
@@ -357,51 +325,6 @@ export function createResourcesAdminRouter(options: {
   const router = Router();
   const validateFilesystemPath = options.validateFilesystemPath ?? ((input?: string | null) => input?.trim() ?? "");
   const requirePermission = options.requirePermission ?? ((_permissionKey: string) => (_req, _res, next) => next());
-
-  router.get("/workspaces", async (_req: Request, res: Response) => {
-    res.json({ workspaces: await options.workspaces.list() });
-  });
-
-  router.post("/workspaces", async (req: Request, res: Response) => {
-    try {
-      const sourceType = String(req.body?.sourceType ?? "");
-      const workspace = await options.workspaces.create({
-        organizationId: toTrimmedString(req.body?.organizationId),
-        name: String(req.body?.name ?? ""),
-        slug: String(req.body?.slug ?? ""),
-        description: toTrimmedString(req.body?.description),
-        status: toTrimmedString(req.body?.status),
-        sourceType,
-        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, toTrimmedString(req.body?.rootPath))
-      });
-      res.status(201).json({ workspace });
-    } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
-    }
-  });
-
-  router.patch("/workspaces/:workspaceId", async (req: Request, res: Response) => {
-    try {
-      const existing = await options.workspaces.get(req.params.workspaceId);
-      if (!existing) {
-        res.status(404).json({ detail: "workspace 不存在" });
-        return;
-      }
-      const sourceType = String(req.body?.sourceType ?? existing.sourceType ?? "");
-      const workspace = await options.workspaces.update(req.params.workspaceId, {
-        organizationId: req.body?.organizationId,
-        name: req.body?.name,
-        slug: req.body?.slug,
-        description: req.body?.description,
-        status: req.body?.status,
-        sourceType,
-        rootPath: requireFilesystemRootPath(validateFilesystemPath, sourceType, req.body?.rootPath ?? existing.rootPath)
-      });
-      res.json({ workspace });
-    } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
-    }
-  });
 
   router.get("/knowledge-sets", async (_req: Request, res: Response) => {
     res.json({ knowledgeSets: await options.knowledgeSets.list() });
@@ -651,35 +574,6 @@ export function createResourcesAdminRouter(options: {
     }
   );
 
-  router.get("/workspaces/:workspaceId/knowledge-sets", async (req: Request, res: Response) => {
-    try {
-      const workspace = await options.workspaces.get(req.params.workspaceId);
-      if (!workspace) {
-        res.status(404).json({ detail: "workspace 不存在" });
-        return;
-      }
-      res.json({ bindings: await options.knowledgeSets.listWorkspaceBindings(req.params.workspaceId) });
-    } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
-    }
-  });
-
-  router.put("/workspaces/:workspaceId/knowledge-sets", async (req: Request, res: Response) => {
-    try {
-      const bindings = Array.isArray(req.body?.bindings)
-        ? req.body.bindings.map((binding: Record<string, unknown>) => ({
-            knowledgeSetId: String(binding.knowledgeSetId ?? ""),
-            mountType: String(binding.mountType ?? "")
-          }))
-        : [];
-      res.json({
-        bindings: await options.knowledgeSets.replaceWorkspaceBindings(req.params.workspaceId, bindings)
-      });
-    } catch (error) {
-      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
-    }
-  });
-
   router.get("/resource-policies", requirePermission("resource_policy.read"), async (_req: Request, res: Response) => {
     res.json({ policies: await options.resourcePolicies.listAll() });
   });
@@ -695,62 +589,6 @@ export function createResourcesAdminRouter(options: {
       res.status(400).json({ detail: detailFromError(error) });
     }
   });
-
-  router.get(
-    "/resources/workspaces/:workspaceId/policies",
-    requirePermission("resource_policy.read"),
-    async (req: Request, res: Response) => {
-    try {
-      const workspaceId = req.params.workspaceId;
-      const workspace = await options.workspaces.get(workspaceId);
-      if (!workspace) {
-        res.status(404).json({ detail: "workspace 不存在" });
-        return;
-      }
-      const policies = (await options.resourcePolicies.listAll()).filter(
-        (policy) => policy.resourceType === "workspace" && policy.resourceId === workspaceId
-      );
-      res.json({ policies });
-    } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
-    }
-    }
-  );
-
-  router.put(
-    "/resources/workspaces/:workspaceId/policies",
-    requirePermission("resource_policy.write"),
-    async (req: Request, res: Response) => {
-    try {
-      const workspaceId = req.params.workspaceId;
-      const workspace = await options.workspaces.get(workspaceId);
-      if (!workspace) {
-        res.status(404).json({ detail: "workspace 不存在" });
-        return;
-      }
-      const nextPolicies = parseResourcePolicies(req.body, { requireExplicitArray: true });
-      const existingPolicies = (await options.resourcePolicies.listAll()).filter(
-        (policy) => policy.resourceType === "workspace" && policy.resourceId === workspaceId
-      );
-      const policies = buildScopedResourcePolicyReplacement(
-        existingPolicies,
-        "workspace",
-        workspaceId,
-        nextPolicies,
-        workspace.organizationId
-      );
-      res.json({
-        policies: await options.resourcePolicies.replacePoliciesForResource({
-          resourceType: "workspace",
-          resourceId: workspaceId,
-          policies
-        })
-      });
-    } catch (error) {
-      res.status(400).json({ detail: detailFromError(error) });
-    }
-    }
-  );
 
   router.get(
     "/resources/knowledge-sets/:knowledgeSetId/policies",

@@ -32,7 +32,7 @@ const SECTION_META: Record<AdminNavSection, { title: string; description: string
   },
   resources: {
     title: "资源配置中心",
-    description: "集中维护工作区、知识集与资源绑定关系。",
+    description: "集中维护资料集、文件来源与访问授权。",
     scope: "资源与授权",
     cadence: "按项目变更维护"
   },
