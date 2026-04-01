@@ -20,9 +20,18 @@
   overflow: hidden;
 }
 
+.portal-workbench-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
 .portal-workbench-layout {
   flex: 1;
   display: flex;
+  width: 100%;
   height: 100%;
 }
 
@@ -119,6 +128,7 @@
   height: 100%;
   background-color: var(--workbench-sidebar-bg);
   border-right: 1px solid var(--workbench-border);
+  overflow: hidden;
 }
 
 .session-rail-head {
@@ -149,6 +159,26 @@
 
 .session-rail-controls .ant-btn {
   border-radius: 6px;
+}
+
+.session-rail-new-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--workbench-accent);
+  color: white;
+  border-radius: 6px;
+  height: 36px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  font-size: 14px;
+}
+
+.session-rail-new-btn:hover {
+  background-color: var(--workbench-accent-strong);
 }
 
 .session-rail-list {
@@ -215,6 +245,7 @@
 /* @assistant-ui customized tokens */
 .aui-thread-root {
   --aui-thread-max-width: 800px;
+  height: 100%;
 }
 .aui-composer-root {
   border: 1px solid var(--workbench-border);
