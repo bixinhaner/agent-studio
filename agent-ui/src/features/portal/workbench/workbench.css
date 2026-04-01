@@ -122,10 +122,14 @@
   background-color: var(--workbench-accent-strong);
 }
 
-[data-thread-list-root] {
+[data-thread-list-root],
+.aui-thread-list-root {
   height: 100%;
+  min-height: 0;
   width: 100%;
   display: flex;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .session-rail {
@@ -181,6 +185,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 8px 12px;
   overscroll-behavior: contain;
 }
