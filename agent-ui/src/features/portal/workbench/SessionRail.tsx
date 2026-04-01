@@ -16,11 +16,24 @@ export function SessionRail(
   return (
     <aside className={props.collapsed ? "session-rail collapsed" : "session-rail"}>
       <div className="session-rail-head">
-        <Button aria-label={props.collapsed ? "展开侧栏" : "收起侧栏"} onClick={props.onToggleCollapsed}>
-          {props.collapsed ? "展开" : "收起"}
-        </Button>
+        <div className="session-rail-title-row">
+          {!props.collapsed ? (
+            <div className="session-rail-title-copy">
+              <p className="session-rail-eyebrow">会话工作区</p>
+              <h2>Threads</h2>
+            </div>
+          ) : null}
+          <Button
+            type="text"
+            className="session-rail-collapse-btn"
+            aria-label={props.collapsed ? "展开侧栏" : "收起侧栏"}
+            onClick={props.onToggleCollapsed}
+          >
+            {props.collapsed ? "›" : "‹"}
+          </Button>
+        </div>
         {!props.collapsed ? (
-          <>
+          <div className="session-rail-controls">
             {props.newThreadSlot ?? (
               <Button aria-label="新会话" type="primary" onClick={props.onCreateThread}>
                 新会话
@@ -33,8 +46,10 @@ export function SessionRail(
               onChange={(event) => props.onSearchChange(event.target.value)}
               allowClear
             />
-          </>
-        ) : null}
+          </div>
+        ) : (
+          <div className="session-rail-collapsed-label">会话</div>
+        )}
       </div>
       {!props.collapsed ? <div className="session-rail-list">{props.children}</div> : null}
       {!props.collapsed ? <div className="session-rail-footer">{props.footer ?? props.userName}</div> : null}

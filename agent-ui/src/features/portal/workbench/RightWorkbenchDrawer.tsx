@@ -13,7 +13,7 @@ export function RightWorkbenchDrawer(props: {
 }) {
   return (
     <Drawer
-      title="工作台工具"
+      title="工具台"
       placement="right"
       width="min(420px, calc(100vw - 16px))"
       open={props.open}
@@ -26,8 +26,8 @@ export function RightWorkbenchDrawer(props: {
         activeKey={props.activeTab}
         onChange={(key) => props.onTabChange(key as WorkbenchTab)}
         items={[
-          { key: "writing", label: "写作", forceRender: true, children: props.writingContent },
-          { key: "collaboration", label: "协作", forceRender: true, children: props.collaborationContent }
+          { key: "writing", label: "文档工坊", forceRender: true, children: props.writingContent },
+          { key: "collaboration", label: "协作面板", forceRender: true, children: props.collaborationContent }
         ]}
       />
     </Drawer>

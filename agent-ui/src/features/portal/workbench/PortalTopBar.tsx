@@ -27,18 +27,22 @@ export function PortalTopBar(props: {
           <span className="portal-topbar-brand-mark" aria-hidden="true">
             AS
           </span>
-          <span className="portal-topbar-brand-title">Agent Studio</span>
+          <span className="portal-topbar-brand-copy">
+            <span className="portal-topbar-brand-title">Agent Studio</span>
+            <span className="portal-topbar-brand-subtitle">Workspace Console</span>
+          </span>
         </div>
-        <Space size={8}>
+        <Space size={8} className="portal-topbar-action-group">
           <Button
             type="text"
+            className="portal-topbar-ghost-btn"
             aria-label={props.sessionRailCollapsed !== false ? "展开会话栏" : "收起会话栏"}
             onClick={props.onToggleRail}
           >
-            会话
+            {props.sessionRailCollapsed !== false ? "展开会话栏" : "收起会话栏"}
           </Button>
-          <Button aria-label="高级设置" onClick={props.onOpenAdvancedSettings}>
-            高级设置
+          <Button className="portal-topbar-ghost-btn" aria-label="高级设置" onClick={props.onOpenAdvancedSettings}>
+            运行参数
           </Button>
         </Space>
       </div>
@@ -51,8 +55,8 @@ export function PortalTopBar(props: {
         <span className="portal-topbar-drawer-state" aria-live="polite">
           {drawerStateText}
         </span>
-        <Button type="primary" aria-label="打开工作台抽屉" onClick={props.onOpenDrawer}>
-          写作 / 协作
+        <Button type="primary" className="portal-topbar-primary-btn" aria-label="打开工作台抽屉" onClick={props.onOpenDrawer}>
+          打开工具台
         </Button>
       </div>
     </header>

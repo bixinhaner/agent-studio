@@ -2,12 +2,11 @@ import type { ThemeConfig } from "antd";
 
 export const PORTAL_ANTD_THEME: ThemeConfig = {
   token: {
-    colorPrimary: "#2563EB",
-    colorBgLayout: "#F8FAFC",
+    colorPrimary: "#0F62FE",
+    colorBgLayout: "#F4F7FB",
     colorBgContainer: "#FFFFFF",
-    colorText: "#0F172A",
-    colorTextSecondary: "#475569",
-    borderRadius: 10
+    colorText: "#111827",
+    colorTextSecondary: "#5F6C80",
+    borderRadius: 12
   }
 };
-
