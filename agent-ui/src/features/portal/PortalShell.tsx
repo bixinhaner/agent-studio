@@ -1357,7 +1357,47 @@ const AgentThreadListItem: FC = () => {
 };
 
 const ComposerActivationGuard: FC = () => {
-  // Keep placeholder to preserve call site; active guard is disabled to avoid runtime re-entrancy during thread switch.
+  const aui = useAui();
+  const threadItemId = useAuiState((s) => s.threadListItem.id);
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const isComposerEditing = useAuiState((s) => s.composer.isEditing);
+  const threadLoading = useAuiState((s) => s.thread.isLoading);
+  const recoverRef = useRef<{ threadId: string; attempts: number }>({
+    threadId: "",
+    attempts: 0
+  });
+
+  useEffect(() => {
+    if (threadLoading || isComposerEditing) {
+      recoverRef.current = { threadId: "", attempts: 0 };
+      return;
+    }
+
+    const normalizedThreadId = String(threadItemId || mainThreadId || "").trim();
+    if (!normalizedThreadId) return;
+
+    if (recoverRef.current.threadId !== normalizedThreadId) {
+      recoverRef.current = { threadId: normalizedThreadId, attempts: 0 };
+    }
+
+    if (recoverRef.current.attempts >= 2) return;
+    recoverRef.current.attempts += 1;
+    const attempt = recoverRef.current.attempts;
+
+    const timer = window.setTimeout(() => {
+      try {
+        const currentThreadId = String(aui.threadListItem().getState().id || "").trim();
+        if (currentThreadId !== normalizedThreadId) return;
+        if (aui.composer().getState().isEditing) return;
+        aui.threadListItem().switchTo();
+      } catch {
+        // Ignore transient runtime timing errors and wait for next state tick.
+      }
+    }, attempt === 1 ? 0 : 120);
+
+    return () => window.clearTimeout(timer);
+  }, [aui, isComposerEditing, mainThreadId, threadItemId, threadLoading]);
+
   return null;
 };
 
