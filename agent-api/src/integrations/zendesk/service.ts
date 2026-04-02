@@ -41,6 +41,11 @@ type ZendeskSettingsStoreBridge = {
     },
     instanceId: string
   ): Promise<ZendeskIntegrationSettings>;
+  rememberValidation(user: { id: number; name: string; email?: string; role?: string }): Promise<ZendeskIntegrationSettings>;
+  rememberValidationForInstance(
+    user: { id: number; name: string; email?: string; role?: string },
+    instanceId: string
+  ): Promise<ZendeskIntegrationSettings>;
 };
 
 type ProcessTicketResult = {
@@ -218,7 +223,7 @@ export class ZendeskIntegrationService {
       ready: missing.length === 0,
       missing,
       setup: buildSetupGuide(settings),
-      runs: await this.runStore.list(50)
+      runs: await this.runStore.listForInstance(50, instanceId)
     };
   }
 
@@ -233,8 +238,8 @@ export class ZendeskIntegrationService {
     return await this.getOverview(instanceId);
   }
 
-  async validateConnection(): Promise<{ ok: true; overview: ZendeskOverview }> {
-    const settings = await this.settingsStore.get();
+  async validateConnection(instanceId?: string): Promise<{ ok: true; overview: ZendeskOverview }> {
+    const settings = await this.loadSettings(instanceId);
     const missing = findZendeskReadinessGaps(settings).filter(
       (item) => !["public_base_url", "workspace", "model"].includes(item)
     );
@@ -244,10 +249,15 @@ export class ZendeskIntegrationService {
 
     const client = new ZendeskClient(settings);
     const me = await client.getMe();
-    await this.settingsStore.rememberValidation(me);
+    const store = this.settingsStore as ZendeskSettingsStoreBridge;
+    if (instanceId) {
+      await store.rememberValidationForInstance(me, instanceId);
+    } else {
+      await store.rememberValidation(me);
+    }
     return {
       ok: true,
-      overview: await this.getOverview()
+      overview: await this.getOverview(instanceId)
     };
   }
 
@@ -263,11 +273,11 @@ export class ZendeskIntegrationService {
     return { accepted: true, result };
   }
 
-  async runTicket(ticketIdInput: string | number): Promise<ProcessTicketResult> {
+  async runTicket(ticketIdInput: string | number, instanceId?: string): Promise<ProcessTicketResult> {
     const ticketId = sanitizeTicketId(ticketIdInput);
     return await this.enqueue(ticketId, async () => {
-      const settings = await this.settingsStore.get();
-      return await this.processTicket(ticketId, "manual", settings);
+      const settings = await this.loadSettings(instanceId);
+      return await this.processTicket(ticketId, "manual", settings, instanceId);
     });
   }
 
@@ -288,7 +298,8 @@ export class ZendeskIntegrationService {
   private async processTicket(
     ticketId: string,
     source: "webhook" | "manual",
-    settings: ZendeskIntegrationSettings
+    settings: ZendeskIntegrationSettings,
+    instanceId?: string
   ): Promise<ProcessTicketResult> {
     const missing = findZendeskReadinessGaps(settings).filter((item) => item !== "public_base_url");
     if (missing.length > 0) {
@@ -296,6 +307,7 @@ export class ZendeskIntegrationService {
     }
 
     const run = await this.runStore.create({
+      instanceId,
       ticketId,
       source,
       status: "received",

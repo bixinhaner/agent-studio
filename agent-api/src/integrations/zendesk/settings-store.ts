@@ -199,6 +199,16 @@ export class ZendeskSettingsStore {
     });
   }
 
+  async rememberValidationForInstance(user: ZendeskValidatedUser, instanceId: string): Promise<ZendeskIntegrationSettings> {
+    return await this.updateForInstance(
+      {
+        lastValidatedAt: new Date().toISOString(),
+        lastValidatedUser: user
+      },
+      instanceId
+    );
+  }
+
   private normalize(input: ZendeskIntegrationSettings): ZendeskIntegrationSettings {
     const model = normalizeModel(input.model || DEFAULT_MODEL);
     const workspace = resolveWorkspace(input.workspace || appConfig.defaultWorkspace);

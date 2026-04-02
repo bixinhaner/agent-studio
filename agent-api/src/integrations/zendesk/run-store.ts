@@ -32,7 +32,23 @@ export class ZendeskRunStore {
     return this.cache.slice(0, Math.max(1, Math.min(200, limit)));
   }
 
+  async listForInstance(limit = 50, instanceId?: string): Promise<ZendeskRunRecord[]> {
+    await this.ensureLoaded();
+    const safeLimit = Math.max(1, Math.min(200, limit));
+    const normalizedInstanceId = typeof instanceId === "string" ? instanceId.trim() : "";
+    if (!normalizedInstanceId) {
+      return this.cache.slice(0, safeLimit);
+    }
+    return this.cache
+      .filter((item) => {
+        const itemInstanceId = typeof item.instanceId === "string" ? item.instanceId.trim() : "";
+        return itemInstanceId === normalizedInstanceId || !itemInstanceId;
+      })
+      .slice(0, safeLimit);
+  }
+
   async create(input: {
+    instanceId?: string;
     ticketId: string;
     source: "webhook" | "manual";
     status: ZendeskRunStatus;
@@ -43,6 +59,7 @@ export class ZendeskRunStore {
     const now = new Date().toISOString();
     const record: ZendeskRunRecord = {
       id: randomUUID(),
+      instanceId: typeof input.instanceId === "string" && input.instanceId.trim() ? input.instanceId.trim() : undefined,
       ticketId: input.ticketId,
       source: input.source,
       status: input.status,

@@ -15,6 +15,7 @@ import {
   type IntegrationPolicySummary,
   type IntegrationTriggerType,
   type IntegrationValidationItem,
+  type IntegrationZendeskRunResult,
   type IntegrationValidationResult,
   sanitizeIntegrationConfigForRead
 } from "./types.js";
@@ -22,6 +23,7 @@ import type { PolicyService } from "../../resources/policy-service.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
 import { OpenAICompatibleApiIntegrationAdapter } from "./openai-compatible-api-adapter.js";
+import type { ZendeskOverview } from "../zendesk/types.js";
 
 const EXTERNAL_OPENAI_API_TYPE = "openai_compatible_api";
 
@@ -82,6 +84,11 @@ export type IntegrationCenterService = {
     payload: IntegrationInstanceBaseInput | IntegrationInstanceUpdateInput;
   }): Promise<IntegrationDetail>;
   validateInstance(input: { currentUserId: string; instanceId: string }): Promise<IntegrationValidationResult>;
+  runZendeskTicket(input: {
+    currentUserId: string;
+    instanceId: string;
+    ticketId: string | number;
+  }): Promise<IntegrationZendeskRunResult>;
   listValidationHistory(input: { currentUserId: string; instanceId: string }): Promise<{ items: IntegrationValidationItem[] }>;
   getExternalApiUsage(input: {
     currentUserId: string;
@@ -370,6 +377,23 @@ function mapInstanceDetail(detail: Awaited<ReturnType<IntegrationInstanceReposit
   };
 }
 
+function mapZendeskOverview(overview: ZendeskOverview): NonNullable<IntegrationDetail["zendesk"]> {
+  return {
+    ready: overview.ready,
+    missing: [...overview.missing],
+    setup: {
+      webhookUrl: overview.setup.webhookUrl,
+      payloadExample: overview.setup.payloadExample,
+      triggers: overview.setup.triggers.map((item) => ({
+        name: item.name,
+        description: item.description,
+        conditions: [...item.conditions]
+      }))
+    },
+    runs: overview.runs.map((item) => ({ ...item }))
+  };
+}
+
 function createValidationOutcome(instanceType: string, config: Record<string, unknown>): IntegrationValidationOutcome {
   return normalizeValidationSummary(instanceType, config);
 }
@@ -380,6 +404,18 @@ export function createIntegrationCenterService(options: {
   policyService: Pick<PolicyService, "filterAllowedResources">;
   accessResolver: AccessResolver;
   usageEvents: Pick<UsageEventRepository, "list">;
+  zendesk?: {
+    getOverview(instanceId?: string): Promise<ZendeskOverview>;
+    validateConnection(instanceId?: string): Promise<{ ok: true; overview: ZendeskOverview }>;
+    runTicket(ticketId: string | number, instanceId?: string): Promise<{
+      status: string;
+      detail: string;
+      runId: string;
+      commentId?: number;
+      requesterCommentId?: number;
+      decision?: string;
+    }>;
+  };
   adapters?: Partial<Record<string, ValidationAdapter>>;
 }): IntegrationCenterService {
   const repository = new IntegrationInstanceRepository(options.db);
@@ -609,7 +645,11 @@ export function createIntegrationCenterService(options: {
   async function readDetail(instanceId: string, currentUserId: string): Promise<IntegrationDetail> {
     const detail = await requireAuthorizedInstance(instanceId, currentUserId);
     if (!requiresInstancePolicy(detail.type)) {
-      return mapInstanceDetail(detail, buildPoliciesResult([]));
+      const mapped = mapInstanceDetail(detail, buildPoliciesResult([]));
+      if (detail.type === "zendesk" && options.zendesk) {
+        mapped.zendesk = mapZendeskOverview(await options.zendesk.getOverview(detail.id));
+      }
+      return mapped;
     }
 
     const policies = await options.policies.listAll();
@@ -624,7 +664,11 @@ export function createIntegrationCenterService(options: {
         effect: policy.effect
       }));
 
-    return mapInstanceDetail(detail, buildPoliciesResult(instancePolicies));
+    const mapped = mapInstanceDetail(detail, buildPoliciesResult(instancePolicies));
+    if (detail.type === "zendesk" && options.zendesk) {
+      mapped.zendesk = mapZendeskOverview(await options.zendesk.getOverview(detail.id));
+    }
+    return mapped;
   }
 
   async function readValidationConfig(instanceId: string): Promise<Record<string, unknown>> {
@@ -808,22 +852,73 @@ export function createIntegrationCenterService(options: {
       }
       await requireAuthorizedInstance(detail.id, input.currentUserId);
 
-      const validationConfig = await readValidationConfig(detail.id);
-      const outcome = adapters[detail.type]
-        ? await adapters[detail.type]!.validate(validationConfig)
-        : createValidationOutcome(detail.type, validationConfig);
-      const validation = mapValidation(
-        await repository.recordValidation(detail.id, {
-          triggerType: "manual" as IntegrationTriggerType,
-          status: outcome.status,
-          summary: outcome.summary,
-          detail: outcome.detail,
-          triggeredByUserId: input.currentUserId
-        })
-      );
+      try {
+        let outcome: IntegrationValidationOutcome;
+        if (detail.type === "zendesk" && options.zendesk) {
+          const result = await options.zendesk.validateConnection(detail.id);
+          outcome = {
+            status: "success",
+            summary: "zendesk connection validated",
+            detail: {
+              ready: result.overview.ready,
+              missing: result.overview.missing,
+              lastValidatedAt: result.overview.settings.lastValidatedAt,
+              lastValidatedUser: result.overview.settings.lastValidatedUser
+            }
+          };
+        } else {
+          const validationConfig = await readValidationConfig(detail.id);
+          outcome = adapters[detail.type]
+            ? await adapters[detail.type]!.validate(validationConfig)
+            : createValidationOutcome(detail.type, validationConfig);
+        }
+
+        const validation = mapValidation(
+          await repository.recordValidation(detail.id, {
+            triggerType: "manual" as IntegrationTriggerType,
+            status: outcome.status,
+            summary: outcome.summary,
+            detail: outcome.detail,
+            triggeredByUserId: input.currentUserId
+          })
+        );
+        return {
+          validation,
+          detail: await readDetail(detail.id, input.currentUserId)
+        };
+      } catch (error) {
+        const validation = mapValidation(
+          await repository.recordValidation(detail.id, {
+            triggerType: "manual" as IntegrationTriggerType,
+            status: "failed",
+            summary: "integration validation failed",
+            detail: { error: detailFromError(error) },
+            triggeredByUserId: input.currentUserId
+          })
+        );
+        if (detail.type === "zendesk" && options.zendesk) {
+          return {
+            validation,
+            detail: await readDetail(detail.id, input.currentUserId)
+          };
+        }
+        throw error;
+      }
+    },
+
+    async runZendeskTicket(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== "zendesk") {
+        throw new Error("当前集成实例不是 Zendesk。");
+      }
+      if (!options.zendesk) {
+        throw new Error("Zendesk 集成功能未启用");
+      }
+
+      const result = await options.zendesk.runTicket(input.ticketId, instance.id);
       return {
-        validation,
-        detail: await readDetail(detail.id, input.currentUserId)
+        result,
+        detail: await readDetail(instance.id, input.currentUserId)
       };
     },
 

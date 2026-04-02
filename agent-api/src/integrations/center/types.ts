@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types.js";
 
 export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api"]);
 export type IntegrationType = z.infer<typeof integrationTypeSchema>;
@@ -34,6 +35,10 @@ export const integrationBindingSchema = z.object({
 
 export const integrationBindingsUpdateSchema = z.object({
   bindings: z.array(integrationBindingSchema)
+});
+
+export const integrationZendeskManualRunSchema = z.object({
+  ticket_id: z.union([z.number().int().positive(), z.string().trim().min(1)])
 });
 
 const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
@@ -140,6 +145,7 @@ export type IntegrationInstanceBaseInput = z.infer<typeof integrationInstanceBas
 export type IntegrationInstanceUpdateInput = z.infer<typeof integrationInstanceUpdateSchema>;
 export type IntegrationPoliciesUpdateInput = z.infer<typeof integrationPoliciesUpdateSchema>;
 export type IntegrationBindingsUpdateInput = z.infer<typeof integrationBindingsUpdateSchema>;
+export type IntegrationZendeskManualRunInput = z.infer<typeof integrationZendeskManualRunSchema>;
 
 export type IntegrationPolicyInput = {
   subjectType: IntegrationPolicySubjectType;
@@ -211,10 +217,28 @@ export type IntegrationDetail = {
     items: Array<IntegrationPolicyInput>;
     summary: IntegrationPolicySummary;
   };
+  zendesk?: {
+    ready: boolean;
+    missing: string[];
+    setup: ZendeskSetupGuide;
+    runs: ZendeskRunRecord[];
+  };
 };
 
 export type IntegrationValidationResult = {
   validation: IntegrationValidationItem;
+  detail: IntegrationDetail;
+};
+
+export type IntegrationZendeskRunResult = {
+  result: {
+    status: string;
+    detail: string;
+    runId: string;
+    commentId?: number;
+    requesterCommentId?: number;
+    decision?: string;
+  };
   detail: IntegrationDetail;
 };
 

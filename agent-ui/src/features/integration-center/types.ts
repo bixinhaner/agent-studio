@@ -1,3 +1,5 @@
+import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types";
+
 export type IntegrationType = 'dingtalk' | 'zendesk' | 'openai_codex' | 'openai_compatible_api';
 export type IntegrationCenterTab = IntegrationType;
 export type IntegrationStatus = 'draft' | 'active' | 'disabled' | 'error' | string;
@@ -68,6 +70,12 @@ export type IntegrationDetail = {
   validationHistory: { items: IntegrationValidationItem[] };
   bindings: { items: IntegrationBindingRecord[] };
   policies: { items: IntegrationPolicyInput[]; summary: IntegrationPolicySummary };
+  zendesk?: {
+    ready: boolean;
+    missing: string[];
+    setup: ZendeskSetupGuide;
+    runs: ZendeskRunRecord[];
+  };
 };
 
 export type IntegrationListResponse = { items: IntegrationListItem[] };
@@ -76,6 +84,17 @@ export type IntegrationBindingsResponse = { items: IntegrationBindingRecord[] };
 export type IntegrationPoliciesResponse = { items: IntegrationPolicyInput[]; summary: IntegrationPolicySummary };
 export type IntegrationValidationResult = {
   validation: IntegrationValidationItem;
+  detail: IntegrationDetail;
+};
+export type IntegrationZendeskRunResult = {
+  result: {
+    status: string;
+    detail: string;
+    runId: string;
+    commentId?: number;
+    requesterCommentId?: number;
+    decision?: string;
+  };
   detail: IntegrationDetail;
 };
 

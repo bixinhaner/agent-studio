@@ -69,7 +69,6 @@ import type { ThreadCollaborationView } from "../collaboration/types";
 import { fetchPortalResources } from "../resources/api";
 import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import type { PortalResourcesResponse } from "../resources/types";
-import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
@@ -3465,8 +3464,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   <p className="field-help">运行配置修改后将自动在下一轮对话生效。</p>
                   {errorText ? <p className="err-text">{errorText}</p> : null}
                 </div>
-
-                <ZendeskIntegrationPanel />
               </div>
             </AdvancedSettingsPanel>
           </div>

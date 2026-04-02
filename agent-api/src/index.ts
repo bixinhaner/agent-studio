@@ -148,6 +148,7 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const systemSettings = new SystemSettingsRepository(db as never);
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
+const zendesk = new ZendeskIntegrationService();
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
@@ -155,6 +156,7 @@ const integrationCenter = createIntegrationCenterService({
   policies: resourcePolicies as never,
   policyService,
   usageEvents: usageEventRepository,
+  zendesk,
   accessResolver: {
     getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
     getDepartmentIdsForUser: async (userId) => departmentMemberships.listIdsForUser(userId)
@@ -381,7 +383,6 @@ const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   resourceAccessLogs,
   securityAlerts: alertEvaluation
 });
-const zendesk = new ZendeskIntegrationService();
 const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient);
 const orgSyncService = new OrgSyncService({
   provider: dingtalkOrgProvider,

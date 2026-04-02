@@ -7,7 +7,8 @@ import {
   integrationInstanceBaseSchema,
   integrationInstanceUpdateSchema,
   integrationListQuerySchema,
-  integrationPoliciesUpdateSchema
+  integrationPoliciesUpdateSchema,
+  integrationZendeskManualRunSchema
 } from "./types.js";
 
 function detailFromError(error: unknown): string {
@@ -93,6 +94,21 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         await options.service.validateInstance({
           currentUserId: req.currentUser!.id,
           instanceId: req.params.instanceId
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/integrations/:instanceId/zendesk/run", requireWrite, async (req: Request, res: Response) => {
+    try {
+      const payload = integrationZendeskManualRunSchema.parse(req.body ?? {});
+      res.json(
+        await options.service.runZendeskTicket({
+          currentUserId: req.currentUser!.id,
+          instanceId: req.params.instanceId,
+          ticketId: payload.ticket_id
         })
       );
     } catch (error) {

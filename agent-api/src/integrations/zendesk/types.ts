@@ -80,6 +80,7 @@ export type ZendeskBindingRecord = {
 
 export type ZendeskRunRecord = {
   id: string;
+  instanceId?: string;
   ticketId: string;
   source: "webhook" | "manual";
   status: ZendeskRunStatus;

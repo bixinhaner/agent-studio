@@ -10,6 +10,7 @@ import type {
   IntegrationPoliciesResponse,
   IntegrationPolicyInput,
   IntegrationType,
+  IntegrationZendeskRunResult,
   IntegrationValidationResult,
   UpdateIntegrationInstanceInput
 } from "./types";
@@ -46,6 +47,16 @@ export async function updateIntegrationInstance(
 export async function validateIntegrationInstance(instanceId: string): Promise<IntegrationValidationResult> {
   return api<IntegrationValidationResult>(`${integrationPath(instanceId)}/validate`, {
     method: "POST"
+  });
+}
+
+export async function runZendeskIntegrationTicket(
+  instanceId: string,
+  ticketId: string | number
+): Promise<IntegrationZendeskRunResult> {
+  return api<IntegrationZendeskRunResult>(`${integrationPath(instanceId)}/zendesk/run`, {
+    method: "POST",
+    json: { ticket_id: ticketId }
   });
 }
 
