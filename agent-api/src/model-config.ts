@@ -28,6 +28,10 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT
   },
+  "gpt-5.4-mini": {
+    reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT
+  },
   "gpt-5.4-pro": {
     reasoningEfforts: ["medium", "high", "xhigh"],
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT

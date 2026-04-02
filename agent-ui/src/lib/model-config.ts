@@ -31,6 +31,13 @@ const DEFAULT_MODEL_OPTION: ModelOption = {
 export const MODEL_OPTIONS: ModelOption[] = [
   DEFAULT_MODEL_OPTION,
   {
+    value: "gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
+    contextLimit: DEFAULT_CONTEXT_LIMIT_TOKENS
+  },
+  {
     value: "gpt-5.3-codex",
     label: "GPT-5.3 Codex",
     reasoningEfforts: LEGACY_REASONING_EFFORTS,

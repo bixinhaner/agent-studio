@@ -683,3 +683,62 @@
 .assistant-file-change-btn:hover {
   background: #eff6ff;
 }
+
+.assistant-inline-file-link-card {
+  margin-top: 6px;
+  width: min(100%, 680px);
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.assistant-inline-file-link-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assistant-inline-file-link-tag {
+  width: fit-content;
+  border: 1px solid #c7dcff;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.assistant-inline-file-link-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.assistant-inline-file-link-path {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.assistant-inline-file-link-btn {
+  flex-shrink: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  color: #1d4ed8;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.assistant-inline-file-link-btn:hover {
+  background: #eff6ff;
+}

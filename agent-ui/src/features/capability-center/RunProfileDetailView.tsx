@@ -3,6 +3,7 @@ import { Alert, Button, Card, Input, Segmented, Select, Switch, Tag } from "antd
 
 import { updateRunProfile } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
+import { buildRunProfileModelOptions, normalizeRunProfileAllowedModels } from "./run-profile-model-options";
 import type {
   ApprovalPolicy,
   ReasoningEffort,
@@ -58,18 +59,6 @@ const SEARCH_OPTIONS = [
   { label: "live", value: "live" }
 ];
 
-function toAllowedModelsText(allowedModels: string[]) {
-  return allowedModels.join(", ");
-}
-
-function normalizeAllowedModels(value: string, fallback: string) {
-  const models = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return models.length > 0 ? models : [fallback.trim()].filter(Boolean);
-}
-
 function buildInstructionPreview(profile: RunProfileRecord) {
   return [
     `默认模型：${profile.defaultModel}`,
@@ -88,7 +77,9 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
   const [description, setDescription] = useState(runProfile.description || "");
   const [status, setStatus] = useState(runProfile.status);
   const [defaultModel, setDefaultModel] = useState(runProfile.defaultModel);
-  const [allowedModels, setAllowedModels] = useState(toAllowedModelsText(runProfile.allowedModels));
+  const [allowedModels, setAllowedModels] = useState<string[]>(
+    normalizeRunProfileAllowedModels(runProfile.allowedModels, runProfile.defaultModel)
+  );
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(runProfile.defaultReasoningEffort);
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>(runProfile.sandboxMode);
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>(runProfile.approvalPolicy);
@@ -105,7 +96,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
     setDescription(runProfile.description || "");
     setStatus(runProfile.status);
     setDefaultModel(runProfile.defaultModel);
-    setAllowedModels(toAllowedModelsText(runProfile.allowedModels));
+    setAllowedModels(normalizeRunProfileAllowedModels(runProfile.allowedModels, runProfile.defaultModel));
     setReasoningEffort(runProfile.defaultReasoningEffort);
     setSandboxMode(runProfile.sandboxMode);
     setApprovalPolicy(runProfile.approvalPolicy);
@@ -129,6 +120,11 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
     return "AGENTS.md 的实际加载由 agent mode 的工作区规则决定。运行策略只在这里提供预览，不直接绑定具体文件。";
   }, []);
 
+  const modelOptions = useMemo(
+    () => buildRunProfileModelOptions([defaultModel, ...allowedModels]),
+    [allowedModels, defaultModel]
+  );
+
   const instructionPreview = useMemo(
     () =>
       buildInstructionPreview({
@@ -138,7 +134,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
         description,
         status,
         defaultModel,
-        allowedModels: normalizeAllowedModels(allowedModels, defaultModel),
+        allowedModels: normalizeRunProfileAllowedModels(allowedModels, defaultModel),
         defaultReasoningEffort: reasoningEffort,
         sandboxMode,
         approvalPolicy,
@@ -172,7 +168,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
       description: description.trim(),
       status,
       defaultModel: defaultModel.trim(),
-      allowedModels: normalizeAllowedModels(allowedModels, defaultModel),
+      allowedModels: normalizeRunProfileAllowedModels(allowedModels, defaultModel),
       defaultReasoningEffort: reasoningEffort,
       sandboxMode,
       approvalPolicy,
@@ -251,16 +247,32 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
 
               <label className="field">
                 <span className="field-label">默认模型</span>
-                <Input aria-label="默认模型" value={defaultModel} disabled={saving} onChange={(event) => setDefaultModel(event.target.value)} />
+                <Select
+                  aria-label="默认模型"
+                  value={defaultModel}
+                  disabled={saving}
+                  options={modelOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={(value) => {
+                    setDefaultModel(value);
+                    setAllowedModels((current) => (current.includes(value) ? current : [...current, value]));
+                  }}
+                />
               </label>
 
               <label className="field resource-center-form-span-2">
                 <span className="field-label">可选模型</span>
-                <Input
+                <Select
                   aria-label="可选模型"
+                  mode="multiple"
                   value={allowedModels}
                   disabled={saving}
-                  onChange={(event) => setAllowedModels(event.target.value)}
+                  options={modelOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="请选择可选模型"
+                  onChange={(value) => setAllowedModels(value as string[])}
                 />
               </label>
 

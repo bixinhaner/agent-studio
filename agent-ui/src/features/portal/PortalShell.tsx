@@ -7,6 +7,7 @@ import {
   useState,
   useContext,
   type FC,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PropsWithChildren
@@ -232,9 +233,71 @@ const SessionSearchContext = createContext("");
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
 });
+const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 
-const AssistantMarkdownText = makeMarkdownText();
+function flattenNodeText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => flattenNodeText(item)).join("");
+  }
+  if (typeof value === "object") {
+    const props = (value as { props?: { children?: unknown } }).props;
+    if (props && "children" in props) {
+      return flattenNodeText(props.children);
+    }
+  }
+  return "";
+}
+
+function AssistantMarkdownLink(props: {
+  href?: string;
+  className?: string;
+  children?: ReactNode;
+  [key: string]: unknown;
+}) {
+  const { href, className, children, ...rest } = props;
+  const requestPreview = useContext(PreviewRequestContext);
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const previewPath = typeof href === "string" ? resolveThreadPreviewPathFromHref(href, activeThreadId) : null;
+  if (!previewPath) {
+    return (
+      <a className={className} href={href} {...rest}>
+        {children}
+      </a>
+    );
+  }
+  const linkLabel = flattenNodeText(children).trim();
+  const displayName =
+    linkLabel && linkLabel !== href && !isLikelyHttpUrl(linkLabel) ? linkLabel : fileNameFromPreviewPath(previewPath);
+  return (
+    <span className="assistant-inline-file-link-card" role="group" aria-label={`文件 ${displayName}`}>
+      <span className="assistant-inline-file-link-meta">
+        <span className="assistant-inline-file-link-tag">文件</span>
+        <span className="assistant-inline-file-link-name">{displayName}</span>
+        <span className="assistant-inline-file-link-path">{previewPath}</span>
+      </span>
+      <button
+        type="button"
+        className="assistant-inline-file-link-btn"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          requestPreview(previewPath);
+        }}
+      >
+        预览
+      </button>
+    </span>
+  );
+}
+
+const AssistantMarkdownText = makeMarkdownText({
+  components: {
+    a: AssistantMarkdownLink as any
+  }
+});
 
 const DraftOnlyWelcomeSuggestions: FC = () => (
   <div className="aui-thread-welcome-suggestions">
@@ -796,19 +859,25 @@ function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: str
 function resolveThreadPreviewPathFromHref(href: string, threadId: string): string | null {
   const rawHref = href.trim();
   const normalizedThreadId = threadId.trim();
-  if (!rawHref || !normalizedThreadId) return null;
+  if (!rawHref) return null;
   if (rawHref.startsWith("#")) return null;
   if (/^(mailto|tel|javascript):/i.test(rawHref)) return null;
 
-  const resolvePathname = () => {
+  const resolvePathname = (): string => {
     try {
-      return new URL(rawHref, window.location.href).pathname || "";
+      const parsed = new URL(rawHref, window.location.href);
+      if (parsed.origin !== window.location.origin) return "";
+      return parsed.pathname || "";
     } catch {
       return "";
     }
   };
   const pathname = decodeURIComponent(resolvePathname());
   if (!pathname || pathname.startsWith("/api/")) return null;
+
+  if (!normalizedThreadId) {
+    return pathname.includes("/thread-") ? pathname : null;
+  }
 
   const threadSegment = `/thread-${normalizedThreadId}`;
   if (pathname !== threadSegment && !pathname.includes(`${threadSegment}/`)) {
@@ -1301,6 +1370,10 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
         detail: detail ? shorten(detail, 1400) : undefined,
         at
       });
+      continue;
+    }
+
+    if (type === "data" && p.name === "codex_file_change") {
       continue;
     }
 
@@ -2349,6 +2422,25 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return true;
         };
 
+        const appendDisplayDataParts = (parts: any[]): boolean => {
+          if (parts.length === 0) return false;
+          let changed = false;
+          for (const part of parts) {
+            const partObj = asRecord(part);
+            if (!partObj || partObj.type !== "data") continue;
+            const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
+            if (name !== "codex_file_change") continue;
+            activeTextPart = null;
+            orderedParts.push({
+              type: "data",
+              name,
+              data: partObj.data
+            });
+            changed = true;
+          }
+          return changed;
+        };
+
         const collapseLatestTraceBatch = (): boolean => {
           for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
             const item = orderedParts[i] as Record<string, unknown>;
@@ -2401,8 +2493,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   } satisfies ProcessData
                 });
               }
+              const dataPartChanged = appendDisplayDataParts(updates);
               const traceChanged = appendTraceBatch(updates);
-              if (traceChanged || textChanged) {
+              if (dataPartChanged || traceChanged || textChanged) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };
@@ -2429,11 +2522,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   } satisfies ProcessData
                 });
               }
+              const dataPartChanged = appendDisplayDataParts(updates);
               const traceChanged = appendTraceBatch(updates);
               if (traceChanged && collapseFinalTraceOnDoneEnabled) {
                 collapseLatestTraceBatch();
               }
-              if (traceChanged || textChanged) {
+              if (dataPartChanged || traceChanged || textChanged) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };
@@ -2459,8 +2553,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   } satisfies ProcessData
                 });
               }
+              const dataPartChanged = appendDisplayDataParts(updates);
               const traceChanged = appendTraceBatch(updates);
-              if (traceChanged || textChanged) {
+              if (dataPartChanged || traceChanged || textChanged) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };
@@ -2751,8 +2846,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               });
             }
 
+            const dataPartChanged = appendDisplayDataParts(updates);
             const traceChanged = appendTraceBatch(updates);
-            if (traceChanged || textChanged) {
+            if (dataPartChanged || traceChanged || textChanged) {
               const content = snapshotContent();
               if (content.length > 0) {
                 yield {
@@ -2795,44 +2891,46 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>共享视图中可查看消息和附件，但不能继续运行该线程。</span>
         </div>
       ) : null}
-      <PreviewRequestContext.Provider value={requestPreviewForPath}>
-        <Thread
-          key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
-          strings={{
-            threadList: {
-              new: { label: "新会话" },
-              item: {
-                title: { fallback: "新对话" }
-              }
-            },
-            composer: {
-              input: {
-                placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+      <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+        <PreviewRequestContext.Provider value={requestPreviewForPath}>
+          <Thread
+            key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
+            strings={{
+              threadList: {
+                new: { label: "新会话" },
+                item: {
+                  title: { fallback: "新对话" }
+                }
               },
-              send: { tooltip: "发送消息" },
-              cancel: { tooltip: "停止生成" }
-            }
-          }}
-          welcome={{
-            message: "你好，我是 Agent Studio。请直接提问。",
-            suggestions: PORTAL_STARTER_SUGGESTIONS
-          }}
-          components={{
-            AssistantMessage: AgentAssistantMessage,
-            ThreadWelcome: DraftOnlyThreadWelcome
-          }}
-          assistantMessage={{
-            allowCopy: true,
-            allowReload: true,
-            allowFeedbackPositive: true,
-            allowFeedbackNegative: true,
-            components: {
-              ToolFallback: HiddenToolFallback as any
-            }
-          }}
-          userMessage={{ allowEdit: true }}
-        />
-      </PreviewRequestContext.Provider>
+              composer: {
+                input: {
+                  placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+                },
+                send: { tooltip: "发送消息" },
+                cancel: { tooltip: "停止生成" }
+              }
+            }}
+            welcome={{
+              message: "你好，我是 Agent Studio。请直接提问。",
+              suggestions: PORTAL_STARTER_SUGGESTIONS
+            }}
+            components={{
+              AssistantMessage: AgentAssistantMessage,
+              ThreadWelcome: DraftOnlyThreadWelcome
+            }}
+            assistantMessage={{
+              allowCopy: true,
+              allowReload: true,
+              allowFeedbackPositive: true,
+              allowFeedbackNegative: true,
+              components: {
+                ToolFallback: HiddenToolFallback as any
+              }
+            }}
+            userMessage={{ allowEdit: true }}
+          />
+        </PreviewRequestContext.Provider>
+      </ActiveThreadIdContext.Provider>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">

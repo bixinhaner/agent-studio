@@ -29,6 +29,11 @@ import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { openWarningConfirm } from "../../lib/warning-modal";
 import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
+import {
+  buildRunProfileModelOptions,
+  DEFAULT_RUN_PROFILE_MODEL,
+  normalizeRunProfileAllowedModels
+} from "./run-profile-model-options";
 import type {
   AgentModeRecord,
   CapabilityCenterTab,
@@ -76,7 +81,7 @@ type CreatePanelState =
       description: string;
       status: string;
       defaultModel: string;
-      allowedModels: string;
+      allowedModels: string[];
       defaultReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
       sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
       approvalPolicy: "never" | "on-request" | "on-failure" | "untrusted";
@@ -145,8 +150,6 @@ const CREATE_SEARCH_OPTIONS = [
   { label: "cached", value: "cached" },
   { label: "live", value: "live" }
 ];
-
-const DEFAULT_RUN_PROFILE_MODEL = "gpt-5.4";
 
 function panelKindForTab(tab: CapabilityCenterTab): CreatePanelState["kind"] {
   if (tab === "agent_mode") return "agent_mode";
@@ -218,8 +221,8 @@ function createStepValidationMessage(
     return null;
   }
   if (panel.kind === "run_profile") {
-    if (!panel.defaultModel.trim()) return "请填写默认模型";
-    if (!panel.allowedModels.trim()) return "请填写至少一个可选模型";
+    if (!panel.defaultModel.trim()) return "请选择默认模型";
+    if (panel.allowedModels.length === 0) return "请至少选择一个可选模型";
     return null;
   }
   return null;
@@ -277,7 +280,7 @@ function createInitialPanelState(tab: CapabilityCenterTab, runProfiles: RunProfi
     description: "",
     status: "active",
     defaultModel: DEFAULT_RUN_PROFILE_MODEL,
-    allowedModels: DEFAULT_RUN_PROFILE_MODEL,
+    allowedModels: [DEFAULT_RUN_PROFILE_MODEL],
     defaultReasoningEffort: "high",
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
@@ -705,17 +708,14 @@ export function CapabilityCenterShell() {
         setSelectedSkillPackageId(response.skillPackage.id);
         resetCreatePanel();
       } else {
-        const allowedModels = createPanel.allowedModels
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
+        const allowedModels = normalizeRunProfileAllowedModels(createPanel.allowedModels, createPanel.defaultModel);
         const payload: CreateRunProfileInput = {
           name: createPanel.name.trim(),
           slug: createPanel.slug.trim(),
           description: createPanel.description.trim(),
           status: createPanel.status,
           defaultModel: createPanel.defaultModel.trim(),
-          allowedModels: allowedModels.length > 0 ? allowedModels : [createPanel.defaultModel.trim() || DEFAULT_RUN_PROFILE_MODEL],
+          allowedModels,
           defaultReasoningEffort: createPanel.defaultReasoningEffort,
           sandboxMode: createPanel.sandboxMode,
           approvalPolicy: createPanel.approvalPolicy,
@@ -746,6 +746,12 @@ export function CapabilityCenterShell() {
   const createSteps = useMemo(() => createStepsForKind(createPanelKind), [createPanelKind]);
   const maxCreateStep = createSteps.length - 1;
   const activeCreateStep = Math.min(createStep, maxCreateStep);
+  const runProfileModelOptions = useMemo(() => {
+    const modelsFromProfiles = runProfiles.flatMap((profile) => [profile.defaultModel, ...profile.allowedModels]);
+    const modelsFromCreatePanel =
+      createPanel?.kind === "run_profile" ? [createPanel.defaultModel, ...createPanel.allowedModels] : [];
+    return buildRunProfileModelOptions([...modelsFromProfiles, ...modelsFromCreatePanel]);
+  }, [createPanel, runProfiles]);
 
   useEffect(() => {
     if (createStep <= maxCreateStep) return;
@@ -1202,14 +1208,23 @@ export function CapabilityCenterShell() {
                   <>
                     <label className="field">
                       <span className="field-label">默认模型</span>
-                      <Input
+                      <Select
                         aria-label="默认模型"
                         disabled={createSaving}
                         value={createPanel.defaultModel}
-                        onChange={(event) =>
+                        options={runProfileModelOptions}
+                        showSearch
+                        optionFilterProp="label"
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, defaultModel: event.target.value }
+                              ? {
+                                  ...current,
+                                  defaultModel: value,
+                                  allowedModels: current.allowedModels.includes(value)
+                                    ? current.allowedModels
+                                    : [...current.allowedModels, value]
+                                }
                               : current
                           )
                         }
@@ -1217,15 +1232,20 @@ export function CapabilityCenterShell() {
                     </label>
 
                     <label className="field">
-                      <span className="field-label">可选模型（逗号分隔）</span>
-                      <Input
+                      <span className="field-label">可选模型</span>
+                      <Select
                         aria-label="可选模型"
+                        mode="multiple"
                         disabled={createSaving}
                         value={createPanel.allowedModels}
-                        onChange={(event) =>
+                        options={runProfileModelOptions}
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="请选择可选模型"
+                        onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"
-                              ? { ...current, allowedModels: event.target.value }
+                              ? { ...current, allowedModels: value as string[] }
                               : current
                           )
                         }
@@ -1338,7 +1358,9 @@ export function CapabilityCenterShell() {
                   {createPanel.kind === "run_profile" ? (
                     <>
                       <Typography.Text type="secondary">默认模型: {createPanel.defaultModel || "-"}</Typography.Text>
-                      <Typography.Text type="secondary">可选模型: {createPanel.allowedModels || "-"}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        可选模型: {createPanel.allowedModels.join(", ") || "-"}
+                      </Typography.Text>
                       <Typography.Text type="secondary">
                         推理/沙箱/审批: {createPanel.defaultReasoningEffort} / {createPanel.sandboxMode} / {createPanel.approvalPolicy}
                       </Typography.Text>
