@@ -39,7 +39,7 @@ export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access"
 export type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
 export type WebSearchMode = "disabled" | "cached" | "live";
 export type DirectoryScope = "workspace_only" | "descendants_only" | "authorized_workspace_and_knowledge_set";
-export type InstructionSourceType = "inline_text" | "knowledge_set_document" | "workspace_agents_md";
+export type InstructionSourceType = "workspace_agents_md";
 export type RuntimeBindingType = "config_fragment" | "prompt_hint";
 export type RuntimeType = "codex" | "claude_code";
 

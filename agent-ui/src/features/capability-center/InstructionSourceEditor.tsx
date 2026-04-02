@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Input, Select } from "antd";
 
 import { fetchWorkspaceAgentsTemplates } from "./api";
-import type { AgentModeInstructionSourceInput, InstructionSourceType } from "./types";
-import type { WorkspaceAgentsTemplateRecord } from "./types";
+import type { AgentModeInstructionSourceInput, WorkspaceAgentsTemplateRecord } from "./types";
 import {
   defaultWorkspaceAgentsMdSourceRef,
   parseWorkspaceAgentsMdSourceRef,
@@ -18,20 +17,12 @@ type InstructionSourceEditorProps = {
 };
 
 type EditableInstructionSource = {
-  sourceType: InstructionSourceType;
   sourceRef: string;
 };
 
 const DEFAULT_SOURCE: EditableInstructionSource = {
-  sourceType: "inline_text",
-  sourceRef: ""
+  sourceRef: defaultWorkspaceAgentsMdSourceRef()
 };
-
-const SOURCE_TYPE_OPTIONS = [
-  { label: "inline", value: "inline_text" },
-  { label: "workspace_agents_md", value: "workspace_agents_md" },
-  { label: "knowledge_set_document", value: "knowledge_set_document" }
-];
 
 const WORKSPACE_AGENTS_MD_SOURCE_MODE_OPTIONS: Array<{ label: string; value: WorkspaceAgentsMdSourceRefMode }> = [
   { label: "直接编辑", value: "inline" },
@@ -44,14 +35,13 @@ function normalizeInstructionSources(instructionSources: AgentModeInstructionSou
     return [{ ...DEFAULT_SOURCE }];
   }
   return instructionSources.map((source) => ({
-    sourceType: source.sourceType,
-    sourceRef: source.sourceRef ?? ""
+    sourceRef: source.sourceRef ?? defaultWorkspaceAgentsMdSourceRef()
   }));
 }
 
 function toPayload(instructionSources: EditableInstructionSource[]): AgentModeInstructionSourceInput[] {
   return instructionSources.map((source, index) => ({
-    sourceType: source.sourceType,
+    sourceType: "workspace_agents_md",
     sourceRef: source.sourceRef,
     sortOrder: index
   }));
@@ -118,30 +108,9 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
     emit(items.map((source, sourceIndex) => (sourceIndex === index ? { ...source, ...patch } : source)));
   }
 
-  function updateSourceType(index: number, sourceType: InstructionSourceType) {
-    emit(
-      items.map((source, sourceIndex) => {
-        if (sourceIndex !== index) return source;
-        if (source.sourceType === sourceType) {
-          return source;
-        }
-        if (sourceType === "workspace_agents_md") {
-          return {
-            sourceType,
-            sourceRef: defaultWorkspaceAgentsMdSourceRef()
-          };
-        }
-        return {
-          sourceType,
-          sourceRef: source.sourceType === "workspace_agents_md" ? "" : source.sourceRef
-        };
-      })
-    );
-  }
-
   function updateWorkspaceAgentsMdSourceRef(index: number, patch: Partial<ReturnType<typeof parseWorkspaceAgentsMdSourceRef>>) {
     const source = items[index];
-    if (!source || source.sourceType !== "workspace_agents_md") return;
+    if (!source) return;
     const draft = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
     const nextDraft = {
       ...draft,
@@ -208,7 +177,7 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
       <div className="resource-center-section-header">
         <div>
           <h4>指令源</h4>
-          <p>按顺序维护 inline、workspace_agents_md 和 knowledge_set_document 指令源。</p>
+          <p>按顺序维护 workspace_agents_md 指令源（仅第一条有效项会自动写入 AGENTS.md）。</p>
         </div>
         <Button type="default" disabled={disabled} onClick={addSource}>
           新增指令源
@@ -216,194 +185,145 @@ export function InstructionSourceEditor({ instructionSources, onChange, disabled
       </div>
 
       <div className="capability-mode-instruction-list">
-        {items.map((source, index) => (
-          <article
-            key={`${source.sourceType}-${index}`}
-            className={
-              draggingIndex === index
-                ? "capability-mode-instruction-card capability-mode-instruction-card dragging"
-                : "capability-mode-instruction-card"
-            }
-            draggable={!disabled}
-            onDragStart={() => handleDragStart(index)}
-            onDragEnd={() => setDraggingIndex(null)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => handleDrop(index)}
-          >
-            <div className="capability-mode-instruction-card-header">
-              <div>
-                <h5>{`指令源 ${index + 1}`}</h5>
-                <p>{source.sourceType}</p>
+        {items.map((source, index) => {
+          const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+          return (
+            <article
+              key={`workspace_agents_md-${index}`}
+              className={
+                draggingIndex === index
+                  ? "capability-mode-instruction-card capability-mode-instruction-card dragging"
+                  : "capability-mode-instruction-card"
+              }
+              draggable={!disabled}
+              onDragStart={() => handleDragStart(index)}
+              onDragEnd={() => setDraggingIndex(null)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => handleDrop(index)}
+            >
+              <div className="capability-mode-instruction-card-header">
+                <div>
+                  <h5>{`指令源 ${index + 1}`}</h5>
+                  <p>workspace_agents_md</p>
+                </div>
+                <div className="capability-mode-instruction-row-actions">
+                  <Button type="text" disabled>
+                    拖拽排序
+                  </Button>
+                  <Button type="default" disabled={disabled || index === 0} onClick={() => moveSource(index, -1)}>
+                    {`上移 ${index + 1}`}
+                  </Button>
+                  <Button type="default" disabled={disabled || index === items.length - 1} onClick={() => moveSource(index, 1)}>
+                    {`下移 ${index + 1}`}
+                  </Button>
+                  <Button type="default" disabled={disabled} onClick={() => removeSource(index)}>
+                    {`删除指令源 ${index + 1}`}
+                  </Button>
+                </div>
               </div>
-              <div className="capability-mode-instruction-row-actions">
-                <Button type="text" disabled>
-                  拖拽排序
-                </Button>
-                <Button type="default" disabled={disabled || index === 0} onClick={() => moveSource(index, -1)}>
-                  {`上移 ${index + 1}`}
-                </Button>
-                <Button type="default" disabled={disabled || index === items.length - 1} onClick={() => moveSource(index, 1)}>
-                  {`下移 ${index + 1}`}
-                </Button>
-                <Button type="default" disabled={disabled} onClick={() => removeSource(index)}>
-                  {`删除指令源 ${index + 1}`}
-                </Button>
-              </div>
-            </div>
 
-            <div className="resource-center-form-grid capability-mode-instruction-grid">
-              <label className="field">
-                <span className="field-label">{`来源类型 ${index + 1}`}</span>
-                <Select
-                  aria-label={`来源类型 ${index + 1}`}
-                  disabled={disabled}
-                  value={source.sourceType}
-                  options={SOURCE_TYPE_OPTIONS}
-                  onChange={(value) => updateSourceType(index, value as InstructionSourceType)}
-                />
-              </label>
-
-              {source.sourceType === "inline_text" ? (
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <Input.TextArea
-                    aria-label={`来源引用 ${index + 1}`}
+              <div className="resource-center-form-grid capability-mode-instruction-grid">
+                <label className="field">
+                  <span className="field-label">{`配置方式 ${index + 1}`}</span>
+                  <Select
+                    aria-label={`配置方式 ${index + 1}`}
                     disabled={disabled}
-                    rows={4}
-                    value={source.sourceRef}
-                    placeholder="直接填写内联指令文本"
-                    onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
+                    value={parsed.mode}
+                    options={WORKSPACE_AGENTS_MD_SOURCE_MODE_OPTIONS}
+                    onChange={(value) => {
+                      const nextMode = value as WorkspaceAgentsMdSourceRefMode;
+                      updateWorkspaceAgentsMdSourceRef(index, {
+                        mode: nextMode,
+                        templateId: nextMode === "template" ? parsed.templateId || workspaceAgentsTemplates[0]?.id || "" : parsed.templateId
+                      });
+                    }}
                   />
                 </label>
-              ) : source.sourceType === "workspace_agents_md" ? (
-                <>
-                  <label className="field">
-                    <span className="field-label">{`配置方式 ${index + 1}`}</span>
-                    <Select
-                      aria-label={`配置方式 ${index + 1}`}
+
+                {parsed.mode === "inline" ? (
+                  <label className="field resource-center-form-span-2">
+                    <span className="field-label">{`来源引用 ${index + 1}`}</span>
+                    <Input.TextArea
+                      aria-label={`来源引用 ${index + 1}`}
                       disabled={disabled}
-                      value={parseWorkspaceAgentsMdSourceRef(source.sourceRef).mode}
-                      options={WORKSPACE_AGENTS_MD_SOURCE_MODE_OPTIONS}
-                      onChange={(value) => {
-                        const nextMode = value as WorkspaceAgentsMdSourceRefMode;
-                        const current = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+                      rows={8}
+                      value={parsed.content}
+                      placeholder="直接编辑 AGENTS.md 内容"
+                      onChange={(event) =>
                         updateWorkspaceAgentsMdSourceRef(index, {
-                          mode: nextMode,
-                          templateId:
-                            nextMode === "template"
-                              ? current.templateId || workspaceAgentsTemplates[0]?.id || ""
-                              : current.templateId
-                        });
-                      }}
+                          content: event.target.value
+                        })
+                      }
                     />
                   </label>
+                ) : null}
 
-                  {parseWorkspaceAgentsMdSourceRef(source.sourceRef).mode === "inline" ? (
+                {parsed.mode === "template" ? (
+                  <>
                     <label className="field resource-center-form-span-2">
                       <span className="field-label">{`来源引用 ${index + 1}`}</span>
+                      <Select
+                        aria-label={`来源引用 ${index + 1}`}
+                        disabled={disabled}
+                        loading={workspaceAgentsTemplateLoading}
+                        value={parsed.templateId || undefined}
+                        options={workspaceAgentsTemplateOptionsWithCurrent(parsed.templateId)}
+                        placeholder="请选择 AGENTS 模板"
+                        showSearch
+                        optionFilterProp="label"
+                        onChange={(value) =>
+                          updateWorkspaceAgentsMdSourceRef(index, {
+                            templateId: value
+                          })
+                        }
+                      />
+                    </label>
+
+                    {workspaceAgentsTemplateErrorText ? <p className="err-text">{workspaceAgentsTemplateErrorText}</p> : null}
+
+                    <label className="field resource-center-form-span-2">
+                      <span className="field-label">{`模板预览 ${index + 1}`}</span>
                       <Input.TextArea
-                        aria-label={`来源引用 ${index + 1}`}
-                        disabled={disabled}
+                        aria-label={`模板预览 ${index + 1}`}
+                        disabled
                         rows={8}
-                        value={parseWorkspaceAgentsMdSourceRef(source.sourceRef).content}
-                        placeholder="直接编辑 AGENTS.md 内容"
-                        onChange={(event) =>
-                          updateWorkspaceAgentsMdSourceRef(index, {
-                            content: event.target.value
-                          })
-                        }
+                        value={selectedTemplateForId(parsed.templateId)?.content || ""}
+                        placeholder="选择模板后显示预览"
                       />
                     </label>
-                  ) : null}
 
-                  {parseWorkspaceAgentsMdSourceRef(source.sourceRef).mode === "template" ? (
-                    <>
-                      <label className="field resource-center-form-span-2">
-                        <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                        <Select
-                          aria-label={`来源引用 ${index + 1}`}
-                          disabled={disabled}
-                          loading={workspaceAgentsTemplateLoading}
-                          value={parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId || undefined}
-                          options={workspaceAgentsTemplateOptionsWithCurrent(
-                            parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId
-                          )}
-                          placeholder="请选择 AGENTS 模板"
-                          showSearch
-                          optionFilterProp="label"
-                          onChange={(value) =>
-                            updateWorkspaceAgentsMdSourceRef(index, {
-                              templateId: value
-                            })
-                          }
-                        />
-                      </label>
+                    <div className="field resource-center-form-span-2">
+                      <Button
+                        type="default"
+                        disabled={disabled || !parsed.templateId || !selectedTemplateForId(parsed.templateId)}
+                        onClick={() => loadTemplateAsEditable(index, parsed.templateId)}
+                      >
+                        载入模板到可编辑内容
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
 
-                      {workspaceAgentsTemplateErrorText ? (
-                        <p className="err-text">{workspaceAgentsTemplateErrorText}</p>
-                      ) : null}
-
-                      <label className="field resource-center-form-span-2">
-                        <span className="field-label">{`模板预览 ${index + 1}`}</span>
-                        <Input.TextArea
-                          aria-label={`模板预览 ${index + 1}`}
-                          disabled
-                          rows={8}
-                          value={selectedTemplateForId(parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId)?.content || ""}
-                          placeholder="选择模板后显示预览"
-                        />
-                      </label>
-
-                      <div className="field resource-center-form-span-2">
-                        <Button
-                          type="default"
-                          disabled={
-                            disabled ||
-                            !parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId ||
-                            !selectedTemplateForId(parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId)
-                          }
-                          onClick={() =>
-                            loadTemplateAsEditable(index, parseWorkspaceAgentsMdSourceRef(source.sourceRef).templateId)
-                          }
-                        >
-                          载入模板到可编辑内容
-                        </Button>
-                      </div>
-                    </>
-                  ) : null}
-
-                  {parseWorkspaceAgentsMdSourceRef(source.sourceRef).mode === "path" ? (
-                    <label className="field resource-center-form-span-2">
-                      <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                      <Input
-                        aria-label={`来源引用 ${index + 1}`}
-                        disabled={disabled}
-                        value={parseWorkspaceAgentsMdSourceRef(source.sourceRef).path}
-                        placeholder="AGENTS.md 路径（如 /data/agents/AGENTS.md）"
-                        onChange={(event) =>
-                          updateWorkspaceAgentsMdSourceRef(index, {
-                            path: event.target.value
-                          })
-                        }
-                      />
-                    </label>
-                  ) : null}
-                </>
-              ) : (
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">{`来源引用 ${index + 1}`}</span>
-                  <Input
-                    aria-label={`来源引用 ${index + 1}`}
-                    disabled={disabled}
-                    value={source.sourceRef}
-                    placeholder="knowledge-set-id#/path/to/doc.md"
-                    onChange={(event) => updateSource(index, { sourceRef: event.target.value })}
-                  />
-                </label>
-              )}
-            </div>
-          </article>
-        ))}
+                {parsed.mode === "path" ? (
+                  <label className="field resource-center-form-span-2">
+                    <span className="field-label">{`来源引用 ${index + 1}`}</span>
+                    <Input
+                      aria-label={`来源引用 ${index + 1}`}
+                      disabled={disabled}
+                      value={parsed.path}
+                      placeholder="AGENTS.md 路径（如 /data/agents/AGENTS.md）"
+                      onChange={(event) =>
+                        updateWorkspaceAgentsMdSourceRef(index, {
+                          path: event.target.value
+                        })
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
       </div>
 
       {items.length === 0 ? <p className="resource-center-empty">当前还没有指令源。</p> : null}

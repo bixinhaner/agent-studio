@@ -56,7 +56,7 @@ function toInstructionSources(agentMode: AgentModeRecord): AgentModeInstructionS
       return left.createdAt.localeCompare(right.createdAt);
     })
     .map((source, index) => ({
-      sourceType: source.sourceType,
+      sourceType: "workspace_agents_md",
       sourceRef: source.sourceRef,
       sortOrder: index
     }));
@@ -114,9 +114,6 @@ export function AgentModeDetailView({
     () =>
       instructionSources
         .map((source, index) => {
-          if (source.sourceType !== "workspace_agents_md") {
-            return `${index + 1}. ${source.sourceType === "inline_text" ? "inline" : source.sourceType} :: ${source.sourceRef}`;
-          }
           const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
           if (parsed.mode === "inline") {
             return `${index + 1}. workspace_agents_md :: inline（可编辑内容）`;
@@ -133,7 +130,6 @@ export function AgentModeDetailView({
   const instructionSourceValidationError = useMemo(() => {
     for (let index = 0; index < instructionSources.length; index += 1) {
       const source = instructionSources[index];
-      if (source.sourceType !== "workspace_agents_md") continue;
       const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
       if (parsed.mode === "template" && !parsed.templateId.trim()) {
         return `指令源 ${index + 1}：workspace_agents_md 选择“模板”时必须选择模板`;
