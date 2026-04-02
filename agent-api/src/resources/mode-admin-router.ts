@@ -188,7 +188,7 @@ const agentModeInstructionSourcesReplaceSchema = z.object({
       sourceRef: z.string().trim().min(1),
       sortOrder: z.number().int().optional()
     })
-  )
+  ).length(1, "instructionSources 仅支持 1 条 workspace_agents_md")
 });
 
 type RunProfileRepositoryLike = {

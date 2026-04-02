@@ -356,7 +356,7 @@ function CapabilitySummaryCard(props: {
             <p>{agentMode.skillPackages.length}</p>
           </div>
           <div>
-            <span className="field-label">指令源</span>
+            <span className="field-label">AGENTS.md 规则</span>
             <p>{agentMode.instructionSources.length}</p>
           </div>
         </div>

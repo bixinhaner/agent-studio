@@ -4,7 +4,7 @@ import { Alert, Button, Card, Checkbox, Input, Segmented, Select, Tag } from "an
 import { putAgentModeInstructionSources, putAgentModeSkillPackages, updateAgentMode } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
 import { InstructionSourceEditor } from "./InstructionSourceEditor";
-import { parseWorkspaceAgentsMdSourceRef } from "./workspace-agents-md-source-ref";
+import { defaultWorkspaceAgentsMdSourceRef, parseWorkspaceAgentsMdSourceRef } from "./workspace-agents-md-source-ref";
 import type {
   AgentModeInstructionSourceInput,
   AgentModeRecord,
@@ -50,16 +50,32 @@ function toSkillPackageIds(agentMode: AgentModeRecord) {
 }
 
 function toInstructionSources(agentMode: AgentModeRecord): AgentModeInstructionSourceInput[] {
-  return [...agentMode.instructionSources]
+  const sorted = [...agentMode.instructionSources]
     .sort((left, right) => {
       if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
       return left.createdAt.localeCompare(right.createdAt);
-    })
-    .map((source, index) => ({
+    });
+  const first = sorted[0];
+  return [
+    {
       sourceType: "workspace_agents_md",
-      sourceRef: source.sourceRef,
-      sortOrder: index
-    }));
+      sourceRef: first?.sourceRef ?? defaultWorkspaceAgentsMdSourceRef(),
+      sortOrder: 0
+    }
+  ];
+}
+
+function normalizeSingleInstructionSourceInput(
+  instructionSources: AgentModeInstructionSourceInput[]
+): AgentModeInstructionSourceInput[] {
+  const first = instructionSources[0];
+  return [
+    {
+      sourceType: "workspace_agents_md",
+      sourceRef: first?.sourceRef ?? defaultWorkspaceAgentsMdSourceRef(),
+      sortOrder: 0
+    }
+  ];
 }
 
 export function AgentModeDetailView({
@@ -111,29 +127,32 @@ export function AgentModeDetailView({
   );
 
   const instructionPreview = useMemo(
-    () =>
-      instructionSources
-        .map((source, index) => {
-          const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
-          if (parsed.mode === "inline") {
-            return `${index + 1}. workspace_agents_md :: inline（可编辑内容）`;
-          }
-          if (parsed.mode === "template") {
-            return `${index + 1}. workspace_agents_md :: template（${parsed.templateId || "未选择"}）`;
-          }
-          return `${index + 1}. workspace_agents_md :: path（${parsed.path || "未填写"}）`;
-        })
-        .join("\n"),
+    () => {
+      const source = instructionSources[0];
+      if (!source) return "";
+      const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+      if (parsed.mode === "inline") {
+        return `workspace_agents_md :: inline（可编辑内容）`;
+      }
+      if (parsed.mode === "template") {
+        return `workspace_agents_md :: template（${parsed.templateId || "未选择"}）`;
+      }
+      return `workspace_agents_md :: path（${parsed.path || "未填写"}）`;
+    },
     [instructionSources]
   );
 
   const instructionSourceValidationError = useMemo(() => {
-    for (let index = 0; index < instructionSources.length; index += 1) {
-      const source = instructionSources[index];
-      const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
-      if (parsed.mode === "template" && !parsed.templateId.trim()) {
-        return `指令源 ${index + 1}：workspace_agents_md 选择“模板”时必须选择模板`;
-      }
+    if (instructionSources.length !== 1) {
+      return "workspace_agents_md 必须且只能配置 1 条";
+    }
+    const source = instructionSources[0];
+    if (!source || !source.sourceRef.trim()) {
+      return "workspace_agents_md 不能为空";
+    }
+    const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+    if (parsed.mode === "template" && !parsed.templateId.trim()) {
+      return "workspace_agents_md 选择“模板”时必须选择模板";
     }
     return "";
   }, [instructionSources]);
@@ -168,7 +187,10 @@ export function AgentModeDetailView({
     try {
       await updateAgentMode(agentMode.id, payload);
       await putAgentModeSkillPackages(agentMode.id, skillPackageIds);
-      const response = await putAgentModeInstructionSources(agentMode.id, instructionSources);
+      const response = await putAgentModeInstructionSources(
+        agentMode.id,
+        normalizeSingleInstructionSourceInput(instructionSources)
+      );
       onAgentModeUpdated(response.agentMode);
       setSuccessText("模式已保存");
     } catch (error) {
@@ -184,7 +206,7 @@ export function AgentModeDetailView({
         <div className="resource-center-section-header">
           <div>
             <h3>{agentMode.name}</h3>
-            <p>维护模式元数据、绑定关系和指令源。</p>
+            <p>维护模式元数据、绑定关系和 AGENTS.md 规则。</p>
           </div>
           <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
@@ -269,7 +291,7 @@ export function AgentModeDetailView({
               <div className="capability-mode-preview-list">
                 <p>运行策略：{selectedRunProfileLabel || "-"}</p>
                 <p>技能包：{selectedSkillPackageNames.length > 0 ? selectedSkillPackageNames.join("、") : "-"}</p>
-                <p>指令源：{instructionSources.length}</p>
+                <p>AGENTS.md 规则：{instructionSources.length > 0 ? "已配置" : "未配置"}</p>
               </div>
             </div>
           </div>
@@ -326,11 +348,13 @@ export function AgentModeDetailView({
             <section className="capability-mode-binding-section">
               <div className="resource-center-section-header">
                 <div>
-                  <h4>绑定预览</h4>
-                  <p>保存前可以先确认运行策略、技能包与指令源组合。</p>
+                  <h4>AGENTS.md 规则预览</h4>
+                  <p>保存前可以先确认运行策略、技能包与 AGENTS.md 规则组合。</p>
                 </div>
               </div>
-              <pre className="capability-center-preview-code capability-mode-binding-preview">{instructionPreview || "当前没有指令源。"}</pre>
+              <pre className="capability-center-preview-code capability-mode-binding-preview">
+                {instructionPreview || "当前没有 AGENTS.md 规则。"}
+              </pre>
             </section>
           </div>
         ) : null}
