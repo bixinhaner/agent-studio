@@ -1607,6 +1607,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const threadCollaborationLoadingRef = useRef(false);
+  const threadCollaborationPendingRef = useRef<{
+    threadId: string;
+    promise: Promise<ThreadCollaborationView | null> | null;
+  }>({
+    threadId: "",
+    promise: null
+  });
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1663,6 +1670,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   useEffect(() => {
     const remoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
     if (!remoteThreadId) {
+      threadCollaborationRef.current = null;
+      threadCollaborationLoadingRef.current = false;
+      threadCollaborationPendingRef.current = { threadId: "", promise: null };
       setThreadCollaboration(null);
       setThreadCollaborationLoading(false);
       setThreadCollaborationErrorText("");
@@ -1670,22 +1680,33 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }
 
     let cancelled = false;
+    threadCollaborationLoadingRef.current = true;
     setThreadCollaborationLoading(true);
     setThreadCollaborationErrorText("");
 
-    void fetchThreadCollaboration(remoteThreadId)
+    const pendingCollaboration = fetchThreadCollaboration(remoteThreadId)
       .then((next) => {
-        if (cancelled) return;
+        if (cancelled) return null;
+        threadCollaborationRef.current = next;
         setThreadCollaboration(next);
+        return next;
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (cancelled) return null;
+        threadCollaborationRef.current = null;
         setThreadCollaboration(null);
         setThreadCollaborationErrorText(error instanceof Error ? error.message : "加载协作状态失败");
+        return null;
       })
       .finally(() => {
-        if (!cancelled) setThreadCollaborationLoading(false);
+        if (cancelled) return;
+        threadCollaborationLoadingRef.current = false;
+        if (threadCollaborationPendingRef.current.threadId === remoteThreadId) {
+          threadCollaborationPendingRef.current = { threadId: "", promise: null };
+        }
+        setThreadCollaborationLoading(false);
       });
+    threadCollaborationPendingRef.current = { threadId: remoteThreadId, promise: pendingCollaboration };
 
     return () => {
       cancelled = true;
@@ -2063,17 +2084,28 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error("无法识别当前线程 ID（线程可能仍在初始化，请稍后重试）");
         }
         activeRemoteThreadIdRef.current = threadId;
-        const activeCollaboration =
-          threadCollaborationRef.current && threadCollaborationRef.current.threadId === threadId
-            ? threadCollaborationRef.current
-            : null;
+        const readActiveCollaboration = () => {
+          const current = threadCollaborationRef.current;
+          return current && current.threadId === threadId ? current : null;
+        };
         const collaborationLoadingForThread =
           threadCollaborationLoadingRef.current &&
           String(activeThreadIdentityRef.current.remoteId || "").trim() === threadId &&
-          !activeCollaboration;
+          !readActiveCollaboration();
         if (collaborationLoadingForThread) {
-          throw new Error("当前线程协作权限加载中，请稍后再试。");
+          const pendingCollaboration =
+            threadCollaborationPendingRef.current.threadId === threadId
+              ? threadCollaborationPendingRef.current.promise
+              : null;
+          if (pendingCollaboration) {
+            updateRunningStage("等待线程协作权限");
+            await Promise.race([
+              pendingCollaboration,
+              new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1500))
+            ]);
+          }
         }
+        const activeCollaboration = readActiveCollaboration();
         if (activeCollaboration && !activeCollaboration.access.canRun) {
           throw new Error("当前共享线程为只读模式，不能继续运行。");
         }
