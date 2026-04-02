@@ -2120,6 +2120,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
+  const knowledgeSetSelectionInitializedRef = useRef(false);
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const threadCollaborationLoadingRef = useRef(false);
@@ -2257,8 +2258,19 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!active) return;
         setResourceErrorText("");
         setPortalResources(next);
-        const allowedIds = new Set((next.knowledgeSets || []).map((item) => item.id));
-        setSelectedKnowledgeSetIds((prev) => prev.filter((id) => allowedIds.has(id)));
+        const availableIds = (next.knowledgeSets || []).map((item) => item.id);
+        const allowedIds = new Set(availableIds);
+        setSelectedKnowledgeSetIds((prev) => {
+          const filtered = prev.filter((id) => allowedIds.has(id));
+          if (filtered.length > 0) {
+            knowledgeSetSelectionInitializedRef.current = true;
+            return filtered;
+          }
+          if (knowledgeSetSelectionInitializedRef.current) return filtered;
+          if (availableIds.length === 0) return filtered;
+          knowledgeSetSelectionInitializedRef.current = true;
+          return availableIds;
+        });
       } catch (error) {
         if (!active) return;
         setResourceErrorText(error instanceof Error ? error.message : "加载知识集资源失败");
@@ -2565,6 +2577,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
+  const handleKnowledgeSetChange = useCallback((ids: string[]) => {
+    knowledgeSetSelectionInitializedRef.current = true;
+    setSelectedKnowledgeSetIds(ids);
+  }, []);
   const activeRemoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
   const activeThreadCollaboration =
     threadCollaboration && threadCollaboration.threadId === activeRemoteThreadId ? threadCollaboration : null;
@@ -3383,7 +3399,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     <KnowledgeSetPicker
                       knowledgeSets={portalResources.knowledgeSets ?? []}
                       selectedIds={selectedKnowledgeSetIdsNormalized}
-                      onChange={setSelectedKnowledgeSetIds}
+                      onChange={handleKnowledgeSetChange}
                     />
                   ) : (
                     <p className="field-help knowledge-set-loading">知识集资源加载中...</p>
