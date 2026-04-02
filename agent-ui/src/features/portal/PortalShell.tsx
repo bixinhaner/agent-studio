@@ -232,6 +232,7 @@ const SessionSearchContext = createContext("");
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
 });
+const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 
 const AssistantMarkdownText = makeMarkdownText();
 
@@ -264,6 +265,10 @@ const DraftOnlyThreadWelcome: FC = () => (
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function shorten(text: string, max = 1000): string {
@@ -744,6 +749,50 @@ function isLikelyHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
+function normalizePreviewFilePath(value: string): string {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .trim();
+}
+
+function fileNameFromPreviewPath(filePath: string): string {
+  const normalized = normalizePreviewFilePath(filePath);
+  if (!normalized) return "未命名文件";
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function fileChangeKindLabel(kind: string): string {
+  const normalized = kind.trim().toLowerCase();
+  if (!normalized || normalized === "update" || normalized === "updated") return "更新";
+  if (normalized === "create" || normalized === "created" || normalized === "add" || normalized === "added") return "新增";
+  if (normalized === "delete" || normalized === "deleted" || normalized === "remove" || normalized === "removed") return "删除";
+  if (normalized === "rename" || normalized === "renamed" || normalized === "move" || normalized === "moved") return "重命名";
+  return kind.trim() || "变更";
+}
+
+function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: string }> {
+  const payload = asRecord(data);
+  if (!payload) return [];
+  const changes = Array.isArray(payload.changes) ? payload.changes : [];
+  const dedup = new Set<string>();
+  const out: Array<{ path: string; kind: string }> = [];
+
+  for (const item of changes) {
+    const obj = asRecord(item);
+    if (!obj) continue;
+    const path = normalizePreviewFilePath(asString(obj.path));
+    if (!path) continue;
+    const kind = asString(obj.kind) || "update";
+    const key = `${kind}::${path}`;
+    if (dedup.has(key)) continue;
+    dedup.add(key);
+    out.push({ path, kind });
+  }
+
+  return out;
+}
+
 function resolveThreadPreviewPathFromHref(href: string, threadId: string): string | null {
   const rawHref = href.trim();
   const normalizedThreadId = threadId.trim();
@@ -1072,6 +1121,8 @@ const ProcessDataFallback: FC<any> = ({
   name?: string;
   data?: ProcessData | unknown;
 }) => {
+  const requestPreview = useContext(PreviewRequestContext);
+
   if (name === "codex_trace_batch") {
     const payload = asRecord(data) || {};
     const batchId = typeof payload.batch_id === "number" ? payload.batch_id : 0;
@@ -1136,7 +1187,32 @@ const ProcessDataFallback: FC<any> = ({
   }
 
   if (name === "codex_file_change") {
-    return null;
+    const changes = collectCodexFileChanges(data);
+    if (changes.length === 0) return null;
+    return (
+      <section className="assistant-file-change-block" aria-label="文件变更">
+        <p className="assistant-file-change-title">已生成文件</p>
+        <ul className="assistant-file-change-list">
+          {changes.map((item) => {
+            const label = fileChangeKindLabel(item.kind);
+            return (
+              <li key={`${item.kind}-${item.path}`} className="assistant-file-change-item">
+                <div className="assistant-file-change-meta">
+                  <span className="assistant-file-change-kind">{label}</span>
+                  <span className="assistant-file-change-name">{fileNameFromPreviewPath(item.path)}</span>
+                  <span className="assistant-file-change-path">{item.path}</span>
+                </div>
+                <div className="assistant-file-change-actions">
+                  <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
+                    预览
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    );
   }
 
   if (name !== "codex_process") {
@@ -2129,6 +2205,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "当前用户";
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · 上下文 ${contextUsageView.usedPercent}%`;
 
+  const requestPreviewForPath = useCallback((filePath: string) => {
+    const normalizedPath = normalizePreviewFilePath(filePath);
+    if (!normalizedPath) return;
+    setRequestedPreviewPath(normalizedPath);
+    setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
+  }, []);
+
   const handleThreadLinkClickCapture = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       if (event.defaultPrevented) return;
@@ -2143,11 +2226,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
       event.preventDefault();
       event.stopPropagation();
-      setRequestedPreviewPath(previewPath);
-      setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
+      requestPreviewForPath(previewPath);
     },
-    [activeRemoteThreadId]
+    [activeRemoteThreadId, requestPreviewForPath]
   );
+
+  useEffect(() => {
+    setRequestedPreviewPath("");
+  }, [activeRemoteThreadId]);
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2709,42 +2795,44 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>共享视图中可查看消息和附件，但不能继续运行该线程。</span>
         </div>
       ) : null}
-      <Thread
-        key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
-        strings={{
-          threadList: {
-            new: { label: "新会话" },
-            item: {
-              title: { fallback: "新对话" }
-            }
-          },
-          composer: {
-            input: {
-              placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+      <PreviewRequestContext.Provider value={requestPreviewForPath}>
+        <Thread
+          key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
+          strings={{
+            threadList: {
+              new: { label: "新会话" },
+              item: {
+                title: { fallback: "新对话" }
+              }
             },
-            send: { tooltip: "发送消息" },
-            cancel: { tooltip: "停止生成" }
-          }
-        }}
-        welcome={{
-          message: "你好，我是 Agent Studio。请直接提问。",
-          suggestions: PORTAL_STARTER_SUGGESTIONS
-        }}
-        components={{
-          AssistantMessage: AgentAssistantMessage,
-          ThreadWelcome: DraftOnlyThreadWelcome
-        }}
-        assistantMessage={{
-          allowCopy: true,
-          allowReload: true,
-          allowFeedbackPositive: true,
-          allowFeedbackNegative: true,
-          components: {
-            ToolFallback: HiddenToolFallback as any
-          }
-        }}
-        userMessage={{ allowEdit: true }}
-      />
+            composer: {
+              input: {
+                placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+              },
+              send: { tooltip: "发送消息" },
+              cancel: { tooltip: "停止生成" }
+            }
+          }}
+          welcome={{
+            message: "你好，我是 Agent Studio。请直接提问。",
+            suggestions: PORTAL_STARTER_SUGGESTIONS
+          }}
+          components={{
+            AssistantMessage: AgentAssistantMessage,
+            ThreadWelcome: DraftOnlyThreadWelcome
+          }}
+          assistantMessage={{
+            allowCopy: true,
+            allowReload: true,
+            allowFeedbackPositive: true,
+            allowFeedbackNegative: true,
+            components: {
+              ToolFallback: HiddenToolFallback as any
+            }
+          }}
+          userMessage={{ allowEdit: true }}
+        />
+      </PreviewRequestContext.Provider>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
