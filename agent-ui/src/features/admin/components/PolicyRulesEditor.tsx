@@ -1,6 +1,9 @@
-import { Alert, Button, Card, Input, Select } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Select } from "antd";
 
 import { openWarningConfirm } from "../../../lib/warning-modal";
+import { fetchAdminUsers, fetchDepartmentTree } from "../api";
+import { fetchRoles } from "../../rbac/api";
 
 export type PolicyRuleSubjectType = "role" | "department" | "user";
 export type PolicyRuleEffect = "allow" | "deny";
@@ -29,6 +32,21 @@ type PolicyRulesEditorProps = {
   onSave(): void;
 };
 
+type SubjectOption = {
+  label: string;
+  value: string;
+};
+
+type SubjectDirectory = Record<PolicyRuleSubjectType, SubjectOption[]>;
+
+const EMPTY_SUBJECT_DIRECTORY: SubjectDirectory = {
+  role: [],
+  department: [],
+  user: []
+};
+
+const FALLBACK_ROLE_SUBJECT_IDS = ["employee", "admin", "super_admin"];
+
 const SUBJECT_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleSubjectType }> = [
   { label: "role", value: "role" },
   { label: "department", value: "department" },
@@ -45,6 +63,137 @@ const EMPTY_RULE: PolicyRuleValue = {
   subjectId: "",
   effect: "allow"
 };
+
+let subjectDirectoryCache: SubjectDirectory | null = null;
+let subjectDirectoryRequest: Promise<SubjectDirectory> | null = null;
+
+function buildOptionLabel(main: string, detail?: string): string {
+  const normalizedMain = String(main || "").trim();
+  const normalizedDetail = String(detail || "").trim();
+  if (!normalizedDetail) return normalizedMain;
+  return `${normalizedMain} · ${normalizedDetail}`;
+}
+
+function upsertOption(target: Map<string, SubjectOption>, value: string, label: string) {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue || target.has(normalizedValue)) return;
+  target.set(normalizedValue, {
+    value: normalizedValue,
+    label: String(label || normalizedValue).trim() || normalizedValue
+  });
+}
+
+function flattenDepartmentOptions(
+  nodes: Array<{
+    id: string;
+    name: string;
+    externalId: string;
+    children?: unknown[];
+  }>,
+  depth = 0,
+  bucket: SubjectOption[] = []
+): SubjectOption[] {
+  for (const node of nodes) {
+    const id = String(node.id || "").trim();
+    const externalId = String(node.externalId || "").trim();
+    const name = String(node.name || "").trim() || externalId || id;
+    const prefix = depth > 0 ? `${"  ".repeat(depth)}↳ ` : "";
+    const baseLabel = `${prefix}${name}`;
+    if (id) {
+      bucket.push({
+        value: id,
+        label: buildOptionLabel(baseLabel, externalId && externalId !== id ? `ID ${id} / external ${externalId}` : `ID ${id}`)
+      });
+    }
+    if (externalId && externalId !== id) {
+      bucket.push({
+        value: externalId,
+        label: buildOptionLabel(baseLabel, `external ${externalId}`)
+      });
+    }
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      flattenDepartmentOptions(node.children as Array<{ id: string; name: string; externalId: string; children?: unknown[] }>, depth + 1, bucket);
+    }
+  }
+  return bucket;
+}
+
+async function resolveSubjectDirectory(): Promise<SubjectDirectory> {
+  if (subjectDirectoryCache) return subjectDirectoryCache;
+  if (subjectDirectoryRequest) return subjectDirectoryRequest;
+
+  subjectDirectoryRequest = Promise.all([
+    fetchRoles().catch(() => ({ roles: [] as Array<{ id: string; slug: string; name: string }> })),
+    fetchDepartmentTree().catch(() => ({ departments: [] as Array<{ id: string; name: string; externalId: string; children?: unknown[] }> })),
+    fetchAdminUsers().catch(
+      () =>
+        ({
+          users: [] as Array<{
+            id: string;
+            local: { role: string };
+            synced: { displayName: string | null; email: string | null; dingtalkUserId: string | null };
+          }>
+        })
+    )
+  ])
+    .then(([rolesResp, departmentsResp, usersResp]) => {
+      const roleMap = new Map<string, SubjectOption>();
+      const departmentMap = new Map<string, SubjectOption>();
+      const userMap = new Map<string, SubjectOption>();
+
+      for (const value of FALLBACK_ROLE_SUBJECT_IDS) {
+        upsertOption(roleMap, value, buildOptionLabel(value, "legacy role"));
+      }
+
+      for (const role of rolesResp.roles || []) {
+        const roleId = String(role.id || "").trim();
+        const roleSlug = String(role.slug || "").trim();
+        const roleName = String(role.name || "").trim() || roleSlug || roleId;
+        if (roleSlug) {
+          upsertOption(roleMap, roleSlug, buildOptionLabel(roleName, `slug ${roleSlug}`));
+        }
+        if (roleId && roleId !== roleSlug) {
+          upsertOption(roleMap, roleId, buildOptionLabel(roleName, `id ${roleId}`));
+        }
+      }
+
+      for (const user of usersResp.users || []) {
+        const userId = String(user.id || "").trim();
+        if (userId) {
+          const displayName = user.synced?.displayName || user.synced?.email || user.synced?.dingtalkUserId || userId;
+          upsertOption(userMap, userId, buildOptionLabel(displayName, `id ${userId}`));
+        }
+        const localRole = String(user.local?.role || "").trim();
+        if (localRole) {
+          upsertOption(roleMap, localRole, buildOptionLabel(localRole, "legacy role"));
+        }
+      }
+
+      const departmentCandidates = flattenDepartmentOptions(departmentsResp.departments || []);
+      for (const option of departmentCandidates) {
+        upsertOption(departmentMap, option.value, option.label);
+      }
+
+      const nextDirectory: SubjectDirectory = {
+        role: [...roleMap.values()],
+        department: [...departmentMap.values()],
+        user: [...userMap.values()]
+      };
+      subjectDirectoryCache = nextDirectory;
+      return nextDirectory;
+    })
+    .finally(() => {
+      subjectDirectoryRequest = null;
+    });
+
+  return subjectDirectoryRequest;
+}
+
+function subjectIdPlaceholder(subjectType: PolicyRuleSubjectType): string {
+  if (subjectType === "role") return "请选择角色主体标识";
+  if (subjectType === "department") return "请选择部门主体标识";
+  return "请选择用户主体标识";
+}
 
 export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
   const {
@@ -64,6 +213,49 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
     onChange,
     onSave
   } = props;
+  const [subjectDirectory, setSubjectDirectory] = useState<SubjectDirectory>(EMPTY_SUBJECT_DIRECTORY);
+  const [subjectDirectoryLoading, setSubjectDirectoryLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setSubjectDirectoryLoading(true);
+    void resolveSubjectDirectory()
+      .then((resolved) => {
+        if (!active) return;
+        setSubjectDirectory(resolved);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSubjectDirectory(EMPTY_SUBJECT_DIRECTORY);
+      })
+      .finally(() => {
+        if (active) setSubjectDirectoryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const subjectOptionMap = useMemo(() => {
+    const map: Record<PolicyRuleSubjectType, Map<string, SubjectOption>> = {
+      role: new Map(subjectDirectory.role.map((item) => [item.value, item] as const)),
+      department: new Map(subjectDirectory.department.map((item) => [item.value, item] as const)),
+      user: new Map(subjectDirectory.user.map((item) => [item.value, item] as const))
+    };
+    return map;
+  }, [subjectDirectory.department, subjectDirectory.role, subjectDirectory.user]);
+
+  function resolveSubjectIdOptions(rule: PolicyRuleValue): SubjectOption[] {
+    const map = new Map(subjectOptionMap[rule.subjectType]);
+    const current = String(rule.subjectId || "").trim();
+    if (current && !map.has(current)) {
+      map.set(current, {
+        value: current,
+        label: buildOptionLabel(current, "当前策略值")
+      });
+    }
+    return [...map.values()];
+  }
 
   function updateRule(index: number, patch: Partial<PolicyRuleValue>) {
     onChange(rules.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule)));
@@ -116,18 +308,27 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
                   value={rule.subjectType}
                   disabled={loading || saving}
                   options={SUBJECT_TYPE_OPTIONS}
-                  onChange={(value) => updateRule(index, { subjectType: value as PolicyRuleSubjectType })}
+                  onChange={(value) =>
+                    updateRule(index, {
+                      subjectType: value as PolicyRuleSubjectType,
+                      subjectId: ""
+                    })
+                  }
                 />
               </label>
 
               <label className="field resource-policy-field">
                 <span className="field-label">主体标识 {index + 1}</span>
-                <Input
+                <Select
                   aria-label={`主体标识 ${index + 1}`}
-                  value={rule.subjectId}
+                  value={rule.subjectId || undefined}
                   disabled={loading || saving}
-                  placeholder="如 employee / dept-rd / user-123"
-                  onChange={(event) => updateRule(index, { subjectId: event.target.value })}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={subjectIdPlaceholder(rule.subjectType)}
+                  options={resolveSubjectIdOptions(rule)}
+                  loading={subjectDirectoryLoading}
+                  onChange={(value) => updateRule(index, { subjectId: String(value || "") })}
                 />
               </label>
 
