@@ -14,6 +14,7 @@ export type KnowledgeSetStorageResult = {
 };
 
 export interface KnowledgeSetStorage {
+  deleteKnowledgeSetData(knowledgeSetStorageKey: string): Promise<void>;
   saveFiles(input: {
     knowledgeSetStorageKey: string;
     files: Array<{ name: string; buffer: Buffer; mimeType?: string }>;

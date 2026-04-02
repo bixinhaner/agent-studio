@@ -33,6 +33,7 @@ type KnowledgeSetRepositoryLike = {
     }
   ): Promise<unknown>;
   get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string; storageKey?: string } | undefined>;
+  delete(id: string): Promise<void>;
   listItems(id: string): Promise<unknown[]>;
   replaceItems(
     id: string,
@@ -529,6 +530,61 @@ export function createResourcesAdminRouter(options: {
         storageKey: nextStorageKey
       });
       res.json({ knowledgeSet });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.delete("/knowledge-sets/:knowledgeSetId", requirePermission("knowledge_set.write"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+
+      await options.knowledgeSets.delete(knowledgeSetId);
+
+      const cleanupWarnings: string[] = [];
+      try {
+        await options.resourcePolicies.replacePoliciesForResource({
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          policies: []
+        });
+      } catch (error) {
+        cleanupWarnings.push(`resourcePolicy: ${detailFromError(error)}`);
+      }
+
+      const storageKeysForCleanup = new Set<string>([knowledgeSetId]);
+      const storageKey = toTrimmedString(knowledgeSet.storageKey);
+      if (storageKey) {
+        storageKeysForCleanup.add(storageKey);
+      }
+      for (const key of storageKeysForCleanup) {
+        try {
+          await options.storage.deleteKnowledgeSetData(key);
+        } catch (error) {
+          cleanupWarnings.push(`storage(${key}): ${detailFromError(error)}`);
+        }
+      }
+
+      if (options.resourceAccessLogs) {
+        await options.resourceAccessLogs.record({
+          userId: req.currentUser?.id,
+          resourceType: "knowledge_set",
+          resourceId: knowledgeSetId,
+          actionType: "delete",
+          resultStatus: "success",
+          metadata: cleanupWarnings.length > 0 ? { cleanupWarnings } : undefined
+        });
+      }
+
+      res.json({
+        deletedId: knowledgeSetId,
+        warnings: cleanupWarnings.length > 0 ? cleanupWarnings : undefined
+      });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }

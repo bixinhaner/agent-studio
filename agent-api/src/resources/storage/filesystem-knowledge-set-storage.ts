@@ -68,6 +68,11 @@ function assertUniqueRelativePath(relativePath: string, seenPaths: Set<string>):
 export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
   constructor(private readonly rootDir: string) {}
 
+  async deleteKnowledgeSetData(knowledgeSetStorageKey: string): Promise<void> {
+    const mountPath = this.resolveReadableMountPath(knowledgeSetStorageKey);
+    await fs.rm(mountPath, { recursive: true, force: true });
+  }
+
   resolveReadableMountPath(knowledgeSetStorageKey: string): string {
     const normalizedKnowledgeSetStorageKey = normalizeKnowledgeSetStorageKey(knowledgeSetStorageKey);
     return ensureInsideRoot(this.rootDir, path.join(this.rootDir, normalizedKnowledgeSetStorageKey));

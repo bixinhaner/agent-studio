@@ -7,6 +7,7 @@ import {
   Empty,
   Form,
   Input,
+  message,
   Select,
   Space,
   Spin,
@@ -140,6 +141,19 @@ export function ResourceCenterShell() {
     setKnowledgeSets((current) =>
       current.map((knowledgeSet) => (knowledgeSet.id === updatedKnowledgeSet.id ? updatedKnowledgeSet : knowledgeSet))
     );
+  }
+
+  function handleKnowledgeSetDeleted(knowledgeSetId: string, warnings?: string[]) {
+    setKnowledgeSets((current) => current.filter((knowledgeSet) => knowledgeSet.id !== knowledgeSetId));
+    setSelectedKnowledgeSetId((current) => (current === knowledgeSetId ? null : current));
+    setMobileDetailOpen(false);
+    setErrorText("");
+    if (Array.isArray(warnings) && warnings.length > 0) {
+      const warningMessage = warnings.map((item) => item.trim()).filter(Boolean).join("；");
+      if (warningMessage) {
+        void message.warning(`资料集已删除，但存在清理告警：${warningMessage}`);
+      }
+    }
   }
 
   function openCreatePanel() {
@@ -377,7 +391,11 @@ export function ResourceCenterShell() {
         {!isNarrowScreen ? (
           <section className="resource-center-detail admin-workspace-detail">
             {selectedKnowledgeSet ? (
-              <KnowledgeSetDetailView knowledgeSet={selectedKnowledgeSet} onKnowledgeSetUpdated={handleKnowledgeSetUpdated} />
+              <KnowledgeSetDetailView
+                knowledgeSet={selectedKnowledgeSet}
+                onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
+                onKnowledgeSetDeleted={handleKnowledgeSetDeleted}
+              />
             ) : (
               <div className="resource-center-placeholder empty">
                 <h3>资料集详情</h3>
@@ -398,7 +416,11 @@ export function ResourceCenterShell() {
           destroyOnClose={false}
         >
           {selectedKnowledgeSet ? (
-            <KnowledgeSetDetailView knowledgeSet={selectedKnowledgeSet} onKnowledgeSetUpdated={handleKnowledgeSetUpdated} />
+            <KnowledgeSetDetailView
+              knowledgeSet={selectedKnowledgeSet}
+              onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
+              onKnowledgeSetDeleted={handleKnowledgeSetDeleted}
+            />
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择资料集。" />
           )}

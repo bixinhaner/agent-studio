@@ -2,6 +2,7 @@ import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/ap
 
 import type {
   CreateKnowledgeSetInput,
+  DeleteKnowledgeSetResponse,
   KnowledgeSetItemsResponse,
   KnowledgeSetListResponse,
   KnowledgeSetResponse,
@@ -55,6 +56,12 @@ export async function updateKnowledgeSet(
   return api<KnowledgeSetResponse>(`/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}`, {
     method: "PATCH",
     json: input
+  });
+}
+
+export async function deleteKnowledgeSet(knowledgeSetId: string): Promise<DeleteKnowledgeSetResponse> {
+  return api<DeleteKnowledgeSetResponse>(`/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}`, {
+    method: "DELETE"
   });
 }
 

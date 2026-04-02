@@ -1,9 +1,10 @@
-import { InboxOutlined } from "@ant-design/icons";
+import { DeleteOutlined, InboxOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Input, Progress, Select, Switch, Tag, Typography, Upload } from "antd";
 import type { UploadFile, UploadProps } from "antd";
 
 import {
+  deleteKnowledgeSet,
   deleteKnowledgeSetItem,
   fetchKnowledgeSetItems,
   rebuildKnowledgeSet,
@@ -12,6 +13,7 @@ import {
   uploadKnowledgeSetArchive,
   uploadKnowledgeSetFiles
 } from "./api";
+import { openWarningConfirm } from "../../lib/warning-modal";
 import { KnowledgeSetFileTree } from "./KnowledgeSetFileTree";
 import { ResourcePolicyEditor } from "./ResourcePolicyEditor";
 import type { KnowledgeSetItemRecord, KnowledgeSetRecord } from "./types";
@@ -19,6 +21,7 @@ import type { KnowledgeSetItemRecord, KnowledgeSetRecord } from "./types";
 type KnowledgeSetDetailViewProps = {
   knowledgeSet: KnowledgeSetRecord;
   onKnowledgeSetUpdated: (knowledgeSet: KnowledgeSetRecord) => void;
+  onKnowledgeSetDeleted: (knowledgeSetId: string, warnings?: string[]) => void;
 };
 
 type UploadTaskStatus = "pending" | "uploading" | "success" | "error" | "skipped";
@@ -60,7 +63,11 @@ function taskLabel(status: UploadTaskStatus): string {
   return "待上传";
 }
 
-export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: KnowledgeSetDetailViewProps) {
+export function KnowledgeSetDetailView({
+  knowledgeSet,
+  onKnowledgeSetUpdated,
+  onKnowledgeSetDeleted
+}: KnowledgeSetDetailViewProps) {
   const [name, setName] = useState(knowledgeSet.name);
   const [description, setDescription] = useState(knowledgeSet.description || "");
   const [status, setStatus] = useState(knowledgeSet.status);
@@ -68,6 +75,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
   const [loadingItems, setLoadingItems] = useState(true);
   const [itemsReady, setItemsReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [mutatingItemPath, setMutatingItemPath] = useState<string | null>(null);
@@ -90,6 +98,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
     viewVersionRef.current += 1;
     setItems([]);
     setSaving(false);
+    setDeleting(false);
     setUploading(false);
     setRebuilding(false);
     setMutatingItemPath(null);
@@ -269,6 +278,37 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
     }
   }
 
+  async function handleDeleteKnowledgeSet() {
+    const confirmed = await openWarningConfirm({
+      title: "确认删除资料集",
+      content: `确认删除资料集「${knowledgeSet.name}」吗？`,
+      description: "将删除资料集记录、文件目录和关联授权策略，操作不可恢复。",
+      dangerLevel: "danger",
+      okText: "删除资料集",
+      cancelText: "取消",
+      okButtonDanger: true
+    });
+    if (!confirmed) return;
+
+    const viewVersion = viewVersionRef.current;
+    setDeleting(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await deleteKnowledgeSet(knowledgeSet.id);
+      if (!isCurrentView(viewVersion)) return;
+      onKnowledgeSetDeleted(response.deletedId, response.warnings);
+    } catch (error) {
+      if (isCurrentView(viewVersion)) {
+        setErrorText(error instanceof Error ? error.message : "删除资料集失败");
+      }
+    } finally {
+      if (isCurrentView(viewVersion)) {
+        setDeleting(false);
+      }
+    }
+  }
+
   async function runFileUploadQueue(targetStatuses: UploadTaskStatus[]) {
     if (selectedFileEntries.length === 0) return;
     const viewVersion = viewVersionRef.current;
@@ -406,7 +446,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
     }
   }
 
-  const busy = saving || uploading || rebuilding || Boolean(mutatingItemPath);
+  const busy = saving || deleting || uploading || rebuilding || Boolean(mutatingItemPath);
   const fileOpsDisabled = busy || !itemsReady;
   const statusEnabled = status === "active";
 
@@ -469,6 +509,9 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
         <div className="resource-center-actions">
           <Button type="primary" disabled={busy} onClick={() => void handleSave()}>
             {saving ? "保存中..." : "保存资料集配置"}
+          </Button>
+          <Button danger icon={<DeleteOutlined />} disabled={busy} onClick={() => void handleDeleteKnowledgeSet()}>
+            {deleting ? "删除中..." : "删除资料集"}
           </Button>
         </div>
       </Card>

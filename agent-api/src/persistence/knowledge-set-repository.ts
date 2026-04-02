@@ -81,6 +81,7 @@ type KnowledgeSetTable = {
   findMany(args?: { orderBy?: { createdAt?: "asc" | "desc"; updatedAt?: "asc" | "desc" } }): Promise<KnowledgeSetRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<KnowledgeSetRow>;
+  delete(args: { where: { id: string } }): Promise<KnowledgeSetRow>;
 };
 
 type KnowledgeSetItemTable = {
@@ -228,6 +229,11 @@ export class KnowledgeSetRepository {
       });
       return this.loadRecord(tx, refreshed);
     });
+  }
+
+  async delete(id: string): Promise<void> {
+    const record = await this.requireKnowledgeSet(this.db, id);
+    await this.db.knowledgeSet.delete({ where: { id: record.id } });
   }
 
   private async requireKnowledgeSet(db: KnowledgeSetRepositoryDb, knowledgeSetId: string): Promise<KnowledgeSetRow> {

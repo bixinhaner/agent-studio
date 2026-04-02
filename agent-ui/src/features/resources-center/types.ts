@@ -40,6 +40,11 @@ export type KnowledgeSetResponse = {
   knowledgeSet: KnowledgeSetRecord;
 };
 
+export type DeleteKnowledgeSetResponse = {
+  deletedId: string;
+  warnings?: string[];
+};
+
 export type ResourcePolicyRecord = {
   id?: string;
   organizationId?: string;
