@@ -10,10 +10,19 @@ export type PublicShareSnapshotPart =
       title?: string;
     };
 
+export type PublicShareSnapshotProcessRow = {
+  id: string;
+  kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
+  title: string;
+  detail?: string;
+  at?: string;
+};
+
 export type PublicShareSnapshotMessage = {
   id: string;
   role: "user" | "assistant";
   parts: PublicShareSnapshotPart[];
+  processRows?: PublicShareSnapshotProcessRow[];
 };
 
 export type PublicShareSnapshotTurn = {

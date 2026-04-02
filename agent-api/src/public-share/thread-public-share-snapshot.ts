@@ -12,10 +12,29 @@ export type ThreadPublicShareSnapshotPart =
       title?: string;
     };
 
+export type ThreadPublicShareSnapshotProcessKind =
+  | "reasoning"
+  | "tool"
+  | "source"
+  | "meta"
+  | "process"
+  | "done"
+  | "error"
+  | "debug";
+
+export type ThreadPublicShareSnapshotProcessRow = {
+  id: string;
+  kind: ThreadPublicShareSnapshotProcessKind;
+  title: string;
+  detail?: string;
+  at?: string;
+};
+
 export type ThreadPublicShareSnapshotMessage = {
   id: string;
   role: "user" | "assistant";
   parts: ThreadPublicShareSnapshotPart[];
+  processRows?: ThreadPublicShareSnapshotProcessRow[];
 };
 
 export type ThreadPublicShareSnapshotTurn = {
@@ -31,6 +50,17 @@ export type ThreadPublicShareSnapshot = {
 };
 
 type ParsedShareableMessage = ThreadPublicShareSnapshotMessage;
+
+const PROCESS_KINDS = new Set<ThreadPublicShareSnapshotProcessKind>([
+  "reasoning",
+  "tool",
+  "source",
+  "meta",
+  "process",
+  "done",
+  "error",
+  "debug"
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -90,7 +120,132 @@ function placeholderForUnsupportedPart(part: Record<string, unknown>, role: "use
   return "";
 }
 
-function sanitizeMessageParts(parts: unknown, role: "user" | "assistant"): ThreadPublicShareSnapshotPart[] {
+function normalizeProcessKind(value: unknown): ThreadPublicShareSnapshotProcessKind {
+  const raw = asTrimmedString(value);
+  return PROCESS_KINDS.has(raw as ThreadPublicShareSnapshotProcessKind)
+    ? (raw as ThreadPublicShareSnapshotProcessKind)
+    : "process";
+}
+
+function sanitizeProcessTitle(value: unknown, fallback = "过程事件"): string {
+  const title = redactSensitiveText(asTrimmedString(value));
+  return title || fallback;
+}
+
+function sanitizeProcessDetail(value: unknown): string | undefined {
+  const detail = redactSensitiveText(asTrimmedString(value));
+  return detail || undefined;
+}
+
+function sanitizeProcessAt(value: unknown): string | undefined {
+  const at = asTrimmedString(value);
+  return at || undefined;
+}
+
+function stringifyProcessValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractTraceBatchRows(part: Record<string, unknown>): ThreadPublicShareSnapshotProcessRow[] {
+  if (asTrimmedString(part.type) !== "data" || asTrimmedString(part.name) !== "codex_trace_batch") {
+    return [];
+  }
+
+  const data = asRecord(part.data);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  return rows
+    .map((entry, index) => {
+      const row = asRecord(entry);
+      if (!row) return null;
+      const title = sanitizeProcessTitle(row.title);
+      if (!title) return null;
+      return {
+        id: asTrimmedString(row.id) || `process-row-${index + 1}`,
+        kind: normalizeProcessKind(row.kind),
+        title,
+        detail: sanitizeProcessDetail(row.detail),
+        at: sanitizeProcessAt(row.at)
+      } satisfies ThreadPublicShareSnapshotProcessRow;
+    })
+    .filter(Boolean) as ThreadPublicShareSnapshotProcessRow[];
+}
+
+function extractFallbackProcessRows(parts: unknown): ThreadPublicShareSnapshotProcessRow[] {
+  if (!Array.isArray(parts)) return [];
+  const rows: ThreadPublicShareSnapshotProcessRow[] = [];
+
+  for (const [index, entry] of parts.entries()) {
+    const part = asRecord(entry);
+    if (!part) continue;
+    const type = asTrimmedString(part.type);
+
+    if (type === "reasoning") {
+      const detail = sanitizeProcessDetail(part.text);
+      if (!detail) continue;
+      rows.push({
+        id: asTrimmedString(part.id) || `process-row-${index + 1}`,
+        kind: "reasoning",
+        title: "思考摘要",
+        detail
+      });
+      continue;
+    }
+
+    if (type === "tool-call") {
+      const toolName = asTrimmedString(part.toolName) || "tool";
+      const argsText = sanitizeProcessDetail(part.argsText);
+      const resultText = sanitizeProcessDetail(stringifyProcessValue(part.result));
+      const detail = [argsText, resultText].filter(Boolean).join("\n\n").trim();
+      rows.push({
+        id: asTrimmedString(part.toolCallId) || `process-row-${index + 1}`,
+        kind: "tool",
+        title: `工具调用 · ${toolName}`,
+        detail: detail || undefined
+      });
+      continue;
+    }
+
+    if (type === "data" && asTrimmedString(part.name) === "codex_process") {
+      const data = asRecord(part.data);
+      if (!data) continue;
+      const title = sanitizeProcessTitle(data.title);
+      if (!title) continue;
+      rows.push({
+        id: asTrimmedString(part.id) || `process-row-${index + 1}`,
+        kind: normalizeProcessKind(data.kind),
+        title,
+        detail: sanitizeProcessDetail(data.detail),
+        at: sanitizeProcessAt(data.at)
+      });
+    }
+  }
+
+  return rows;
+}
+
+function extractProcessRows(parts: unknown): ThreadPublicShareSnapshotProcessRow[] {
+  if (!Array.isArray(parts)) return [];
+  const traceRows = parts.flatMap((entry) => {
+    const part = asRecord(entry);
+    return part ? extractTraceBatchRows(part) : [];
+  });
+  if (traceRows.length > 0) {
+    return traceRows;
+  }
+  return extractFallbackProcessRows(parts);
+}
+
+function sanitizeMessageParts(
+  parts: unknown,
+  role: "user" | "assistant",
+  hasStructuredProcess = false
+): ThreadPublicShareSnapshotPart[] {
   if (!Array.isArray(parts)) return [];
   const sanitized: ThreadPublicShareSnapshotPart[] = [];
   let unsupportedOnly = false;
@@ -128,7 +283,7 @@ function sanitizeMessageParts(parts: unknown, role: "user" | "assistant"): Threa
     }
   }
 
-  if (sanitized.length === 0 && unsupportedOnly) {
+  if (sanitized.length === 0 && unsupportedOnly && !hasStructuredProcess) {
     pushTextPart(sanitized, role === "user" ? "[此消息包含未公开内容]" : "[此回复包含未公开内容]");
   }
 
@@ -144,13 +299,15 @@ function parseShareableMessages(items: StoredMessageItem[]): ParsedShareableMess
     const role = asTrimmedString(message.role);
     if (role !== "user" && role !== "assistant") continue;
 
-    const parts = sanitizeMessageParts(message.content, role);
-    if (parts.length === 0) continue;
+    const processRows = role === "assistant" ? extractProcessRows(message.content) : [];
+    const parts = sanitizeMessageParts(message.content, role, processRows.length > 0);
+    if (parts.length === 0 && processRows.length === 0) continue;
 
     parsed.push({
       id: asTrimmedString(message.id) || `message-${index + 1}`,
       role,
-      parts
+      parts,
+      ...(processRows.length > 0 ? { processRows } : {})
     });
   }
 
@@ -238,6 +395,41 @@ export function buildThreadPublicShareSnapshot(input: {
   };
 }
 
+export function buildThreadPublicShareSnapshotFromLeadMessageIds(input: {
+  thread: Pick<ThreadRecord, "title">;
+  repository: { messages: StoredMessageItem[] };
+  selectedLeadMessageIds: string[];
+}): {
+  selectedTurnCount: number;
+  title: string;
+  snapshot: ThreadPublicShareSnapshot;
+} {
+  const leadMessageIds = new Set(input.selectedLeadMessageIds.map((value) => asTrimmedString(value)).filter(Boolean));
+  const parsedMessages = parseShareableMessages(input.repository.messages);
+  const groupedTurns = groupParsedMessagesIntoTurns(parsedMessages);
+  const turns = groupedTurns.filter((turn) => leadMessageIds.has(turn.leadMessageId));
+
+  if (turns.length === 0) {
+    throw new Error("无法根据公开链接恢复所选对话轮次");
+  }
+
+  const snapshot: ThreadPublicShareSnapshot = {
+    version: 1,
+    threadTitle: asTrimmedString(input.thread.title) || undefined,
+    turns
+  };
+
+  return {
+    selectedTurnCount: turns.length,
+    title: deriveThreadPublicShareTitle(snapshot, input.thread.title),
+    snapshot
+  };
+}
+
+export function snapshotHasStructuredProcessRows(snapshot: ThreadPublicShareSnapshot): boolean {
+  return snapshot.turns.some((turn) => turn.messages.some((message) => Array.isArray(message.processRows) && message.processRows.length > 0));
+}
+
 function normalizeSnapshotPart(value: unknown): ThreadPublicShareSnapshotPart | null {
   const part = asRecord(value);
   if (!part) return null;
@@ -270,11 +462,29 @@ function normalizeSnapshotMessage(value: unknown, index: number): ThreadPublicSh
   const parts = Array.isArray(message.parts)
     ? message.parts.map(normalizeSnapshotPart).filter((part): part is ThreadPublicShareSnapshotPart => Boolean(part))
     : [];
-  if (parts.length === 0) return null;
+  const processRows = Array.isArray(message.processRows)
+    ? message.processRows
+        .map((row, rowIndex) => {
+          const item = asRecord(row);
+          if (!item) return null;
+          const title = sanitizeProcessTitle(item.title);
+          if (!title) return null;
+          return {
+            id: asTrimmedString(item.id) || `process-row-${rowIndex + 1}`,
+            kind: normalizeProcessKind(item.kind),
+            title,
+            detail: sanitizeProcessDetail(item.detail),
+            at: sanitizeProcessAt(item.at)
+          } satisfies ThreadPublicShareSnapshotProcessRow;
+        })
+        .filter(Boolean) as ThreadPublicShareSnapshotProcessRow[]
+    : [];
+  if (parts.length === 0 && processRows.length === 0) return null;
   return {
     id: asTrimmedString(message.id) || `message-${index + 1}`,
     role,
-    parts
+    parts,
+    ...(processRows.length > 0 ? { processRows } : {})
   };
 }
 

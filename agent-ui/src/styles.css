@@ -1044,6 +1044,11 @@ body {
   min-width: 0;
   height: 100%;
   --aui-thread-max-width: min(1120px, calc(100vw - 470px));
+  --portal-thread-leading-gap: 58px;
+  --portal-thread-message-max-width: min(
+    calc(var(--aui-thread-max-width) * 0.92),
+    calc(var(--aui-thread-max-width) - var(--portal-thread-leading-gap))
+  );
   border-radius: 10px;
   border: 1px solid #e2e8f0;
 }
@@ -1056,9 +1061,57 @@ body {
   padding-bottom: 10px;
 }
 
+.thread-wrap .aui-thread-welcome-root,
+.thread-wrap .aui-thread-viewport-footer,
+.thread-wrap .aui-assistant-message-root,
+.thread-wrap .aui-user-message-root {
+  width: min(100%, var(--aui-thread-max-width));
+}
+
+.thread-wrap .aui-assistant-message-root {
+  grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr) auto;
+}
+
+.thread-wrap :where(.aui-assistant-message-root) > .aui-avatar-root,
+.thread-wrap .aui-assistant-avatar {
+  margin-right: 0;
+}
+
+.thread-wrap :where(.aui-assistant-message-root) > .aui-branch-picker-root,
+.thread-wrap .aui-assistant-branch-picker {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.thread-wrap .aui-assistant-message-content {
+  width: 100%;
+  max-width: min(100%, var(--portal-thread-message-max-width));
+}
+
+.thread-wrap .aui-user-message-root {
+  grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr);
+}
+
+.thread-wrap .aui-user-message-attachments {
+  grid-column: 2;
+  width: min(100%, var(--portal-thread-message-max-width));
+  justify-self: end;
+}
+
+.thread-wrap .aui-user-message-content {
+  justify-self: end;
+  width: fit-content;
+}
+
+.thread-wrap :where(.aui-user-message-root) > .aui-branch-picker-root,
+.thread-wrap .aui-user-branch-picker {
+  grid-column: 2;
+  justify-self: end;
+}
+
 .thread-wrap .aui-assistant-message-content,
 .thread-wrap .aui-user-message-content {
-  max-width: calc(var(--aui-thread-max-width) * 0.92);
+  max-width: min(100%, var(--portal-thread-message-max-width));
   font-size: 15px;
   line-height: 1.6;
 }
@@ -1807,6 +1860,7 @@ body {
 
   .thread-wrap .aui-thread-root {
     --aui-thread-max-width: 100%;
+    --portal-thread-leading-gap: 50px;
     height: 72vh;
   }
 
@@ -4849,6 +4903,70 @@ body.public-share-mode #root {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.03);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.public-share-process-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.public-share-process-step-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.public-share-process-step-kind-reasoning,
+.public-share-process-step-kind-meta {
+  background: rgba(96, 165, 250, 0.14);
+  color: #bfdbfe;
+}
+
+.public-share-process-step-kind-tool {
+  background: rgba(167, 139, 250, 0.16);
+  color: #ddd6fe;
+}
+
+.public-share-process-step-kind-source {
+  background: rgba(52, 211, 153, 0.16);
+  color: #bbf7d0;
+}
+
+.public-share-process-step-kind-done {
+  background: rgba(74, 222, 128, 0.16);
+  color: #bbf7d0;
+}
+
+.public-share-process-step-kind-error {
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+.public-share-process-step-kind-debug {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+}
+
+.public-share-process-step-title {
+  color: rgba(248, 250, 252, 0.95);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.public-share-process-step-time {
+  margin-left: auto;
+  color: rgba(148, 163, 184, 0.82);
+  font-size: 12px;
 }
 
 .public-share-process-step-label {

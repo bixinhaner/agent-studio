@@ -107,164 +107,6 @@ function extractPublicShareToken(pathname: string): string {
   return match ? decodeURIComponent(match[1] || "") : "";
 }
 
-function normalizeLineBreaks(value: string): string {
-  return value.replace(/\r\n?/g, "\n").trim();
-}
-
-const PROCESS_MARKERS = [
-  "我先",
-  "我会",
-  "接下来",
-  "下一步",
-  "当前",
-  "我已经",
-  "我需要",
-  "然后",
-  "最后",
-  "我转去",
-  "我确认",
-  "我定位",
-  "我整理",
-  "我补齐",
-  "我想"
-];
-
-const ANSWER_SECTION_MARKERS = [
-  "文档事实",
-  "建议按",
-  "建议按这个顺序排查",
-  "先确认",
-  "先看",
-  "核对",
-  "用 KPI 验证",
-  "如果是",
-  "参考文档",
-  "我对这个问题的保守判断",
-  "结论",
-  "建议"
-];
-
-function stripSectionPrefix(value: string): string {
-  return normalizeLineBreaks(value).replace(/^[#>\-\s\d.()（）]+/, "");
-}
-
-function splitIntoMeaningfulBlocks(text: string): string[] {
-  const normalized = normalizeLineBreaks(text);
-  if (!normalized) return [];
-
-  const paragraphBlocks = normalized
-    .split(/\n{2,}/g)
-    .map((block) => block.trim())
-    .filter(Boolean);
-  if (paragraphBlocks.length >= 2) {
-    return paragraphBlocks;
-  }
-
-  const hasStructuredMarkdown = /(^|\n)\s{0,3}(```|#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\|.+\|)/m.test(normalized);
-  if (hasStructuredMarkdown) {
-    return [normalized];
-  }
-
-  const lineBlocks = normalized
-    .split(/\n/g)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lineBlocks.length >= 2) {
-    return lineBlocks;
-  }
-
-  const processMarkers = ["我先", "我会", "接下来", "下一步", "当前", "我已经", "我需要", "然后", "最后"];
-  const markerHits = processMarkers.filter((marker) => normalized.includes(marker)).length;
-  if (markerHits >= 2) {
-    const sentenceBlocks = normalized
-      .split(/(?<=[。！？!?])/g)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-    if (sentenceBlocks.length >= 3) {
-      return sentenceBlocks;
-    }
-  }
-
-  return [normalized];
-}
-
-function isProcessLikeBlock(block: string): boolean {
-  const normalized = normalizeLineBreaks(block);
-  if (!normalized) return false;
-
-  const prefix = stripSectionPrefix(normalized);
-  if (ANSWER_SECTION_MARKERS.some((marker) => prefix.startsWith(marker))) {
-    return false;
-  }
-
-  let score = 0;
-  PROCESS_MARKERS.forEach((marker) => {
-    if (normalized.includes(marker)) {
-      score += 1;
-    }
-  });
-
-  if (/当前工作区|资料集|定位|提取|整理|补齐|避免把推断当成结论/.test(normalized)) {
-    score += 2;
-  }
-
-  if (/我先|我会|我已经|我需要|接下来|下一步|当前/.test(normalized)) {
-    score += 2;
-  }
-
-  return score >= 2;
-}
-
-function expandProcessNarrativeBlock(block: string): string[] {
-  const normalized = normalizeLineBreaks(block);
-  if (!normalized) return [];
-
-  const sentenceBlocks = normalized
-    .split(/(?<=[。！？!?])/g)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-
-  if (sentenceBlocks.length >= 3 && normalized.length >= 120) {
-    return sentenceBlocks;
-  }
-
-  return [normalized];
-}
-
-function splitAssistantMessageSections(text: string): { processBlocks: string[]; finalBlock: string } {
-  const blocks = splitIntoMeaningfulBlocks(text);
-  if (blocks.length <= 1) {
-    return {
-      processBlocks: [],
-      finalBlock: blocks[0] || normalizeLineBreaks(text)
-    };
-  }
-
-  let processBoundary = 0;
-  while (processBoundary < blocks.length && isProcessLikeBlock(blocks[processBoundary] || "")) {
-    processBoundary += 1;
-  }
-
-  if (processBoundary === 0) {
-    return {
-      processBlocks: [],
-      finalBlock: blocks.join("\n\n").trim()
-    };
-  }
-
-  if (processBoundary > 0 && processBoundary < blocks.length) {
-    return {
-      processBlocks: blocks.slice(0, processBoundary).flatMap((block) => expandProcessNarrativeBlock(block)),
-      finalBlock: blocks.slice(processBoundary).join("\n\n").trim()
-    };
-  }
-
-  return {
-    processBlocks: blocks.slice(0, -1).flatMap((block) => expandProcessNarrativeBlock(block)),
-    finalBlock: blocks[blocks.length - 1] || ""
-  };
-}
-
 function collectMessageText(message: PublicShareSnapshotMessage): string {
   return message.parts
     .filter((part): part is Extract<PublicShareSnapshotMessage["parts"][number], { type: "text" }> => part.type === "text")
@@ -306,28 +148,35 @@ function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: strin
       }
 
       const text = collectMessageText(message);
-      if (!text) return;
       const sourceParts = message.parts.filter((part) => part.type === "source");
-      const { processBlocks, finalBlock } = splitAssistantMessageSections(text);
+      const processRows = Array.isArray(message.processRows) ? message.processRows : [];
 
       lines.push("### Agent Studio");
       lines.push("");
 
-      if (processBlocks.length > 0) {
+      if (processRows.length > 0) {
         lines.push("#### 过程记录");
         lines.push("");
-        processBlocks.forEach((block, index) => {
-          lines.push(`##### Step ${index + 1}`);
+        processRows.forEach((row, index) => {
+          lines.push(`##### Step ${index + 1} · ${row.title}`);
           lines.push("");
-          lines.push(block);
-          lines.push("");
+          if (row.at) {
+            lines.push(`_${formatLocalDateTime(row.at)}_`);
+            lines.push("");
+          }
+          if (row.detail) {
+            lines.push(row.detail);
+            lines.push("");
+          }
         });
       }
 
-      lines.push("#### 最终回复");
-      lines.push("");
-      lines.push(finalBlock || text);
-      lines.push("");
+      if (text) {
+        lines.push("#### 最终回复");
+        lines.push("");
+        lines.push(text);
+        lines.push("");
+      }
 
       if (sourceParts.length > 0) {
         lines.push("#### 参考链接");
@@ -341,6 +190,22 @@ function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: strin
   });
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim().concat("\n");
+}
+
+function formatProcessRowTime(value?: string): string {
+  if (!value) return "";
+  return formatLocalDateTime(value);
+}
+
+function processRowKindLabel(kind: string): string {
+  if (kind === "reasoning") return "思考";
+  if (kind === "tool") return "工具";
+  if (kind === "source") return "来源";
+  if (kind === "meta") return "准备";
+  if (kind === "done") return "完成";
+  if (kind === "error") return "异常";
+  if (kind === "debug") return "调试";
+  return "步骤";
 }
 
 function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
@@ -360,7 +225,7 @@ function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabe
 function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
   const text = collectMessageText(props.message);
   const sourceParts = props.message.parts.filter((part) => part.type === "source");
-  const { processBlocks, finalBlock } = splitAssistantMessageSections(text);
+  const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
 
   return (
     <section className="public-share-message public-share-message-assistant">
@@ -368,24 +233,30 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
         <span className="public-share-message-role">Agent Studio</span>
       </div>
 
-      {processBlocks.length > 0 ? (
+      {processRows.length > 0 ? (
         <details className="public-share-process-card">
           <summary>
             <span className="public-share-process-summary-copy">
               <span className="public-share-process-summary-label">过程记录</span>
-              <span className="public-share-process-summary-caption">按步骤查看回答形成过程</span>
+              <span className="public-share-process-summary-caption">按真实助手轨迹查看回答形成过程</span>
             </span>
-            <span className="public-share-process-summary-count">{processBlocks.length} 步</span>
+            <span className="public-share-process-summary-count">{processRows.length} 步</span>
           </summary>
           <ol className="public-share-process-list">
-            {processBlocks.map((block, index) => (
-              <li key={`${props.message.id}-process-${index}`} className="public-share-process-item">
+            {processRows.map((row, index) => (
+              <li key={row.id || `${props.message.id}-process-${index}`} className="public-share-process-item">
                 <div className="public-share-process-node" aria-hidden="true">
                   <span>{String(index + 1).padStart(2, "0")}</span>
                 </div>
                 <div className="public-share-process-panel">
-                  <div className="public-share-process-step-label">Step {index + 1}</div>
-                  <PublicShareMarkdown text={block} className="public-share-process-markdown" />
+                  <div className="public-share-process-step-head">
+                    <span className={`public-share-process-step-kind public-share-process-step-kind-${row.kind}`}>
+                      {processRowKindLabel(row.kind)}
+                    </span>
+                    <span className="public-share-process-step-title">{row.title}</span>
+                    {row.at ? <span className="public-share-process-step-time">{formatProcessRowTime(row.at)}</span> : null}
+                  </div>
+                  {row.detail ? <PublicShareMarkdown text={row.detail} className="public-share-process-markdown" /> : null}
                 </div>
               </li>
             ))}
@@ -393,19 +264,21 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
         </details>
       ) : null}
 
-      <div className="public-share-final-card">
-        <div className="public-share-final-label">最终回复</div>
-        <PublicShareMarkdown text={finalBlock || text} className="public-share-final-markdown" />
-        {sourceParts.length > 0 ? (
-          <div className="public-share-source-list">
-            {sourceParts.map((part) => (
-              <a key={`${props.message.id}-${part.id}`} href={part.url} target="_blank" rel="noreferrer">
-                {part.title || part.url}
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      {text ? (
+        <div className="public-share-final-card">
+          <div className="public-share-final-label">最终回复</div>
+          <PublicShareMarkdown text={text} className="public-share-final-markdown" />
+          {sourceParts.length > 0 ? (
+            <div className="public-share-source-list">
+              {sourceParts.map((part) => (
+                <a key={`${props.message.id}-${part.id}`} href={part.url} target="_blank" rel="noreferrer">
+                  {part.title || part.url}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

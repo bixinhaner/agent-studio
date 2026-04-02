@@ -106,7 +106,12 @@ import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-kn
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { initSSE, sendSSE } from "./sse.js";
-import { buildThreadPublicShareSnapshot } from "./public-share/thread-public-share-snapshot.js";
+import {
+  buildThreadPublicShareSnapshot,
+  buildThreadPublicShareSnapshotFromLeadMessageIds,
+  snapshotHasStructuredProcessRows,
+  type ThreadPublicShareSnapshot
+} from "./public-share/thread-public-share-snapshot.js";
 
 const app = express();
 const runtime = new CodexRuntime();
@@ -648,6 +653,47 @@ async function resolveThreadPublicShareUserDisplayName(userId?: string): Promise
   if (!normalizedUserId) return undefined;
   const user = await users.getById(normalizedUserId);
   return trimOrUndefined(user?.displayName) ?? trimOrUndefined(user?.email);
+}
+
+async function resolveThreadPublicShareSnapshotForRead<
+  T extends {
+    threadId: string;
+    title: string;
+    selectedTurnCount: number;
+    snapshot: ThreadPublicShareSnapshot;
+  }
+>(share: T): Promise<T> {
+  if (snapshotHasStructuredProcessRows(share.snapshot)) {
+    return share;
+  }
+
+  const leadMessageIds = share.snapshot.turns
+    .map((turn) => trimOrUndefined(turn.leadMessageId))
+    .filter((value): value is string => Boolean(value));
+  if (leadMessageIds.length === 0) {
+    return share;
+  }
+
+  const thread = await threads.get(share.threadId);
+  if (!thread) {
+    return share;
+  }
+
+  try {
+    const rebuilt = buildThreadPublicShareSnapshotFromLeadMessageIds({
+      thread,
+      repository: { messages: thread.messages },
+      selectedLeadMessageIds: leadMessageIds
+    });
+    return {
+      ...share,
+      title: rebuilt.title,
+      selectedTurnCount: rebuilt.selectedTurnCount,
+      snapshot: rebuilt.snapshot
+    } as T;
+  } catch {
+    return share;
+  }
 }
 
 function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
@@ -1593,10 +1639,11 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
       res.status(404).json({ detail: "公开链接不存在或已失效" });
       return;
     }
+    const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
     const userDisplayName = await resolveThreadPublicShareUserDisplayName(share.createdByUserId);
     res.json({
       share: threadPublicShareOut({
-        ...share,
+        ...resolvedShare,
         userDisplayName
       })
     });
