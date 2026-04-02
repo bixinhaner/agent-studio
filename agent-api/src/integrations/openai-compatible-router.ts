@@ -60,6 +60,7 @@ type KnowledgeSetRecord = {
   slug: string;
   status: string;
   sourceType: string;
+  storageKey?: string | null;
 };
 
 type RuntimeStreamEvent = {
@@ -208,6 +209,10 @@ function normalizeIdList(value: unknown): string[] {
 
 function normalizeAdditionalDirectories(value: unknown): string[] {
   return normalizeIdList(value);
+}
+
+function resolveKnowledgeSetStorageKey(knowledgeSet: KnowledgeSetRecord): string {
+  return trimOrUndefined(knowledgeSet.storageKey ?? undefined) ?? knowledgeSet.id;
 }
 
 function mergeAdditionalDirectories(
@@ -583,7 +588,13 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         }
       }
 
-      const mountPaths = selectedKnowledgeSetIds.map((knowledgeSetId) => options.knowledgeSetStorage.resolveReadableMountPath(knowledgeSetId));
+      const mountPaths = selectedKnowledgeSetIds.map((knowledgeSetId) => {
+        const knowledgeSet = knowledgeSetMap.get(knowledgeSetId);
+        if (!knowledgeSet) {
+          throw new Error("当前外部接口实例绑定的资料集不存在或未启用。");
+        }
+        return options.knowledgeSetStorage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
+      });
       const workspaceBase = path.join(
         options.sessionWorkspaceRoot,
         "external-openai",
