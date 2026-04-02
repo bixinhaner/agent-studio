@@ -464,7 +464,7 @@ function formatUpdatedAt(ms: number): string {
   }).format(date);
 }
 
-export function PreviewWorkbenchPanel(props: { threadId: string }) {
+export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePath?: string }) {
   const threadMessages = useAuiState((s) => s.thread.messages);
   const threadFiles = useMemo(() => collectThreadFiles(threadMessages), [threadMessages]);
   const [selectedFilePath, setSelectedFilePath] = useState("");
@@ -492,19 +492,34 @@ export function PreviewWorkbenchPanel(props: { threadId: string }) {
   );
 
   useEffect(() => {
-    if (!threadFiles.length) {
-      setSelectedFilePath("");
-      return;
-    }
-    if (!threadFiles.some((item) => item.filePath === selectedFilePath)) {
-      setSelectedFilePath(threadFiles[0]!.filePath);
-    }
+    setSelectedFilePath("");
+  }, [props.threadId]);
+
+  useEffect(() => {
+    const requested = normalizeFilePath(asString(props.requestedFilePath));
+    if (!requested) return;
+    setSelectedFilePath(requested);
+  }, [props.requestedFilePath]);
+
+  useEffect(() => {
+    if (selectedFilePath) return;
+    if (!threadFiles.length) return;
+    setSelectedFilePath(threadFiles[0]!.filePath);
   }, [selectedFilePath, threadFiles]);
 
-  const activeFile = useMemo(
-    () => threadFiles.find((item) => item.filePath === selectedFilePath) || null,
-    [selectedFilePath, threadFiles]
-  );
+  const activeFile = useMemo(() => {
+    const fromList = threadFiles.find((item) => item.filePath === selectedFilePath);
+    if (fromList) return fromList;
+    const normalizedSelected = normalizeFilePath(selectedFilePath);
+    if (!normalizedSelected) return null;
+    return {
+      filePath: normalizedSelected,
+      displayName: fileNameFromPath(normalizedSelected),
+      mimeType: "",
+      source: "file_change" as const,
+      updatedAt: Date.now()
+    };
+  }, [selectedFilePath, threadFiles]);
 
   useEffect(() => {
     let cancelled = false;

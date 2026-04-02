@@ -744,6 +744,30 @@ function isLikelyHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
+function resolveThreadPreviewPathFromHref(href: string, threadId: string): string | null {
+  const rawHref = href.trim();
+  const normalizedThreadId = threadId.trim();
+  if (!rawHref || !normalizedThreadId) return null;
+  if (rawHref.startsWith("#")) return null;
+  if (/^(mailto|tel|javascript):/i.test(rawHref)) return null;
+
+  const resolvePathname = () => {
+    try {
+      return new URL(rawHref, window.location.href).pathname || "";
+    } catch {
+      return "";
+    }
+  };
+  const pathname = decodeURIComponent(resolvePathname());
+  if (!pathname || pathname.startsWith("/api/")) return null;
+
+  const threadSegment = `/thread-${normalizedThreadId}`;
+  if (pathname !== threadSegment && !pathname.includes(`${threadSegment}/`)) {
+    return null;
+  }
+  return pathname;
+}
+
 function extractSources(value: unknown): Array<{ id: string; url: string; title?: string }> {
   const results: Array<{ id: string; url: string; title?: string }> = [];
   const seen = new Set<string>();
@@ -1618,6 +1642,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
   const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
+  const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
 
   const [statusText, setStatusText] = useState("就绪");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
@@ -2103,6 +2128,26 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "当前用户";
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · 上下文 ${contextUsageView.usedPercent}%`;
+
+  const handleThreadLinkClickCapture = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.defaultPrevented) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a");
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      const href = anchor.getAttribute("href") || anchor.href || "";
+      const previewPath = resolveThreadPreviewPathFromHref(href, activeRemoteThreadId);
+      if (!previewPath) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setRequestedPreviewPath(previewPath);
+      setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
+    },
+    [activeRemoteThreadId]
+  );
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -2656,6 +2701,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     <div
       className={sharedThreadReadonly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
       aria-disabled={sharedThreadReadonly}
+      onClickCapture={handleThreadLinkClickCapture}
     >
       {sharedThreadReadonly ? (
         <div className="thread-readonly-banner" role="status">
@@ -2797,7 +2843,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               activeTab={layoutState.activeRightDrawerTab}
               onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
               onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
-              previewContent={<PreviewWorkbenchPanel threadId={activeRemoteThreadId} />}
+              previewContent={<PreviewWorkbenchPanel threadId={activeRemoteThreadId} requestedFilePath={requestedPreviewPath} />}
               collaborationContent={
                 <div className="workbench-collaboration-content">
                   <section className="workbench-priority-card">
