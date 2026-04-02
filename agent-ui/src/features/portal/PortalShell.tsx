@@ -534,9 +534,20 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
 }
 
 function buildCodexRunConfig(cfg: AppliedConfig, mode: string): Record<string, unknown> {
-  return {
+  const runConfig: Record<string, unknown> = {
+    sandboxMode: cfg.sandboxMode,
+    approvalPolicy: cfg.approvalPolicy,
+    networkAccessEnabled: cfg.networkAccessEnabled,
+    webSearchMode: cfg.webSearchMode,
     mode
   };
+
+  const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
+  if (additionalDirectories && additionalDirectories.length > 0) {
+    runConfig.additionalDirectories = additionalDirectories;
+  }
+
+  return runConfig;
 }
 
 function findRuntimeMode(options: PortalRuntimeOptions | null, modeId: string) {
