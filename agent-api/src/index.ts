@@ -1,6 +1,6 @@
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -60,6 +60,10 @@ import {
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
+import {
+  ThreadPublicShareRepository,
+  type ThreadPublicShareRepositoryDb
+} from "./persistence/thread-public-share-repository.js";
 import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persistence/thread-share-repository.js";
 import { InboxItemRepository, type InboxItemRepositoryDb } from "./persistence/inbox-item-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
@@ -102,6 +106,7 @@ import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-kn
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { initSSE, sendSSE } from "./sse.js";
+import { buildThreadPublicShareSnapshot } from "./public-share/thread-public-share-snapshot.js";
 
 const app = express();
 const runtime = new CodexRuntime();
@@ -122,6 +127,7 @@ const notificationRecords = new NotificationRecordRepository(db as unknown as No
 const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const broadcasts = new BroadcastRepository(db as unknown as BroadcastRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
+const threadPublicShares = new ThreadPublicShareRepository(db as unknown as ThreadPublicShareRepositoryDb);
 const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepositoryDb);
 const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
 const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
@@ -522,6 +528,10 @@ const feedbackSchema = z.object({
   content_preview: z.string().optional()
 });
 
+const createThreadPublicShareSchema = z.object({
+  selected_turn_ids: z.array(z.string().min(1)).min(1)
+});
+
 const browseDirectoriesSchema = z.object({
   path: z.string().optional()
 });
@@ -600,10 +610,35 @@ function threadOut(thread: ThreadRecord) {
   };
 }
 
+function threadPublicShareOut(share: {
+  id: string;
+  token: string;
+  title: string;
+  selectedTurnCount: number;
+  snapshot: unknown;
+  createdAt: string;
+  updatedAt: string;
+}) {
+  return {
+    id: share.id,
+    token: share.token,
+    title: share.title,
+    selected_turn_count: share.selectedTurnCount,
+    public_path: `/share/${encodeURIComponent(share.token)}`,
+    snapshot: share.snapshot,
+    created_at: share.createdAt,
+    updated_at: share.updatedAt
+  };
+}
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function createThreadPublicShareToken(): string {
+  return randomBytes(18).toString("base64url");
 }
 
 function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
@@ -1540,6 +1575,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
   }
 });
 
+app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) => {
+  try {
+    const token = String(req.params.token || "").trim();
+    const share = await threadPublicShares.getActiveByToken(token);
+    if (!share) {
+      res.status(404).json({ detail: "公开链接不存在或已失效" });
+      return;
+    }
+    res.json({
+      share: threadPublicShareOut(share)
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "读取公开链接失败";
+    res.status(400).json({ detail });
+  }
+});
+
 app.get("/api/threads", async (req: Request, res: Response) => {
   const list = await threads.listForUser(req.currentUser!.id, true);
   res.json({
@@ -1696,6 +1748,41 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "读取消息历史失败";
+    res.status(400).json({ detail });
+  }
+});
+
+app.post("/api/threads/:threadId/public-share", async (req: Request, res: Response) => {
+  try {
+    const currentUser = req.currentUser!;
+    const threadId = String(req.params.threadId || "").trim();
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
+
+    const input = createThreadPublicShareSchema.parse(req.body || {});
+    const repository = await threads.getRepository(threadId);
+    const built = buildThreadPublicShareSnapshot({
+      thread,
+      repository,
+      selectedTurnIds: input.selected_turn_ids
+    });
+    const share = await threadPublicShares.createOrReplaceActiveForThread({
+      threadId,
+      token: createThreadPublicShareToken(),
+      title: built.title,
+      selectedTurnCount: built.selectedTurnCount,
+      snapshot: built.snapshot,
+      createdByUserId: currentUser.id
+    });
+
+    res.json({
+      share: threadPublicShareOut(share)
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "创建公开链接失败";
     res.status(400).json({ detail });
   }
 });

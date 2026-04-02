@@ -37,6 +37,8 @@ model User {
   threadAssignmentsCreated ThreadAssignment[] @relation("ThreadAssignmentCreatedBy")
   threadFollowers    ThreadFollower[]       @relation("ThreadFollowerUser")
   threadFollowersAdded ThreadFollower[]     @relation("ThreadFollowerAddedBy")
+  threadPublicSharesCreated ThreadPublicShare[] @relation("ThreadPublicShareCreatedBy")
+  threadPublicSharesRevoked ThreadPublicShare[] @relation("ThreadPublicShareRevokedBy")
   inboxItems         InboxItem[]
   inboxItemsAsActor   InboxItem[]           @relation("InboxItemSourceActor")
   broadcastMessagesCreated BroadcastMessage[] @relation("BroadcastMessageCreatedBy")
@@ -261,6 +263,7 @@ model Thread {
   comments        ThreadComment[]
   assignment      ThreadAssignment?
   followers       ThreadFollower[]
+  publicShares    ThreadPublicShare[]
   inboxItems      InboxItem[]
   knowledgeCaptureMark KnowledgeCaptureMark?
 
@@ -346,6 +349,29 @@ model ThreadComment {
   @@index([threadId, createdAt])
   @@index([authorUserId, createdAt])
   @@map("thread_comments")
+}
+
+model ThreadPublicShare {
+  id                String    @id @default(cuid())
+  threadId          String    @map("thread_id")
+  token             String    @unique
+  title             String
+  selectedTurnCount Int       @default(1) @map("selected_turn_count")
+  snapshotJson      Json      @map("snapshot_json")
+  createdByUserId   String?   @map("created_by_user_id")
+  revokedByUserId   String?   @map("revoked_by_user_id")
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  thread            Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  createdByUser     User?     @relation("ThreadPublicShareCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  revokedByUser     User?     @relation("ThreadPublicShareRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([revokedByUserId, createdAt])
+  @@map("thread_public_shares")
 }
 
 model ThreadAssignment {

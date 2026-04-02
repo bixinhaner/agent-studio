@@ -152,6 +152,18 @@ type OpenAICompatibleRouterOptions = {
       createdAt?: string | Date;
     }): Promise<unknown>;
   };
+  systemSettings?: {
+    getCurrentPublished(): Promise<
+      | {
+          payload?: {
+            platformDefaults?: {
+              sessionWorkspaceRoot?: string | null;
+            };
+          };
+        }
+      | undefined
+    >;
+  };
   sessionWorkspaceRoot: string;
   defaultModel: string;
   defaultReasoningEffort: ReasoningEffort;
@@ -176,6 +188,25 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function resolveSessionWorkspaceRoot(input: string | null | undefined): string | undefined {
+  const normalized = trimOrUndefined(input);
+  if (!normalized) return undefined;
+  return path.isAbsolute(normalized) ? normalized : path.resolve(process.cwd(), normalized);
+}
+
+async function resolveEffectiveSessionWorkspaceRoot(options: OpenAICompatibleRouterOptions): Promise<string> {
+  try {
+    const published = await options.systemSettings?.getCurrentPublished();
+    const configured = resolveSessionWorkspaceRoot(published?.payload?.platformDefaults?.sessionWorkspaceRoot);
+    if (configured) {
+      return configured;
+    }
+  } catch {
+    // Fall back to static config when system settings are unavailable.
+  }
+  return options.sessionWorkspaceRoot;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -732,8 +763,9 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         }
         return options.knowledgeSetStorage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
       });
+      const sessionWorkspaceRoot = await resolveEffectiveSessionWorkspaceRoot(options);
       const workspaceBase = path.join(
-        options.sessionWorkspaceRoot,
+        sessionWorkspaceRoot,
         "external-openai",
         sanitizePathSegment(authenticated.instance.slug, "instance"),
         dateSegment()

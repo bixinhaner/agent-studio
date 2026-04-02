@@ -3,11 +3,20 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
 const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then((module) => ({ default: module.PortalShell })));
+const PublicSharePageLazy = lazy(() =>
+  import("./features/public-share/PublicSharePage").then((module) => ({ default: module.PublicSharePage }))
+);
 
 type AppShellView = "portal" | "admin";
 
 function canOpenAdmin(role: string | undefined): boolean {
   return role === "admin" || role === "super_admin";
+}
+
+function extractPublicShareToken(pathname: string): string | undefined {
+  const match = pathname.match(/^\/share\/([^/]+)\/?$/);
+  const token = match ? decodeURIComponent(match[1] || "") : "";
+  return token || undefined;
 }
 
 function AppContent() {
@@ -73,6 +82,17 @@ function AppContent() {
 }
 
 export default function App() {
+  const publicShareToken =
+    typeof window !== "undefined" ? extractPublicShareToken(window.location.pathname) : undefined;
+
+  if (publicShareToken) {
+    return (
+      <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>公开链接加载中...</p></div></div>}>
+        <PublicSharePageLazy token={publicShareToken} />
+      </Suspense>
+    );
+  }
+
   return (
     <AuthProvider>
       <AppContent />

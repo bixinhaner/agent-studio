@@ -28,11 +28,12 @@ import {
 import {
   AssistantMessage,
   Thread,
+  UserMessage,
   ThreadWelcome,
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
-import { CheckIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, PencilIcon, Share2Icon, Trash2Icon, XIcon } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
   type AttachmentAdapter,
@@ -72,6 +73,8 @@ import { ZendeskIntegrationPanel } from "../zendesk/ZendeskIntegrationPanel";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
+import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-share/api";
+import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
@@ -235,6 +238,43 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
 });
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
+type ThreadPublicShareSelectionContextValue = {
+  selectionMode: boolean;
+  leadTurnIdByMessageId: Record<string, string>;
+  selectedTurnIds: Set<string>;
+  toggleTurnSelection: (turnId: string) => void;
+};
+const ThreadPublicShareSelectionContext = createContext<ThreadPublicShareSelectionContextValue>({
+  selectionMode: false,
+  leadTurnIdByMessageId: {},
+  selectedTurnIds: new Set<string>(),
+  toggleTurnSelection: () => undefined
+});
+
+async function copyTextToClipboard(value: string): Promise<void> {
+  const text = value.trim();
+  if (!text) {
+    throw new Error("复制内容为空");
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "absolute";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("浏览器不支持自动复制，请手动复制链接");
+  }
+}
 
 function flattenNodeText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -1390,20 +1430,75 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
   return rows;
 }
 
+const ThreadPublicShareTurnCheckbox: FC = () => {
+  const messageId = useAuiState((s) => s.message.id);
+  const selection = useContext(ThreadPublicShareSelectionContext);
+  if (!selection.selectionMode) return null;
+
+  const turnId = selection.leadTurnIdByMessageId[messageId];
+  if (!turnId) return null;
+
+  const checked = selection.selectedTurnIds.has(turnId);
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      className={checked ? "thread-public-share-turn-checkbox is-checked" : "thread-public-share-turn-checkbox"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selection.toggleTurnSelection(turnId);
+      }}
+    >
+      <span className="thread-public-share-turn-checkbox-mark">{checked ? <CheckIcon size={14} /> : null}</span>
+    </button>
+  );
+};
+
+const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: ReactNode }> = ({ tone, children }) => {
+  const messageId = useAuiState((s) => s.message.id);
+  const selection = useContext(ThreadPublicShareSelectionContext);
+  const selectable = selection.selectionMode && Boolean(selection.leadTurnIdByMessageId[messageId]);
+
+  return (
+    <div
+      className={
+        selectable
+          ? `thread-public-share-message-shell thread-public-share-message-shell-${tone} is-selectable`
+          : `thread-public-share-message-shell thread-public-share-message-shell-${tone}`
+      }
+    >
+      {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
+      {children}
+    </div>
+  );
+};
+
+const AgentUserMessage: FC = () => {
+  return (
+    <ThreadPublicShareMessageShell tone="user">
+      <UserMessage />
+    </ThreadPublicShareMessageShell>
+  );
+};
+
 const AgentAssistantMessage: FC = () => {
   return (
-    <AssistantMessage.Root>
-      <AssistantMessage.Avatar />
-      <AssistantMessage.Content
-        components={{
-          Text: AssistantMarkdownText,
-          Empty: RunningMessagePlaceholder as any,
-          Reasoning: ReasoningPart as any,
-          Source: SourcePart as any,
-          data: { Fallback: ProcessDataFallback as any }
-        }}
-      />
-    </AssistantMessage.Root>
+    <ThreadPublicShareMessageShell tone="assistant">
+      <AssistantMessage.Root>
+        <AssistantMessage.Avatar />
+        <AssistantMessage.Content
+          components={{
+            Text: AssistantMarkdownText,
+            Empty: RunningMessagePlaceholder as any,
+            Reasoning: ReasoningPart as any,
+            Source: SourcePart as any,
+            data: { Fallback: ProcessDataFallback as any }
+          }}
+        />
+      </AssistantMessage.Root>
+    </ThreadPublicShareMessageShell>
   );
 };
 
@@ -1569,6 +1664,210 @@ const AgentThreadListItem: FC = () => {
         </div>
       </ThreadListItemPrimitive.Root>
     </>
+  );
+};
+
+const ThreadPublicShareControls: FC<
+  PropsWithChildren<{
+    threadId: string;
+    disabled: boolean;
+    onStatusChange?: (text: string) => void;
+  }>
+> = ({ threadId, disabled, onStatusChange, children }) => {
+  const messages = useAuiState((s) => s.thread.messages);
+  const threadRunning = useAuiState((s) => s.thread.isRunning);
+  const turns = useMemo(() => groupThreadMessagesIntoPublicShareTurns(messages), [messages]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedTurnIds, setSelectedTurnIds] = useState<string[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorText, setErrorText] = useState("");
+
+  const allTurnIds = useMemo(() => turns.map((turn) => turn.id), [turns]);
+  const leadTurnIdByMessageId = useMemo(
+    () =>
+      turns.reduce<Record<string, string>>((acc, turn) => {
+        acc[turn.leadMessageId] = turn.id;
+        return acc;
+      }, {}),
+    [turns]
+  );
+  const selectedTurnIdSet = useMemo(() => new Set(selectedTurnIds), [selectedTurnIds]);
+
+  useEffect(() => {
+    setSelectionMode(false);
+    setSelectedTurnIds([]);
+    setConfirmOpen(false);
+    setSubmitting(false);
+    setErrorText("");
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!selectionMode) return;
+    const available = new Set(allTurnIds);
+    setSelectedTurnIds((prev) => {
+      const next = prev.filter((turnId) => available.has(turnId));
+      return next.length === prev.length && next.every((turnId, index) => turnId === prev[index]) ? prev : next;
+    });
+    if (allTurnIds.length === 0) {
+      setSelectionMode(false);
+      setConfirmOpen(false);
+    }
+  }, [allTurnIds, selectionMode]);
+
+  const toggleTurnSelection = useCallback(
+    (turnId: string) => {
+      setErrorText("");
+      setSelectedTurnIds((prev) => {
+        const set = new Set(prev);
+        if (set.has(turnId)) {
+          set.delete(turnId);
+        } else {
+          set.add(turnId);
+        }
+        return allTurnIds.filter((id) => set.has(id));
+      });
+    },
+    [allTurnIds]
+  );
+
+  const enterSelectionMode = () => {
+    if (!threadId || disabled || threadRunning || allTurnIds.length === 0) return;
+    setSelectionMode(true);
+    setSelectedTurnIds(allTurnIds);
+    setConfirmOpen(false);
+    setErrorText("");
+  };
+
+  const cancelSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedTurnIds([]);
+    setConfirmOpen(false);
+    setSubmitting(false);
+    setErrorText("");
+  };
+
+  const selectAllTurns = () => {
+    setErrorText("");
+    setSelectedTurnIds(allTurnIds);
+  };
+
+  const createAndCopyPublicLink = async () => {
+    if (!threadId || selectedTurnIds.length === 0 || submitting) return;
+    setSubmitting(true);
+    setErrorText("");
+    try {
+      const share = await createThreadPublicShare(threadId, selectedTurnIds);
+      const publicUrl = resolveThreadPublicShareUrl(share.public_path);
+      await copyTextToClipboard(publicUrl);
+      onStatusChange?.("公开链接已创建并复制");
+      cancelSelectionMode();
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "创建公开链接失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const selectionContext = useMemo<ThreadPublicShareSelectionContextValue>(
+    () => ({
+      selectionMode,
+      leadTurnIdByMessageId,
+      selectedTurnIds: selectedTurnIdSet,
+      toggleTurnSelection
+    }),
+    [selectionMode, leadTurnIdByMessageId, selectedTurnIdSet, toggleTurnSelection]
+  );
+
+  const shareActionDisabled = !threadId || disabled || threadRunning || allTurnIds.length === 0;
+
+  return (
+    <ThreadPublicShareSelectionContext.Provider value={selectionContext}>
+      <div className="thread-public-share-shell" data-share-selection-mode={selectionMode ? "true" : "false"}>
+        {children}
+        {!selectionMode && threadId && !disabled ? (
+          <div className="thread-public-share-toolbar">
+            <button
+              type="button"
+              className="thread-public-share-toolbar-btn"
+              onClick={enterSelectionMode}
+              disabled={shareActionDisabled}
+              title={threadRunning ? "线程运行中，稍后再创建公开链接" : "Create public link"}
+            >
+              <Share2Icon size={16} />
+              <span>Create public link</span>
+            </button>
+          </div>
+        ) : null}
+
+        {selectionMode ? (
+          <div className="thread-public-share-actionbar">
+            <div className="thread-public-share-actionbar-meta">
+              <button
+                type="button"
+                className="thread-public-share-actionbar-link"
+                onClick={selectAllTurns}
+                disabled={submitting || selectedTurnIds.length === allTurnIds.length}
+              >
+                Select all
+              </button>
+              <span>{selectedTurnIds.length} conversation turn selected</span>
+            </div>
+            <div className="thread-public-share-actionbar-actions">
+              <button type="button" className="thread-public-share-secondary-btn" onClick={cancelSelectionMode} disabled={submitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="thread-public-share-primary-btn"
+                onClick={() => setConfirmOpen(true)}
+                disabled={submitting || selectedTurnIds.length === 0}
+              >
+                Create public link
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {confirmOpen ? (
+          <div
+            className="thread-public-share-modal-mask"
+            onClick={() => {
+              if (submitting) return;
+              setConfirmOpen(false);
+            }}
+          >
+            <div className="thread-public-share-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="thread-public-share-modal-head">
+                <h3>Create public link</h3>
+                <button
+                  type="button"
+                  className="thread-public-share-close-btn"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={submitting}
+                  aria-label="关闭公开链接确认弹窗"
+                >
+                  <XIcon size={18} />
+                </button>
+              </div>
+              <p className="thread-public-share-modal-copy">
+                Anyone with the link can view the conversation you&apos;ve shared. Please check for sensitive or private
+                content before continuing.
+              </p>
+              {errorText ? <p className="field-error thread-public-share-modal-error">{errorText}</p> : null}
+              <button
+                type="button"
+                className="thread-public-share-modal-primary"
+                onClick={() => void createAndCopyPublicLink()}
+                disabled={submitting || selectedTurnIds.length === 0}
+              >
+                {submitting ? "Creating..." : "Create and copy"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </ThreadPublicShareSelectionContext.Provider>
   );
 };
 
@@ -2891,46 +3190,53 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>共享视图中可查看消息和附件，但不能继续运行该线程。</span>
         </div>
       ) : null}
-      <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-        <PreviewRequestContext.Provider value={requestPreviewForPath}>
-          <Thread
-            key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
-            strings={{
-              threadList: {
-                new: { label: "新会话" },
-                item: {
-                  title: { fallback: "新对话" }
-                }
-              },
-              composer: {
-                input: {
-                  placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+      <ThreadPublicShareControls
+        threadId={activeRemoteThreadId}
+        disabled={sharedThreadReadonly}
+        onStatusChange={setStatusText}
+      >
+        <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+          <PreviewRequestContext.Provider value={requestPreviewForPath}>
+            <Thread
+              key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
+              strings={{
+                threadList: {
+                  new: { label: "新会话" },
+                  item: {
+                    title: { fallback: "新对话" }
+                  }
                 },
-                send: { tooltip: "发送消息" },
-                cancel: { tooltip: "停止生成" }
-              }
-            }}
-            welcome={{
-              message: "你好，我是 Agent Studio。请直接提问。",
-              suggestions: PORTAL_STARTER_SUGGESTIONS
-            }}
-            components={{
-              AssistantMessage: AgentAssistantMessage,
-              ThreadWelcome: DraftOnlyThreadWelcome
-            }}
-            assistantMessage={{
-              allowCopy: true,
-              allowReload: true,
-              allowFeedbackPositive: true,
-              allowFeedbackNegative: true,
-              components: {
-                ToolFallback: HiddenToolFallback as any
-              }
-            }}
-            userMessage={{ allowEdit: true }}
-          />
-        </PreviewRequestContext.Provider>
-      </ActiveThreadIdContext.Provider>
+                composer: {
+                  input: {
+                    placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+                  },
+                  send: { tooltip: "发送消息" },
+                  cancel: { tooltip: "停止生成" }
+                }
+              }}
+              welcome={{
+                message: "你好，我是 Agent Studio。请直接提问。",
+                suggestions: PORTAL_STARTER_SUGGESTIONS
+              }}
+              components={{
+                UserMessage: AgentUserMessage,
+                AssistantMessage: AgentAssistantMessage,
+                ThreadWelcome: DraftOnlyThreadWelcome
+              }}
+              assistantMessage={{
+                allowCopy: true,
+                allowReload: true,
+                allowFeedbackPositive: true,
+                allowFeedbackNegative: true,
+                components: {
+                  ToolFallback: HiddenToolFallback as any
+                }
+              }}
+              userMessage={{ allowEdit: true }}
+            />
+          </PreviewRequestContext.Provider>
+        </ActiveThreadIdContext.Provider>
+      </ThreadPublicShareControls>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
