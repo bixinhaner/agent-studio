@@ -485,7 +485,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
         </div>
 
         <div className="knowledge-set-upload-grid">
-          <label className="field">
+          <label className="field knowledge-set-upload-field">
             <span className="field-label">上传资料文件</span>
             <Upload.Dragger aria-label="上传资料文件" className="knowledge-set-upload-dragger" {...fileUploadProps}>
               <p className="ant-upload-drag-icon">
@@ -498,7 +498,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
               {selectedFiles.length > 0 ? `已选择 ${selectedFiles.length} 个文件` : "尚未选择文件"}
             </Typography.Text>
           </label>
-          <div className="resource-center-actions">
+          <div className="resource-center-actions knowledge-set-upload-actions">
             <label className="field knowledge-set-inline-field">
               <span className="field-label">冲突策略</span>
               <Select
@@ -531,7 +531,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
           </div>
 
           {fileUploadTasks.length > 0 ? (
-            <div className="knowledge-set-upload-task-list resource-center-form-span-2">
+            <div className="knowledge-set-upload-task-list knowledge-set-upload-full-row">
               {fileUploadTasks.map((task) => (
                 <article key={task.uid} className="knowledge-set-upload-task-item">
                   <div className="knowledge-set-upload-task-head">
@@ -554,7 +554,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
             </div>
           ) : null}
 
-          <label className="field">
+          <label className="field knowledge-set-upload-field">
             <span className="field-label">上传压缩包</span>
             <Upload.Dragger aria-label="上传压缩包" className="knowledge-set-upload-dragger" {...archiveUploadProps}>
               <p className="ant-upload-drag-icon">
@@ -567,7 +567,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
               {selectedArchive ? `已选择：${selectedArchive.name}` : "尚未选择压缩包"}
             </Typography.Text>
           </label>
-          <div className="resource-center-actions">
+          <div className="resource-center-actions knowledge-set-upload-actions">
             <Button type="default" disabled={uploadDisabled || !selectedArchive} onClick={() => void handleUploadArchive()}>
               上传压缩包
             </Button>
@@ -591,7 +591,7 @@ export function KnowledgeSetDetailView({ knowledgeSet, onKnowledgeSetUpdated }: 
           </div>
 
           {archiveUploadTask ? (
-            <div className="knowledge-set-upload-task-list resource-center-form-span-2">
+            <div className="knowledge-set-upload-task-list knowledge-set-upload-full-row">
               <article className="knowledge-set-upload-task-item">
                 <div className="knowledge-set-upload-task-head">
                   <div>

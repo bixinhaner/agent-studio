@@ -2973,6 +2973,7 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -3096,14 +3097,47 @@ body {
 
 .knowledge-set-upload-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px 16px;
   margin-bottom: 16px;
-  align-items: end;
+  align-items: start;
+}
+
+.knowledge-set-upload-field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.knowledge-set-upload-field .knowledge-set-upload-dragger {
+  width: 100%;
+}
+
+.knowledge-set-upload-field .knowledge-set-upload-dragger.ant-upload-wrapper .ant-upload-drag {
+  min-height: 170px;
+}
+
+.knowledge-set-upload-actions {
+  min-width: 0;
+  align-self: end;
+  gap: 10px;
+}
+
+.knowledge-set-upload-actions .knowledge-set-inline-field {
+  flex: 1 1 220px;
+  min-width: 220px;
+  margin-bottom: 0;
+}
+
+.knowledge-set-upload-actions .ant-btn {
+  flex: 0 0 auto;
 }
 
 .knowledge-set-inline-field {
   min-width: 180px;
+}
+
+.knowledge-set-upload-full-row {
+  grid-column: 1 / -1;
 }
 
 .knowledge-set-upload-task-list {
@@ -3288,6 +3322,15 @@ body {
   .resource-center-list-wrap {
     max-height: none;
     overflow: visible;
+  }
+
+  .knowledge-set-upload-actions {
+    align-self: start;
+  }
+
+  .knowledge-set-upload-actions .knowledge-set-inline-field {
+    flex-basis: 100%;
+    min-width: 0;
   }
 }
 
