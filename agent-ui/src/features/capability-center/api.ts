@@ -20,7 +20,8 @@ import type {
   SkillPackageResponse,
   UpdateAgentModeInput,
   UpdateRunProfileInput,
-  UpdateSkillPackageInput
+  UpdateSkillPackageInput,
+  WorkspaceAgentsTemplateListResponse
 } from "./types";
 
 const CAPABILITY_RESOURCE_SEGMENTS: Record<CapabilityResourceType, string> = {
@@ -110,6 +111,10 @@ export async function putAgentModeInstructionSources(
     method: "PUT",
     json: { instructionSources }
   });
+}
+
+export async function fetchWorkspaceAgentsTemplates(): Promise<WorkspaceAgentsTemplateListResponse> {
+  return api<WorkspaceAgentsTemplateListResponse>("/api/admin/agent-modes/workspace-agents-templates");
 }
 
 export async function fetchCapabilityPolicies(resourceType: CapabilityResourceType, resourceId: string): Promise<CapabilityPoliciesResponse> {

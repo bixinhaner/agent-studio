@@ -237,3 +237,15 @@ export type AgentModeInstructionSourceInput = {
   sourceRef: string;
   sortOrder?: number;
 };
+
+export type WorkspaceAgentsTemplateRecord = {
+  id: string;
+  label: string;
+  sourcePath: string;
+  content: string;
+  updatedAt: string;
+};
+
+export type WorkspaceAgentsTemplateListResponse = {
+  templates: WorkspaceAgentsTemplateRecord[];
+};

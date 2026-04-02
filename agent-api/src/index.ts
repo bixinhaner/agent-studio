@@ -88,6 +88,7 @@ import { AlertEvaluationService } from "./operations/alert-evaluation-service.js
 import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
+import { resolveWorkspaceAgentsMdContent } from "./agent-mode/workspace-agents-md.js";
 import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
 import { QuotaEvaluationService } from "./operations/quota-evaluation-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
@@ -820,6 +821,31 @@ async function resolveKnowledgeSetRunConfig(input: {
   });
 }
 
+async function resolveWorkspaceAgentsMdContentForMode(modeId: string): Promise<string | undefined> {
+  const normalizedModeId = trimOrUndefined(modeId);
+  if (!normalizedModeId) return undefined;
+
+  const agentMode = await agentModes.get(normalizedModeId);
+  if (!agentMode) {
+    return undefined;
+  }
+
+  const source = agentMode.instructionSources.find(
+    (item) => item.sourceType === "workspace_agents_md" && trimOrUndefined(item.sourceRef)
+  );
+  if (!source) {
+    return undefined;
+  }
+  return resolveWorkspaceAgentsMdContent(source.sourceRef);
+}
+
+async function applyWorkspaceAgentsMdForMode(modeId: string, workspacePath: string): Promise<void> {
+  const content = await resolveWorkspaceAgentsMdContentForMode(modeId);
+  if (!content) return;
+  await fs.mkdir(workspacePath, { recursive: true });
+  await fs.writeFile(path.join(workspacePath, "AGENTS.md"), content, "utf8");
+}
+
 async function resolveSessionOptions(
   input: {
     model?: string;
@@ -840,6 +866,7 @@ async function resolveSessionOptions(
     input.reasoning_effort || appConfig.defaultReasoningEffort
   );
   const sourceCodexRunConfig = withRunConfigMode(input.codex_run_config, modeId);
+  await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
   return {
     userId: currentUser.id,
     model,
@@ -920,6 +947,7 @@ async function ensureThreadSession(
     knowledgeSetIds: patch?.knowledge_set_ids,
     codexRunConfig: normalizedSourceCodexRunConfig
   });
+  await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
 
   const desired: SessionOptions = {
@@ -1413,6 +1441,10 @@ app.post("/api/session", async (req: Request, res: Response) => {
               modeHint: undefined
             });
             modeId = fallback.modeId;
+          }
+
+          if (modeId && workspace) {
+            await applyWorkspaceAgentsMdForMode(modeId, workspace);
           }
 
           const normalizedSourceCodexRunConfig = withRunConfigMode(nextSourceCodexRunConfig, modeId);

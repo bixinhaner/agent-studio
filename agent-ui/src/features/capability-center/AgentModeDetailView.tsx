@@ -4,6 +4,7 @@ import { Alert, Button, Card, Checkbox, Input, Segmented, Select, Tag } from "an
 import { putAgentModeInstructionSources, putAgentModeSkillPackages, updateAgentMode } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
 import { InstructionSourceEditor } from "./InstructionSourceEditor";
+import { parseWorkspaceAgentsMdSourceRef } from "./workspace-agents-md-source-ref";
 import type {
   AgentModeInstructionSourceInput,
   AgentModeRecord,
@@ -112,13 +113,34 @@ export function AgentModeDetailView({
   const instructionPreview = useMemo(
     () =>
       instructionSources
-        .map(
-          (source, index) =>
-            `${index + 1}. ${source.sourceType === "inline_text" ? "inline" : source.sourceType} :: ${source.sourceRef}`
-        )
+        .map((source, index) => {
+          if (source.sourceType !== "workspace_agents_md") {
+            return `${index + 1}. ${source.sourceType === "inline_text" ? "inline" : source.sourceType} :: ${source.sourceRef}`;
+          }
+          const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+          if (parsed.mode === "inline") {
+            return `${index + 1}. workspace_agents_md :: inline（可编辑内容）`;
+          }
+          if (parsed.mode === "template") {
+            return `${index + 1}. workspace_agents_md :: template（${parsed.templateId || "未选择"}）`;
+          }
+          return `${index + 1}. workspace_agents_md :: path（${parsed.path || "未填写"}）`;
+        })
         .join("\n"),
     [instructionSources]
   );
+
+  const instructionSourceValidationError = useMemo(() => {
+    for (let index = 0; index < instructionSources.length; index += 1) {
+      const source = instructionSources[index];
+      if (source.sourceType !== "workspace_agents_md") continue;
+      const parsed = parseWorkspaceAgentsMdSourceRef(source.sourceRef);
+      if (parsed.mode === "template" && !parsed.templateId.trim()) {
+        return `指令源 ${index + 1}：workspace_agents_md 选择“模板”时必须选择模板`;
+      }
+    }
+    return "";
+  }, [instructionSources]);
 
   function toggleSkillPackage(skillPackageId: string) {
     setSkillPackageIds((current) =>
@@ -128,6 +150,12 @@ export function AgentModeDetailView({
   }
 
   async function handleSave() {
+    if (instructionSourceValidationError) {
+      setErrorText(instructionSourceValidationError);
+      setSuccessText("");
+      return;
+    }
+
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -191,6 +219,9 @@ export function AgentModeDetailView({
 
         {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
         {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+        {instructionSourceValidationError ? (
+          <Alert type="error" showIcon className="admin-alert-inline" message={instructionSourceValidationError} />
+        ) : null}
 
         {activeTab === "basic" ? (
           <div className="resource-center-form-grid">
@@ -310,7 +341,7 @@ export function AgentModeDetailView({
 
         {activeTab !== "policies" ? (
           <div className="resource-center-actions">
-            <Button type="primary" onClick={() => void handleSave()} disabled={saving}>
+            <Button type="primary" onClick={() => void handleSave()} disabled={saving || Boolean(instructionSourceValidationError)}>
               {saving ? "保存中..." : "保存模式配置"}
             </Button>
           </div>

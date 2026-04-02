@@ -9,6 +9,7 @@ import {
   SANDBOX_MODE_VALUES,
   WEB_SEARCH_MODE_VALUES
 } from "../integrations/zendesk/types.js";
+import { listWorkspaceAgentsMdTemplates } from "../agent-mode/workspace-agents-md.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 
@@ -691,6 +692,23 @@ export function createModeAdminRouter(options: {
 
   router.get("/agent-modes", async (_req: Request, res: Response) => {
     res.json({ agentModes: await options.agentModes.list() });
+  });
+
+  router.get("/agent-modes/workspace-agents-templates", async (_req: Request, res: Response) => {
+    try {
+      const templates = await listWorkspaceAgentsMdTemplates();
+      res.json({
+        templates: templates.map((template) => ({
+          id: template.id,
+          label: template.label,
+          sourcePath: template.sourcePath,
+          content: template.content,
+          updatedAt: template.updatedAt
+        }))
+      });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
   });
 
   router.post("/agent-modes", async (req: Request, res: Response) => {
