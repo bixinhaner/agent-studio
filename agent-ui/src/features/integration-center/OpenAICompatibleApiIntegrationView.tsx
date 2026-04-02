@@ -6,31 +6,20 @@ import type { AgentModeRecord } from "../capability-center/types";
 import { fetchKnowledgeSets } from "../resources-center/api";
 import type { KnowledgeSetRecord } from "../resources-center/types";
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
-import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
-import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
+import { ExternalApiUsageView } from "./ExternalApiUsageView";
 import type { IntegrationDetail, OpenAICompatibleApiConfigDraft } from "./types";
 
-type ExternalTab = "basic" | "policies" | "history";
+type ExternalTab = "basic" | "usage";
 
 const TABS: Array<{ id: ExternalTab; label: string }> = [
   { id: "basic", label: "基本信息" },
-  { id: "policies", label: "授权" },
-  { id: "history", label: "验证与历史" }
+  { id: "usage", label: "API调用记录" }
 ];
 
 const STATUS_OPTIONS = [
   { label: "active", value: "active" },
   { label: "disabled", value: "disabled" },
   { label: "draft", value: "draft" }
-];
-
-const REASONING_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" }
 ];
 
 function asString(value: unknown) {
@@ -52,8 +41,6 @@ function asStringArray(value: unknown) {
 
 function buildDraft(detail: IntegrationDetail): OpenAICompatibleApiConfigDraft {
   return {
-    defaultModel: asString(detail.config.defaultModel),
-    defaultReasoningEffort: asString(detail.config.defaultReasoningEffort),
     agentModeId: asString(detail.config.agentModeId) || asString(detail.config.defaultAgentModeId),
     knowledgeSetIds:
       asStringArray(detail.config.knowledgeSetIds).length > 0
@@ -178,8 +165,6 @@ export function OpenAICompatibleApiIntegrationView(props: {
         description: description.trim() || null,
         status,
         config: {
-          defaultModel: draft.defaultModel.trim(),
-          defaultReasoningEffort: draft.defaultReasoningEffort.trim(),
           agentModeId: draft.agentModeId.trim(),
           knowledgeSetIds: asStringArray(draft.knowledgeSetIds)
         },
@@ -306,26 +291,9 @@ export function OpenAICompatibleApiIntegrationView(props: {
                 },
                 {
                   key: "scope",
-                  label: "运行范围与默认值",
+                  label: "运行范围",
                   children: (
                     <div className="resource-center-form-grid">
-                      <label className="field">
-                        <span className="field-label">默认模型</span>
-                        <Input
-                          value={draft.defaultModel}
-                          disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, defaultModel: event.target.value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">默认推理强度</span>
-                        <Select
-                          value={draft.defaultReasoningEffort}
-                          options={optionsWithCurrent(REASONING_OPTIONS, draft.defaultReasoningEffort)}
-                          disabled={saving}
-                          onChange={(value) => setDraft((current) => ({ ...current, defaultReasoningEffort: value }))}
-                        />
-                      </label>
                       <label className="field">
                         <span className="field-label">绑定 Agent Mode</span>
                         <Select
@@ -354,7 +322,7 @@ export function OpenAICompatibleApiIntegrationView(props: {
                       <div className="field resource-center-form-span-2">
                         <span className="field-label">调用说明</span>
                         <p className="resource-center-subtle">
-                          外部调用方只需要 Base URL 和 API Key。Agent Mode、资料集范围和默认模型都由这里统一控制。
+                          外部调用方只需要 Base URL 和 API Key。实际使用的模型、推理强度、沙箱与联网策略都继承自绑定 Agent Mode 的 Run Profile。
                         </p>
                       </div>
                     </div>
@@ -374,7 +342,7 @@ export function OpenAICompatibleApiIntegrationView(props: {
                       <div className="field resource-center-form-span-2">
                         <span className="field-label">请求约定</span>
                         <p className="resource-center-subtle">
-                          外部调用方不需要传 Agent Mode 或资料集参数。若第三方 SDK 强制要求 `model`，可传 `/models` 返回值；不传则使用默认模型。
+                          外部调用方不需要传 Agent Mode 或资料集参数。若第三方 SDK 强制要求 `model`，可传 `/models` 返回值；服务端实际仍按绑定 Agent Mode 的默认运行参数执行，不接受请求侧覆盖模型或推理强度。
                         </p>
                       </div>
                       <div className="field resource-center-form-span-2">
@@ -400,8 +368,7 @@ export function OpenAICompatibleApiIntegrationView(props: {
           </>
         ) : null}
 
-        {activeTab === "policies" ? <IntegrationPolicyEditor instanceId={props.detail.instance.id} /> : null}
-        {activeTab === "history" ? <IntegrationValidationHistory items={props.detail.validationHistory.items} /> : null}
+        {activeTab === "usage" ? <ExternalApiUsageView instanceId={props.detail.instance.id} /> : null}
       </Card>
     </section>
   );

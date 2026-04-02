@@ -78,8 +78,6 @@ type ChatCompletionMessage = {
 };
 
 type OpenAICompatibleApiConfig = {
-  defaultModel?: string;
-  defaultReasoningEffort?: ReasoningEffort;
   agentModeId?: string;
   knowledgeSetIds: string[];
 };
@@ -253,8 +251,6 @@ function parseConfig(value: unknown): OpenAICompatibleApiConfig {
       : normalizeIdList(record.defaultKnowledgeSetIds);
 
   return {
-    defaultModel: asString(record.defaultModel),
-    defaultReasoningEffort: asReasoningEffort(record.defaultReasoningEffort),
     agentModeId,
     knowledgeSetIds
   };
@@ -443,33 +439,50 @@ function writeOpenAIStreamChunk(res: Response, payload: unknown): void {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function buildExternalApiUsageMetadata(input: {
+  authenticated: AuthenticatedIntegration;
+  agentModeId?: string;
+  knowledgeSetIds: string[];
+  body?: z.infer<typeof chatCompletionRequestSchema>;
+  selectedModel?: string;
+  selectedReasoningEffort?: ReasoningEffort;
+  errorMessage?: string;
+}) {
+  return {
+    source: OPENAI_COMPATIBLE_API_TYPE,
+    integrationInstanceId: input.authenticated.instance.id,
+    integrationSlug: input.authenticated.instance.slug,
+    agentModeId: input.agentModeId,
+    knowledgeSetIds: input.knowledgeSetIds,
+    requestedModel: trimOrUndefined(input.body?.model),
+    requestedReasoningEffort: input.body?.reasoning_effort,
+    selectedModel: input.selectedModel,
+    selectedReasoningEffort: input.selectedReasoningEffort,
+    stream: Boolean(input.body?.stream),
+    messageCount: input.body?.messages.length ?? 0,
+    errorMessage: trimOrUndefined(input.errorMessage)
+  };
+}
+
 async function buildModelList(
   authenticated: AuthenticatedIntegration,
   runProfiles: OpenAICompatibleRouterOptions["runProfiles"],
   agentModes: OpenAICompatibleRouterOptions["agentModes"],
   defaultModel: string
 ): Promise<string[]> {
-  const models = new Set<string>();
-  const configuredDefault = normalizeModel(authenticated.config.defaultModel || defaultModel);
-  models.add(configuredDefault);
   const configuredModeId = trimOrUndefined(authenticated.config.agentModeId);
   if (!configuredModeId) {
-    return [...models].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
+    return [normalizeModel(defaultModel)];
   }
   const mode = await agentModes.get(configuredModeId);
   if (!mode || trimOrUndefined(mode.status) !== "active") {
-    return [...models].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
+    return [normalizeModel(defaultModel)];
   }
   const runProfile = await runProfiles.get(mode.runProfileId);
   if (!runProfile || trimOrUndefined(runProfile.status) !== "active") {
-    return [...models].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
+    return [normalizeModel(defaultModel)];
   }
-  models.add(normalizeModel(runProfile.defaultModel || configuredDefault));
-  for (const modelId of runProfile.allowedModels) {
-    models.add(normalizeModel(modelId));
-  }
-
-  return [...models].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
+  return [normalizeModel(runProfile.defaultModel || defaultModel)];
 }
 
 export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOptions): Router {
@@ -529,10 +542,15 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     let workspacePath = "";
     const completionId = `chatcmpl_${randomUUID().replace(/-/g, "")}`;
     const created = Math.floor(Date.now() / 1000);
+    let body: z.infer<typeof chatCompletionRequestSchema> | undefined;
+    let selectedAgentModeId: string | undefined;
+    let selectedKnowledgeSetIds: string[] = [];
+    let selectedModel: string | undefined;
+    let selectedReasoningEffort: ReasoningEffort | undefined;
 
     try {
-      const body = chatCompletionRequestSchema.parse(req.body ?? {});
-      const selectedAgentModeId = trimOrUndefined(authenticated.config.agentModeId);
+      body = chatCompletionRequestSchema.parse(req.body ?? {});
+      selectedAgentModeId = trimOrUndefined(authenticated.config.agentModeId);
       if (!selectedAgentModeId) {
         throw new Error("当前外部接口实例未配置 Agent Mode。");
       }
@@ -547,18 +565,12 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         throw new Error("Agent Mode 对应的 Run Profile 不存在或未启用。");
       }
 
-      const selectedModel = normalizeModel(body.model || authenticated.config.defaultModel || runProfile.defaultModel || options.defaultModel);
-      if (runProfile.allowedModels.length > 0 && !runProfile.allowedModels.includes(selectedModel)) {
-        throw new Error("请求的 model 不在当前 Agent Mode 对应的 Run Profile 允许范围内。");
-      }
-      const reasoningEffort = normalizeReasoningEffortForModel(
+      selectedModel = normalizeModel(runProfile.defaultModel || options.defaultModel);
+      selectedReasoningEffort = normalizeReasoningEffortForModel(
         selectedModel,
-        body.reasoning_effort ||
-          authenticated.config.defaultReasoningEffort ||
-          (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) ||
-          options.defaultReasoningEffort
+        (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) || options.defaultReasoningEffort
       );
-      const selectedKnowledgeSetIds = authenticated.config.knowledgeSetIds;
+      selectedKnowledgeSetIds = authenticated.config.knowledgeSetIds;
 
       const knowledgeSetMap = new Map(
         (await options.knowledgeSets.list())
@@ -596,7 +608,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       const prompt = buildPrompt(body.messages as ChatCompletionMessage[]);
       const thread = await options.runtime.startThreadWithOptions({
         model: selectedModel,
-        reasoningEffort,
+        reasoningEffort: selectedReasoningEffort,
         workspace: workspacePath,
         codexRunConfig
       });
@@ -670,23 +682,24 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         res.write("data: [DONE]\n\n");
         res.end();
 
-        if (usage && options.usageIngestion) {
+        if (options.usageIngestion) {
           await options.usageIngestion.record({
             organizationId: trimOrUndefined(authenticated.instance.organizationId),
             sessionId: completionId,
             model: selectedModel,
             featureType: "external_openai_api",
-            inputTokens: usage.inputTokens,
-            cachedInputTokens: usage.cachedInputTokens,
-            outputTokens: usage.outputTokens,
+            inputTokens: usage?.inputTokens ?? 0,
+            cachedInputTokens: usage?.cachedInputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
             resultStatus: "success",
-            metadata: {
-              source: OPENAI_COMPATIBLE_API_TYPE,
-              integrationInstanceId: authenticated.instance.id,
-              integrationSlug: authenticated.instance.slug,
+            metadata: buildExternalApiUsageMetadata({
+              authenticated,
               agentModeId: selectedAgentModeId,
-              knowledgeSetIds: selectedKnowledgeSetIds
-            }
+              knowledgeSetIds: selectedKnowledgeSetIds,
+              body,
+              selectedModel,
+              selectedReasoningEffort
+            })
           });
         }
         return;
@@ -710,23 +723,24 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         else if (event.text) answer += event.text;
       }
 
-      if (usage && options.usageIngestion) {
+      if (options.usageIngestion) {
         await options.usageIngestion.record({
           organizationId: trimOrUndefined(authenticated.instance.organizationId),
           sessionId: completionId,
           model: selectedModel,
           featureType: "external_openai_api",
-          inputTokens: usage.inputTokens,
-          cachedInputTokens: usage.cachedInputTokens,
-          outputTokens: usage.outputTokens,
+          inputTokens: usage?.inputTokens ?? 0,
+          cachedInputTokens: usage?.cachedInputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
           resultStatus: "success",
-          metadata: {
-            source: OPENAI_COMPATIBLE_API_TYPE,
-            integrationInstanceId: authenticated.instance.id,
-            integrationSlug: authenticated.instance.slug,
+          metadata: buildExternalApiUsageMetadata({
+            authenticated,
             agentModeId: selectedAgentModeId,
-            knowledgeSetIds: selectedKnowledgeSetIds
-          }
+            knowledgeSetIds: selectedKnowledgeSetIds,
+            body,
+            selectedModel,
+            selectedReasoningEffort
+          })
         });
       }
 
@@ -740,6 +754,27 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         })
       );
     } catch (error) {
+      if (options.usageIngestion) {
+        await options.usageIngestion.record({
+          organizationId: trimOrUndefined(authenticated.instance.organizationId),
+          sessionId: completionId,
+          model: selectedModel || normalizeModel(options.defaultModel),
+          featureType: "external_openai_api",
+          inputTokens: 0,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          resultStatus: "failed",
+          metadata: buildExternalApiUsageMetadata({
+            authenticated,
+            agentModeId: selectedAgentModeId,
+            knowledgeSetIds: selectedKnowledgeSetIds,
+            body,
+            selectedModel,
+            selectedReasoningEffort,
+            errorMessage: error instanceof Error ? error.message : "Invalid request."
+          })
+        }).catch(() => undefined);
+      }
       if (!res.headersSent) {
         writeOpenAIError(res, 400, error instanceof Error ? error.message : "Invalid request.", "invalid_request");
       } else {

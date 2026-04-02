@@ -91,6 +91,11 @@ export const integrationListQuerySchema = z.object({
   type: integrationTypeSchema.optional()
 });
 
+export const integrationExternalApiUsageQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(90).optional(),
+  take: z.coerce.number().int().min(1).max(200).optional()
+});
+
 export const integrationInstanceBaseSchema = z.object({
   type: integrationTypeSchema,
   slug: identifierSchema,

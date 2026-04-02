@@ -1,4 +1,5 @@
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb, type IntegrationValidationRecord } from "../../persistence/integration-instance-repository.js";
+import type { UsageEventRecord, UsageEventRepository } from "../../persistence/usage-event-repository.js";
 import {
   createEmptyPolicySummary,
   collectSecretLikeConfigKeys,
@@ -21,6 +22,8 @@ import type { PolicyService } from "../../resources/policy-service.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
 import { OpenAICompatibleApiIntegrationAdapter } from "./openai-compatible-api-adapter.js";
+
+const EXTERNAL_OPENAI_API_TYPE = "openai_compatible_api";
 
 type PolicyRecord = {
   id: string;
@@ -80,6 +83,91 @@ export type IntegrationCenterService = {
   }): Promise<IntegrationDetail>;
   validateInstance(input: { currentUserId: string; instanceId: string }): Promise<IntegrationValidationResult>;
   listValidationHistory(input: { currentUserId: string; instanceId: string }): Promise<{ items: IntegrationValidationItem[] }>;
+  getExternalApiUsage(input: {
+    currentUserId: string;
+    instanceId: string;
+    days?: number;
+    take?: number;
+  }): Promise<{
+    summary: {
+      windowDays: number;
+      totalRequests: number;
+      successCount: number;
+      failureCount: number;
+      successRate: number;
+      streamCount: number;
+      streamRate: number;
+      totalInputTokens: number;
+      totalCachedInputTokens: number;
+      totalOutputTokens: number;
+      totalTokens: number;
+      averageTokensPerRequest: number;
+      totalEstimatedCost: string;
+      totalInternalCost: string;
+      lastRequestedAt?: string;
+    };
+    trends: Array<{
+      date: string;
+      requestCount: number;
+      successCount: number;
+      failureCount: number;
+      totalTokens: number;
+      estimatedCost: string;
+      internalCost: string;
+    }>;
+    breakdowns: {
+      byModel: Array<{
+        key: string;
+        label: string;
+        requestCount: number;
+        successCount: number;
+        failureCount: number;
+        totalTokens: number;
+        estimatedCost: string;
+        internalCost: string;
+      }>;
+      byStatus: Array<{
+        key: string;
+        label: string;
+        requestCount: number;
+        successCount: number;
+        failureCount: number;
+        totalTokens: number;
+        estimatedCost: string;
+        internalCost: string;
+      }>;
+      byTransport: Array<{
+        key: string;
+        label: string;
+        requestCount: number;
+        successCount: number;
+        failureCount: number;
+        totalTokens: number;
+        estimatedCost: string;
+        internalCost: string;
+      }>;
+    };
+    records: Array<{
+      id: string;
+      sessionId?: string;
+      model: string;
+      requestedModel?: string;
+      requestedReasoningEffort?: string;
+      stream: boolean;
+      messageCount: number;
+      inputTokens: number;
+      cachedInputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      estimatedCost: string;
+      internalCost: string;
+      resultStatus: string;
+      errorMessage?: string;
+      agentModeId?: string;
+      knowledgeSetIds: string[];
+      createdAt: string;
+    }>;
+  }>;
   listBindings(input: { currentUserId: string; instanceId: string }): Promise<IntegrationBindingsResult>;
   getPolicies(input: { currentUserId: string; instanceId: string }): Promise<IntegrationPoliciesResult>;
   replaceBindings(input: {
@@ -257,6 +345,7 @@ export function createIntegrationCenterService(options: {
   policies: IntegrationPolicyStore;
   policyService: Pick<PolicyService, "filterAllowedResources">;
   accessResolver: AccessResolver;
+  usageEvents: Pick<UsageEventRepository, "list">;
   adapters?: Partial<Record<string, ValidationAdapter>>;
 }): IntegrationCenterService {
   const repository = new IntegrationInstanceRepository(options.db);
@@ -272,6 +361,130 @@ export function createIntegrationCenterService(options: {
       roleIds: await options.accessResolver.getRoleIdsForUser(userId),
       departmentIds: await options.accessResolver.getDepartmentIdsForUser(userId)
     };
+  }
+
+  function requiresInstancePolicy(type: string | undefined): boolean {
+    return trimOrUndefined(type) !== EXTERNAL_OPENAI_API_TYPE;
+  }
+
+  function asRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    return value as Record<string, unknown>;
+  }
+
+  function asString(value: unknown): string | undefined {
+    return trimOrUndefined(typeof value === "string" ? value : undefined);
+  }
+
+  function asStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
+    const items: string[] = [];
+    for (const item of value) {
+      const normalized = asString(item);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      items.push(normalized);
+    }
+    return items;
+  }
+
+  function toNumber(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  }
+
+  function toDayKey(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return new Date().toISOString().slice(0, 10);
+    }
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  function utcDayOffset(daysAgo: number): string {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo)).toISOString().slice(0, 10);
+  }
+
+  function clampWindowDays(value: number | undefined): number {
+    if (!Number.isFinite(value)) return 14;
+    return Math.max(1, Math.min(90, Math.trunc(value as number)));
+  }
+
+  function clampRecordTake(value: number | undefined): number {
+    if (!Number.isFinite(value)) return 120;
+    return Math.max(1, Math.min(200, Math.trunc(value as number)));
+  }
+
+  function formatFixed(value: number): string {
+    return value.toFixed(6);
+  }
+
+  function roundRatio(numerator: number, denominator: number): number {
+    if (denominator <= 0) return 0;
+    return Number(((numerator / denominator) * 100).toFixed(1));
+  }
+
+  function buildUsageBreakdown(
+    records: UsageEventRecord[],
+    select: (record: UsageEventRecord) => string,
+    label?: (key: string) => string
+  ) {
+    const buckets = new Map<
+      string,
+      {
+        requestCount: number;
+        successCount: number;
+        failureCount: number;
+        totalTokens: number;
+        estimatedCost: number;
+        internalCost: number;
+      }
+    >();
+
+    for (const record of records) {
+      const key = select(record).trim() || "unknown";
+      const bucket = buckets.get(key) ?? {
+        requestCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        totalTokens: 0,
+        estimatedCost: 0,
+        internalCost: 0
+      };
+      bucket.requestCount += 1;
+      if (record.resultStatus === "success") bucket.successCount += 1;
+      else bucket.failureCount += 1;
+      bucket.totalTokens += record.inputTokens + record.cachedInputTokens + record.outputTokens;
+      bucket.estimatedCost += toNumber(record.estimatedCost);
+      bucket.internalCost += toNumber(record.internalCost);
+      buckets.set(key, bucket);
+    }
+
+    return [...buckets.entries()]
+      .map(([key, bucket]) => ({
+        key,
+        label: label ? label(key) : key,
+        requestCount: bucket.requestCount,
+        successCount: bucket.successCount,
+        failureCount: bucket.failureCount,
+        totalTokens: bucket.totalTokens,
+        estimatedCost: formatFixed(bucket.estimatedCost),
+        internalCost: formatFixed(bucket.internalCost)
+      }))
+      .sort(
+        (left, right) =>
+          right.requestCount - left.requestCount ||
+          right.totalTokens - left.totalTokens ||
+          left.label.localeCompare(right.label, "en", { sensitivity: "base" })
+      );
   }
 
   async function filterAuthorizedInstanceIds(currentUserId: string, instanceIds: string[]): Promise<string[]> {
@@ -290,6 +503,9 @@ export function createIntegrationCenterService(options: {
     if (!detail) {
       throw new Error("integration instance not found");
     }
+    if (!requiresInstancePolicy(detail.type)) {
+      return detail;
+    }
     const allowed = await filterAuthorizedInstanceIds(currentUserId, [detail.id]);
     if (!allowed.includes(detail.id)) {
       throw new Error("integration instance access denied");
@@ -298,10 +514,12 @@ export function createIntegrationCenterService(options: {
   }
 
   async function readDetail(instanceId: string, currentUserId: string): Promise<IntegrationDetail> {
-    const [detail, policies] = await Promise.all([
-      requireAuthorizedInstance(instanceId, currentUserId),
-      options.policies.listAll()
-    ]);
+    const detail = await requireAuthorizedInstance(instanceId, currentUserId);
+    if (!requiresInstancePolicy(detail.type)) {
+      return mapInstanceDetail(detail, buildPoliciesResult([]));
+    }
+
+    const policies = await options.policies.listAll();
 
     const instancePolicies = policies
       .filter(
@@ -390,9 +608,12 @@ export function createIntegrationCenterService(options: {
 
   async function createCreatorPolicy(
     db: Pick<IntegrationCenterTx, "resourcePolicy">,
-    created: { id: string; organizationId?: string | null },
+    created: { id: string; organizationId?: string | null; type?: string | null },
     currentUserId: string
   ): Promise<void> {
+    if (!requiresInstancePolicy(trimOrUndefined(created.type) ?? undefined)) {
+      return;
+    }
     await db.resourcePolicy.create({
       data: {
         organizationId: created.organizationId ?? null,
@@ -460,7 +681,12 @@ export function createIntegrationCenterService(options: {
         ...(item as IntegrationListItem),
         config: item.config ? sanitizeIntegrationConfigForRead(item.config) : item.config
       }));
-      const allowedIds = new Set(await filterAuthorizedInstanceIds(input.currentUserId, items.map((item) => item.id)));
+      const unrestrictedIds = items.filter((item) => !requiresInstancePolicy(item.type)).map((item) => item.id);
+      const restrictedIds = items.filter((item) => requiresInstancePolicy(item.type)).map((item) => item.id);
+      const allowedIds = new Set([
+        ...unrestrictedIds,
+        ...(await filterAuthorizedInstanceIds(input.currentUserId, restrictedIds))
+      ]);
       return {
         items: items.filter((item) => allowedIds.has(item.id))
       };
@@ -516,6 +742,169 @@ export function createIntegrationCenterService(options: {
       };
     },
 
+    async getExternalApiUsage(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== EXTERNAL_OPENAI_API_TYPE) {
+        throw new Error("当前集成实例不是外部 OpenAI API。");
+      }
+
+      const windowDays = clampWindowDays(input.days);
+      const recordTake = clampRecordTake(input.take);
+      const fromDate = new Date();
+      fromDate.setUTCDate(fromDate.getUTCDate() - (windowDays - 1));
+      fromDate.setUTCHours(0, 0, 0, 0);
+
+      const rawEvents = await options.usageEvents.list({
+        featureType: "external_openai_api"
+      });
+      const relevantEvents = rawEvents.filter((record) => {
+        const metadata = asRecord(record.metadata);
+        if (asString(metadata?.integrationInstanceId) !== instance.id) {
+          return false;
+        }
+        const createdAt = new Date(record.createdAt);
+        if (Number.isNaN(createdAt.getTime())) {
+          return false;
+        }
+        return createdAt.getTime() >= fromDate.getTime();
+      });
+
+      const trends = new Map<
+        string,
+        {
+          date: string;
+          requestCount: number;
+          successCount: number;
+          failureCount: number;
+          totalTokens: number;
+          estimatedCost: number;
+          internalCost: number;
+        }
+      >();
+      for (let offset = windowDays - 1; offset >= 0; offset -= 1) {
+        const date = utcDayOffset(offset);
+        trends.set(date, {
+          date,
+          requestCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          totalTokens: 0,
+          estimatedCost: 0,
+          internalCost: 0
+        });
+      }
+
+      let successCount = 0;
+      let failureCount = 0;
+      let streamCount = 0;
+      let totalInputTokens = 0;
+      let totalCachedInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalEstimatedCost = 0;
+      let totalInternalCost = 0;
+      let lastRequestedAt: string | undefined;
+
+      for (const record of relevantEvents) {
+        const metadata = asRecord(record.metadata);
+        const totalTokens = record.inputTokens + record.cachedInputTokens + record.outputTokens;
+        const trend = trends.get(toDayKey(record.createdAt));
+        if (trend) {
+          trend.requestCount += 1;
+          if (record.resultStatus === "success") {
+            trend.successCount += 1;
+          } else {
+            trend.failureCount += 1;
+          }
+          trend.totalTokens += totalTokens;
+          trend.estimatedCost += toNumber(record.estimatedCost);
+          trend.internalCost += toNumber(record.internalCost);
+        }
+
+        if (record.resultStatus === "success") {
+          successCount += 1;
+        } else {
+          failureCount += 1;
+        }
+        if (metadata?.stream === true) {
+          streamCount += 1;
+        }
+        totalInputTokens += record.inputTokens;
+        totalCachedInputTokens += record.cachedInputTokens;
+        totalOutputTokens += record.outputTokens;
+        totalEstimatedCost += toNumber(record.estimatedCost);
+        totalInternalCost += toNumber(record.internalCost);
+        if (!lastRequestedAt || record.createdAt > lastRequestedAt) {
+          lastRequestedAt = record.createdAt;
+        }
+      }
+
+      const records = relevantEvents.slice(0, recordTake).map((record) => {
+        const metadata = asRecord(record.metadata);
+        return {
+          id: record.id,
+          sessionId: record.sessionId,
+          model: record.model,
+          requestedModel: asString(metadata?.requestedModel),
+          requestedReasoningEffort: asString(metadata?.requestedReasoningEffort),
+          stream: metadata?.stream === true,
+          messageCount: Number(metadata?.messageCount ?? 0) || 0,
+          inputTokens: record.inputTokens,
+          cachedInputTokens: record.cachedInputTokens,
+          outputTokens: record.outputTokens,
+          totalTokens: record.inputTokens + record.cachedInputTokens + record.outputTokens,
+          estimatedCost: record.estimatedCost,
+          internalCost: record.internalCost,
+          resultStatus: record.resultStatus,
+          errorMessage: asString(metadata?.errorMessage),
+          agentModeId: asString(metadata?.agentModeId),
+          knowledgeSetIds: asStringArray(metadata?.knowledgeSetIds),
+          createdAt: record.createdAt
+        };
+      });
+
+      const totalRequests = relevantEvents.length;
+      const totalTokens = totalInputTokens + totalCachedInputTokens + totalOutputTokens;
+
+      return {
+        summary: {
+          windowDays,
+          totalRequests,
+          successCount,
+          failureCount,
+          successRate: roundRatio(successCount, totalRequests),
+          streamCount,
+          streamRate: roundRatio(streamCount, totalRequests),
+          totalInputTokens,
+          totalCachedInputTokens,
+          totalOutputTokens,
+          totalTokens,
+          averageTokensPerRequest: totalRequests > 0 ? Math.round(totalTokens / totalRequests) : 0,
+          totalEstimatedCost: formatFixed(totalEstimatedCost),
+          totalInternalCost: formatFixed(totalInternalCost),
+          lastRequestedAt
+        },
+        trends: [...trends.values()].map((item) => ({
+          date: item.date,
+          requestCount: item.requestCount,
+          successCount: item.successCount,
+          failureCount: item.failureCount,
+          totalTokens: item.totalTokens,
+          estimatedCost: formatFixed(item.estimatedCost),
+          internalCost: formatFixed(item.internalCost)
+        })),
+        breakdowns: {
+          byModel: buildUsageBreakdown(relevantEvents, (record) => record.model),
+          byStatus: buildUsageBreakdown(relevantEvents, (record) => record.resultStatus),
+          byTransport: buildUsageBreakdown(
+            relevantEvents,
+            (record) => (asRecord(record.metadata)?.stream === true ? "stream" : "non_stream"),
+            (key) => (key === "stream" ? "Streaming" : "Non-stream")
+          )
+        },
+        records
+      };
+    },
+
     async listBindings(input) {
       await requireAuthorizedInstance(input.instanceId, input.currentUserId);
       return mapBindingsResult(await repository.listBindings(input.instanceId));
@@ -523,6 +912,9 @@ export function createIntegrationCenterService(options: {
 
     async getPolicies(input) {
       const detail = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (!requiresInstancePolicy(detail.type)) {
+        return buildPoliciesResult([]);
+      }
 
       const policies = await options.policies.listAll();
       const items = policies
@@ -537,6 +929,14 @@ export function createIntegrationCenterService(options: {
 
     async replacePolicies(input) {
       const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (!requiresInstancePolicy(instance.type)) {
+        await options.policies.replacePoliciesForResource({
+          resourceType: integrationPolicyResourceType,
+          resourceId: instance.id,
+          policies: []
+        });
+        return buildPoliciesResult([]);
+      }
 
       const policies = input.policies.map((policy) => ({
         organizationId: input.organizationId ?? instance.organizationId ?? undefined,

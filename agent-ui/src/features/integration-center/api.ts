@@ -2,6 +2,7 @@ import { api } from "../../lib/api";
 
 import type {
   CreateIntegrationInstanceInput,
+  ExternalApiUsageResponse,
   IntegrationBindingsResponse,
   IntegrationBindingInput,
   IntegrationDetail,
@@ -46,6 +47,17 @@ export async function validateIntegrationInstance(instanceId: string): Promise<I
   return api<IntegrationValidationResult>(`${integrationPath(instanceId)}/validate`, {
     method: "POST"
   });
+}
+
+export async function fetchExternalApiUsage(
+  instanceId: string,
+  params?: { days?: number; take?: number }
+): Promise<ExternalApiUsageResponse> {
+  const search = new URLSearchParams();
+  if (params?.days) search.set("days", String(params.days));
+  if (params?.take) search.set("take", String(params.take));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return api<ExternalApiUsageResponse>(`${integrationPath(instanceId)}/external-api-usage${suffix}`);
 }
 
 export async function fetchIntegrationBindings(instanceId: string): Promise<IntegrationBindingsResponse> {

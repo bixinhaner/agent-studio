@@ -3,6 +3,7 @@ import express, { type Request, type RequestHandler, type Response, type Router 
 import type { IntegrationCenterService } from "./service.js";
 import {
   integrationBindingsUpdateSchema,
+  integrationExternalApiUsageQuerySchema,
   integrationInstanceBaseSchema,
   integrationInstanceUpdateSchema,
   integrationListQuerySchema,
@@ -105,6 +106,22 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
         await options.service.listValidationHistory({
           currentUserId: req.currentUser!.id,
           instanceId: req.params.instanceId
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/integrations/:instanceId/external-api-usage", requireRead, async (req: Request, res: Response) => {
+    try {
+      const query = integrationExternalApiUsageQuerySchema.parse(req.query ?? {});
+      res.json(
+        await options.service.getExternalApiUsage({
+          currentUserId: req.currentUser!.id,
+          instanceId: req.params.instanceId,
+          days: query.days,
+          take: query.take
         })
       );
     } catch (error) {

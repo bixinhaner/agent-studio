@@ -1,16 +1,8 @@
-import { appConfig } from "../../config.js";
-import {
-  REASONING_EFFORT_VALUES,
-  normalizeModel,
-  normalizeReasoningEffortForModel,
-  type ReasoningEffort
-} from "../../model-config.js";
+import type { ReasoningEffort } from "../../model-config.js";
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 
 type OpenAICompatibleApiValidationPayload = {
   apiKey?: string;
-  defaultModel: string;
-  defaultReasoningEffort: ReasoningEffort;
   agentModeId?: string;
   knowledgeSetIds: string[];
 };
@@ -24,14 +16,6 @@ function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
-}
-
-function asReasoningEffort(value: unknown): ReasoningEffort | undefined {
-  const normalized = asString(value);
-  if (!normalized) return undefined;
-  return REASONING_EFFORT_VALUES.includes(normalized as ReasoningEffort)
-    ? (normalized as ReasoningEffort)
-    : undefined;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -48,7 +32,6 @@ function asStringArray(value: unknown): string[] {
 }
 
 function normalizePayload(input: Record<string, unknown>): OpenAICompatibleApiValidationPayload {
-  const defaultModel = normalizeModel(asString(input.defaultModel) || appConfig.defaultModel);
   const agentModeId = asString(input.agentModeId) || asString(input.defaultAgentModeId);
   const knowledgeSetIds =
     asStringArray(input.knowledgeSetIds).length > 0
@@ -57,11 +40,6 @@ function normalizePayload(input: Record<string, unknown>): OpenAICompatibleApiVa
 
   return {
     apiKey: asString(input.apiKey),
-    defaultModel,
-    defaultReasoningEffort: normalizeReasoningEffortForModel(
-      defaultModel,
-      asReasoningEffort(input.defaultReasoningEffort) ?? appConfig.defaultReasoningEffort
-    ),
     agentModeId,
     knowledgeSetIds
   };
@@ -93,8 +71,6 @@ export class OpenAICompatibleApiIntegrationAdapter {
       status: "success",
       summary: "OpenAI-compatible API configuration looks valid",
       detail: {
-        defaultModel: payload.defaultModel,
-        defaultReasoningEffort: payload.defaultReasoningEffort,
         agentModeId: payload.agentModeId,
         knowledgeSetCount: payload.knowledgeSetIds.length
       }

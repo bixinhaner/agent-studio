@@ -164,11 +164,80 @@ export type OpenAICodexConfigDraft = {
 };
 
 export type OpenAICompatibleApiConfigDraft = {
-  defaultModel: string;
-  defaultReasoningEffort: string;
   agentModeId: string;
   knowledgeSetIds: string[];
   apiKeyDraft: string;
+};
+
+export type ExternalApiUsageSummary = {
+  windowDays: number;
+  totalRequests: number;
+  successCount: number;
+  failureCount: number;
+  successRate: number;
+  streamCount: number;
+  streamRate: number;
+  totalInputTokens: number;
+  totalCachedInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  averageTokensPerRequest: number;
+  totalEstimatedCost: string;
+  totalInternalCost: string;
+  lastRequestedAt?: string;
+};
+
+export type ExternalApiUsageTrendPoint = {
+  date: string;
+  requestCount: number;
+  successCount: number;
+  failureCount: number;
+  totalTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+};
+
+export type ExternalApiUsageBreakdownRow = {
+  key: string;
+  label: string;
+  requestCount: number;
+  successCount: number;
+  failureCount: number;
+  totalTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+};
+
+export type ExternalApiUsageRecord = {
+  id: string;
+  sessionId?: string;
+  model: string;
+  requestedModel?: string;
+  requestedReasoningEffort?: string;
+  stream: boolean;
+  messageCount: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: string;
+  internalCost: string;
+  resultStatus: string;
+  errorMessage?: string;
+  agentModeId?: string;
+  knowledgeSetIds: string[];
+  createdAt: string;
+};
+
+export type ExternalApiUsageResponse = {
+  summary: ExternalApiUsageSummary;
+  trends: ExternalApiUsageTrendPoint[];
+  breakdowns: {
+    byModel: ExternalApiUsageBreakdownRow[];
+    byStatus: ExternalApiUsageBreakdownRow[];
+    byTransport: ExternalApiUsageBreakdownRow[];
+  };
+  records: ExternalApiUsageRecord[];
 };
 
 export type ZendeskConfigDraft = {

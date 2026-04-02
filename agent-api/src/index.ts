@@ -143,6 +143,7 @@ const integrationCenter = createIntegrationCenterService({
   db: db as unknown as IntegrationCenterDb,
   policies: resourcePolicies as never,
   policyService,
+  usageEvents: usageEventRepository,
   accessResolver: {
     getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
     getDepartmentIdsForUser: async (userId) => departmentMemberships.listIdsForUser(userId)
