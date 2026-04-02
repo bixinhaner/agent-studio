@@ -111,6 +111,43 @@ function normalizeLineBreaks(value: string): string {
   return value.replace(/\r\n?/g, "\n").trim();
 }
 
+const PROCESS_MARKERS = [
+  "我先",
+  "我会",
+  "接下来",
+  "下一步",
+  "当前",
+  "我已经",
+  "我需要",
+  "然后",
+  "最后",
+  "我转去",
+  "我确认",
+  "我定位",
+  "我整理",
+  "我补齐",
+  "我想"
+];
+
+const ANSWER_SECTION_MARKERS = [
+  "文档事实",
+  "建议按",
+  "建议按这个顺序排查",
+  "先确认",
+  "先看",
+  "核对",
+  "用 KPI 验证",
+  "如果是",
+  "参考文档",
+  "我对这个问题的保守判断",
+  "结论",
+  "建议"
+];
+
+function stripSectionPrefix(value: string): string {
+  return normalizeLineBreaks(value).replace(/^[#>\-\s\d.()（）]+/, "");
+}
+
 function splitIntoMeaningfulBlocks(text: string): string[] {
   const normalized = normalizeLineBreaks(text);
   if (!normalized) return [];
@@ -151,6 +188,49 @@ function splitIntoMeaningfulBlocks(text: string): string[] {
   return [normalized];
 }
 
+function isProcessLikeBlock(block: string): boolean {
+  const normalized = normalizeLineBreaks(block);
+  if (!normalized) return false;
+
+  const prefix = stripSectionPrefix(normalized);
+  if (ANSWER_SECTION_MARKERS.some((marker) => prefix.startsWith(marker))) {
+    return false;
+  }
+
+  let score = 0;
+  PROCESS_MARKERS.forEach((marker) => {
+    if (normalized.includes(marker)) {
+      score += 1;
+    }
+  });
+
+  if (/当前工作区|资料集|定位|提取|整理|补齐|避免把推断当成结论/.test(normalized)) {
+    score += 2;
+  }
+
+  if (/我先|我会|我已经|我需要|接下来|下一步|当前/.test(normalized)) {
+    score += 2;
+  }
+
+  return score >= 2;
+}
+
+function expandProcessNarrativeBlock(block: string): string[] {
+  const normalized = normalizeLineBreaks(block);
+  if (!normalized) return [];
+
+  const sentenceBlocks = normalized
+    .split(/(?<=[。！？!?])/g)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentenceBlocks.length >= 3 && normalized.length >= 120) {
+    return sentenceBlocks;
+  }
+
+  return [normalized];
+}
+
 function splitAssistantMessageSections(text: string): { processBlocks: string[]; finalBlock: string } {
   const blocks = splitIntoMeaningfulBlocks(text);
   if (blocks.length <= 1) {
@@ -159,8 +239,28 @@ function splitAssistantMessageSections(text: string): { processBlocks: string[];
       finalBlock: blocks[0] || normalizeLineBreaks(text)
     };
   }
+
+  let processBoundary = 0;
+  while (processBoundary < blocks.length && isProcessLikeBlock(blocks[processBoundary] || "")) {
+    processBoundary += 1;
+  }
+
+  if (processBoundary === 0) {
+    return {
+      processBlocks: [],
+      finalBlock: blocks.join("\n\n").trim()
+    };
+  }
+
+  if (processBoundary > 0 && processBoundary < blocks.length) {
+    return {
+      processBlocks: blocks.slice(0, processBoundary).flatMap((block) => expandProcessNarrativeBlock(block)),
+      finalBlock: blocks.slice(processBoundary).join("\n\n").trim()
+    };
+  }
+
   return {
-    processBlocks: blocks.slice(0, -1),
+    processBlocks: blocks.slice(0, -1).flatMap((block) => expandProcessNarrativeBlock(block)),
     finalBlock: blocks[blocks.length - 1] || ""
   };
 }
