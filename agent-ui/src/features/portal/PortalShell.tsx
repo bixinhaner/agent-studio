@@ -1416,6 +1416,26 @@ const ComposerActivationGuard: FC<{ runtime: unknown }> = ({ runtime }) => {
   return null;
 };
 
+const ThreadRuntimeSubscriptionBridge: FC<{ runtime: unknown }> = ({ runtime }) => {
+  useEffect(() => {
+    const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
+      | { _hookManager?: { subscribe(callback: () => void): () => void }; _notifySubscribers?: () => void }
+      | undefined;
+    const hookManager = threadsCore?._hookManager;
+    const notifySubscribers = threadsCore?._notifySubscribers;
+    if (!hookManager || typeof hookManager.subscribe !== "function" || typeof notifySubscribers !== "function") {
+      return undefined;
+    }
+
+    return hookManager.subscribe(() => {
+      // assistant-ui replaces per-thread runtimes without notifying outer thread-list subscribers.
+      notifySubscribers.call(threadsCore);
+    });
+  }, [runtime]);
+
+  return null;
+};
+
 const AgentRuntimeAdapterProvider: FC<
   PropsWithChildren<{
     onThreadIdentityChange?: (identity: ThreadIdentity) => void;
@@ -2598,6 +2618,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ComposerActivationGuard runtime={runtime} />
+      <ThreadRuntimeSubscriptionBridge runtime={runtime} />
       <RunningStageTextContext.Provider value={runningStageText}>
         <ConfigProvider theme={PORTAL_ANTD_THEME}>
           <div className="portal-workbench-root">
