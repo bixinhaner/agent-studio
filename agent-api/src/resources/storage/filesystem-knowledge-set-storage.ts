@@ -34,10 +34,13 @@ function ensureInsideRoot(rootDir: string, candidate: string): string {
   throw new Error("knowledge set path escapes storage root");
 }
 
-function normalizeKnowledgeSetId(knowledgeSetId: string): string {
-  const normalized = trimOrUndefined(knowledgeSetId);
+function normalizeKnowledgeSetStorageKey(knowledgeSetStorageKey: string): string {
+  const normalized = trimOrUndefined(knowledgeSetStorageKey);
   if (!normalized) {
-    throw new Error("knowledgeSetId is required");
+    throw new Error("knowledgeSetStorageKey is required");
+  }
+  if (normalized === "." || normalized === ".." || normalized.includes("/") || normalized.includes("\\") || normalized.includes("\0")) {
+    throw new Error("knowledgeSetStorageKey is invalid");
   }
   return normalized;
 }
@@ -65,16 +68,16 @@ function assertUniqueRelativePath(relativePath: string, seenPaths: Set<string>):
 export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
   constructor(private readonly rootDir: string) {}
 
-  resolveReadableMountPath(knowledgeSetId: string): string {
-    const normalizedKnowledgeSetId = normalizeKnowledgeSetId(knowledgeSetId);
-    return ensureInsideRoot(this.rootDir, path.join(this.rootDir, normalizedKnowledgeSetId));
+  resolveReadableMountPath(knowledgeSetStorageKey: string): string {
+    const normalizedKnowledgeSetStorageKey = normalizeKnowledgeSetStorageKey(knowledgeSetStorageKey);
+    return ensureInsideRoot(this.rootDir, path.join(this.rootDir, normalizedKnowledgeSetStorageKey));
   }
 
   async saveFiles(input: {
-    knowledgeSetId: string;
+    knowledgeSetStorageKey: string;
     files: Array<{ name: string; buffer: Buffer; mimeType?: string }>;
   }): Promise<KnowledgeSetStorageResult> {
-    const mountPath = this.resolveReadableMountPath(input.knowledgeSetId);
+    const mountPath = this.resolveReadableMountPath(input.knowledgeSetStorageKey);
     await fs.mkdir(this.rootDir, { recursive: true });
     const stagingDir = await fs.mkdtemp(path.join(this.rootDir, ".staging-"));
 
@@ -106,11 +109,11 @@ export class FilesystemKnowledgeSetStorage implements KnowledgeSetStorage {
   }
 
   async extractArchive(input: {
-    knowledgeSetId: string;
+    knowledgeSetStorageKey: string;
     archiveName: string;
     buffer: Buffer;
   }): Promise<KnowledgeSetStorageResult> {
-    const mountPath = this.resolveReadableMountPath(input.knowledgeSetId);
+    const mountPath = this.resolveReadableMountPath(input.knowledgeSetStorageKey);
     await fs.mkdir(this.rootDir, { recursive: true });
     const stagingDir = await fs.mkdtemp(path.join(this.rootDir, ".staging-"));
 

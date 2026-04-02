@@ -8,7 +8,7 @@ import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
 
 type KnowledgeSetRepositoryLike = {
-  list(): Promise<Array<{ sourceType?: string; slug?: string } & Record<string, unknown>>>;
+  list(): Promise<Array<{ id?: string; sourceType?: string; slug?: string; storageKey?: string } & Record<string, unknown>>>;
   create(payload: {
     organizationId?: string;
     name: string;
@@ -32,7 +32,7 @@ type KnowledgeSetRepositoryLike = {
       storageKey?: string;
     }
   ): Promise<unknown>;
-  get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string } | undefined>;
+  get(id: string): Promise<{ id: string; organizationId?: string; sourceType?: string; rootPath?: string; storageKey?: string } | undefined>;
   listItems(id: string): Promise<unknown[]>;
   replaceItems(
     id: string,
@@ -209,6 +209,61 @@ function suggestUniqueSlug(base: string, existingSlugs: Iterable<string>): strin
   return candidate;
 }
 
+function normalizeStorageKeySegment(value: string): string {
+  const normalized = value
+    .trim()
+    .replace(/[/\\]/g, "-")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized === "." || normalized === "..") {
+    throw new Error("资料集目录名无效");
+  }
+  return normalized;
+}
+
+function normalizeKnowledgeSetStorageKey(value: unknown): string | undefined {
+  const storageKey = toTrimmedString(value);
+  if (!storageKey) return undefined;
+  return normalizeStorageKeySegment(storageKey);
+}
+
+function suggestUniqueStorageKey(base: string, existingStorageKeys: Iterable<string>): string {
+  const seed = normalizeStorageKeySegment(base);
+  const taken = new Set(
+    Array.from(existingStorageKeys)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!taken.has(seed.toLowerCase())) return seed;
+  let index = 2;
+  let candidate = `${seed}-${index}`;
+  while (taken.has(candidate.toLowerCase())) {
+    index += 1;
+    candidate = `${seed}-${index}`;
+  }
+  return candidate;
+}
+
+function resolveCreateKnowledgeSetStorageKey(input: {
+  requestedStorageKey: unknown;
+  name: string;
+  existingKnowledgeSets: Array<{ id?: string; storageKey?: string } & Record<string, unknown>>;
+}): string {
+  const existingStorageKeys = input.existingKnowledgeSets
+    .flatMap((knowledgeSet) => [toTrimmedString(knowledgeSet.storageKey), toTrimmedString(knowledgeSet.id)])
+    .filter((value): value is string => Boolean(value));
+  const requestedStorageKey = normalizeKnowledgeSetStorageKey(input.requestedStorageKey);
+  if (requestedStorageKey) {
+    const taken = new Set(existingStorageKeys.map((item) => item.toLowerCase()));
+    if (taken.has(requestedStorageKey.toLowerCase())) {
+      throw new Error("资料集目录名已存在，请更换后重试");
+    }
+    return requestedStorageKey;
+  }
+  return suggestUniqueStorageKey(input.name, existingStorageKeys);
+}
+
 function resolveCreateKnowledgeSetSlug(input: {
   requestedSlug: unknown;
   name: string;
@@ -295,12 +350,12 @@ function parsePatchKnowledgeSetItem(body: unknown): { action: "rename"; relative
 }
 
 function resolveKnowledgeSetRoot(
-  knowledgeSet: { sourceType?: string; rootPath?: string },
+  knowledgeSet: { sourceType?: string; rootPath?: string; storageKey?: string },
   storage: KnowledgeSetStorage,
   knowledgeSetId: string
 ): string {
   if (knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE) {
-    return storage.resolveReadableMountPath(knowledgeSetId);
+    return storage.resolveReadableMountPath(toTrimmedString(knowledgeSet.storageKey) ?? knowledgeSetId);
   }
   throw new Error("filesystem 资料集已下线，仅支持 managed_upload");
 }
@@ -427,6 +482,11 @@ export function createResourcesAdminRouter(options: {
         name,
         existingKnowledgeSets
       });
+      const storageKey = resolveCreateKnowledgeSetStorageKey({
+        requestedStorageKey: req.body?.storageKey,
+        name,
+        existingKnowledgeSets
+      });
       const knowledgeSet = await options.knowledgeSets.create({
         organizationId: toTrimmedString(req.body?.organizationId),
         name,
@@ -435,7 +495,7 @@ export function createResourcesAdminRouter(options: {
         status: toTrimmedString(req.body?.status) ?? "active",
         sourceType,
         rootPath: undefined,
-        storageKey: toTrimmedString(req.body?.storageKey)
+        storageKey
       });
       res.status(201).json({ knowledgeSet });
     } catch (error) {
@@ -453,6 +513,8 @@ export function createResourcesAdminRouter(options: {
       const sourceType = normalizeKnowledgeSetSourceType(req.body?.sourceType ?? existing.sourceType);
       const nextName = req.body?.name === undefined ? undefined : normalizeKnowledgeSetName(req.body?.name);
       const nextSlug = req.body?.slug === undefined ? undefined : normalizeKnowledgeSetSlug(req.body?.slug);
+      const nextStorageKey =
+        req.body?.storageKey === undefined ? undefined : normalizeKnowledgeSetStorageKey(req.body?.storageKey);
       if (req.body?.slug !== undefined && !nextSlug) {
         throw new Error("资料集 slug 不能为空");
       }
@@ -464,7 +526,7 @@ export function createResourcesAdminRouter(options: {
         status: req.body?.status,
         sourceType,
         rootPath: undefined,
-        storageKey: req.body?.storageKey
+        storageKey: nextStorageKey
       });
       res.json({ knowledgeSet });
     } catch (error) {
@@ -603,7 +665,8 @@ export function createResourcesAdminRouter(options: {
         res.status(400).json({ detail: "at least one file upload is required" });
         return;
       }
-      const result = await options.storage.saveFiles({ knowledgeSetId, files });
+      const knowledgeSetStorageKey = toTrimmedString(knowledgeSet.storageKey) ?? knowledgeSetId;
+      const result = await options.storage.saveFiles({ knowledgeSetStorageKey, files });
       await options.knowledgeSets.replaceItems(knowledgeSetId, result.items);
       if (options.resourceAccessLogs) {
         await options.resourceAccessLogs.record({
@@ -645,7 +708,7 @@ export function createResourcesAdminRouter(options: {
         }
 
         const result = await options.storage.extractArchive({
-          knowledgeSetId,
+          knowledgeSetStorageKey: toTrimmedString(knowledgeSet.storageKey) ?? knowledgeSetId,
           archiveName: req.header("X-Archive-Name") || "archive.zip",
           buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
         });

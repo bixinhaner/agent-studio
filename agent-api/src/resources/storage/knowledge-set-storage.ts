@@ -15,13 +15,13 @@ export type KnowledgeSetStorageResult = {
 
 export interface KnowledgeSetStorage {
   saveFiles(input: {
-    knowledgeSetId: string;
+    knowledgeSetStorageKey: string;
     files: Array<{ name: string; buffer: Buffer; mimeType?: string }>;
   }): Promise<KnowledgeSetStorageResult>;
   extractArchive(input: {
-    knowledgeSetId: string;
+    knowledgeSetStorageKey: string;
     archiveName: string;
     buffer: Buffer;
   }): Promise<KnowledgeSetStorageResult>;
-  resolveReadableMountPath(knowledgeSetId: string): string;
+  resolveReadableMountPath(knowledgeSetStorageKey: string): string;
 }

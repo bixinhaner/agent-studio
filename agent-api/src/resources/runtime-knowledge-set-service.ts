@@ -9,6 +9,7 @@ type KnowledgeSetRecord = {
   status: string;
   sourceType: string;
   rootPath?: string | null;
+  storageKey?: string | null;
 };
 
 type KnowledgeSetRepositoryLike = {
@@ -26,7 +27,7 @@ type PolicyServiceLike = {
 };
 
 type KnowledgeSetStorageLike = {
-  resolveReadableMountPath(knowledgeSetId: string): string;
+  resolveReadableMountPath(knowledgeSetStorageKey: string): string;
 };
 
 type KnowledgeSetRuntimeMetadata = {
@@ -142,6 +143,10 @@ function resolveSelectedKnowledgeSetIds(input: {
   return [];
 }
 
+function resolveKnowledgeSetStorageKey(knowledgeSet: KnowledgeSetRecord): string {
+  return trimOrUndefined(knowledgeSet.storageKey) ?? knowledgeSet.id;
+}
+
 export class RuntimeKnowledgeSetService {
   constructor(
     private readonly options: {
@@ -223,7 +228,7 @@ export class RuntimeKnowledgeSetService {
       if (!knowledgeSet) {
         throw new Error("knowledge set 不存在或未启用");
       }
-      return this.options.storage.resolveReadableMountPath(knowledgeSetId);
+      return this.options.storage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
     });
 
     if (this.options.resourceAccessLogs) {
