@@ -869,8 +869,9 @@ ensure_caddy_config() {
   fi
 
   render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787"
+  ensure_secure_file_mode "$CADDY_CONFIG_FILE" 644
   if command_exists caddy; then
-    caddy validate --config "$CADDY_CONFIG_FILE" >/dev/null 2>&1 || true
+    caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null 2>&1 || true
     if command_exists systemctl; then
       systemctl reload caddy >/dev/null 2>&1 || true
     fi

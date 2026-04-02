@@ -203,14 +203,14 @@ refresh_caddy_config() {
 
   if command_exists caddy; then
     log_step "Validating Caddy config"
-    run_as_root caddy validate --config "$rendered_config" >/dev/null
+    run_as_root caddy validate --config "$rendered_config" --adapter caddyfile >/dev/null
   else
     log_warn "Caddy binary not found; writing config without validation"
   fi
 
   log_step "Updating Caddy config"
   run_as_root mkdir -p "$(dirname "$CADDY_CONFIG_FILE")"
-  run_as_root install -m 600 "$rendered_config" "$CADDY_CONFIG_FILE"
+  run_as_root install -m 644 "$rendered_config" "$CADDY_CONFIG_FILE"
 
   if command_exists caddy && command_exists systemctl; then
     log_step "Reloading Caddy"

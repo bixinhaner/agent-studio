@@ -151,7 +151,7 @@ check_pm2() {
 }
 
 check_caddy() {
-  caddy validate --config "$CADDY_CONFIG_FILE" >/dev/null
+  caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null
   print_ok "caddy configuration validates"
 }
 

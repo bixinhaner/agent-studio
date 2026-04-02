@@ -168,7 +168,7 @@ main() {
   try_run "pm2 status" run_as_app_user_shell "pm2 status"
   try_run "pm2 logs" run_as_app_user_shell "pm2 logs '$PM2_APP_NAME' --lines 80 --nostream"
   try_run "health check" curl --fail --silent --show-error "$HEALTH_URL"
-  try_run "caddy validate" caddy validate --config "$CADDY_CONFIG_FILE"
+  try_run "caddy validate" caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile
   try_run "prisma migrate status" run_as_app_user_shell "cd '$APP_API_DIR' && npx prisma migrate status"
 
   if [[ -f "$BACKEND_ENV_FILE" ]]; then
