@@ -117,6 +117,25 @@ function toTrimmedString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function decodeUploadedFileName(value: string): string {
+  const raw = value.trim();
+  if (!raw) return value;
+
+  // Multer/Busboy may parse UTF-8 multipart filenames as latin1 bytes.
+  const utf8Candidate = Buffer.from(raw, "latin1").toString("utf8");
+  if (!utf8Candidate || utf8Candidate.includes("\uFFFD")) {
+    return raw;
+  }
+
+  // Promote the utf8 candidate when original looks like mojibake,
+  // or when candidate clearly contains non-ASCII characters.
+  const looksMojibake = /[ÃÂÐÑ¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]/.test(raw);
+  if (looksMojibake || /[^\u0000-\u007F]/.test(utf8Candidate)) {
+    return utf8Candidate;
+  }
+  return raw;
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -576,7 +595,7 @@ export function createResourcesAdminRouter(options: {
       }
 
       const files = ((req.files as Express.Multer.File[] | undefined) ?? []).map((file) => ({
-        name: file.originalname,
+        name: decodeUploadedFileName(file.originalname),
         buffer: file.buffer,
         mimeType: toTrimmedString(file.mimetype)
       }));
