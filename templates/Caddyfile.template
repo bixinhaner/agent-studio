@@ -2,9 +2,9 @@
   encode zstd gzip
   root * {$UI_DIST_ROOT}
 
-  @api path /api/* /healthz
+  @api path /api/* /openai/* /healthz
   handle @api {
-    reverse_proxy 127.0.0.1:8787
+    reverse_proxy {$CADDY_UPSTREAM_HOST}:{$CADDY_UPSTREAM_PORT}
   }
 
   handle {

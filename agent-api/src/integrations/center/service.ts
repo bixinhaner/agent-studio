@@ -20,6 +20,7 @@ import {
 import type { PolicyService } from "../../resources/policy-service.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
+import { OpenAICompatibleApiIntegrationAdapter } from "./openai-compatible-api-adapter.js";
 
 type PolicyRecord = {
   id: string;
@@ -262,6 +263,7 @@ export function createIntegrationCenterService(options: {
   const adapters: Partial<Record<string, ValidationAdapter>> = {
     dingtalk: new DingTalkIntegrationAdapter(),
     openai_codex: new OpenAICodexIntegrationAdapter(),
+    openai_compatible_api: new OpenAICompatibleApiIntegrationAdapter(),
     ...options.adapters
   };
 

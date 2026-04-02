@@ -18,11 +18,15 @@ const ZendeskIntegrationViewLazy = lazy(() =>
 const OpenAICodexIntegrationViewLazy = lazy(() =>
   import("./OpenAICodexIntegrationView").then((module) => ({ default: module.OpenAICodexIntegrationView }))
 );
+const OpenAICompatibleApiIntegrationViewLazy = lazy(() =>
+  import("./OpenAICompatibleApiIntegrationView").then((module) => ({ default: module.OpenAICompatibleApiIntegrationView }))
+);
 
 const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "dingtalk", label: "DingTalk" },
   { id: "zendesk", label: "Zendesk" },
-  { id: "openai_codex", label: "OpenAI Codex" }
+  { id: "openai_codex", label: "OpenAI Codex" },
+  { id: "openai_compatible_api", label: "外部 OpenAI API" }
 ];
 
 const STATUS_OPTIONS = [
@@ -46,8 +50,20 @@ function matchesSearch(search: string, values: Array<string | undefined>) {
 
 function buildCreateDraft(tab: IntegrationCenterTab): CreateDraft {
   return {
-    name: tab === "dingtalk" ? "DingTalk" : tab === "zendesk" ? "Zendesk" : "OpenAI/Codex",
-    slug: tab === "openai_codex" ? "openai-main" : `${tab}-main`,
+    name:
+      tab === "dingtalk"
+        ? "DingTalk"
+        : tab === "zendesk"
+          ? "Zendesk"
+          : tab === "openai_codex"
+            ? "OpenAI/Codex"
+            : "外部 OpenAI API",
+    slug:
+      tab === "openai_codex"
+        ? "openai-main"
+        : tab === "openai_compatible_api"
+          ? "external-openai-api"
+          : `${tab}-main`,
     description: "",
     status: "active"
   };
@@ -377,6 +393,17 @@ export function IntegrationCenterShell() {
                 <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
               </Suspense>
             ) : null}
+            {detail && detail.instance.type === "openai_compatible_api" ? (
+              <Suspense
+                fallback={(
+                  <div className="admin-workspace-loading">
+                    <Spin size="small" />
+                  </div>
+                )}
+              >
+                <OpenAICompatibleApiIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              </Suspense>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -436,8 +463,19 @@ export function IntegrationCenterShell() {
                   <Spin size="small" />
                 </div>
               )}
+              >
+                <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              </Suspense>
+            ) : null}
+          {detail && detail.instance.type === "openai_compatible_api" ? (
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
             >
-              <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              <OpenAICompatibleApiIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
             </Suspense>
           ) : null}
         </Drawer>

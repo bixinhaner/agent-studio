@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex"]);
+export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api"]);
 export type IntegrationType = z.infer<typeof integrationTypeSchema>;
 
 export const integrationStatusSchema = z.enum(["draft", "active", "disabled", "error"]);

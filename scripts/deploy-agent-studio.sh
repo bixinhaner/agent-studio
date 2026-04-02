@@ -11,8 +11,12 @@ GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_REF="${GIT_REF:-main}"
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
+DOMAIN="${DOMAIN:-}"
+CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
+CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
+SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
 
 usage() {
   cat <<USAGE
@@ -24,10 +28,16 @@ Options:
   --repo-dir <path>      Repository checkout path [default: $APP_REPO_DIR]
   --remote <name>        Git remote name [default: $GIT_REMOTE]
   --ref <name>           Git branch to deploy [default: $GIT_REF]
+  --domain <name>        Public domain used to render Caddy config [default: install state domain]
   --api-host <host>      Host written into PM2 env [default: $API_HOST]
   --api-port <port>      Port written into PM2 env [default: $API_PORT]
+  --caddy-upstream-host <host>
+                         Backend host used by Caddy reverse proxy [default: 127.0.0.1]
+  --caddy-upstream-port <port>
+                         Backend port used by Caddy reverse proxy [default: --api-port value]
   --skip-git-pull        Rebuild current checkout without fetching or pulling
   --skip-rbac-seed       Skip built-in RBAC seed step
+  --skip-caddy-reload    Skip rendering/reloading Caddy
   -h, --help             Show this help text
 USAGE
 }
@@ -47,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       GIT_REF="$2"
       shift 2
       ;;
+    --domain)
+      DOMAIN="$2"
+      shift 2
+      ;;
     --api-host)
       API_HOST="$2"
       shift 2
@@ -55,12 +69,24 @@ while [[ $# -gt 0 ]]; do
       API_PORT="$2"
       shift 2
       ;;
+    --caddy-upstream-host)
+      CADDY_UPSTREAM_HOST="$2"
+      shift 2
+      ;;
+    --caddy-upstream-port)
+      CADDY_UPSTREAM_PORT="$2"
+      shift 2
+      ;;
     --skip-git-pull)
       SKIP_GIT_PULL=1
       shift
       ;;
     --skip-rbac-seed)
       SKIP_RBAC_SEED=1
+      shift
+      ;;
+    --skip-caddy-reload)
+      SKIP_CADDY_RELOAD=1
       shift
       ;;
     -h|--help)
@@ -77,6 +103,15 @@ REPO_DIR="$APP_REPO_DIR"
 refresh_app_paths
 
 pm2_template_path="$script_dir/../templates/pm2-ecosystem.config.cjs.template"
+caddy_template_path="$script_dir/../templates/Caddyfile.template"
+
+if [[ -z "$CADDY_UPSTREAM_HOST" ]]; then
+  CADDY_UPSTREAM_HOST="127.0.0.1"
+fi
+
+if [[ -z "$CADDY_UPSTREAM_PORT" ]]; then
+  CADDY_UPSTREAM_PORT="$API_PORT"
+fi
 
 require_repo_checkout() {
   [[ -d "$APP_REPO_DIR" ]] || die "repository directory does not exist: $APP_REPO_DIR"
@@ -108,6 +143,85 @@ destination.write_text(rendered)
 PY
 
   apply_app_user_ownership "$PM2_ECOSYSTEM_FILE" || true
+}
+
+render_caddy_config() {
+  local template="$1"
+  local destination="$2"
+  local domain="$3"
+  local ui_root="$4"
+  local upstream_host="$5"
+  local upstream_port="$6"
+
+  python3 - "$template" "$destination" "$domain" "$ui_root" "$upstream_host" "$upstream_port" <<'PY'
+from pathlib import Path
+import sys
+
+template = Path(sys.argv[1]).read_text()
+destination = Path(sys.argv[2])
+domain = sys.argv[3]
+ui_root = sys.argv[4]
+upstream_host = sys.argv[5]
+upstream_port = sys.argv[6]
+rendered = (
+    template
+    .replace("{$DOMAIN}", domain)
+    .replace("{$UI_DIST_ROOT}", ui_root)
+    .replace("{$CADDY_UPSTREAM_HOST}", upstream_host)
+    .replace("{$CADDY_UPSTREAM_PORT}", upstream_port)
+)
+destination.write_text(rendered)
+PY
+}
+
+resolve_caddy_domain() {
+  if [[ -n "$DOMAIN" ]]; then
+    return 0
+  fi
+  if [[ -f "$INSTALL_STATE_FILE" ]]; then
+    DOMAIN="$(state_read domain "")"
+  fi
+}
+
+refresh_caddy_config() {
+  if [[ "$SKIP_CADDY_RELOAD" == "1" ]]; then
+    log_info "Skipping Caddy config refresh"
+    return 0
+  fi
+
+  resolve_caddy_domain
+  if [[ -z "$DOMAIN" ]]; then
+    log_warn "Skipping Caddy config refresh because no domain was provided and no install state domain was found"
+    return 0
+  fi
+
+  [[ -f "$caddy_template_path" ]] || die "missing Caddy template: $caddy_template_path"
+
+  local rendered_config
+  rendered_config="$(mktemp)"
+  render_caddy_config "$caddy_template_path" "$rendered_config" "$DOMAIN" "$APP_UI_DIR/dist" "$CADDY_UPSTREAM_HOST" "$CADDY_UPSTREAM_PORT"
+
+  if command_exists caddy; then
+    log_step "Validating Caddy config"
+    run_as_root caddy validate --config "$rendered_config" >/dev/null
+  else
+    log_warn "Caddy binary not found; writing config without validation"
+  fi
+
+  log_step "Updating Caddy config"
+  run_as_root mkdir -p "$(dirname "$CADDY_CONFIG_FILE")"
+  run_as_root install -m 600 "$rendered_config" "$CADDY_CONFIG_FILE"
+
+  if command_exists caddy && command_exists systemctl; then
+    log_step "Reloading Caddy"
+    run_as_root systemctl reload caddy
+  elif ! command_exists caddy; then
+    log_warn "Caddy binary not found; Caddy was not reloaded"
+  else
+    log_warn "systemctl not found; Caddy was not reloaded"
+  fi
+
+  rm -f "$rendered_config"
 }
 
 git_update() {
@@ -196,11 +310,14 @@ main() {
   seed_rbac
   build_frontend
   restart_pm2
+  refresh_caddy_config
 
   log_step "Deploy complete"
   log_info "Repo: $APP_REPO_DIR"
   log_info "PM2 app: $PM2_APP_NAME"
   log_info "PM2 ecosystem: $PM2_ECOSYSTEM_FILE"
+  log_info "Caddy config: $CADDY_CONFIG_FILE"
+  log_info "Public domain: ${DOMAIN:-<unset>}"
 }
 
 main

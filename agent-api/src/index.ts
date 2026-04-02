@@ -81,6 +81,7 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
+import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
@@ -1227,6 +1228,22 @@ registerCommonApiRoutes(app, {
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });
+
+app.use(
+  "/openai/v1",
+  createOpenAICompatibleRouter({
+    runtime,
+    integrationsDb: db as never,
+    agentModes,
+    runProfiles,
+    knowledgeSets,
+    knowledgeSetStorage,
+    usageIngestion,
+    sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot,
+    defaultModel: appConfig.defaultModel,
+    defaultReasoningEffort: appConfig.defaultReasoningEffort
+  })
+);
 
 app.use(
   createCollaborationRouter({

@@ -655,9 +655,11 @@ render_caddy_config() {
   local destination="$2"
   local domain="$3"
   local ui_root="$4"
+  local upstream_host="${5:-127.0.0.1}"
+  local upstream_port="${6:-8787}"
 
   ensure_dir "$(dirname "$destination")"
-  python3 - "$template" "$destination" "$domain" "$ui_root" <<'PY'
+  python3 - "$template" "$destination" "$domain" "$ui_root" "$upstream_host" "$upstream_port" <<'PY'
 from pathlib import Path
 import sys
 
@@ -665,7 +667,15 @@ template = Path(sys.argv[1]).read_text()
 destination = Path(sys.argv[2])
 domain = sys.argv[3]
 ui_root = sys.argv[4]
-destination.write_text(template.replace("{$DOMAIN}", domain).replace("{$UI_DIST_ROOT}", ui_root))
+upstream_host = sys.argv[5]
+upstream_port = sys.argv[6]
+destination.write_text(
+    template
+    .replace("{$DOMAIN}", domain)
+    .replace("{$UI_DIST_ROOT}", ui_root)
+    .replace("{$CADDY_UPSTREAM_HOST}", upstream_host)
+    .replace("{$CADDY_UPSTREAM_PORT}", upstream_port)
+)
 PY
 }
 
@@ -858,7 +868,7 @@ ensure_caddy_config() {
     return 0
   fi
 
-  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist"
+  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787"
   if command_exists caddy; then
     caddy validate --config "$CADDY_CONFIG_FILE" >/dev/null 2>&1 || true
     if command_exists systemctl; then

@@ -1,4 +1,4 @@
-export type IntegrationType = 'dingtalk' | 'zendesk' | 'openai_codex';
+export type IntegrationType = 'dingtalk' | 'zendesk' | 'openai_codex' | 'openai_compatible_api';
 export type IntegrationCenterTab = IntegrationType;
 export type IntegrationStatus = 'draft' | 'active' | 'disabled' | 'error' | string;
 export type IntegrationSectionTab = 'basic' | 'config' | 'history' | 'bindings' | 'policies';
@@ -160,6 +160,14 @@ export type OpenAICodexConfigDraft = {
   baseUrl: string;
   defaultModel: string;
   defaultReasoningEffort: string;
+  apiKeyDraft: string;
+};
+
+export type OpenAICompatibleApiConfigDraft = {
+  defaultModel: string;
+  defaultReasoningEffort: string;
+  agentModeId: string;
+  knowledgeSetIds: string[];
   apiKeyDraft: string;
 };
 
