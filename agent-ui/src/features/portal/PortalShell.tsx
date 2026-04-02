@@ -74,7 +74,7 @@ import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
-import { WritingWorkbenchPanel } from "./workbench/WritingWorkbenchPanel";
+import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
 import {
   closeWorkbenchDrawer,
@@ -1098,6 +1098,10 @@ const ProcessDataFallback: FC<any> = ({
         </ol>
       </details>
     );
+  }
+
+  if (name === "codex_file_change") {
+    return null;
   }
 
   if (name !== "codex_process") {
@@ -2518,31 +2522,50 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               });
             }
 
-            if (itemType === "file_change" && isCompleted && processEnabled) {
+            if (itemType === "file_change" && isCompleted) {
               const changes = Array.isArray(item?.changes) ? item.changes : [];
-              const lines = changes
-                .slice(0, 30)
+              const normalizedChanges = changes
+                .slice(0, 60)
                 .map((it) => {
                   const obj = asRecord(it);
-                  if (!obj) return "";
-                  const path = typeof obj.path === "string" ? obj.path : "";
-                  const kind = typeof obj.kind === "string" ? obj.kind : "update";
-                  return `${kind}: ${path}`;
+                  if (!obj) return null;
+                  const filePath = typeof obj.path === "string" ? obj.path.trim() : "";
+                  if (!filePath) return null;
+                  const kind = typeof obj.kind === "string" && obj.kind.trim() ? obj.kind.trim() : "update";
+                  return {
+                    path: filePath,
+                    kind
+                  };
                 })
-                .filter(Boolean)
+                .filter((value): value is { path: string; kind: string } => Boolean(value));
+              const lines = normalizedChanges
+                .slice(0, 30)
+                .map((change) => `${change.kind}: ${change.path}`)
                 .join("\n");
-              updates.push({
-                type: "data",
-                name: "codex_process",
-                data: {
-                  kind: "process",
-                  at: new Date().toISOString(),
-                  title: "文件变更",
-                  detail: lines,
-                  event: eventType,
-                  item_type: itemType
-                } satisfies ProcessData
-              });
+              if (normalizedChanges.length > 0) {
+                updates.push({
+                  type: "data",
+                  name: "codex_file_change",
+                  data: {
+                    at: new Date().toISOString(),
+                    changes: normalizedChanges
+                  }
+                });
+              }
+              if (processEnabled) {
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "process",
+                    at: new Date().toISOString(),
+                    title: "文件变更",
+                    detail: lines,
+                    event: eventType,
+                    item_type: itemType
+                  } satisfies ProcessData
+                });
+              }
             }
 
             if (itemType === "error" && processEnabled) {
@@ -2763,15 +2786,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               activeTab={layoutState.activeRightDrawerTab}
               onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
               onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
-              writingContent={
-                <WritingWorkbenchPanel
-                  onUsePrompt={(prompt) => {
-                    const preview = prompt.length > 28 ? `${prompt.slice(0, 28)}...` : prompt;
-                    setStatusText(`写作提示词已就绪：${preview}`);
-                    setLayoutState((prev) => closeWorkbenchDrawer(prev));
-                  }}
-                />
-              }
+              previewContent={<PreviewWorkbenchPanel threadId={activeRemoteThreadId} />}
               collaborationContent={
                 <div className="workbench-collaboration-content">
                   <section className="workbench-priority-card">

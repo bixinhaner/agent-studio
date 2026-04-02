@@ -338,3 +338,265 @@
   display: flex;
   flex-direction: column;
 }
+
+.preview-workbench-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview-workbench-list h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.preview-workbench-empty {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.preview-workbench-items {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.preview-file-item {
+  width: 100%;
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.preview-file-item:hover {
+  border-color: #a9bfec;
+  background: #f8fbff;
+}
+
+.preview-file-item.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.preview-file-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  word-break: break-all;
+}
+
+.preview-file-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.preview-workbench-viewer {
+  border: 1px solid #dbe4f4;
+  border-radius: 12px;
+  background: #fff;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.preview-workbench-placeholder {
+  padding: 20px 16px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.preview-viewer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid #e5edf8;
+  background: #f8fbff;
+}
+
+.preview-viewer-title-group h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.preview-viewer-title-group p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  word-break: break-all;
+}
+
+.preview-viewer-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.preview-viewer-actions a {
+  border: 1px solid #c9daff;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #1d4ed8;
+  text-decoration: none;
+  background: #fff;
+}
+
+.preview-viewer-actions a:hover {
+  background: #eef4ff;
+}
+
+.preview-viewer-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.preview-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.preview-image {
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid #e5edf8;
+}
+
+.preview-iframe {
+  width: 100%;
+  min-height: 60vh;
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.preview-text {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: auto;
+  max-height: 56vh;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.preview-sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview-sheet-card {
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.preview-sheet-card h5 {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5edf8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.preview-table-wrap {
+  overflow: auto;
+  max-height: 36vh;
+}
+
+.preview-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.preview-table-wrap td {
+  border: 1px solid #e5edf8;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 76px;
+}
+
+.preview-slide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview-slide-card {
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.preview-slide-card h5 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.preview-slide-card ol {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.preview-unsupported {
+  border: 1px dashed #dbe4f4;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+}

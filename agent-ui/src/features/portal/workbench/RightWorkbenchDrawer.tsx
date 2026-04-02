@@ -8,7 +8,7 @@ export function RightWorkbenchDrawer(props: {
   activeTab: WorkbenchTab;
   onClose(): void;
   onTabChange(tab: WorkbenchTab): void;
-  writingContent: ReactNode;
+  previewContent: ReactNode;
   collaborationContent: ReactNode;
 }) {
   if (!props.open) return null;
@@ -19,7 +19,7 @@ export function RightWorkbenchDrawer(props: {
         activeKey={props.activeTab}
         onChange={(key) => props.onTabChange(key as WorkbenchTab)}
         items={[
-          { key: "writing", label: "文档工坊", forceRender: true, children: props.writingContent },
+          { key: "preview", label: "预览", forceRender: true, children: props.previewContent },
           { key: "collaboration", label: "协作面板", forceRender: true, children: props.collaborationContent }
         ]}
       />

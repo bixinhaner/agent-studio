@@ -523,6 +523,15 @@ const browseDirectoriesSchema = z.object({
   path: z.string().optional()
 });
 
+const threadFileContentQuerySchema = z
+  .object({
+    relative_path: z.string().optional(),
+    path: z.string().optional()
+  })
+  .refine((value) => Boolean(trimOrUndefined(value.relative_path) || trimOrUndefined(value.path)), {
+    message: "必须提供 relative_path 或 path"
+  });
+
 type SessionOptions = {
   userId: string;
   model: string;
@@ -1014,6 +1023,51 @@ function normalizeRelativePath(value: string): string {
   return value.split(path.sep).join("/");
 }
 
+function isPathInside(parentDir: string, candidatePath: string): boolean {
+  const normalizedParent = path.resolve(parentDir);
+  const normalizedCandidate = path.resolve(candidatePath);
+  return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
+}
+
+function resolveThreadFileAbsolutePath(input: {
+  workspacePath: string;
+  uploadDir: string;
+  relativePath?: string;
+  filePath?: string;
+}): string {
+  const normalizedWorkspacePath = path.resolve(input.workspacePath);
+  const normalizedUploadDir = path.resolve(input.uploadDir);
+  const normalizedRelative = trimOrUndefined(input.relativePath);
+  if (normalizedRelative) {
+    const normalizedPosixRelative = normalizeRelativePath(normalizedRelative).replace(/^\/+/, "");
+    const relativeSegments = normalizedPosixRelative
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    if (relativeSegments.length === 0) {
+      throw new Error("relative_path 无效");
+    }
+    const candidate = path.resolve(normalizedUploadDir, ...relativeSegments);
+    if (!isPathInside(normalizedUploadDir, candidate)) {
+      throw new Error("附件路径不在允许目录中");
+    }
+    return candidate;
+  }
+
+  const normalizedFilePath = trimOrUndefined(input.filePath);
+  if (!normalizedFilePath) {
+    throw new Error("必须提供 relative_path 或 path");
+  }
+
+  const candidate = path.isAbsolute(normalizedFilePath)
+    ? path.resolve(normalizedFilePath)
+    : path.resolve(normalizedWorkspacePath, normalizedFilePath);
+  if (!isPathInside(normalizedWorkspacePath, candidate)) {
+    throw new Error("文件路径不在线程工作区内");
+  }
+  return candidate;
+}
+
 function findWhitelistRoot(candidate: string): string | undefined {
   for (const root of appConfig.workspaceWhitelist) {
     if (candidate === root || candidate.startsWith(`${root}${path.sep}`)) {
@@ -1251,6 +1305,61 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "上传附件失败";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/files/content", async (req: Request, res: Response) => {
+  try {
+    const currentUser = req.currentUser!;
+    const threadId = String(req.params.threadId || "").trim();
+    if (!threadId) {
+      res.status(400).json({ detail: "threadId 不能为空" });
+      return;
+    }
+
+    const query = threadFileContentQuerySchema.parse({
+      relative_path: typeof req.query.relative_path === "string" ? req.query.relative_path : undefined,
+      path: typeof req.query.path === "string" ? req.query.path : undefined
+    });
+
+    const thread = await threads.getOwned(threadId, currentUser.id);
+    if (!thread) {
+      res.status(404).json({ detail: "thread 不存在" });
+      return;
+    }
+
+    const workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      res.status(404).json({ detail: "thread 工作目录不存在" });
+      return;
+    }
+
+    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
+    const absolutePath = resolveThreadFileAbsolutePath({
+      workspacePath,
+      uploadDir,
+      relativePath: query.relative_path,
+      filePath: query.path
+    });
+
+    const stat = await fs.stat(absolutePath).catch(() => null);
+    if (!stat || !stat.isFile()) {
+      res.status(404).json({ detail: "文件不存在" });
+      return;
+    }
+
+    const fileName = path.basename(absolutePath);
+    const ext = path.extname(fileName);
+    const fileBuffer = await fs.readFile(absolutePath);
+
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.type(ext || "application/octet-stream");
+    res.status(200).send(fileBuffer);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "读取文件失败";
     res.status(400).json({ detail });
   }
 });

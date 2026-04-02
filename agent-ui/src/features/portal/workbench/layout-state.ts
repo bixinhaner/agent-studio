@@ -1,4 +1,4 @@
-export type WorkbenchTab = "writing" | "collaboration";
+export type WorkbenchTab = "preview" | "collaboration";
 
 export type WorkbenchLayoutState = {
   isSessionRailCollapsed: boolean;
@@ -11,7 +11,7 @@ export function createInitialLayoutState(): WorkbenchLayoutState {
   return {
     isSessionRailCollapsed: false,
     isRightDrawerOpen: false,
-    activeRightDrawerTab: "writing",
+    activeRightDrawerTab: "preview",
     isAdvancedSettingsOpen: false
   };
 }

@@ -4,7 +4,7 @@ import { LayoutPanelLeft, Settings, PanelRightClose, PanelRightOpen, Shield } fr
 import type { WorkbenchTab } from "./layout-state";
 
 const WORKBENCH_TAB_LABEL: Record<WorkbenchTab, string> = {
-  writing: "写作",
+  preview: "预览",
   collaboration: "协作"
 };
 
