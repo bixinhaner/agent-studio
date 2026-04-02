@@ -15,6 +15,7 @@ import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
   RuntimeAdapterProvider,
+  ThreadPrimitive,
   ThreadListItemPrimitive,
   useAui,
   useLocalRuntime,
@@ -26,6 +27,7 @@ import {
 import {
   AssistantMessage,
   Thread,
+  ThreadWelcome,
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
@@ -232,6 +234,32 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
 });
 
 const AssistantMarkdownText = makeMarkdownText();
+
+const DraftOnlyWelcomeSuggestions: FC = () => (
+  <div className="aui-thread-welcome-suggestions">
+    {PORTAL_STARTER_SUGGESTIONS.map((suggestion, index) => (
+      <ThreadPrimitive.Suggestion
+        key={`${suggestion.prompt}-${index}`}
+        className="aui-thread-welcome-suggestion"
+        prompt={suggestion.prompt}
+        send={false}
+        clearComposer
+      >
+        <span className="aui-thread-welcome-suggestion-text">{suggestion.text ?? suggestion.prompt}</span>
+      </ThreadPrimitive.Suggestion>
+    ))}
+  </div>
+);
+
+const DraftOnlyThreadWelcome: FC = () => (
+  <ThreadWelcome.Root>
+    <ThreadWelcome.Center>
+      <ThreadWelcome.Avatar />
+      <ThreadWelcome.Message />
+    </ThreadWelcome.Center>
+    <DraftOnlyWelcomeSuggestions />
+  </ThreadWelcome.Root>
+);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -2623,7 +2651,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           suggestions: PORTAL_STARTER_SUGGESTIONS
         }}
         components={{
-          AssistantMessage: AgentAssistantMessage
+          AssistantMessage: AgentAssistantMessage,
+          ThreadWelcome: DraftOnlyThreadWelcome
         }}
         assistantMessage={{
           allowCopy: true,
