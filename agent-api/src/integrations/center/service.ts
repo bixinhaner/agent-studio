@@ -95,6 +95,10 @@ export type IntegrationCenterService = {
       successCount: number;
       failureCount: number;
       successRate: number;
+      deliverySuccessCount: number;
+      deliveryFailureCount: number;
+      deliverySuccessRate: number;
+      generatedUndeliveredCount: number;
       streamCount: number;
       streamRate: number;
       totalInputTokens: number;
@@ -102,15 +106,22 @@ export type IntegrationCenterService = {
       totalOutputTokens: number;
       totalTokens: number;
       averageTokensPerRequest: number;
+      averageReadyMs: number;
+      p95ReadyMs: number;
+      averageResponseMs: number;
+      p95ResponseMs: number;
       totalEstimatedCost: string;
       totalInternalCost: string;
       lastRequestedAt?: string;
+      lastDeliveredAt?: string;
     };
     trends: Array<{
       date: string;
       requestCount: number;
       successCount: number;
       failureCount: number;
+      deliverySuccessCount: number;
+      deliveryFailureCount: number;
       totalTokens: number;
       estimatedCost: string;
       internalCost: string;
@@ -127,6 +138,16 @@ export type IntegrationCenterService = {
         internalCost: string;
       }>;
       byStatus: Array<{
+        key: string;
+        label: string;
+        requestCount: number;
+        successCount: number;
+        failureCount: number;
+        totalTokens: number;
+        estimatedCost: string;
+        internalCost: string;
+      }>;
+      byDelivery: Array<{
         key: string;
         label: string;
         requestCount: number;
@@ -162,9 +183,22 @@ export type IntegrationCenterService = {
       estimatedCost: string;
       internalCost: string;
       resultStatus: string;
+      deliveryStatus: string;
+      responseMode: string;
       errorMessage?: string;
       agentModeId?: string;
       knowledgeSetIds: string[];
+      requestAborted: boolean;
+      responseFinished: boolean;
+      responseClosedBeforeFinish: boolean;
+      responseStatusCode?: number;
+      responseStartedAt?: string;
+      responseReadyAt?: string;
+      responseCompletedAt?: string;
+      responseStartedMs?: number;
+      responseReadyMs?: number;
+      responseCompletedMs?: number;
+      outputChars: number;
       createdAt: string;
     }>;
   }>;
@@ -400,6 +434,15 @@ export function createIntegrationCenterService(options: {
     return 0;
   }
 
+  function asBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      if (value === "true") return true;
+      if (value === "false") return false;
+    }
+    return undefined;
+  }
+
   function toDayKey(value: string): string {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
@@ -430,6 +473,56 @@ export function createIntegrationCenterService(options: {
   function roundRatio(numerator: number, denominator: number): number {
     if (denominator <= 0) return 0;
     return Number(((numerator / denominator) * 100).toFixed(1));
+  }
+
+  function average(values: number[]): number {
+    if (values.length === 0) return 0;
+    return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  }
+
+  function percentile(values: number[], ratio: number): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+    return Math.round(sorted[index] ?? 0);
+  }
+
+  function responseMetric(value: unknown): number | undefined {
+    const parsed = toNumber(value);
+    return parsed > 0 ? parsed : undefined;
+  }
+
+  function responseStatusCode(value: unknown): number | undefined {
+    const parsed = toNumber(value);
+    return parsed > 0 ? Math.trunc(parsed) : undefined;
+  }
+
+  function deliveryStatusFromUsage(record: UsageEventRecord): string {
+    return asString(asRecord(record.metadata)?.deliveryStatus) ?? "unknown";
+  }
+
+  function deliveryStatusLabel(key: string): string {
+    switch (key) {
+      case "delivered":
+        return "已送达";
+      case "client_aborted":
+        return "客户端中断";
+      case "connection_closed":
+        return "连接中断";
+      default:
+        return "未知";
+    }
+  }
+
+  function executionStatusLabel(key: string): string {
+    switch (key) {
+      case "success":
+        return "生成成功";
+      case "failed":
+        return "生成失败";
+      default:
+        return key;
+    }
   }
 
   function buildUsageBreakdown(
@@ -776,6 +869,8 @@ export function createIntegrationCenterService(options: {
           requestCount: number;
           successCount: number;
           failureCount: number;
+          deliverySuccessCount: number;
+          deliveryFailureCount: number;
           totalTokens: number;
           estimatedCost: number;
           internalCost: number;
@@ -788,6 +883,8 @@ export function createIntegrationCenterService(options: {
           requestCount: 0,
           successCount: 0,
           failureCount: 0,
+          deliverySuccessCount: 0,
+          deliveryFailureCount: 0,
           totalTokens: 0,
           estimatedCost: 0,
           internalCost: 0
@@ -796,6 +893,9 @@ export function createIntegrationCenterService(options: {
 
       let successCount = 0;
       let failureCount = 0;
+      let deliverySuccessCount = 0;
+      let deliveryFailureCount = 0;
+      let generatedUndeliveredCount = 0;
       let streamCount = 0;
       let totalInputTokens = 0;
       let totalCachedInputTokens = 0;
@@ -803,9 +903,13 @@ export function createIntegrationCenterService(options: {
       let totalEstimatedCost = 0;
       let totalInternalCost = 0;
       let lastRequestedAt: string | undefined;
+      let lastDeliveredAt: string | undefined;
+      const readyDurations: number[] = [];
+      const responseDurations: number[] = [];
 
       for (const record of relevantEvents) {
         const metadata = asRecord(record.metadata);
+        const deliveryStatus = deliveryStatusFromUsage(record);
         const totalTokens = record.inputTokens + record.cachedInputTokens + record.outputTokens;
         const trend = trends.get(toDayKey(record.createdAt));
         if (trend) {
@@ -814,6 +918,11 @@ export function createIntegrationCenterService(options: {
             trend.successCount += 1;
           } else {
             trend.failureCount += 1;
+          }
+          if (deliveryStatus === "delivered") {
+            trend.deliverySuccessCount += 1;
+          } else {
+            trend.deliveryFailureCount += 1;
           }
           trend.totalTokens += totalTokens;
           trend.estimatedCost += toNumber(record.estimatedCost);
@@ -825,8 +934,28 @@ export function createIntegrationCenterService(options: {
         } else {
           failureCount += 1;
         }
+        if (deliveryStatus === "delivered") {
+          deliverySuccessCount += 1;
+          const deliveredAt = asString(metadata?.responseCompletedAt) ?? record.createdAt;
+          if (!lastDeliveredAt || deliveredAt > lastDeliveredAt) {
+            lastDeliveredAt = deliveredAt;
+          }
+        } else {
+          deliveryFailureCount += 1;
+          if (record.resultStatus === "success") {
+            generatedUndeliveredCount += 1;
+          }
+        }
         if (metadata?.stream === true) {
           streamCount += 1;
+        }
+        const readyMs = responseMetric(metadata?.responseReadyMs);
+        if (readyMs !== undefined) {
+          readyDurations.push(readyMs);
+        }
+        const responseMs = responseMetric(metadata?.responseCompletedMs);
+        if (responseMs !== undefined) {
+          responseDurations.push(responseMs);
         }
         totalInputTokens += record.inputTokens;
         totalCachedInputTokens += record.cachedInputTokens;
@@ -840,6 +969,7 @@ export function createIntegrationCenterService(options: {
 
       const records = relevantEvents.slice(0, recordTake).map((record) => {
         const metadata = asRecord(record.metadata);
+        const deliveryStatus = deliveryStatusFromUsage(record);
         return {
           id: record.id,
           sessionId: record.sessionId,
@@ -855,9 +985,22 @@ export function createIntegrationCenterService(options: {
           estimatedCost: record.estimatedCost,
           internalCost: record.internalCost,
           resultStatus: record.resultStatus,
+          deliveryStatus,
+          responseMode: asString(metadata?.responseMode) ?? (metadata?.stream === true ? "stream" : "non_stream"),
           errorMessage: asString(metadata?.errorMessage),
           agentModeId: asString(metadata?.agentModeId),
           knowledgeSetIds: asStringArray(metadata?.knowledgeSetIds),
+          requestAborted: asBoolean(metadata?.requestAborted) === true,
+          responseFinished: asBoolean(metadata?.responseFinished) === true,
+          responseClosedBeforeFinish: asBoolean(metadata?.responseClosedBeforeFinish) === true,
+          responseStatusCode: responseStatusCode(metadata?.responseStatusCode),
+          responseStartedAt: asString(metadata?.responseStartedAt),
+          responseReadyAt: asString(metadata?.responseReadyAt),
+          responseCompletedAt: asString(metadata?.responseCompletedAt),
+          responseStartedMs: responseMetric(metadata?.responseStartedMs),
+          responseReadyMs: responseMetric(metadata?.responseReadyMs),
+          responseCompletedMs: responseMetric(metadata?.responseCompletedMs),
+          outputChars: Math.max(0, Math.trunc(toNumber(metadata?.outputChars))),
           createdAt: record.createdAt
         };
       });
@@ -872,6 +1015,10 @@ export function createIntegrationCenterService(options: {
           successCount,
           failureCount,
           successRate: roundRatio(successCount, totalRequests),
+          deliverySuccessCount,
+          deliveryFailureCount,
+          deliverySuccessRate: roundRatio(deliverySuccessCount, totalRequests),
+          generatedUndeliveredCount,
           streamCount,
           streamRate: roundRatio(streamCount, totalRequests),
           totalInputTokens,
@@ -879,22 +1026,34 @@ export function createIntegrationCenterService(options: {
           totalOutputTokens,
           totalTokens,
           averageTokensPerRequest: totalRequests > 0 ? Math.round(totalTokens / totalRequests) : 0,
+          averageReadyMs: average(readyDurations),
+          p95ReadyMs: percentile(readyDurations, 0.95),
+          averageResponseMs: average(responseDurations),
+          p95ResponseMs: percentile(responseDurations, 0.95),
           totalEstimatedCost: formatFixed(totalEstimatedCost),
           totalInternalCost: formatFixed(totalInternalCost),
-          lastRequestedAt
+          lastRequestedAt,
+          lastDeliveredAt
         },
         trends: [...trends.values()].map((item) => ({
           date: item.date,
           requestCount: item.requestCount,
           successCount: item.successCount,
           failureCount: item.failureCount,
+          deliverySuccessCount: item.deliverySuccessCount,
+          deliveryFailureCount: item.deliveryFailureCount,
           totalTokens: item.totalTokens,
           estimatedCost: formatFixed(item.estimatedCost),
           internalCost: formatFixed(item.internalCost)
         })),
         breakdowns: {
           byModel: buildUsageBreakdown(relevantEvents, (record) => record.model),
-          byStatus: buildUsageBreakdown(relevantEvents, (record) => record.resultStatus),
+          byStatus: buildUsageBreakdown(relevantEvents, (record) => record.resultStatus, executionStatusLabel),
+          byDelivery: buildUsageBreakdown(
+            relevantEvents,
+            (record) => deliveryStatusFromUsage(record),
+            deliveryStatusLabel
+          ),
           byTransport: buildUsageBreakdown(
             relevantEvents,
             (record) => (asRecord(record.metadata)?.stream === true ? "stream" : "non_stream"),

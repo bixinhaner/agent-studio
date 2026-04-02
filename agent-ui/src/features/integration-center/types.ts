@@ -175,6 +175,10 @@ export type ExternalApiUsageSummary = {
   successCount: number;
   failureCount: number;
   successRate: number;
+  deliverySuccessCount: number;
+  deliveryFailureCount: number;
+  deliverySuccessRate: number;
+  generatedUndeliveredCount: number;
   streamCount: number;
   streamRate: number;
   totalInputTokens: number;
@@ -182,9 +186,14 @@ export type ExternalApiUsageSummary = {
   totalOutputTokens: number;
   totalTokens: number;
   averageTokensPerRequest: number;
+  averageReadyMs: number;
+  p95ReadyMs: number;
+  averageResponseMs: number;
+  p95ResponseMs: number;
   totalEstimatedCost: string;
   totalInternalCost: string;
   lastRequestedAt?: string;
+  lastDeliveredAt?: string;
 };
 
 export type ExternalApiUsageTrendPoint = {
@@ -192,6 +201,8 @@ export type ExternalApiUsageTrendPoint = {
   requestCount: number;
   successCount: number;
   failureCount: number;
+  deliverySuccessCount: number;
+  deliveryFailureCount: number;
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
@@ -223,9 +234,22 @@ export type ExternalApiUsageRecord = {
   estimatedCost: string;
   internalCost: string;
   resultStatus: string;
+  deliveryStatus: string;
+  responseMode: string;
   errorMessage?: string;
   agentModeId?: string;
   knowledgeSetIds: string[];
+  requestAborted: boolean;
+  responseFinished: boolean;
+  responseClosedBeforeFinish: boolean;
+  responseStatusCode?: number;
+  responseStartedAt?: string;
+  responseReadyAt?: string;
+  responseCompletedAt?: string;
+  responseStartedMs?: number;
+  responseReadyMs?: number;
+  responseCompletedMs?: number;
+  outputChars: number;
   createdAt: string;
 };
 
@@ -235,6 +259,7 @@ export type ExternalApiUsageResponse = {
   breakdowns: {
     byModel: ExternalApiUsageBreakdownRow[];
     byStatus: ExternalApiUsageBreakdownRow[];
+    byDelivery: ExternalApiUsageBreakdownRow[];
     byTransport: ExternalApiUsageBreakdownRow[];
   };
   records: ExternalApiUsageRecord[];

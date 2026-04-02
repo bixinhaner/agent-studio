@@ -3,7 +3,7 @@ import { Alert, Button, Card, Empty, Input, Segmented, Space, Spin, Tag } from "
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { fetchExternalApiUsage } from "./api";
-import type { ExternalApiUsageBreakdownRow, ExternalApiUsageResponse } from "./types";
+import type { ExternalApiUsageBreakdownRow, ExternalApiUsageResponse, ExternalApiUsageRecord } from "./types";
 
 const WINDOW_OPTIONS = [
   { label: "7 天", value: 7 },
@@ -12,10 +12,16 @@ const WINDOW_OPTIONS = [
   { label: "90 天", value: 90 }
 ] as const;
 
-const STATUS_FILTERS = [
-  { label: "全部", value: "all" },
-  { label: "成功", value: "success" },
-  { label: "失败", value: "failed" }
+const EXECUTION_FILTERS = [
+  { label: "全部生成态", value: "all" },
+  { label: "生成成功", value: "success" },
+  { label: "生成失败", value: "failed" }
+] as const;
+
+const DELIVERY_FILTERS = [
+  { label: "全部交付态", value: "all" },
+  { label: "已送达", value: "delivered" },
+  { label: "已中断", value: "interrupted" }
 ] as const;
 
 function formatCount(value: number): string {
@@ -40,53 +46,119 @@ function formatLocalDateTime(value: string | undefined): string {
   return parsed.toLocaleString();
 }
 
+function formatDuration(value: number | undefined): string {
+  if (!value || value <= 0) return "—";
+  if (value < 1000) return `${Math.round(value)} ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)} s`;
+  const minutes = Math.floor(value / 60_000);
+  const seconds = Math.round((value % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+function executionLabel(value: string): string {
+  return value === "success" ? "生成成功" : value === "failed" ? "生成失败" : value || "未知";
+}
+
+function executionColor(value: string): "success" | "error" | "default" {
+  return value === "success" ? "success" : value === "failed" ? "error" : "default";
+}
+
+function deliveryLabel(value: string): string {
+  switch (value) {
+    case "delivered":
+      return "已送达";
+    case "client_aborted":
+      return "客户端中断";
+    case "connection_closed":
+      return "连接中断";
+    default:
+      return value || "未知";
+  }
+}
+
+function deliveryColor(value: string): "success" | "warning" | "error" | "default" {
+  if (value === "delivered") return "success";
+  if (value === "client_aborted") return "warning";
+  if (value === "connection_closed") return "error";
+  return "default";
+}
+
+function responseModeLabel(value: string, stream: boolean): string {
+  if (value === "stream" || stream) return "stream";
+  return "non-stream";
+}
+
+function isInterruptedDelivery(value: string): boolean {
+  return value !== "delivered";
+}
+
 function TrendChart(props: { data: ExternalApiUsageResponse["trends"] }) {
   const points = props.data;
-  const width = 640;
-  const height = 220;
-  const padding = 20;
-  const maxRequests = Math.max(...points.map((item) => item.requestCount), 1);
+  const width = 720;
+  const height = 240;
+  const padding = 24;
+  const maxValue = Math.max(
+    ...points.flatMap((item) => [item.requestCount, item.deliverySuccessCount, item.deliveryFailureCount]),
+    1
+  );
 
   const requestPolyline = points
     .map((item, index) => {
       const x = padding + (index * (width - padding * 2)) / Math.max(points.length - 1, 1);
-      const y = height - padding - (item.requestCount / maxRequests) * (height - padding * 2);
+      const y = height - padding - (item.requestCount / maxValue) * (height - padding * 2);
       return `${x},${y}`;
     })
     .join(" ");
 
-  const areaPolyline = [
-    `${padding},${height - padding}`,
-    requestPolyline,
-    `${width - padding},${height - padding}`
-  ].join(" ");
+  const deliveryPolyline = points
+    .map((item, index) => {
+      const x = padding + (index * (width - padding * 2)) / Math.max(points.length - 1, 1);
+      const y = height - padding - (item.deliverySuccessCount / maxValue) * (height - padding * 2);
+      return `${x},${y}`;
+    })
+    .join(" ");
 
   return (
     <div className="external-api-usage-chart-shell">
       <div className="external-api-usage-chart-meta">
         <div>
-          <span className="field-label">请求趋势</span>
-          <p className="resource-center-subtle">按 UTC 天聚合请求量，帮助快速看出波峰、回落和异常空窗。</p>
+          <span className="field-label">请求与送达趋势</span>
+          <p className="resource-center-subtle">同一时间窗内同时看请求量、已送达量和被中断量，更容易区分业务完成与链路送达。</p>
         </div>
-        <Tag color="blue">最近 {points.length} 天</Tag>
+        <div className="external-api-usage-legend">
+          <span><i className="legend-request" />请求</span>
+          <span><i className="legend-delivery" />已送达</span>
+          <span><i className="legend-interrupted" />已中断</span>
+        </div>
       </div>
       <div className="external-api-usage-chart">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="API 请求趋势图">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="API 请求与送达趋势图">
           <defs>
             <linearGradient id="external-api-usage-fill" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="rgba(12, 74, 110, 0.42)" />
-              <stop offset="100%" stopColor="rgba(12, 74, 110, 0.02)" />
+              <stop offset="0%" stopColor="rgba(15, 118, 110, 0.3)" />
+              <stop offset="100%" stopColor="rgba(15, 118, 110, 0.02)" />
             </linearGradient>
           </defs>
           <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} className="external-api-usage-axis" />
-          <polygon points={areaPolyline} className="external-api-usage-area" />
           <polyline points={requestPolyline} className="external-api-usage-line" />
+          <polyline points={deliveryPolyline} className="external-api-usage-line-secondary" />
           {points.map((item, index) => {
             const x = padding + (index * (width - padding * 2)) / Math.max(points.length - 1, 1);
-            const y = height - padding - (item.requestCount / maxRequests) * (height - padding * 2);
+            const requestY = height - padding - (item.requestCount / maxValue) * (height - padding * 2);
+            const deliveryY = height - padding - (item.deliverySuccessCount / maxValue) * (height - padding * 2);
+            const interruptedHeight = (item.deliveryFailureCount / maxValue) * (height - padding * 2);
             return (
               <g key={item.date}>
-                <circle cx={x} cy={y} r="4" className="external-api-usage-dot" />
+                <rect
+                  x={x - 8}
+                  y={height - padding - interruptedHeight}
+                  width="16"
+                  height={interruptedHeight}
+                  rx="6"
+                  className="external-api-usage-interrupted-bar"
+                />
+                <circle cx={x} cy={requestY} r="4" className="external-api-usage-dot" />
+                <circle cx={x} cy={deliveryY} r="4" className="external-api-usage-dot-secondary" />
                 <text x={x} y={height - 4} textAnchor="middle" className="external-api-usage-axis-label">
                   {item.date.slice(5)}
                 </text>
@@ -127,8 +199,8 @@ function BreakdownPanel(props: {
                 <span style={{ width: `${(row.requestCount / maxRequests) * 100}%` }} />
               </div>
               <div className="external-api-usage-breakdown-meta">
-                <span>成功 {formatCount(row.successCount)}</span>
-                <span>失败 {formatCount(row.failureCount)}</span>
+                <span>生成成功 {formatCount(row.successCount)}</span>
+                <span>生成失败 {formatCount(row.failureCount)}</span>
                 <span>Tokens {formatCount(row.totalTokens)}</span>
               </div>
             </article>
@@ -141,6 +213,12 @@ function BreakdownPanel(props: {
   );
 }
 
+function recordMatchesDeliveryFilter(record: ExternalApiUsageRecord, filter: (typeof DELIVERY_FILTERS)[number]["value"]) {
+  if (filter === "all") return true;
+  if (filter === "delivered") return record.deliveryStatus === "delivered";
+  return isInterruptedDelivery(record.deliveryStatus);
+}
+
 export function ExternalApiUsageView(props: { instanceId: string }) {
   const [windowDays, setWindowDays] = useState<number>(14);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -148,7 +226,8 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]["value"]>("all");
+  const [executionFilter, setExecutionFilter] = useState<(typeof EXECUTION_FILTERS)[number]["value"]>("all");
+  const [deliveryFilter, setDeliveryFilter] = useState<(typeof DELIVERY_FILTERS)[number]["value"]>("all");
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -186,7 +265,10 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
     if (!data) return [];
     const keyword = deferredSearch.trim().toLowerCase();
     return data.records.filter((record) => {
-      if (statusFilter !== "all" && record.resultStatus !== statusFilter) {
+      if (executionFilter !== "all" && record.resultStatus !== executionFilter) {
+        return false;
+      }
+      if (!recordMatchesDeliveryFilter(record, deliveryFilter)) {
         return false;
       }
       if (!keyword) return true;
@@ -196,21 +278,22 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
         record.sessionId,
         record.agentModeId,
         record.errorMessage,
+        record.deliveryStatus,
         ...record.knowledgeSetIds
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(keyword));
     });
-  }, [data, deferredSearch, statusFilter]);
+  }, [data, deferredSearch, deliveryFilter, executionFilter]);
 
   return (
     <section className="external-api-usage-shell">
       <Card className="resource-center-section external-api-usage-hero antd-admin-card" size="small">
         <div className="external-api-usage-hero-header">
           <div>
-            <p className="external-api-usage-kicker">API Signal Board</p>
+            <p className="external-api-usage-kicker">Delivery Observability Board</p>
             <h3>外部调用记录</h3>
-            <p>聚焦单个 API Key 绑定实例的真实调用情况，先看总体信号，再下钻到每一条请求。</p>
+            <p>把“模型是否做完”和“结果是否真正送达调用方”拆开看，才能定位长请求的真实不稳定点。</p>
           </div>
           <Space wrap>
             <Segmented
@@ -229,6 +312,17 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
 
         {data ? (
           <>
+            {data.summary.generatedUndeliveredCount > 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                className="admin-alert-inline"
+                message={`最近 ${data.summary.windowDays} 天有 ${formatCount(
+                  data.summary.generatedUndeliveredCount
+                )} 次“生成完成但未送达”的请求。`}
+              />
+            ) : null}
+
             <div className="external-api-usage-metric-grid">
               <article className="external-api-usage-metric-card">
                 <span>总调用数</span>
@@ -236,11 +330,33 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                 <small>最近 {data.summary.windowDays} 天</small>
               </article>
               <article className="external-api-usage-metric-card">
-                <span>成功率</span>
+                <span>生成成功率</span>
                 <strong>{formatPercent(data.summary.successRate)}</strong>
                 <small>
                   成功 {formatCount(data.summary.successCount)} / 失败 {formatCount(data.summary.failureCount)}
                 </small>
+              </article>
+              <article className="external-api-usage-metric-card">
+                <span>送达成功率</span>
+                <strong>{formatPercent(data.summary.deliverySuccessRate)}</strong>
+                <small>
+                  已送达 {formatCount(data.summary.deliverySuccessCount)} / 中断 {formatCount(data.summary.deliveryFailureCount)}
+                </small>
+              </article>
+              <article className="external-api-usage-metric-card">
+                <span>生成未送达</span>
+                <strong>{formatCount(data.summary.generatedUndeliveredCount)}</strong>
+                <small>模型已完成，但结果没有完整送达调用方</small>
+              </article>
+              <article className="external-api-usage-metric-card">
+                <span>平均准备耗时</span>
+                <strong>{formatDuration(data.summary.averageReadyMs)}</strong>
+                <small>P95 {formatDuration(data.summary.p95ReadyMs)}</small>
+              </article>
+              <article className="external-api-usage-metric-card">
+                <span>平均总耗时</span>
+                <strong>{formatDuration(data.summary.averageResponseMs)}</strong>
+                <small>P95 {formatDuration(data.summary.p95ResponseMs)}</small>
               </article>
               <article className="external-api-usage-metric-card">
                 <span>总 Tokens</span>
@@ -248,19 +364,9 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                 <small>平均每次 {formatCount(data.summary.averageTokensPerRequest)}</small>
               </article>
               <article className="external-api-usage-metric-card">
-                <span>Streaming 占比</span>
-                <strong>{formatPercent(data.summary.streamRate)}</strong>
-                <small>{formatCount(data.summary.streamCount)} 次流式调用</small>
-              </article>
-              <article className="external-api-usage-metric-card">
-                <span>预估成本</span>
-                <strong>{formatDecimal(data.summary.totalEstimatedCost)}</strong>
-                <small>内部成本 {formatDecimal(data.summary.totalInternalCost)}</small>
-              </article>
-              <article className="external-api-usage-metric-card">
-                <span>最近一次</span>
-                <strong>{data.summary.lastRequestedAt ? "已接入" : "暂无调用"}</strong>
-                <small>{formatLocalDateTime(data.summary.lastRequestedAt)}</small>
+                <span>最近送达</span>
+                <strong>{data.summary.lastDeliveredAt ? "有交付" : "暂无"}</strong>
+                <small>{formatLocalDateTime(data.summary.lastDeliveredAt || data.summary.lastRequestedAt)}</small>
               </article>
             </div>
 
@@ -273,19 +379,25 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
         <div className="external-api-usage-panels">
           <BreakdownPanel
             title="模型分布"
-            subtitle="看实际执行模型是否稳定，是否出现与预期不一致的切换。"
+            subtitle="看实际执行模型是否稳定，是否出现非预期模型切换。"
             rows={data.breakdowns.byModel}
             accentClassName="external-api-usage-panel-ink"
           />
           <BreakdownPanel
-            title="结果分布"
-            subtitle="快速识别成功/失败结构，避免只看总调用量而忽略错误积压。"
+            title="生成结果"
+            subtitle="聚焦模型执行是否成功，而不是只看 HTTP 是否返回。"
             rows={data.breakdowns.byStatus}
             accentClassName="external-api-usage-panel-sky"
           />
           <BreakdownPanel
-            title="传输形态"
-            subtitle="区分流式与非流式请求，方便判断接入方的使用习惯。"
+            title="交付结果"
+            subtitle="分离已送达、客户端中断和连接中断，定位链路问题。"
+            rows={data.breakdowns.byDelivery}
+            accentClassName="external-api-usage-panel-amber"
+          />
+          <BreakdownPanel
+            title="响应形态"
+            subtitle="区分 stream / non-stream，判断接入方式是否更容易触发长连接风险。"
             rows={data.breakdowns.byTransport}
             accentClassName="external-api-usage-panel-mist"
           />
@@ -296,19 +408,24 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
         <div className="external-api-usage-records-header">
           <div>
             <h3>详细调用列表</h3>
-            <p>按调用时间倒序展示，支持按状态和关键字过滤，方便定位单次请求的上下文。</p>
+            <p>按调用时间倒序展示每次请求的生成态、交付态、耗时与上下文，适合排查“服务端已完成但客户端仍报错”的个案。</p>
           </div>
           <div className="external-api-usage-record-filters">
             <Input
               allowClear
-              placeholder="搜索 model / session / error / 资料集"
+              placeholder="搜索 model / session / delivery / error / 资料集"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
             <Segmented
-              value={statusFilter}
-              options={STATUS_FILTERS.map((item) => ({ label: item.label, value: item.value }))}
-              onChange={(value) => setStatusFilter(value as (typeof STATUS_FILTERS)[number]["value"])}
+              value={executionFilter}
+              options={EXECUTION_FILTERS.map((item) => ({ label: item.label, value: item.value }))}
+              onChange={(value) => setExecutionFilter(value as (typeof EXECUTION_FILTERS)[number]["value"])}
+            />
+            <Segmented
+              value={deliveryFilter}
+              options={DELIVERY_FILTERS.map((item) => ({ label: item.label, value: item.value }))}
+              onChange={(value) => setDeliveryFilter(value as (typeof DELIVERY_FILTERS)[number]["value"])}
             />
           </div>
         </div>
@@ -321,11 +438,11 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
               <thead>
                 <tr>
                   <th>时间</th>
-                  <th>结果</th>
-                  <th>模型</th>
-                  <th>请求形态</th>
-                  <th>Tokens</th>
-                  <th>成本</th>
+                  <th>生成态</th>
+                  <th>交付态</th>
+                  <th>耗时</th>
+                  <th>模型与形态</th>
+                  <th>Tokens / 输出</th>
                   <th>调用详情</th>
                 </tr>
               </thead>
@@ -339,18 +456,41 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                       </div>
                     </td>
                     <td>
-                      <Tag color={record.resultStatus === "success" ? "success" : "error"}>{record.resultStatus}</Tag>
+                      <div className="external-api-usage-status-stack">
+                        <Tag color={executionColor(record.resultStatus)}>{executionLabel(record.resultStatus)}</Tag>
+                        <span>{record.responseStatusCode ? `HTTP ${record.responseStatusCode}` : "未记录 HTTP 状态"}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="external-api-usage-status-stack">
+                        <Tag color={deliveryColor(record.deliveryStatus)}>{deliveryLabel(record.deliveryStatus)}</Tag>
+                        <span>
+                          {record.responseFinished
+                            ? "响应已完整结束"
+                            : record.responseClosedBeforeFinish
+                              ? "响应在完成前关闭"
+                              : record.requestAborted
+                                ? "请求已被调用方中断"
+                                : "等待/未知"}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="external-api-usage-cell-stack">
+                        <strong>准备 {formatDuration(record.responseReadyMs)}</strong>
+                        <span>总耗时 {formatDuration(record.responseCompletedMs)}</span>
+                      </div>
                     </td>
                     <td>
                       <div className="external-api-usage-cell-stack">
                         <strong>{record.model}</strong>
                         <span>请求侧: {record.requestedModel || "未传"}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="external-api-usage-chip-row">
-                        <Tag color={record.stream ? "processing" : "default"}>{record.stream ? "stream" : "non-stream"}</Tag>
-                        <Tag>{record.messageCount} 条消息</Tag>
+                        <div className="external-api-usage-chip-row">
+                          <Tag color={responseModeLabel(record.responseMode, record.stream) === "stream" ? "processing" : "default"}>
+                            {responseModeLabel(record.responseMode, record.stream)}
+                          </Tag>
+                          <Tag>{record.messageCount} 条消息</Tag>
+                        </div>
                       </div>
                     </td>
                     <td>
@@ -359,12 +499,7 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                         <span>
                           in {formatCount(record.inputTokens + record.cachedInputTokens)} / out {formatCount(record.outputTokens)}
                         </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="external-api-usage-cell-stack">
-                        <strong>{formatDecimal(record.estimatedCost)}</strong>
-                        <span>内部 {formatDecimal(record.internalCost)}</span>
+                        <span>输出字符 {formatCount(record.outputChars)}</span>
                       </div>
                     </td>
                     <td>
@@ -372,6 +507,8 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                         <span>Agent Mode: {record.agentModeId || "—"}</span>
                         <span>资料集: {record.knowledgeSetIds.length ? record.knowledgeSetIds.join(", ") : "未绑定"}</span>
                         {record.requestedReasoningEffort ? <span>请求推理强度: {record.requestedReasoningEffort}</span> : null}
+                        {record.responseReadyAt ? <span>生成完成: {formatLocalDateTime(record.responseReadyAt)}</span> : null}
+                        {record.responseCompletedAt ? <span>响应结束: {formatLocalDateTime(record.responseCompletedAt)}</span> : null}
                         {record.errorMessage ? <span className="external-api-usage-error-text">{record.errorMessage}</span> : null}
                       </div>
                     </td>

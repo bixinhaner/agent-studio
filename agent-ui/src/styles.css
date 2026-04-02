@@ -3153,7 +3153,7 @@ body {
 
 .external-api-usage-metric-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -3205,6 +3205,40 @@ body {
   flex-wrap: wrap;
 }
 
+.external-api-usage-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.external-api-usage-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.external-api-usage-legend i {
+  width: 18px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.external-api-usage-legend .legend-request {
+  background: linear-gradient(90deg, #0f766e, #2dd4bf);
+}
+
+.external-api-usage-legend .legend-delivery {
+  background: linear-gradient(90deg, #0f172a, #38bdf8);
+}
+
+.external-api-usage-legend .legend-interrupted {
+  background: linear-gradient(90deg, #f59e0b, #fb7185);
+}
+
 .external-api-usage-chart {
   overflow: auto;
 }
@@ -3232,10 +3266,31 @@ body {
   stroke-linejoin: round;
 }
 
+.external-api-usage-line-secondary {
+  fill: none;
+  stroke: #0f172a;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 10 8;
+}
+
 .external-api-usage-dot {
   fill: #0f766e;
   stroke: #ffffff;
   stroke-width: 2;
+}
+
+.external-api-usage-dot-secondary {
+  fill: #0f172a;
+  stroke: #e0f2fe;
+  stroke-width: 2;
+}
+
+.external-api-usage-interrupted-bar {
+  fill: rgba(245, 158, 11, 0.18);
+  stroke: rgba(251, 113, 133, 0.38);
+  stroke-width: 1;
 }
 
 .external-api-usage-axis-label {
@@ -3245,7 +3300,7 @@ body {
 
 .external-api-usage-panels {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -3260,6 +3315,10 @@ body {
 
 .external-api-usage-panel-sky {
   background: linear-gradient(180deg, #fbfeff, #f2f8ff);
+}
+
+.external-api-usage-panel-amber {
+  background: linear-gradient(180deg, #fffdf7, #fff7ed);
 }
 
 .external-api-usage-panel-mist {
@@ -3379,6 +3438,16 @@ body {
   color: #64748b;
 }
 
+.external-api-usage-status-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.external-api-usage-status-stack span {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .external-api-usage-chip-row {
   display: flex;
   gap: 8px;
@@ -3408,6 +3477,10 @@ body {
 
   .external-api-usage-record-filters .ant-input-affix-wrapper,
   .external-api-usage-record-filters .ant-segmented {
+    width: 100%;
+  }
+
+  .external-api-usage-legend {
     width: 100%;
   }
 

@@ -149,6 +149,7 @@ type OpenAICompatibleRouterOptions = {
       outputTokens: number;
       resultStatus?: string;
       metadata?: unknown;
+      createdAt?: string | Date;
     }): Promise<unknown>;
   };
   sessionWorkspaceRoot: string;
@@ -451,6 +452,22 @@ function buildExternalApiUsageMetadata(input: {
   body?: z.infer<typeof chatCompletionRequestSchema>;
   selectedModel?: string;
   selectedReasoningEffort?: ReasoningEffort;
+  executionStatus?: string;
+  deliveryStatus?: string;
+  responseMode?: "stream" | "non_stream";
+  requestAborted?: boolean;
+  responseStarted?: boolean;
+  responseFinished?: boolean;
+  responseClosed?: boolean;
+  responseClosedBeforeFinish?: boolean;
+  responseStatusCode?: number;
+  responseStartedAt?: string;
+  responseReadyAt?: string;
+  responseCompletedAt?: string;
+  responseStartedMs?: number;
+  responseReadyMs?: number;
+  responseCompletedMs?: number;
+  outputChars?: number;
   errorMessage?: string;
 }) {
   return {
@@ -463,8 +480,24 @@ function buildExternalApiUsageMetadata(input: {
     requestedReasoningEffort: input.body?.reasoning_effort,
     selectedModel: input.selectedModel,
     selectedReasoningEffort: input.selectedReasoningEffort,
+    executionStatus: trimOrUndefined(input.executionStatus),
+    deliveryStatus: trimOrUndefined(input.deliveryStatus),
+    responseMode: trimOrUndefined(input.responseMode),
     stream: Boolean(input.body?.stream),
     messageCount: input.body?.messages.length ?? 0,
+    requestAborted: input.requestAborted === true,
+    responseStarted: input.responseStarted === true,
+    responseFinished: input.responseFinished === true,
+    responseClosed: input.responseClosed === true,
+    responseClosedBeforeFinish: input.responseClosedBeforeFinish === true,
+    responseStatusCode: Number.isFinite(input.responseStatusCode) ? input.responseStatusCode : undefined,
+    responseStartedAt: trimOrUndefined(input.responseStartedAt),
+    responseReadyAt: trimOrUndefined(input.responseReadyAt),
+    responseCompletedAt: trimOrUndefined(input.responseCompletedAt),
+    responseStartedMs: Number.isFinite(input.responseStartedMs) ? input.responseStartedMs : undefined,
+    responseReadyMs: Number.isFinite(input.responseReadyMs) ? input.responseReadyMs : undefined,
+    responseCompletedMs: Number.isFinite(input.responseCompletedMs) ? input.responseCompletedMs : undefined,
+    outputChars: Number.isFinite(input.outputChars) ? input.outputChars : undefined,
     errorMessage: trimOrUndefined(input.errorMessage)
   };
 }
@@ -552,6 +585,110 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     let selectedKnowledgeSetIds: string[] = [];
     let selectedModel: string | undefined;
     let selectedReasoningEffort: ReasoningEffort | undefined;
+    const startedAtMs = Date.now();
+    let usage:
+      | {
+          inputTokens: number;
+          cachedInputTokens: number;
+          outputTokens: number;
+        }
+      | undefined;
+    let executionStatus: "success" | "failed" = "failed";
+    let deliveryStatus: "delivered" | "client_aborted" | "connection_closed" | undefined;
+    let requestAborted = false;
+    let responseStarted = false;
+    let responseFinished = false;
+    let responseClosed = false;
+    let responseClosedBeforeFinish = false;
+    let responseMode: "stream" | "non_stream" = "non_stream";
+    let responseStatusCode: number | undefined;
+    let responseStartedAtMs: number | undefined;
+    let responseReadyAtMs: number | undefined;
+    let responseCompletedAtMs: number | undefined;
+    let outputChars = 0;
+    let recordedUsage = false;
+    let errorMessage: string | undefined;
+
+    const markResponseStarted = (statusCode: number) => {
+      responseStarted = true;
+      responseStatusCode = statusCode;
+      if (!responseStartedAtMs) {
+        responseStartedAtMs = Date.now();
+      }
+    };
+
+    const markResponseReady = () => {
+      if (!responseReadyAtMs) {
+        responseReadyAtMs = Date.now();
+      }
+    };
+
+    const recordUsageIfNeeded = (nextDeliveryStatus: "delivered" | "client_aborted" | "connection_closed") => {
+      if (recordedUsage || !options.usageIngestion) {
+        return;
+      }
+      recordedUsage = true;
+      deliveryStatus = nextDeliveryStatus;
+      responseCompletedAtMs = responseCompletedAtMs ?? Date.now();
+      void options.usageIngestion.record({
+        organizationId: trimOrUndefined(authenticated.instance.organizationId),
+        sessionId: completionId,
+        model: selectedModel || normalizeModel(options.defaultModel),
+        featureType: "external_openai_api",
+        inputTokens: usage?.inputTokens ?? 0,
+        cachedInputTokens: usage?.cachedInputTokens ?? 0,
+        outputTokens: usage?.outputTokens ?? 0,
+        resultStatus: executionStatus,
+        createdAt: new Date(startedAtMs),
+        metadata: buildExternalApiUsageMetadata({
+          authenticated,
+          agentModeId: selectedAgentModeId,
+          knowledgeSetIds: selectedKnowledgeSetIds,
+          body,
+          selectedModel,
+          selectedReasoningEffort,
+          executionStatus,
+          deliveryStatus,
+          responseMode,
+          requestAborted,
+          responseStarted,
+          responseFinished,
+          responseClosed,
+          responseClosedBeforeFinish,
+          responseStatusCode,
+          responseStartedAt: responseStartedAtMs ? new Date(responseStartedAtMs).toISOString() : undefined,
+          responseReadyAt: responseReadyAtMs ? new Date(responseReadyAtMs).toISOString() : undefined,
+          responseCompletedAt: responseCompletedAtMs ? new Date(responseCompletedAtMs).toISOString() : undefined,
+          responseStartedMs: responseStartedAtMs ? responseStartedAtMs - startedAtMs : undefined,
+          responseReadyMs: responseReadyAtMs ? responseReadyAtMs - startedAtMs : undefined,
+          responseCompletedMs: responseCompletedAtMs ? responseCompletedAtMs - startedAtMs : undefined,
+          outputChars,
+          errorMessage
+        })
+      }).catch(() => undefined);
+    };
+
+    req.once("aborted", () => {
+      requestAborted = true;
+      responseCompletedAtMs = responseCompletedAtMs ?? Date.now();
+    });
+
+    res.once("finish", () => {
+      responseFinished = true;
+      responseStatusCode = res.statusCode;
+      responseCompletedAtMs = Date.now();
+      recordUsageIfNeeded("delivered");
+    });
+
+    res.once("close", () => {
+      responseClosed = true;
+      responseStatusCode = res.statusCode;
+      if (!responseFinished) {
+        responseClosedBeforeFinish = true;
+        responseCompletedAtMs = Date.now();
+        recordUsageIfNeeded(requestAborted ? "client_aborted" : "connection_closed");
+      }
+    });
 
     try {
       body = chatCompletionRequestSchema.parse(req.body ?? {});
@@ -625,19 +762,13 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       });
 
       if (body.stream) {
+        responseMode = "stream";
         res.status(200);
         res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
         res.setHeader("Cache-Control", "no-cache, no-transform");
         res.setHeader("Connection", "keep-alive");
         res.flushHeaders?.();
-
-        let usage:
-          | {
-              inputTokens: number;
-              cachedInputTokens: number;
-              outputTokens: number;
-            }
-          | undefined;
+        markResponseStarted(200);
 
         writeOpenAIStreamChunk(res, {
           id: completionId,
@@ -662,6 +793,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           if (!delta) {
             continue;
           }
+          outputChars += delta.length;
           writeOpenAIStreamChunk(res, {
             id: completionId,
             object: "chat.completion.chunk",
@@ -690,40 +822,14 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
             }
           ]
         });
+        executionStatus = "success";
+        markResponseReady();
         res.write("data: [DONE]\n\n");
         res.end();
-
-        if (options.usageIngestion) {
-          await options.usageIngestion.record({
-            organizationId: trimOrUndefined(authenticated.instance.organizationId),
-            sessionId: completionId,
-            model: selectedModel,
-            featureType: "external_openai_api",
-            inputTokens: usage?.inputTokens ?? 0,
-            cachedInputTokens: usage?.cachedInputTokens ?? 0,
-            outputTokens: usage?.outputTokens ?? 0,
-            resultStatus: "success",
-            metadata: buildExternalApiUsageMetadata({
-              authenticated,
-              agentModeId: selectedAgentModeId,
-              knowledgeSetIds: selectedKnowledgeSetIds,
-              body,
-              selectedModel,
-              selectedReasoningEffort
-            })
-          });
-        }
         return;
       }
 
       let answer = "";
-      let usage:
-        | {
-            inputTokens: number;
-            cachedInputTokens: number;
-            outputTokens: number;
-          }
-        | undefined;
 
       for await (const event of options.runtime.runStreamed(thread, prompt)) {
         const eventUsage = extractRuntimeUsageFromStreamEvent(event);
@@ -733,27 +839,10 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         if (event.delta) answer += event.delta;
         else if (event.text) answer += event.text;
       }
-
-      if (options.usageIngestion) {
-        await options.usageIngestion.record({
-          organizationId: trimOrUndefined(authenticated.instance.organizationId),
-          sessionId: completionId,
-          model: selectedModel,
-          featureType: "external_openai_api",
-          inputTokens: usage?.inputTokens ?? 0,
-          cachedInputTokens: usage?.cachedInputTokens ?? 0,
-          outputTokens: usage?.outputTokens ?? 0,
-          resultStatus: "success",
-          metadata: buildExternalApiUsageMetadata({
-            authenticated,
-            agentModeId: selectedAgentModeId,
-            knowledgeSetIds: selectedKnowledgeSetIds,
-            body,
-            selectedModel,
-            selectedReasoningEffort
-          })
-        });
-      }
+      executionStatus = "success";
+      outputChars = answer.length;
+      markResponseReady();
+      markResponseStarted(200);
 
       res.json(
         buildChatCompletionResponse({
@@ -765,29 +854,12 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         })
       );
     } catch (error) {
-      if (options.usageIngestion) {
-        await options.usageIngestion.record({
-          organizationId: trimOrUndefined(authenticated.instance.organizationId),
-          sessionId: completionId,
-          model: selectedModel || normalizeModel(options.defaultModel),
-          featureType: "external_openai_api",
-          inputTokens: 0,
-          cachedInputTokens: 0,
-          outputTokens: 0,
-          resultStatus: "failed",
-          metadata: buildExternalApiUsageMetadata({
-            authenticated,
-            agentModeId: selectedAgentModeId,
-            knowledgeSetIds: selectedKnowledgeSetIds,
-            body,
-            selectedModel,
-            selectedReasoningEffort,
-            errorMessage: error instanceof Error ? error.message : "Invalid request."
-          })
-        }).catch(() => undefined);
-      }
+      executionStatus = "failed";
+      errorMessage = error instanceof Error ? error.message : "Invalid request.";
+      markResponseReady();
       if (!res.headersSent) {
-        writeOpenAIError(res, 400, error instanceof Error ? error.message : "Invalid request.", "invalid_request");
+        markResponseStarted(400);
+        writeOpenAIError(res, 400, errorMessage, "invalid_request");
       } else {
         res.end();
       }
