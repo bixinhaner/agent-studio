@@ -895,6 +895,11 @@ function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: str
   return out;
 }
 
+function isKnowledgeSetPreviewPath(pathname: string): boolean {
+  const normalized = pathname.trim().replace(/\\/g, "/");
+  return normalized.includes("/data/knowledge-sets/");
+}
+
 function resolveThreadPreviewPathFromHref(href: string, threadId: string): string | null {
   const rawHref = href.trim();
   const normalizedThreadId = threadId.trim();
@@ -913,6 +918,7 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
   };
   const pathname = decodeURIComponent(resolvePathname());
   if (!pathname || pathname.startsWith("/api/")) return null;
+  if (isKnowledgeSetPreviewPath(pathname)) return pathname;
 
   if (!normalizedThreadId) {
     return pathname.includes("/thread-") ? pathname : null;

@@ -1063,9 +1063,15 @@ body {
 
 .thread-wrap .aui-thread-welcome-root,
 .thread-wrap .aui-thread-viewport-footer,
+.thread-wrap .thread-public-share-message-shell,
 .thread-wrap .aui-assistant-message-root,
 .thread-wrap .aui-user-message-root {
   width: min(100%, var(--aui-thread-max-width));
+}
+
+.thread-wrap .thread-public-share-message-shell {
+  box-sizing: border-box;
+  margin-inline: auto;
 }
 
 .thread-wrap .aui-assistant-message-root {

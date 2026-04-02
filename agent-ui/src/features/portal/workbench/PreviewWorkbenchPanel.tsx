@@ -346,6 +346,11 @@ function resolvePreviewKind(file: ThreadFileRecord, responseMimeType: string): P
   return "unsupported";
 }
 
+function isKnowledgeSetFilePath(filePath: string): boolean {
+  const normalized = normalizeFilePath(filePath);
+  return normalized.includes("/data/knowledge-sets/");
+}
+
 async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<Response> {
   const query = new URLSearchParams({ path: filePath });
   const response = await fetch(
@@ -362,6 +367,34 @@ async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<
     notifyAuthInvalidStatus(response.status);
     const text = await response.text();
     let detail = `读取文件失败(${response.status})`;
+    if (text) {
+      try {
+        const payload = JSON.parse(text) as { detail?: string };
+        if (typeof payload.detail === "string" && payload.detail.trim()) {
+          detail = payload.detail.trim();
+        }
+      } catch {
+        // ignore non-json response body
+      }
+    }
+    throw new Error(detail);
+  }
+  return response;
+}
+
+async function fetchPortalResourceFileBlob(filePath: string): Promise<Response> {
+  const query = new URLSearchParams({ path: filePath });
+  const response = await fetch(`${apiBase()}/api/portal/resources/files/content?${query.toString()}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      ...authHeaders()
+    }
+  });
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    const text = await response.text();
+    let detail = `读取资料集文件失败(${response.status})`;
     if (text) {
       try {
         const payload = JSON.parse(text) as { detail?: string };
@@ -533,13 +566,21 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
     };
 
     const loadPreview = async () => {
-      if (!props.threadId.trim() || !activeFile) {
+      if (!activeFile) {
+        setPreview({ status: "idle" });
+        return;
+      }
+      const filePath = normalizeFilePath(activeFile.filePath);
+      const isKnowledgeSetFile = isKnowledgeSetFilePath(filePath);
+      if (!isKnowledgeSetFile && !props.threadId.trim()) {
         setPreview({ status: "idle" });
         return;
       }
       setPreview({ status: "loading" });
       try {
-        const response = await fetchThreadFileBlob(props.threadId, activeFile.filePath);
+        const response = isKnowledgeSetFile
+          ? await fetchPortalResourceFileBlob(filePath)
+          : await fetchThreadFileBlob(props.threadId, filePath);
         const blob = await response.blob();
         createdObjectUrl = URL.createObjectURL(blob);
         const kind = resolvePreviewKind(activeFile, response.headers.get("content-type") || blob.type || "");

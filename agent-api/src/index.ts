@@ -1314,6 +1314,7 @@ registerCommonApiRoutes(app, {
   }),
   resourcesPortalRouter: createResourcesPortalRouter({
     knowledgeSets,
+    storage: knowledgeSetStorage,
     policies: policyService,
     listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
   }),
