@@ -613,51 +613,86 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
     <ConfigProvider theme={ADMIN_PREMIUM_THEME}>
       <div className="admin-console-root">
         <header className="admin-console-topbar">
-        <div className="admin-console-topbar-left">
-          {compactLayout ? (
-            <Button
-              type="text"
-              icon={<Menu size={16} />}
-              aria-label="打开导航"
-              className="admin-console-menu-btn"
-              onClick={() => setMobileNavOpen(true)}
+          <div className="admin-console-topbar-left">
+            {compactLayout ? (
+              <Button
+                type="text"
+                icon={<Menu size={16} />}
+                aria-label="打开导航"
+                className="admin-console-menu-btn"
+                onClick={() => setMobileNavOpen(true)}
+              />
+            ) : null}
+            <div className="admin-console-brand">
+              <span className="admin-console-brand-mark" aria-hidden="true">
+                AS
+              </span>
+              <strong className="admin-console-brand-title">Agent Studio Console</strong>
+            </div>
+            <Breadcrumb
+              className="admin-console-breadcrumb"
+              items={[{ title: currentGroupMeta.label }, { title: currentSectionMeta.title }]}
             />
+          </div>
+
+          <div className="admin-console-topbar-actions">
+            <Tag color="geekblue">时区：{timezoneLabel}</Tag>
+            <Button icon={<RefreshCcw size={14} />} onClick={() => void loadOverview()} loading={loading}>
+              刷新概览
+            </Button>
+            {props.onOpenPortal ? (
+              <Button type="default" onClick={props.onOpenPortal}>
+                工作台
+              </Button>
+            ) : null}
+          </div>
+        </header>
+
+        <div className="admin-console-frame">
+          {!compactLayout ? (
+            <aside className="admin-console-nav">
+              <AdminNavigationPanel
+                section={section}
+                search={navSearch}
+                onSearchChange={setNavSearch}
+                onSectionChange={setSection}
+                groups={filteredGroups}
+                currentUser={props.currentUser}
+                onOpenPortal={props.onOpenPortal}
+                onSignOut={props.onSignOut}
+              />
+            </aside>
           ) : null}
-          <div className="admin-console-brand">
-            <span className="admin-console-brand-mark" aria-hidden="true">
-              AS
-            </span>
-            <div>
-              <p className="admin-console-brand-eyebrow">Agent Studio Console</p>
-              <strong>管理控制台</strong>
+
+          <div className="admin-console-main" ref={contentRef}>
+            <div className="admin-console-header">
+              <div>
+                <h2 className="admin-console-header-title">{currentSectionMeta.title}</h2>
+                <p className="admin-console-header-desc">{currentSectionMeta.description}</p>
+              </div>
+            </div>
+            <div className="admin-console-content">
+              <AdminSectionContent
+                section={section}
+                overview={overview}
+                loading={loading}
+                errorText={errorText}
+                refreshedAt={overviewRefreshedAt}
+                onRefresh={() => void loadOverview()}
+                onSectionChange={setSection}
+              />
             </div>
           </div>
-          <Breadcrumb
-            className="admin-console-breadcrumb"
-            items={[
-              { title: "管理控制台" },
-              { title: currentGroupMeta.label },
-              { title: currentSectionMeta.title }
-            ]}
-          />
         </div>
-
-        <div className="admin-console-topbar-actions">
-          <Tag color="geekblue">时区：{timezoneLabel}</Tag>
-          <Button icon={<RefreshCcw size={14} />} onClick={() => void loadOverview()} loading={loading}>
-            刷新概览
-          </Button>
-          {props.onOpenPortal ? (
-            <Button type="default" onClick={props.onOpenPortal}>
-              工作台
-            </Button>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="admin-console-frame">
-        {!compactLayout ? (
-          <aside className="admin-console-nav">
+        {compactLayout ? (
+          <Drawer
+            open={mobileNavOpen}
+            onClose={() => setMobileNavOpen(false)}
+            title="管理导航"
+            placement="left"
+            width={360}
+            className="admin-console-nav-drawer"
+          >
             <AdminNavigationPanel
               section={section}
               search={navSearch}
@@ -668,56 +703,8 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
               onOpenPortal={props.onOpenPortal}
               onSignOut={props.onSignOut}
             />
-          </aside>
+          </Drawer>
         ) : null}
-
-        <div className="admin-console-main" ref={contentRef}>
-          <div className="admin-console-header">
-            <div>
-              <h2 className="admin-console-header-title">{currentSectionMeta.title}</h2>
-              <p className="admin-console-header-desc">{currentSectionMeta.description}</p>
-            </div>
-            <div className="admin-console-header-meta">
-              <span>{currentSectionMeta.scope}</span>
-              <span className="admin-console-header-meta-dot">•</span>
-              <span>{currentSectionMeta.cadence}</span>
-            </div>
-          </div>
-          <div className="admin-console-content">
-            <AdminSectionContent
-              section={section}
-              overview={overview}
-              loading={loading}
-              errorText={errorText}
-              refreshedAt={overviewRefreshedAt}
-              onRefresh={() => void loadOverview()}
-              onSectionChange={setSection}
-            />
-          </div>
-        </div>
-      </div>
-
-      {compactLayout ? (
-        <Drawer
-          open={mobileNavOpen}
-          onClose={() => setMobileNavOpen(false)}
-          title="管理导航"
-          placement="left"
-          width={360}
-          className="admin-console-nav-drawer"
-        >
-          <AdminNavigationPanel
-            section={section}
-            search={navSearch}
-            onSearchChange={setNavSearch}
-            onSectionChange={setSection}
-            groups={filteredGroups}
-            currentUser={props.currentUser}
-            onOpenPortal={props.onOpenPortal}
-            onSignOut={props.onSignOut}
-          />
-        </Drawer>
-      ) : null}
       </div>
     </ConfigProvider>
   );
