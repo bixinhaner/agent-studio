@@ -29,6 +29,10 @@ const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "openai_compatible_api", label: "外部 OpenAI API" }
 ];
 
+function getTabLabel(tab: IntegrationCenterTab): string {
+  return TABS.find((item) => item.id === tab)?.label ?? tab;
+}
+
 const STATUS_OPTIONS = [
   { label: "active", value: "active" },
   { label: "draft", value: "draft" },
@@ -170,6 +174,7 @@ export function IntegrationCenterShell() {
   const mobileFilterCount = search.trim() ? 1 : 0;
 
   const activeCount = filteredItems.filter((item) => item.status === "active").length;
+  const currentTabLabel = getTabLabel(tab);
 
   function handleUpdated(next: IntegrationDetail) {
     setDetail(next);
@@ -252,7 +257,7 @@ export function IntegrationCenterShell() {
           <Typography.Title level={4} className="admin-card-heading">
             集成中心
           </Typography.Title>
-          <Typography.Paragraph>统一管理 DingTalk、Zendesk、OpenAI/Codex 实例和授权策略。</Typography.Paragraph>
+          <Typography.Paragraph>统一管理 DingTalk、Zendesk、OpenAI/Codex、外部 OpenAI API 实例和授权策略。</Typography.Paragraph>
         </div>
         <Space wrap>
           <Tag color="blue">实例总数 {items.length}</Tag>
@@ -261,7 +266,7 @@ export function IntegrationCenterShell() {
             刷新列表
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
-            新建实例
+            新建{currentTabLabel}实例
           </Button>
         </Space>
       </div>
@@ -482,7 +487,7 @@ export function IntegrationCenterShell() {
       ) : null}
 
       <Drawer
-        title="新建集成实例"
+        title={`新建${currentTabLabel}实例`}
         width={520}
         open={createPanelOpen}
         onClose={() => void closeCreatePanel()}
@@ -502,6 +507,11 @@ export function IntegrationCenterShell() {
         {createErrorText ? <Alert className="admin-alert-inline" type="error" showIcon message={createErrorText} /> : null}
 
         <Space direction="vertical" size={14} className="admin-full-width">
+          <label className="field">
+            <span className="field-label">实例类型</span>
+            <Input value={currentTabLabel} disabled />
+          </label>
+
           <label className="field">
             <span className="field-label">实例名称</span>
             <Input
