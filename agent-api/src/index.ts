@@ -1275,6 +1275,7 @@ app.use(
     knowledgeSets,
     knowledgeSetStorage,
     usageIngestion,
+    systemSettings,
     sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot,
     defaultModel: appConfig.defaultModel,
     defaultReasoningEffort: appConfig.defaultReasoningEffort
