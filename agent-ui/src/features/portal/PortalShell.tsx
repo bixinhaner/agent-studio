@@ -1356,7 +1356,7 @@ const AgentThreadListItem: FC = () => {
   );
 };
 
-const ComposerActivationGuard: FC = () => {
+const ComposerActivationGuard: FC<{ runtime: unknown }> = ({ runtime }) => {
   const aui = useAui();
   const threadItemId = useAuiState((s) => s.threadListItem.id);
   const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -1380,7 +1380,7 @@ const ComposerActivationGuard: FC = () => {
       recoverRef.current = { threadId: normalizedThreadId, attempts: 0 };
     }
 
-    if (recoverRef.current.attempts >= 2) return;
+    if (recoverRef.current.attempts >= 3) return;
     recoverRef.current.attempts += 1;
     const attempt = recoverRef.current.attempts;
 
@@ -1389,14 +1389,29 @@ const ComposerActivationGuard: FC = () => {
         const currentThreadId = String(aui.threadListItem().getState().id || "").trim();
         if (currentThreadId !== normalizedThreadId) return;
         if (aui.composer().getState().isEditing) return;
+        if (attempt >= 2) {
+          // Hard recovery path: rebuild runtime binding for current thread if it got stuck in no-op state.
+          const threadsCore = (runtime as { _core?: { threads?: any } } | undefined)?._core?.threads as
+            | { _hookManager?: { stopThreadRuntime(threadId: string): void; startThreadRuntime(threadId: string): Promise<unknown> } }
+            | undefined;
+          const hookManager = threadsCore?._hookManager;
+          if (hookManager) {
+            try {
+              hookManager.stopThreadRuntime(normalizedThreadId);
+              void hookManager.startThreadRuntime(normalizedThreadId);
+            } catch {
+              // ignore internal runtime restart errors
+            }
+          }
+        }
         aui.threadListItem().switchTo();
       } catch {
         // Ignore transient runtime timing errors and wait for next state tick.
       }
-    }, attempt === 1 ? 0 : 120);
+    }, attempt === 1 ? 0 : attempt === 2 ? 120 : 240);
 
     return () => window.clearTimeout(timer);
-  }, [aui, isComposerEditing, mainThreadId, threadItemId, threadLoading]);
+  }, [aui, isComposerEditing, mainThreadId, runtime, threadItemId, threadLoading]);
 
   return null;
 };
@@ -2582,7 +2597,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ComposerActivationGuard />
+      <ComposerActivationGuard runtime={runtime} />
       <RunningStageTextContext.Provider value={runningStageText}>
         <ConfigProvider theme={PORTAL_ANTD_THEME}>
           <div className="portal-workbench-root">
