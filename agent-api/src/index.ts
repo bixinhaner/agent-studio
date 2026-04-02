@@ -618,6 +618,7 @@ function threadPublicShareOut(share: {
   snapshot: unknown;
   createdAt: string;
   updatedAt: string;
+  userDisplayName?: string;
 }) {
   return {
     id: share.id,
@@ -626,6 +627,7 @@ function threadPublicShareOut(share: {
     selected_turn_count: share.selectedTurnCount,
     public_path: `/share/${encodeURIComponent(share.token)}`,
     snapshot: share.snapshot,
+    user_display_name: share.userDisplayName,
     created_at: share.createdAt,
     updated_at: share.updatedAt
   };
@@ -639,6 +641,13 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 
 function createThreadPublicShareToken(): string {
   return randomBytes(18).toString("base64url");
+}
+
+async function resolveThreadPublicShareUserDisplayName(userId?: string): Promise<string | undefined> {
+  const normalizedUserId = trimOrUndefined(userId);
+  if (!normalizedUserId) return undefined;
+  const user = await users.getById(normalizedUserId);
+  return trimOrUndefined(user?.displayName) ?? trimOrUndefined(user?.email);
 }
 
 function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
@@ -1584,8 +1593,12 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
       res.status(404).json({ detail: "公开链接不存在或已失效" });
       return;
     }
+    const userDisplayName = await resolveThreadPublicShareUserDisplayName(share.createdByUserId);
     res.json({
-      share: threadPublicShareOut(share)
+      share: threadPublicShareOut({
+        ...share,
+        userDisplayName
+      })
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "读取公开链接失败";
@@ -1778,9 +1791,14 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
       snapshot: built.snapshot,
       createdByUserId: currentUser.id
     });
+    const userDisplayName =
+      trimOrUndefined(currentUser.displayName) ?? trimOrUndefined(currentUser.email) ?? undefined;
 
     res.json({
-      share: threadPublicShareOut(share)
+      share: threadPublicShareOut({
+        ...share,
+        userDisplayName
+      })
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "创建公开链接失败";

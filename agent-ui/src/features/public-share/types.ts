@@ -33,6 +33,7 @@ export type ThreadPublicShareView = {
   token: string;
   title: string;
   public_path: string;
+  user_display_name?: string;
   selected_turn_count: number;
   snapshot: PublicShareSnapshot;
   created_at: string;

@@ -4,6 +4,43 @@ import ReactMarkdown from "react-markdown";
 import { fetchPublicThreadShare } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
 
+async function copyTextToClipboard(value: string): Promise<void> {
+  const text = value.trim();
+  if (!text) {
+    throw new Error("没有可复制的内容");
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "absolute";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("浏览器不支持自动复制，请手动复制");
+  }
+}
+
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(href);
+}
+
 function isHttpUrl(value: string | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
@@ -25,6 +62,37 @@ function PublicShareMarkdownLink(props: {
   );
 }
 
+function PublicShareMarkdown(props: { text: string; className?: string }) {
+  return (
+    <div className={props.className ? `public-share-markdown ${props.className}` : "public-share-markdown"}>
+      <ReactMarkdown
+        components={{
+          h1: ({ className, ...rest }) => <h1 className={className ? `aui-md-h1 ${className}` : "aui-md-h1"} {...rest} />,
+          h2: ({ className, ...rest }) => <h2 className={className ? `aui-md-h2 ${className}` : "aui-md-h2"} {...rest} />,
+          h3: ({ className, ...rest }) => <h3 className={className ? `aui-md-h3 ${className}` : "aui-md-h3"} {...rest} />,
+          h4: ({ className, ...rest }) => <h4 className={className ? `aui-md-h4 ${className}` : "aui-md-h4"} {...rest} />,
+          p: ({ className, ...rest }) => <p className={className ? `aui-md-p ${className}` : "aui-md-p"} {...rest} />,
+          a: PublicShareMarkdownLink as any,
+          ul: ({ className, ...rest }) => <ul className={className ? `aui-md-ul ${className}` : "aui-md-ul"} {...rest} />,
+          ol: ({ className, ...rest }) => <ol className={className ? `aui-md-ol ${className}` : "aui-md-ol"} {...rest} />,
+          blockquote: ({ className, ...rest }) => (
+            <blockquote className={className ? `aui-md-blockquote ${className}` : "aui-md-blockquote"} {...rest} />
+          ),
+          code: ({ className, ...rest }) =>
+            className ? (
+              <code className={className} {...rest} />
+            ) : (
+              <code className="aui-md-inline-code" {...rest} />
+            ),
+          pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />
+        }}
+      >
+        {props.text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function formatLocalDateTime(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
@@ -39,45 +107,195 @@ function extractPublicShareToken(pathname: string): string {
   return match ? decodeURIComponent(match[1] || "") : "";
 }
 
-function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage }) {
-  const textParts = props.message.parts.filter((part) => part.type === "text");
-  const sourceParts = props.message.parts.filter((part) => part.type === "source");
-  const roleLabel = props.message.role === "user" ? "你" : "Assistant";
+function normalizeLineBreaks(value: string): string {
+  return value.replace(/\r\n?/g, "\n").trim();
+}
 
+function splitIntoMeaningfulBlocks(text: string): string[] {
+  const normalized = normalizeLineBreaks(text);
+  if (!normalized) return [];
+
+  const paragraphBlocks = normalized
+    .split(/\n{2,}/g)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  if (paragraphBlocks.length >= 2) {
+    return paragraphBlocks;
+  }
+
+  const hasStructuredMarkdown = /(^|\n)\s{0,3}(```|#{1,6}\s|[-*+]\s|\d+\.\s|>\s|\|.+\|)/m.test(normalized);
+  if (hasStructuredMarkdown) {
+    return [normalized];
+  }
+
+  const lineBlocks = normalized
+    .split(/\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lineBlocks.length >= 2) {
+    return lineBlocks;
+  }
+
+  const processMarkers = ["我先", "我会", "接下来", "下一步", "当前", "我已经", "我需要", "然后", "最后"];
+  const markerHits = processMarkers.filter((marker) => normalized.includes(marker)).length;
+  if (markerHits >= 2) {
+    const sentenceBlocks = normalized
+      .split(/(?<=[。！？!?])/g)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+    if (sentenceBlocks.length >= 3) {
+      return sentenceBlocks;
+    }
+  }
+
+  return [normalized];
+}
+
+function splitAssistantMessageSections(text: string): { processBlocks: string[]; finalBlock: string } {
+  const blocks = splitIntoMeaningfulBlocks(text);
+  if (blocks.length <= 1) {
+    return {
+      processBlocks: [],
+      finalBlock: blocks[0] || normalizeLineBreaks(text)
+    };
+  }
+  return {
+    processBlocks: blocks.slice(0, -1),
+    finalBlock: blocks[blocks.length - 1] || ""
+  };
+}
+
+function collectMessageText(message: PublicShareSnapshotMessage): string {
+  return message.parts
+    .filter((part): part is Extract<PublicShareSnapshotMessage["parts"][number], { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
+}
+
+function sanitizeFileNameSegment(value: string): string {
+  const normalized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+  return normalized || "shared-conversation";
+}
+
+function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: string): string {
+  const lines: string[] = [];
+  const threadTitle = share.snapshot.threadTitle || share.title;
+  lines.push(`# ${threadTitle}`);
+  lines.push("");
+  lines.push(`> Public link generated at ${formatLocalDateTime(share.created_at)}`);
+  lines.push("");
+
+  share.snapshot.turns.forEach((turn, turnIndex) => {
+    lines.push(`## Turn ${turnIndex + 1}`);
+    lines.push("");
+
+    turn.messages.forEach((message) => {
+      if (message.role === "user") {
+        const text = collectMessageText(message);
+        if (!text) return;
+        lines.push(`### ${userLabel}`);
+        lines.push("");
+        lines.push(text);
+        lines.push("");
+        return;
+      }
+
+      const text = collectMessageText(message);
+      if (!text) return;
+      const sourceParts = message.parts.filter((part) => part.type === "source");
+      const { processBlocks, finalBlock } = splitAssistantMessageSections(text);
+
+      lines.push("### Agent Studio");
+      lines.push("");
+
+      if (processBlocks.length > 0) {
+        lines.push("#### 过程记录");
+        lines.push("");
+        processBlocks.forEach((block, index) => {
+          lines.push(`##### Step ${index + 1}`);
+          lines.push("");
+          lines.push(block);
+          lines.push("");
+        });
+      }
+
+      lines.push("#### 最终回复");
+      lines.push("");
+      lines.push(finalBlock || text);
+      lines.push("");
+
+      if (sourceParts.length > 0) {
+        lines.push("#### 参考链接");
+        lines.push("");
+        sourceParts.forEach((part) => {
+          lines.push(`- [${part.title || part.url}](${part.url})`);
+        });
+        lines.push("");
+      }
+    });
+  });
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim().concat("\n");
+}
+
+function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
+  const text = collectMessageText(props.message);
   return (
-    <section className={`public-share-message public-share-message-${props.message.role}`}>
+    <section className="public-share-message public-share-message-user">
       <div className="public-share-message-head">
-        <span className="public-share-message-role">{roleLabel}</span>
+        <span className="public-share-message-role">{props.userLabel}</span>
       </div>
       <div className="public-share-message-body">
-        {textParts.map((part, index) => (
-          <div key={`${props.message.id}-text-${index}`} className="public-share-markdown">
-            <ReactMarkdown
-              components={{
-                h1: ({ className, ...rest }) => <h1 className={className ? `aui-md-h1 ${className}` : "aui-md-h1"} {...rest} />,
-                h2: ({ className, ...rest }) => <h2 className={className ? `aui-md-h2 ${className}` : "aui-md-h2"} {...rest} />,
-                h3: ({ className, ...rest }) => <h3 className={className ? `aui-md-h3 ${className}` : "aui-md-h3"} {...rest} />,
-                h4: ({ className, ...rest }) => <h4 className={className ? `aui-md-h4 ${className}` : "aui-md-h4"} {...rest} />,
-                p: ({ className, ...rest }) => <p className={className ? `aui-md-p ${className}` : "aui-md-p"} {...rest} />,
-                a: PublicShareMarkdownLink as any,
-                ul: ({ className, ...rest }) => <ul className={className ? `aui-md-ul ${className}` : "aui-md-ul"} {...rest} />,
-                ol: ({ className, ...rest }) => <ol className={className ? `aui-md-ol ${className}` : "aui-md-ol"} {...rest} />,
-                blockquote: ({ className, ...rest }) => (
-                  <blockquote className={className ? `aui-md-blockquote ${className}` : "aui-md-blockquote"} {...rest} />
-                ),
-                code: ({ className, ...rest }) =>
-                  className ? (
-                    <code className={className} {...rest} />
-                  ) : (
-                    <code className="aui-md-inline-code" {...rest} />
-                  ),
-                pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />
-              }}
-            >
-              {part.text}
-            </ReactMarkdown>
-          </div>
-        ))}
+        <PublicShareMarkdown text={text} />
+      </div>
+    </section>
+  );
+}
+
+function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
+  const text = collectMessageText(props.message);
+  const sourceParts = props.message.parts.filter((part) => part.type === "source");
+  const { processBlocks, finalBlock } = splitAssistantMessageSections(text);
+
+  return (
+    <section className="public-share-message public-share-message-assistant">
+      <div className="public-share-message-head">
+        <span className="public-share-message-role">Agent Studio</span>
+      </div>
+
+      {processBlocks.length > 0 ? (
+        <details className="public-share-process-card">
+          <summary>
+            <span className="public-share-process-summary-copy">
+              <span className="public-share-process-summary-label">过程记录</span>
+              <span className="public-share-process-summary-caption">按步骤查看回答形成过程</span>
+            </span>
+            <span className="public-share-process-summary-count">{processBlocks.length} 步</span>
+          </summary>
+          <ol className="public-share-process-list">
+            {processBlocks.map((block, index) => (
+              <li key={`${props.message.id}-process-${index}`} className="public-share-process-item">
+                <div className="public-share-process-node" aria-hidden="true">
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                </div>
+                <div className="public-share-process-panel">
+                  <div className="public-share-process-step-label">Step {index + 1}</div>
+                  <PublicShareMarkdown text={block} className="public-share-process-markdown" />
+                </div>
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
+
+      <div className="public-share-final-card">
+        <div className="public-share-final-label">最终回复</div>
+        <PublicShareMarkdown text={finalBlock || text} className="public-share-final-markdown" />
         {sourceParts.length > 0 ? (
           <div className="public-share-source-list">
             {sourceParts.map((part) => (
@@ -92,6 +310,13 @@ function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage })
   );
 }
 
+function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
+  if (props.message.role === "user") {
+    return <UserMessageBlock message={props.message} userLabel={props.userLabel} />;
+  }
+  return <AssistantMessageBlock message={props.message} />;
+}
+
 export function PublicSharePage(props: { token?: string }) {
   const token = useMemo(
     () => props.token || extractPublicShareToken(typeof window !== "undefined" ? window.location.pathname : ""),
@@ -100,6 +325,16 @@ export function PublicSharePage(props: { token?: string }) {
   const [share, setShare] = useState<ThreadPublicShareView | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
+  const [actionStatus, setActionStatus] = useState("");
+
+  useEffect(() => {
+    document.documentElement.classList.add("public-share-mode");
+    document.body.classList.add("public-share-mode");
+    return () => {
+      document.documentElement.classList.remove("public-share-mode");
+      document.body.classList.remove("public-share-mode");
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,12 +391,55 @@ export function PublicSharePage(props: { token?: string }) {
     };
   }, [share?.title]);
 
+  const userLabel = share?.user_display_name?.trim() || "用户";
+  const shareMarkdown = useMemo(
+    () => (share ? buildPublicShareMarkdown(share, userLabel) : ""),
+    [share, userLabel]
+  );
+  const downloadFileName = useMemo(
+    () => (share ? `${sanitizeFileNameSegment(share.snapshot.threadTitle || share.title)}.md` : "shared-conversation.md"),
+    [share]
+  );
+
+  useEffect(() => {
+    if (!actionStatus) return;
+    const timer = window.setTimeout(() => setActionStatus(""), 2200);
+    return () => window.clearTimeout(timer);
+  }, [actionStatus]);
+
+  async function handleCopyMarkdown() {
+    try {
+      await copyTextToClipboard(shareMarkdown);
+      setActionStatus("Markdown 已复制");
+    } catch (error) {
+      setActionStatus(error instanceof Error ? error.message : "复制失败");
+    }
+  }
+
+  function handleDownloadMarkdown() {
+    if (!shareMarkdown) return;
+    downloadTextFile(downloadFileName, shareMarkdown);
+    setActionStatus(`已下载 ${downloadFileName}`);
+  }
+
   return (
     <div className="public-share-shell">
       <div className="public-share-aurora" aria-hidden="true" />
       <main className="public-share-layout">
         <header className="public-share-header">
-          <span className="public-share-kicker">Agent Studio Public Link</span>
+          <div className="public-share-header-top">
+            <span className="public-share-kicker">Agent Studio Public Link</span>
+            {share ? (
+              <div className="public-share-header-actions">
+                <button type="button" className="public-share-header-btn" onClick={() => void handleCopyMarkdown()}>
+                  Copy Markdown
+                </button>
+                <button type="button" className="public-share-header-btn public-share-header-btn-primary" onClick={handleDownloadMarkdown}>
+                  Download
+                </button>
+              </div>
+            ) : null}
+          </div>
           <h1>{share?.title || "Shared conversation"}</h1>
           <p>
             {loading
@@ -170,6 +448,7 @@ export function PublicSharePage(props: { token?: string }) {
                 ? `任何拿到链接的人都可以查看此快照。生成时间：${formatLocalDateTime(share.created_at)}`
                 : "当前公开链接不可用。"}
           </p>
+          {actionStatus ? <div className="public-share-header-status">{actionStatus}</div> : null}
         </header>
 
         {loading ? (
@@ -204,7 +483,7 @@ export function PublicSharePage(props: { token?: string }) {
                   <div className="public-share-turn-index">Turn {index + 1}</div>
                   <div className="public-share-turn-body">
                     {turn.messages.map((message) => (
-                      <PublicShareMessageBlock key={message.id} message={message} />
+                      <PublicShareMessageBlock key={message.id} message={message} userLabel={userLabel} />
                     ))}
                   </div>
                 </article>
