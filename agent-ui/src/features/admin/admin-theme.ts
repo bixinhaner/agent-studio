@@ -2,69 +2,69 @@ import type { ThemeConfig } from "antd";
 
 export const ADMIN_PREMIUM_THEME: ThemeConfig = {
   token: {
-    colorPrimary: "#0f172a", // Shadcn uses Slate/Zinc dark colors for primary standard 
-    colorInfo: "#0f172a",
-    colorBgLayout: "#f8fafc", // Very soft slate layout background
-    colorBgContainer: "#ffffff",
-    colorText: "#0f172a",
-    colorTextSecondary: "#64748b",
-    colorBorder: "#e2e8f0",  // Crisp fine borders
-    colorBorderSecondary: "#f1f5f9",
-    borderRadius: 6, // Crucial! 6px is standard Shadcn radius, instead of Antd 12px
-    borderRadiusSM: 4,
-    borderRadiusLG: 8,
-    controlHeight: 36, // Smaller inputs 
-    boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
-    boxShadowSecondary: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)",
+    colorPrimary: "#2458e8",
+    colorInfo: "#2458e8",
+    colorBgLayout: "#eef3f8",
+    colorBgContainer: "rgba(255,255,255,0.82)",
+    colorText: "#10203a",
+    colorTextSecondary: "#5d6a7f",
+    colorBorder: "rgba(128,145,168,0.22)",
+    colorBorderSecondary: "rgba(148,163,184,0.16)",
+    borderRadius: 18,
+    borderRadiusSM: 14,
+    borderRadiusLG: 24,
+    controlHeight: 42,
+    boxShadow: "0 16px 36px rgba(15, 23, 42, 0.08)",
+    boxShadowSecondary: "0 26px 70px rgba(15, 23, 42, 0.12)",
     fontFamily:
-      "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+      "'SF Pro Display', 'SF Pro Text', 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'IBM Plex Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif"
   },
   components: {
     Button: {
-      colorPrimary: "#0f172a",
-      colorPrimaryHover: "#334155",
-      colorPrimaryActive: "#020617",
+      colorPrimary: "#2458e8",
+      colorPrimaryHover: "#1d47c5",
+      colorPrimaryActive: "#16389a",
       primaryShadow: "none",
-      fontWeight: 500,
-      paddingInlineSM: 12,
-      paddingInline: 16,
-      paddingInlineLG: 24,
-      borderRadius: 6
+      fontWeight: 600,
+      paddingInlineSM: 14,
+      paddingInline: 18,
+      paddingInlineLG: 26,
+      borderRadius: 999
     },
     Input: {
-      activeBorderColor: "#0f172a",
-      hoverBorderColor: "#94a3b8",
-      activeShadow: "0 0 0 2px rgba(15, 23, 42, 0.1)", 
-      errorActiveShadow: "0 0 0 2px rgba(220, 38, 38, 0.1)",
-      paddingBlock: 6,
-      paddingInline: 12
+      activeBorderColor: "#2458e8",
+      hoverBorderColor: "#8ca1c8",
+      activeShadow: "0 0 0 4px rgba(36, 88, 232, 0.12)",
+      errorActiveShadow: "0 0 0 4px rgba(220, 38, 38, 0.12)",
+      paddingBlock: 8,
+      paddingInline: 14
     },
     Select: {
-      activeBorderColor: "#0f172a",
-      hoverBorderColor: "#94a3b8",
+      activeBorderColor: "#2458e8",
+      hoverBorderColor: "#8ca1c8",
       activeOutlineColor: "transparent",
-      optionSelectedBg: "#f1f5f9"
+      optionSelectedBg: "rgba(36, 88, 232, 0.08)"
     },
     Table: {
-      headerBg: "#f8fafc",
-      headerColor: "#475569",
-      headerBorderRadius: 6,
-      rowHoverBg: "#f8fafc",
+      headerBg: "rgba(241,245,249,0.9)",
+      headerColor: "#425168",
+      headerBorderRadius: 16,
+      rowHoverBg: "rgba(239,244,255,0.84)",
       cellPaddingBlock: 12,
       cellPaddingInline: 16
     },
     Tabs: {
-      itemColor: "#64748b",
-      itemSelectedColor: "#0f172a",
-      itemHoverColor: "#0f172a",
-      inkBarColor: "#0f172a"
+      itemColor: "#5d6a7f",
+      itemSelectedColor: "#10203a",
+      itemHoverColor: "#10203a",
+      inkBarColor: "#2458e8"
     },
     Card: {
-      paddingLG: 20
+      paddingLG: 24
     },
     Switch: {
-      colorPrimary: "#0f172a",
-      colorPrimaryHover: "#334155"
+      colorPrimary: "#2458e8",
+      colorPrimaryHover: "#1d47c5"
     }
   }
 };

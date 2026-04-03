@@ -1320,3 +1320,933 @@
     padding: 18px;
   }
 }
+
+/* ==========================================================================
+   Console Reframe V2
+   ========================================================================== */
+
+.admin-console-root {
+  --admin-bg: #eef3f8;
+  --admin-surface: rgba(255, 255, 255, 0.74);
+  --admin-surface-strong: rgba(255, 255, 255, 0.92);
+  --admin-surface-soft: rgba(247, 250, 255, 0.72);
+  --admin-border: rgba(128, 145, 168, 0.2);
+  --admin-border-strong: rgba(126, 145, 174, 0.28);
+  --admin-text: #10203a;
+  --admin-subtle: #5d6a7f;
+  --admin-accent: #2458e8;
+  --admin-accent-strong: #1b43bb;
+  --admin-accent-soft: rgba(36, 88, 232, 0.12);
+  --admin-glow: rgba(36, 88, 232, 0.2);
+  --admin-warm: #d97706;
+  --admin-shadow-xl: 0 32px 80px rgba(15, 23, 42, 0.11);
+  --admin-shadow-lg: 0 18px 44px rgba(15, 23, 42, 0.08);
+  --admin-shadow-sm: 0 8px 20px rgba(15, 23, 42, 0.05);
+  --admin-radius-xl: 32px;
+  --admin-radius-lg: 24px;
+  --admin-radius-md: 18px;
+  --admin-radius-sm: 14px;
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(255, 255, 255, 0.92), transparent 24%),
+    radial-gradient(circle at 92% 12%, rgba(36, 88, 232, 0.12), transparent 20%),
+    linear-gradient(180deg, #f7fbff 0%, #eef3f8 42%, #ebf0f6 100%);
+  color: var(--admin-text);
+  font-family:
+    "SF Pro Display",
+    "SF Pro Text",
+    "Segoe UI Variable Display",
+    "Segoe UI Variable Text",
+    "IBM Plex Sans",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+.admin-console-root[data-group="governance"] {
+  --admin-accent: #0f766e;
+  --admin-accent-strong: #0d5c56;
+  --admin-accent-soft: rgba(15, 118, 110, 0.12);
+  --admin-glow: rgba(15, 118, 110, 0.18);
+}
+
+.admin-console-root[data-group="runtime"] {
+  --admin-accent: #c26a0d;
+  --admin-accent-strong: #96500b;
+  --admin-accent-soft: rgba(194, 106, 13, 0.12);
+  --admin-glow: rgba(194, 106, 13, 0.18);
+}
+
+.admin-console-root::before,
+.admin-console-root::after {
+  content: "";
+  position: absolute;
+  inset: auto;
+  border-radius: 999px;
+  filter: blur(48px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.admin-console-root::before {
+  top: 84px;
+  right: -80px;
+  width: 280px;
+  height: 280px;
+  background: linear-gradient(135deg, var(--admin-glow), rgba(255, 255, 255, 0));
+}
+
+.admin-console-root::after {
+  bottom: 84px;
+  left: -110px;
+  width: 320px;
+  height: 320px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.48), var(--admin-accent-soft));
+}
+
+.admin-console-topbar {
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(24px);
+  background: rgba(248, 250, 252, 0.72);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.58);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.admin-console-brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 11px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.3)),
+    linear-gradient(160deg, var(--admin-accent), var(--admin-accent-strong));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.admin-console-brand-title {
+  letter-spacing: -0.03em;
+}
+
+.admin-console-frame {
+  background: transparent;
+}
+
+.admin-console-nav {
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.84), rgba(240, 245, 251, 0.62));
+  border-right: 1px solid rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(22px);
+}
+
+.admin-console-nav-surface {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-console-nav-search {
+  padding: 20px 18px 12px;
+}
+
+.admin-console-nav-scroll {
+  padding: 0 14px 20px;
+  gap: 18px;
+}
+
+.admin-console-nav-group-head h4 {
+  margin: 0 0 10px 10px;
+  letter-spacing: 0.16em;
+}
+
+.admin-console-nav-item {
+  border-radius: 16px;
+  padding: 12px 14px;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+  border: 1px solid transparent;
+}
+
+.admin-console-nav-item:hover {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(160, 174, 192, 0.16);
+}
+
+.admin-console-nav-item.active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 246, 255, 0.82)),
+    var(--admin-accent-soft);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 12px 24px rgba(15, 23, 42, 0.06);
+}
+
+.admin-console-nav-item-copy strong {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.admin-console-nav-foot {
+  padding: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.54);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.54));
+}
+
+.admin-console-main {
+  position: relative;
+  overflow-y: auto;
+  padding: 28px 32px 42px;
+  gap: 22px;
+  background: transparent;
+}
+
+.admin-console-main::-webkit-scrollbar {
+  width: 12px;
+}
+
+.admin-console-main::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background: rgba(125, 139, 160, 0.34);
+  background-clip: padding-box;
+}
+
+.admin-console-stage-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.admin-console-stage-hero-copy,
+.admin-console-command-deck,
+.admin-console-switchboard,
+.admin-console-stage {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: var(--admin-radius-xl);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.72)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.4), transparent);
+  box-shadow: var(--admin-shadow-xl);
+  backdrop-filter: blur(22px);
+}
+
+.admin-console-stage-hero-copy {
+  padding: 28px 30px 30px;
+  overflow: hidden;
+}
+
+.admin-console-stage-hero-copy::after {
+  content: "";
+  position: absolute;
+  inset: auto -80px -120px auto;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--admin-glow), transparent 66%);
+  pointer-events: none;
+}
+
+.admin-console-section-kicker,
+.admin-console-command-kicker,
+.admin-console-stage-caption,
+.admin-console-command-eyebrow,
+.admin-overview-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--admin-accent-strong);
+}
+
+.admin-console-stage-title {
+  margin: 18px 0 14px;
+  max-width: 14ch;
+  font-size: clamp(2rem, 3.2vw, 3.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.06em;
+  color: var(--admin-text);
+}
+
+.admin-console-stage-summary {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--admin-subtle);
+}
+
+.admin-console-pill-row,
+.admin-console-stage-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.admin-console-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.admin-console-pill.neutral,
+.admin-console-pill.subtle {
+  color: var(--admin-subtle);
+}
+
+.admin-console-pill.success {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.admin-console-pill.warning {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.08);
+}
+
+.admin-console-command-deck {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-console-command-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-console-command-title {
+  margin: 14px 0 0;
+  max-width: 18ch;
+  font-size: 24px;
+  line-height: 1.18;
+  letter-spacing: -0.04em;
+}
+
+.admin-console-inline-notice {
+  padding: 12px 14px;
+  border-radius: var(--admin-radius-sm);
+  border: 1px solid rgba(220, 38, 38, 0.14);
+  background: rgba(254, 242, 242, 0.9);
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.admin-console-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-console-signal-card {
+  padding: 16px;
+  border-radius: var(--admin-radius-md);
+  border: 1px solid var(--admin-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(247, 250, 255, 0.72)),
+    rgba(255, 255, 255, 0.64);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.admin-console-signal-card[data-tone="primary"] {
+  border-color: rgba(36, 88, 232, 0.16);
+}
+
+.admin-console-signal-card[data-tone="success"] {
+  border-color: rgba(15, 118, 110, 0.18);
+}
+
+.admin-console-signal-card[data-tone="warning"] {
+  border-color: rgba(180, 83, 9, 0.18);
+}
+
+.admin-console-signal-label,
+.admin-overview-metric-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--admin-subtle);
+}
+
+.admin-console-signal-value,
+.admin-overview-metric-value,
+.admin-overview-status-value {
+  display: block;
+  font-family: "SF Mono", "Cascadia Code", "IBM Plex Mono", monospace;
+  font-size: clamp(1.45rem, 2vw, 2rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  color: var(--admin-text);
+}
+
+.admin-console-signal-detail,
+.admin-overview-metric-detail {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--admin-subtle);
+}
+
+.admin-console-switchboard {
+  padding: 22px 24px;
+}
+
+.admin-console-switchboard-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.admin-console-switchboard-title,
+.admin-overview-panel-title,
+.admin-console-stage-heading {
+  margin: 12px 0 0;
+  letter-spacing: -0.04em;
+  color: var(--admin-text);
+}
+
+.admin-console-switchboard-title,
+.admin-overview-panel-title {
+  font-size: clamp(1.25rem, 1.6vw, 1.65rem);
+  line-height: 1.22;
+}
+
+.admin-console-switchboard-copy,
+.admin-overview-panel-copy,
+.admin-console-stage-detail {
+  margin: 0;
+  max-width: 56ch;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--admin-subtle);
+}
+
+.admin-console-switchboard-grid,
+.admin-overview-action-grid,
+.admin-overview-group-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-console-switch-card,
+.admin-overview-group-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid var(--admin-border);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 250, 255, 0.74)),
+    rgba(255, 255, 255, 0.68);
+  color: var(--admin-text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.admin-console-switch-card.compact {
+  min-height: 104px;
+}
+
+.admin-console-switch-card:hover,
+.admin-overview-group-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.1);
+}
+
+.admin-console-switch-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--admin-accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), var(--admin-accent-soft));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.admin-console-switch-card-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-console-switch-card-copy strong,
+.admin-overview-group-title {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.admin-console-switch-card-copy small,
+.admin-overview-group-copy {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--admin-subtle);
+}
+
+.admin-console-switch-card-arrow,
+.admin-overview-group-foot {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--admin-subtle);
+}
+
+.admin-console-content {
+  padding: 0;
+  overflow: visible;
+}
+
+.admin-console-stage {
+  padding: 24px;
+}
+
+.admin-console-stage-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.admin-console-stage-heading {
+  font-size: clamp(1.5rem, 1.8vw, 2rem);
+  line-height: 1.14;
+}
+
+.admin-console-stage-content > * {
+  min-width: 0;
+}
+
+.admin-console-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  gap: 18px;
+}
+
+.admin-overview-panel {
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  padding: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 250, 255, 0.72)),
+    rgba(255, 255, 255, 0.62);
+  box-shadow: var(--admin-shadow-lg);
+}
+
+.admin-overview-panel-primary {
+  grid-row: span 2;
+}
+
+.admin-overview-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-overview-panel-head.compact {
+  margin-bottom: 18px;
+}
+
+.admin-overview-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.admin-overview-mosaic {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-overview-metric-tile,
+.admin-overview-status-tile {
+  min-height: 160px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  background:
+    radial-gradient(circle at top right, var(--admin-accent-soft), transparent 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.72));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.admin-overview-status-tile {
+  background:
+    radial-gradient(circle at top right, rgba(217, 119, 6, 0.09), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.72));
+}
+
+.admin-overview-status-tags {
+  margin-top: 14px;
+}
+
+.admin-overview-group-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-overview-group-card {
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 180px;
+}
+
+.admin-overview-group-copy {
+  margin: 10px 0 0;
+}
+
+.admin-overview-group-foot {
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+
+.admin-console-organization-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.admin-console-root .ant-btn {
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.admin-console-root .ant-btn-default {
+  border-color: rgba(128, 145, 168, 0.2);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.admin-console-root .ant-btn-default:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(255, 255, 255, 0.82);
+}
+
+.admin-console-root .ant-btn-primary {
+  background: linear-gradient(135deg, var(--admin-accent), var(--admin-accent-strong));
+  border-color: transparent;
+}
+
+.admin-console-root .ant-tag {
+  border-radius: 999px;
+  padding-inline: 10px;
+  font-weight: 600;
+  border-color: transparent;
+}
+
+.admin-console-root .ant-card,
+.admin-console-root .admin-card,
+.admin-console-root .antd-admin-card,
+.admin-console-root .resource-center-section,
+.admin-console-root .resource-center-sidebar,
+.admin-console-root .resource-center-detail,
+.admin-console-root .resource-center-stat-card,
+.admin-console-root .resource-center-item,
+.admin-console-root .resource-center-list-item,
+.admin-console-root .monitoring-shell-header,
+.admin-console-root .broadcast-admin-shell,
+.admin-console-root .inbox-shell,
+.admin-console-root .system-settings-preview-card,
+.admin-console-root .system-settings-history-card,
+.admin-console-root .capability-center-preview-card,
+.admin-console-root .conversation-audit-mode-bar,
+.admin-console-root .conversation-audit-rail,
+.admin-console-root .conversation-audit-detail {
+  border: 1px solid var(--admin-border) !important;
+  border-radius: var(--admin-radius-lg) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.72)),
+    rgba(255, 255, 255, 0.68) !important;
+  box-shadow: var(--admin-shadow-lg) !important;
+}
+
+.admin-console-root .admin-card .ant-card-body,
+.admin-console-root .antd-admin-card .ant-card-body {
+  padding: 24px;
+}
+
+.admin-console-root .resource-center-shell,
+.admin-console-root .capability-center-shell,
+.admin-console-root .integration-center-shell,
+.admin-console-root .system-settings-shell,
+.admin-console-root .monitoring-shell,
+.admin-console-root .broadcast-admin-shell,
+.admin-console-root .conversation-audit-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.admin-console-root .admin-section-header,
+.admin-console-root .resource-center-section-header,
+.admin-console-root .resource-center-sidebar-header,
+.admin-console-root .monitoring-shell-heading,
+.admin-console-root .system-settings-toolbar,
+.admin-console-root .conversation-audit-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-console-root .resource-center-stats-row,
+.admin-console-root .capability-center-summary-grid,
+.admin-console-root .system-settings-preview-grid,
+.admin-console-root .system-settings-history-grid,
+.admin-console-root .monitoring-shell-tabs,
+.admin-console-root .conversation-audit-summary-grid {
+  gap: 14px;
+}
+
+.admin-console-root .resource-center-stat-card,
+.admin-console-root .system-settings-preview-card,
+.admin-console-root .system-settings-history-card,
+.admin-console-root .capability-center-preview-card {
+  padding: 18px;
+}
+
+.admin-console-root .resource-center-item,
+.admin-console-root .resource-center-list-item,
+.admin-console-root .resource-center-type-tab,
+.admin-console-root .monitoring-shell-tab,
+.admin-console-root .conversation-audit-thread-card {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.admin-console-root .resource-center-item:hover,
+.admin-console-root .resource-center-list-item:hover,
+.admin-console-root .resource-center-type-tab:hover,
+.admin-console-root .monitoring-shell-tab:hover,
+.admin-console-root .conversation-audit-thread-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.admin-console-root .resource-center-item.active,
+.admin-console-root .resource-center-list-item.active,
+.admin-console-root .resource-center-type-tab.active,
+.admin-console-root .monitoring-shell-tab.active,
+.admin-console-root .conversation-audit-thread-card.is-active {
+  border-color: rgba(255, 255, 255, 0.82) !important;
+  background:
+    radial-gradient(circle at top right, var(--admin-accent-soft), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 246, 255, 0.88)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 22px 40px rgba(15, 23, 42, 0.1) !important;
+}
+
+.admin-console-root .resource-center-item-title,
+.admin-console-root .resource-center-list-item strong,
+.admin-console-root .system-settings-preview-card strong,
+.admin-console-root .capability-center-preview-card strong {
+  letter-spacing: -0.02em;
+}
+
+.admin-console-root .ant-input,
+.admin-console-root .ant-input-number,
+.admin-console-root .ant-select-selector,
+.admin-console-root .ant-input-affix-wrapper {
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(128, 145, 168, 0.2) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.admin-console-root .ant-input:focus,
+.admin-console-root .ant-input-focused,
+.admin-console-root .ant-input-affix-wrapper-focused,
+.admin-console-root .ant-select-focused .ant-select-selector {
+  border-color: rgba(36, 88, 232, 0.32) !important;
+  box-shadow: 0 0 0 4px rgba(36, 88, 232, 0.1) !important;
+}
+
+.admin-console-root .ant-table-wrapper {
+  border: 1px solid rgba(128, 145, 168, 0.18);
+  border-radius: 22px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.admin-console-root .ant-table,
+.admin-console-root .ant-table-container,
+.admin-console-root .ant-table-content {
+  background: transparent;
+}
+
+.admin-console-root .ant-table-thead > tr > th {
+  background: rgba(241, 245, 249, 0.84) !important;
+  backdrop-filter: blur(18px);
+}
+
+.admin-console-root .ant-drawer-content,
+.admin-console-root .ant-modal-content {
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 255, 0.88));
+}
+
+.admin-console-root .auth-eyebrow {
+  margin-bottom: 8px;
+  color: var(--admin-accent-strong);
+  letter-spacing: 0.18em;
+}
+
+.admin-console-root .admin-action-btn {
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--admin-accent), var(--admin-accent-strong));
+  color: #fff;
+  font-weight: 600;
+}
+
+@media (max-width: 1440px) {
+  .admin-console-switchboard-grid,
+  .admin-overview-group-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .admin-console-main {
+    padding: 22px 20px 34px;
+  }
+
+  .admin-console-stage-hero,
+  .admin-console-overview-grid,
+  .admin-console-organization-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-stage-title {
+    max-width: none;
+  }
+
+  .admin-console-command-title {
+    max-width: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .admin-console-command-head,
+  .admin-console-switchboard-head,
+  .admin-console-stage-head,
+  .admin-overview-panel-head,
+  .admin-console-root .admin-section-header,
+  .admin-console-root .resource-center-section-header,
+  .admin-console-root .resource-center-sidebar-header,
+  .admin-console-root .monitoring-shell-heading,
+  .admin-console-root .system-settings-toolbar,
+  .admin-console-root .conversation-audit-section-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-console-signal-grid,
+  .admin-console-switchboard-grid,
+  .admin-overview-action-grid,
+  .admin-overview-group-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-overview-mosaic {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-console-topbar {
+    padding-inline: 12px;
+  }
+
+  .admin-console-main {
+    padding: 16px 14px 28px;
+  }
+
+  .admin-console-stage-hero-copy,
+  .admin-console-command-deck,
+  .admin-console-switchboard,
+  .admin-console-stage,
+  .admin-overview-panel {
+    padding: 18px;
+    border-radius: 24px;
+  }
+
+  .admin-console-pill {
+    min-height: 32px;
+    padding-inline: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-console-root *,
+  .admin-console-root *::before,
+  .admin-console-root *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
