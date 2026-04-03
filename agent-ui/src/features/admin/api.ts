@@ -1,6 +1,9 @@
 import { api } from "../../lib/api";
 
 import type {
+  AdminConversationDetailResponse,
+  AdminConversationListInput,
+  AdminConversationListResponse,
   AdminOverview,
   AdminUserDetailResponse,
   AdminUserListResponse,
@@ -13,6 +16,26 @@ import type {
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
   return api<AdminOverview>("/api/admin/overview");
+}
+
+export async function fetchAdminConversationAuditList(
+  input: AdminConversationListInput = {}
+): Promise<AdminConversationListResponse> {
+  const params = new URLSearchParams();
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.status) params.set("status", input.status);
+  if (input.feedback) params.set("feedback", input.feedback);
+  if (input.sort) params.set("sort", input.sort);
+  if (typeof input.page === "number") params.set("page", String(input.page));
+  if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
+  const query = params.toString();
+  return api<AdminConversationListResponse>(`/api/admin/conversations${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAdminConversationAuditDetail(
+  conversationId: string
+): Promise<AdminConversationDetailResponse> {
+  return api<AdminConversationDetailResponse>(`/api/admin/conversations/${encodeURIComponent(conversationId)}`);
 }
 
 export async function fetchAdminUsers(): Promise<AdminUserListResponse> {

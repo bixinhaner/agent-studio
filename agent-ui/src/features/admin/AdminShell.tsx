@@ -9,6 +9,7 @@ import {
   Wrench,
   Component,
   Settings,
+  MessageSquareText,
   Search,
   Menu,
   RefreshCcw,
@@ -29,6 +30,9 @@ import "./admin-console.css";
 const MonitoringShellLazy = lazy(() => import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell })));
 const BroadcastAdminViewLazy = lazy(() =>
   import("../collaboration/BroadcastAdminView").then((module) => ({ default: module.BroadcastAdminView }))
+);
+const ConversationAuditViewLazy = lazy(() =>
+  import("./ConversationAuditView").then((module) => ({ default: module.ConversationAuditView }))
 );
 const UsersViewLazy = lazy(() => import("./UsersView").then((module) => ({ default: module.UsersView })));
 const DepartmentTreeViewLazy = lazy(() =>
@@ -95,6 +99,7 @@ const GROUPS: AdminGroupMeta[] = [
 
 const SECTION_ORDER: AdminConsoleSection[] = [
   "overview",
+  "conversations",
   "monitoring",
   "broadcasts",
   "users",
@@ -116,6 +121,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["概览", "运营", "数据看板", "dashboard"],
     icon: <LayoutDashboard size={18} />
+  },
+  conversations: {
+    id: "conversations",
+    title: "会话审计",
+    description: "查看全量用户会话、逐条消息与正负向反馈记录。",
+    scope: "会话与反馈",
+    cadence: "建议持续巡检",
+    group: "operations",
+    keywords: ["会话", "对话", "thread", "feedback", "审计"],
+    icon: <MessageSquareText size={18} />
   },
   monitoring: {
     id: "monitoring",
@@ -409,6 +424,13 @@ function AdminSectionContent(props: {
     return (
       <Suspense fallback={<AdminSectionLazyFallback />}>
         <UsersViewLazy />
+      </Suspense>
+    );
+  }
+  if (props.section === "conversations") {
+    return (
+      <Suspense fallback={<AdminSectionLazyFallback />}>
+        <ConversationAuditViewLazy />
       </Suspense>
     );
   }

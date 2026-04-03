@@ -1,5 +1,6 @@
 export type AdminSection =
   | "overview"
+  | "conversations"
   | "users"
   | "resources"
   | "capabilities"
@@ -24,6 +25,107 @@ export type AdminOverview = {
       hasWebhookSigningSecret: boolean;
       lastValidatedAt: string | null;
     };
+  };
+};
+
+export type AdminConversationStatusFilter = "all" | "regular" | "archived";
+export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
+export type AdminConversationSort = "updated_desc" | "created_desc";
+
+export type AdminConversationUser = {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+  role: string;
+  status: string;
+};
+
+export type AdminConversationFeedback = {
+  id: string;
+  type: "positive" | "negative";
+  messageId: string | null;
+  contentPreview: string | null;
+  createdAt: string;
+};
+
+export type AdminConversationSummary = {
+  id: string;
+  externalId: string | null;
+  title: string;
+  status: string;
+  model: string;
+  reasoningEffort: string;
+  workspace: string;
+  activeSession: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: AdminConversationUser | null;
+  metrics: {
+    messageCount: number;
+    userMessageCount: number;
+    assistantMessageCount: number;
+    feedbackCount: number;
+  };
+  preview: {
+    firstUserText: string | null;
+    latestText: string | null;
+  };
+  feedbackSummary: {
+    total: number;
+    positive: number;
+    negative: number;
+    latestAt: string | null;
+  };
+  feedback: AdminConversationFeedback[];
+};
+
+export type AdminConversationListInput = {
+  query?: string;
+  status?: AdminConversationStatusFilter;
+  feedback?: AdminConversationFeedbackFilter;
+  sort?: AdminConversationSort;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AdminConversationListResponse = {
+  filters: {
+    query: string;
+    status: AdminConversationStatusFilter;
+    feedback: AdminConversationFeedbackFilter;
+    sort: AdminConversationSort;
+  };
+  summary: {
+    totalThreads: number;
+    threadsWithFeedback: number;
+    totalFeedback: number;
+    positiveFeedback: number;
+    negativeFeedback: number;
+    uniqueUsers: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  conversations: AdminConversationSummary[];
+};
+
+export type AdminConversationTranscriptMessage = {
+  id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  text: string;
+  parentId: string | null;
+  createdAt: string | null;
+  hasRunConfig: boolean;
+};
+
+export type AdminConversationDetailResponse = {
+  conversation: AdminConversationSummary;
+  transcript: {
+    messageCount: number;
+    messages: AdminConversationTranscriptMessage[];
   };
 };
 
