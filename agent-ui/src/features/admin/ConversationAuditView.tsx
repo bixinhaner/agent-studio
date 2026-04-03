@@ -46,6 +46,37 @@ const AUDIT_MODE_OPTIONS: Array<{ value: AuditMode; label: string }> = [
   { value: "api", label: "API 调用" }
 ];
 
+const AUDIT_MODE_STORY: Record<
+  AuditMode,
+  {
+    eyebrow: string;
+    title: string;
+    detail: string;
+    notes: Array<{ label: string; text: string }>;
+  }
+> = {
+  conversations: {
+    eyebrow: "Conversation Investigations",
+    title: "围绕线程、反馈和转录上下文组织调查，而不是只翻聊天日志。",
+    detail: "适合定位用户问题、回看模型响应、复盘负向反馈，沿着会话时间线快速理解发生过什么。",
+    notes: [
+      { label: "主索引", text: "先用标题、用户、反馈和模型锁定目标线程，再进入右侧详情。" },
+      { label: "核心线索", text: "优先关注反馈、最近摘要和消息角色分布，能最快判断问题落点。" },
+      { label: "复盘方式", text: "把时间线当叙事来阅读，而不是把记录当数据库行逐个检索。" }
+    ]
+  },
+  api: {
+    eyebrow: "Request Forensics",
+    title: "把 API 审计做成请求取证视图，而不是纯技术流水账。",
+    detail: "适合围绕 IP、传输状态、时延和 Token 消耗快速判断异常来源，定位生成与交付链路的断点。",
+    notes: [
+      { label: "主索引", text: "从 IP、实例、Session 和模型组合入手，优先锁定异常请求簇。" },
+      { label: "核心线索", text: "结果状态、交付状态和时延一起看，能更快判断是生成问题还是传输问题。" },
+      { label: "复盘方式", text: "把单条请求放回同 IP、同会话和同实例上下文里观察，不要孤立处理。" }
+    ]
+  }
+};
+
 const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
   { value: "regular", label: "活跃线程" },
@@ -291,6 +322,15 @@ function SummaryCard(props: { title: string; value: number | string; suffix?: st
 function InsightCard(props: { label: string; text: string }) {
   return (
     <article className="conversation-audit-insight-card">
+      <span>{props.label}</span>
+      <strong>{props.text}</strong>
+    </article>
+  );
+}
+
+function AuditGuidanceCard(props: { label: string; text: string }) {
+  return (
+    <article className="conversation-audit-command-card">
       <span>{props.label}</span>
       <strong>{props.text}</strong>
     </article>
@@ -1258,17 +1298,36 @@ function ApiAuditWorkspace(props: { timezoneLabel: string }) {
 export function ConversationAuditView() {
   const [mode, setMode] = useState<AuditMode>("conversations");
   const timezoneLabel = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区", []);
+  const story = AUDIT_MODE_STORY[mode];
 
   return (
     <div className="conversation-audit-hub">
-      <Card className="admin-card conversation-audit-mode-bar">
-        <div className="conversation-audit-mode-copy">
-          <span className="conversation-audit-detail-eyebrow">Audit Workspace</span>
-          <h3>统一审计工作台</h3>
-          <p>在同一个工作台里切换查看用户会话和 OpenAI 兼容 API 调用，所有时间都跟随浏览器本地时区 {timezoneLabel}。</p>
+      <section className="admin-flagship-surface conversation-audit-command">
+        <div className="admin-flagship-top">
+          <div className="admin-flagship-copy">
+            <span className="conversation-audit-detail-eyebrow">{story.eyebrow}</span>
+            <Typography.Title level={3} className="admin-flagship-title">
+              {story.title}
+            </Typography.Title>
+            <Typography.Paragraph className="admin-flagship-detail">
+              {story.detail} 所有时间都会跟随当前浏览器本地时区 {timezoneLabel}。
+            </Typography.Paragraph>
+            <div className="admin-flagship-pill-row">
+              <span className="admin-console-pill">当前模式 · {mode === "conversations" ? "用户会话" : "API 调用"}</span>
+              <span className="admin-console-pill">调查节奏 · 先筛选后下钻</span>
+              <span className="admin-console-pill neutral">时区 · {timezoneLabel}</span>
+            </div>
+          </div>
+          <div className="admin-flagship-actions conversation-audit-command-actions">
+            <Segmented options={AUDIT_MODE_OPTIONS} value={mode} onChange={(value) => setMode(value as AuditMode)} />
+          </div>
         </div>
-        <Segmented options={AUDIT_MODE_OPTIONS} value={mode} onChange={(value) => setMode(value as AuditMode)} />
-      </Card>
+        <div className="conversation-audit-command-grid">
+          {story.notes.map((item) => (
+            <AuditGuidanceCard key={item.label} label={item.label} text={item.text} />
+          ))}
+        </div>
+      </section>
 
       {mode === "conversations" ? <ConversationWorkspace timezoneLabel={timezoneLabel} /> : <ApiAuditWorkspace timezoneLabel={timezoneLabel} />}
     </div>

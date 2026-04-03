@@ -77,21 +77,6 @@ type AdminNavigationGroupView = AdminGroupMeta & {
   items: AdminSectionMeta[];
 };
 
-type AdminSectionStory = {
-  eyebrow: string;
-  headline: string;
-  detail: string;
-};
-
-type AdminSignalTone = "primary" | "success" | "warning" | "neutral";
-
-type AdminSignal = {
-  label: string;
-  value: string;
-  detail: string;
-  tone: AdminSignalTone;
-};
-
 const ADMIN_HASH_PREFIX = "#admin/";
 
 const GROUPS: AdminGroupMeta[] = [
@@ -245,63 +230,6 @@ const GROUP_ENTRY_SECTION: Record<AdminConsoleGroup, AdminConsoleSection> = {
   runtime: "resources"
 };
 
-const SECTION_STORY: Record<AdminConsoleSection, AdminSectionStory> = {
-  overview: {
-    eyebrow: "Platform Pulse",
-    headline: "把平台状态读成一张精确、克制、可操作的控制面板。",
-    detail: "先看到信号，再做判断。把用户规模、线程沉淀、会话活跃度和外部连接状态压缩到同一视角里。"
-  },
-  conversations: {
-    eyebrow: "Audit Studio",
-    headline: "把对话审计从纯日志表格，升级成可追踪的内容工作台。",
-    detail: "围绕线程、反馈、转录和 API 轨迹组织信息，让定位问题与复盘体验像浏览时间线而不是翻数据库。"
-  },
-  monitoring: {
-    eyebrow: "Operations Watch",
-    headline: "把请求、成本、配额和告警汇成同一条运行叙事。",
-    detail: "这里不是堆图表，而是把平台健康度、风险边界和动作入口收敛到一层清晰的监控语言。"
-  },
-  broadcasts: {
-    eyebrow: "Announcement Engine",
-    headline: "把系统广播做成可编排、可审阅、可追踪的运营面板。",
-    detail: "统一处理内容、渠道与触达节奏，让广播像产品能力而不是零散表单。"
-  },
-  users: {
-    eyebrow: "Identity Governance",
-    headline: "把用户管理做成一张可信的身份地图，而不是一串平铺字段。",
-    detail: "成员状态、身份属性和治理动作应该先被看懂，再被编辑。"
-  },
-  organization: {
-    eyebrow: "Org Fabric",
-    headline: "把组织结构与同步任务摆进同一画布，直接看见偏差发生在哪里。",
-    detail: "左手是结构，右手是动作。组织同步页应该帮助你定位差异，而不是要求你记住上下文。"
-  },
-  rbac: {
-    eyebrow: "Access Architecture",
-    headline: "让角色与权限像架构图一样可读，而不是像配置表一样难接近。",
-    detail: "授权体系需要清晰、可靠、低摩擦，既能做治理，也能让人快速理解影响范围。"
-  },
-  resources: {
-    eyebrow: "Knowledge Operating System",
-    headline: "把资料集管理做成一套可巡视、可维护、可委派的资源操作系统。",
-    detail: "资料、来源、权限和状态必须在同一个界面语境里被理解，而不是拆散在若干普通卡片中。"
-  },
-  capabilities: {
-    eyebrow: "Capability Craft",
-    headline: "把 Mode、Skill 和 Run Profile 重新编排成一套像产品装配台的体验。",
-    detail: "这里要体现系统能力的组合关系，而不是仅仅列出资源名字。"
-  },
-  integrations: {
-    eyebrow: "Connection Fabric",
-    headline: "让第三方平台接入看起来像经营一个连接层，而不是维护若干配置表。",
-    detail: "实例状态、授权绑定、校验历史和调用语义应该形成清晰的纵深。"
-  },
-  "system-settings": {
-    eyebrow: "Control Surface",
-    headline: "把系统设置做成高信任控制面，而不是危险的后台表单集合。",
-    detail: "草稿、发布和预览要有明确层次，让每次变更都像一次受控发布。"
-  }
-};
 
 function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
@@ -673,7 +601,6 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
 
   const currentSectionMeta = SECTION_META[section];
   const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
-  const currentSectionStory = SECTION_STORY[section];
 
   const filteredGroups = useMemo<AdminNavigationGroupView[]>(() => {
     const query = navSearch.trim().toLowerCase();
@@ -690,45 +617,6 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
       };
     }).filter((group) => group.items.length > 0);
   }, [navSearch]);
-
-  const quickSwitches = useMemo(
-    () => filteredGroups.flatMap((group) => group.items).filter((item) => item.id !== section).slice(0, 5),
-    [filteredGroups, section]
-  );
-  const platformSignals = useMemo<AdminSignal[]>(() => {
-    const zendeskStatus = overview?.integrations?.zendesk;
-    return [
-      {
-        label: "平台用户",
-        value: loading ? "..." : formatMetricValue(overview?.counts.users),
-        detail: "统一身份体系下的成员规模",
-        tone: "primary"
-      },
-      {
-        label: "线程资产",
-        value: loading ? "..." : formatMetricValue(overview?.counts.threads),
-        detail: "沉淀中的工作与知识上下文",
-        tone: "neutral"
-      },
-      {
-        label: "活跃会话",
-        value: loading ? "..." : formatMetricValue(overview?.counts.activeSessions),
-        detail: "当前仍在运行或交互中的会话",
-        tone: "neutral"
-      },
-      {
-        label: "外部连接",
-        value: zendeskStatus ? (zendeskStatus.ready ? "Ready" : "Review") : "Pending",
-        detail: zendeskStatus
-          ? zendeskStatus.ready
-            ? "Zendesk 已进入可用状态"
-            : "Zendesk 仍需要补齐配置"
-          : "尚未建立连接健康快照",
-        tone: zendeskStatus?.ready ? "success" : zendeskStatus ? "warning" : "neutral"
-      }
-    ];
-  }, [loading, overview]);
-  const stageKeywords = useMemo(() => currentSectionMeta.keywords.slice(0, 4), [currentSectionMeta]);
 
   const loadOverview = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -881,76 +769,18 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           ) : null}
 
           <div className="admin-console-main" ref={contentRef}>
-            <section className="admin-console-stage-hero">
-              <div className="admin-console-stage-hero-copy">
-                <span className="admin-console-section-kicker">{currentSectionStory.eyebrow}</span>
-                <h1 className="admin-console-stage-title">{currentSectionStory.headline}</h1>
-                <p className="admin-console-stage-summary">{currentSectionStory.detail}</p>
-                <div className="admin-console-pill-row">
-                  <span className="admin-console-pill">{currentSectionMeta.scope}</span>
-                  <span className="admin-console-pill">{currentSectionMeta.cadence}</span>
-                  <span className="admin-console-pill">模块 · {currentSectionMeta.title}</span>
-                  <span className="admin-console-pill neutral">更新 · {formatLocalTimestamp(overviewRefreshedAt)}</span>
-                </div>
-              </div>
-              <aside className="admin-console-command-deck">
-                <div className="admin-console-command-head">
-                  <div>
-                    <span className="admin-console-command-kicker">Mission Control</span>
-                    <h2 className="admin-console-command-title">所有子页都应该从信号开始，而不是从冰冷表单开始。</h2>
-                  </div>
-                  <Button icon={<RefreshCcw size={14} />} onClick={() => void loadOverview()} loading={loading}>
-                    同步状态
-                  </Button>
-                </div>
-                <div className="admin-console-signal-grid">
-                  {platformSignals.map((signal) => (
-                    <article key={signal.label} className="admin-console-signal-card" data-tone={signal.tone}>
-                      <span className="admin-console-signal-label">{signal.label}</span>
-                      <strong className="admin-console-signal-value">{signal.value}</strong>
-                      <small className="admin-console-signal-detail">{signal.detail}</small>
-                    </article>
-                  ))}
-                </div>
-                {errorText ? (
-                  <div className="admin-console-inline-notice" role="alert">
-                    {errorText}
-                  </div>
-                ) : null}
-              </aside>
-            </section>
-
-            {quickSwitches.length ? (
-              <section className="admin-console-switchboard" aria-label="快捷跳转">
-                <div className="admin-console-switchboard-head">
-                  <div>
-                    <span className="admin-console-section-kicker">Quick Switch</span>
-                    <h2 className="admin-console-switchboard-title">保持方向感，不要在管理台里迷路。</h2>
-                  </div>
-                  <p className="admin-console-switchboard-copy">根据当前分组与搜索词，推荐几个最可能连续访问的模块。</p>
-                </div>
-                <div className="admin-console-switchboard-grid">
-                  {quickSwitches.map((item) => (
-                    <SectionShortcutCard key={item.id} item={item} compact onSelect={setSection} />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
             <div className="admin-console-content">
-              <section className="admin-console-stage">
+              <section className="admin-console-stage admin-console-stage-minimal">
                 <div className="admin-console-stage-head">
                   <div>
                     <span className="admin-console-stage-caption">{currentGroupMeta.label}</span>
-                    <h2 className="admin-console-stage-heading">{currentSectionMeta.title}</h2>
+                    <h1 className="admin-console-stage-heading">{currentSectionMeta.title}</h1>
                     <p className="admin-console-stage-detail">{currentSectionMeta.description}</p>
                   </div>
                   <div className="admin-console-stage-tag-row">
-                    {stageKeywords.map((keyword) => (
-                      <span key={keyword} className="admin-console-pill subtle">
-                        {keyword}
-                      </span>
-                    ))}
+                    <span className="admin-console-pill subtle">{currentSectionMeta.scope}</span>
+                    <span className="admin-console-pill subtle">{currentSectionMeta.cadence}</span>
+                    <span className="admin-console-pill subtle">更新 · {formatLocalTimestamp(overviewRefreshedAt)}</span>
                   </div>
                 </div>
 

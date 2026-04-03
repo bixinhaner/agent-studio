@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Space, Tabs } from "antd";
+import { Alert, Button, Tabs, Typography } from "antd";
 
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "./api";
 import { BrandingSettingsView } from "./BrandingSettingsView";
@@ -57,6 +57,26 @@ function fieldPaths(prefix: string, patch: Record<string, unknown>) {
 function getValidationMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "请求失败";
+}
+
+function formatLocalDateTime(value?: string | null) {
+  if (!value) return "未记录";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "未记录";
+  return parsed.toLocaleString();
+}
+
+function formatStorageLimit(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "未设置";
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(0)} MB`;
+}
+
+function isPayloadSectionChanged(left: unknown, right: unknown) {
+  if (right == null) return true;
+  return JSON.stringify(left) !== JSON.stringify(right);
 }
 
 function applySystemSettingsResponse(
@@ -367,32 +387,88 @@ export function SystemSettingsShell() {
 
   const draftPayload = draftRecord.payload;
   const publishedPayload = publishedRecord?.payload ?? null;
+  const changedAreas = [
+    { label: "品牌与文案", changed: isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding) },
+    { label: "模型默认值", changed: isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults) },
+    { label: "保留与上传", changed: isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null) },
+    { label: "安全策略", changed: isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety) },
+    {
+      label: "组织默认值",
+      changed: isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults)
+    },
+    { label: "行为文案", changed: isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior) }
+  ];
+  const changedAreaCount = changedAreas.filter((item) => item.changed).length;
+  const enabledSafetyRuleCount = Object.values(draftPayload.safety).filter(Boolean).length;
+  const currentSectionLabel = SECTIONS.find((item) => item.id === section)?.label ?? section;
 
   return (
     <section className="admin-card system-settings-shell">
-      <div className="admin-section-header">
-        <div>
-          <p className="auth-eyebrow">Admin System Settings</p>
-          <h2>系统设置</h2>
-          <p>编辑平台默认值和安全边界，保存到草稿后再显式发布。</p>
+      <section className="admin-flagship-surface system-settings-command">
+        <div className="admin-flagship-top">
+          <div className="admin-flagship-copy">
+            <p className="auth-eyebrow">Control Surface</p>
+            <Typography.Title level={3} className="admin-flagship-title">
+              把系统设置变成一张可发布、可对照、可回溯的控制面。
+            </Typography.Title>
+            <Typography.Paragraph className="admin-flagship-detail">
+              草稿、已发布版本和风险边界都应该在第一屏被看见。当前正在编辑“{currentSectionLabel}”，所有时间均跟随当前用户本地时区。
+            </Typography.Paragraph>
+            <div className="admin-flagship-pill-row">
+              <span className="admin-console-pill">草稿 · {formatVersionLabel(draftMeta)}</span>
+              <span className="admin-console-pill">{publishedMeta ? `已发布 · ${formatVersionLabel(publishedMeta)}` : "尚未发布"}</span>
+              <span className="admin-console-pill neutral">
+                {changedAreaCount > 0 ? `待发布变更 ${changedAreaCount} 项` : "草稿与线上一致"}
+              </span>
+            </div>
+          </div>
+          <div className="admin-flagship-actions">
+            <Button disabled={loading || saving || publishing} onClick={() => void reloadSettings()}>
+              重新加载
+            </Button>
+            <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
+              {saving ? "保存中..." : "保存草稿"}
+            </Button>
+            <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
+              {publishing ? "发布中..." : "发布设置"}
+            </Button>
+          </div>
         </div>
-        <div className="system-settings-meta-pill-group">
-          <span className="system-settings-meta-pill">编辑中：{formatVersionLabel(draftMeta)}</span>
-          <span className="system-settings-meta-pill">已发布：{formatVersionLabel(publishedMeta)}</span>
-        </div>
-      </div>
 
-      <div className="system-settings-toolbar">
-        <p className="system-settings-toolbar-copy">建议先保存草稿，再发布到线上环境。</p>
-        <Space wrap className="system-settings-action-group">
-          <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
-            {saving ? "保存中..." : "保存草稿"}
-          </Button>
-          <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
-            {publishing ? "发布中..." : "发布设置"}
-          </Button>
-        </Space>
-      </div>
+        <div className="admin-flagship-grid">
+          <article className="admin-flagship-card emphasis">
+            <span>草稿轨道</span>
+            <strong>{formatVersionLabel(draftMeta)}</strong>
+            <p>修订 {draftMeta.revision} · 最近保存于 {formatLocalDateTime(draftMeta.updatedAt)}</p>
+          </article>
+          <article className="admin-flagship-card">
+            <span>发布轨道</span>
+            <strong>{publishedMeta ? formatVersionLabel(publishedMeta) : "未发布"}</strong>
+            <p>
+              {publishedMeta
+                ? `发布时间 ${formatLocalDateTime(publishedMeta.publishedAt || publishedMeta.updatedAt)}`
+                : "当前还没有正式线上版本。"}
+            </p>
+          </article>
+          <article className="admin-flagship-card">
+            <span>待发布变更</span>
+            <strong>{changedAreaCount}</strong>
+            <p>
+              {changedAreaCount > 0
+                ? changedAreas.filter((item) => item.changed).map((item) => item.label).join("、")
+                : "当前草稿与已发布版本一致。"}
+            </p>
+          </article>
+          <article className="admin-flagship-card">
+            <span>安全与配额</span>
+            <strong>{enabledSafetyRuleCount}</strong>
+            <p>
+              启用中的安全护栏；总上传限额 {formatStorageLimit(draftPayload.uploads.maxTotalUploadBytes)}，组织同步间隔{" "}
+              {draftPayload.organizationDefaults.orgSyncIntervalMinutes} 分钟。
+            </p>
+          </article>
+        </div>
+      </section>
 
       {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
@@ -444,25 +520,53 @@ export function SystemSettingsShell() {
 
       <section className="system-settings-preview-grid">
         <article className="system-settings-preview-card">
+          <span className="system-settings-preview-kicker">Draft Snapshot</span>
           <h3>当前草稿预览</h3>
-          <p>{draftPayload.branding.platformName}</p>
-          <p>
-            {draftPayload.platformDefaults.provider} / {draftPayload.platformDefaults.model}
-          </p>
-          <p>{draftPayload.platformDefaults.sessionWorkspaceRoot}</p>
-          <p>{draftPayload.behavior.welcomeSummary}</p>
+          <div className="system-settings-preview-stack">
+            <div className="system-settings-preview-row">
+              <span>平台名称</span>
+              <strong>{draftPayload.branding.platformName}</strong>
+            </div>
+            <div className="system-settings-preview-row">
+              <span>模型默认值</span>
+              <strong>
+                {draftPayload.platformDefaults.provider} / {draftPayload.platformDefaults.model}
+              </strong>
+            </div>
+            <div className="system-settings-preview-row">
+              <span>工作区根目录</span>
+              <strong>{draftPayload.platformDefaults.sessionWorkspaceRoot}</strong>
+            </div>
+            <div className="system-settings-preview-row">
+              <span>欢迎摘要</span>
+              <strong>{draftPayload.behavior.welcomeSummary}</strong>
+            </div>
+          </div>
         </article>
         <article className="system-settings-preview-card">
+          <span className="system-settings-preview-kicker">Published Snapshot</span>
           <h3>当前发布预览</h3>
           {publishedPayload ? (
-            <>
-              <p>{publishedPayload.branding.platformName}</p>
-              <p>
-                {publishedPayload.platformDefaults.provider} / {publishedPayload.platformDefaults.model}
-              </p>
-              <p>{publishedPayload.platformDefaults.sessionWorkspaceRoot}</p>
-              <p>{publishedPayload.behavior.welcomeSummary}</p>
-            </>
+            <div className="system-settings-preview-stack">
+              <div className="system-settings-preview-row">
+                <span>平台名称</span>
+                <strong>{publishedPayload.branding.platformName}</strong>
+              </div>
+              <div className="system-settings-preview-row">
+                <span>模型默认值</span>
+                <strong>
+                  {publishedPayload.platformDefaults.provider} / {publishedPayload.platformDefaults.model}
+                </strong>
+              </div>
+              <div className="system-settings-preview-row">
+                <span>工作区根目录</span>
+                <strong>{publishedPayload.platformDefaults.sessionWorkspaceRoot}</strong>
+              </div>
+              <div className="system-settings-preview-row">
+                <span>欢迎摘要</span>
+                <strong>{publishedPayload.behavior.welcomeSummary}</strong>
+              </div>
+            </div>
           ) : (
             <p>尚未发布</p>
           )}

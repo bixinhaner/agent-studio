@@ -29,6 +29,29 @@ const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "openai_compatible_api", label: "外部 OpenAI API" }
 ];
 
+const TAB_STORIES: Record<IntegrationCenterTab, { eyebrow: string; title: string; detail: string }> = {
+  dingtalk: {
+    eyebrow: "Identity Bridge",
+    title: "把 DingTalk 当成身份桥与通知通道来运营，而不是一次性接入项。",
+    detail: "关注实例状态、密钥完整度和当前聚焦对象，避免在登录、组织同步和通知能力之间割裂理解。"
+  },
+  zendesk: {
+    eyebrow: "Support Fabric",
+    title: "让 Zendesk 接入成为支持系统编排层，而不是单点配置页。",
+    detail: "在同一视图里判断实例可用性、密钥状态和详情上下文，减少配置与排障跳转。"
+  },
+  openai_codex: {
+    eyebrow: "Model Runtime",
+    title: "把 Codex 接入抬升成模型运行底座，而不是 API 钥匙保管箱。",
+    detail: "围绕实例、默认模型和密钥状态来经营运行面，便于后续扩容与回溯。"
+  },
+  openai_compatible_api: {
+    eyebrow: "External Inference Layer",
+    title: "把外部 OpenAI API 管成一张推理供应图，而不是离散 endpoint 清单。",
+    detail: "让实例状态、交付准备度和绑定关系形成清晰纵深，便于长期维护。"
+  }
+};
+
 function getTabLabel(tab: IntegrationCenterTab): string {
   return TABS.find((item) => item.id === tab)?.label ?? tab;
 }
@@ -174,7 +197,13 @@ export function IntegrationCenterShell() {
   const mobileFilterCount = search.trim() ? 1 : 0;
 
   const activeCount = filteredItems.filter((item) => item.status === "active").length;
+  const draftCount = filteredItems.filter((item) => item.status === "draft").length;
+  const disabledCount = filteredItems.filter((item) => item.status === "disabled").length;
+  const secretReadyCount = filteredItems.filter((item) => item.secretState.hasSecrets).length;
+  const systemSingletonCount = filteredItems.filter((item) => item.isSystemSingleton).length;
   const currentTabLabel = getTabLabel(tab);
+  const currentStory = TAB_STORIES[tab];
+  const selectedInstance = detail?.instance ?? filteredItems.find((item) => item.id === selectedId) ?? null;
 
   function handleUpdated(next: IntegrationDetail) {
     setDetail(next);
@@ -252,33 +281,68 @@ export function IntegrationCenterShell() {
 
   return (
     <Card className="admin-card resource-center-shell integration-center-shell antd-admin-card admin-workspace-shell">
-      <div className="admin-section-header admin-workspace-header">
-        <div>
-          <Typography.Title level={4} className="admin-card-heading">
-            集成中心
-          </Typography.Title>
-          <Typography.Paragraph>统一管理 DingTalk、Zendesk、OpenAI/Codex、外部 OpenAI API 实例和授权策略。</Typography.Paragraph>
+      <section className="admin-flagship-surface integration-center-command">
+        <div className="admin-flagship-top">
+          <div className="admin-flagship-copy">
+            <p className="auth-eyebrow">{currentStory.eyebrow}</p>
+            <Typography.Title level={3} className="admin-flagship-title">
+              {currentStory.title}
+            </Typography.Title>
+            <Typography.Paragraph className="admin-flagship-detail">{currentStory.detail}</Typography.Paragraph>
+            <div className="admin-flagship-pill-row">
+              <span className="admin-console-pill">类型 · {currentTabLabel}</span>
+              <span className="admin-console-pill">{search.trim() ? `搜索“${search.trim()}”` : "全量实例视图"}</span>
+              <span className="admin-console-pill neutral">
+                焦点 · {selectedInstance ? `${selectedInstance.name} / ${selectedInstance.status}` : "未选择实例"}
+              </span>
+            </div>
+          </div>
+          <div className="admin-flagship-actions">
+            <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
+              刷新列表
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
+              新建{currentTabLabel}实例
+            </Button>
+          </div>
         </div>
-        <Space wrap>
-          <Tag color="blue">实例总数 {items.length}</Tag>
-          <Tag color={activeCount > 0 ? "success" : "default"}>active {activeCount}</Tag>
-          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-            刷新列表
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
-            新建{currentTabLabel}实例
-          </Button>
-        </Space>
-      </div>
 
-      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="集成类型">
-        <Segmented
-          block
-          value={tab}
-          options={TABS.map((item) => ({ label: item.label, value: item.id }))}
-          onChange={(value) => setTab(value as IntegrationCenterTab)}
-        />
-      </div>
+        <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="集成类型">
+          <Segmented
+            block
+            value={tab}
+            options={TABS.map((item) => ({ label: item.label, value: item.id }))}
+            onChange={(value) => setTab(value as IntegrationCenterTab)}
+          />
+        </div>
+
+        <div className="admin-flagship-grid">
+          <article className="admin-flagship-card">
+            <span>在线实例</span>
+            <strong>{activeCount}</strong>
+            <p>当前类型下可直接投入使用的实例数量。</p>
+          </article>
+          <article className="admin-flagship-card">
+            <span>草稿与停用</span>
+            <strong>{draftCount + disabledCount}</strong>
+            <p>其中草稿 {draftCount} 个，停用 {disabledCount} 个，适合优先清理或补齐。</p>
+          </article>
+          <article className="admin-flagship-card">
+            <span>密钥已就绪</span>
+            <strong>{secretReadyCount}</strong>
+            <p>已保存关键 secret 的实例数量，可用来判断接入准备度。</p>
+          </article>
+          <article className="admin-flagship-card emphasis">
+            <span>当前焦点</span>
+            <strong>{selectedInstance ? selectedInstance.name : "等待选择"}</strong>
+            <p>
+              {selectedInstance
+                ? `${selectedInstance.slug} · ${selectedInstance.secretState.hasSecrets ? "密钥已配置" : "缺少密钥"} · 更新于 ${formatLocalDateTime(selectedInstance.updatedAt)}`
+                : `当前类型共有 ${filteredItems.length} 个实例，其中 ${systemSingletonCount} 个为系统单例。`}
+            </p>
+          </article>
+        </div>
+      </section>
 
       {isNarrowScreen ? (
         <div className="resource-center-mobile-toolbar">
@@ -296,7 +360,7 @@ export function IntegrationCenterShell() {
           </MobileFilterDrawer>
         </div>
       ) : (
-        <div className="resource-center-toolbar admin-workspace-toolbar">
+        <div className="admin-flagship-toolbar resource-center-toolbar admin-workspace-toolbar">
           <label className="field resource-center-search">
             <span className="field-label">搜索实例</span>
             <Input
@@ -326,19 +390,24 @@ export function IntegrationCenterShell() {
 
           <div className="resource-center-list">
             {filteredItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={selectedId === item.id ? "resource-center-list-item active" : "resource-center-list-item"}
-              onClick={() => {
-                setSelectedId(item.id);
-                if (isNarrowScreen) setMobileDetailOpen(true);
-              }}
-            >
+              <button
+                key={item.id}
+                type="button"
+                className={selectedId === item.id ? "resource-center-list-item active" : "resource-center-list-item"}
+                onClick={() => {
+                  setSelectedId(item.id);
+                  if (isNarrowScreen) setMobileDetailOpen(true);
+                }}
+              >
                 <strong>{item.name}</strong>
                 <span>{item.slug}</span>
+                <span className="resource-center-item-note">
+                  {item.description?.trim() || `${currentTabLabel} 实例，适合在详情区继续查看配置、密钥和校验历史。`}
+                </span>
                 <span className="resource-center-list-item-meta">
                   <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
+                  <Tag>{item.secretState.hasSecrets ? "密钥已配置" : "缺少密钥"}</Tag>
+                  {item.isSystemSingleton ? <Tag>系统单例</Tag> : null}
                   <span className="resource-center-inline-muted">{formatLocalDateTime(item.updatedAt)}</span>
                 </span>
               </button>
