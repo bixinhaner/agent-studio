@@ -9,6 +9,8 @@ const PublicSharePageLazy = lazy(() =>
 
 type AppShellView = "portal" | "admin";
 
+const ADMIN_HASH_PREFIX = "#admin/";
+
 function canOpenAdmin(role: string | undefined): boolean {
   return role === "admin" || role === "super_admin";
 }
@@ -19,20 +21,74 @@ function extractPublicShareToken(pathname: string): string | undefined {
   return token || undefined;
 }
 
+function resolveAppShellView(hash: string, adminEligible: boolean): AppShellView {
+  if (adminEligible && hash.startsWith(ADMIN_HASH_PREFIX)) {
+    return "admin";
+  }
+  return "portal";
+}
+
+function replaceLocationHash(nextHash: string): void {
+  if (typeof window === "undefined") return;
+  const normalizedHash = nextHash.trim();
+  const suffix = normalizedHash ? normalizedHash : "";
+  window.history.replaceState(
+    window.history.state,
+    document.title,
+    `${window.location.pathname}${window.location.search}${suffix}`
+  );
+}
+
 function AppContent() {
   const auth = useAuth();
   const adminEligible = useMemo(() => canOpenAdmin(auth.user?.role), [auth.user?.role]);
-  const [view, setView] = useState<AppShellView>("portal");
+  const [view, setView] = useState<AppShellView>(() => {
+    if (typeof window === "undefined") return "portal";
+    return resolveAppShellView(window.location.hash, false);
+  });
 
   useEffect(() => {
-    setView("portal");
-  }, [auth.user?.id]);
+    if (typeof window === "undefined") return;
+    setView(resolveAppShellView(window.location.hash, adminEligible));
+  }, [adminEligible, auth.user?.id]);
 
   useEffect(() => {
     if (!adminEligible && view === "admin") {
+      if (typeof window !== "undefined" && window.location.hash.startsWith(ADMIN_HASH_PREFIX)) {
+        replaceLocationHash("");
+      }
       setView("portal");
     }
   }, [adminEligible, view]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncViewFromLocation = () => {
+      setView(resolveAppShellView(window.location.hash, adminEligible));
+    };
+    window.addEventListener("hashchange", syncViewFromLocation);
+    window.addEventListener("popstate", syncViewFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncViewFromLocation);
+      window.removeEventListener("popstate", syncViewFromLocation);
+    };
+  }, [adminEligible]);
+
+  const openAdmin = adminEligible
+    ? () => {
+        if (typeof window !== "undefined" && !window.location.hash.startsWith(ADMIN_HASH_PREFIX)) {
+          replaceLocationHash(`${ADMIN_HASH_PREFIX}overview`);
+        }
+        setView("admin");
+      }
+    : undefined;
+
+  const openPortal = () => {
+    if (typeof window !== "undefined" && window.location.hash.startsWith(ADMIN_HASH_PREFIX)) {
+      replaceLocationHash("");
+    }
+    setView("portal");
+  };
 
   if (auth.loading) {
     return (
@@ -65,7 +121,7 @@ function AppContent() {
   if (adminEligible && view === "admin") {
     return (
       <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>管理控制台加载中...</p></div></div>}>
-        <AdminShellLazy currentUser={auth.user} onOpenPortal={() => setView("portal")} onSignOut={() => void auth.signOut()} />
+        <AdminShellLazy currentUser={auth.user} onOpenPortal={openPortal} onSignOut={() => void auth.signOut()} />
       </Suspense>
     );
   }
@@ -74,7 +130,7 @@ function AppContent() {
     <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>工作台加载中...</p></div></div>}>
       <PortalShellLazy
         currentUser={auth.user}
-        onOpenAdmin={adminEligible ? () => setView("admin") : undefined}
+        onOpenAdmin={openAdmin}
         onSignOut={() => void auth.signOut()}
       />
     </Suspense>

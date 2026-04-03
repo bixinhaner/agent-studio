@@ -237,6 +237,7 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
 });
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
+const PORTAL_THREAD_SEARCH_PARAM = "thread";
 type ThreadPublicShareSelectionContextValue = {
   selectionMode: boolean;
   leadTurnIdByMessageId: Record<string, string>;
@@ -929,6 +930,25 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
     return null;
   }
   return pathname;
+}
+
+function readPortalThreadIdFromLocation(search: string): string {
+  const params = new URLSearchParams(search);
+  return params.get(PORTAL_THREAD_SEARCH_PARAM)?.trim() || "";
+}
+
+function replacePortalThreadIdInLocation(threadId: string): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  const normalizedThreadId = threadId.trim();
+  if (normalizedThreadId) {
+    params.set(PORTAL_THREAD_SEARCH_PARAM, normalizedThreadId);
+  } else {
+    params.delete(PORTAL_THREAD_SEARCH_PARAM);
+  }
+  const nextSearch = params.toString();
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+  window.history.replaceState(window.history.state, document.title, nextUrl);
 }
 
 function extractSources(value: unknown): Array<{ id: string; url: string; title?: string }> {
@@ -2114,6 +2134,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [pickerPathInput, setPickerPathInput] = useState("");
   const [pickerParent, setPickerParent] = useState<string | null>(null);
   const [pickerDirectories, setPickerDirectories] = useState<Array<{ name: string; path: string }>>([]);
+  const initialLocationThreadIdRef = useRef(
+    typeof window === "undefined" ? "" : readPortalThreadIdFromLocation(window.location.search)
+  );
+  const [portalThreadRestoreSettled, setPortalThreadRestoreSettled] = useState(() => !initialLocationThreadIdRef.current);
 
   const appliedConfigRef = useRef(appliedConfig);
   const runtimeOptionsRef = useRef(runtimeOptions);
@@ -3199,6 +3223,38 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       return useLocalRuntime(chatAdapter);
     }
   });
+
+  useEffect(() => {
+    if (portalThreadRestoreSettled) return;
+    const requestedThreadId = initialLocationThreadIdRef.current.trim();
+    if (!requestedThreadId) {
+      setPortalThreadRestoreSettled(true);
+      return;
+    }
+
+    let cancelled = false;
+    void runtime.threads
+      .switchToThread(requestedThreadId)
+      .catch((error) => {
+        if (cancelled) return;
+        setErrorText(error instanceof Error ? error.message : "恢复当前会话失败");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPortalThreadRestoreSettled(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [portalThreadRestoreSettled, runtime]);
+
+  useEffect(() => {
+    if (!portalThreadRestoreSettled) return;
+    replacePortalThreadIdInLocation(activeRemoteThreadId);
+  }, [activeRemoteThreadId, portalThreadRestoreSettled]);
+
   const threadContent = (
     <div
       className={sharedThreadReadonly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
