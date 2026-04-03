@@ -45,6 +45,28 @@ export interface DingTalkClient {
   sendWorkNotice?(input: { userIds?: string[]; message: string }): Promise<void>;
 }
 
+type AppAccessTokenCache = {
+  token: string;
+  expiresAt: number;
+};
+
+const APP_ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
+const APP_ACCESS_TOKEN_FALLBACK_TTL_MS = 60 * 60 * 1000;
+
+class DingTalkRequestError extends Error {
+  readonly code?: string;
+  readonly subcode?: string;
+  readonly status?: number;
+
+  constructor(input: { message: string; code?: string; subcode?: string; status?: number }) {
+    super(input.message);
+    this.name = "DingTalkRequestError";
+    this.code = input.code;
+    this.subcode = input.subcode;
+    this.status = input.status;
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -274,8 +296,14 @@ async function requestJson(
   const response = await fetchImpl(input, init);
   const payload = await readJson(response);
   if (!response.ok) {
-    const message = getString(asRecord(payload), ["message", "msg", "errmsg", "error_description"]) ?? `DingTalk request failed (${response.status})`;
-    throw new Error(message);
+    throw new DingTalkRequestError({
+      message:
+        getString(asRecord(payload), ["message", "msg", "errmsg", "error_description", "sub_msg", "submsg"]) ??
+        `DingTalk request failed (${response.status})`,
+      code: getString(asRecord(payload), ["errcode", "code"]),
+      subcode: getString(asRecord(payload), ["subcode", "sub_code"]),
+      status: response.status
+    });
   }
   return payload;
 }
@@ -296,7 +324,43 @@ async function requestTopApiJson(
     return payload;
   }
 
-  throw new Error(getErrorMessage(payload) ?? `DingTalk request failed (${String(errcode)})`);
+  throw new DingTalkRequestError({
+    message: getErrorMessage(payload) ?? `DingTalk request failed (${String(errcode)})`,
+    code: getString(record, ["errcode", "code"]),
+    subcode: getString(record, ["subcode", "sub_code"])
+  });
+}
+
+function getAppAccessTokenExpiresAt(payload: unknown): number {
+  const expiresInSeconds = getNumber(asRecord(payload), ["expireIn", "expire_in", "expiresIn", "expires_in"]);
+  if (!expiresInSeconds || expiresInSeconds <= 0) {
+    return Date.now() + APP_ACCESS_TOKEN_FALLBACK_TTL_MS;
+  }
+
+  const expiresInMs = expiresInSeconds * 1000;
+  const effectiveTtlMs =
+    expiresInMs > APP_ACCESS_TOKEN_REFRESH_WINDOW_MS
+      ? expiresInMs - APP_ACCESS_TOKEN_REFRESH_WINDOW_MS
+      : expiresInMs;
+  return Date.now() + Math.max(1000, effectiveTtlMs);
+}
+
+function isInvalidAccessTokenError(error: unknown): boolean {
+  if (error instanceof DingTalkRequestError) {
+    if (error.code === "40014" || error.subcode === "40014") {
+      return true;
+    }
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (!/access[_\s-]*token/i.test(error.message)) {
+    return false;
+  }
+
+  return /40014|invalid|illegal|not legal|不合法/i.test(error.message);
 }
 
 export function resolveDingTalkConfig(config: DingTalkConfig):
@@ -343,7 +407,9 @@ export function createDingTalkClient(
   config: DingTalkConfig,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)
 ): DingTalkClient {
-  let appAccessTokenPromise: Promise<string> | undefined;
+  let appAccessTokenCache: AppAccessTokenCache | undefined;
+  let appAccessTokenPromise: Promise<AppAccessTokenCache> | undefined;
+  let appAccessTokenGeneration = 0;
   const orgApiBaseUrl = "https://oapi.dingtalk.com";
 
   const getResolvedConfig = () => {
@@ -354,8 +420,22 @@ export function createDingTalkClient(
     return resolved;
   };
 
-  const getAppAccessToken = async (): Promise<string> => {
+  const invalidateAppAccessToken = () => {
+    appAccessTokenGeneration += 1;
+    appAccessTokenCache = undefined;
+    appAccessTokenPromise = undefined;
+  };
+
+  const getAppAccessToken = async (options?: { forceRefresh?: boolean }): Promise<string> => {
+    const forceRefresh = options?.forceRefresh === true;
+    if (forceRefresh) {
+      invalidateAppAccessToken();
+    } else if (appAccessTokenCache && appAccessTokenCache.expiresAt > Date.now()) {
+      return appAccessTokenCache.token;
+    }
+
     if (!appAccessTokenPromise) {
+      const generation = appAccessTokenGeneration;
       appAccessTokenPromise = (async () => {
         try {
           const resolved = getResolvedConfig();
@@ -377,32 +457,57 @@ export function createDingTalkClient(
           if (!accessToken) {
             throw new Error("DingTalk app access token request did not return an access token");
           }
-          return accessToken;
+
+          const cachedToken = {
+            token: accessToken,
+            expiresAt: getAppAccessTokenExpiresAt(tokenPayload)
+          };
+          if (generation === appAccessTokenGeneration) {
+            appAccessTokenCache = cachedToken;
+          }
+          return cachedToken;
         } catch (error) {
-          appAccessTokenPromise = undefined;
+          if (generation === appAccessTokenGeneration) {
+            appAccessTokenCache = undefined;
+          }
           throw error;
+        } finally {
+          if (generation === appAccessTokenGeneration) {
+            appAccessTokenPromise = undefined;
+          }
         }
       })();
     }
 
-    return appAccessTokenPromise;
+    return (await appAccessTokenPromise).token;
   };
 
   const requestOrgApi = async (path: string, body: Record<string, unknown>): Promise<unknown> => {
-    const accessToken = await getAppAccessToken();
-    const input = new URL(`${orgApiBaseUrl}${path}`);
-    input.searchParams.set("access_token", accessToken);
-    return requestTopApiJson(
-      input.toString(),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
+    const requestWithAppAccessToken = async (forceRefresh = false): Promise<unknown> => {
+      const accessToken = await getAppAccessToken({ forceRefresh });
+      const input = new URL(`${orgApiBaseUrl}${path}`);
+      input.searchParams.set("access_token", accessToken);
+      return requestTopApiJson(
+        input.toString(),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(body)
         },
-        body: JSON.stringify(body)
-      },
-      fetchImpl
-    );
+        fetchImpl
+      );
+    };
+
+    try {
+      return await requestWithAppAccessToken();
+    } catch (error) {
+      if (!isInvalidAccessTokenError(error)) {
+        throw error;
+      }
+      return requestWithAppAccessToken(true);
+    }
   };
 
   const getUserIdByUnionId = async (unionId: string): Promise<string | undefined> => {
