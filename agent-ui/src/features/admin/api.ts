@@ -1,6 +1,9 @@
 import { api } from "../../lib/api";
 
 import type {
+  AdminApiAuditDetailResponse,
+  AdminApiAuditListInput,
+  AdminApiAuditListResponse,
   AdminConversationDetailResponse,
   AdminConversationListInput,
   AdminConversationListResponse,
@@ -36,6 +39,26 @@ export async function fetchAdminConversationAuditDetail(
   conversationId: string
 ): Promise<AdminConversationDetailResponse> {
   return api<AdminConversationDetailResponse>(`/api/admin/conversations/${encodeURIComponent(conversationId)}`);
+}
+
+export async function fetchAdminApiAuditList(
+  input: AdminApiAuditListInput = {}
+): Promise<AdminApiAuditListResponse> {
+  const params = new URLSearchParams();
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.result) params.set("result", input.result);
+  if (input.delivery) params.set("delivery", input.delivery);
+  if (input.sort) params.set("sort", input.sort);
+  if (typeof input.page === "number") params.set("page", String(input.page));
+  if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
+  const query = params.toString();
+  return api<AdminApiAuditListResponse>(`/api/admin/conversations/api-usage${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAdminApiAuditDetail(
+  eventId: string
+): Promise<AdminApiAuditDetailResponse> {
+  return api<AdminApiAuditDetailResponse>(`/api/admin/conversations/api-usage/${encodeURIComponent(eventId)}`);
 }
 
 export async function fetchAdminUsers(): Promise<AdminUserListResponse> {

@@ -124,12 +124,12 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   conversations: {
     id: "conversations",
-    title: "会话审计",
-    description: "查看全量用户会话、逐条消息与正负向反馈记录。",
-    scope: "会话与反馈",
+    title: "审计工作台",
+    description: "统一查看用户会话、反馈记录与 API 调用轨迹。",
+    scope: "会话、反馈与 API 调用",
     cadence: "建议持续巡检",
     group: "operations",
-    keywords: ["会话", "对话", "thread", "feedback", "审计"],
+    keywords: ["会话", "对话", "thread", "feedback", "审计", "api", "ip"],
     icon: <MessageSquareText size={18} />
   },
   monitoring: {

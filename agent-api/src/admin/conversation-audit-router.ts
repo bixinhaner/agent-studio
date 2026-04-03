@@ -9,6 +9,9 @@ import {
   type ThreadRepositoryDb
 } from "../persistence/thread-repository.js";
 
+const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
+const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
+
 type ConversationAuditUserRow = {
   id: string;
   displayName: string | null;
@@ -17,16 +20,58 @@ type ConversationAuditUserRow = {
   status: string | null;
 };
 
+type UsageEventAuditRow = {
+  id: string;
+  sessionId: string | null;
+  model: string;
+  featureType: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  estimatedCost: unknown;
+  internalCost: unknown;
+  resultStatus: string;
+  metadata: unknown;
+  createdAt: Date | string;
+};
+
+type IntegrationInstanceAuditRow = {
+  id: string;
+  type: string;
+  slug: string;
+  name: string;
+  status: string;
+};
+
 type ConversationAuditDb = ThreadRepositoryDb & {
   user: {
     findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<ConversationAuditUserRow[]>;
     findUnique(args: { where: { id: string } }): Promise<ConversationAuditUserRow | null>;
+  };
+  usageEvent: {
+    findMany(args?: {
+      where?: {
+        featureType?: string;
+      };
+      orderBy?: { createdAt: "asc" | "desc" };
+    }): Promise<UsageEventAuditRow[]>;
+  };
+  integrationInstance: {
+    findMany(args?: {
+      where?: {
+        type?: string;
+      };
+    }): Promise<IntegrationInstanceAuditRow[]>;
   };
 };
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
 type ConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
 type ConversationSort = "updated_desc" | "created_desc";
+
+type ApiAuditResultFilter = "all" | "success" | "failed";
+type ApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
+type ApiAuditSort = "created_desc" | "tokens_desc" | "latency_desc";
 
 type ConversationAuditUser = {
   id: string;
@@ -82,6 +127,56 @@ type ConversationSummary = {
   }>;
 };
 
+type ApiAuditRecord = {
+  id: string;
+  sessionId: string | null;
+  clientIp: string | null;
+  integration: {
+    id: string | null;
+    slug: string | null;
+    name: string | null;
+  };
+  model: string;
+  requestedModel: string | null;
+  requestedReasoningEffort: string | null;
+  stream: boolean;
+  messageCount: number;
+  preview: {
+    prompt: string | null;
+    latest: string | null;
+  };
+  metrics: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCost: string;
+    internalCost: string;
+    outputChars: number;
+    responseStartedMs: number | null;
+    responseReadyMs: number | null;
+    responseCompletedMs: number | null;
+  };
+  transport: {
+    responseMode: string;
+    requestAborted: boolean;
+    responseFinished: boolean;
+    responseClosedBeforeFinish: boolean;
+    responseStatusCode: number | null;
+  };
+  status: {
+    result: string;
+    delivery: string;
+  };
+  errorMessage: string | null;
+  agentModeId: string | null;
+  knowledgeSetIds: string[];
+  createdAt: string;
+  responseStartedAt: string | null;
+  responseReadyAt: string | null;
+  responseCompletedAt: string | null;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -91,6 +186,48 @@ function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const items = value
+    .map((item) => trimOrUndefined(item))
+    .filter((item): item is string => Boolean(item));
+  return [...new Set(items)];
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value === "true") return true;
+    if (value === "false") return false;
+  }
+  return undefined;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (value && typeof value === "object" && "toString" in value && typeof value.toString === "function") {
+    const parsed = Number(value.toString());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function formatDecimal(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return value.toFixed(6);
+  if (value && typeof value === "object" && "toFixed" in value && typeof value.toFixed === "function") {
+    return value.toFixed(6);
+  }
+  if (value && typeof value === "object" && "toString" in value && typeof value.toString === "function") {
+    return String(value.toString());
+  }
+  return "0.000000";
 }
 
 function parseDateString(value: unknown): string | null {
@@ -139,6 +276,23 @@ function parseFeedbackFilter(value: unknown): ConversationFeedbackFilter {
 
 function parseSort(value: unknown): ConversationSort {
   return value === "created_desc" ? value : "updated_desc";
+}
+
+function parseApiResultFilter(value: unknown): ApiAuditResultFilter {
+  return value === "success" || value === "failed" ? value : "all";
+}
+
+function parseApiDeliveryFilter(value: unknown): ApiAuditDeliveryFilter {
+  return value === "delivered" ||
+    value === "client_aborted" ||
+    value === "connection_closed" ||
+    value === "unknown"
+    ? value
+    : "all";
+}
+
+function parseApiSort(value: unknown): ApiAuditSort {
+  return value === "tokens_desc" || value === "latency_desc" ? value : "created_desc";
 }
 
 function normalizeUser(row: ConversationAuditUserRow | null | undefined): ConversationAuditUser | null {
@@ -303,6 +457,72 @@ function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditU
   };
 }
 
+function asMetric(value: unknown): number | null {
+  const parsed = Math.trunc(toNumber(value));
+  return parsed > 0 ? parsed : null;
+}
+
+function buildApiAuditRecord(
+  row: UsageEventAuditRow,
+  integrationMap: Map<string, IntegrationInstanceAuditRow>
+): ApiAuditRecord {
+  const metadata = asRecord(row.metadata);
+  const integrationId = trimOrUndefined(metadata?.integrationInstanceId) ?? null;
+  const integration = integrationId ? integrationMap.get(integrationId) : undefined;
+  const createdAt = parseDateString(row.createdAt) ?? new Date().toISOString();
+  const delivery = trimOrUndefined(metadata?.deliveryStatus) ?? "unknown";
+
+  return {
+    id: row.id,
+    sessionId: trimOrUndefined(row.sessionId) ?? null,
+    clientIp: trimOrUndefined(metadata?.clientIp) ?? null,
+    integration: {
+      id: integrationId,
+      slug: integration?.slug ?? trimOrUndefined(metadata?.integrationSlug) ?? null,
+      name: integration?.name ?? null
+    },
+    model: trimOrUndefined(metadata?.selectedModel) ?? row.model,
+    requestedModel: trimOrUndefined(metadata?.requestedModel) ?? null,
+    requestedReasoningEffort: trimOrUndefined(metadata?.requestedReasoningEffort) ?? null,
+    stream: metadata?.stream === true,
+    messageCount: Math.max(0, Math.trunc(toNumber(metadata?.messageCount))),
+    preview: {
+      prompt: summarizeText(trimOrUndefined(metadata?.promptPreview), 220),
+      latest: summarizeText(trimOrUndefined(metadata?.latestMessagePreview), 240)
+    },
+    metrics: {
+      inputTokens: row.inputTokens,
+      cachedInputTokens: row.cachedInputTokens,
+      outputTokens: row.outputTokens,
+      totalTokens: row.inputTokens + row.cachedInputTokens + row.outputTokens,
+      estimatedCost: formatDecimal(row.estimatedCost),
+      internalCost: formatDecimal(row.internalCost),
+      outputChars: Math.max(0, Math.trunc(toNumber(metadata?.outputChars))),
+      responseStartedMs: asMetric(metadata?.responseStartedMs),
+      responseReadyMs: asMetric(metadata?.responseReadyMs),
+      responseCompletedMs: asMetric(metadata?.responseCompletedMs)
+    },
+    transport: {
+      responseMode: trimOrUndefined(metadata?.responseMode) ?? (metadata?.stream === true ? "stream" : "non_stream"),
+      requestAborted: asBoolean(metadata?.requestAborted) === true,
+      responseFinished: asBoolean(metadata?.responseFinished) === true,
+      responseClosedBeforeFinish: asBoolean(metadata?.responseClosedBeforeFinish) === true,
+      responseStatusCode: asMetric(metadata?.responseStatusCode)
+    },
+    status: {
+      result: trimOrUndefined(row.resultStatus) ?? "unknown",
+      delivery
+    },
+    errorMessage: trimOrUndefined(metadata?.errorMessage) ?? null,
+    agentModeId: trimOrUndefined(metadata?.agentModeId) ?? null,
+    knowledgeSetIds: asStringArray(metadata?.knowledgeSetIds),
+    createdAt,
+    responseStartedAt: parseDateString(metadata?.responseStartedAt),
+    responseReadyAt: parseDateString(metadata?.responseReadyAt),
+    responseCompletedAt: parseDateString(metadata?.responseCompletedAt)
+  };
+}
+
 function matchesStatusFilter(summary: ConversationSummary, filter: ConversationStatusFilter): boolean {
   if (filter === "all") return true;
   return summary.status === filter;
@@ -344,7 +564,7 @@ function compareConversationSummary(left: ConversationSummary, right: Conversati
   return rightValue - leftValue;
 }
 
-function buildAggregateSummary(conversations: ConversationSummary[]) {
+function buildConversationAggregateSummary(conversations: ConversationSummary[]) {
   const totalFeedback = conversations.reduce((sum, item) => sum + item.feedbackSummary.total, 0);
   const positiveFeedback = conversations.reduce((sum, item) => sum + item.feedbackSummary.positive, 0);
   const negativeFeedback = conversations.reduce((sum, item) => sum + item.feedbackSummary.negative, 0);
@@ -358,6 +578,82 @@ function buildAggregateSummary(conversations: ConversationSummary[]) {
     negativeFeedback,
     uniqueUsers
   };
+}
+
+function matchesApiResult(record: ApiAuditRecord, filter: ApiAuditResultFilter): boolean {
+  if (filter === "all") return true;
+  return record.status.result === filter;
+}
+
+function matchesApiDelivery(record: ApiAuditRecord, filter: ApiAuditDeliveryFilter): boolean {
+  if (filter === "all") return true;
+  return record.status.delivery === filter;
+}
+
+function matchesApiQuery(record: ApiAuditRecord, query: string | undefined): boolean {
+  const normalized = trimOrUndefined(query)?.toLowerCase();
+  if (!normalized) return true;
+  const haystack = [
+    record.id,
+    record.sessionId,
+    record.clientIp,
+    record.integration.id,
+    record.integration.slug,
+    record.integration.name,
+    record.model,
+    record.requestedModel,
+    record.requestedReasoningEffort,
+    record.preview.prompt,
+    record.preview.latest,
+    record.errorMessage,
+    record.status.result,
+    record.status.delivery
+  ]
+    .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
+    .join("\n");
+  return haystack.includes(normalized);
+}
+
+function compareApiAuditRecord(left: ApiAuditRecord, right: ApiAuditRecord, sort: ApiAuditSort): number {
+  if (sort === "tokens_desc") {
+    return right.metrics.totalTokens - left.metrics.totalTokens || Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  }
+  if (sort === "latency_desc") {
+    return (right.metrics.responseCompletedMs ?? -1) - (left.metrics.responseCompletedMs ?? -1) ||
+      Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  }
+  return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+}
+
+function buildApiAggregateSummary(records: ApiAuditRecord[]) {
+  return {
+    totalRequests: records.length,
+    successCount: records.filter((item) => item.status.result === "success").length,
+    failureCount: records.filter((item) => item.status.result !== "success").length,
+    deliveredCount: records.filter((item) => item.status.delivery === "delivered").length,
+    deliveryFailureCount: records.filter((item) => item.status.delivery !== "delivered").length,
+    streamCount: records.filter((item) => item.stream).length,
+    uniqueIps: new Set(records.map((item) => item.clientIp).filter(Boolean)).size,
+    missingIpCount: records.filter((item) => !item.clientIp).length
+  };
+}
+
+function apiFirstSeenAt(records: ApiAuditRecord[], clientIp: string | null): string | null {
+  if (!clientIp) return null;
+  const matches = records
+    .filter((item) => item.clientIp === clientIp)
+    .map((item) => item.createdAt)
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime());
+  return matches[0] ?? null;
+}
+
+function apiLastSeenAt(records: ApiAuditRecord[], clientIp: string | null): string | null {
+  if (!clientIp) return null;
+  const matches = records
+    .filter((item) => item.clientIp === clientIp)
+    .map((item) => item.createdAt)
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime());
+  return matches[0] ?? null;
 }
 
 export function createConversationAuditRouter(options: {
@@ -378,6 +674,21 @@ export function createConversationAuditRouter(options: {
     const [threads, users] = await Promise.all([repository.list(true), db.user.findMany({ orderBy: { createdAt: "asc" } })]);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     return threads.map((thread) => buildConversationSummary(thread, userMap.get(thread.userId ?? "") ?? null));
+  }
+
+  async function listApiAuditRecords(): Promise<ApiAuditRecord[]> {
+    const db = getDb();
+    const [events, integrations] = await Promise.all([
+      db.usageEvent.findMany({
+        where: { featureType: EXTERNAL_API_FEATURE_TYPE },
+        orderBy: { createdAt: "desc" }
+      }),
+      db.integrationInstance.findMany({
+        where: { type: OPENAI_COMPATIBLE_API_TYPE }
+      })
+    ]);
+    const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
+    return events.map((event) => buildApiAuditRecord(event, integrationMap));
   }
 
   router.get("/conversations", async (req: Request, res: Response) => {
@@ -408,7 +719,7 @@ export function createConversationAuditRouter(options: {
           feedback,
           sort
         },
-        summary: buildAggregateSummary(filtered),
+        summary: buildConversationAggregateSummary(filtered),
         page: {
           page,
           pageSize,
@@ -419,6 +730,82 @@ export function createConversationAuditRouter(options: {
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "加载会话审计列表失败";
+      res.status(500).json({ detail });
+    }
+  });
+
+  router.get("/conversations/api-usage", async (req: Request, res: Response) => {
+    try {
+      const query = trimOrUndefined(req.query.query);
+      const result = parseApiResultFilter(req.query.result);
+      const delivery = parseApiDeliveryFilter(req.query.delivery);
+      const sort = parseApiSort(req.query.sort);
+      const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
+      const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
+
+      const filtered = (await listApiAuditRecords())
+        .filter((item) => matchesApiResult(item, result))
+        .filter((item) => matchesApiDelivery(item, delivery))
+        .filter((item) => matchesApiQuery(item, query))
+        .sort((left, right) => compareApiAuditRecord(left, right, sort));
+
+      const totalItems = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const start = (page - 1) * pageSize;
+      const records = filtered.slice(start, start + pageSize);
+
+      res.json({
+        filters: {
+          query: query ?? "",
+          result,
+          delivery,
+          sort
+        },
+        summary: buildApiAggregateSummary(filtered),
+        page: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages
+        },
+        records
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载 API 审计列表失败";
+      res.status(500).json({ detail });
+    }
+  });
+
+  router.get("/conversations/api-usage/:eventId", async (req: Request, res: Response) => {
+    try {
+      const eventId = trimOrUndefined(req.params.eventId);
+      if (!eventId) {
+        res.status(400).json({ detail: "eventId 不合法" });
+        return;
+      }
+
+      const records = await listApiAuditRecords();
+      const record = records.find((item) => item.id === eventId);
+      if (!record) {
+        res.status(404).json({ detail: "API usage event 不存在" });
+        return;
+      }
+
+      res.json({
+        record,
+        relatedSummary: {
+          sameIpRequests: record.clientIp ? records.filter((item) => item.clientIp === record.clientIp).length : 0,
+          sameSessionRequests: record.sessionId ? records.filter((item) => item.sessionId === record.sessionId).length : 0,
+          sameIntegrationRequests: record.integration.id
+            ? records.filter((item) => item.integration.id === record.integration.id).length
+            : 0,
+          firstSeenAt: apiFirstSeenAt(records, record.clientIp),
+          lastSeenAt: apiLastSeenAt(records, record.clientIp)
+        }
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载 API 审计详情失败";
       res.status(500).json({ detail });
     }
   });

@@ -31,6 +31,9 @@ export type AdminOverview = {
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
 export type AdminConversationSort = "updated_desc" | "created_desc";
+export type AdminApiAuditResultFilter = "all" | "success" | "failed";
+export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
+export type AdminApiAuditSort = "created_desc" | "tokens_desc" | "latency_desc";
 
 export type AdminConversationUser = {
   id: string;
@@ -126,6 +129,102 @@ export type AdminConversationDetailResponse = {
   transcript: {
     messageCount: number;
     messages: AdminConversationTranscriptMessage[];
+  };
+};
+
+export type AdminApiAuditRecord = {
+  id: string;
+  sessionId: string | null;
+  clientIp: string | null;
+  integration: {
+    id: string | null;
+    slug: string | null;
+    name: string | null;
+  };
+  model: string;
+  requestedModel: string | null;
+  requestedReasoningEffort: string | null;
+  stream: boolean;
+  messageCount: number;
+  preview: {
+    prompt: string | null;
+    latest: string | null;
+  };
+  metrics: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCost: string;
+    internalCost: string;
+    outputChars: number;
+    responseStartedMs: number | null;
+    responseReadyMs: number | null;
+    responseCompletedMs: number | null;
+  };
+  transport: {
+    responseMode: string;
+    requestAborted: boolean;
+    responseFinished: boolean;
+    responseClosedBeforeFinish: boolean;
+    responseStatusCode: number | null;
+  };
+  status: {
+    result: string;
+    delivery: string;
+  };
+  errorMessage: string | null;
+  agentModeId: string | null;
+  knowledgeSetIds: string[];
+  createdAt: string;
+  responseStartedAt: string | null;
+  responseReadyAt: string | null;
+  responseCompletedAt: string | null;
+};
+
+export type AdminApiAuditListInput = {
+  query?: string;
+  result?: AdminApiAuditResultFilter;
+  delivery?: AdminApiAuditDeliveryFilter;
+  sort?: AdminApiAuditSort;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AdminApiAuditListResponse = {
+  filters: {
+    query: string;
+    result: AdminApiAuditResultFilter;
+    delivery: AdminApiAuditDeliveryFilter;
+    sort: AdminApiAuditSort;
+  };
+  summary: {
+    totalRequests: number;
+    successCount: number;
+    failureCount: number;
+    deliveredCount: number;
+    deliveryFailureCount: number;
+    streamCount: number;
+    uniqueIps: number;
+    missingIpCount: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  records: AdminApiAuditRecord[];
+};
+
+export type AdminApiAuditDetailResponse = {
+  record: AdminApiAuditRecord;
+  relatedSummary: {
+    sameIpRequests: number;
+    sameSessionRequests: number;
+    sameIntegrationRequests: number;
+    firstSeenAt: string | null;
+    lastSeenAt: string | null;
   };
 };
 

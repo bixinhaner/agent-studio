@@ -318,6 +318,52 @@ function parseMessageContent(value: unknown): string {
     .trim();
 }
 
+function summarizePreview(value: string, limit: number): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function buildMessagePreview(messages: ChatCompletionMessage[]): {
+  promptPreview?: string;
+  latestMessagePreview?: string;
+} {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const promptPreview = firstUserMessage ? summarizePreview(parseMessageContent(firstUserMessage.content), 220) : undefined;
+
+  const latestMessage = [...messages]
+    .reverse()
+    .map((message) => summarizePreview(parseMessageContent(message.content), 240))
+    .find(Boolean);
+
+  return {
+    promptPreview,
+    latestMessagePreview: latestMessage
+  };
+}
+
+function normalizeClientIp(value: string | undefined): string | undefined {
+  const trimmed = trimOrUndefined(value);
+  if (!trimmed) return undefined;
+
+  const firstForwarded = trimmed.split(",")[0]?.trim().replace(/^"|"$/g, "");
+  if (!firstForwarded) return undefined;
+
+  const bracketedMatch = firstForwarded.match(/^\[([^\]]+)\](?::\d+)?$/);
+  const unwrapped = bracketedMatch?.[1] ?? firstForwarded;
+  const withoutMappedPrefix = unwrapped.startsWith("::ffff:") ? unwrapped.slice(7) : unwrapped;
+  const ipv4WithPort = withoutMappedPrefix.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  return trimOrUndefined(ipv4WithPort?.[1] ?? withoutMappedPrefix);
+}
+
+function resolveClientIp(req: Request): string | undefined {
+  return normalizeClientIp(req.header("x-forwarded-for")) ||
+    normalizeClientIp(req.header("x-real-ip")) ||
+    normalizeClientIp(req.ip) ||
+    normalizeClientIp(req.socket.remoteAddress);
+}
+
 function buildPrompt(messages: ChatCompletionMessage[]): string {
   const instructionBlocks = messages
     .filter((message) => message.role === "system" || message.role === "developer")
@@ -481,6 +527,7 @@ function buildExternalApiUsageMetadata(input: {
   agentModeId?: string;
   knowledgeSetIds: string[];
   body?: z.infer<typeof chatCompletionRequestSchema>;
+  clientIp?: string;
   selectedModel?: string;
   selectedReasoningEffort?: ReasoningEffort;
   executionStatus?: string;
@@ -501,16 +548,20 @@ function buildExternalApiUsageMetadata(input: {
   outputChars?: number;
   errorMessage?: string;
 }) {
+  const messagePreview = buildMessagePreview((input.body?.messages ?? []) as ChatCompletionMessage[]);
   return {
     source: OPENAI_COMPATIBLE_API_TYPE,
     integrationInstanceId: input.authenticated.instance.id,
     integrationSlug: input.authenticated.instance.slug,
     agentModeId: input.agentModeId,
     knowledgeSetIds: input.knowledgeSetIds,
+    clientIp: trimOrUndefined(input.clientIp),
     requestedModel: trimOrUndefined(input.body?.model),
     requestedReasoningEffort: input.body?.reasoning_effort,
     selectedModel: input.selectedModel,
     selectedReasoningEffort: input.selectedReasoningEffort,
+    promptPreview: messagePreview.promptPreview,
+    latestMessagePreview: messagePreview.latestMessagePreview,
     executionStatus: trimOrUndefined(input.executionStatus),
     deliveryStatus: trimOrUndefined(input.deliveryStatus),
     responseMode: trimOrUndefined(input.responseMode),
@@ -676,6 +727,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           agentModeId: selectedAgentModeId,
           knowledgeSetIds: selectedKnowledgeSetIds,
           body,
+          clientIp: resolveClientIp(req),
           selectedModel,
           selectedReasoningEffort,
           executionStatus,

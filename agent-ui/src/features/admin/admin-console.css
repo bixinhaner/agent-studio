@@ -518,6 +518,44 @@
   font-weight: 500;
 }
 
+.conversation-audit-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.conversation-audit-mode-bar {
+  border: 1px solid rgba(51, 109, 244, 0.14);
+  background:
+    radial-gradient(circle at top left, rgba(51, 109, 244, 0.16), transparent 38%),
+    linear-gradient(135deg, rgba(248, 251, 255, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.conversation-audit-mode-bar > .ant-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.conversation-audit-mode-copy {
+  min-width: 0;
+}
+
+.conversation-audit-mode-copy h3 {
+  margin: 14px 0 8px;
+  font-size: 26px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+
+.conversation-audit-mode-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #475569;
+}
+
 .conversation-audit-shell {
   display: flex;
   flex-direction: column;
@@ -1031,6 +1069,68 @@
   color: #94a3b8;
 }
 
+.conversation-audit-api-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.conversation-audit-api-flow-card {
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 16px;
+  padding: 14px 15px;
+  background:
+    radial-gradient(circle at top right, rgba(51, 109, 244, 0.08), transparent 42%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.98));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conversation-audit-api-flow-card span {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.conversation-audit-api-flow-card strong {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #0f172a;
+}
+
+.conversation-audit-api-flow-card small {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.conversation-audit-api-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.conversation-audit-api-context-card {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conversation-audit-api-context-card strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.conversation-audit-api-context-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #475569;
+}
+
 .conversation-audit-transcript-toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -1175,10 +1275,12 @@
   .conversation-audit-summary-grid,
   .conversation-audit-detail-metrics,
   .conversation-audit-insight-grid,
-  .conversation-audit-detail-fingerprint {
+  .conversation-audit-detail-fingerprint,
+  .conversation-audit-api-context {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .conversation-audit-mode-bar > .ant-card-body,
   .conversation-audit-detail-hero,
   .conversation-audit-section-head,
   .conversation-audit-rail-head {
@@ -1209,7 +1311,8 @@
   .conversation-audit-detail-metrics,
   .conversation-audit-filter-grid,
   .conversation-audit-insight-grid,
-  .conversation-audit-detail-fingerprint {
+  .conversation-audit-detail-fingerprint,
+  .conversation-audit-api-context {
     grid-template-columns: 1fr;
   }
 

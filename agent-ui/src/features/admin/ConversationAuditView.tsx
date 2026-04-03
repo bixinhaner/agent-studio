@@ -4,17 +4,30 @@ import {
   Clock3,
   HardDrive,
   MessageSquareText,
+  Network,
   RefreshCcw,
   Search,
   ThumbsDown,
   ThumbsUp,
-  UserRound
+  UserRound,
+  type LucideIcon
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 
-import { fetchAdminConversationAuditDetail, fetchAdminConversationAuditList } from "./api";
+import {
+  fetchAdminApiAuditDetail,
+  fetchAdminApiAuditList,
+  fetchAdminConversationAuditDetail,
+  fetchAdminConversationAuditList
+} from "./api";
 import type {
+  AdminApiAuditDeliveryFilter,
+  AdminApiAuditDetailResponse,
+  AdminApiAuditListResponse,
+  AdminApiAuditRecord,
+  AdminApiAuditResultFilter,
+  AdminApiAuditSort,
   AdminConversationDetailResponse,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
@@ -24,6 +37,14 @@ import type {
   AdminConversationTranscriptMessage,
   AdminConversationUser
 } from "./types";
+
+type AuditMode = "conversations" | "api";
+type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
+
+const AUDIT_MODE_OPTIONS: Array<{ value: AuditMode; label: string }> = [
+  { value: "conversations", label: "用户会话" },
+  { value: "api", label: "API 调用" }
+];
 
 const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
@@ -44,8 +65,6 @@ const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
   { value: "created_desc", label: "最近创建" }
 ];
 
-type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
-
 const TRANSCRIPT_ROLE_OPTIONS: Array<{ value: TranscriptRoleFilter; label: string }> = [
   { value: "all", label: "全部角色" },
   { value: "user", label: "用户" },
@@ -54,11 +73,47 @@ const TRANSCRIPT_ROLE_OPTIONS: Array<{ value: TranscriptRoleFilter; label: strin
   { value: "tool", label: "工具" }
 ];
 
+const API_RESULT_OPTIONS: Array<{ value: AdminApiAuditResultFilter; label: string }> = [
+  { value: "all", label: "全部结果" },
+  { value: "success", label: "生成成功" },
+  { value: "failed", label: "生成失败" }
+];
+
+const API_DELIVERY_OPTIONS: Array<{ value: AdminApiAuditDeliveryFilter; label: string }> = [
+  { value: "all", label: "全部传输" },
+  { value: "delivered", label: "已送达" },
+  { value: "client_aborted", label: "客户端中断" },
+  { value: "connection_closed", label: "连接中断" },
+  { value: "unknown", label: "未知" }
+];
+
+const API_SORT_OPTIONS: Array<{ value: AdminApiAuditSort; label: string }> = [
+  { value: "created_desc", label: "最近请求" },
+  { value: "tokens_desc", label: "Token 最高" },
+  { value: "latency_desc", label: "时延最高" }
+];
+
 function formatLocalDateTime(value: string | null | undefined): string {
   if (!value) return "未知时间";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatInteger(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "0";
+  return value.toLocaleString();
+}
+
+function formatMs(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "未记录";
+  return `${value.toLocaleString()} ms`;
+}
+
+function compactId(value: string | null | undefined, left = 6, right = 4): string {
+  const normalized = value?.trim();
+  if (!normalized) return "未记录";
+  return normalized.length <= left + right + 2 ? normalized : `${normalized.slice(0, left)}··${normalized.slice(-right)}`;
 }
 
 function displayUserLabel(user: AdminConversationUser | null): string {
@@ -71,12 +126,61 @@ function userMonogram(user: AdminConversationUser | null): string {
   return source.slice(0, 2).toUpperCase();
 }
 
+function ipIdentityLabel(record: AdminApiAuditRecord): string {
+  return record.clientIp || "IP 暂缺";
+}
+
+function ipMonogram(record: AdminApiAuditRecord): string {
+  if (!record.clientIp) return "IP";
+  const normalized = record.clientIp.replace(/[^a-zA-Z0-9]/g, "");
+  return (normalized.slice(-2) || "IP").toUpperCase();
+}
+
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "blue";
 }
 
 function feedbackColor(type: "positive" | "negative"): string {
   return type === "positive" ? "success" : "error";
+}
+
+function apiResultLabel(value: string): string {
+  return value === "success" ? "生成成功" : value === "failed" ? "生成失败" : value;
+}
+
+function apiResultColor(value: string): string {
+  return value === "success" ? "success" : "error";
+}
+
+function apiDeliveryLabel(value: string): string {
+  if (value === "delivered") return "已送达";
+  if (value === "client_aborted") return "客户端中断";
+  if (value === "connection_closed") return "连接中断";
+  return "未知";
+}
+
+function apiDeliveryColor(value: string): string {
+  return value === "delivered" ? "blue" : value === "unknown" ? "default" : "warning";
+}
+
+function apiTransportLabel(value: string): string {
+  return value === "stream" ? "Streaming" : "Non-stream";
+}
+
+function apiPreviewText(record: AdminApiAuditRecord): string {
+  return record.preview.latest || record.preview.prompt || "该调用未持久化正文摘要，通常是历史事件或仅记录了元数据。";
+}
+
+function apiInstanceLabel(record: AdminApiAuditRecord): string {
+  return record.integration.name || record.integration.slug || "未识别实例";
+}
+
+function apiPromptLabel(record: AdminApiAuditRecord): string {
+  return record.preview.prompt || "当前记录没有落下首轮请求摘要。";
+}
+
+function apiLatestLabel(record: AdminApiAuditRecord): string {
+  return record.preview.latest || "当前记录没有落下最近消息摘要。";
 }
 
 function sentimentText(summary: AdminConversationSummary["feedbackSummary"]): string {
@@ -102,16 +206,28 @@ function sentimentBar(summary: AdminConversationSummary["feedbackSummary"]): { p
   return { positive, negative, neutral };
 }
 
+function apiHealthBar(record: AdminApiAuditRecord): { positive: number; negative: number; neutral: number } {
+  if (record.status.result !== "success") {
+    return { positive: 0, neutral: 24, negative: 76 };
+  }
+  if (record.status.delivery !== "delivered") {
+    return { positive: 42, neutral: 58, negative: 0 };
+  }
+  return { positive: 100, neutral: 0, negative: 0 };
+}
+
+function apiHealthText(record: AdminApiAuditRecord): string {
+  if (record.status.result !== "success") return "生成失败";
+  if (record.status.delivery !== "delivered") return "生成成功但传输未完整送达";
+  return "生成与传输均正常";
+}
+
 function compactWorkspaceLabel(workspace: string): string {
   const normalized = workspace.trim();
   if (!normalized) return "未记录";
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length <= 2) return normalized;
   return segments.slice(-2).join("/");
-}
-
-function compactThreadId(id: string): string {
-  return id.length <= 12 ? id : `${id.slice(0, 6)}··${id.slice(-4)}`;
 }
 
 function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
@@ -143,7 +259,7 @@ function ConversationAuditMarkdown(props: { text: string; className?: string }) 
           h3: ({ className, ...rest }) => <h3 className={className ? `aui-md-h3 ${className}` : "aui-md-h3"} {...rest} />,
           h4: ({ className, ...rest }) => <h4 className={className ? `aui-md-h4 ${className}` : "aui-md-h4"} {...rest} />,
           p: ({ className, ...rest }) => <p className={className ? `aui-md-p ${className}` : "aui-md-p"} {...rest} />,
-          a: MarkdownLink as any,
+          a: MarkdownLink as never,
           ul: ({ className, ...rest }) => <ul className={className ? `aui-md-ul ${className}` : "aui-md-ul"} {...rest} />,
           ol: ({ className, ...rest }) => <ol className={className ? `aui-md-ol ${className}` : "aui-md-ol"} {...rest} />,
           blockquote: ({ className, ...rest }) => (
@@ -172,7 +288,34 @@ function SummaryCard(props: { title: string; value: number | string; suffix?: st
   );
 }
 
-function deriveLatestAssistantReply(conversation: AdminConversationDetailResponse["conversation"], transcript: AdminConversationTranscriptMessage[]): string {
+function InsightCard(props: { label: string; text: string }) {
+  return (
+    <article className="conversation-audit-insight-card">
+      <span>{props.label}</span>
+      <strong>{props.text}</strong>
+    </article>
+  );
+}
+
+function MetricCard(props: { icon: LucideIcon; title: string; text: string; detail: string }) {
+  const Icon = props.icon;
+  return (
+    <div className="conversation-audit-detail-metric">
+      <Icon size={16} />
+      <div>
+        <strong>{props.text}</strong>
+        <span>
+          {props.title} · {props.detail}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function deriveLatestAssistantReply(
+  conversation: AdminConversationDetailResponse["conversation"],
+  transcript: AdminConversationTranscriptMessage[]
+): string {
   const item = [...transcript].reverse().find((message) => message.role === "assistant" && message.text.trim());
   return item?.text || conversation.preview.latestText || "暂无助手文本回复";
 }
@@ -212,12 +355,8 @@ function ThreadListItem(props: {
         </Tag>
         <Tag>{props.conversation.metrics.messageCount} 条消息</Tag>
         {props.conversation.activeSession ? <Tag color="green">运行中</Tag> : null}
-        {props.conversation.feedbackSummary.positive > 0 ? (
-          <Tag color="success">+{props.conversation.feedbackSummary.positive}</Tag>
-        ) : null}
-        {props.conversation.feedbackSummary.negative > 0 ? (
-          <Tag color="error">-{props.conversation.feedbackSummary.negative}</Tag>
-        ) : null}
+        {props.conversation.feedbackSummary.positive > 0 ? <Tag color="success">+{props.conversation.feedbackSummary.positive}</Tag> : null}
+        {props.conversation.feedbackSummary.negative > 0 ? <Tag color="error">-{props.conversation.feedbackSummary.negative}</Tag> : null}
       </div>
 
       <div className="conversation-audit-thread-foot">
@@ -238,6 +377,57 @@ function ThreadListItem(props: {
   );
 }
 
+function ApiUsageListItem(props: {
+  record: AdminApiAuditRecord;
+  active: boolean;
+  onSelect(): void;
+}) {
+  const health = apiHealthBar(props.record);
+
+  return (
+    <button
+      type="button"
+      className={props.active ? "conversation-audit-thread-card is-active" : "conversation-audit-thread-card"}
+      onClick={props.onSelect}
+    >
+      <div className="conversation-audit-thread-top">
+        <div className="conversation-audit-thread-lead">
+          <span className="conversation-audit-thread-avatar">{ipMonogram(props.record)}</span>
+          <div className="conversation-audit-thread-title-block">
+            <strong>{ipIdentityLabel(props.record)}</strong>
+            <small>{apiInstanceLabel(props.record)}</small>
+          </div>
+        </div>
+        <span className="conversation-audit-thread-time">{formatLocalDateTime(props.record.createdAt)}</span>
+      </div>
+
+      <p className="conversation-audit-thread-preview">{apiPreviewText(props.record)}</p>
+
+      <div className="conversation-audit-thread-meta">
+        <Tag color={apiResultColor(props.record.status.result)}>{apiResultLabel(props.record.status.result)}</Tag>
+        <Tag color={apiDeliveryColor(props.record.status.delivery)}>{apiDeliveryLabel(props.record.status.delivery)}</Tag>
+        <Tag>{props.record.model}</Tag>
+        <Tag>{formatInteger(props.record.metrics.totalTokens)} tokens</Tag>
+      </div>
+
+      <div className="conversation-audit-thread-foot">
+        <span>{compactId(props.record.sessionId)}</span>
+        <span>{apiTransportLabel(props.record.transport.responseMode)}</span>
+        <span>{formatMs(props.record.metrics.responseCompletedMs)}</span>
+      </div>
+
+      <div className="conversation-audit-thread-sentiment">
+        <div className="conversation-audit-thread-sentiment-bar" aria-hidden="true">
+          <span className="is-positive" style={{ width: `${health.positive}%` }} />
+          <span className="is-neutral" style={{ width: `${health.neutral}%` }} />
+          <span className="is-negative" style={{ width: `${health.negative}%` }} />
+        </div>
+        <small>{apiHealthText(props.record)}</small>
+      </div>
+    </button>
+  );
+}
+
 function TranscriptMessageCard(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
@@ -251,11 +441,7 @@ function TranscriptMessageCard(props: {
       : role === "assistant"
         ? "conversation-audit-message is-assistant"
         : "conversation-audit-message is-system";
-  const classes = [
-    stateClass,
-    props.highlighted ? "is-highlighted" : "",
-    props.queryMatched ? "is-query-match" : ""
-  ]
+  const classes = [stateClass, props.highlighted ? "is-highlighted" : "", props.queryMatched ? "is-query-match" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -299,10 +485,7 @@ function ConversationDetail(props: {
     return transcriptMessages.filter((message) => {
       if (roleFilter !== "all" && message.role !== roleFilter) return false;
       if (!deferredTranscriptQuery) return true;
-      return (
-        message.text.toLowerCase().includes(deferredTranscriptQuery) ||
-        roleLabel(message.role).toLowerCase().includes(deferredTranscriptQuery)
-      );
+      return message.text.toLowerCase().includes(deferredTranscriptQuery) || roleLabel(message.role).toLowerCase().includes(deferredTranscriptQuery);
     });
   }, [deferredTranscriptQuery, roleFilter, transcriptMessages]);
 
@@ -340,8 +523,7 @@ function ConversationDetail(props: {
           <span className="conversation-audit-detail-eyebrow">Conversation Audit</span>
           <h3>{conversation.title}</h3>
           <p>
-            {displayUserLabel(conversation.user)} · 创建于 {formatLocalDateTime(conversation.createdAt)} · 所有时间按{" "}
-            {props.timezoneLabel} 展示
+            {displayUserLabel(conversation.user)} · 创建于 {formatLocalDateTime(conversation.createdAt)} · 所有时间按 {props.timezoneLabel} 展示
           </p>
         </div>
         <div className="conversation-audit-detail-tags">
@@ -358,7 +540,7 @@ function ConversationDetail(props: {
       <section className="conversation-audit-detail-fingerprint">
         <article className="conversation-audit-fingerprint-card">
           <span>Thread 指纹</span>
-          <strong>{compactThreadId(conversation.id)}</strong>
+          <strong>{compactId(conversation.id)}</strong>
         </article>
         <article className="conversation-audit-fingerprint-card">
           <span>工作区尾段</span>
@@ -374,49 +556,35 @@ function ConversationDetail(props: {
 
       <section className="conversation-audit-detail-grid">
         <div className="conversation-audit-detail-metrics">
-          <div className="conversation-audit-detail-metric">
-            <UserRound size={16} />
-            <div>
-              <strong>{displayUserLabel(conversation.user)}</strong>
-              <span>{conversation.user ? `${conversation.user.role} · ${conversation.user.status}` : "匿名或已删除用户"}</span>
-            </div>
-          </div>
-          <div className="conversation-audit-detail-metric">
-            <MessageSquareText size={16} />
-            <div>
-              <strong>{conversation.metrics.messageCount} 条消息</strong>
-              <span>
-                用户 {conversation.metrics.userMessageCount} / 助手 {conversation.metrics.assistantMessageCount}
-              </span>
-            </div>
-          </div>
-          <div className="conversation-audit-detail-metric">
-            <Activity size={16} />
-            <div>
-              <strong>{conversation.feedbackSummary.total} 条反馈</strong>
-              <span>
-                正向 {conversation.feedbackSummary.positive} / 负向 {conversation.feedbackSummary.negative} / {sentimentText(conversation.feedbackSummary)}
-              </span>
-            </div>
-          </div>
-          <div className="conversation-audit-detail-metric">
-            <HardDrive size={16} />
-            <div>
-              <strong title={conversation.workspace}>{conversation.workspace || "未记录工作区"}</strong>
-              <span>最后更新 {formatLocalDateTime(conversation.updatedAt)}</span>
-            </div>
-          </div>
+          <MetricCard
+            icon={UserRound}
+            title="身份"
+            text={displayUserLabel(conversation.user)}
+            detail={conversation.user ? `${conversation.user.role} · ${conversation.user.status}` : "匿名或已删除用户"}
+          />
+          <MetricCard
+            icon={MessageSquareText}
+            title="消息规模"
+            text={`${formatInteger(conversation.metrics.messageCount)} 条消息`}
+            detail={`用户 ${conversation.metrics.userMessageCount} / 助手 ${conversation.metrics.assistantMessageCount}`}
+          />
+          <MetricCard
+            icon={Activity}
+            title="反馈状态"
+            text={`${formatInteger(conversation.feedbackSummary.total)} 条反馈`}
+            detail={`正向 ${conversation.feedbackSummary.positive} / 负向 ${conversation.feedbackSummary.negative}`}
+          />
+          <MetricCard
+            icon={HardDrive}
+            title="工作区"
+            text={conversation.workspace || "未记录工作区"}
+            detail={`最后更新 ${formatLocalDateTime(conversation.updatedAt)}`}
+          />
         </div>
 
         <div className="conversation-audit-insight-grid">
-          <article className="conversation-audit-insight-card">
-            <span>首轮用户问题</span>
-            <strong>{firstUserPrompt}</strong>
-          </article>
-          <article className="conversation-audit-insight-card">
-            <span>最近一条助手回复</span>
-            <strong>{latestAssistantReply}</strong>
-          </article>
+          <InsightCard label="首轮用户问题" text={firstUserPrompt} />
+          <InsightCard label="最近一条助手回复" text={latestAssistantReply} />
         </div>
 
         <div className="conversation-audit-section">
@@ -520,7 +688,175 @@ function ConversationDetail(props: {
   );
 }
 
-export function ConversationAuditView() {
+function ApiAuditDetail(props: {
+  detail: AdminApiAuditDetailResponse | null;
+  loading: boolean;
+  errorText: string;
+  timezoneLabel: string;
+}) {
+  if (props.loading && !props.detail) {
+    return (
+      <div className="conversation-audit-detail-loading">
+        <Spin />
+      </div>
+    );
+  }
+
+  if (!props.detail) {
+    return (
+      <div className="conversation-audit-detail-empty">
+        <Empty description="选择左侧 API 调用后查看 IP、实例、状态和传输轨迹" />
+      </div>
+    );
+  }
+
+  const { record, relatedSummary } = props.detail;
+  const captureMood = record.clientIp
+    ? record.preview.prompt || record.preview.latest
+      ? "采集完整"
+      : "仅落元数据"
+    : "缺少 IP";
+
+  const requestTrail = [
+    { label: "收到请求", value: formatLocalDateTime(record.createdAt), hint: record.sessionId ? `Session ${compactId(record.sessionId)}` : "未附带 Session ID" },
+    { label: "开始响应", value: formatLocalDateTime(record.responseStartedAt), hint: formatMs(record.metrics.responseStartedMs) },
+    { label: "首包就绪", value: formatLocalDateTime(record.responseReadyAt), hint: formatMs(record.metrics.responseReadyMs) },
+    { label: "响应结束", value: formatLocalDateTime(record.responseCompletedAt), hint: formatMs(record.metrics.responseCompletedMs) }
+  ];
+
+  return (
+    <div className="conversation-audit-detail-body">
+      <section className="conversation-audit-detail-hero">
+        <div className="conversation-audit-detail-hero-copy">
+          <span className="conversation-audit-detail-eyebrow">API Audit</span>
+          <h3>{ipIdentityLabel(record)}</h3>
+          <p>
+            {apiInstanceLabel(record)} · 请求发起于 {formatLocalDateTime(record.createdAt)} · 所有时间按 {props.timezoneLabel} 展示
+          </p>
+        </div>
+        <div className="conversation-audit-detail-tags">
+          <Tag color={apiResultColor(record.status.result)}>{apiResultLabel(record.status.result)}</Tag>
+          <Tag color={apiDeliveryColor(record.status.delivery)}>{apiDeliveryLabel(record.status.delivery)}</Tag>
+          <Tag>{record.model}</Tag>
+          <Tag>{apiTransportLabel(record.transport.responseMode)}</Tag>
+          {!record.clientIp ? <Tag>IP 暂缺</Tag> : null}
+        </div>
+      </section>
+
+      <section className="conversation-audit-detail-fingerprint">
+        <article className="conversation-audit-fingerprint-card">
+          <span>Session 指纹</span>
+          <strong>{compactId(record.sessionId)}</strong>
+        </article>
+        <article className="conversation-audit-fingerprint-card">
+          <span>API 实例</span>
+          <strong>{record.integration.slug || apiInstanceLabel(record)}</strong>
+        </article>
+        <article className="conversation-audit-fingerprint-card">
+          <span>采集完整度</span>
+          <strong>{captureMood}</strong>
+        </article>
+      </section>
+
+      {props.errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={props.errorText} /> : null}
+
+      <section className="conversation-audit-detail-grid">
+        <div className="conversation-audit-detail-metrics">
+          <MetricCard
+            icon={Network}
+            title="身份主键"
+            text={ipIdentityLabel(record)}
+            detail={
+              record.clientIp
+                ? `同 IP 共 ${formatInteger(relatedSummary.sameIpRequests)} 次，请求最早 ${formatLocalDateTime(relatedSummary.firstSeenAt)}`
+                : "历史记录尚未采集到客户端 IP"
+            }
+          />
+          <MetricCard
+            icon={MessageSquareText}
+            title="消息规模"
+            text={`${formatInteger(record.messageCount)} 条输入消息`}
+            detail={`输出 ${formatInteger(record.metrics.outputChars)} chars`}
+          />
+          <MetricCard
+            icon={Activity}
+            title="Token 消耗"
+            text={`${formatInteger(record.metrics.totalTokens)} tokens`}
+            detail={`Ready ${formatMs(record.metrics.responseReadyMs)} / Full ${formatMs(record.metrics.responseCompletedMs)}`}
+          />
+          <MetricCard
+            icon={HardDrive}
+            title="传输状态"
+            text={record.transport.responseStatusCode ? `HTTP ${record.transport.responseStatusCode}` : "未记录状态码"}
+            detail={`${apiDeliveryLabel(record.status.delivery)} · ${apiTransportLabel(record.transport.responseMode)}`}
+          />
+        </div>
+
+        <div className="conversation-audit-insight-grid">
+          <InsightCard label="首轮请求摘要" text={apiPromptLabel(record)} />
+          <InsightCard label="最近消息摘要" text={apiLatestLabel(record)} />
+        </div>
+
+        <div className="conversation-audit-section">
+          <div className="conversation-audit-section-head">
+            <div>
+              <h4>调用轨迹</h4>
+              <p>展示请求接入、首包就绪和响应结束时间，方便判断是生成失败还是链路中断。</p>
+            </div>
+          </div>
+          <div className="conversation-audit-api-flow">
+            {requestTrail.map((item) => (
+              <article key={item.label} className="conversation-audit-api-flow-card">
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.hint}</small>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="conversation-audit-section">
+          <div className="conversation-audit-section-head">
+            <div>
+              <h4>调用上下文</h4>
+              <p>用实例、模型、传输标记和错误摘要来还原这次 API 请求的行为边界。</p>
+            </div>
+          </div>
+          <div className="conversation-audit-api-context">
+            <article className="conversation-audit-feedback-empty conversation-audit-api-context-card">
+              <strong>实例与模型</strong>
+              <p>
+                {apiInstanceLabel(record)} · 请求模型 {record.requestedModel || "未指定"} · 实际模型 {record.model}
+                {record.requestedReasoningEffort ? ` · 推理强度 ${record.requestedReasoningEffort}` : ""}
+              </p>
+            </article>
+            <article className="conversation-audit-feedback-empty conversation-audit-api-context-card">
+              <strong>链路标记</strong>
+              <p>
+                {record.transport.requestAborted ? "客户端主动中断" : "未记录客户端中断"} ·{" "}
+                {record.transport.responseClosedBeforeFinish ? "连接在完成前关闭" : "连接完整结束"} ·{" "}
+                {record.transport.responseFinished ? "finish 已触发" : "finish 未触发"}
+              </p>
+            </article>
+            <article className="conversation-audit-feedback-empty conversation-audit-api-context-card">
+              <strong>范围信息</strong>
+              <p>
+                Agent Mode {record.agentModeId ? compactId(record.agentModeId) : "未记录"} · 资料集 {record.knowledgeSetIds.length || 0} 个 · 同 Session{" "}
+                {formatInteger(relatedSummary.sameSessionRequests)} 次
+              </p>
+            </article>
+            <article className="conversation-audit-feedback-empty conversation-audit-api-context-card">
+              <strong>错误摘要</strong>
+              <p>{record.errorMessage || "当前调用没有记录错误消息。"}</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ConversationWorkspace(props: { timezoneLabel: string }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminConversationStatusFilter>("all");
   const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
@@ -537,7 +873,6 @@ export function ConversationAuditView() {
   const [selectedConversationId, setSelectedConversationId] = useState("");
 
   const deferredQuery = useDeferredValue(query.trim());
-  const timezoneLabel = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区", []);
 
   useEffect(() => {
     let active = true;
@@ -629,15 +964,15 @@ export function ConversationAuditView() {
           <div className="conversation-audit-rail-head">
             <div>
               <Typography.Title level={4} className="admin-card-heading">
-                会话台账
+                用户会话台账
               </Typography.Title>
-              <Typography.Paragraph>参考 magic 的会话侧栏结构，用搜索、筛选和卡片摘要快速定位问题线程。</Typography.Paragraph>
+              <Typography.Paragraph>按标题、用户、反馈和摘要快速锁定问题线程，延续现有会话阅读式双栏节奏。</Typography.Paragraph>
             </div>
             <Space wrap>
               <Tag>
                 <Space size={4}>
                   <Clock3 size={12} />
-                  <span>{timezoneLabel}</span>
+                  <span>{props.timezoneLabel}</span>
                 </Space>
               </Tag>
               <Button icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((value) => value + 1)} loading={listLoading}>
@@ -717,14 +1052,227 @@ export function ConversationAuditView() {
         </Card>
 
         <Card className="admin-card conversation-audit-detail">
-          <ConversationDetail
-            detail={detailData}
-            loading={detailLoading}
-            errorText={detailErrorText}
-            timezoneLabel={timezoneLabel}
-          />
+          <ConversationDetail detail={detailData} loading={detailLoading} errorText={detailErrorText} timezoneLabel={props.timezoneLabel} />
         </Card>
       </div>
     </div>
   );
 }
+
+function ApiAuditWorkspace(props: { timezoneLabel: string }) {
+  const [query, setQuery] = useState("");
+  const [resultFilter, setResultFilter] = useState<AdminApiAuditResultFilter>("all");
+  const [deliveryFilter, setDeliveryFilter] = useState<AdminApiAuditDeliveryFilter>("all");
+  const [sort, setSort] = useState<AdminApiAuditSort>("created_desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(24);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
+  const [listErrorText, setListErrorText] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErrorText, setDetailErrorText] = useState("");
+  const [listData, setListData] = useState<AdminApiAuditListResponse | null>(null);
+  const [detailData, setDetailData] = useState<AdminApiAuditDetailResponse | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState("");
+
+  const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    setListErrorText("");
+
+    void fetchAdminApiAuditList({
+      query: deferredQuery || undefined,
+      result: resultFilter,
+      delivery: deliveryFilter,
+      sort,
+      page,
+      pageSize
+    })
+      .then((result) => {
+        if (!active) return;
+        setListData(result);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setListErrorText(error instanceof Error ? error.message : "加载 API 审计失败");
+      })
+      .finally(() => {
+        if (!active) return;
+        setListLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredQuery, deliveryFilter, page, pageSize, refreshToken, resultFilter, sort]);
+
+  useEffect(() => {
+    if (!listData?.records.length) {
+      setSelectedEventId("");
+      setDetailData(null);
+      return;
+    }
+    setSelectedEventId((current) => (listData.records.some((item) => item.id === current) ? current : listData.records[0]!.id));
+  }, [listData]);
+
+  useEffect(() => {
+    if (!selectedEventId) {
+      setDetailData(null);
+      setDetailErrorText("");
+      return;
+    }
+
+    let active = true;
+    setDetailLoading(true);
+    setDetailErrorText("");
+
+    void fetchAdminApiAuditDetail(selectedEventId)
+      .then((result) => {
+        if (!active) return;
+        setDetailData(result);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setDetailErrorText(error instanceof Error ? error.message : "加载 API 调用详情失败");
+      })
+      .finally(() => {
+        if (!active) return;
+        setDetailLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [refreshToken, selectedEventId]);
+
+  const summary = listData?.summary;
+
+  return (
+    <div className="conversation-audit-shell">
+      <div className="conversation-audit-summary-grid">
+        <SummaryCard title="API 调用总数" value={summary?.totalRequests ?? 0} />
+        <SummaryCard title="唯一 IP" value={summary?.uniqueIps ?? 0} />
+        <SummaryCard title="缺失 IP" value={summary?.missingIpCount ?? 0} />
+        <SummaryCard title="传输异常" value={summary?.deliveryFailureCount ?? 0} />
+      </div>
+
+      {listErrorText ? <Alert type="error" showIcon className="admin-alert-inline" message={listErrorText} /> : null}
+
+      <div className="conversation-audit-layout">
+        <Card className="admin-card conversation-audit-rail">
+          <div className="conversation-audit-rail-head">
+            <div>
+              <Typography.Title level={4} className="admin-card-heading">
+                API 调用台账
+              </Typography.Title>
+              <Typography.Paragraph>以 IP 作为主身份视角，串联实例、模型、传输状态和响应时延，旧数据没有 IP 时保持空缺。</Typography.Paragraph>
+            </div>
+            <Space wrap>
+              <Tag>
+                <Space size={4}>
+                  <Clock3 size={12} />
+                  <span>{props.timezoneLabel}</span>
+                </Space>
+              </Tag>
+              <Button icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((value) => value + 1)} loading={listLoading}>
+                刷新
+              </Button>
+            </Space>
+          </div>
+
+          <div className="conversation-audit-filter-grid">
+            <Input
+              allowClear
+              value={query}
+              prefix={<Search size={15} />}
+              placeholder="搜索 IP、实例、Session、模型、摘要"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+            />
+            <Select
+              value={resultFilter}
+              options={API_RESULT_OPTIONS}
+              onChange={(value) => {
+                setResultFilter(value as AdminApiAuditResultFilter);
+                setPage(1);
+              }}
+            />
+            <Select
+              value={deliveryFilter}
+              options={API_DELIVERY_OPTIONS}
+              onChange={(value) => {
+                setDeliveryFilter(value as AdminApiAuditDeliveryFilter);
+                setPage(1);
+              }}
+            />
+            <Select value={sort} options={API_SORT_OPTIONS} onChange={(value) => setSort(value as AdminApiAuditSort)} />
+          </div>
+
+          <div className="conversation-audit-list-meta">
+            <span>
+              当前筛选命中 {listData?.page.totalItems ?? 0} 条，识别到 {summary?.uniqueIps ?? 0} 个 IP，缺失 {summary?.missingIpCount ?? 0} 条
+            </span>
+            {listLoading ? <Spin size="small" /> : null}
+          </div>
+
+          <div className="conversation-audit-list">
+            {!listLoading && (listData?.records.length ?? 0) === 0 ? (
+              <div className="conversation-audit-list-empty">
+                <Empty description="没有匹配到 API 调用记录" />
+              </div>
+            ) : (
+              listData?.records.map((record) => (
+                <ApiUsageListItem key={record.id} record={record} active={record.id === selectedEventId} onSelect={() => setSelectedEventId(record.id)} />
+              ))
+            )}
+          </div>
+
+          <div className="conversation-audit-pagination">
+            <Pagination
+              current={listData?.page.page ?? page}
+              pageSize={listData?.page.pageSize ?? pageSize}
+              total={listData?.page.totalItems ?? 0}
+              showSizeChanger
+              onChange={(nextPage, nextPageSize) => {
+                setPage(nextPage);
+                if (nextPageSize !== pageSize) {
+                  setPageSize(nextPageSize);
+                }
+              }}
+            />
+          </div>
+        </Card>
+
+        <Card className="admin-card conversation-audit-detail">
+          <ApiAuditDetail detail={detailData} loading={detailLoading} errorText={detailErrorText} timezoneLabel={props.timezoneLabel} />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+export function ConversationAuditView() {
+  const [mode, setMode] = useState<AuditMode>("conversations");
+  const timezoneLabel = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区", []);
+
+  return (
+    <div className="conversation-audit-hub">
+      <Card className="admin-card conversation-audit-mode-bar">
+        <div className="conversation-audit-mode-copy">
+          <span className="conversation-audit-detail-eyebrow">Audit Workspace</span>
+          <h3>统一审计工作台</h3>
+          <p>在同一个工作台里切换查看用户会话和 OpenAI 兼容 API 调用，所有时间都跟随浏览器本地时区 {timezoneLabel}。</p>
+        </div>
+        <Segmented options={AUDIT_MODE_OPTIONS} value={mode} onChange={(value) => setMode(value as AuditMode)} />
+      </Card>
+
+      {mode === "conversations" ? <ConversationWorkspace timezoneLabel={timezoneLabel} /> : <ApiAuditWorkspace timezoneLabel={timezoneLabel} />}
+    </div>
+  );
+}
+
+export default ConversationAuditView;
