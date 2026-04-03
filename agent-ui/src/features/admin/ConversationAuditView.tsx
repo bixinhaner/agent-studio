@@ -65,6 +65,12 @@ function displayUserLabel(user: AdminConversationUser | null): string {
   return user?.displayName || user?.email || "未关联用户";
 }
 
+function userMonogram(user: AdminConversationUser | null): string {
+  const source = displayUserLabel(user).replace(/\s+/g, "");
+  if (!source) return "NA";
+  return source.slice(0, 2).toUpperCase();
+}
+
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "blue";
 }
@@ -77,6 +83,35 @@ function sentimentText(summary: AdminConversationSummary["feedbackSummary"]): st
   if (summary.total === 0) return "暂无反馈";
   const ratio = Math.round((summary.positive / summary.total) * 100);
   return `正向率 ${ratio}%`;
+}
+
+function sentimentMood(summary: AdminConversationSummary["feedbackSummary"]): string {
+  if (summary.total === 0) return "未形成反馈样本";
+  if (summary.negative > summary.positive) return "负向占优";
+  if (summary.negative === summary.positive) return "评价分化";
+  return "整体偏正向";
+}
+
+function sentimentBar(summary: AdminConversationSummary["feedbackSummary"]): { positive: number; negative: number; neutral: number } {
+  if (summary.total === 0) {
+    return { positive: 0, negative: 0, neutral: 100 };
+  }
+  const positive = Math.round((summary.positive / summary.total) * 100);
+  const negative = Math.round((summary.negative / summary.total) * 100);
+  const neutral = Math.max(0, 100 - positive - negative);
+  return { positive, negative, neutral };
+}
+
+function compactWorkspaceLabel(workspace: string): string {
+  const normalized = workspace.trim();
+  if (!normalized) return "未记录";
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length <= 2) return normalized;
+  return segments.slice(-2).join("/");
+}
+
+function compactThreadId(id: string): string {
+  return id.length <= 12 ? id : `${id.slice(0, 6)}··${id.slice(-4)}`;
 }
 
 function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
@@ -148,6 +183,7 @@ function ThreadListItem(props: {
   onSelect(): void;
 }) {
   const latestAt = props.conversation.feedbackSummary.latestAt;
+  const sentiment = sentimentBar(props.conversation.feedbackSummary);
 
   return (
     <button
@@ -156,9 +192,12 @@ function ThreadListItem(props: {
       onClick={props.onSelect}
     >
       <div className="conversation-audit-thread-top">
-        <div className="conversation-audit-thread-title-block">
-          <strong>{props.conversation.title}</strong>
-          <small>{displayUserLabel(props.conversation.user)}</small>
+        <div className="conversation-audit-thread-lead">
+          <span className="conversation-audit-thread-avatar">{userMonogram(props.conversation.user)}</span>
+          <div className="conversation-audit-thread-title-block">
+            <strong>{props.conversation.title}</strong>
+            <small>{displayUserLabel(props.conversation.user)}</small>
+          </div>
         </div>
         <span className="conversation-audit-thread-time">{formatLocalDateTime(props.conversation.updatedAt)}</span>
       </div>
@@ -185,6 +224,15 @@ function ThreadListItem(props: {
         <span>{props.conversation.model}</span>
         <span>{props.conversation.reasoningEffort}</span>
         <span>{latestAt ? `反馈更新 ${formatLocalDateTime(latestAt)}` : sentimentText(props.conversation.feedbackSummary)}</span>
+      </div>
+
+      <div className="conversation-audit-thread-sentiment">
+        <div className="conversation-audit-thread-sentiment-bar" aria-hidden="true">
+          <span className="is-positive" style={{ width: `${sentiment.positive}%` }} />
+          <span className="is-neutral" style={{ width: `${sentiment.neutral}%` }} />
+          <span className="is-negative" style={{ width: `${sentiment.negative}%` }} />
+        </div>
+        <small>{sentimentMood(props.conversation.feedbackSummary)}</small>
       </div>
     </button>
   );
@@ -305,6 +353,21 @@ function ConversationDetail(props: {
           {conversation.activeSession ? <Tag color="green">活跃 Runtime</Tag> : null}
           {conversation.externalId ? <Tag>外部 ID</Tag> : null}
         </div>
+      </section>
+
+      <section className="conversation-audit-detail-fingerprint">
+        <article className="conversation-audit-fingerprint-card">
+          <span>Thread 指纹</span>
+          <strong>{compactThreadId(conversation.id)}</strong>
+        </article>
+        <article className="conversation-audit-fingerprint-card">
+          <span>工作区尾段</span>
+          <strong>{compactWorkspaceLabel(conversation.workspace)}</strong>
+        </article>
+        <article className="conversation-audit-fingerprint-card">
+          <span>反馈判断</span>
+          <strong>{sentimentMood(conversation.feedbackSummary)}</strong>
+        </article>
       </section>
 
       {props.errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={props.errorText} /> : null}
