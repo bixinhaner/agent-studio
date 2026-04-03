@@ -506,7 +506,7 @@ export function CapabilityCenterShell() {
         setAgentModes(agentModeResponse.agentModes);
       } catch (error) {
         if (active) {
-          setErrorText(error instanceof Error ? error.message : "加载能力配置中心失败");
+          setErrorText(error instanceof Error ? error.message : "加载智能体配置失败");
         }
       } finally {
         if (active) setLoading(false);
@@ -855,7 +855,7 @@ export function CapabilityCenterShell() {
       <div className="admin-section-header admin-workspace-header">
         <div>
           <Typography.Title level={4} className="admin-card-heading">
-            能力配置中心
+            智能体配置
           </Typography.Title>
           <Typography.Paragraph>统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Paragraph>
         </div>
@@ -866,12 +866,12 @@ export function CapabilityCenterShell() {
             刷新列表
           </Button>
           <Button type="primary" onClick={openCreatePanel} disabled={loading}>
-            新建能力资源
+            新建配置项
           </Button>
         </Space>
       </div>
 
-      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="能力资源类型">
+      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="智能体配置类型">
         <Segmented
           block
           value={tab}
@@ -882,7 +882,7 @@ export function CapabilityCenterShell() {
 
       {isNarrowScreen ? (
         <div className="resource-center-mobile-toolbar">
-          <MobileFilterDrawer title="筛选能力资源" filterCount={mobileFilterCount}>
+          <MobileFilterDrawer title="筛选配置项" filterCount={mobileFilterCount}>
             <Space direction="vertical" size={12} className="admin-full-width">
               <label className="field">
                 <span className="field-label">搜索资源</span>
@@ -954,7 +954,7 @@ export function CapabilityCenterShell() {
         </div>
       )}
 
-      <div className="resource-center-stats-row capability-center-stats-row" aria-label="能力统计">
+      <div className="resource-center-stats-row capability-center-stats-row" aria-label="配置统计">
         <article className="resource-center-stat-card">
           <span className="resource-center-stat-label">{resourceCountLabel}</span>
           <strong className="resource-center-stat-value">{visibleCount}</strong>

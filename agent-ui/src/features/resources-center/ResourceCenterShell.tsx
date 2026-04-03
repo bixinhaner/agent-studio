@@ -242,59 +242,25 @@ export function ResourceCenterShell() {
 
   return (
     <Card className="admin-card resource-center-shell antd-admin-card admin-workspace-shell">
-      <section className="admin-flagship-surface resource-center-command">
-        <div className="admin-flagship-top">
-          <div className="admin-flagship-copy">
-            <p className="auth-eyebrow">Knowledge Operations</p>
-            <Typography.Title level={3} className="admin-flagship-title">
-              把资料集当成平台记忆资产，而不是普通上传目录。
-            </Typography.Title>
-            <Typography.Paragraph className="admin-flagship-detail">
-              在一个页面里查看资料集规模、启停状态、最近变更和当前聚焦对象，方便像经营知识资产一样维护内容源与授权边界。
-            </Typography.Paragraph>
-            <div className="admin-flagship-pill-row">
-              <span className="admin-console-pill">{filterScopeLabel}</span>
-              <span className="admin-console-pill">{statusFilter === "all" ? "状态 · 全部" : `状态 · ${statusFilter}`}</span>
-              <span className="admin-console-pill neutral">焦点 · {selectionLabel}</span>
-            </div>
-          </div>
-          <div className="admin-flagship-actions">
-            <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-              刷新列表
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
-              新建资料集
-            </Button>
-          </div>
+      <div className="admin-section-header admin-workspace-header">
+        <div>
+          <Typography.Title level={4} className="admin-card-heading">
+            资料集
+          </Typography.Title>
+          <Typography.Paragraph>维护资料、文件清单与授权策略。</Typography.Paragraph>
         </div>
-
-        <div className="admin-flagship-grid">
-          <article className="admin-flagship-card">
-            <span>资料集总数</span>
-            <strong>{activeListCount}</strong>
-            <p>当前筛选结果中，共有 {activeEnabledCount} 个启用、{activeDisabledCount} 个停用。</p>
-          </article>
-          <article className="admin-flagship-card">
-            <span>托管上传</span>
-            <strong>{managedUploadCount}</strong>
-            <p>当前界面中的资料来源全部纳入同一托管上传路径，便于统一维护。</p>
-          </article>
-          <article className="admin-flagship-card">
-            <span>7 日内变更</span>
-            <strong>{recentChangeCount}</strong>
-            <p>最近一周内被更新过的资料集数量，可快速判断内容维护是否仍在继续。</p>
-          </article>
-          <article className="admin-flagship-card emphasis">
-            <span>当前焦点</span>
-            <strong>{selectedKnowledgeSet ? selectedKnowledgeSet.name : "等待选择"}</strong>
-            <p>
-              {selectedKnowledgeSet
-                ? `${selectedKnowledgeSet.slug} · 更新于 ${formatLocalDateTime(selectedKnowledgeSet.updatedAt)}`
-                : "从左侧列表选择资料集后，在右侧进入文件、授权和来源细节。"}
-            </p>
-          </article>
-        </div>
-      </section>
+        <Space wrap>
+          <Tag color="blue">{filterScopeLabel}</Tag>
+          <Tag>{statusFilter === "all" ? "状态 · 全部" : `状态 · ${statusFilter}`}</Tag>
+          <Tag>{selectionLabel}</Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
+            刷新列表
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
+            新建资料集
+          </Button>
+        </Space>
+      </div>
 
       {isNarrowScreen ? (
         <div className="resource-center-mobile-toolbar">
@@ -324,7 +290,7 @@ export function ResourceCenterShell() {
           </MobileFilterDrawer>
         </div>
       ) : (
-        <div className="admin-flagship-toolbar resource-center-toolbar admin-workspace-toolbar">
+        <div className="resource-center-toolbar admin-workspace-toolbar">
           <label className="field resource-center-search">
             <span className="field-label">搜索资料集</span>
             <Input
@@ -347,6 +313,29 @@ export function ResourceCenterShell() {
           </label>
         </div>
       )}
+
+      <div className="resource-center-stats-row" aria-label="资料集统计">
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">资料集</span>
+          <strong className="resource-center-stat-value">{activeListCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">启用中</span>
+          <strong className="resource-center-stat-value">{activeEnabledCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">托管上传</span>
+          <strong className="resource-center-stat-value">{managedUploadCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">7 日更新</span>
+          <strong className="resource-center-stat-value">{recentChangeCount}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">停用中</span>
+          <strong className="resource-center-stat-value">{activeDisabledCount}</strong>
+        </article>
+      </div>
 
       {loading ? (
         <div className="admin-workspace-loading">

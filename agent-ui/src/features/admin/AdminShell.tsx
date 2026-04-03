@@ -12,8 +12,7 @@ import {
   MessageSquareText,
   Search,
   Menu,
-  RefreshCcw,
-  ArrowRight
+  RefreshCcw
 } from "lucide-react";
 import { Alert, Breadcrumb, Button, ConfigProvider, Drawer, Input, Space, Spin } from "antd";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -184,7 +183,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   resources: {
     id: "resources",
-    title: "资源配置中心",
+    title: "资料集",
     description: "集中维护资料集、文件来源与资源授权策略。",
     scope: "资源与授权",
     cadence: "按项目变更维护",
@@ -194,7 +193,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   capabilities: {
     id: "capabilities",
-    title: "能力配置中心",
+    title: "智能体配置",
     description: "统一管理 Agent 模式、技能包和运行策略。",
     scope: "运行能力",
     cadence: "按发布节奏更新",
@@ -214,7 +213,7 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   "system-settings": {
     id: "system-settings",
-    title: "系统设置",
+    title: "系统配置",
     description: "维护平台默认参数、策略开关和版本发布记录。",
     scope: "平台默认参数",
     cadence: "变更前评审后发布",
@@ -222,12 +221,6 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     keywords: ["系统", "配置", "默认值", "发布"],
     icon: <Settings size={18} />
   }
-};
-
-const GROUP_ENTRY_SECTION: Record<AdminConsoleGroup, AdminConsoleSection> = {
-  operations: "conversations",
-  governance: "users",
-  runtime: "resources"
 };
 
 
@@ -254,31 +247,6 @@ function nextSectionInOrder(current: AdminConsoleSection, offset: number): Admin
   const length = SECTION_ORDER.length;
   const nextIndex = (index + offset + length) % length;
   return SECTION_ORDER[nextIndex] ?? "overview";
-}
-
-function SectionShortcutCard(props: {
-  item: AdminSectionMeta;
-  compact?: boolean;
-  onSelect(section: AdminConsoleSection): void;
-}) {
-  return (
-    <button
-      type="button"
-      className={props.compact ? "admin-console-switch-card compact" : "admin-console-switch-card"}
-      onClick={() => props.onSelect(props.item.id)}
-    >
-      <span className="admin-console-switch-card-icon" aria-hidden="true">
-        {props.item.icon}
-      </span>
-      <span className="admin-console-switch-card-copy">
-        <strong>{props.item.title}</strong>
-        <small>{props.item.description}</small>
-      </span>
-      <span className="admin-console-switch-card-arrow" aria-hidden="true">
-        <ArrowRight size={16} />
-      </span>
-    </button>
-  );
 }
 
 function AdminNavigationPanel(props: {
@@ -357,7 +325,6 @@ function OverviewWorkspace(props: {
   errorText: string;
   refreshedAt: Date | null;
   onRefresh(): void;
-  onSectionChange(section: AdminConsoleSection): void;
 }) {
   const platformMetrics = [
     {
@@ -379,13 +346,13 @@ function OverviewWorkspace(props: {
   const zendeskStatus = props.overview?.integrations?.zendesk;
 
   return (
-    <div className="admin-console-overview-grid">
+    <div className="admin-console-overview-grid admin-console-overview-grid-single">
       <article className="admin-overview-panel admin-overview-panel-primary">
         <div className="admin-overview-panel-head">
           <div>
-            <span className="admin-console-section-kicker">Executive Snapshot</span>
-            <h2 className="admin-overview-panel-title">平台关键状态应该先给判断，再给动作。</h2>
-            <p className="admin-overview-panel-copy">把规模、活跃度和外部连接准备度浓缩成一眼可读的控制面，所有时间均跟随当前登录者本地时区。</p>
+            <span className="admin-console-section-kicker">Overview</span>
+            <h2 className="admin-overview-panel-title">平台概览</h2>
+            <p className="admin-overview-panel-copy">用户、会话与外部连接状态均按当前登录者本地时区展示。</p>
           </div>
           <div className="admin-overview-head-actions">
             <span className="admin-console-pill neutral">刷新于 {formatLocalTimestamp(props.refreshedAt)}</span>
@@ -423,54 +390,6 @@ function OverviewWorkspace(props: {
           </article>
         </div>
       </article>
-
-      <article className="admin-overview-panel admin-overview-panel-map">
-        <div className="admin-overview-panel-head compact">
-          <div>
-            <span className="admin-console-section-kicker">Action Atlas</span>
-            <h2 className="admin-overview-panel-title">把常用管理动作改造成可直接切换的工作区地图。</h2>
-          </div>
-        </div>
-        <div className="admin-overview-action-grid">
-          {SECTION_ORDER.filter((item) => item !== "overview").map((item) => {
-            const meta = SECTION_META[item];
-            return <SectionShortcutCard key={item} item={meta} onSelect={props.onSectionChange} />;
-          })}
-        </div>
-      </article>
-
-      <article className="admin-overview-panel admin-overview-panel-groups">
-        <div className="admin-overview-panel-head compact">
-          <div>
-            <span className="admin-console-section-kicker">Operating Lanes</span>
-            <h2 className="admin-overview-panel-title">用三条主线组织控制台，而不是把页面平铺成目录。</h2>
-          </div>
-        </div>
-        <div className="admin-overview-group-grid">
-          {GROUPS.map((group) => {
-            const entrySection = GROUP_ENTRY_SECTION[group.id];
-            const sectionCount = SECTION_ORDER.filter((sectionId) => SECTION_META[sectionId].group === group.id).length;
-            return (
-              <button
-                key={group.id}
-                type="button"
-                className="admin-overview-group-card"
-                onClick={() => props.onSectionChange(entrySection)}
-              >
-                <div>
-                  <span className="admin-overview-group-label">{group.label}</span>
-                  <strong className="admin-overview-group-title">{SECTION_META[entrySection].title}</strong>
-                  <p className="admin-overview-group-copy">{group.description}</p>
-                </div>
-                <div className="admin-overview-group-foot">
-                  <span className="admin-console-pill neutral">{sectionCount} 个模块</span>
-                  <ArrowRight size={16} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </article>
     </div>
   );
 }
@@ -500,7 +419,6 @@ function AdminSectionContent(props: {
         errorText={props.errorText}
         refreshedAt={props.refreshedAt}
         onRefresh={props.onRefresh}
-        onSectionChange={props.onSectionChange}
       />
     );
   }

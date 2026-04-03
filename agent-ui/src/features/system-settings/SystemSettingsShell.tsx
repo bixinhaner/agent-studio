@@ -361,13 +361,13 @@ export function SystemSettingsShell() {
         <div className="admin-section-header">
           <div>
             <p className="auth-eyebrow">Admin System Settings</p>
-            <h2>系统设置</h2>
+            <h2>系统配置</h2>
             <p>编辑平台默认值和安全边界，保存到草稿后再显式发布。</p>
           </div>
         </div>
 
         <div className="system-settings-load-error">
-          <p className="err-text">系统设置加载失败</p>
+          <p className="err-text">系统配置加载失败</p>
           <p>{loadErrorText}</p>
           <button type="button" className="admin-action-btn" disabled={loading} onClick={() => void reloadSettings()}>
             {loading ? "重试中..." : "重试加载"}
@@ -380,95 +380,82 @@ export function SystemSettingsShell() {
   if (!draftRecord || !draftMeta) {
     return (
       <section className="admin-card">
-        <p>系统设置暂不可用</p>
+        <p>系统配置暂不可用</p>
       </section>
     );
   }
 
   const draftPayload = draftRecord.payload;
   const publishedPayload = publishedRecord?.payload ?? null;
-  const changedAreas = [
-    { label: "品牌与文案", changed: isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding) },
-    { label: "模型默认值", changed: isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults) },
-    { label: "保留与上传", changed: isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null) },
-    { label: "安全策略", changed: isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety) },
-    {
-      label: "组织默认值",
-      changed: isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults)
-    },
-    { label: "行为文案", changed: isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior) }
-  ];
-  const changedAreaCount = changedAreas.filter((item) => item.changed).length;
+  const changedAreaCount = [
+    isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding),
+    isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults),
+    isPayloadSectionChanged(
+      { retention: draftPayload.retention, uploads: draftPayload.uploads },
+      publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null
+    ),
+    isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety),
+    isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults),
+    isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior)
+  ].filter(Boolean).length;
   const enabledSafetyRuleCount = Object.values(draftPayload.safety).filter(Boolean).length;
   const currentSectionLabel = SECTIONS.find((item) => item.id === section)?.label ?? section;
 
   return (
     <section className="admin-card system-settings-shell">
-      <section className="admin-flagship-surface system-settings-command">
-        <div className="admin-flagship-top">
-          <div className="admin-flagship-copy">
-            <p className="auth-eyebrow">Control Surface</p>
-            <Typography.Title level={3} className="admin-flagship-title">
-              把系统设置变成一张可发布、可对照、可回溯的控制面。
-            </Typography.Title>
-            <Typography.Paragraph className="admin-flagship-detail">
-              草稿、已发布版本和风险边界都应该在第一屏被看见。当前正在编辑“{currentSectionLabel}”，所有时间均跟随当前用户本地时区。
-            </Typography.Paragraph>
-            <div className="admin-flagship-pill-row">
-              <span className="admin-console-pill">草稿 · {formatVersionLabel(draftMeta)}</span>
-              <span className="admin-console-pill">{publishedMeta ? `已发布 · ${formatVersionLabel(publishedMeta)}` : "尚未发布"}</span>
-              <span className="admin-console-pill neutral">
-                {changedAreaCount > 0 ? `待发布变更 ${changedAreaCount} 项` : "草稿与线上一致"}
-              </span>
-            </div>
-          </div>
-          <div className="admin-flagship-actions">
-            <Button disabled={loading || saving || publishing} onClick={() => void reloadSettings()}>
-              重新加载
-            </Button>
-            <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
-              {saving ? "保存中..." : "保存草稿"}
-            </Button>
-            <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
-              {publishing ? "发布中..." : "发布设置"}
-            </Button>
-          </div>
+      <div className="admin-section-header">
+        <div>
+          <Typography.Title level={4} className="admin-card-heading">
+            系统配置
+          </Typography.Title>
+          <Typography.Paragraph>草稿、发布与平台默认值统一管理。</Typography.Paragraph>
         </div>
+        <div className="system-settings-meta-pill-group">
+          <span className="system-settings-meta-pill">草稿 {formatVersionLabel(draftMeta)}</span>
+          <span className="system-settings-meta-pill">
+            {publishedMeta ? `已发布 ${formatVersionLabel(publishedMeta)}` : "尚未发布"}
+          </span>
+          <span className="system-settings-meta-pill">
+            {changedAreaCount > 0 ? `待发布 ${changedAreaCount} 项` : "无待发布变更"}
+          </span>
+        </div>
+      </div>
 
-        <div className="admin-flagship-grid">
-          <article className="admin-flagship-card emphasis">
-            <span>草稿轨道</span>
-            <strong>{formatVersionLabel(draftMeta)}</strong>
-            <p>修订 {draftMeta.revision} · 最近保存于 {formatLocalDateTime(draftMeta.updatedAt)}</p>
-          </article>
-          <article className="admin-flagship-card">
-            <span>发布轨道</span>
-            <strong>{publishedMeta ? formatVersionLabel(publishedMeta) : "未发布"}</strong>
-            <p>
-              {publishedMeta
-                ? `发布时间 ${formatLocalDateTime(publishedMeta.publishedAt || publishedMeta.updatedAt)}`
-                : "当前还没有正式线上版本。"}
-            </p>
-          </article>
-          <article className="admin-flagship-card">
-            <span>待发布变更</span>
-            <strong>{changedAreaCount}</strong>
-            <p>
-              {changedAreaCount > 0
-                ? changedAreas.filter((item) => item.changed).map((item) => item.label).join("、")
-                : "当前草稿与已发布版本一致。"}
-            </p>
-          </article>
-          <article className="admin-flagship-card">
-            <span>安全与配额</span>
-            <strong>{enabledSafetyRuleCount}</strong>
-            <p>
-              启用中的安全护栏；总上传限额 {formatStorageLimit(draftPayload.uploads.maxTotalUploadBytes)}，组织同步间隔{" "}
-              {draftPayload.organizationDefaults.orgSyncIntervalMinutes} 分钟。
-            </p>
-          </article>
+      <div className="resource-center-stats-row" aria-label="系统配置统计">
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">当前分区</span>
+          <strong className="resource-center-stat-value">{currentSectionLabel}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">草稿版本</span>
+          <strong className="resource-center-stat-value">{formatVersionLabel(draftMeta)}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">已发布版本</span>
+          <strong className="resource-center-stat-value">{publishedMeta ? formatVersionLabel(publishedMeta) : "未发布"}</strong>
+        </article>
+        <article className="resource-center-stat-card">
+          <span className="resource-center-stat-label">安全护栏</span>
+          <strong className="resource-center-stat-value">{enabledSafetyRuleCount}</strong>
+        </article>
+      </div>
+
+      <div className="system-settings-toolbar">
+        <p className="system-settings-toolbar-copy">
+          最近保存 {formatLocalDateTime(draftMeta.updatedAt)}，总上传限额 {formatStorageLimit(draftPayload.uploads.maxTotalUploadBytes)}。
+        </p>
+        <div className="system-settings-action-group">
+          <Button disabled={loading || saving || publishing} onClick={() => void reloadSettings()}>
+            重新加载
+          </Button>
+          <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
+            {saving ? "保存中..." : "保存草稿"}
+          </Button>
+          <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
+            {publishing ? "发布中..." : "发布设置"}
+          </Button>
         </div>
-      </section>
+      </div>
 
       {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
       {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}

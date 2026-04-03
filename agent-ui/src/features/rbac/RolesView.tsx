@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
+import { Button, Tag } from "antd";
 
 import { cloneRole, createRole, disableRole, fetchRoles } from "./api";
 import { RoleDetailView } from "./RoleDetailView";
 import type { RoleSummary } from "./types";
+
+function formatLocalTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
 
 export function RolesView() {
   const [roles, setRoles] = useState<RoleSummary[]>([]);
@@ -56,6 +63,10 @@ export function RolesView() {
             <h2>角色列表</h2>
             <p>系统角色与自定义角色统一管理。</p>
           </div>
+          <div className="system-settings-meta-pill-group">
+            <span className="system-settings-meta-pill">总数 {roles.length}</span>
+            <span className="system-settings-meta-pill">激活 {roles.filter((role) => role.isActive).length}</span>
+          </div>
         </div>
         {errorText ? <p className="err-text">{errorText}</p> : null}
         <div className="rbac-create-row">
@@ -65,26 +76,43 @@ export function RolesView() {
             新建角色
           </button>
         </div>
-        <div className="admin-user-list">
+        <div className="admin-density-list admin-role-density-list">
           {roles.map((role) => (
-            <article key={role.id} className={`admin-list-card ${selectedRoleId === role.id ? "rbac-selected-card" : ""}`}>
-              <div className="admin-list-card-header">
-                <div>
-                  <h3>{role.name}</h3>
-                  <p>{role.slug}</p>
-                </div>
-                <button type="button" className="admin-secondary-btn" onClick={() => setSelectedRoleId(role.id)}>
-                  查看
-                </button>
+            <article key={role.id} className={selectedRoleId === role.id ? "admin-density-row active" : "admin-density-row"}>
+              <div className="admin-density-primary">
+                <strong>{role.name}</strong>
+                <span>{role.description?.trim() || role.slug}</span>
               </div>
-              <div className="admin-actions-row">
-                <button type="button" className="admin-secondary-btn" onClick={() => void handleClone(role)}>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">slug</span>
+                <span className="admin-density-value">{role.slug}</span>
+              </div>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">类型</span>
+                <span className="admin-density-value admin-density-tags">
+                  <Tag>{role.isSystem ? "系统" : "自定义"}</Tag>
+                  <Tag color={role.isActive ? "success" : "default"}>{role.isActive ? "active" : "disabled"}</Tag>
+                </span>
+              </div>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">更新时间</span>
+                <span className="admin-density-value">{formatLocalTime(role.updatedAt)}</span>
+              </div>
+
+              <div className="admin-density-actions">
+                <Button size="small" onClick={() => setSelectedRoleId(role.id)}>
+                  查看
+                </Button>
+                <Button size="small" onClick={() => void handleClone(role)}>
                   复制
-                </button>
+                </Button>
                 {!role.isSystem ? (
-                  <button type="button" className="admin-secondary-btn" onClick={() => void handleDisable(role)}>
+                  <Button size="small" onClick={() => void handleDisable(role)}>
                     禁用
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </article>

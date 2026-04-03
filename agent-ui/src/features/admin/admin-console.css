@@ -2571,3 +2571,142 @@
     grid-template-columns: 1fr;
   }
 }
+
+.admin-console-overview-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-console-overview-grid-single .admin-overview-panel-primary {
+  grid-row: auto;
+}
+
+.conversation-audit-toggle-bar {
+  border-radius: 22px !important;
+}
+
+.conversation-audit-toggle-bar > .ant-card-body {
+  padding: 16px 18px !important;
+}
+
+.conversation-audit-toggle-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-console-root .monitoring-shell-tab.active,
+.admin-console-root .monitoring-shell-tab.active:hover,
+.admin-console-root .monitoring-shell-tab.active:focus {
+  color: #fff !important;
+  background: #2458e8 !important;
+  border-color: #2458e8 !important;
+}
+
+.admin-console-root .admin-density-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.admin-console-root .admin-density-row {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(128, 145, 168, 0.18);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 250, 255, 0.74)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.admin-console-root .admin-density-row.active {
+  border-color: rgba(36, 88, 232, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(36, 88, 232, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 246, 255, 0.86));
+}
+
+.admin-console-root .admin-user-density-list .admin-density-row {
+  grid-template-columns: minmax(220px, 1.25fr) minmax(120px, 0.8fr) minmax(180px, 1fr) minmax(120px, 0.75fr) minmax(150px, 0.9fr) auto;
+}
+
+.admin-console-root .admin-role-density-list .admin-density-row {
+  grid-template-columns: minmax(220px, 1.25fr) minmax(120px, 0.75fr) minmax(170px, 0.95fr) minmax(150px, 0.9fr) auto;
+}
+
+.admin-console-root .admin-density-primary,
+.admin-console-root .admin-density-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-console-root .admin-density-primary strong {
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--admin-text);
+}
+
+.admin-console-root .admin-density-primary span,
+.admin-console-root .admin-density-value {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--admin-subtle);
+}
+
+.admin-console-root .admin-density-value {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-console-root .admin-density-value small {
+  font-size: 11px;
+  color: var(--admin-subtle);
+}
+
+.admin-console-root .admin-density-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.admin-console-root .admin-density-tags {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.admin-console-root .admin-density-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-console-root .admin-density-empty {
+  margin-top: 14px;
+  padding: 22px 18px;
+  border: 1px dashed rgba(128, 145, 168, 0.3);
+  border-radius: 18px;
+  color: var(--admin-subtle);
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .conversation-audit-toggle-bar-inner,
+  .admin-console-root .admin-user-density-list .admin-density-row,
+  .admin-console-root .admin-role-density-list .admin-density-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-console-root .admin-density-actions {
+    justify-content: flex-start;
+  }
+}

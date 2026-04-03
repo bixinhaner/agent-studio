@@ -12,6 +12,14 @@ function formatLocalTime(value: string | null): string {
   return parsed.toLocaleString();
 }
 
+function userDisplayTitle(user: AdminUser): string {
+  return user.synced.displayName || user.synced.email || user.id;
+}
+
+function userContact(user: AdminUser): string {
+  return user.synced.email || user.synced.dingtalkUserId || "未绑定邮箱";
+}
+
 export function UsersView() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,8 +108,12 @@ export function UsersView() {
           <Typography.Title level={4} className="admin-card-heading">
             用户管理
           </Typography.Title>
-          <Typography.Paragraph>只允许编辑本地治理字段，钉钉同步资料保持只读。</Typography.Paragraph>
+          <Typography.Paragraph>本地治理字段可编辑，钉钉同步资料保持只读。</Typography.Paragraph>
         </div>
+        <Space wrap>
+          <Tag color="blue">总数 {users.length}</Tag>
+          <Tag>命中 {filteredUsers.length}</Tag>
+        </Space>
       </div>
       <Input
         aria-label="搜索用户"
@@ -112,57 +124,55 @@ export function UsersView() {
       />
       {loading ? <Spin size="small" /> : null}
       {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-      <Space direction="vertical" size={12} className="admin-full-width admin-user-list">
+      <div className="admin-density-list admin-user-density-list">
         {filteredUsers.map((user) => {
-          const title = user.synced.displayName || user.synced.email || user.id;
+          const title = userDisplayTitle(user);
           return (
-            <Card key={user.id} size="small" className="admin-list-card">
-              <div className="admin-list-card-header">
-                <div>
-                  <Typography.Title level={5} className="admin-card-subheading">
-                    {title}
-                  </Typography.Title>
-                  <Typography.Paragraph className="admin-card-meta">
-                    {user.synced.email || user.synced.dingtalkUserId || "未绑定邮箱"}
-                  </Typography.Paragraph>
-                </div>
-                <Space wrap>
-                  <Button type="primary" onClick={() => openEditor(user)}>
-                    编辑 {title}
-                  </Button>
-                  <Button onClick={() => setRoleEditorUserId(user.id)}>角色分配</Button>
-                </Space>
+            <article key={user.id} className={editingUserId === user.id ? "admin-density-row active" : "admin-density-row"}>
+              <div className="admin-density-primary">
+                <strong>{title}</strong>
+                <span>{userContact(user)}</span>
               </div>
-              <dl className="admin-detail-grid">
-                <div>
-                  <dt>角色</dt>
-                  <dd>
-                    <Tag color="blue">{user.local.role}</Tag>
-                  </dd>
-                </div>
-                <div>
-                  <dt>状态</dt>
-                  <dd>
-                    <Tag color={user.effective.status === "active" ? "success" : "warning"}>{user.effective.status}</Tag>
-                  </dd>
-                </div>
-                <div>
-                  <dt>已分配角色</dt>
-                  <dd>{user.assignedRoles.map((roleItem) => roleItem.slug).join(", ") || "未分配"}</dd>
-                </div>
-                <div>
-                  <dt>主部门</dt>
-                  <dd>{user.synced.primaryDepartmentId || "未设置"}</dd>
-                </div>
-                <div>
-                  <dt>最后同步</dt>
-                  <dd>{formatLocalTime(user.effective.lastSyncedAt)}</dd>
-                </div>
-              </dl>
-            </Card>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">状态</span>
+                <span className="admin-density-value admin-density-tags">
+                  <Tag color={user.effective.status === "active" ? "success" : "warning"}>{user.effective.status}</Tag>
+                  {user.local.manualDisabled ? <Tag color="error">手动禁用</Tag> : null}
+                </span>
+              </div>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">角色</span>
+                <span className="admin-density-value">
+                  {user.primaryRole?.name || user.local.role}
+                  <small>{user.assignedRoles.map((roleItem) => roleItem.slug).join(", ") || "未分配角色"}</small>
+                </span>
+              </div>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">主部门</span>
+                <span className="admin-density-value">{user.synced.primaryDepartmentId || "未设置"}</span>
+              </div>
+
+              <div className="admin-density-cell">
+                <span className="admin-density-label">最后同步</span>
+                <span className="admin-density-value">{formatLocalTime(user.effective.lastSyncedAt)}</span>
+              </div>
+
+              <div className="admin-density-actions">
+                <Button size="small" type="primary" onClick={() => openEditor(user)}>
+                  编辑
+                </Button>
+                <Button size="small" onClick={() => setRoleEditorUserId(user.id)}>
+                  角色分配
+                </Button>
+              </div>
+            </article>
           );
         })}
-      </Space>
+      </div>
+      {!loading && filteredUsers.length === 0 ? <div className="admin-density-empty">没有匹配到用户。</div> : null}
       {editingUser ? (
         <Card
           size="small"
