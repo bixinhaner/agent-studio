@@ -1,35 +1,36 @@
 import {
-  LayoutDashboard,
   Activity,
+  ArrowRight,
   Bell,
-  Users,
-  Network,
-  ShieldCheck,
-  Database,
-  Wrench,
   Component,
-  Settings,
-  MessageSquareText,
-  Search,
+  Database,
+  LayoutDashboard,
   Menu,
-  RefreshCcw,
-  Command,
+  MessageSquareText,
+  Network,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Search,
+  Settings,
+  ShieldCheck,
+  Users,
+  Wrench
 } from "lucide-react";
-import { Alert, Breadcrumb, Button, ConfigProvider, Drawer, Input, Space, Spin, Modal, List } from "antd";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Breadcrumb, Button, Col, ConfigProvider, Drawer, Input, List, Modal, Row, Spin } from "antd";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { fetchAdminOverview } from "./api";
-import type { AdminOverview, AdminSection } from "./types";
-
 import { ADMIN_PREMIUM_THEME } from "./admin-theme";
+import type { AdminOverview, AdminSection } from "./types";
 import "./admin-console.css";
 
-const MonitoringShellLazy = lazy(() => import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell })));
+const MonitoringShellLazy = lazy(() =>
+  import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell }))
+);
 const BroadcastAdminViewLazy = lazy(() =>
   import("../collaboration/BroadcastAdminView").then((module) => ({ default: module.BroadcastAdminView }))
 );
@@ -88,24 +89,136 @@ const GROUPS: AdminGroupMeta[] = [
 ];
 
 const SECTION_ORDER: AdminConsoleSection[] = [
-  "overview", "conversations", "monitoring", "broadcasts",
-  "users", "organization", "rbac",
-  "resources", "capabilities", "integrations", "system-settings"
+  "overview",
+  "conversations",
+  "monitoring",
+  "broadcasts",
+  "users",
+  "organization",
+  "rbac",
+  "resources",
+  "capabilities",
+  "integrations",
+  "system-settings"
 ];
 
 const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
-  overview: { id: "overview", title: "平台概览", description: "统一查看平台规模、活跃状态与核心运营指标。", scope: "全局管理域", cadence: "建议每小时刷新", group: "operations", keywords: ["概览", "运营", "dashboard"], icon: <LayoutDashboard size={18} /> },
-  conversations: { id: "conversations", title: "审计工作台", description: "统一查看用户会话、反馈记录与 API 调用轨迹。", scope: "会话与 API 调用", cadence: "建议持续巡检", group: "operations", keywords: ["会话", "审计", "api"], icon: <MessageSquareText size={18} /> },
-  monitoring: { id: "monitoring", title: "审计监控", description: "追踪请求、成本、配额、告警和资源访问轨迹。", scope: "运行审计", cadence: "建议持续观察", group: "operations", keywords: ["监控", "告警", "成本"], icon: <Activity size={18} /> },
-  broadcasts: { id: "broadcasts", title: "广播管理", description: "维护系统广播模板与触达策略。", scope: "运营触达", cadence: "按活动排期维护", group: "operations", keywords: ["广播", "公告", "触达"], icon: <Bell size={18} /> },
-  users: { id: "users", title: "用户治理", description: "管理用户状态、身份资料与本地治理字段。", scope: "身份与成员", cadence: "建议每日巡检", group: "governance", keywords: ["用户", "成员", "账号"], icon: <Users size={18} /> },
-  organization: { id: "organization", title: "组织同步", description: "查看部门树与同步任务，定位组织数据偏差。", scope: "组织架构", cadence: "按同步任务节奏", group: "governance", keywords: ["组织", "部门", "同步"], icon: <Network size={18} /> },
-  rbac: { id: "rbac", title: "角色权限", description: "维护角色模板和权限矩阵，保障授权可追溯。", scope: "权限体系", cadence: "建议双周审计", group: "governance", keywords: ["角色", "权限", "RBAC"], icon: <ShieldCheck size={18} /> },
-  resources: { id: "resources", title: "资料集", description: "集中维护资料集、文件来源与资源授权策略。", scope: "资源与授权", cadence: "按项目变更维护", group: "runtime", keywords: ["资源", "资料集"], icon: <Database size={18} /> },
-  capabilities: { id: "capabilities", title: "智能体配置", description: "统一管理 Agent 模式、技能包和运行策略。", scope: "运行能力", cadence: "按发布节奏更新", group: "runtime", keywords: ["能力", "mode", "skill"], icon: <Wrench size={18} /> },
-  integrations: { id: "integrations", title: "集成中心", description: "配置第三方平台连接并追踪实例健康状态。", scope: "外部平台连接", cadence: "建议每周复核", group: "runtime", keywords: ["集成", "dingtalk", "zendesk"], icon: <Component size={18} /> },
-  "system-settings": { id: "system-settings", title: "系统配置", description: "维护平台默认参数、策略开关和版本发布记录。", scope: "平台默认参数", cadence: "变更前评审后发布", group: "runtime", keywords: ["系统", "配置"], icon: <Settings size={18} /> }
+  overview: {
+    id: "overview",
+    title: "平台概览",
+    description: "统一查看平台规模、活跃状态与核心运营指标。",
+    scope: "全局管理域",
+    cadence: "建议每小时刷新",
+    group: "operations",
+    keywords: ["概览", "运营", "dashboard"],
+    icon: <LayoutDashboard size={18} />
+  },
+  conversations: {
+    id: "conversations",
+    title: "审计工作台",
+    description: "统一查看用户会话、反馈记录与 API 调用轨迹。",
+    scope: "会话与 API 调用",
+    cadence: "建议持续巡检",
+    group: "operations",
+    keywords: ["会话", "审计", "api"],
+    icon: <MessageSquareText size={18} />
+  },
+  monitoring: {
+    id: "monitoring",
+    title: "审计监控",
+    description: "追踪请求、成本、配额、告警和资源访问轨迹。",
+    scope: "运行审计",
+    cadence: "建议持续观察",
+    group: "operations",
+    keywords: ["监控", "告警", "成本"],
+    icon: <Activity size={18} />
+  },
+  broadcasts: {
+    id: "broadcasts",
+    title: "广播管理",
+    description: "维护系统广播模板与触达策略。",
+    scope: "运营触达",
+    cadence: "按活动排期维护",
+    group: "operations",
+    keywords: ["广播", "公告", "触达"],
+    icon: <Bell size={18} />
+  },
+  users: {
+    id: "users",
+    title: "用户治理",
+    description: "管理用户状态、身份资料与本地治理字段。",
+    scope: "身份与成员",
+    cadence: "建议每日巡检",
+    group: "governance",
+    keywords: ["用户", "成员", "账号"],
+    icon: <Users size={18} />
+  },
+  organization: {
+    id: "organization",
+    title: "组织同步",
+    description: "查看部门树与同步任务，定位组织数据偏差。",
+    scope: "组织架构",
+    cadence: "按同步任务节奏",
+    group: "governance",
+    keywords: ["组织", "部门", "同步"],
+    icon: <Network size={18} />
+  },
+  rbac: {
+    id: "rbac",
+    title: "角色权限",
+    description: "维护角色模板和权限矩阵，保障授权可追溯。",
+    scope: "权限体系",
+    cadence: "建议双周审计",
+    group: "governance",
+    keywords: ["角色", "权限", "RBAC"],
+    icon: <ShieldCheck size={18} />
+  },
+  resources: {
+    id: "resources",
+    title: "资料集",
+    description: "集中维护资料集、文件来源与资源授权策略。",
+    scope: "资源与授权",
+    cadence: "按项目变更维护",
+    group: "runtime",
+    keywords: ["资源", "资料集"],
+    icon: <Database size={18} />
+  },
+  capabilities: {
+    id: "capabilities",
+    title: "智能体配置",
+    description: "统一管理 Agent 模式、技能包和运行策略。",
+    scope: "运行能力",
+    cadence: "按发布节奏更新",
+    group: "runtime",
+    keywords: ["能力", "mode", "skill"],
+    icon: <Wrench size={18} />
+  },
+  integrations: {
+    id: "integrations",
+    title: "集成中心",
+    description: "配置第三方平台连接并追踪实例健康状态。",
+    scope: "外部平台连接",
+    cadence: "建议每周复核",
+    group: "runtime",
+    keywords: ["集成", "dingtalk", "zendesk"],
+    icon: <Component size={18} />
+  },
+  "system-settings": {
+    id: "system-settings",
+    title: "系统配置",
+    description: "维护平台默认参数、策略开关和版本发布记录。",
+    scope: "平台默认参数",
+    cadence: "变更前评审后发布",
+    group: "runtime",
+    keywords: ["系统", "配置"],
+    icon: <Settings size={18} />
+  }
 };
+
+const NAVIGATION_GROUPS: AdminNavigationGroupView[] = GROUPS.map((group) => ({
+  ...group,
+  items: SECTION_ORDER.map((sectionId) => SECTION_META[sectionId]).filter((item) => item.group === group.id)
+}));
 
 function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
@@ -115,8 +228,16 @@ function sectionFromHash(hash: string): AdminConsoleSection | null {
 }
 
 function formatMetricValue(value: number | undefined): string {
-  if (!Number.isFinite(value ?? NaN)) return "--";
+  if (!Number.isFinite(value ?? Number.NaN)) return "--";
   return new Intl.NumberFormat("zh-CN").format(value ?? 0);
+}
+
+function getLocalTimeZoneLabel(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区";
+  } catch {
+    return "本地时区";
+  }
 }
 
 function AdminSectionLazyFallback() {
@@ -127,42 +248,251 @@ function AdminSectionLazyFallback() {
   );
 }
 
-function OverviewWorkspace(props: { overview: AdminOverview | null; loading: boolean }) {
+function AdminNavigation(props: {
+  activeSection: AdminConsoleSection;
+  collapsed: boolean;
+  onNavigate: (section: AdminConsoleSection) => void;
+}) {
   return (
-    <div className="admin-card">
-      <h3 style={{ marginBottom: 16, fontSize: 18, fontWeight: 600 }}>平台概览</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <div style={{ padding: 16, background: 'rgba(0,0,0,0.02)', borderRadius: 12 }}>
-          <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>用户规模</div>
-          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>{props.loading ? "..." : formatMetricValue(props.overview?.counts.users)}</div>
+    <div className="admin-sidebar-content">
+      {NAVIGATION_GROUPS.map((group) => (
+        <div key={group.id} style={{ marginBottom: 24 }}>
+          {!props.collapsed ? (
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--admin-color-subtle)",
+                marginBottom: 8,
+                paddingLeft: 12,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em"
+              }}
+            >
+              {group.label}
+            </div>
+          ) : null}
+          {group.items.map((item) => (
+            <div
+              key={item.id}
+              className={`admin-menu-item ${props.activeSection === item.id ? "active" : ""}`}
+              onClick={() => props.onNavigate(item.id)}
+              title={props.collapsed ? item.title : undefined}
+            >
+              {item.icon}
+              {!props.collapsed ? <span>{item.title}</span> : null}
+            </div>
+          ))}
         </div>
-        <div style={{ padding: 16, background: 'rgba(0,0,0,0.02)', borderRadius: 12 }}>
-          <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>活跃会话</div>
-          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>{props.loading ? "..." : formatMetricValue(props.overview?.counts.activeSessions)}</div>
+      ))}
+    </div>
+  );
+}
+
+function OverviewWorkspace(props: {
+  overview: AdminOverview | null;
+  loading: boolean;
+  onNavigate: (section: AdminConsoleSection) => void;
+}) {
+  const stats = [
+    {
+      label: "用户规模",
+      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.users),
+      meta: "纳管成员总数"
+    },
+    {
+      label: "活跃会话",
+      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.activeSessions),
+      meta: "当前有上下文活动的运行会话"
+    },
+    {
+      label: "总线程数",
+      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.threads),
+      meta: "平台累计沉淀的会话线程"
+    },
+    {
+      label: "管理工作区",
+      value: String(SECTION_ORDER.length - 1),
+      meta: "覆盖运营、治理、运行三大域"
+    }
+  ];
+
+  return (
+    <div className="admin-page-container">
+      <section className="admin-overview-hero">
+        <div className="admin-overview-hero-copy">
+          <span className="admin-overview-eyebrow">Control Tower</span>
+          <div>
+            <h1 className="admin-page-title">平台概览</h1>
+            <p className="admin-page-desc">统一查看平台规模、活跃状态与核心运营指标。</p>
+          </div>
+          <p>
+            这个入口现在承担整套管理控制台的导航职责。用户、权限、资料、能力、集成和系统配置都在同一壳层下切换，
+            时间信息默认跟随当前用户本地时区显示。
+          </p>
         </div>
-        <div style={{ padding: 16, background: 'rgba(0,0,0,0.02)', borderRadius: 12 }}>
-          <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>总线程数</div>
-          <div style={{ fontSize: 24, fontWeight: 600, marginTop: 4 }}>{props.loading ? "..." : formatMetricValue(props.overview?.counts.threads)}</div>
+
+        <div className="admin-overview-hero-metrics">
+          <div className="admin-overview-hero-stat">
+            <span>管理域</span>
+            <strong>{GROUPS.length}</strong>
+          </div>
+          <div className="admin-overview-hero-stat">
+            <span>导航工作区</span>
+            <strong>{SECTION_ORDER.length - 1}</strong>
+          </div>
+          <div className="admin-overview-hero-stat">
+            <span>当前时区</span>
+            <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{getLocalTimeZoneLabel()}</strong>
+          </div>
+          <div className="admin-overview-hero-stat">
+            <span>巡检节奏</span>
+            <strong style={{ fontSize: 20, lineHeight: 1.25 }}>持续值守</strong>
+          </div>
         </div>
+      </section>
+
+      <div className="admin-page-summary-grid">
+        {stats.map((item) => (
+          <section key={item.label} className="admin-page-summary-card">
+            <div className="admin-page-summary-label">{item.label}</div>
+            <div className="admin-page-summary-value">{item.value}</div>
+            <div className="admin-page-summary-meta">{item.meta}</div>
+          </section>
+        ))}
+      </div>
+
+      <div className="admin-overview-group-grid">
+        {NAVIGATION_GROUPS.map((group) => (
+          <section key={group.id} className="admin-overview-group-card">
+            <div className="admin-overview-group-header">
+              <div>
+                <h3>{group.label}</h3>
+                <p>{group.description}</p>
+              </div>
+              <span className="admin-overview-group-count">{group.items.filter((item) => item.id !== "overview").length} 项</span>
+            </div>
+
+            <div className="admin-overview-link-list">
+              {group.items
+                .filter((item) => item.id !== "overview")
+                .map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="admin-overview-link-card"
+                    onClick={() => props.onNavigate(item.id)}
+                  >
+                    <span className="admin-overview-link-icon">{item.icon}</span>
+                    <span>
+                      <span className="admin-overview-link-title">{item.title}</span>
+                      <span className="admin-overview-link-description">{item.description}</span>
+                      <span className="admin-overview-link-meta">
+                        <span>{item.scope}</span>
+                        <span>{item.cadence}</span>
+                      </span>
+                    </span>
+                    <ArrowRight size={16} style={{ color: "var(--admin-color-subtle)", marginTop: 2 }} />
+                  </button>
+                ))}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );
 }
 
-function AdminSectionContent(props: { section: AdminConsoleSection; overview: AdminOverview | null; loading: boolean }) {
+function AdminSectionContent(props: {
+  section: AdminConsoleSection;
+  overview: AdminOverview | null;
+  loading: boolean;
+  onNavigate: (section: AdminConsoleSection) => void;
+}) {
   switch (props.section) {
-    case "overview": return <OverviewWorkspace overview={props.overview} loading={props.loading} />;
-    case "users": return <Suspense fallback={<AdminSectionLazyFallback />}><UsersViewLazy /></Suspense>;
-    case "conversations": return <Suspense fallback={<AdminSectionLazyFallback />}><ConversationAuditViewLazy /></Suspense>;
-    case "resources": return <Suspense fallback={<AdminSectionLazyFallback />}><ResourceCenterShellLazy /></Suspense>;
-    case "capabilities": return <Suspense fallback={<AdminSectionLazyFallback />}><CapabilityCenterShellLazy /></Suspense>;
-    case "integrations": return <Suspense fallback={<AdminSectionLazyFallback />}><IntegrationCenterShellLazy /></Suspense>;
-    case "broadcasts": return <Suspense fallback={<AdminSectionLazyFallback />}><BroadcastAdminViewLazy /></Suspense>;
-    case "system-settings": return <Suspense fallback={<AdminSectionLazyFallback />}><SystemSettingsShellLazy /></Suspense>;
-    case "rbac": return <Suspense fallback={<AdminSectionLazyFallback />}><RolesViewLazy /></Suspense>;
-    case "organization": return <div style={{ display: 'flex', gap: 24 }}><Suspense fallback={<AdminSectionLazyFallback />}><DepartmentTreeViewLazy /></Suspense><Suspense fallback={<AdminSectionLazyFallback />}><OrgSyncViewLazy /></Suspense></div>;
-    case "monitoring": return <Suspense fallback={<AdminSectionLazyFallback />}><MonitoringShellLazy /></Suspense>;
-    default: return null;
+    case "overview":
+      return <OverviewWorkspace overview={props.overview} loading={props.loading} onNavigate={props.onNavigate} />;
+    case "users":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <UsersViewLazy />
+        </Suspense>
+      );
+    case "conversations":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <ConversationAuditViewLazy />
+        </Suspense>
+      );
+    case "resources":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <ResourceCenterShellLazy />
+        </Suspense>
+      );
+    case "capabilities":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <CapabilityCenterShellLazy />
+        </Suspense>
+      );
+    case "integrations":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <IntegrationCenterShellLazy />
+        </Suspense>
+      );
+    case "broadcasts":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <BroadcastAdminViewLazy />
+        </Suspense>
+      );
+    case "system-settings":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <SystemSettingsShellLazy />
+        </Suspense>
+      );
+    case "rbac":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <RolesViewLazy />
+        </Suspense>
+      );
+    case "organization":
+      return (
+        <div className="admin-page-container">
+          <div className="admin-page-header">
+            <div>
+              <h1 className="admin-page-title">组织同步</h1>
+              <p className="admin-page-desc">查看部门树与同步任务，定位组织数据偏差。</p>
+            </div>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <Row gutter={[24, 24]}>
+              <Col xs={24} lg={10}>
+                <Suspense fallback={<AdminSectionLazyFallback />}>
+                  <DepartmentTreeViewLazy />
+                </Suspense>
+              </Col>
+              <Col xs={24} lg={14}>
+                <Suspense fallback={<AdminSectionLazyFallback />}>
+                  <OrgSyncViewLazy />
+                </Suspense>
+              </Col>
+            </Row>
+          </div>
+        </div>
+      );
+    case "monitoring":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <MonitoringShellLazy />
+        </Suspense>
+      );
+    default:
+      return null;
   }
 }
 
@@ -174,14 +504,33 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
     return sectionFromHash(window.location.hash) ?? "overview";
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [cmdSearch, setCmdSearch] = useState("");
+  const isNarrowScreen = useIsNarrowScreen(1080);
 
   const currentSectionMeta = SECTION_META[section];
   const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
 
   useEffect(() => {
-    fetchAdminOverview().then(setOverview).finally(() => setLoading(false));
+    let active = true;
+
+    async function loadOverview() {
+      setLoading(true);
+      try {
+        const next = await fetchAdminOverview();
+        if (active) {
+          setOverview(next);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadOverview();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -201,109 +550,131 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   }, [section]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
         setCmdPaletteOpen(true);
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const handleNavClick = (id: AdminConsoleSection) => {
-    setSection(id);
+  useEffect(() => {
+    if (!isNarrowScreen) {
+      setMobileNavOpen(false);
+    }
+  }, [isNarrowScreen]);
+
+  const handleNavClick = (targetSection: AdminConsoleSection) => {
+    setSection(targetSection);
     setCmdPaletteOpen(false);
+    setMobileNavOpen(false);
   };
 
   const filteredCmdItems = useMemo(() => {
-    const query = cmdSearch.toLowerCase();
-    return Object.values(SECTION_META).filter(item => 
-      item.title.toLowerCase().includes(query) || 
-      item.description.toLowerCase().includes(query) ||
-      item.keywords.some(k => k.toLowerCase().includes(query))
+    const query = cmdSearch.trim().toLowerCase();
+    if (!query) return Object.values(SECTION_META);
+    return Object.values(SECTION_META).filter(
+      (item) =>
+        item.title.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.keywords.some((keyword) => keyword.toLowerCase().includes(query))
     );
   }, [cmdSearch]);
+
+  const drawerNavigation = (
+    <>
+      <div className="admin-sidebar-header">
+        <div className="admin-brand" style={{ display: "flex" }}>
+          <div className="admin-brand-icon">AS</div>
+          <span>Agent Studio</span>
+        </div>
+      </div>
+      <AdminNavigation activeSection={section} collapsed={false} onNavigate={handleNavClick} />
+    </>
+  );
 
   return (
     <ConfigProvider theme={ADMIN_PREMIUM_THEME}>
       <div className="admin-console-root">
-        {/* Sidebar */}
-        <aside className={`admin-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-          <div className="admin-sidebar-header">
-            <div className="admin-brand" style={{ display: sidebarCollapsed ? 'none' : 'flex' }}>
-              <div className="admin-brand-icon">AS</div>
-              <span>Agent Studio</span>
-            </div>
-            {sidebarCollapsed && <div className="admin-brand-icon" style={{ margin: '0 auto' }}>AS</div>}
-          </div>
-          <div className="admin-sidebar-content">
-            {GROUPS.map(group => (
-              <div key={group.id} style={{ marginBottom: 24 }}>
-                {!sidebarCollapsed && (
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--admin-color-subtle)', marginBottom: 8, paddingLeft: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    {group.label}
-                  </div>
-                )}
-                {SECTION_ORDER.map(secId => {
-                  const meta = SECTION_META[secId];
-                  if (meta.group !== group.id) return null;
-                  return (
-                    <div 
-                      key={meta.id} 
-                      className={`admin-menu-item ${section === meta.id ? 'active' : ''}`}
-                      onClick={() => handleNavClick(meta.id)}
-                      title={sidebarCollapsed ? meta.title : undefined}
-                    >
-                      {meta.icon}
-                      {!sidebarCollapsed && <span>{meta.title}</span>}
-                    </div>
-                  );
-                })}
+        {!isNarrowScreen ? (
+          <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+            <div className="admin-sidebar-header">
+              <div className="admin-brand" style={{ display: sidebarCollapsed ? "none" : "flex" }}>
+                <div className="admin-brand-icon">AS</div>
+                <span>Agent Studio</span>
               </div>
-            ))}
-          </div>
-        </aside>
+              {sidebarCollapsed ? <div className="admin-brand-icon" style={{ margin: "0 auto" }}>AS</div> : null}
+            </div>
+            <AdminNavigation activeSection={section} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
+          </aside>
+        ) : null}
 
-        {/* Main Content */}
         <main className="admin-main">
-          {/* Topbar */}
           <header className="admin-topbar">
             <div className="admin-topbar-left">
-              <Button 
-                type="text" 
-                icon={sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />} 
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                style={{ color: 'var(--admin-color-subtle)' }}
+              <Button
+                type="text"
+                icon={
+                  isNarrowScreen ? (
+                    <Menu size={18} />
+                  ) : sidebarCollapsed ? (
+                    <PanelLeftOpen size={18} />
+                  ) : (
+                    <PanelLeftClose size={18} />
+                  )
+                }
+                onClick={() => {
+                  if (isNarrowScreen) {
+                    setMobileNavOpen(true);
+                  } else {
+                    setSidebarCollapsed((current) => !current);
+                  }
+                }}
+                style={{ color: "var(--admin-color-subtle)" }}
               />
-              <Breadcrumb 
-                items={[
-                  { title: currentGroupMeta.label },
-                  { title: currentSectionMeta.title }
-                ]}
-              />
+              <div className="admin-topbar-current">{currentSectionMeta.title}</div>
+              <Breadcrumb items={[{ title: currentGroupMeta.label }, { title: currentSectionMeta.title }]} />
             </div>
+
             <div className="admin-topbar-right">
               <button className="admin-cmd-trigger" onClick={() => setCmdPaletteOpen(true)}>
                 <Search size={14} />
-                <span>Search or jump to...</span>
+                <span className="admin-cmd-label">Search or jump to management workspace...</span>
                 <span className="admin-cmd-kbd">⌘K</span>
               </button>
-              {props.currentUser && <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} />}
+              {props.onOpenPortal ? (
+                <Button style={{ borderRadius: "var(--admin-radius-full)" }} onClick={props.onOpenPortal}>
+                  返回工作台
+                </Button>
+              ) : null}
+              {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
             </div>
           </header>
 
-          {/* Scrollable Area */}
           <div className="admin-content-scroll">
-            <div className="admin-page-header">
-              <h1 className="admin-page-title">{currentSectionMeta.title}</h1>
-              <p className="admin-page-desc">{currentSectionMeta.description}</p>
-            </div>
-            <AdminSectionContent section={section} overview={overview} loading={loading} />
+            <AdminSectionContent
+              section={section}
+              overview={overview}
+              loading={loading}
+              onNavigate={handleNavClick}
+            />
           </div>
         </main>
 
-        {/* Command Palette Modal */}
+        <Drawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          placement="left"
+          width={320}
+          closable={false}
+          bodyStyle={{ padding: 0 }}
+        >
+          {drawerNavigation}
+        </Drawer>
+
         <Modal
           open={cmdPaletteOpen}
           onCancel={() => setCmdPaletteOpen(false)}
@@ -313,34 +684,32 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           bodyStyle={{ padding: 0 }}
           style={{ top: 100 }}
         >
-          <div style={{ padding: 16, borderBottom: '1px solid var(--admin-color-border)' }}>
-            <Input 
-              prefix={<Search size={18} style={{ color: 'var(--admin-color-subtle)' }} />}
-              placeholder="Search features, settings..." 
+          <div style={{ padding: 16, borderBottom: "1px solid var(--admin-color-border)" }}>
+            <Input
+              prefix={<Search size={18} style={{ color: "var(--admin-color-subtle)" }} />}
+              placeholder="Search features, settings..."
               variant="borderless"
               size="large"
               autoFocus
               value={cmdSearch}
-              onChange={e => setCmdSearch(e.target.value)}
+              onChange={(event) => setCmdSearch(event.target.value)}
               style={{ fontSize: 18 }}
             />
           </div>
           <List
             dataSource={filteredCmdItems}
-            style={{ maxHeight: 400, overflow: 'auto' }}
-            renderItem={item => (
-              <List.Item 
+            style={{ maxHeight: 400, overflow: "auto" }}
+            renderItem={(item) => (
+              <List.Item
                 className="admin-menu-item"
-                style={{ margin: '8px 16px', border: 'none' }}
+                style={{ margin: "8px 16px", border: "none" }}
                 onClick={() => handleNavClick(item.id)}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                  <div style={{ padding: 8, background: 'var(--admin-color-bg)', borderRadius: 8 }}>
-                    {item.icon}
-                  </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+                  <div style={{ padding: 8, background: "var(--admin-color-bg)", borderRadius: 8 }}>{item.icon}</div>
                   <div>
-                    <div style={{ fontWeight: 500, color: 'var(--admin-color-text)' }}>{item.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)' }}>{item.description}</div>
+                    <div style={{ fontWeight: 500, color: "var(--admin-color-text)" }}>{item.title}</div>
+                    <div style={{ fontSize: 12, color: "var(--admin-color-subtle)" }}>{item.description}</div>
                   </div>
                 </div>
               </List.Item>

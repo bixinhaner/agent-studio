@@ -1,14 +1,17 @@
-import { useState } from "react";
-import { Layout, Menu, Typography, Tag } from "antd";
 import {
-  DashboardOutlined,
-  BarChartOutlined,
-  FileTextOutlined,
-  SafetyCertificateOutlined,
   AlertOutlined,
-  MoneyCollectOutlined
+  AppstoreOutlined,
+  BarChartOutlined,
+  DashboardOutlined,
+  FileTextOutlined,
+  MenuOutlined,
+  MoneyCollectOutlined,
+  SafetyCertificateOutlined
 } from "@ant-design/icons";
+import { Button, Drawer, Layout, Menu, Space, Tag, Typography } from "antd";
+import { useEffect, useState } from "react";
 
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { AlertCenterView } from "./AlertCenterView";
 import { CostProfilesView } from "./CostProfilesView";
 import { MonitoringOverviewView } from "./MonitoringOverviewView";
@@ -76,50 +79,137 @@ function CurrentPanel(props: { panel: MonitoringPanel }) {
 
 export function MonitoringShell() {
   const [panel, setPanel] = useState<MonitoringPanel>("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isNarrowScreen = useIsNarrowScreen(980);
   const panelMeta = PANELS.find((item) => item.id === panel) ?? PANELS[0];
 
-  const menuItems = PANELS.map(item => ({
+  useEffect(() => {
+    if (!isNarrowScreen) {
+      setMobileNavOpen(false);
+    }
+  }, [isNarrowScreen]);
+
+  const menuItems = PANELS.map((item) => ({
     key: item.id,
     icon: item.icon,
-    label: item.label,
+    label: item.label
   }));
 
+  const navigationMenu = (
+    <>
+      <div
+        className="admin-settings-sider-header"
+        style={{ padding: "20px 16px", borderBottom: "1px solid var(--admin-color-border)" }}
+      >
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          审计监控工作台
+        </Typography.Title>
+        <Typography.Text type="secondary" style={{ fontSize: "12px" }}>
+          统一查看平台运行指标与策略
+        </Typography.Text>
+      </div>
+      <Menu
+        mode="inline"
+        selectedKeys={[panel]}
+        onClick={({ key }) => {
+          setPanel(key as MonitoringPanel);
+          setMobileNavOpen(false);
+        }}
+        items={menuItems}
+        className="admin-settings-menu"
+        style={{ borderRight: "none", padding: "12px 8px" }}
+      />
+    </>
+  );
+
   return (
-    <Layout className="admin-settings-layout">
-      <Sider width={260} className="admin-settings-sider" theme="light">
-        <div className="admin-settings-sider-header">
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            审计监控工作台
+    <div className="admin-page-container">
+      <div className="admin-page-header">
+        <div>
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
+            审计监控
           </Typography.Title>
-          <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
-            统一查看平台运行指标与策略
-          </Typography.Text>
+          <Typography.Text type="secondary">追踪请求、成本、配额、告警和资源访问轨迹。</Typography.Text>
         </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[panel]}
-          onClick={({ key }) => setPanel(key as MonitoringPanel)}
-          items={menuItems}
-          className="admin-settings-menu"
-        />
-      </Sider>
-      <Content className="admin-settings-content">
-        <div className="admin-settings-content-header">
-          <div>
-            <Typography.Title level={4} style={{ margin: 0, marginBottom: 4 }}>
-              {panelMeta.label}
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              {panelMeta.description}
-            </Typography.Text>
+        <Space wrap>
+          <Tag color="processing" style={{ borderRadius: "var(--admin-radius-full)" }}>
+            本地时区展示
+          </Tag>
+          {isNarrowScreen ? (
+            <Button icon={<MenuOutlined />} onClick={() => setMobileNavOpen(true)} style={{ borderRadius: "var(--admin-radius-full)" }}>
+              切换面板
+            </Button>
+          ) : null}
+        </Space>
+      </div>
+
+      <Layout className="admin-settings-layout" style={{ marginTop: 4, background: "transparent" }}>
+        {!isNarrowScreen ? (
+          <Sider
+            width={260}
+            className="admin-settings-sider"
+            theme="light"
+            style={{
+              background: "var(--admin-color-surface-solid)",
+              borderRadius: "var(--admin-radius-lg)",
+              border: "1px solid var(--admin-color-border)",
+              overflow: "hidden"
+            }}
+          >
+            {navigationMenu}
+          </Sider>
+        ) : null}
+
+        <Content
+          className="admin-settings-content"
+          style={{
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+            paddingLeft: isNarrowScreen ? 0 : 24,
+            overflow: "visible"
+          }}
+        >
+          <div
+            style={{
+              background: "var(--admin-color-surface-solid)",
+              borderRadius: "var(--admin-radius-lg)",
+              border: "1px solid var(--admin-color-border)",
+              height: "100%",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column"
+            }}
+          >
+            <div className="admin-settings-content-header" style={{ padding: "20px 24px", borderBottom: "1px solid var(--admin-color-border)" }}>
+              <div>
+                <Typography.Title level={4} style={{ margin: 0, marginBottom: 4 }}>
+                  {panelMeta.label}
+                </Typography.Title>
+                <Typography.Text type="secondary">{panelMeta.description}</Typography.Text>
+              </div>
+              <Tag color="blue" style={{ borderRadius: "var(--admin-radius-full)" }}>
+                {panelMeta.label}
+              </Tag>
+            </div>
+            <div className="admin-settings-content-body" style={{ flex: 1, overflow: "auto", padding: 24 }}>
+              <CurrentPanel panel={panel} />
+            </div>
           </div>
-          <Tag color="processing" style={{ borderRadius: 'var(--admin-radius-full)' }}>本地时区展示</Tag>
-        </div>
-        <div className="admin-settings-content-body">
-          <CurrentPanel panel={panel} />
-        </div>
-      </Content>
-    </Layout>
+        </Content>
+      </Layout>
+
+      <Drawer
+        title="监控面板"
+        placement="left"
+        width={320}
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        bodyStyle={{ padding: 0 }}
+      >
+        {navigationMenu}
+      </Drawer>
+    </div>
   );
 }
 

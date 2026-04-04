@@ -131,8 +131,8 @@ export function DepartmentTreeView() {
   const treeData = useMemo(() => departments.map(d => toTreeData(d, searchValue)), [departments, searchValue]);
 
   return (
-    <Card className="admin-tree-card" bordered={false} bodyStyle={{ padding: 0 }}>
-      <div className="admin-tree-header">
+    <Card className="admin-tree-card antd-admin-card" bordered={false} bodyStyle={{ padding: 0 }}>
+      <div className="admin-tree-header" style={{ padding: '24px 24px 0 24px' }}>
         <Typography.Title level={4} style={{ margin: '0 0 8px 0', fontSize: 18 }}>
           部门结构树
         </Typography.Title>
@@ -143,12 +143,12 @@ export function DepartmentTreeView() {
           placeholder="搜索部门名称..." 
           prefix={<Search size={16} style={{ color: 'var(--admin-color-subtle)' }} />}
           onChange={onChange} 
-          style={{ width: '100%', maxWidth: 400 }}
+          style={{ width: '100%', borderRadius: 'var(--admin-radius-full)' }}
           size="large"
           allowClear
         />
       </div>
-      <div className="admin-tree-container">
+      <div className="admin-tree-container" style={{ padding: '24px' }}>
         {errorText && <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} />}
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin size="large" /></div>
