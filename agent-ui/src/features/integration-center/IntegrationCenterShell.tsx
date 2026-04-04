@@ -256,191 +256,123 @@ export function IntegrationCenterShell() {
   }
 
   return (
-    <Card className="admin-card resource-center-shell integration-center-shell antd-admin-card admin-workspace-shell">
-      <div className="admin-section-header admin-workspace-header">
+    <div className="admin-page-container">
+      <div className="admin-page-header">
         <div>
-          <Typography.Title level={4} className="admin-card-heading">
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
             集成中心
           </Typography.Title>
-          <Typography.Paragraph>管理第三方平台实例、密钥状态与授权策略。</Typography.Paragraph>
+          <Typography.Text type="secondary">
+            管理第三方平台实例、密钥状态与授权策略。
+          </Typography.Text>
         </div>
-        <Space wrap>
-          <Tag color="blue">类型 · {currentTabLabel}</Tag>
-          <Tag>{search.trim() ? `搜索“${search.trim()}”` : "全量实例视图"}</Tag>
-          <Tag>{selectedInstance ? `${selectedInstance.name} / ${selectedInstance.status}` : "未选择实例"}</Tag>
+        <Space>
           <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-            刷新列表
+            刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
-            新建{currentTabLabel}实例
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel} style={{ borderRadius: 'var(--admin-radius-full)' }}>
+            新建{currentTabLabel}
           </Button>
         </Space>
       </div>
 
-      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="集成类型">
+      <div style={{ marginBottom: 16 }}>
         <Segmented
-          block
           value={tab}
           options={TABS.map((item) => ({ label: item.label, value: item.id }))}
           onChange={(value) => setTab(value as IntegrationCenterTab)}
+          style={{ padding: 4, background: 'var(--admin-color-surface)' }}
         />
       </div>
 
-      <div className="resource-center-stats-row" aria-label="集成统计">
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">在线实例</span>
-          <strong className="resource-center-stat-value">{activeCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">草稿与停用</span>
-          <strong className="resource-center-stat-value">{draftCount + disabledCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">密钥已就绪</span>
-          <strong className="resource-center-stat-value">{secretReadyCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">系统单例</span>
-          <strong className="resource-center-stat-value">{systemSingletonCount}</strong>
-        </article>
-      </div>
-
-      {isNarrowScreen ? (
-        <div className="resource-center-mobile-toolbar">
-          <MobileFilterDrawer title="筛选实例" filterCount={mobileFilterCount}>
-            <label className="field">
-              <span className="field-label">搜索实例</span>
-              <Input
-                aria-label="搜索实例"
-                placeholder="名称、slug、描述"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                allowClear
-              />
-            </label>
-          </MobileFilterDrawer>
-        </div>
-      ) : (
-        <div className="resource-center-toolbar admin-workspace-toolbar">
-          <label className="field resource-center-search">
-            <span className="field-label">搜索实例</span>
+      <div className="admin-split-layout">
+        <div className="admin-split-master">
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
             <Input
-              aria-label="搜索实例"
-              placeholder="名称、slug、描述"
+              prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
+              placeholder="搜索实例..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               allowClear
+              style={{ borderRadius: 'var(--admin-radius-full)' }}
             />
-          </label>
-        </div>
-      )}
-
-      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
-
-      <div className="resource-center-content admin-workspace-body">
-        <aside className="resource-center-sidebar">
-          {loading ? (
-            <div className="admin-workspace-loading">
-              <Spin size="small" />
-            </div>
-          ) : null}
-
-          {!loading && filteredItems.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description="当前类型还没有实例。" />
-          ) : null}
-
-          <div className="resource-center-list">
-            {filteredItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={selectedId === item.id ? "resource-center-list-item active" : "resource-center-list-item"}
-                onClick={() => {
-                  setSelectedId(item.id);
-                  if (isNarrowScreen) setMobileDetailOpen(true);
-                }}
-              >
-                <strong>{item.name}</strong>
-                <span>{item.slug}</span>
-                <span className="resource-center-item-note">
-                  {item.description?.trim() || `${currentTabLabel} 实例，适合在详情区继续查看配置、密钥和校验历史。`}
-                </span>
-                <span className="resource-center-list-item-meta">
-                  <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
-                  <Tag>{item.secretState.hasSecrets ? "密钥已配置" : "缺少密钥"}</Tag>
-                  {item.isSystemSingleton ? <Tag>系统单例</Tag> : null}
-                  <span className="resource-center-inline-muted">{formatLocalDateTime(item.updatedAt)}</span>
-                </span>
-              </button>
-            ))}
           </div>
-        </aside>
-
-        {!isNarrowScreen ? (
-          <div className="resource-center-detail admin-workspace-detail">
-            {detailLoading ? (
-              <div className="admin-workspace-loading">
+          
+          <div className="admin-master-list">
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
                 <Spin size="small" />
               </div>
-            ) : null}
-
-            {!detailLoading && !detail ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description="请选择一个集成实例。" />
-            ) : null}
-
-          {detail && detail.instance.type === "dingtalk" ? (
-            <Suspense
-              fallback={(
-                <div className="admin-workspace-loading">
-                  <Spin size="small" />
-                </div>
-              )}
-            >
-              <DingTalkIntegrationViewLazy
-                instanceId={detail.instance.id}
-                onInstanceUpdated={(instance) => {
-                  setDetail((current) => (current && current.instance.id === instance.id ? { ...current, instance } : current));
-                  setItems((current) => current.map((item) => (item.id === instance.id ? instance : item)));
-                }}
-              />
-            </Suspense>
-          ) : null}
-
-            {detail && detail.instance.type === "zendesk" ? (
-              <Suspense
-                fallback={(
-                  <div className="admin-workspace-loading">
-                    <Spin size="small" />
+            ) : filteredItems.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前类型还没有实例。" />
+            ) : (
+              filteredItems.map((item) => (
+                <div
+                  key={item.id}
+                  className={`admin-master-item ${selectedId === item.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    if (isNarrowScreen) setMobileDetailOpen(true);
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                    <strong style={{ fontSize: 14, fontWeight: 600 }}>{item.name}</strong>
+                    <Tag color={statusTagColor(item.status)} style={{ margin: 0, borderRadius: 4 }}>
+                      {item.status}
+                    </Tag>
                   </div>
-                )}
-              >
+                  <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {item.slug}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                    <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
+                      {item.secretState.hasSecrets ? "🔑 已配置" : "⚠️ 缺密钥"}
+                    </Tag>
+                    {item.isSystemSingleton && (
+                      <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
+                        系统单例
+                      </Tag>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-split-detail">
+          {!isNarrowScreen ? (
+            detailLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <Spin size="large" />
+              </div>
+            ) : !detail ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧选择一个实例" style={{ marginTop: '20%' }} />
+            ) : detail.instance.type === "dingtalk" ? (
+              <Suspense fallback={<Spin />}>
+                <DingTalkIntegrationViewLazy
+                  instanceId={detail.instance.id}
+                  onInstanceUpdated={(instance) => {
+                    setDetail((current) => (current && current.instance.id === instance.id ? { ...current, instance } : current));
+                    setItems((current) => current.map((item) => (item.id === instance.id ? instance : item)));
+                  }}
+                />
+              </Suspense>
+            ) : detail.instance.type === "zendesk" ? (
+              <Suspense fallback={<Spin />}>
                 <ZendeskIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
               </Suspense>
-            ) : null}
-            {detail && detail.instance.type === "openai_codex" ? (
-              <Suspense
-                fallback={(
-                  <div className="admin-workspace-loading">
-                    <Spin size="small" />
-                  </div>
-                )}
-              >
+            ) : detail.instance.type === "openai_codex" ? (
+              <Suspense fallback={<Spin />}>
                 <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
               </Suspense>
-            ) : null}
-            {detail && detail.instance.type === "openai_compatible_api" ? (
-              <Suspense
-                fallback={(
-                  <div className="admin-workspace-loading">
-                    <Spin size="small" />
-                  </div>
-                )}
-              >
+            ) : (
+              <Suspense fallback={<Spin />}>
                 <OpenAICompatibleApiIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
               </Suspense>
-            ) : null}
-          </div>
-        ) : null}
+            )
+          ) : null}
+        </div>
       </div>
 
       {isNarrowScreen ? (
@@ -583,6 +515,6 @@ export function IntegrationCenterShell() {
           </label>
         </Space>
       </Drawer>
-    </Card>
+    </div>
   );
 }

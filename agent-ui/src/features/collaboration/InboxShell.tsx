@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { Typography, Tag, Segmented, Spin, Empty, Alert, Button, Space } from "antd";
+import { ReloadOutlined, CheckOutlined, InboxOutlined } from "@ant-design/icons";
 
 import {
   archiveInboxItem,
@@ -37,6 +39,7 @@ export function InboxShell() {
   const [errorText, setErrorText] = useState("");
   const [activeTab, setActiveTab] = useState<InboxTab>("all");
   const [pendingItemIds, setPendingItemIds] = useState<string[]>([]);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -58,7 +61,7 @@ export function InboxShell() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadNonce]);
 
   const filteredItems = useMemo(() => {
     if (activeTab === "all") return items;
@@ -82,97 +85,143 @@ export function InboxShell() {
     }
   }
 
+  const unreadCount = items.filter(item => item.status === 'unread').length;
+
   return (
-    <section className="admin-card inbox-shell">
-      <div className="inbox-shell-header">
+    <div className="admin-page-container">
+      <div className="admin-page-header">
         <div>
-          <h2>通知中心</h2>
-          <p>统一处理协作动态、告警事件和系统广播。</p>
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
+            通知中心
+          </Typography.Title>
+          <Typography.Text type="secondary">统一处理协作动态、告警事件和系统广播。</Typography.Text>
         </div>
+        <Space>
+          <Tag color={unreadCount > 0 ? "processing" : "default"} style={{ borderRadius: 'var(--admin-radius-full)' }}>
+            {unreadCount} 条未读
+          </Tag>
+          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce(n => n + 1)} loading={loading}>
+            刷新
+          </Button>
+        </Space>
       </div>
 
-      <div className="inbox-tabs" role="tablist" aria-label="通知分类">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            className={activeTab === tab.id ? "resource-center-type-tab active" : "resource-center-type-tab"}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div style={{ marginBottom: 16 }}>
+        <Segmented
+          value={activeTab}
+          options={TABS.map((item) => ({ label: item.label, value: item.id }))}
+          onChange={(value) => setActiveTab(value as InboxTab)}
+          style={{ padding: 4, background: 'var(--admin-color-surface)' }}
+        />
       </div>
 
-      {loading ? <p className="field-help">加载通知中心中...</p> : null}
-      {errorText ? <p className="err-text">{errorText}</p> : null}
+      {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} /> : null}
 
-      <div className="inbox-list">
-        {!loading && filteredItems.length === 0 ? <p className="field-help">当前筛选下暂无消息。</p> : null}
-        {filteredItems.map((item) => {
-          const busy = pendingItemIds.includes(item.id);
-          return (
-            <article key={item.id} className={`inbox-card inbox-card-${item.status}`}>
-              <div className="inbox-card-header">
-                <div className="inbox-card-title-group">
-                  <strong>{item.title}</strong>
-                  <div className="config-tags">
-                    <span className="tag">{statusLabel(item)}</span>
-                    <span className="tag">{item.category}</span>
-                    {item.threadId ? <span className="tag">{item.threadId}</span> : null}
+      <div style={{ 
+        background: 'var(--admin-color-surface-solid)', 
+        borderRadius: 'var(--admin-radius-lg)', 
+        border: '1px solid var(--admin-color-border)',
+        boxShadow: 'var(--admin-shadow-sm)',
+        minHeight: '400px'
+      }}>
+        {loading ? (
+          <div style={{ padding: '60px 0', textAlign: 'center' }}>
+            <Spin size="large" />
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <Empty 
+            image={Empty.PRESENTED_IMAGE_SIMPLE} 
+            description="当前筛选下暂无消息" 
+            style={{ padding: '60px 0' }}
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', padding: '12px' }}>
+            {filteredItems.map((item) => {
+              const busy = pendingItemIds.includes(item.id);
+              const isUnread = item.status === "unread";
+              
+              return (
+                <div 
+                  key={item.id} 
+                  style={{
+                    padding: '16px',
+                    borderBottom: '1px solid var(--admin-color-border)',
+                    background: isUnread ? 'var(--admin-color-accent-soft)' : 'transparent',
+                    borderRadius: 'var(--admin-radius-md)',
+                    marginBottom: '4px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {isUnread && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--admin-color-accent)' }} />}
+                      <strong style={{ fontSize: '15px', color: 'var(--admin-color-text)' }}>{item.title}</strong>
+                      <Tag color={item.category === 'alert' ? 'error' : item.category === 'collaboration' ? 'processing' : 'default'} style={{ margin: 0, borderRadius: 4 }}>
+                        {item.category}
+                      </Tag>
+                    </div>
+                    <span style={{ fontSize: '12px', color: 'var(--admin-color-subtle)' }}>
+                      {formatLocalDateTime(item.createdAt)}
+                    </span>
+                  </div>
+                  
+                  <p style={{ margin: '0 0 12px 0', color: 'var(--admin-color-text)', fontSize: '14px', paddingLeft: isUnread ? '20px' : '0' }}>
+                    {item.body}
+                  </p>
+                  
+                  <div style={{ display: 'flex', gap: '8px', paddingLeft: isUnread ? '20px' : '0' }}>
+                    {item.status === "unread" && (
+                      <Button 
+                        size="small" 
+                        type="primary"
+                        ghost
+                        icon={<CheckOutlined />} 
+                        loading={busy} 
+                        onClick={() => void applyItemUpdate(item.id, markInboxItemRead)}
+                        style={{ borderRadius: 'var(--admin-radius-full)' }}
+                      >
+                        标记已读
+                      </Button>
+                    )}
+                    {item.status === "read" && (
+                      <Button 
+                        size="small" 
+                        loading={busy} 
+                        onClick={() => void applyItemUpdate(item.id, markInboxItemUnread)}
+                        style={{ borderRadius: 'var(--admin-radius-full)' }}
+                      >
+                        标记未读
+                      </Button>
+                    )}
+                    {item.status !== "archived" && (
+                      <Button 
+                        size="small" 
+                        icon={<InboxOutlined />}
+                        loading={busy} 
+                        onClick={() => void applyItemUpdate(item.id, archiveInboxItem)}
+                        style={{ borderRadius: 'var(--admin-radius-full)' }}
+                      >
+                        归档
+                      </Button>
+                    )}
+                    {item.status === "archived" && (
+                      <Button 
+                        size="small" 
+                        loading={busy} 
+                        onClick={() => void applyItemUpdate(item.id, unarchiveInboxItem)}
+                        style={{ borderRadius: 'var(--admin-radius-full)' }}
+                      >
+                        取消归档
+                      </Button>
+                    )}
                   </div>
                 </div>
-                <span className="field-help">{formatLocalDateTime(item.createdAt)}</span>
-              </div>
-              <p className="inbox-card-body">{item.body}</p>
-              <div className="inbox-card-actions">
-                {item.status === "unread" ? (
-                  <button
-                    type="button"
-                    className="picker-btn"
-                    disabled={busy}
-                    onClick={() => void applyItemUpdate(item.id, markInboxItemRead)}
-                  >
-                    标记已读
-                  </button>
-                ) : null}
-                {item.status === "read" ? (
-                  <button
-                    type="button"
-                    className="picker-btn"
-                    disabled={busy}
-                    onClick={() => void applyItemUpdate(item.id, markInboxItemUnread)}
-                  >
-                    标记未读
-                  </button>
-                ) : null}
-                {item.status === "archived" ? (
-                  <button
-                    type="button"
-                    className="picker-btn"
-                    disabled={busy}
-                    onClick={() => void applyItemUpdate(item.id, unarchiveInboxItem)}
-                  >
-                    取消归档
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="picker-btn"
-                    disabled={busy}
-                    onClick={() => void applyItemUpdate(item.id, archiveInboxItem)}
-                  >
-                    归档
-                  </button>
-                )}
-              </div>
-            </article>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
 

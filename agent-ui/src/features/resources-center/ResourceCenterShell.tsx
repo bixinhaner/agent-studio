@@ -241,172 +241,102 @@ export function ResourceCenterShell() {
   }
 
   return (
-    <Card className="admin-card resource-center-shell antd-admin-card admin-workspace-shell">
-      <div className="admin-section-header admin-workspace-header">
+    <div className="admin-page-container">
+      <div className="admin-page-header">
         <div>
-          <Typography.Title level={4} className="admin-card-heading">
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
             资料集
           </Typography.Title>
-          <Typography.Paragraph>维护资料、文件清单与授权策略。</Typography.Paragraph>
+          <Typography.Text type="secondary">维护资料、文件清单与授权策略。</Typography.Text>
         </div>
-        <Space wrap>
-          <Tag color="blue">{filterScopeLabel}</Tag>
-          <Tag>{statusFilter === "all" ? "状态 · 全部" : `状态 · ${statusFilter}`}</Tag>
-          <Tag>{selectionLabel}</Tag>
+        <Space>
+          <Tag color="blue" style={{ borderRadius: 'var(--admin-radius-full)' }}>{filterScopeLabel}</Tag>
           <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-            刷新列表
+            刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreatePanel} style={{ borderRadius: 'var(--admin-radius-full)' }}>
             新建资料集
           </Button>
         </Space>
       </div>
 
-      {isNarrowScreen ? (
-        <div className="resource-center-mobile-toolbar">
-          <MobileFilterDrawer title="筛选资料集" filterCount={mobileFilterCount}>
-            <Space direction="vertical" size={12} className="admin-full-width">
-              <label className="field">
-                <span className="field-label">搜索资料集</span>
-                <Input
-                  aria-label="搜索资料集"
-                  placeholder="名称、slug、描述"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  allowClear
-                />
-              </label>
-
-              <label className="field">
-                <span className="field-label">状态筛选</span>
-                <Select
-                  aria-label="状态筛选"
-                  value={statusFilter}
-                  options={STATUS_FILTER_OPTIONS}
-                  onChange={(value) => setStatusFilter(value)}
-                />
-              </label>
+      <div className="admin-split-layout" style={{ marginTop: 16 }}>
+        <div className="admin-split-master">
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Input
+                prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
+                placeholder="搜索资料集..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                allowClear
+                style={{ borderRadius: 'var(--admin-radius-full)' }}
+              />
+              <Select
+                value={statusFilter}
+                options={STATUS_FILTER_OPTIONS}
+                onChange={(value) => setStatusFilter(value)}
+                size="small"
+                style={{ width: '100%' }}
+              />
             </Space>
-          </MobileFilterDrawer>
-        </div>
-      ) : (
-        <div className="resource-center-toolbar admin-workspace-toolbar">
-          <label className="field resource-center-search">
-            <span className="field-label">搜索资料集</span>
-            <Input
-              aria-label="搜索资料集"
-              placeholder="名称、slug、描述"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              allowClear
-            />
-          </label>
-
-          <label className="field resource-center-filter admin-workspace-filter">
-            <span className="field-label">状态筛选</span>
-            <Select
-              aria-label="状态筛选"
-              value={statusFilter}
-              options={STATUS_FILTER_OPTIONS}
-              onChange={(value) => setStatusFilter(value)}
-            />
-          </label>
-        </div>
-      )}
-
-      <div className="resource-center-stats-row" aria-label="资料集统计">
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">资料集</span>
-          <strong className="resource-center-stat-value">{activeListCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">启用中</span>
-          <strong className="resource-center-stat-value">{activeEnabledCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">托管上传</span>
-          <strong className="resource-center-stat-value">{managedUploadCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">7 日更新</span>
-          <strong className="resource-center-stat-value">{recentChangeCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">停用中</span>
-          <strong className="resource-center-stat-value">{activeDisabledCount}</strong>
-        </article>
-      </div>
-
-      {loading ? (
-        <div className="admin-workspace-loading">
-          <Spin size="small" />
-        </div>
-      ) : null}
-      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
-
-      <div className="resource-center-body admin-workspace-body">
-        <aside className="resource-center-sidebar">
-          <div className="resource-center-sidebar-header">
-            <div>
-              <span>资料集目录</span>
-              <Typography.Text type="secondary">按最近更新时间排序，方便优先处理活跃资产。</Typography.Text>
-            </div>
-            <Tag color="blue">{activeListCount}</Tag>
           </div>
 
-          <div className="resource-center-list-wrap">
-            <ul className="resource-center-list">
-              {filteredKnowledgeSets.map((knowledgeSet) => {
+          <div className="admin-master-list">
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <Spin size="small" />
+              </div>
+            ) : filteredKnowledgeSets.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选条件下没有资料集。" />
+            ) : (
+              filteredKnowledgeSets.map((knowledgeSet) => {
                 const active = selectedKnowledgeSet?.id === knowledgeSet.id;
                 return (
-                  <li key={knowledgeSet.id}>
-                    <button
-                      type="button"
-                      className={active ? "resource-center-item active" : "resource-center-item"}
-                      onClick={() => handleKnowledgeSetSelect(knowledgeSet.id)}
-                    >
-                      <span className="resource-center-item-title-row">
-                        <span className="resource-center-item-title">{knowledgeSet.name}</span>
-                        <Tag color={knowledgeSet.status === "active" ? "success" : "default"}>{knowledgeSet.status}</Tag>
+                  <div
+                    key={knowledgeSet.id}
+                    className={`admin-master-item ${active ? 'active' : ''}`}
+                    onClick={() => handleKnowledgeSetSelect(knowledgeSet.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                      <strong style={{ fontSize: 14, fontWeight: 600 }}>{knowledgeSet.name}</strong>
+                      <Tag color={knowledgeSet.status === "active" ? "success" : "default"} style={{ margin: 0, borderRadius: 4 }}>
+                        {knowledgeSet.status}
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {knowledgeSet.slug}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                      <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
+                        {knowledgeSet.sourceType === "managed_upload" ? "托管上传" : knowledgeSet.sourceType}
+                      </Tag>
+                      <span style={{ color: 'var(--admin-color-subtle)', fontSize: 11, alignSelf: 'center' }}>
+                        {formatLocalDateTime(knowledgeSet.updatedAt)}
                       </span>
-                      <span className="resource-center-item-meta">
-                        <Tag>{knowledgeSet.sourceType === "managed_upload" ? "托管上传" : knowledgeSet.sourceType}</Tag>
-                        <span className="resource-center-inline-muted">slug · {knowledgeSet.slug}</span>
-                        <span className="resource-center-inline-muted">更新于 {formatLocalDateTime(knowledgeSet.updatedAt)}</span>
-                      </span>
-                      <span className="resource-center-item-note">{knowledgeSetCardSummary(knowledgeSet)}</span>
-                    </button>
-                  </li>
+                    </div>
+                  </div>
                 );
-              })}
-            </ul>
-          </div>
-
-          {filteredKnowledgeSets.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              className="resource-center-empty-block"
-              description="当前筛选条件下没有资料集。"
-            />
-          ) : null}
-        </aside>
-
-        {!isNarrowScreen ? (
-          <section className="resource-center-detail admin-workspace-detail">
-            {selectedKnowledgeSet ? (
-              <KnowledgeSetDetailView
-                knowledgeSet={selectedKnowledgeSet}
-                onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
-                onKnowledgeSetDeleted={handleKnowledgeSetDeleted}
-              />
-            ) : (
-              <div className="resource-center-placeholder empty">
-                <h3>资料集详情</h3>
-                <p>请选择左侧资料集以继续配置。</p>
-              </div>
+              })
             )}
-          </section>
-        ) : null}
+          </div>
+        </div>
+
+        <div className="admin-split-detail">
+          {!isNarrowScreen ? (
+            selectedKnowledgeSet ? (
+              <div style={{ height: '100%', overflow: 'auto' }}>
+                <KnowledgeSetDetailView
+                  knowledgeSet={selectedKnowledgeSet}
+                  onKnowledgeSetUpdated={handleKnowledgeSetUpdated}
+                  onKnowledgeSetDeleted={handleKnowledgeSetDeleted}
+                />
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择左侧资料集以继续配置" style={{ marginTop: '20%' }} />
+            )
+          ) : null}
+        </div>
       </div>
 
       {isNarrowScreen ? (
@@ -480,6 +410,6 @@ export function ResourceCenterShell() {
           </Card>
         </Form>
       </Drawer>
-    </Card>
+    </div>
   );
 }

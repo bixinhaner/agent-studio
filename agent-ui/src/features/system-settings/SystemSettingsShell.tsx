@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Tabs, Typography } from "antd";
+import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
+import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send } from "lucide-react";
 
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "./api";
 import { BrandingSettingsView } from "./BrandingSettingsView";
@@ -17,13 +18,13 @@ import type {
 } from "./types";
 import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from "./validation";
 
-const SECTIONS: Array<{ id: SystemSettingsSection; label: string }> = [
-  { id: "branding", label: "基本设置" },
-  { id: "model-defaults", label: "模型默认值" },
-  { id: "retention-upload", label: "保留与上传" },
-  { id: "safety", label: "安全策略" },
-  { id: "organization-defaults", label: "组织默认值" },
-  { id: "publish-history", label: "发布记录" }
+const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; group: string }> = [
+  { id: "branding", label: "基本设置", icon: Settings2, group: 'General' },
+  { id: "model-defaults", label: "模型默认值", icon: Box, group: 'General' },
+  { id: "organization-defaults", label: "组织默认值", icon: Users, group: 'General' },
+  { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
+  { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
+  { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
 ];
 
 function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
@@ -39,10 +40,7 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
 }
 
 function cloneRecord(record: SystemSettingsVersionRecord): SystemSettingsVersionRecord {
-  return {
-    ...record,
-    payload: clonePayload(record.payload)
-  };
+  return { ...record, payload: clonePayload(record.payload) };
 }
 
 function formatVersionLabel(meta: SystemSettingsVersionMeta | null) {
@@ -64,14 +62,6 @@ function formatLocalDateTime(value?: string | null) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "未记录";
   return parsed.toLocaleString();
-}
-
-function formatStorageLimit(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "未设置";
-  const gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1) return `${gb.toFixed(1)} GB`;
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(0)} MB`;
 }
 
 function isPayloadSectionChanged(left: unknown, right: unknown) {
@@ -117,10 +107,6 @@ export function SystemSettingsShell() {
     let active = true;
     async function load() {
       setLoading(true);
-      setLoadErrorText("");
-      setErrorText("");
-      setSuccessText("");
-      setFieldErrors({});
       try {
         const response = await fetchSystemSettings();
         if (!active) return;
@@ -129,18 +115,13 @@ export function SystemSettingsShell() {
         setDraftMeta(response.draftMeta);
         setPublishedMeta(response.publishedMeta);
       } catch (error) {
-        if (active) {
-          setLoadErrorText(getValidationMessage(error));
-        }
+        if (active) setLoadErrorText(getValidationMessage(error));
       } finally {
         if (active) setLoading(false);
       }
     }
-
     void load();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, []);
 
   async function reloadSettings() {
@@ -171,102 +152,37 @@ export function SystemSettingsShell() {
     setFieldErrors((current) => {
       if (pathsToClear.length === 0) return current;
       const next = { ...current };
-      for (const path of pathsToClear) {
-        delete next[path];
-      }
+      for (const path of pathsToClear) delete next[path];
       return next;
     });
   }
 
   function updateDraftBranding(patch: Partial<SystemSettingsPayload["branding"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          branding: { ...current.payload.branding, ...patch }
-        }
-      }),
-      fieldPaths("branding", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, branding: { ...c.payload.branding, ...patch } } }), fieldPaths("branding", patch));
   }
 
   function updateDraftPlatformDefaults(patch: Partial<SystemSettingsPayload["platformDefaults"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          platformDefaults: { ...current.payload.platformDefaults, ...patch }
-        }
-      }),
-      fieldPaths("platformDefaults", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, platformDefaults: { ...c.payload.platformDefaults, ...patch } } }), fieldPaths("platformDefaults", patch));
   }
 
   function updateDraftRetention(patch: Partial<SystemSettingsPayload["retention"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          retention: { ...current.payload.retention, ...patch }
-        }
-      }),
-      fieldPaths("retention", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, retention: { ...c.payload.retention, ...patch } } }), fieldPaths("retention", patch));
   }
 
   function updateDraftUploads(patch: Partial<SystemSettingsPayload["uploads"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          uploads: { ...current.payload.uploads, ...patch }
-        }
-      }),
-      fieldPaths("uploads", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, uploads: { ...c.payload.uploads, ...patch } } }), fieldPaths("uploads", patch));
   }
 
   function updateDraftSafety(patch: Partial<SystemSettingsPayload["safety"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          safety: { ...current.payload.safety, ...patch }
-        }
-      }),
-      fieldPaths("safety", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, safety: { ...c.payload.safety, ...patch } } }), fieldPaths("safety", patch));
   }
 
   function updateDraftOrganization(patch: Partial<SystemSettingsPayload["organizationDefaults"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          organizationDefaults: { ...current.payload.organizationDefaults, ...patch }
-        }
-      }),
-      fieldPaths("organizationDefaults", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, organizationDefaults: { ...c.payload.organizationDefaults, ...patch } } }), fieldPaths("organizationDefaults", patch));
   }
 
   function updateDraftBehavior(patch: Partial<SystemSettingsPayload["behavior"]>) {
-    updateDraft(
-      (current) => ({
-        ...current,
-        payload: {
-          ...current.payload,
-          behavior: { ...current.payload.behavior, ...patch }
-        }
-      }),
-      fieldPaths("behavior", patch as Record<string, unknown>)
-    );
+    updateDraft(c => ({ ...c, payload: { ...c.payload, behavior: { ...c.payload.behavior, ...patch } } }), fieldPaths("behavior", patch));
   }
 
   async function persistDraft(options?: { successText?: string }) {
@@ -276,16 +192,9 @@ export function SystemSettingsShell() {
     setSuccessText("");
     try {
       const response = await saveSystemSettingsDraft(draftRecord.payload);
-      applySystemSettingsResponse(response, {
-        setDraftRecord: setDraftRecord,
-        setPublishedRecord: setPublishedRecord,
-        setDraftMeta: setDraftMeta,
-        setPublishedMeta: setPublishedMeta
-      });
+      applySystemSettingsResponse(response, { setDraftRecord, setPublishedRecord, setDraftMeta, setPublishedMeta });
       setFieldErrors({});
-      if (options?.successText) {
-        setSuccessText(options.successText);
-      }
+      if (options?.successText) setSuccessText(options.successText);
       return true;
     } catch (error) {
       const message = getValidationMessage(error);
@@ -293,9 +202,7 @@ export function SystemSettingsShell() {
       if (Object.keys(parsed.fieldErrors).length > 0) {
         setFieldErrors(parsed.fieldErrors);
         const nextSection = firstSectionWithFieldErrors(parsed.fieldErrors);
-        if (nextSection) {
-          setSection(nextSection);
-        }
+        if (nextSection) setSection(nextSection);
         setErrorText(parsed.summary);
       } else {
         setErrorText(message);
@@ -317,16 +224,9 @@ export function SystemSettingsShell() {
     setSuccessText("");
     try {
       const saved = await persistDraft();
-      if (!saved) {
-        return;
-      }
+      if (!saved) return;
       const response = await publishSystemSettings();
-      applySystemSettingsResponse(response, {
-        setDraftRecord: setDraftRecord,
-        setPublishedRecord: setPublishedRecord,
-        setDraftMeta: setDraftMeta,
-        setPublishedMeta: setPublishedMeta
-      });
+      applySystemSettingsResponse(response, { setDraftRecord, setPublishedRecord, setDraftMeta, setPublishedMeta });
       setFieldErrors({});
       setSuccessText("设置已发布");
     } catch (error) {
@@ -335,9 +235,7 @@ export function SystemSettingsShell() {
       if (Object.keys(parsed.fieldErrors).length > 0) {
         setFieldErrors(parsed.fieldErrors);
         const nextSection = firstSectionWithFieldErrors(parsed.fieldErrors);
-        if (nextSection) {
-          setSection(nextSection);
-        }
+        if (nextSection) setSection(nextSection);
         setErrorText(parsed.summary);
       } else {
         setErrorText(message);
@@ -348,218 +246,140 @@ export function SystemSettingsShell() {
   }
 
   if (loading && !draftRecord && !loadErrorText) {
-    return (
-      <section className="admin-card">
-        <p>加载系统设置中...</p>
-      </section>
-    );
+    return <div style={{ display: 'flex', justifyContent: 'center', padding: 64 }}><Spin size="large" /></div>;
   }
 
   if (loadErrorText && !draftRecord) {
     return (
-      <section className="admin-card system-settings-shell">
-        <div className="admin-section-header">
-          <div>
-            <p className="auth-eyebrow">Admin System Settings</p>
-            <h2>系统配置</h2>
-            <p>编辑平台默认值和安全边界，保存到草稿后再显式发布。</p>
-          </div>
-        </div>
-
-        <div className="system-settings-load-error">
-          <p className="err-text">系统配置加载失败</p>
-          <p>{loadErrorText}</p>
-          <button type="button" className="admin-action-btn" disabled={loading} onClick={() => void reloadSettings()}>
-            {loading ? "重试中..." : "重试加载"}
-          </button>
-        </div>
-      </section>
+      <div className="admin-card">
+        <Typography.Title level={4}>系统配置</Typography.Title>
+        <Alert type="error" message="加载失败" description={loadErrorText} showIcon style={{ marginBottom: 16 }} />
+        <Button onClick={() => void reloadSettings()}>重试加载</Button>
+      </div>
     );
   }
 
-  if (!draftRecord || !draftMeta) {
-    return (
-      <section className="admin-card">
-        <p>系统配置暂不可用</p>
-      </section>
-    );
-  }
+  if (!draftRecord || !draftMeta) return null;
 
   const draftPayload = draftRecord.payload;
   const publishedPayload = publishedRecord?.payload ?? null;
   const changedAreaCount = [
     isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding),
     isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults),
-    isPayloadSectionChanged(
-      { retention: draftPayload.retention, uploads: draftPayload.uploads },
-      publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null
-    ),
+    isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null),
     isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety),
     isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults),
     isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior)
   ].filter(Boolean).length;
-  const enabledSafetyRuleCount = Object.values(draftPayload.safety).filter(Boolean).length;
-  const currentSectionLabel = SECTIONS.find((item) => item.id === section)?.label ?? section;
+
+  const currentSectionItem = SECTIONS.find((item) => item.id === section);
+  
+  // Group SECTIONS
+  const groups = Array.from(new Set(SECTIONS.map(s => s.group)));
 
   return (
-    <section className="admin-card system-settings-shell">
-      <div className="admin-section-header">
-        <div>
-          <Typography.Title level={4} className="admin-card-heading">
-            系统配置
-          </Typography.Title>
-          <Typography.Paragraph>草稿、发布与平台默认值统一管理。</Typography.Paragraph>
-        </div>
-        <div className="system-settings-meta-pill-group">
-          <span className="system-settings-meta-pill">草稿 {formatVersionLabel(draftMeta)}</span>
-          <span className="system-settings-meta-pill">
-            {publishedMeta ? `已发布 ${formatVersionLabel(publishedMeta)}` : "尚未发布"}
-          </span>
-          <span className="system-settings-meta-pill">
-            {changedAreaCount > 0 ? `待发布 ${changedAreaCount} 项` : "无待发布变更"}
-          </span>
-        </div>
-      </div>
-
-      <div className="resource-center-stats-row" aria-label="系统配置统计">
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">当前分区</span>
-          <strong className="resource-center-stat-value">{currentSectionLabel}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">草稿版本</span>
-          <strong className="resource-center-stat-value">{formatVersionLabel(draftMeta)}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">已发布版本</span>
-          <strong className="resource-center-stat-value">{publishedMeta ? formatVersionLabel(publishedMeta) : "未发布"}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">安全护栏</span>
-          <strong className="resource-center-stat-value">{enabledSafetyRuleCount}</strong>
-        </article>
-      </div>
-
-      <div className="system-settings-toolbar">
-        <p className="system-settings-toolbar-copy">
-          最近保存 {formatLocalDateTime(draftMeta.updatedAt)}，总上传限额 {formatStorageLimit(draftPayload.uploads.maxTotalUploadBytes)}。
-        </p>
-        <div className="system-settings-action-group">
-          <Button disabled={loading || saving || publishing} onClick={() => void reloadSettings()}>
-            重新加载
-          </Button>
-          <Button type="default" disabled={saving || publishing} onClick={() => void handleSaveDraft()}>
-            {saving ? "保存中..." : "保存草稿"}
-          </Button>
-          <Button type="primary" disabled={saving || publishing} onClick={() => void handlePublish()}>
-            {publishing ? "发布中..." : "发布设置"}
-          </Button>
-        </div>
-      </div>
-
-      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
-
-      <div className="system-settings-tabs-wrap">
-        <Tabs
-          activeKey={section}
-          onChange={(key) => setSection(key as SystemSettingsSection)}
-          items={SECTIONS.map((item) => ({
-            key: item.id,
-            label: item.label
-          }))}
-        />
-      </div>
-
-      {section === "branding" ? (
-        <BrandingSettingsView
-          value={draftPayload.branding}
-          behavior={draftPayload.behavior}
-          fieldErrors={fieldErrors}
-          disabled={saving || publishing}
-          onChange={updateDraftBranding}
-          onBehaviorChange={updateDraftBehavior}
-        />
-      ) : null}
-      {section === "model-defaults" ? (
-        <ModelDefaultsView value={draftPayload.platformDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftPlatformDefaults} />
-      ) : null}
-      {section === "retention-upload" ? (
-        <RetentionUploadView
-          retention={draftPayload.retention}
-          uploads={draftPayload.uploads}
-          fieldErrors={fieldErrors}
-          disabled={saving || publishing}
-          onRetentionChange={updateDraftRetention}
-          onUploadsChange={updateDraftUploads}
-        />
-      ) : null}
-      {section === "safety" ? <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} /> : null}
-      {section === "organization-defaults" ? (
-        <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />
-      ) : null}
-      {section === "publish-history" ? (
-        <PublishHistoryView
-          draftMeta={draftMeta}
-          publishedMeta={publishedMeta}
-        />
-      ) : null}
-
-      <section className="system-settings-preview-grid">
-        <article className="system-settings-preview-card">
-          <span className="system-settings-preview-kicker">Draft Snapshot</span>
-          <h3>当前草稿预览</h3>
-          <div className="system-settings-preview-stack">
-            <div className="system-settings-preview-row">
-              <span>平台名称</span>
-              <strong>{draftPayload.branding.platformName}</strong>
-            </div>
-            <div className="system-settings-preview-row">
-              <span>模型默认值</span>
-              <strong>
-                {draftPayload.platformDefaults.provider} / {draftPayload.platformDefaults.model}
-              </strong>
-            </div>
-            <div className="system-settings-preview-row">
-              <span>工作区根目录</span>
-              <strong>{draftPayload.platformDefaults.sessionWorkspaceRoot}</strong>
-            </div>
-            <div className="system-settings-preview-row">
-              <span>欢迎摘要</span>
-              <strong>{draftPayload.behavior.welcomeSummary}</strong>
+    <div className="admin-settings-layout">
+      {/* Sidebar Navigation (macOS System Settings Style) */}
+      <div className="admin-settings-sidebar">
+        {groups.map(group => (
+          <div key={group} className="admin-settings-nav-group">
+            <div className="admin-settings-nav-group-title">{group}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {SECTIONS.filter(s => s.group === group).map(item => {
+                const Icon = item.icon;
+                const isActive = section === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`admin-settings-nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => setSection(item.id)}
+                  >
+                    <div className="admin-settings-nav-icon">
+                      <Icon size={16} />
+                    </div>
+                    <span style={{ fontWeight: isActive ? 500 : 400 }}>{item.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </article>
-        <article className="system-settings-preview-card">
-          <span className="system-settings-preview-kicker">Published Snapshot</span>
-          <h3>当前发布预览</h3>
-          {publishedPayload ? (
-            <div className="system-settings-preview-stack">
-              <div className="system-settings-preview-row">
-                <span>平台名称</span>
-                <strong>{publishedPayload.branding.platformName}</strong>
-              </div>
-              <div className="system-settings-preview-row">
-                <span>模型默认值</span>
-                <strong>
-                  {publishedPayload.platformDefaults.provider} / {publishedPayload.platformDefaults.model}
-                </strong>
-              </div>
-              <div className="system-settings-preview-row">
-                <span>工作区根目录</span>
-                <strong>{publishedPayload.platformDefaults.sessionWorkspaceRoot}</strong>
-              </div>
-              <div className="system-settings-preview-row">
-                <span>欢迎摘要</span>
-                <strong>{publishedPayload.behavior.welcomeSummary}</strong>
-              </div>
-            </div>
-          ) : (
-            <p>尚未发布</p>
+        ))}
+      </div>
+
+      {/* Main Content Area */}
+      <div className="admin-settings-content">
+        <div className="admin-settings-content-header">
+          <div>
+            <Typography.Title level={4} style={{ margin: '0 0 4px 0', fontSize: 20 }}>
+              {currentSectionItem?.label}
+            </Typography.Title>
+            <Space size={16}>
+              <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>草稿 {formatVersionLabel(draftMeta)}</span>
+              {publishedMeta && <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>发布 {formatVersionLabel(publishedMeta)}</span>}
+            </Space>
+          </div>
+          {changedAreaCount > 0 && (
+            <Tag color="processing" style={{ borderRadius: 12 }}>
+              有 {changedAreaCount} 项未发布变更
+            </Tag>
           )}
-        </article>
-      </section>
-    </section>
+        </div>
+
+        <div className="admin-settings-content-scroll">
+          {errorText && <Alert type="error" showIcon message={errorText} style={{ marginBottom: 24 }} closable onClose={() => setErrorText("")} />}
+          {successText && <Alert type="success" showIcon message={successText} style={{ marginBottom: 24 }} closable onClose={() => setSuccessText("")} />}
+
+          {section === "branding" && (
+            <BrandingSettingsView value={draftPayload.branding} behavior={draftPayload.behavior} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftBranding} onBehaviorChange={updateDraftBehavior} />
+          )}
+          {section === "model-defaults" && (
+            <ModelDefaultsView value={draftPayload.platformDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftPlatformDefaults} />
+          )}
+          {section === "retention-upload" && (
+            <RetentionUploadView retention={draftPayload.retention} uploads={draftPayload.uploads} fieldErrors={fieldErrors} disabled={saving || publishing} onRetentionChange={updateDraftRetention} onUploadsChange={updateDraftUploads} />
+          )}
+          {section === "safety" && (
+            <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} />
+          )}
+          {section === "organization-defaults" && (
+            <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />
+          )}
+          {section === "publish-history" && (
+            <PublishHistoryView draftMeta={draftMeta} publishedMeta={publishedMeta} />
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="admin-settings-footer">
+          <div style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>
+            自动保存草稿于 {formatLocalDateTime(draftMeta.updatedAt)}
+          </div>
+          <Space>
+            <Button disabled={loading || saving || publishing} onClick={reloadSettings}>
+              放弃更改
+            </Button>
+            <Button 
+              type="default" 
+              icon={<Save size={16} />} 
+              disabled={saving || publishing} 
+              onClick={handleSaveDraft}
+              loading={saving}
+            >
+              保存草稿
+            </Button>
+            <Button 
+              type="primary" 
+              icon={<Send size={16} />} 
+              disabled={saving || publishing || changedAreaCount === 0} 
+              onClick={handlePublish}
+              loading={publishing}
+            >
+              应用并发布
+            </Button>
+          </Space>
+        </div>
+      </div>
+    </div>
   );
 }
 

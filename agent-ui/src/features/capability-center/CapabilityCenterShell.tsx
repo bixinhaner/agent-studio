@@ -851,197 +851,116 @@ export function CapabilityCenterShell() {
   }
 
   return (
-    <Card className="admin-card capability-center-shell resource-center-shell antd-admin-card admin-workspace-shell">
-      <div className="admin-section-header admin-workspace-header">
+    <div className="admin-page-container">
+      <div className="admin-page-header">
         <div>
-          <Typography.Title level={4} className="admin-card-heading">
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
             智能体配置
           </Typography.Title>
-          <Typography.Paragraph>统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Paragraph>
+          <Typography.Text type="secondary">统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Text>
         </div>
-        <Space wrap>
-          <Tag color="blue">{resourceCountLabel} {visibleCount}</Tag>
-          <Tag color={enabledCount > 0 ? "success" : "default"}>active {enabledCount}</Tag>
+        <Space>
+          <Tag color="blue" style={{ borderRadius: 'var(--admin-radius-full)' }}>{resourceCountLabel} {visibleCount}</Tag>
+          <Tag color={enabledCount > 0 ? "success" : "default"} style={{ borderRadius: 'var(--admin-radius-full)' }}>active {enabledCount}</Tag>
           <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-            刷新列表
+            刷新
           </Button>
-          <Button type="primary" onClick={openCreatePanel} disabled={loading}>
-            新建配置项
+          <Button type="primary" onClick={openCreatePanel} disabled={loading} style={{ borderRadius: 'var(--admin-radius-full)' }}>
+            新建配置
           </Button>
         </Space>
       </div>
 
-      <div className="resource-center-type-tabs admin-workspace-segmented" role="tablist" aria-label="智能体配置类型">
+      <div style={{ marginBottom: 16 }}>
         <Segmented
-          block
           value={tab}
           options={CAPABILITY_TABS.map((item) => ({ label: item.label, value: item.id }))}
           onChange={(value) => setTab(value as CapabilityCenterTab)}
+          style={{ padding: 4, background: 'var(--admin-color-surface)' }}
         />
       </div>
 
-      {isNarrowScreen ? (
-        <div className="resource-center-mobile-toolbar">
-          <MobileFilterDrawer title="筛选配置项" filterCount={mobileFilterCount}>
-            <Space direction="vertical" size={12} className="admin-full-width">
-              <label className="field">
-                <span className="field-label">搜索资源</span>
-                <Input
-                  aria-label="搜索资源"
-                  placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  allowClear
-                />
-              </label>
-
-              <label className="field">
-                <span className="field-label">状态筛选</span>
+      <div className="admin-split-layout">
+        <div className="admin-split-master">
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Input
+                prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
+                placeholder={`搜索${resourceLabel}...`}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                allowClear
+                style={{ borderRadius: 'var(--admin-radius-full)' }}
+              />
+              <Space>
                 <Select
-                  aria-label="状态筛选"
                   value={statusFilter}
                   options={STATUS_FILTER_OPTIONS}
                   onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
+                  size="small"
+                  style={{ width: 100 }}
                 />
-              </label>
-
-              <label className="field">
-                <span className="field-label">可见性筛选</span>
                 <Select
-                  aria-label="可见性筛选"
                   value={visibilityDisabled ? "all" : visibilityFilter}
                   disabled={visibilityDisabled}
                   options={VISIBILITY_FILTER_OPTIONS}
                   onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
+                  size="small"
+                  style={{ width: 110 }}
                 />
-              </label>
+              </Space>
             </Space>
-          </MobileFilterDrawer>
-        </div>
-      ) : (
-        <div className="resource-center-toolbar capability-center-toolbar admin-workspace-toolbar">
-          <label className="field resource-center-search">
-            <span className="field-label">搜索资源</span>
-            <Input
-              aria-label="搜索资源"
-              placeholder={`名称、slug、描述${tab === "agent_mode" ? "、run profile" : tab === "skill_package" ? "、能力项" : "、模型"}`}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              allowClear
-            />
-          </label>
-
-          <label className="field resource-center-filter admin-workspace-filter">
-            <span className="field-label">状态筛选</span>
-            <Select
-              aria-label="状态筛选"
-              value={statusFilter}
-              options={STATUS_FILTER_OPTIONS}
-              onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
-            />
-          </label>
-
-          <label className="field resource-center-filter admin-workspace-filter">
-            <span className="field-label">可见性筛选</span>
-            <Select
-              aria-label="可见性筛选"
-              value={visibilityDisabled ? "all" : visibilityFilter}
-              disabled={visibilityDisabled}
-              options={VISIBILITY_FILTER_OPTIONS}
-              onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
-            />
-          </label>
-        </div>
-      )}
-
-      <div className="resource-center-stats-row capability-center-stats-row" aria-label="配置统计">
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">{resourceCountLabel}</span>
-          <strong className="resource-center-stat-value">{visibleCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">启用中</span>
-          <strong className="resource-center-stat-value">{enabledCount}</strong>
-        </article>
-        <article className="resource-center-stat-card">
-          <span className="resource-center-stat-label">选中资源</span>
-          <strong className="resource-center-stat-value">{selectedResourceSummary}</strong>
-        </article>
-      </div>
-
-      {loading ? (
-        <div className="admin-workspace-loading">
-          <Spin size="small" />
-        </div>
-      ) : null}
-      {errorText ? <Alert className="admin-alert-inline" type="error" showIcon message={errorText} /> : null}
-      <div className="resource-center-body capability-center-body">
-        <aside className="resource-center-sidebar">
-          <div className="resource-center-sidebar-header">
-            <span>{sidebarTitle}</span>
-            <Tag color="blue">{visibleCount}</Tag>
           </div>
 
-          <div className="resource-center-list-wrap">
-            <ul className="resource-center-list capability-center-list">
-              {tab === "agent_mode"
-                ? (visibleItems as AgentModeRecord[]).map((item) => (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        className={selectedAgentModeId === item.id ? "resource-center-item active" : "resource-center-item"}
-                        onClick={() => selectResource(item.id)}
-                        >
-                          <span className="resource-center-item-title">{item.name}</span>
-                          <span className="resource-center-item-meta capability-center-item-meta">
-                            <span>{item.slug}</span>
-                            <Tag>{item.visibleToUsers ? "visible" : "hidden"}</Tag>
-                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
-                          </span>
-                        </button>
-                      </li>
-                    ))
-                : tab === "skill_package"
-                  ? (visibleItems as SkillPackageRecord[]).map((item) => (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          className={selectedSkillPackageId === item.id ? "resource-center-item active" : "resource-center-item"}
-                          onClick={() => selectResource(item.id)}
-                        >
-                          <span className="resource-center-item-title">{item.name}</span>
-                          <span className="resource-center-item-meta capability-center-item-meta">
-                            <span>{item.slug}</span>
-                            <Tag>{item.visibleToUsers ? "visible" : "hidden"}</Tag>
-                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
-                          </span>
-                        </button>
-                      </li>
-                    ))
-                  : (visibleItems as RunProfileRecord[]).map((item) => (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          className={selectedRunProfileId === item.id ? "resource-center-item active" : "resource-center-item"}
-                          onClick={() => selectResource(item.id)}
-                        >
-                          <span className="resource-center-item-title">{item.name}</span>
-                          <span className="resource-center-item-meta capability-center-item-meta">
-                            <span>{item.slug}</span>
-                            <Tag color={statusTagColor(item.status)}>{item.status}</Tag>
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-            </ul>
+          <div className="admin-master-list">
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <Spin size="small" />
+              </div>
+            ) : visibleItems.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noResultsLabel} />
+            ) : (
+              visibleItems.map((item: any) => {
+                const isSelected = 
+                  (tab === "agent_mode" && selectedAgentModeId === item.id) ||
+                  (tab === "skill_package" && selectedSkillPackageId === item.id) ||
+                  (tab === "run_profile" && selectedRunProfileId === item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`admin-master-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => selectResource(item.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                      <strong style={{ fontSize: 14, fontWeight: 600 }}>{item.name}</strong>
+                      <Tag color={statusTagColor(item.status)} style={{ margin: 0, borderRadius: 4 }}>
+                        {item.status}
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', marginBottom: 8 }}>
+                      {item.slug}
+                    </div>
+                    {tab !== "run_profile" && (
+                      <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
+                        <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
+                          {item.visibleToUsers ? "👀 可见" : "🔒 隐藏"}
+                        </Tag>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
+        </div>
 
-          {visibleItems.length === 0 && !loading ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} className="resource-center-empty-block" description={noResultsLabel} />
+        <div className="admin-split-detail">
+          {!isNarrowScreen ? (
+            <div style={{ height: '100%', overflow: 'auto' }}>
+              {renderSelectedDetail()}
+            </div>
           ) : null}
-        </aside>
-
-        {!isNarrowScreen ? <section className="resource-center-detail capability-center-detail">{renderSelectedDetail()}</section> : null}
+        </div>
       </div>
 
       {isNarrowScreen ? (
@@ -1376,6 +1295,6 @@ export function CapabilityCenterShell() {
           </Space>
         ) : null}
       </Drawer>
-    </Card>
+    </div>
   );
 }

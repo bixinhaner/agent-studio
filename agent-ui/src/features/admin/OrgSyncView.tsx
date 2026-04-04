@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Input, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Input, Space, Spin, Tag, Typography, Progress } from "antd";
+import { RefreshCcw, UserPlus, Building, Zap, Clock, FileJson, Activity } from "lucide-react";
 
 import {
   fetchOrgSyncConfig,
@@ -27,7 +28,7 @@ function formatCadence(intervalMinutes: number): string {
 function summarize(job: OrgSyncJob): string {
   if (!job.summary) return "无摘要";
   try {
-    return JSON.stringify(job.summary);
+    return JSON.stringify(job.summary, null, 2);
   } catch {
     return "摘要不可用";
   }
@@ -83,91 +84,151 @@ export function OrgSyncView() {
     }
   }
 
+  const latestJob = jobs[0];
+  const isRunning = latestJob?.status === "running";
+
   return (
-    <Card className="admin-card antd-admin-card">
-      <div className="admin-section-header">
-        <div>
-          <Typography.Title level={4} className="admin-card-heading">
-            组织同步
-          </Typography.Title>
-          <Typography.Paragraph>支持全量、按部门和按用户补同步。</Typography.Paragraph>
-        </div>
-      </div>
-      {loading ? <Spin size="small" /> : null}
-      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-      {config ? (
-        <div className="admin-sync-meta">
-          <Tag color={config.enabled ? "success" : "default"}>启用状态：{config.enabled ? "已启用" : "已关闭"}</Tag>
-          <Tag color="processing">同步周期：{formatCadence(config.intervalMinutes)}</Tag>
-        </div>
-      ) : null}
-      <section className="admin-form-section">
-        <div className="admin-form-section-header">
-          <h4>同步触发</h4>
-          <p>支持全量、部门和用户级补同步；建议优先使用小范围同步。</p>
-        </div>
-        <div className="admin-trigger-grid">
-          <Button type="primary" disabled={submitting} onClick={() => void handleTrigger(triggerFullOrgSync)}>
-            立即全量同步
-          </Button>
-          <div className="admin-trigger-inline">
-            <label className="field admin-trigger-field">
-              <span className="field-label">部门 External ID</span>
-              <Input
-                aria-label="部门 External ID"
-                value={departmentId}
-                onChange={(event) => setDepartmentId(event.target.value)}
-                placeholder="部门 External ID"
-              />
-              <small className="field-help">示例：`dept-rd`，用于增量补齐该部门人员和结构。</small>
-            </label>
-            <Button
-              disabled={submitting || !departmentId.trim()}
-              onClick={() => void handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}
-            >
-              按部门同步
-            </Button>
-          </div>
-          <div className="admin-trigger-inline">
-            <label className="field admin-trigger-field">
-              <span className="field-label">用户 External ID</span>
-              <Input
-                aria-label="用户 External ID"
-                value={userId}
-                onChange={(event) => setUserId(event.target.value)}
-                placeholder="用户 External ID"
-              />
-              <small className="field-help">示例：`ding-u1`，用于补齐单个用户信息。</small>
-            </label>
-            <Button
-              disabled={submitting || !userId.trim()}
-              onClick={() => void handleTrigger(() => triggerUserOrgSync(userId.trim()))}
-            >
-              按用户补同步
-            </Button>
-          </div>
-        </div>
-      </section>
-      <div className="admin-job-list">
-        <Typography.Title level={5} className="admin-card-subheading">
-          同步任务
+    <Card className="admin-tree-card" bordered={false} bodyStyle={{ padding: 0 }}>
+      <div className="admin-tree-header">
+        <Typography.Title level={4} style={{ margin: '0 0 8px 0', fontSize: 18 }}>
+          同步中心
         </Typography.Title>
-        <Space direction="vertical" size={10} className="admin-full-width">
-          {jobs.map((job) => (
-            <Card key={job.id} size="small" className="admin-list-card">
-              <div className="admin-list-card-header">
-                <div>
-                  <Typography.Text strong>{job.id}</Typography.Text>
-                  <Typography.Paragraph className="admin-card-meta">
-                    {job.scopeType || "full"} / {job.status}
-                  </Typography.Paragraph>
+        <Typography.Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }}>
+          管理与身份提供商的同步任务状态与策略。
+        </Typography.Paragraph>
+      </div>
+
+      <div className="admin-tree-container">
+        {loading ? <div style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /></div> : null}
+        {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} /> : null}
+        
+        {config && !loading && (
+          <>
+            <div className="admin-sync-dashboard">
+              <div className="admin-sync-stat-card">
+                <div className="admin-sync-stat-label"><Clock size={16} /> 自动化策略</div>
+                <div className="admin-sync-stat-value" style={{ color: config.enabled ? 'var(--admin-color-text)' : 'var(--admin-color-subtle)' }}>
+                  {config.enabled ? formatCadence(config.intervalMinutes) : "已关闭"}
                 </div>
-                <span className="admin-job-time">{formatLocalTime(job.updatedAt || job.finishedAt || job.createdAt)}</span>
+                <div style={{ marginTop: 'auto' }}>
+                  <Tag color={config.enabled ? "success" : "default"} style={{ borderRadius: 12 }}>
+                    {config.enabled ? "Enabled" : "Disabled"}
+                  </Tag>
+                </div>
               </div>
-              <Typography.Paragraph className="admin-job-summary">{summarize(job)}</Typography.Paragraph>
-            </Card>
-          ))}
-        </Space>
+
+              <div className="admin-sync-stat-card">
+                <div className="admin-sync-stat-label"><Activity size={16} /> 最近任务状态</div>
+                {latestJob ? (
+                  <>
+                    <div className="admin-sync-stat-value">
+                      {latestJob.status === "success" ? "同步成功" : latestJob.status === "running" ? "进行中" : "异常结束"}
+                    </div>
+                    <div style={{ marginTop: 'auto', fontSize: 12, color: 'var(--admin-color-subtle)' }}>
+                      耗时: {latestJob.finishedAt ? `${Math.round((new Date(latestJob.finishedAt).getTime() - new Date(latestJob.createdAt || Date.now()).getTime()) / 1000)}s` : '--'}
+                      <br/>
+                      结束于: {formatLocalTime(latestJob.finishedAt)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="admin-sync-stat-value" style={{ color: 'var(--admin-color-subtle)' }}>暂无记录</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 32 }}>
+              <Typography.Title level={5} style={{ fontSize: 15, marginBottom: 16 }}>触发手动同步</Typography.Title>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <Card size="small" style={{ borderRadius: 12, border: '1px solid var(--admin-color-border)', boxShadow: 'var(--admin-shadow-sm)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ padding: 8, background: 'var(--admin-color-bg)', borderRadius: 8 }}><Zap size={18} color="var(--admin-color-accent)" /></div>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>全量同步</div>
+                        <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)' }}>立即同步所有用户与组织架构信息</div>
+                      </div>
+                    </div>
+                    <Button type="primary" loading={submitting || isRunning} onClick={() => handleTrigger(triggerFullOrgSync)}>
+                      立即执行
+                    </Button>
+                  </div>
+                </Card>
+
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <Card size="small" style={{ flex: 1, borderRadius: 12, border: '1px solid var(--admin-color-border)', boxShadow: 'var(--admin-shadow-sm)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <div style={{ padding: 8, background: 'var(--admin-color-bg)', borderRadius: 8 }}><Building size={18} color="var(--admin-color-subtle)" /></div>
+                      <div style={{ fontWeight: 500 }}>部门增量同步</div>
+                    </div>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input 
+                        placeholder="输入部门 External ID (如 dept-rd)" 
+                        value={departmentId}
+                        onChange={e => setDepartmentId(e.target.value)}
+                      />
+                      <Button loading={submitting} disabled={!departmentId.trim()} onClick={() => handleTrigger(() => triggerDepartmentOrgSync(departmentId.trim()))}>
+                        执行
+                      </Button>
+                    </Space.Compact>
+                  </Card>
+
+                  <Card size="small" style={{ flex: 1, borderRadius: 12, border: '1px solid var(--admin-color-border)', boxShadow: 'var(--admin-shadow-sm)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <div style={{ padding: 8, background: 'var(--admin-color-bg)', borderRadius: 8 }}><UserPlus size={18} color="var(--admin-color-subtle)" /></div>
+                      <div style={{ fontWeight: 500 }}>用户增量同步</div>
+                    </div>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input 
+                        placeholder="输入用户 External ID (如 ding-u1)" 
+                        value={userId}
+                        onChange={e => setUserId(e.target.value)}
+                      />
+                      <Button loading={submitting} disabled={!userId.trim()} onClick={() => handleTrigger(() => triggerUserOrgSync(userId.trim()))}>
+                        执行
+                      </Button>
+                    </Space.Compact>
+                  </Card>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Typography.Title level={5} style={{ fontSize: 15, margin: 0 }}>最近同步任务</Typography.Title>
+                <Button type="text" icon={<RefreshCcw size={14} />} onClick={reload} loading={loading}>刷新列表</Button>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {jobs.map((job) => (
+                  <div key={job.id} className="admin-sync-job-item">
+                    <div className="admin-sync-job-header">
+                      <div className="admin-sync-job-title">
+                        {job.status === "running" && <Spin size="small" />}
+                        {job.scopeType === "full" ? "全量同步" : job.scopeType === "department" ? "部门同步" : "用户同步"}
+                        <Tag color={job.status === 'success' ? 'success' : job.status === 'running' ? 'processing' : 'error'} style={{ borderRadius: 12, marginLeft: 8 }}>
+                          {job.status}
+                        </Tag>
+                      </div>
+                      <div className="admin-sync-job-meta">
+                        {formatLocalTime(job.updatedAt || job.finishedAt || job.createdAt)}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', display: 'flex', gap: 16 }}>
+                      <span>Task ID: <span style={{ fontFamily: 'monospace' }}>{job.id}</span></span>
+                      <span>Target: {job.scopeType === "department" || job.scopeType === "user" ? (job as any).scopeValue || "Unknown" : "All"}</span>
+                    </div>
+                    {job.summary && (
+                      <div className="admin-sync-job-summary">
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{summarize(job)}</pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {jobs.length === 0 && <div style={{ textAlign: 'center', color: 'var(--admin-color-subtle)', padding: 24 }}>暂无同步任务记录</div>}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Card>
   );
