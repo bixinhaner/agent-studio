@@ -63,6 +63,7 @@ type RuntimeOptionServiceDependencies = {
 };
 
 type RuntimeOptionRequest = {
+  organizationId?: string;
   userId: string;
   roleIds: string[];
   departmentIds: string[];
@@ -76,6 +77,15 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 
 function isActive(status: string | undefined): boolean {
   return trimOrUndefined(status) === "active";
+}
+
+function matchesOrganization(recordOrganizationId: string | undefined, organizationId: string | undefined): boolean {
+  const normalizedRecordOrganizationId = trimOrUndefined(recordOrganizationId);
+  const normalizedOrganizationId = trimOrUndefined(organizationId);
+  if (normalizedRecordOrganizationId && normalizedOrganizationId) {
+    return normalizedRecordOrganizationId === normalizedOrganizationId;
+  }
+  return !normalizedRecordOrganizationId;
 }
 
 function toRunProfileSnapshot(runProfile: RunProfileRecord, safety?: SystemSettingsSafety): PortalRuntimeOptionRunProfile {
@@ -131,15 +141,17 @@ export class PortalRuntimeOptionService {
       this.deps.skillPackages.list()
     ]);
 
-    const activeVisibleModeRows = modeRows.filter((mode) => isActive(mode.status) && mode.visibleToUsers);
+    const activeVisibleModeRows = modeRows.filter(
+      (mode) => isActive(mode.status) && mode.visibleToUsers && matchesOrganization(mode.organizationId, input.organizationId)
+    );
     const allowedModeIds = new Set(
       await this.deps.policies.filterAllowedResources({
         userId: input.userId,
         roleIds: input.roleIds,
         departmentIds: input.departmentIds,
-        resourceType: "agent_mode",
-        candidateIds: activeVisibleModeRows.map((mode) => mode.id)
-      })
+          resourceType: "agent_mode",
+          candidateIds: activeVisibleModeRows.map((mode) => mode.id)
+        })
     );
 
     const runProfileMap = new Map(runProfileRows.map((runProfile) => [runProfile.id, runProfile] as const));
@@ -153,7 +165,7 @@ export class PortalRuntimeOptionService {
       }
 
       const runProfile = runProfileMap.get(mode.runProfileId);
-      if (!runProfile || !isActive(runProfile.status)) {
+      if (!runProfile || !isActive(runProfile.status) || !matchesOrganization(runProfile.organizationId, input.organizationId)) {
         continue;
       }
 
@@ -161,10 +173,11 @@ export class PortalRuntimeOptionService {
         await this.deps.policies.filterAllowedResources({
           userId: input.userId,
           roleIds: input.roleIds,
-          departmentIds: input.departmentIds,
-          resourceType: "run_profile",
-          candidateIds: [runProfile.id]
-        })
+            departmentIds: input.departmentIds,
+            organizationId: input.organizationId,
+            resourceType: "run_profile",
+            candidateIds: [runProfile.id]
+          })
       );
       if (!authorizedRunProfileIds.has(runProfile.id)) {
         continue;
@@ -174,7 +187,12 @@ export class PortalRuntimeOptionService {
       let valid = true;
       for (const binding of mode.skillPackages) {
         const skillPackage = skillPackageMap.get(binding.skillPackageId);
-        if (!skillPackage || !isActive(skillPackage.status) || !skillPackage.visibleToUsers) {
+        if (
+          !skillPackage ||
+          !isActive(skillPackage.status) ||
+          !skillPackage.visibleToUsers ||
+          !matchesOrganization(skillPackage.organizationId, input.organizationId)
+        ) {
           valid = false;
           break;
         }
@@ -184,6 +202,7 @@ export class PortalRuntimeOptionService {
             userId: input.userId,
             roleIds: input.roleIds,
             departmentIds: input.departmentIds,
+            organizationId: input.organizationId,
             resourceType: "skill_package",
             candidateIds: [skillPackage.id]
           })

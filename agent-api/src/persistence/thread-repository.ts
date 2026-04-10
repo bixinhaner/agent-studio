@@ -21,6 +21,7 @@ export type ThreadFeedback = {
 
 export type ThreadRecord = {
   id: string;
+  organizationId?: string;
   userId?: string;
   externalId?: string;
   status: ThreadStatus;
@@ -39,6 +40,7 @@ export type ThreadRecord = {
 
 type CreateThreadPayload = {
   id?: string;
+  organizationId?: string;
   userId?: string;
   title?: string;
   externalId?: string;
@@ -66,6 +68,7 @@ type UpdateThreadPayload = Partial<{
 
 type ThreadRow = {
   id: string;
+  organizationId: string | null;
   userId: string | null;
   externalId: string | null;
   title: string | null;
@@ -100,7 +103,10 @@ type RuntimeSessionRow = {
 type ThreadTable = {
   count(args?: unknown): Promise<number>;
   findUnique(args: { where: { id: string } }): Promise<ThreadRow | null>;
-  findMany(args?: { where?: { status?: "active" | "archived"; userId?: string | null }; orderBy?: { updatedAt: "asc" | "desc" } }): Promise<ThreadRow[]>;
+  findMany(args?: {
+    where?: { status?: "active" | "archived"; userId?: string | null; organizationId?: string | null };
+    orderBy?: { updatedAt: "asc" | "desc" };
+  }): Promise<ThreadRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<ThreadRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<ThreadRow>;
   delete(args: { where: { id: string } }): Promise<ThreadRow>;
@@ -227,18 +233,24 @@ export class ThreadRepository {
     return this.db.thread.count();
   }
 
-  async list(includeArchived = false): Promise<ThreadRecord[]> {
+  async list(organizationId?: string, includeArchived = false): Promise<ThreadRecord[]> {
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
     const rows = await this.db.thread.findMany({
-      where: includeArchived ? undefined : { status: "active" },
+      where: {
+        ...(includeArchived ? {} : { status: "active" }),
+        ...(normalizedOrganizationId ? { organizationId: normalizedOrganizationId } : {})
+      },
       orderBy: { updatedAt: "desc" }
     });
     return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
   }
 
-  async listForUser(userId: string, includeArchived = false): Promise<ThreadRecord[]> {
+  async listForUser(userId: string, organizationId?: string, includeArchived = false): Promise<ThreadRecord[]> {
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
     const rows = await this.db.thread.findMany({
       where: {
         userId,
+        ...(normalizedOrganizationId ? { organizationId: normalizedOrganizationId } : {}),
         ...(includeArchived ? {} : { status: "active" })
       },
       orderBy: { updatedAt: "desc" }
@@ -251,6 +263,7 @@ export class ThreadRepository {
     const created = await this.db.thread.create({
       data: {
         id: payload.id,
+        organizationId: trimOrUndefined(payload.organizationId) ?? null,
         userId: trimOrUndefined(payload.userId) ?? null,
         externalId: trimOrUndefined(payload.externalId) ?? null,
         title: title ?? null,
@@ -279,6 +292,7 @@ export class ThreadRepository {
       const created = await tx.thread.create({
         data: {
           id: record.id,
+          organizationId: trimOrUndefined(record.organizationId) ?? null,
           userId: trimOrUndefined(record.userId) ?? null,
           externalId: record.externalId ?? null,
           title: record.title ?? null,
@@ -315,14 +329,18 @@ export class ThreadRepository {
     });
   }
 
-  async get(threadId: string): Promise<ThreadRecord | undefined> {
+  async get(threadId: string, organizationId?: string): Promise<ThreadRecord | undefined> {
     const row = await this.db.thread.findUnique({ where: { id: threadId } });
     if (!row) return undefined;
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
+    if (normalizedOrganizationId && trimOrUndefined(row.organizationId ?? undefined) !== normalizedOrganizationId) {
+      return undefined;
+    }
     return this.loadThreadRecord(this.db, row);
   }
 
-  async getOwned(threadId: string, userId: string): Promise<ThreadRecord | undefined> {
-    const thread = await this.get(threadId);
+  async getOwned(threadId: string, userId: string, organizationId?: string): Promise<ThreadRecord | undefined> {
+    const thread = await this.get(threadId, organizationId);
     if (!thread || thread.userId !== userId) {
       return undefined;
     }
@@ -543,6 +561,7 @@ export class ThreadRepository {
 
     return {
       id: row.id,
+      organizationId: trimOrUndefined(row.organizationId ?? undefined),
       userId: row.userId ?? undefined,
       externalId: row.externalId ?? undefined,
       status: mapThreadStatusFromDb(row.status),

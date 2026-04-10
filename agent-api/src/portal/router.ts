@@ -18,6 +18,7 @@ export function createPortalRouter(options: {
 
     try {
       const resolved = await options.runtimeOptions.resolve({
+        organizationId: req.currentOrganization?.id,
         userId: currentUser.id,
         roleIds: [currentUser.role ?? "employee"],
         departmentIds: await options.listDepartmentIdsForUser(currentUser.id)

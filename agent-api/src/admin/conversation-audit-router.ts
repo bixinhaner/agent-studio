@@ -671,7 +671,7 @@ export function createConversationAuditRouter(options: {
   async function listConversationSummaries(): Promise<ConversationSummary[]> {
     const db = getDb();
     const repository = new ThreadRepository(db as unknown as ThreadRepositoryDb);
-    const [threads, users] = await Promise.all([repository.list(true), db.user.findMany({ orderBy: { createdAt: "asc" } })]);
+    const [threads, users] = await Promise.all([repository.list(undefined, true), db.user.findMany({ orderBy: { createdAt: "asc" } })]);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     return threads.map((thread) => buildConversationSummary(thread, userMap.get(thread.userId ?? "") ?? null));
   }

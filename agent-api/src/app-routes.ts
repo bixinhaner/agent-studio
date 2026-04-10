@@ -1,6 +1,6 @@
 import { Router, type Express, type RequestHandler } from "express";
 
-import { requireCurrentUser, requireRole } from "./auth/current-user.js";
+import { requireCurrentOrganization, requireCurrentUser, requireRole } from "./auth/current-user.js";
 
 type AdminRouterLike = Router & {
   systemSettingsRouter?: Router;
@@ -32,6 +32,7 @@ export function registerCommonApiRoutes(
   app.use(
     "/api/admin",
     requireCurrentUser,
+    requireCurrentOrganization,
     options.rbacAdminRouter ?? Router(),
     requireRole("admin"),
     options.adminRouter,
@@ -41,7 +42,7 @@ export function registerCommonApiRoutes(
     options.resourcesAdminRouter ?? Router(),
     options.modeAdminRouter ?? Router()
   );
-  app.use("/api/portal", requireCurrentUser, options.portalRouter, options.resourcesPortalRouter ?? Router());
+  app.use("/api/portal", requireCurrentUser, requireCurrentOrganization, options.portalRouter, options.resourcesPortalRouter ?? Router());
   app.use("/api/integrations/zendesk", options.serviceTokenMiddleware, options.zendeskRouter);
-  app.use("/api", requireCurrentUser);
+  app.use("/api", requireCurrentUser, requireCurrentOrganization);
 }

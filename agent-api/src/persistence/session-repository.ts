@@ -4,6 +4,7 @@ import type { ReasoningEffort } from "../model-config.js";
 
 export type SessionRecord = {
   sessionId: string;
+  organizationId?: string;
   userId?: string;
   threadId?: string;
   model: string;
@@ -25,6 +26,7 @@ type RuntimeSessionMetadata = {
 
 type RuntimeSessionRow = {
   id: string;
+  organizationId: string | null;
   threadId: string | null;
   userId: string | null;
   externalId: string | null;
@@ -49,6 +51,12 @@ export type SessionRepositoryDb = {
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function toIsoString(value: Date | string): string {
@@ -83,6 +91,7 @@ export class SessionRepository {
     const sessionId = randomUUID();
     const created = await this.db.runtimeSession.create({
       data: {
+        organizationId: payload.organizationId ?? null,
         threadId: payload.threadId ?? null,
         userId: payload.userId ?? null,
         status: "active",
@@ -119,9 +128,13 @@ export class SessionRepository {
     return this.mapSession(updated);
   }
 
-  async getOwned(sessionId: string, userId: string): Promise<SessionRecord | undefined> {
+  async getOwned(sessionId: string, userId: string, organizationId?: string): Promise<SessionRecord | undefined> {
     const session = await this.peek(sessionId);
     if (!session || session.userId !== userId) {
+      return undefined;
+    }
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
+    if (normalizedOrganizationId && session.organizationId !== normalizedOrganizationId) {
       return undefined;
     }
     const updated = await this.db.runtimeSession.update({
@@ -214,6 +227,7 @@ export class SessionRepository {
     const metadata = parseMetadata(row.metadata);
     return {
       sessionId: row.externalId ?? row.id,
+      organizationId: trimOrUndefined(row.organizationId),
       userId: row.userId ?? undefined,
       threadId: row.threadId ?? undefined,
       model: metadata.model,

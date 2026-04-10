@@ -2,13 +2,15 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 export type SessionCookiePayload = {
   userId: string;
+  activeOrganizationId?: string;
+  sessionVersion: number;
   issuedAt: number;
   expiresAt: number;
 };
 
 export type SessionCookieManager = {
   cookieName: string;
-  create(userId: string): string;
+  create(userId: string, activeOrganizationId?: string): string;
   clear(): string;
   read(header: string | string[] | undefined): SessionCookiePayload | undefined;
 };
@@ -140,7 +142,7 @@ export function createSessionCookieManager(
 
   return {
     cookieName,
-    create(userId: string): string {
+    create(userId: string, activeOrganizationId?: string): string {
       const normalizedUserId = trimOrUndefined(userId);
       if (!normalizedUserId) {
         throw new Error("userId is required for session cookies");
@@ -152,6 +154,8 @@ export function createSessionCookieManager(
       const encodedPayload = toBase64Url(
         JSON.stringify({
           userId: normalizedUserId,
+          activeOrganizationId: trimOrUndefined(activeOrganizationId),
+          sessionVersion: 1,
           issuedAt: now,
           expiresAt: now + maxAgeMs
         } satisfies SessionCookiePayload)
@@ -174,6 +178,8 @@ export function createSessionCookieManager(
       const parsed = readSignedPayload<Partial<SessionCookiePayload>>(header, cookieName, secret);
       try {
         const userId = trimOrUndefined(parsed?.userId);
+        const activeOrganizationId = trimOrUndefined(parsed?.activeOrganizationId);
+        const sessionVersion = Number(parsed?.sessionVersion);
         const issuedAt = Number(parsed?.issuedAt);
         const expiresAt = Number(parsed?.expiresAt);
         if (!userId || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) {
@@ -182,7 +188,13 @@ export function createSessionCookieManager(
         if (Date.now() >= expiresAt) {
           return undefined;
         }
-        return { userId, issuedAt, expiresAt };
+        return {
+          userId,
+          activeOrganizationId,
+          sessionVersion: Number.isFinite(sessionVersion) && sessionVersion > 0 ? sessionVersion : 1,
+          issuedAt,
+          expiresAt
+        };
       } catch {
         return undefined;
       }

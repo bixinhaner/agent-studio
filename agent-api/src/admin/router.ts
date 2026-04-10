@@ -63,6 +63,8 @@ type AdminRouterOptions = {
 
 type UserRow = {
   id: string;
+  userType: string | null;
+  primaryOrganizationId: string | null;
   externalId: string | null;
   email: string | null;
   displayName: string | null;
@@ -78,6 +80,25 @@ type UserRow = {
   dingtalkCorpId: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
+};
+
+type AuthIdentityRow = {
+  provider: string;
+  email: string | null;
+  lastLoginAt: Date | string | null;
+};
+
+type UserOrganizationMembershipRow = {
+  organizationId: string;
+  membershipType: string | null;
+  status: string | null;
+  organization?: {
+    id: string;
+    slug: string;
+    name: string;
+    type: string | null;
+    status: string | null;
+  } | null;
 };
 
 type DepartmentRow = {
@@ -106,6 +127,23 @@ type DepartmentMembershipRow = {
 
 type AdminDetailUser = {
   id: string;
+  source: {
+    userType: string;
+    primaryOrganizationId: string | null;
+    identities: Array<{
+      provider: string;
+      email: string | null;
+      lastLoginAt: string | null;
+    }>;
+    organizations: Array<{
+      organizationId: string;
+      organizationSlug: string | null;
+      organizationName: string | null;
+      organizationType: string | null;
+      membershipType: string;
+      status: string;
+    }>;
+  };
   synced: {
     displayName: string | null;
     email: string | null;
@@ -204,9 +242,42 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       isPrimary: Boolean(assignment.isPrimary)
     }));
   const primaryAssignment = assignedRoles.find((assignment) => assignment.isPrimary) ?? null;
+  const identityRows = typeof (db as AdminDb & { authIdentity?: { findMany(args: unknown): Promise<AuthIdentityRow[]> } }).authIdentity?.findMany === "function"
+    ? await (db as AdminDb & { authIdentity: { findMany(args: unknown): Promise<AuthIdentityRow[]> } }).authIdentity.findMany({
+        where: { userId: row.id },
+        orderBy: { createdAt: "asc" }
+      })
+    : [];
+  const organizationMembershipRows =
+    typeof (db as AdminDb & { organizationMembership?: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> } }).organizationMembership?.findMany === "function"
+      ? await (db as AdminDb & {
+          organizationMembership: { findMany(args: unknown): Promise<UserOrganizationMembershipRow[]> };
+        }).organizationMembership.findMany({
+          where: { userId: row.id },
+          include: { organization: true },
+          orderBy: { createdAt: "asc" }
+        })
+      : [];
 
   return {
     id: row.id,
+    source: {
+      userType: trimOrUndefined(row.userType) ?? "internal_employee",
+      primaryOrganizationId: trimOrUndefined(row.primaryOrganizationId) ?? null,
+      identities: identityRows.map((identity) => ({
+        provider: identity.provider,
+        email: trimOrUndefined(identity.email) ?? null,
+        lastLoginAt: toIsoString(identity.lastLoginAt)
+      })),
+      organizations: organizationMembershipRows.map((membership) => ({
+        organizationId: membership.organizationId,
+        organizationSlug: trimOrUndefined(membership.organization?.slug) ?? null,
+        organizationName: trimOrUndefined(membership.organization?.name) ?? null,
+        organizationType: trimOrUndefined(membership.organization?.type) ?? null,
+        membershipType: trimOrUndefined(membership.membershipType) ?? "customer_member",
+        status: trimOrUndefined(membership.status) ?? "active"
+      }))
+    },
     synced: {
       displayName: trimOrUndefined(row.displayName) ?? null,
       email: trimOrUndefined(row.email) ?? null,

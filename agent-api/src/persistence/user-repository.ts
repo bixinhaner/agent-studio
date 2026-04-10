@@ -1,5 +1,7 @@
 export type AuthenticatedUser = {
   id: string;
+  userType?: string;
+  primaryOrganizationId?: string;
   externalId?: string;
   email?: string;
   displayName?: string;
@@ -31,7 +33,22 @@ export type DingTalkUserIdentity = {
 export interface UserRepositoryLike {
   getById(id: string): Promise<AuthenticatedUser | undefined>;
   getByExternalId(externalId: string): Promise<AuthenticatedUser | undefined>;
+  getByEmail?(email: string): Promise<AuthenticatedUser | undefined>;
   upsertFromDingTalk(identity: DingTalkUserIdentity): Promise<AuthenticatedUser>;
+  createUser?(input: {
+    email?: string | null;
+    displayName?: string | null;
+    userType?: string;
+    primaryOrganizationId?: string | null;
+    role?: string;
+  }): Promise<AuthenticatedUser>;
+  updateUserProfile?(input: {
+    userId: string;
+    email?: string | null;
+    displayName?: string | null;
+    userType?: string;
+    primaryOrganizationId?: string | null;
+  }): Promise<AuthenticatedUser>;
   updateLegacyRole?(input: { userId: string; role: string }): Promise<AuthenticatedUser>;
   updateLocalSettings(input: {
     userId: string;
@@ -43,6 +60,8 @@ export interface UserRepositoryLike {
 
 type UserRow = {
   id: string;
+  userType?: string | null;
+  primaryOrganizationId?: string | null;
   externalId: string | null;
   email: string | null;
   displayName: string | null;
@@ -92,6 +111,8 @@ function toIsoString(value: Date | string): string {
 function mapUser(row: UserRow): AuthenticatedUser {
   return {
     id: row.id,
+    userType: trimOrUndefined(row.userType) ?? "internal_employee",
+    primaryOrganizationId: trimOrUndefined(row.primaryOrganizationId),
     externalId: trimOrUndefined(row.externalId),
     email: trimOrUndefined(row.email),
     displayName: trimOrUndefined(row.displayName),
@@ -131,6 +152,13 @@ export class UserRepository implements UserRepositoryLike {
     const normalized = trimOrUndefined(externalId);
     if (!normalized) return undefined;
     const row = await this.db.user.findUnique({ where: { externalId: normalized } });
+    return row ? mapUser(row) : undefined;
+  }
+
+  async getByEmail(email: string): Promise<AuthenticatedUser | undefined> {
+    const normalized = trimOrUndefined(email)?.toLowerCase();
+    if (!normalized) return undefined;
+    const row = await this.db.user.findUnique({ where: { email: normalized } });
     return row ? mapUser(row) : undefined;
   }
 
@@ -174,6 +202,7 @@ export class UserRepository implements UserRepositoryLike {
       const updated = await this.db.user.update({
         where: { id: existingByExternalId.id },
         data: {
+          userType: existingByExternalId.userType ?? "internal_employee",
           externalId,
           email: email ?? existingByExternalId.email,
           displayName: displayName ?? existingByExternalId.displayName,
@@ -187,6 +216,7 @@ export class UserRepository implements UserRepositoryLike {
 
     const created = await this.db.user.create({
       data: {
+        userType: "internal_employee",
         externalId,
         email: email ?? null,
         displayName: displayName ?? null,
@@ -202,6 +232,65 @@ export class UserRepository implements UserRepositoryLike {
       }
     });
     return mapUser(created);
+  }
+
+  async createUser(input: {
+    email?: string | null;
+    displayName?: string | null;
+    userType?: string;
+    primaryOrganizationId?: string | null;
+    role?: string;
+  }): Promise<AuthenticatedUser> {
+    const created = await this.db.user.create({
+      data: {
+        userType: trimOrUndefined(input.userType) ?? "external_user",
+        primaryOrganizationId: trimOrUndefined(input.primaryOrganizationId ?? undefined) ?? null,
+        email: trimOrUndefined(input.email ?? undefined)?.toLowerCase() ?? null,
+        displayName: trimOrUndefined(input.displayName ?? undefined) ?? null,
+        role: trimOrUndefined(input.role) ?? "employee",
+        status: "active",
+        statusSource: "manual",
+        syncState: "active",
+        manualDisabled: false,
+        adminNote: null
+      }
+    });
+    return mapUser(created);
+  }
+
+  async updateUserProfile(input: {
+    userId: string;
+    email?: string | null;
+    displayName?: string | null;
+    userType?: string;
+    primaryOrganizationId?: string | null;
+  }): Promise<AuthenticatedUser> {
+    const userId = trimOrUndefined(input.userId);
+    if (!userId) {
+      throw new Error("user 不存在");
+    }
+
+    const existing = await this.db.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      throw new Error("user 不存在");
+    }
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data: {
+        email:
+          input.email === undefined ? existing.email : trimOrUndefined(input.email ?? undefined)?.toLowerCase() ?? null,
+        displayName:
+          input.displayName === undefined ? existing.displayName : trimOrUndefined(input.displayName ?? undefined) ?? null,
+        userType: input.userType === undefined ? existing.userType : trimOrUndefined(input.userType) ?? existing.userType,
+        primaryOrganizationId:
+          input.primaryOrganizationId === undefined
+            ? existing.primaryOrganizationId
+            : trimOrUndefined(input.primaryOrganizationId ?? undefined) ?? null,
+        updatedAt: new Date()
+      }
+    });
+    return mapUser(updated);
   }
 
   async updateLocalSettings(input: {

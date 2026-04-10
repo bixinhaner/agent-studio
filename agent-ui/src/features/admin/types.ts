@@ -230,6 +230,23 @@ export type AdminApiAuditDetailResponse = {
 
 export type AdminUser = {
   id: string;
+  source: {
+    userType: string;
+    primaryOrganizationId: string | null;
+    identities: Array<{
+      provider: string;
+      email: string | null;
+      lastLoginAt: string | null;
+    }>;
+    organizations: Array<{
+      organizationId: string;
+      organizationSlug: string | null;
+      organizationName: string | null;
+      organizationType: string | null;
+      membershipType: string;
+      status: string;
+    }>;
+  };
   synced: {
     displayName: string | null;
     email: string | null;

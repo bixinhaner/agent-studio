@@ -14,6 +14,7 @@ import { createAuthRouter } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { createDingTalkClient } from "./auth/dingtalk.js";
+import { createAuthEmailSender } from "./auth/email.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
 import { InboxProjectionService } from "./collaboration/inbox-projection-service.js";
@@ -68,6 +69,14 @@ import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persisten
 import { InboxItemRepository, type InboxItemRepositoryDb } from "./persistence/inbox-item-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
+import { OrganizationRepository, type OrganizationRepositoryDb } from "./persistence/organization-repository.js";
+import {
+  OrganizationMembershipRepository,
+  type OrganizationMembershipRepositoryDb
+} from "./persistence/organization-membership-repository.js";
+import { AuthIdentityRepository, type AuthIdentityRepositoryDb } from "./persistence/auth-identity-repository.js";
+import { OrganizationInviteRepository, type OrganizationInviteRepositoryDb } from "./persistence/organization-invite-repository.js";
+import { LoginChallengeRepository, type LoginChallengeRepositoryDb } from "./persistence/login-challenge-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
 import { RoleRepository, type RoleRepositoryDb } from "./persistence/role-repository.js";
 import { PermissionRepository, type PermissionRepositoryDb } from "./persistence/permission-repository.js";
@@ -118,6 +127,11 @@ const runtime = new CodexRuntime();
 const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
+const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
+const organizationMemberships = new OrganizationMembershipRepository(db as unknown as OrganizationMembershipRepositoryDb);
+const authIdentities = new AuthIdentityRepository(db as unknown as AuthIdentityRepositoryDb);
+const organizationInvites = new OrganizationInviteRepository(db as unknown as OrganizationInviteRepositoryDb);
+const loginChallenges = new LoginChallengeRepository(db as unknown as LoginChallengeRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
 const roles = new RoleRepository(db as unknown as RoleRepositoryDb);
 const permissions = new PermissionRepository(db as unknown as PermissionRepositoryDb);
@@ -148,6 +162,7 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const systemSettings = new SystemSettingsRepository(db as never);
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
+const authEmailSender = createAuthEmailSender(appConfig.authEmail);
 const zendesk = new ZendeskIntegrationService();
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
@@ -553,6 +568,7 @@ const threadFileContentQuerySchema = z
 
 type SessionOptions = {
   userId: string;
+  organizationId: string;
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
@@ -562,6 +578,14 @@ type SessionOptions = {
 type ModeSelection = {
   modeId: string;
   workspaceRootPath: string;
+};
+
+type CurrentActor = {
+  id: string;
+  role?: string;
+  organizationId: string;
+  organizationSlug?: string;
+  organizationType?: string;
 };
 
 function stableJson(value: unknown): string {
@@ -586,6 +610,7 @@ function stableJson(value: unknown): string {
 
 function sessionOut(session: {
   sessionId: string;
+  organizationId?: string;
   model: string;
   reasoningEffort: ReasoningEffort;
   workspace: string;
@@ -594,6 +619,7 @@ function sessionOut(session: {
 }) {
   return {
     session_id: session.sessionId,
+    organization_id: session.organizationId ?? null,
     model: session.model,
     reasoning_effort: session.reasoningEffort,
     workspace: session.workspace,
@@ -605,6 +631,7 @@ function sessionOut(session: {
 function threadOut(thread: ThreadRecord) {
   return {
     id: thread.id,
+    organization_id: thread.organizationId ?? null,
     status: thread.status,
     title: thread.title,
     external_id: thread.externalId,
@@ -747,6 +774,7 @@ async function resolveEffectiveSessionWorkspaceRootPath(): Promise<string> {
 
 function buildThreadWorkspacePath(
   rootPath: string,
+  organizationKey: string,
   userId: string,
   threadId: string,
   createdAt?: string
@@ -757,33 +785,57 @@ function buildThreadWorkspacePath(
   );
   return path.join(
     rootPath,
+    sanitizePathSegment(organizationKey, "organization"),
     sanitizePathSegment(userId, "user"),
     dateSegment,
     `thread-${sanitizePathSegment(threadId, "thread")}`
   );
 }
 
-function buildDetachedSessionWorkspacePath(rootPath: string, userId: string): string {
+function buildDetachedSessionWorkspacePath(rootPath: string, organizationKey: string, userId: string): string {
   const suffix = `${Date.now()}-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const dateSegment = formatSessionDateSegment();
   return path.join(
     rootPath,
+    sanitizePathSegment(organizationKey, "organization"),
     sanitizePathSegment(userId, "user"),
     dateSegment,
     `session-${suffix}`
   );
 }
 
-async function resolveModeSelection(input: {
-  currentUser: {
-    id: string;
-    role?: string;
+function currentActorFromRequest(req: Request): CurrentActor {
+  if (!req.currentUser || !req.currentOrganization) {
+    throw new Error("current actor is not available");
+  }
+  return {
+    id: req.currentUser.id,
+    role: req.currentUser.role,
+    organizationId: req.currentOrganization.id,
+    organizationSlug: req.currentOrganization.slug,
+    organizationType: req.currentOrganization.type
   };
+}
+
+async function listDepartmentIdsForActor(actor: CurrentActor): Promise<string[]> {
+  if (trimOrUndefined(actor.organizationType) !== "internal") {
+    return [];
+  }
+  return departmentMemberships.listIdsForUser(actor.id);
+}
+
+function roleIdsForActor(actor: CurrentActor): string[] {
+  return [actor.role ?? "employee"];
+}
+
+async function resolveModeSelection(input: {
+  currentUser: CurrentActor;
   modeHint?: string;
 }): Promise<ModeSelection> {
-  const roleIds = [input.currentUser.role ?? "employee"];
-  const departmentIds = await departmentMemberships.listIdsForUser(input.currentUser.id);
+  const roleIds = roleIdsForActor(input.currentUser);
+  const departmentIds = await listDepartmentIdsForActor(input.currentUser);
   const runtimeOptions = await portalRuntimeOptions.resolve({
+    organizationId: input.currentUser.organizationId,
     userId: input.currentUser.id,
     roleIds,
     departmentIds
@@ -808,10 +860,7 @@ async function resolveModeSelection(input: {
 }
 
 async function allocateThreadWorkspacePath(input: {
-  currentUser: {
-    id: string;
-    role?: string;
-  };
+  currentUser: CurrentActor;
   threadId: string;
   modeHint?: string;
 }): Promise<ModeSelection & { workspacePath: string }> {
@@ -819,7 +868,12 @@ async function allocateThreadWorkspacePath(input: {
     currentUser: input.currentUser,
     modeHint: input.modeHint
   });
-  const workspacePath = buildThreadWorkspacePath(selection.workspaceRootPath, input.currentUser.id, input.threadId);
+  const workspacePath = buildThreadWorkspacePath(
+    selection.workspaceRootPath,
+    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
+    input.currentUser.id,
+    input.threadId
+  );
   await fs.mkdir(workspacePath, { recursive: true });
   return {
     ...selection,
@@ -828,17 +882,18 @@ async function allocateThreadWorkspacePath(input: {
 }
 
 async function allocateDetachedSessionWorkspacePath(input: {
-  currentUser: {
-    id: string;
-    role?: string;
-  };
+  currentUser: CurrentActor;
   modeHint?: string;
 }): Promise<ModeSelection & { workspacePath: string }> {
   const selection = await resolveModeSelection({
     currentUser: input.currentUser,
     modeHint: input.modeHint
   });
-  const workspacePath = buildDetachedSessionWorkspacePath(selection.workspaceRootPath, input.currentUser.id);
+  const workspacePath = buildDetachedSessionWorkspacePath(
+    selection.workspaceRootPath,
+    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
+    input.currentUser.id
+  );
   await fs.mkdir(workspacePath, { recursive: true });
   return {
     ...selection,
@@ -883,6 +938,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
   const session = await sessions.create({
+    organizationId: options.organizationId,
     userId: options.userId,
     threadId,
     model: options.model,
@@ -896,18 +952,16 @@ async function createSession(options: SessionOptions, threadId?: string) {
 }
 
 async function resolveKnowledgeSetRunConfig(input: {
-  currentUser: {
-    id: string;
-    role?: string;
-  };
+  currentUser: CurrentActor;
   workspacePath: string;
   knowledgeSetIds?: string[];
   codexRunConfig?: Record<string, unknown>;
 }): Promise<Record<string, unknown> | undefined> {
   return runtimeKnowledgeSets.mergeSelectedKnowledgeSetsIntoRunConfig({
+    organizationId: input.currentUser.organizationId,
     userId: input.currentUser.id,
-    roleIds: [input.currentUser.role ?? "employee"],
-    departmentIds: await departmentMemberships.listIdsForUser(input.currentUser.id),
+    roleIds: roleIdsForActor(input.currentUser),
+    departmentIds: await listDepartmentIdsForActor(input.currentUser),
     workspacePath: input.workspacePath,
     knowledgeSetIds: input.knowledgeSetIds,
     codexRunConfig: input.codexRunConfig
@@ -946,10 +1000,7 @@ async function resolveSessionOptions(
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
   },
-  currentUser: {
-    id: string;
-    role?: string;
-  },
+  currentUser: CurrentActor,
   workspacePath: string,
   modeId: string
 ): Promise<SessionOptions> {
@@ -962,6 +1013,7 @@ async function resolveSessionOptions(
   await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
   return {
     userId: currentUser.id,
+    organizationId: currentUser.organizationId,
     model,
     reasoningEffort,
     workspace: workspacePath,
@@ -975,14 +1027,16 @@ async function resolveSessionOptions(
 }
 
 async function assertQuotaAllowsNewSession(input: {
-  currentUser: {
-    id: string;
-  };
+  currentUser: CurrentActor;
   model: string;
   featureType: "chat";
 }): Promise<void> {
-  const departmentId = await departmentMemberships.getPreferredDepartmentIdForUser(input.currentUser.id);
+  const departmentId =
+    trimOrUndefined(input.currentUser.organizationType) === "internal"
+      ? await departmentMemberships.getPreferredDepartmentIdForUser(input.currentUser.id)
+      : undefined;
   const decision = await quotaEvaluation.evaluate({
+    organizationId: input.currentUser.organizationId,
     departmentId: departmentId ?? undefined,
     model: input.model,
     featureType: input.featureType,
@@ -1003,10 +1057,7 @@ async function assertQuotaAllowsNewSession(input: {
 }
 
 async function ensureThreadSession(
-  currentUser: {
-    id: string;
-    role?: string;
-  },
+  currentUser: CurrentActor,
   threadId: string,
   patch?: {
     model?: string;
@@ -1015,7 +1066,7 @@ async function ensureThreadSession(
     codex_run_config?: Record<string, unknown>;
   }
 ) {
-  const thread = await threads.getOwned(threadId, currentUser.id);
+  const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
   if (!thread) throw new Error("thread 不存在");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
@@ -1026,7 +1077,13 @@ async function ensureThreadSession(
   });
   const workspacePath =
     trimOrUndefined(thread.workspace) ||
-    buildThreadWorkspacePath(modeSelection.workspaceRootPath, currentUser.id, threadId, thread.createdAt);
+    buildThreadWorkspacePath(
+      modeSelection.workspaceRootPath,
+      currentUser.organizationSlug ?? currentUser.organizationId,
+      currentUser.id,
+      threadId,
+      thread.createdAt
+    );
   await fs.mkdir(workspacePath, { recursive: true });
   const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId);
   const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
@@ -1044,6 +1101,7 @@ async function ensureThreadSession(
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
 
   const desired: SessionOptions = {
+    organizationId: currentUser.organizationId,
     userId: thread.userId ?? currentUser.id,
     model: desiredModel,
     reasoningEffort: desiredReasoning,
@@ -1247,13 +1305,24 @@ app.get("/healthz", (_req: Request, res: Response) => {
 });
 
 registerCommonApiRoutes(app, {
-  currentUserMiddleware: createCurrentUserMiddleware({ users, cookies: sessionCookies }),
+  currentUserMiddleware: createCurrentUserMiddleware({
+    users,
+    memberships: organizationMemberships,
+    cookies: sessionCookies
+  }),
   authRouter: createAuthRouter({
     users,
     cookies: sessionCookies,
     dingtalkClient,
     dingtalkConfig: appConfig.dingtalk,
     oauthStates,
+    identities: authIdentities,
+    memberships: organizationMemberships,
+    organizations,
+    invites: organizationInvites,
+    challenges: loginChallenges,
+    emailSender: authEmailSender,
+    appBaseUrl: appConfig.appBaseUrl,
     sessionCookieReady: Boolean(appConfig.sessionCookie.secret)
   }),
   rbacAdminRouter: createRbacRouter({
@@ -1389,14 +1458,14 @@ app.get("/api/fs/directories", async (req: Request, res: Response) => {
 
 app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     if (!threadId) {
       res.status(400).json({ detail: "threadId 不能为空" });
       return;
     }
 
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1419,7 +1488,13 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     let workspacePath = trimOrUndefined(thread.workspace);
     if (!workspacePath) {
       const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
-      workspacePath = buildThreadWorkspacePath(workspaceRootPath, currentUser.id, threadId, thread.createdAt);
+      workspacePath = buildThreadWorkspacePath(
+        workspaceRootPath,
+        currentUser.organizationSlug ?? currentUser.organizationId,
+        currentUser.id,
+        threadId,
+        thread.createdAt
+      );
       await threads.update(threadId, { workspace: workspacePath });
     }
 
@@ -1450,7 +1525,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
 
 app.get("/api/threads/:threadId/files/content", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     if (!threadId) {
       res.status(400).json({ detail: "threadId 不能为空" });
@@ -1462,7 +1537,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
       path: typeof req.query.path === "string" ? req.query.path : undefined
     });
 
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1505,11 +1580,11 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
 
 app.post("/api/session", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const input = createSessionSchema.parse(req.body || {});
     const existingId = (input.session_id || "").trim();
     if (existingId) {
-      const existing = await sessions.getOwned(existingId, currentUser.id);
+      const existing = await sessions.getOwned(existingId, currentUser.id, currentUser.organizationId);
       if (existing) {
         const hasLiveRuntime =
           liveRuntimeThreads.has(existing.sessionId) || Boolean(await restoreLiveRuntimeThread(existing));
@@ -1528,11 +1603,17 @@ app.post("/api/session", async (req: Request, res: Response) => {
               modeHint
             });
             modeId = selection.modeId;
-            const ownedThread = await threads.getOwned(existing.threadId, currentUser.id);
+            const ownedThread = await threads.getOwned(existing.threadId, currentUser.id, currentUser.organizationId);
             workspace =
               trimOrUndefined(ownedThread?.workspace) ||
               trimOrUndefined(workspace) ||
-              buildThreadWorkspacePath(selection.workspaceRootPath, currentUser.id, existing.threadId, ownedThread?.createdAt);
+              buildThreadWorkspacePath(
+                selection.workspaceRootPath,
+                currentUser.organizationSlug ?? currentUser.organizationId,
+                currentUser.id,
+                existing.threadId,
+                ownedThread?.createdAt
+              );
             await fs.mkdir(workspace, { recursive: true });
             if (ownedThread && trimOrUndefined(ownedThread.workspace) !== workspace) {
               await threads.update(existing.threadId, { workspace });
@@ -1656,7 +1737,8 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
 });
 
 app.get("/api/threads", async (req: Request, res: Response) => {
-  const list = await threads.listForUser(req.currentUser!.id, true);
+  const currentUser = currentActorFromRequest(req);
+  const list = await threads.listForUser(currentUser.id, currentUser.organizationId, true);
   res.json({
     threads: list.map((thread) => threadOut(thread))
   });
@@ -1664,7 +1746,7 @@ app.get("/api/threads", async (req: Request, res: Response) => {
 
 app.post("/api/threads", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const input = createThreadSchema.parse(req.body || {});
     const threadId = randomUUID().replace(/-/g, "");
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
@@ -1691,6 +1773,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     });
     const createdThread = await threads.create({
       id: threadId,
+      organizationId: currentUser.organizationId,
       userId: currentUser.id,
       title: input.title?.trim() || undefined,
       externalId: input.external_id?.trim() || undefined,
@@ -1700,7 +1783,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       codexRunConfig: options.codexRunConfig
     });
     const session = await createSession(options, createdThread.id);
-    const updated = (await threads.get(createdThread.id)) ?? createdThread;
+    const updated = (await threads.get(createdThread.id, currentUser.organizationId)) ?? createdThread;
 
     res.json({
       thread: threadOut(updated),
@@ -1713,7 +1796,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
 });
 
 app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
-  const thread = await threads.getOwned(String(req.params.threadId || "").trim(), req.currentUser!.id);
+  const currentUser = currentActorFromRequest(req);
+  const thread = await threads.getOwned(String(req.params.threadId || "").trim(), currentUser.id, currentUser.organizationId);
   if (!thread) {
     res.status(404).json({ detail: "thread 不存在" });
     return;
@@ -1723,10 +1807,10 @@ app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     const input = patchThreadSchema.parse(req.body || {});
-    const existing = await threads.getOwned(threadId, currentUser.id);
+    const existing = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!existing) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1754,9 +1838,9 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1780,7 +1864,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 
 app.post("/api/threads/:threadId/session", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     const input = ensureThreadSessionSchema.parse(req.body || {});
     const session = await ensureThreadSession(currentUser, threadId, input);
@@ -1793,9 +1877,9 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
 
 app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1817,9 +1901,10 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
 
 app.post("/api/threads/:threadId/public-share", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
+    const profileUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1841,7 +1926,7 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
       createdByUserId: currentUser.id
     });
     const userDisplayName =
-      trimOrUndefined(currentUser.displayName) ?? trimOrUndefined(currentUser.email) ?? undefined;
+      trimOrUndefined(profileUser.displayName) ?? trimOrUndefined(profileUser.email) ?? undefined;
 
     res.json({
       share: threadPublicShareOut({
@@ -1857,9 +1942,9 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
 
 app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1879,9 +1964,9 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
 
 app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1904,9 +1989,9 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
 
 app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) => {
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id);
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "thread 不存在" });
       return;
@@ -1929,9 +2014,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
 
   try {
-    const currentUser = req.currentUser!;
+    const currentUser = currentActorFromRequest(req);
     const input = streamSchema.parse(req.body || {});
-    let session = await sessions.getOwned(input.session_id, currentUser.id);
+    let session = await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId);
     let liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
     if (!liveThread && session) {
       liveThread = await restoreLiveRuntimeThread(session);
@@ -1998,8 +2083,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         });
       },
       async recordUsage(usage) {
-        const departmentIdSnapshot = await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id);
+        const departmentIdSnapshot =
+          trimOrUndefined(currentUser.organizationType) === "internal"
+            ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
+            : undefined;
         await usageIngestion.record({
+          organizationId: currentUser.organizationId,
           userId: currentUser.id,
           departmentIdSnapshot,
           threadId: currentSession.threadId ?? undefined,

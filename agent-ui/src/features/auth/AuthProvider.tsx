@@ -5,18 +5,33 @@ import {
   buildDingTalkAuthorizeUrl,
   createDingTalkSession,
   fetchDingTalkConfig,
-  logoutSession,
   fetchWhoAmI,
+  logoutSession,
   redirectTo,
-  type AuthUser
+  requestEmailSignIn,
+  selectActiveOrganization,
+  verifyEmailSignIn,
+  type AuthIdentity,
+  type AuthMembership,
+  type AuthOrganization,
+  type AuthSession,
+  type AuthUser,
+  type EmailRequestResponse
 } from "./api";
 
 type AuthContextValue = {
   loading: boolean;
   user: AuthUser | null;
+  activeOrganization: AuthOrganization | null;
+  memberships: AuthMembership[];
+  identities: AuthIdentity[];
   error: string | null;
   reload: () => Promise<void>;
+  clearError: () => void;
   startSignIn: () => Promise<void>;
+  requestEmailSignIn: (input: { email?: string; inviteToken?: string }) => Promise<EmailRequestResponse>;
+  verifyEmailSignIn: (input: { email: string; code: string; inviteToken?: string }) => Promise<void>;
+  selectOrganization: (organizationId: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -25,23 +40,46 @@ const DINGTALK_NONCE_KEY = "agent_studio_dingtalk_nonce";
 
 function authErrorMessage(error: unknown): string | null {
   if (!error) return null;
-  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error instanceof Error) {
+    const detail = error.message.trim();
+    if (!detail || detail === "Unauthorized") {
+      return null;
+    }
+    return detail;
+  }
   return "认证信息加载失败";
+}
+
+function emptySession(): Pick<AuthContextValue, "user" | "activeOrganization" | "memberships" | "identities"> {
+  return {
+    user: null,
+    activeOrganization: null,
+    memberships: [],
+    identities: []
+  };
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function applySession(next: AuthSession | null) {
+    setSession(next);
+  }
+
+  function resetSession() {
+    applySession(null);
+  }
 
   async function reload() {
     setLoading(true);
     setError(null);
     try {
       const next = await fetchWhoAmI();
-      setUser(next.user);
+      applySession(next);
     } catch (err) {
-      setUser(null);
+      resetSession();
       setError(authErrorMessage(err));
     } finally {
       setLoading(false);
@@ -50,7 +88,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     const onAuthInvalid = () => {
-      setUser(null);
+      resetSession();
       setLoading(false);
       setError("登录状态已失效，请重新登录。");
     };
@@ -63,10 +101,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const nonce = window.sessionStorage.getItem(DINGTALK_NONCE_KEY) || "";
         try {
           const next = await createDingTalkSession({ code, state, nonce });
-          setUser(next.user);
+          applySession(next);
           setError(null);
         } catch (err) {
-          setUser(null);
+          resetSession();
           setError(authErrorMessage(err));
         } finally {
           window.sessionStorage.removeItem(DINGTALK_NONCE_KEY);
@@ -94,6 +132,43 @@ export function AuthProvider({ children }: PropsWithChildren) {
       redirectTo(buildDingTalkAuthorizeUrl(config));
     } catch (err) {
       setError(authErrorMessage(err));
+      throw err;
+    }
+  }
+
+  async function requestEmailCode(input: { email?: string; inviteToken?: string }) {
+    setError(null);
+    try {
+      return await requestEmailSignIn(input);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      throw err;
+    }
+  }
+
+  async function completeEmailSignIn(input: {
+    email: string;
+    code: string;
+    inviteToken?: string;
+  }) {
+    setError(null);
+    try {
+      const next = await verifyEmailSignIn(input);
+      applySession(next);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      throw err;
+    }
+  }
+
+  async function changeOrganization(organizationId: string) {
+    setError(null);
+    try {
+      const next = await selectActiveOrganization(organizationId);
+      applySession(next);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      throw err;
     }
   }
 
@@ -103,21 +178,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
       await logoutSession();
     } finally {
       window.sessionStorage.removeItem(DINGTALK_NONCE_KEY);
-      setUser(null);
+      resetSession();
       setLoading(false);
     }
   }
 
+  const sessionValue = session ?? emptySession();
   const value = useMemo<AuthContextValue>(
     () => ({
       loading,
-      user,
+      user: sessionValue.user,
+      activeOrganization: sessionValue.activeOrganization,
+      memberships: sessionValue.memberships,
+      identities: sessionValue.identities,
       error,
       reload,
+      clearError: () => setError(null),
       startSignIn,
+      requestEmailSignIn: requestEmailCode,
+      verifyEmailSignIn: completeEmailSignIn,
+      selectOrganization: changeOrganization,
       signOut
     }),
-    [error, loading, user]
+    [error, loading, sessionValue]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

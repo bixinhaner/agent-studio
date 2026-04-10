@@ -6,10 +6,17 @@ import {
   type ResourcePolicySubjectType
 } from "../persistence/resource-policy-repository.js";
 
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 export class PolicyService {
   constructor(private readonly policies: ResourcePolicyRepository) {}
 
   async listSubjectPolicies(input: {
+    organizationId?: string;
     subjectType: ResourcePolicySubjectType;
     subjectId: string;
     resourceType?: ResourcePolicyResourceType;
@@ -21,6 +28,15 @@ export class PolicyService {
 
     const rows = await this.policies.listAll();
     return rows.filter((row) => {
+      const rowOrganizationId = trimOrUndefined(row.organizationId);
+      const organizationId = trimOrUndefined(input.organizationId);
+      if (organizationId) {
+        if (rowOrganizationId && rowOrganizationId !== organizationId) {
+          return false;
+        }
+      } else if (rowOrganizationId) {
+        return false;
+      }
       if (row.subjectType !== input.subjectType || row.subjectId !== subjectId) {
         return false;
       }
@@ -63,6 +79,7 @@ export class PolicyService {
   }
 
   async filterAllowedResources(input: {
+    organizationId?: string;
     userId: string;
     roleIds: string[];
     departmentIds: string[];
@@ -81,9 +98,17 @@ export class PolicyService {
         { subjectType: "user" as const, subjectId: input.userId }
       ]
     });
+    const organizationId = trimOrUndefined(input.organizationId);
+    const scopedRows = rows.filter((row) => {
+      const rowOrganizationId = trimOrUndefined(row.organizationId);
+      if (organizationId) {
+        return !rowOrganizationId || rowOrganizationId === organizationId;
+      }
+      return !rowOrganizationId;
+    });
 
     return input.candidateIds.filter((resourceId) => {
-      const matched = rows.filter((row) => row.resourceId === resourceId);
+      const matched = scopedRows.filter((row) => row.resourceId === resourceId);
       if (matched.some((row) => row.effect === "deny")) {
         return false;
       }

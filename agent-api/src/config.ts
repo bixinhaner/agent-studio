@@ -24,6 +24,14 @@ const schema = z.object({
   SESSION_COOKIE_SECRET: z.string().optional(),
   SESSION_COOKIE_MAX_AGE_DAYS: z.string().default("7"),
   SESSION_COOKIE_SECURE: z.string().optional(),
+  APP_BASE_URL: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional(),
+  SMTP_SECURE: z.string().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  AUTH_EMAIL_FROM: z.string().optional(),
+  AUTH_EMAIL_DEBUG: z.string().optional(),
   ORG_SYNC_ENABLED: z.string().optional(),
   ORG_SYNC_INTERVAL_MINUTES: z.string().optional(),
   WORKSPACE_WHITELIST: z.string().default("."),
@@ -123,6 +131,16 @@ export const appConfig = {
       env.SESSION_COOKIE_SECURE === undefined
         ? defaultCookieSecure(env.NODE_ENV)
         : parseBoolean(env.SESSION_COOKIE_SECURE)
+  },
+  appBaseUrl: (env.APP_BASE_URL || "").trim(),
+  authEmail: {
+    host: (env.SMTP_HOST || "").trim(),
+    port: parseInteger(env.SMTP_PORT, 587),
+    secure: parseBooleanWithDefault(env.SMTP_SECURE, false),
+    user: (env.SMTP_USER || "").trim(),
+    pass: (env.SMTP_PASS || "").trim(),
+    from: (env.AUTH_EMAIL_FROM || "").trim(),
+    debug: parseBooleanWithDefault(env.AUTH_EMAIL_DEBUG, false)
   },
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),

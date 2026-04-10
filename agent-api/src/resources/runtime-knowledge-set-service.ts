@@ -6,6 +6,7 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 
 type KnowledgeSetRecord = {
   id: string;
+  organizationId?: string;
   status: string;
   sourceType: string;
   rootPath?: string | null;
@@ -18,6 +19,7 @@ type KnowledgeSetRepositoryLike = {
 
 type PolicyServiceLike = {
   filterAllowedResources(input: {
+    organizationId?: string;
     userId: string;
     roleIds: string[];
     departmentIds: string[];
@@ -147,6 +149,15 @@ function resolveKnowledgeSetStorageKey(knowledgeSet: KnowledgeSetRecord): string
   return trimOrUndefined(knowledgeSet.storageKey) ?? knowledgeSet.id;
 }
 
+function matchesOrganization(recordOrganizationId: string | undefined, organizationId: string | undefined): boolean {
+  const normalizedRecordOrganizationId = trimOrUndefined(recordOrganizationId);
+  const normalizedOrganizationId = trimOrUndefined(organizationId);
+  if (normalizedRecordOrganizationId && normalizedOrganizationId) {
+    return normalizedRecordOrganizationId === normalizedOrganizationId;
+  }
+  return !normalizedRecordOrganizationId;
+}
+
 export class RuntimeKnowledgeSetService {
   constructor(
     private readonly options: {
@@ -159,6 +170,7 @@ export class RuntimeKnowledgeSetService {
   ) {}
 
   async mergeSelectedKnowledgeSetsIntoRunConfig(input: {
+    organizationId?: string;
     userId: string;
     roleIds: string[];
     departmentIds: string[];
@@ -181,7 +193,9 @@ export class RuntimeKnowledgeSetService {
       (await this.options.knowledgeSets.list())
         .filter(
           (knowledgeSet) =>
-            knowledgeSet.status === "active" && trimOrUndefined(knowledgeSet.sourceType) === MANAGED_UPLOAD_SOURCE_TYPE
+            knowledgeSet.status === "active" &&
+            trimOrUndefined(knowledgeSet.sourceType) === MANAGED_UPLOAD_SOURCE_TYPE &&
+            matchesOrganization(knowledgeSet.organizationId, input.organizationId)
         )
         .map((knowledgeSet) => [knowledgeSet.id, knowledgeSet] as const)
     );
@@ -205,6 +219,7 @@ export class RuntimeKnowledgeSetService {
         userId: input.userId,
         roleIds: input.roleIds,
         departmentIds: input.departmentIds,
+        organizationId: input.organizationId,
         resourceType: "knowledge_set",
         candidateIds: selectedKnowledgeSetIds
       })
