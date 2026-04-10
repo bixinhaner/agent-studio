@@ -369,7 +369,6 @@ export function SystemSettingsShell() {
             </Button>
             <Button 
               type="primary" 
-              shape="round" /* Added round shape to match the floating pill style */
               icon={<Send size={16} />} 
               disabled={saving || publishing || changedAreaCount === 0} 
               onClick={handlePublish}
