@@ -253,17 +253,13 @@ export function UsersView() {
       {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
 
       <div
-        className="admin-card"
         style={{
           display: "flex",
           flexDirection: "column",
-          minHeight: isNarrowScreen ? 420 : undefined,
-          height: isNarrowScreen ? "auto" : "calc(100vh - 360px)",
+          flex: 1,
+          minHeight: isNarrowScreen ? 420 : 0,
           padding: 0,
-          overflow: "hidden",
-          background: "var(--admin-color-surface-solid)",
-          borderRadius: "var(--admin-radius-lg)",
-          border: "1px solid var(--admin-color-border)"
+          background: "transparent",
         }}
       >
         <div
@@ -362,7 +358,7 @@ export function UsersView() {
               rowKey="id"
               pagination={false}
               loading={loading}
-              scroll={{ y: "calc(100vh - 480px)", x: 1060 }}
+              scroll={{ y: "calc(100vh - 320px)", x: 1060 }}
               virtual
               size="middle"
               rowClassName={() => "admin-table-row-hover"}

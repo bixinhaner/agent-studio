@@ -214,14 +214,18 @@
 .admin-content-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 32px;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
 }
 
 .admin-page-container {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
 .admin-page-header {
@@ -582,8 +586,9 @@
 /* Advanced Layout Support for Master-Detail Views */
 .admin-split-layout {
   display: flex;
-  height: calc(100vh - 220px);
+  flex: 1;
   min-height: 500px;
+  height: calc(100vh - 120px); /* For when inside scroll that doesn't restrict */
   background: var(--admin-color-surface-solid);
   border: 1px solid var(--admin-color-border);
   border-radius: var(--admin-radius-lg);
