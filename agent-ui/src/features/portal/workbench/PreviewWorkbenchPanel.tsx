@@ -500,6 +500,10 @@ function formatUpdatedAt(ms: number): string {
 export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePath?: string }) {
   const threadMessages = useAuiState((s) => s.thread.messages);
   const threadFiles = useMemo(() => collectThreadFiles(threadMessages), [threadMessages]);
+  const requestedFilePath = useMemo(
+    () => normalizeFilePath(asString(props.requestedFilePath)),
+    [props.requestedFilePath]
+  );
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const previewObjectUrlRef = useRef("");
@@ -529,16 +533,15 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
   }, [props.threadId]);
 
   useEffect(() => {
-    const requested = normalizeFilePath(asString(props.requestedFilePath));
-    if (!requested) return;
-    setSelectedFilePath(requested);
-  }, [props.requestedFilePath]);
+    if (!requestedFilePath) return;
+    setSelectedFilePath(requestedFilePath);
+  }, [requestedFilePath]);
 
   useEffect(() => {
-    if (selectedFilePath) return;
+    if (selectedFilePath || requestedFilePath) return;
     if (!threadFiles.length) return;
     setSelectedFilePath(threadFiles[0]!.filePath);
-  }, [selectedFilePath, threadFiles]);
+  }, [requestedFilePath, selectedFilePath, threadFiles]);
 
   const activeFile = useMemo(() => {
     const fromList = threadFiles.find((item) => item.filePath === selectedFilePath);
