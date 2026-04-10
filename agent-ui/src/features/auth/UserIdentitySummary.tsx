@@ -1,8 +1,8 @@
-import { LogOutIcon, UserPlusIcon } from "lucide-react";
+import { LogOutIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "./AuthProvider";
-import { createOrganizationInvite, type AuthUser } from "./api";
+import type { AuthUser } from "./api";
 
 function roleLabel(role: string | undefined): string {
   switch ((role || "").trim()) {
@@ -46,21 +46,11 @@ export function UserIdentitySummary(props: {
 }) {
   const auth = useAuth();
   const [switchingOrganization, setSwitchingOrganization] = useState(false);
-  const [inviteComposerOpen, setInviteComposerOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteMembershipType, setInviteMembershipType] = useState("customer_member");
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
-  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const name = props.user.displayName?.trim() || props.user.email?.trim() || props.user.id;
   const email = props.user.email?.trim() || "未绑定邮箱";
   const activeOrganizationName = auth.activeOrganization?.name?.trim() || "未选择组织";
   const providerLabels = [...new Set(auth.identities.map((identity) => providerLabel(identity.provider)).filter(Boolean))];
   const organizationOptions = auth.memberships.filter((membership) => membership.organization);
-  const canInviteToCustomerOrganization =
-    auth.activeOrganization?.type === "customer" &&
-    (props.user.role === "admin" ||
-      props.user.role === "super_admin" ||
-      auth.activeOrganization.membershipType === "customer_admin");
 
   const handleSignOut = () => {
     if (!props.onSignOut) return;
@@ -73,33 +63,8 @@ export function UserIdentitySummary(props: {
     setSwitchingOrganization(true);
     try {
       await auth.selectOrganization(nextOrganizationId);
-      setInviteComposerOpen(false);
-      setInviteFeedback(null);
     } finally {
       setSwitchingOrganization(false);
-    }
-  };
-
-  const handleInviteSubmit = async () => {
-    const normalizedEmail = inviteEmail.trim();
-    if (!normalizedEmail) {
-      setInviteFeedback("请输入被邀请人的邮箱。");
-      return;
-    }
-    setInviteSubmitting(true);
-    setInviteFeedback(null);
-    try {
-      const invite = await createOrganizationInvite({
-        email: normalizedEmail,
-        membershipType: inviteMembershipType
-      });
-      setInviteEmail("");
-      setInviteComposerOpen(false);
-      setInviteFeedback(`已向 ${invite.email} 发送邀请。`);
-    } catch (error) {
-      setInviteFeedback(error instanceof Error ? error.message : "创建邀请失败");
-    } finally {
-      setInviteSubmitting(false);
     }
   };
 
@@ -154,53 +119,10 @@ export function UserIdentitySummary(props: {
         ) : null}
 
         {auth.error ? <p className="user-identity-alert">{auth.error}</p> : null}
-        {inviteFeedback ? <p className="user-identity-alert">{inviteFeedback}</p> : null}
-
-        {canInviteToCustomerOrganization && inviteComposerOpen ? (
-          <div className="user-identity-invite-form">
-            <input
-              className="user-identity-inline-input"
-              type="email"
-              placeholder="invitee@example.com"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-            />
-            <select
-              className="user-identity-inline-select"
-              value={inviteMembershipType}
-              onChange={(event) => setInviteMembershipType(event.target.value)}
-            >
-              <option value="customer_member">客户成员</option>
-              <option value="customer_admin">客户管理员</option>
-            </select>
-            <button
-              type="button"
-              className="user-identity-inline-btn"
-              disabled={inviteSubmitting}
-              onClick={() => void handleInviteSubmit()}
-            >
-              {inviteSubmitting ? "发送中..." : "发送邀请"}
-            </button>
-          </div>
-        ) : null}
       </div>
 
       {props.onSignOut ? (
         <div className="user-identity-actions">
-          {canInviteToCustomerOrganization ? (
-            <button
-              type="button"
-              className="user-identity-action-btn"
-              aria-label="邀请组织成员"
-              title="邀请组织成员"
-              onClick={() => {
-                setInviteFeedback(null);
-                setInviteComposerOpen((current) => !current);
-              }}
-            >
-              <UserPlusIcon size={16} strokeWidth={2} />
-            </button>
-          ) : null}
           <button
             type="button"
             className="user-identity-action-btn"

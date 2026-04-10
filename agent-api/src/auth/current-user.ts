@@ -111,3 +111,21 @@ export function requireRole(role: string): RequestHandler {
     next();
   };
 }
+
+export function requireInternalRole(role: string): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.currentUser) {
+      res.status(401).json({ detail: "Unauthorized" });
+      return;
+    }
+    if (!req.currentOrganization || req.currentOrganization.type !== "internal") {
+      res.status(403).json({ detail: "Internal organization access is required" });
+      return;
+    }
+    if (req.currentUser.role !== role && req.currentUser.role !== "super_admin") {
+      res.status(403).json({ detail: "Forbidden" });
+      return;
+    }
+    next();
+  };
+}

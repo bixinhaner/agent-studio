@@ -294,6 +294,51 @@ export type AdminUserLocalSettingsInput = {
   adminNote?: string | null;
 };
 
+export type AdminCustomerOrganization = {
+  id: string;
+  slug: string;
+  name: string;
+  type: string;
+  status: string;
+  ownerUserId: string | null;
+  memberCount: number;
+  pendingInviteCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminCustomerOrganizationListResponse = {
+  organizations: AdminCustomerOrganization[];
+};
+
+export type AdminCustomerOrganizationDetailResponse = {
+  organization: AdminCustomerOrganization;
+};
+
+export type AdminCustomerOrganizationCreateInput = {
+  name: string;
+  status?: string;
+};
+
+export type AdminCustomerOrganizationUpdateInput = {
+  name?: string;
+  status?: string;
+};
+
+export type AdminExternalInviteInput = {
+  organizationId: string;
+  email: string;
+  membershipType: string;
+};
+
+export type AdminCreatedInvite = {
+  id: string;
+  organizationId: string;
+  email: string;
+  status: string;
+  expiresAt?: string | null;
+};
+
 export type AdminDepartmentNode = {
   id: string;
   organizationId?: string;

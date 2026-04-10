@@ -198,18 +198,18 @@ async function resolveDingTalkUser(options: {
 }
 
 function canCreateInvite(req: Request): boolean {
-  if (req.currentUser?.role === "admin" || req.currentUser?.role === "super_admin") {
-    return true;
+  if (req.currentOrganization?.type !== "internal") {
+    return false;
   }
-  return req.currentMembership?.membershipType === "customer_admin";
+  return req.currentUser?.role === "admin" || req.currentUser?.role === "super_admin";
 }
 
 function resolveInviteOrganizationId(req: Request, requestedOrganizationId?: string): string | undefined {
-  if (req.currentUser?.role === "admin" || req.currentUser?.role === "super_admin") {
-    return trimOrUndefined(requestedOrganizationId) ?? trimOrUndefined(req.currentOrganization?.id);
+  if (req.currentOrganization?.type !== "internal") {
+    return undefined;
   }
-  if (req.currentMembership?.membershipType === "customer_admin") {
-    return trimOrUndefined(req.currentMembership.organizationId);
+  if (req.currentUser?.role === "admin" || req.currentUser?.role === "super_admin") {
+    return trimOrUndefined(requestedOrganizationId);
   }
   return undefined;
 }
@@ -407,7 +407,7 @@ export function createAuthRouter(options: {
         return;
       }
       const organization = await options.organizations.getById(organizationId);
-      if (!organization || organization.status !== "active") {
+      if (!organization || organization.status !== "active" || organization.type !== "customer") {
         res.status(404).json({ detail: "organization 不存在或不可用" });
         return;
       }

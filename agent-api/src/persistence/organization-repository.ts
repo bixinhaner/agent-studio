@@ -25,7 +25,7 @@ type OrganizationRow = {
 type OrganizationTable = {
   findUnique(args: { where: { id?: string; slug?: string } }): Promise<OrganizationRow | null>;
   findMany(args?: {
-    where?: { id?: { in: string[] }; slug?: string; status?: string };
+    where?: { id?: { in: string[] }; slug?: string; status?: string; type?: string };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<OrganizationRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<OrganizationRow>;
@@ -85,6 +85,17 @@ export class OrganizationRepository {
     if (!normalizedIds.length) return [];
     const rows = await this.db.organization.findMany({
       where: { id: { in: normalizedIds } },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map(mapOrganization);
+  }
+
+  async list(input?: { type?: string; status?: string }): Promise<OrganizationRecord[]> {
+    const rows = await this.db.organization.findMany({
+      where: {
+        type: trimOrUndefined(input?.type),
+        status: trimOrUndefined(input?.status)
+      },
       orderBy: { createdAt: "asc" }
     });
     return rows.map(mapOrganization);

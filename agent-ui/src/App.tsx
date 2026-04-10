@@ -13,8 +13,8 @@ type AppShellView = "portal" | "admin";
 
 const ADMIN_HASH_PREFIX = "#admin/";
 
-function canOpenAdmin(role: string | undefined): boolean {
-  return role === "admin" || role === "super_admin";
+function canOpenAdmin(role: string | undefined, organizationType: string | undefined): boolean {
+  return organizationType === "internal" && (role === "admin" || role === "super_admin");
 }
 
 function extractPublicShareToken(pathname: string): string | undefined {
@@ -302,7 +302,10 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
 
 function AppContent(props: { inviteToken?: string }) {
   const auth = useAuth();
-  const adminEligible = useMemo(() => canOpenAdmin(auth.user?.role), [auth.user?.role]);
+  const adminEligible = useMemo(
+    () => canOpenAdmin(auth.user?.role, auth.activeOrganization?.type),
+    [auth.activeOrganization?.type, auth.user?.role]
+  );
   const [view, setView] = useState<AppShellView>(() => {
     if (typeof window === "undefined") return "portal";
     return resolveAppShellView(window.location.hash, false);

@@ -7,6 +7,12 @@ import type {
   AdminConversationDetailResponse,
   AdminConversationListInput,
   AdminConversationListResponse,
+  AdminCreatedInvite,
+  AdminCustomerOrganizationCreateInput,
+  AdminCustomerOrganizationDetailResponse,
+  AdminCustomerOrganizationListResponse,
+  AdminCustomerOrganizationUpdateInput,
+  AdminExternalInviteInput,
   AdminOverview,
   AdminUserDetailResponse,
   AdminUserListResponse,
@@ -16,6 +22,16 @@ import type {
   OrgSyncJobListResponse,
   OrgSyncTriggerResponse
 } from "./types";
+
+type CreateAdminInvitePayload = {
+  invite: {
+    id: string;
+    organization_id: string;
+    email: string;
+    status: string;
+    expires_at?: string | null;
+  };
+};
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
   return api<AdminOverview>("/api/admin/overview");
@@ -77,6 +93,50 @@ export async function patchAdminUserLocalSettings(
     method: "PATCH",
     json: input
   });
+}
+
+export async function fetchAdminCustomerOrganizations(): Promise<AdminCustomerOrganizationListResponse> {
+  return api<AdminCustomerOrganizationListResponse>("/api/admin/customer-organizations");
+}
+
+export async function createAdminCustomerOrganization(
+  input: AdminCustomerOrganizationCreateInput
+): Promise<AdminCustomerOrganizationDetailResponse> {
+  return api<AdminCustomerOrganizationDetailResponse>("/api/admin/customer-organizations", {
+    method: "POST",
+    json: input
+  });
+}
+
+export async function patchAdminCustomerOrganization(
+  organizationId: string,
+  input: AdminCustomerOrganizationUpdateInput
+): Promise<AdminCustomerOrganizationDetailResponse> {
+  return api<AdminCustomerOrganizationDetailResponse>(
+    `/api/admin/customer-organizations/${encodeURIComponent(organizationId)}`,
+    {
+      method: "PATCH",
+      json: input
+    }
+  );
+}
+
+export async function createAdminOrganizationInvite(input: AdminExternalInviteInput): Promise<AdminCreatedInvite> {
+  const payload = await api<CreateAdminInvitePayload>("/api/auth/invites", {
+    method: "POST",
+    json: {
+      organization_id: input.organizationId,
+      email: input.email,
+      membership_type: input.membershipType
+    }
+  });
+  return {
+    id: payload.invite.id,
+    organizationId: payload.invite.organization_id,
+    email: payload.invite.email,
+    status: payload.invite.status,
+    expiresAt: payload.invite.expires_at ?? null
+  };
 }
 
 export async function fetchDepartmentTree(): Promise<DepartmentTreeResponse> {

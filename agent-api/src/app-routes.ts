@@ -1,6 +1,6 @@
 import { Router, type Express, type RequestHandler } from "express";
 
-import { requireCurrentOrganization, requireCurrentUser, requireRole } from "./auth/current-user.js";
+import { requireCurrentOrganization, requireCurrentUser, requireInternalRole } from "./auth/current-user.js";
 
 type AdminRouterLike = Router & {
   systemSettingsRouter?: Router;
@@ -34,7 +34,7 @@ export function registerCommonApiRoutes(
     requireCurrentUser,
     requireCurrentOrganization,
     options.rbacAdminRouter ?? Router(),
-    requireRole("admin"),
+    requireInternalRole("admin"),
     options.adminRouter,
     systemSettingsMount,
     options.integrationCenterRouter ?? Router(),

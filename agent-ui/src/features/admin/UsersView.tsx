@@ -4,8 +4,15 @@ import { Alert, Button, Drawer, Empty, Input, Select, Space, Switch, Table, Tag,
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { UserRoleEditor } from "../rbac/UserRoleEditor";
-import { fetchAdminUsers, patchAdminUserLocalSettings } from "./api";
-import type { AdminUser } from "./types";
+import {
+  createAdminCustomerOrganization,
+  createAdminOrganizationInvite,
+  fetchAdminCustomerOrganizations,
+  fetchAdminUsers,
+  patchAdminCustomerOrganization,
+  patchAdminUserLocalSettings
+} from "./api";
+import type { AdminCustomerOrganization, AdminUser } from "./types";
 
 function userSource(user: AdminUser) {
   return user.source ?? {
@@ -27,6 +34,16 @@ function formatUserStatus(status: string): string {
   if (status === "active") return "正常";
   if (status === "disabled") return "已停用";
   return status;
+}
+
+function formatOrganizationStatus(status: string): string {
+  if (status === "active") return "启用中";
+  if (status === "disabled") return "已停用";
+  return status;
+}
+
+function organizationStatusColor(status: string): "success" | "default" {
+  return status === "active" ? "success" : "default";
 }
 
 function userTypeLabel(userType: string): string {
@@ -100,10 +117,26 @@ function userOrganizationSummary(user: AdminUser): string {
   return extra > 0 ? `${visible.join(" / ")} +${extra}` : visible.join(" / ");
 }
 
+function organizationLabel(organization: AdminCustomerOrganization): string {
+  return `${organization.name} (${organization.slug})`;
+}
+
+function upsertOrganization(
+  organizations: AdminCustomerOrganization[],
+  nextOrganization: AdminCustomerOrganization
+): AdminCustomerOrganization[] {
+  const nextOrganizations = organizations.some((organization) => organization.id === nextOrganization.id)
+    ? organizations.map((organization) => (organization.id === nextOrganization.id ? nextOrganization : organization))
+    : [...organizations, nextOrganization];
+  return nextOrganizations.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
 export function UsersView() {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [organizations, setOrganizations] = useState<AdminCustomerOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
+  const [successText, setSuccessText] = useState("");
   const [filterText, setFilterText] = useState("");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [role, setRole] = useState("employee");
@@ -111,6 +144,17 @@ export function UsersView() {
   const [adminNote, setAdminNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [roleEditorUserId, setRoleEditorUserId] = useState<string | null>(null);
+  const [newOrganizationName, setNewOrganizationName] = useState("");
+  const [newOrganizationStatus, setNewOrganizationStatus] = useState("active");
+  const [creatingOrganization, setCreatingOrganization] = useState(false);
+  const [inviteOrganizationId, setInviteOrganizationId] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMembershipType, setInviteMembershipType] = useState("customer_member");
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [editingOrganizationId, setEditingOrganizationId] = useState<string | null>(null);
+  const [editingOrganizationName, setEditingOrganizationName] = useState("");
+  const [editingOrganizationStatus, setEditingOrganizationStatus] = useState("active");
+  const [savingOrganization, setSavingOrganization] = useState(false);
   const isNarrowScreen = useIsNarrowScreen(980);
 
   useEffect(() => {
@@ -120,12 +164,21 @@ export function UsersView() {
       setLoading(true);
       setErrorText("");
       try {
-        const response = await fetchAdminUsers();
-        if (active) {
-          setUsers(response.users);
-        }
+        const [userResponse, organizationResponse] = await Promise.all([
+          fetchAdminUsers(),
+          fetchAdminCustomerOrganizations()
+        ]);
+        if (!active) return;
+        setUsers(userResponse.users);
+        setOrganizations(organizationResponse.organizations);
+        setInviteOrganizationId((current) => {
+          if (current && organizationResponse.organizations.some((organization) => organization.id === current)) {
+            return current;
+          }
+          return organizationResponse.organizations[0]?.id ?? "";
+        });
       } catch (error) {
-        if (active) setErrorText(error instanceof Error ? error.message : "加载用户失败");
+        if (active) setErrorText(error instanceof Error ? error.message : "加载用户治理数据失败");
       } finally {
         if (active) setLoading(false);
       }
@@ -138,6 +191,10 @@ export function UsersView() {
   }, []);
 
   const editingUser = useMemo(() => users.find((item) => item.id === editingUserId) ?? null, [editingUserId, users]);
+  const editingOrganization = useMemo(
+    () => organizations.find((item) => item.id === editingOrganizationId) ?? null,
+    [editingOrganizationId, organizations]
+  );
 
   const filteredUsers = useMemo(() => {
     const query = filterText.trim().toLowerCase();
@@ -168,22 +225,34 @@ export function UsersView() {
     const externalCount = users.filter((user) => userSource(user).userType === "external_user").length;
     const multiOrgCount = users.filter((user) => userSource(user).organizations.length > 1).length;
     const manualDisabledCount = users.filter((user) => user.local.manualDisabled).length;
+    const customerOrganizationCount = organizations.length;
+    const pendingInviteCount = organizations.reduce((total, organization) => total + organization.pendingInviteCount, 0);
 
     return [
       {
         label: "总用户数",
         value: String(users.length),
-        meta: filterText.trim() ? `当前筛选命中 ${filteredUsers.length} 人` : "当前租户内全部成员"
+        meta: filterText.trim() ? `当前筛选命中 ${filteredUsers.length} 人` : "平台内全部成员"
+      },
+      {
+        label: "客户组织",
+        value: String(customerOrganizationCount),
+        meta: "由内部管理员创建和维护"
       },
       {
         label: "内部成员",
         value: String(internalCount),
-        meta: "仍走钉钉组织同步链路"
+        meta: "继续走钉钉组织同步链路"
       },
       {
         label: "外部成员",
         value: String(externalCount),
         meta: "通过邀请和邮箱免密进入"
+      },
+      {
+        label: "待处理邀请",
+        value: String(pendingInviteCount),
+        meta: "尚未完成首次验证的外部用户"
       },
       {
         label: "多组织成员",
@@ -193,7 +262,7 @@ export function UsersView() {
       {
         label: "正常可用",
         value: String(activeCount),
-        meta: "包含当前仍可发起会话的成员"
+        meta: "当前仍可发起会话的成员"
       },
       {
         label: "手动禁用",
@@ -201,7 +270,7 @@ export function UsersView() {
         meta: "被管理员显式关闭访问的成员"
       }
     ];
-  }, [filterText, filteredUsers.length, users]);
+  }, [filterText, filteredUsers.length, organizations, users]);
 
   function openEditor(user: AdminUser) {
     setEditingUserId(user.id);
@@ -210,10 +279,17 @@ export function UsersView() {
     setAdminNote(user.local.adminNote ?? "");
   }
 
+  function openOrganizationEditor(organization: AdminCustomerOrganization) {
+    setEditingOrganizationId(organization.id);
+    setEditingOrganizationName(organization.name);
+    setEditingOrganizationStatus(organization.status);
+  }
+
   async function handleSave() {
     if (!editingUser) return;
     setSaving(true);
     setErrorText("");
+    setSuccessText("");
     try {
       const response = await patchAdminUserLocalSettings(editingUser.id, {
         role,
@@ -222,10 +298,102 @@ export function UsersView() {
       });
       setUsers((current) => current.map((item) => (item.id === editingUser.id ? response.user : item)));
       setEditingUserId(null);
+      setSuccessText(`已更新 ${userDisplayTitle(response.user)} 的本地治理设置。`);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "保存用户设置失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleCreateOrganization() {
+    const name = newOrganizationName.trim();
+    if (!name) {
+      setErrorText("请输入客户组织名称。");
+      setSuccessText("");
+      return;
+    }
+    setCreatingOrganization(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await createAdminCustomerOrganization({
+        name,
+        status: newOrganizationStatus
+      });
+      setOrganizations((current) => upsertOrganization(current, response.organization));
+      setInviteOrganizationId(response.organization.id);
+      setNewOrganizationName("");
+      setNewOrganizationStatus("active");
+      setSuccessText(`已创建客户组织 ${response.organization.name}。`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "创建客户组织失败");
+    } finally {
+      setCreatingOrganization(false);
+    }
+  }
+
+  async function handleSendInvite() {
+    const email = inviteEmail.trim();
+    if (!inviteOrganizationId) {
+      setErrorText("请先选择目标客户组织。");
+      setSuccessText("");
+      return;
+    }
+    if (!email) {
+      setErrorText("请输入被邀请人的邮箱。");
+      setSuccessText("");
+      return;
+    }
+    setSendingInvite(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const invite = await createAdminOrganizationInvite({
+        organizationId: inviteOrganizationId,
+        email,
+        membershipType: inviteMembershipType
+      });
+      const targetOrganization = organizations.find((organization) => organization.id === invite.organizationId);
+      setOrganizations((current) =>
+        current.map((organization) =>
+          organization.id === invite.organizationId
+            ? { ...organization, pendingInviteCount: organization.pendingInviteCount + 1 }
+            : organization
+        )
+      );
+      setInviteEmail("");
+      setSuccessText(`已向 ${invite.email} 发送邀请，归属组织为 ${targetOrganization?.name ?? invite.organizationId}。`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "发送邀请失败");
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  async function handleSaveOrganization() {
+    if (!editingOrganization) return;
+    const nextName = editingOrganizationName.trim();
+    if (!nextName) {
+      setErrorText("请输入组织名称。");
+      setSuccessText("");
+      return;
+    }
+    setSavingOrganization(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await patchAdminCustomerOrganization(editingOrganization.id, {
+        name: nextName,
+        status: editingOrganizationStatus
+      });
+      setOrganizations((current) => upsertOrganization(current, response.organization));
+      setEditingOrganizationId(null);
+      setSuccessText(`已更新客户组织 ${response.organization.name}。`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "更新客户组织失败");
+    } finally {
+      setSavingOrganization(false);
     }
   }
 
@@ -347,7 +515,7 @@ export function UsersView() {
       <div className="admin-page-header">
         <div>
           <h1 className="admin-page-title">用户治理</h1>
-          <p className="admin-page-desc">管理用户状态、身份资料与本地治理字段。</p>
+          <p className="admin-page-desc">内部管理员统一维护客户组织，并将外部用户邀请到指定组织。</p>
         </div>
         <Space wrap>
           <Tag color="blue" style={{ borderRadius: "var(--admin-radius-full)" }}>
@@ -366,7 +534,179 @@ export function UsersView() {
         ))}
       </div>
 
-      {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
+      {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} /> : null}
+      {successText ? <Alert type="success" showIcon message={successText} style={{ marginBottom: 16 }} /> : null}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isNarrowScreen ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
+          gap: 16,
+          marginBottom: 16
+        }}
+      >
+        <section className="admin-page-summary-card" aria-label="创建客户组织">
+          <div className="admin-page-summary-label">创建客户组织</div>
+          <div className="admin-page-summary-meta" style={{ marginBottom: 16 }}>
+            组织名称由内部管理员维护，外部用户只会被加入到这里选择的组织中。
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Input
+              placeholder="例如：Indosat 项目组"
+              value={newOrganizationName}
+              onChange={(event) => setNewOrganizationName(event.target.value)}
+            />
+            <Select
+              value={newOrganizationStatus}
+              onChange={setNewOrganizationStatus}
+              options={[
+                { value: "active", label: "启用中" },
+                { value: "disabled", label: "已停用" }
+              ]}
+            />
+            <Button type="primary" onClick={() => void handleCreateOrganization()} loading={creatingOrganization}>
+              创建客户组织
+            </Button>
+          </div>
+        </section>
+
+        <section className="admin-page-summary-card" aria-label="邀请外部用户">
+          <div className="admin-page-summary-label">邀请外部用户</div>
+          <div className="admin-page-summary-meta" style={{ marginBottom: 16 }}>
+            选择目标客户组织后发送邀请邮件，首次登录会完成账号创建和组织加入。
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Select
+              placeholder="选择目标客户组织"
+              value={inviteOrganizationId || undefined}
+              onChange={setInviteOrganizationId}
+              options={organizations.map((organization) => ({
+                value: organization.id,
+                label: organizationLabel(organization)
+              }))}
+              disabled={!organizations.length}
+            />
+            <Input
+              type="email"
+              placeholder="customer@example.com"
+              value={inviteEmail}
+              onChange={(event) => setInviteEmail(event.target.value)}
+              disabled={!organizations.length}
+            />
+            <Select
+              value={inviteMembershipType}
+              onChange={setInviteMembershipType}
+              options={[
+                { value: "customer_member", label: "客户成员" },
+                { value: "customer_admin", label: "客户管理员" }
+              ]}
+              disabled={!organizations.length}
+            />
+            <Button
+              type="primary"
+              onClick={() => void handleSendInvite()}
+              loading={sendingInvite}
+              disabled={!organizations.length}
+            >
+              发送邀请
+            </Button>
+          </div>
+        </section>
+      </div>
+
+      <section className="admin-page-summary-card" style={{ marginBottom: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: isNarrowScreen ? "stretch" : "center",
+            flexDirection: isNarrowScreen ? "column" : "row",
+            gap: 12,
+            marginBottom: 16
+          }}
+        >
+          <div>
+            <div className="admin-page-summary-label">客户组织维护</div>
+            <div className="admin-page-summary-meta">创建、改名和停用都在这里执行，邀请时只能引用已存在的组织。</div>
+          </div>
+          <Tag color="cyan" style={{ borderRadius: "var(--admin-radius-full)", margin: 0 }}>
+            当前 {organizations.length} 个客户组织
+          </Tag>
+        </div>
+
+        {organizations.length === 0 ? (
+          <Empty description="还没有客户组织，请先创建组织后再邀请外部用户。" />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrowScreen ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12
+            }}
+          >
+            {organizations.map((organization) => (
+              <section
+                key={organization.id}
+                className="admin-entity-card"
+                style={{
+                  border: "1px solid var(--admin-color-border)",
+                  borderRadius: "var(--admin-radius-card)",
+                  padding: 16,
+                  background: "var(--admin-color-panel)"
+                }}
+              >
+                <div className="admin-entity-card-head" style={{ marginBottom: 12 }}>
+                  <div>
+                    <strong style={{ display: "block", fontSize: 15, color: "var(--admin-color-text)" }}>
+                      {organization.name}
+                    </strong>
+                    <div className="admin-entity-card-subtle">{organization.slug}</div>
+                  </div>
+                  <Tag color={organizationStatusColor(organization.status)} style={{ borderRadius: 12, margin: 0 }}>
+                    {formatOrganizationStatus(organization.status)}
+                  </Tag>
+                </div>
+
+                <div className="admin-entity-card-grid">
+                  <div>
+                    <div className="admin-entity-card-subtle">有效成员</div>
+                    <strong>{organization.memberCount}</strong>
+                  </div>
+                  <div>
+                    <div className="admin-entity-card-subtle">待处理邀请</div>
+                    <strong>{organization.pendingInviteCount}</strong>
+                  </div>
+                  <div>
+                    <div className="admin-entity-card-subtle">创建时间</div>
+                    <strong>{formatLocalTime(organization.createdAt)}</strong>
+                  </div>
+                  <div>
+                    <div className="admin-entity-card-subtle">最近更新</div>
+                    <strong>{formatLocalTime(organization.updatedAt)}</strong>
+                  </div>
+                </div>
+
+                <div className="admin-entity-card-actions">
+                  <Button block onClick={() => openOrganizationEditor(organization)}>
+                    修改组织
+                  </Button>
+                  <Button
+                    block
+                    type="primary"
+                    onClick={() => {
+                      setInviteOrganizationId(organization.id);
+                      setSuccessText(`已将邀请表单目标组织切换为 ${organization.name}。`);
+                      setErrorText("");
+                    }}
+                  >
+                    邀请到此组织
+                  </Button>
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div
         style={{
@@ -375,7 +715,7 @@ export function UsersView() {
           flex: 1,
           minHeight: isNarrowScreen ? 420 : 0,
           padding: 0,
-          background: "transparent",
+          background: "transparent"
         }}
       >
         <div
@@ -397,9 +737,7 @@ export function UsersView() {
             allowClear
             style={{ width: isNarrowScreen ? "100%" : 320, borderRadius: "var(--admin-radius-full)" }}
           />
-          <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>
-            共 {users.length} 名用户
-          </span>
+          <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>共 {users.length} 名用户</span>
         </div>
 
         <div style={{ flex: 1, overflow: isNarrowScreen ? "auto" : "hidden" }}>
@@ -558,6 +896,68 @@ export function UsersView() {
                 rows={4}
                 placeholder="记录禁用原因或权限调整说明..."
               />
+            </div>
+          </div>
+        ) : null}
+      </Drawer>
+
+      <Drawer
+        title="编辑客户组织"
+        placement="right"
+        width={isNarrowScreen ? "100%" : 400}
+        onClose={() => setEditingOrganizationId(null)}
+        open={Boolean(editingOrganization)}
+        footer={
+          <Space style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button onClick={() => setEditingOrganizationId(null)} disabled={savingOrganization}>
+              取消
+            </Button>
+            <Button type="primary" onClick={() => void handleSaveOrganization()} loading={savingOrganization}>
+              保存组织
+            </Button>
+          </Space>
+        }
+      >
+        {editingOrganization ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <div>
+              <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}>组织名称</div>
+              <Input value={editingOrganizationName} onChange={(event) => setEditingOrganizationName(event.target.value)} />
+              <div style={{ marginTop: 6, color: "var(--admin-color-subtle)", fontSize: 12 }}>
+                Slug 固定为 {editingOrganization.slug}，邀请时将继续引用这个组织。
+              </div>
+            </div>
+
+            <div>
+              <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}>组织状态</div>
+              <Select
+                value={editingOrganizationStatus}
+                onChange={setEditingOrganizationStatus}
+                style={{ width: "100%" }}
+                options={[
+                  { value: "active", label: "启用中" },
+                  { value: "disabled", label: "已停用" }
+                ]}
+              />
+            </div>
+
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+              <div>
+                <div className="admin-entity-card-subtle">有效成员</div>
+                <strong>{editingOrganization.memberCount}</strong>
+              </div>
+              <div>
+                <div className="admin-entity-card-subtle">待处理邀请</div>
+                <strong>{editingOrganization.pendingInviteCount}</strong>
+              </div>
+              <div>
+                <div className="admin-entity-card-subtle">创建时间</div>
+                <strong>{formatLocalTime(editingOrganization.createdAt)}</strong>
+              </div>
+              <div>
+                <div className="admin-entity-card-subtle">最近更新</div>
+                <strong>{formatLocalTime(editingOrganization.updatedAt)}</strong>
+              </div>
             </div>
           </div>
         ) : null}

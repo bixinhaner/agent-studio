@@ -12,6 +12,7 @@ import { AdminAuditLogRepository } from "../persistence/admin-audit-log-reposito
 import { RolePermissionRepository } from "../persistence/role-permission-repository.js";
 import { RoleRepository } from "../persistence/role-repository.js";
 import { UserRoleRepository } from "../persistence/user-role-repository.js";
+import { OrganizationRepository, type OrganizationRepositoryDb, type OrganizationRecord } from "../persistence/organization-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
 import { PermissionService } from "../rbac/permission-service.js";
@@ -21,7 +22,7 @@ import { SystemSettingsService } from "../system-settings/service.js";
 import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 
-type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
+type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb & OrganizationRepositoryDb;
 
 type AdminRouterWithExtensions = Router & {
   systemSettingsRouter?: Router;
@@ -43,6 +44,7 @@ type AdminRepositoryBundle = {
   users?: UserRepository;
   departments?: DepartmentRepository;
   memberships?: DepartmentMembershipRepository;
+  organizations?: OrganizationRepository;
   syncJobs?: SyncJobRepository;
 };
 
@@ -125,6 +127,27 @@ type DepartmentMembershipRow = {
   updatedAt: Date | string;
 };
 
+type OrganizationMembershipCountRow = {
+  organizationId: string;
+};
+
+type OrganizationInviteCountRow = {
+  organizationId: string;
+};
+
+type AdminCustomerOrganization = {
+  id: string;
+  slug: string;
+  name: string;
+  type: string;
+  status: string;
+  ownerUserId: string | null;
+  memberCount: number;
+  pendingInviteCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type AdminDetailUser = {
   id: string;
   source: {
@@ -178,6 +201,7 @@ type AdminDetailUser = {
 };
 
 const ADMIN_EDITABLE_ROLES = new Set(["employee", "admin"]);
+const ADMIN_EDITABLE_CUSTOMER_ORG_STATUSES = new Set(["active", "disabled"]);
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -202,6 +226,123 @@ function detailFromError(error: unknown): string {
 function isNotFoundError(error: unknown): boolean {
   const message = detailFromError(error).toLowerCase();
   return message.includes("不存在") || message.includes("not found");
+}
+
+function slugifyOrganizationName(name: string): string {
+  const normalized = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "customer";
+}
+
+async function ensureUniqueOrganizationSlug(repository: OrganizationRepository, baseName: string): Promise<string> {
+  const base = slugifyOrganizationName(baseName);
+  let candidate = base;
+  let sequence = 2;
+  while (await repository.getBySlug(candidate)) {
+    candidate = `${base}-${sequence}`;
+    sequence += 1;
+  }
+  return candidate;
+}
+
+function toAdminCustomerOrganization(
+  organization: OrganizationRecord,
+  memberCount: number,
+  pendingInviteCount: number
+): AdminCustomerOrganization {
+  return {
+    id: organization.id,
+    slug: organization.slug,
+    name: organization.name,
+    type: organization.type,
+    status: organization.status,
+    ownerUserId: organization.ownerUserId ?? null,
+    memberCount,
+    pendingInviteCount,
+    createdAt: organization.createdAt,
+    updatedAt: organization.updatedAt
+  };
+}
+
+async function decorateCustomerOrganizations(
+  db: AdminDb,
+  organizations: OrganizationRecord[]
+): Promise<AdminCustomerOrganization[]> {
+  if (!organizations.length) {
+    return [];
+  }
+
+  const organizationIds = organizations.map((organization) => organization.id);
+  const membershipRows =
+    typeof (
+      db as AdminDb & {
+        organizationMembership?: {
+          findMany(args: unknown): Promise<OrganizationMembershipCountRow[]>;
+        };
+      }
+    ).organizationMembership?.findMany === "function"
+      ? await (
+          db as AdminDb & {
+            organizationMembership: {
+              findMany(args: unknown): Promise<OrganizationMembershipCountRow[]>;
+            };
+          }
+        ).organizationMembership.findMany({
+          where: {
+            organizationId: { in: organizationIds },
+            status: "active"
+          }
+        })
+      : [];
+  const pendingInviteRows =
+    typeof (
+      db as AdminDb & {
+        organizationInvite?: {
+          findMany(args: unknown): Promise<OrganizationInviteCountRow[]>;
+        };
+      }
+    ).organizationInvite?.findMany === "function"
+      ? await (
+          db as AdminDb & {
+            organizationInvite: {
+              findMany(args: unknown): Promise<OrganizationInviteCountRow[]>;
+            };
+          }
+        ).organizationInvite.findMany({
+          where: {
+            organizationId: { in: organizationIds },
+            status: "pending"
+          }
+        })
+      : [];
+
+  const memberCountByOrganizationId = new Map<string, number>();
+  for (const membership of membershipRows) {
+    memberCountByOrganizationId.set(
+      membership.organizationId,
+      (memberCountByOrganizationId.get(membership.organizationId) ?? 0) + 1
+    );
+  }
+
+  const pendingInviteCountByOrganizationId = new Map<string, number>();
+  for (const invite of pendingInviteRows) {
+    pendingInviteCountByOrganizationId.set(
+      invite.organizationId,
+      (pendingInviteCountByOrganizationId.get(invite.organizationId) ?? 0) + 1
+    );
+  }
+
+  return organizations.map((organization) =>
+    toAdminCustomerOrganization(
+      organization,
+      memberCountByOrganizationId.get(organization.id) ?? 0,
+      pendingInviteCountByOrganizationId.get(organization.id) ?? 0
+    )
+  );
 }
 
 async function resolveDepartmentExternalId(db: AdminDb, departmentId: string): Promise<string> {
@@ -365,6 +506,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
     users: UserRepository;
     departments: DepartmentRepository;
     memberships: DepartmentMembershipRepository;
+    organizations: OrganizationRepository;
     syncJobs: SyncJobRepository;
   } | null = options.repositories
     ? {
@@ -374,6 +516,9 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
         memberships:
           options.repositories.memberships ??
           new DepartmentMembershipRepository((options.db ?? getDbClient()) as DepartmentMembershipRepositoryDb),
+        organizations:
+          options.repositories.organizations ??
+          new OrganizationRepository((options.db ?? getDbClient()) as OrganizationRepositoryDb),
         syncJobs: options.repositories.syncJobs ?? new SyncJobRepository((options.db ?? getDbClient()) as SyncJobRepositoryDb)
       }
     : null;
@@ -391,6 +536,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
         departments: options.repositories?.departments ?? new DepartmentRepository(db as DepartmentRepositoryDb),
         memberships:
           options.repositories?.memberships ?? new DepartmentMembershipRepository(db as DepartmentMembershipRepositoryDb),
+        organizations: options.repositories?.organizations ?? new OrganizationRepository(db as OrganizationRepositoryDb),
         syncJobs: options.repositories?.syncJobs ?? new SyncJobRepository(db as SyncJobRepositoryDb)
       };
     }
@@ -529,6 +675,88 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
         return;
       }
       res.json({ user: await buildUserDetail(db, updated) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/customer-organizations", async (_req: Request, res: Response) => {
+    try {
+      const db = getDbInstance();
+      const repositories = getRepositories();
+      const organizations = await repositories.organizations.list({ type: "customer" });
+      res.json({
+        organizations: await decorateCustomerOrganizations(db, organizations)
+      });
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/customer-organizations", async (req: Request, res: Response) => {
+    try {
+      const db = getDbInstance();
+      const repositories = getRepositories();
+      const name = trimOrUndefined(req.body?.name);
+      if (!name) {
+        res.status(400).json({ detail: "name is required" });
+        return;
+      }
+
+      const requestedStatus = trimOrUndefined(req.body?.status) ?? "active";
+      if (!ADMIN_EDITABLE_CUSTOMER_ORG_STATUSES.has(requestedStatus)) {
+        res.status(400).json({ detail: "status 不受支持" });
+        return;
+      }
+
+      const created = await repositories.organizations.create({
+        slug: await ensureUniqueOrganizationSlug(repositories.organizations, name),
+        name,
+        type: "customer",
+        status: requestedStatus,
+        ownerUserId: req.currentUser?.id ?? null
+      });
+      const [organization] = await decorateCustomerOrganizations(db, [created]);
+      res.status(201).json({ organization });
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.patch("/customer-organizations/:organizationId", async (req: Request, res: Response) => {
+    try {
+      const db = getDbInstance();
+      const repositories = getRepositories();
+      const organizationId = trimOrUndefined(req.params.organizationId);
+      if (!organizationId) {
+        res.status(400).json({ detail: "organizationId is required" });
+        return;
+      }
+
+      const existing = await repositories.organizations.getById(organizationId);
+      if (!existing || existing.type !== "customer") {
+        res.status(404).json({ detail: "customer organization 不存在" });
+        return;
+      }
+
+      const nextName = req.body?.name === undefined ? undefined : trimOrUndefined(req.body?.name);
+      if (req.body?.name !== undefined && !nextName) {
+        res.status(400).json({ detail: "name is required" });
+        return;
+      }
+
+      const nextStatus = req.body?.status === undefined ? undefined : trimOrUndefined(req.body?.status);
+      if (nextStatus !== undefined && !ADMIN_EDITABLE_CUSTOMER_ORG_STATUSES.has(nextStatus)) {
+        res.status(400).json({ detail: "status 不受支持" });
+        return;
+      }
+
+      const updated = await repositories.organizations.update(existing.id, {
+        name: nextName,
+        status: nextStatus
+      });
+      const [organization] = await decorateCustomerOrganizations(db, [updated]);
+      res.json({ organization });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 500).json({ detail: detailFromError(error) });
     }
