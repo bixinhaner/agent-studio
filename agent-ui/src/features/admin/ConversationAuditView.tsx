@@ -290,10 +290,204 @@ function ConversationWorkspace() {
   );
 }
 
-export function ConversationAuditView() {
+const API_STATUS_OPTIONS: Array<{ value: AdminApiAuditResultFilter; label: string }> = [
+  { value: "all", label: "全部结果" },
+  { value: "success", label: "请求成功" },
+  { value: "failed", label: "请求失败" }
+];
+
+const API_SORT_OPTIONS: Array<{ value: AdminApiAuditSort; label: string }> = [
+  { value: "created_desc", label: "最近调用" },
+  { value: "tokens_desc", label: "消耗 Token 最多" },
+  { value: "latency_desc", label: "耗时最长" }
+];
+
+function ApiAuditWorkspace() {
+  const [query, setQuery] = useState("");
+  const [resultFilter, setResultFilter] = useState<AdminApiAuditResultFilter>("all");
+  const [sort, setSort] = useState<AdminApiAuditSort>("created_desc");
+  const [page, setPage] = useState(1);
+  
+  const [listLoading, setListLoading] = useState(true);
+  const [listData, setListData] = useState<AdminApiAuditListResponse | null>(null);
+  
+  const [selectedId, setSelectedId] = useState("");
+  const [detailData, setDetailData] = useState<AdminApiAuditDetailResponse | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    fetchAdminApiAuditList({ query: deferredQuery || undefined, result: resultFilter === "all" ? undefined : resultFilter, sort, page, pageSize: 20 })
+      .then(res => active && setListData(res))
+      .finally(() => active && setListLoading(false));
+    return () => { active = false; };
+  }, [deferredQuery, resultFilter, sort, page]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    setDetailLoading(true);
+    fetchAdminApiAuditDetail(selectedId)
+      .then(res => active && setDetailData(res))
+      .finally(() => active && setDetailLoading(false));
+    return () => { active = false; };
+  }, [selectedId]);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, height: '100%' }}>
-      <ConversationWorkspace />
+    <div className="admin-split-layout">
+      {/* Master List */}
+      <div className="admin-split-master">
+        <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
+          <Input 
+            prefix={<Search size={14} />} 
+            placeholder="搜索调用 IP、模型或 ID..." 
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            style={{ marginBottom: 12 }}
+          />
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Select size="small" value={resultFilter} options={API_STATUS_OPTIONS} onChange={setResultFilter} style={{ width: 100 }} />
+            <Select size="small" value={sort} options={API_SORT_OPTIONS} onChange={setSort} style={{ width: 100 }} />
+          </Space>
+        </div>
+        
+        <div className="admin-master-list">
+          {listLoading ? <Spin style={{ margin: 'auto', padding: 24 }} /> : 
+           listData?.records.length === 0 ? <Empty style={{ margin: 'auto' }} /> :
+           listData?.records.map(rec => (
+             <button 
+               key={rec.id}
+               className={`admin-master-item ${selectedId === rec.id ? 'active' : ''}`}
+               onClick={() => setSelectedId(rec.id)}
+             >
+               <div className="admin-master-header">
+                 <span className="admin-master-title">{rec.model}</span>
+                 <span className="admin-master-time">{formatLocalDateTime(rec.createdAt).split(' ')[1]}</span>
+               </div>
+               <div className="admin-master-preview" style={{ fontFamily: 'monospace' }}>
+                 {rec.preview.prompt || "<无请求数据>"}
+               </div>
+               <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
+                 <Badge status={rec.status.result === 'success' ? 'success' : 'error'} />
+                 <span style={{ fontSize: 11, opacity: selectedId === rec.id ? 0.8 : 0.5 }}>{rec.clientIp || "Internal"} • {rec.metrics.totalTokens} Tk</span>
+               </div>
+             </button>
+           ))}
+        </div>
+        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--admin-color-border)', textAlign: 'center' }}>
+          <Pagination simple current={page} total={listData?.page.totalItems || 0} pageSize={20} onChange={setPage} />
+        </div>
+      </div>
+
+      {/* Detail View */}
+      <div className="admin-split-detail">
+        <ApiAuditDetail detail={detailData} loading={detailLoading} />
+      </div>
+    </div>
+  );
+}
+
+function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loading: boolean }) {
+  if (props.loading && !props.detail) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Spin size="large" /></div>;
+  }
+  if (!props.detail) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--admin-color-subtle)' }}>
+        <Empty description="选择左侧记录查看完整 API 详情" />
+      </div>
+    );
+  }
+
+  const { record } = props.detail;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--admin-color-border)', background: 'var(--admin-color-surface)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px 0' }}>API: {record.id.slice(0, 8)}...</h2>
+            <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>
+              {formatLocalDateTime(record.createdAt)} • IP: {record.clientIp || "Unknown"}
+            </div>
+          </div>
+          <Space>
+            <Tag color={record.status.result === "success" ? "success" : "error"}>{record.status.result}</Tag>
+            <Tag color={record.status.delivery === "delivered" ? "success" : "warning"}>{record.status.delivery}</Tag>
+            <Tag>{record.model}</Tag>
+          </Space>
+        </div>
+        
+        <div style={{ display: 'flex', gap: 24, fontSize: 13, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <Activity size={14} />
+            <span>输入: {record.metrics.inputTokens} | 输出: {record.metrics.outputTokens}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <Clock3 size={14} />
+             <span>首字准备: {record.metrics.responseReadyMs ? `${record.metrics.responseReadyMs}ms` : 'N/A'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <HardDrive size={14} />
+            <span>预估成本: {record.metrics.estimatedCost}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px', background: '#f9fafb' }}>
+        <div style={{ marginBottom: 24 }}>
+          <Typography.Title level={5} style={{ fontSize: 14 }}>Prompt / Request</Typography.Title>
+          <div style={{ background: '#282c34', color: '#abb2bf', padding: 16, borderRadius: 8, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 13 }}>
+            {record.preview.prompt || "<无请求数据>"}
+          </div>
+        </div>
+        
+        <div style={{ marginBottom: 24 }}>
+          <Typography.Title level={5} style={{ fontSize: 14 }}>Response / Latest Message</Typography.Title>
+          <div style={{ background: '#f1f3f5', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all', border: '1px solid var(--admin-color-border)', fontSize: 14 }}>
+            {record.preview.latest || "<无响应数据>"}
+          </div>
+        </div>
+
+        {record.errorMessage && (
+           <div style={{ marginBottom: 24 }}>
+            <Typography.Title level={5} style={{ fontSize: 14 }} type="danger">Error Message</Typography.Title>
+            <Alert type="error" message={record.errorMessage} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ConversationAuditView() {
+  const [mode, setMode] = useState<AuditMode>("conversations");
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="admin-page-container" style={{ paddingBottom: 0, gap: 0, flex: 'none', marginBottom: 24 }}>
+        <div className="admin-page-header" style={{ padding: '0 0 16px 0' }}>
+          <div>
+            <h1 className="admin-page-title">审计工作台</h1>
+            <p className="admin-page-desc">统一查看用户交互会话、反馈记录与底层 API 调用轨迹。</p>
+          </div>
+        </div>
+        <Tabs 
+          activeKey={mode} 
+          onChange={k => setMode(k as AuditMode)} 
+          items={[
+            { key: "conversations", label: "用户交互会话" },
+            { key: "api", label: "底层 API 调用" }
+          ]}
+          style={{ marginBottom: -16 }}
+        />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {mode === "conversations" ? <ConversationWorkspace /> : <ApiAuditWorkspace />}
+      </div>
     </div>
   );
 }
