@@ -11,6 +11,7 @@ model User {
   id                 String                @id @default(cuid())
   userType           String                @default("internal_employee") @map("user_type")
   primaryOrganizationId String?            @map("primary_organization_id")
+  primaryOrganization Organization?        @relation("UserPrimaryOrganization", fields: [primaryOrganizationId], references: [id], onDelete: SetNull)
   externalId         String?               @unique @map("external_id")
   email              String?
   displayName        String?               @map("display_name")
@@ -28,6 +29,13 @@ model User {
   updatedAt          DateTime              @updatedAt @map("updated_at")
   threads            Thread[]
   runtimeSessions    RuntimeSession[]
+  authIdentities     AuthIdentity[]
+  organizationMemberships OrganizationMembership[] @relation("OrganizationMembershipUser")
+  organizationMembershipInvites OrganizationMembership[] @relation("OrganizationMembershipInvitedBy")
+  ownedOrganizations Organization[]        @relation("OrganizationOwner")
+  organizationInvitesSent OrganizationInvite[] @relation("OrganizationInviteInvitedBy")
+  organizationInvitesAccepted OrganizationInvite[] @relation("OrganizationInviteAcceptedBy")
+  organizationRoleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentUser")
   departmentMemberships DepartmentMembership[]
   triggeredSyncJobs   SyncJob[]             @relation("SyncJobTriggeredBy")
   userRoles          UserRole[]
@@ -53,32 +61,41 @@ model User {
 }
 
 model Organization {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  type        String   @default("customer")
-  status      String   @default("active")
-  ownerUserId String?  @map("owner_user_id")
-  settingsJson Json?   @map("settings_json")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String                       @id @default(cuid())
+  slug           String                       @unique
+  name           String
+  type           String                       @default("customer")
+  status         String                       @default("active")
+  ownerUserId    String?                      @map("owner_user_id")
+  owner          User?                        @relation("OrganizationOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  settingsJson   Json?                        @map("settings_json")
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+  primaryUsers   User[]                       @relation("UserPrimaryOrganization")
+  memberships    OrganizationMembership[]     @relation("OrganizationMembershipOrganization")
+  invites        OrganizationInvite[]         @relation("OrganizationInviteOrganization")
+  loginChallenges LoginChallenge[]            @relation("LoginChallengeOrganization")
+  roleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentOrganization")
 
   @@index([type, status])
   @@map("organizations")
 }
 
 model OrganizationMembership {
-  id                  String   @id @default(cuid())
-  organizationId      String   @map("organization_id")
-  userId              String   @map("user_id")
-  membershipType      String   @default("customer_member") @map("membership_type")
-  status              String   @default("active")
-  displayNameOverride String?  @map("display_name_override")
+  id                  String        @id @default(cuid())
+  organizationId      String        @map("organization_id")
+  organization        Organization  @relation("OrganizationMembershipOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  userId              String        @map("user_id")
+  user                User          @relation("OrganizationMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  membershipType      String        @default("customer_member") @map("membership_type")
+  status              String        @default("active")
+  displayNameOverride String?       @map("display_name_override")
   title               String?
-  invitedByUserId     String?  @map("invited_by_user_id")
-  joinedAt            DateTime? @map("joined_at")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  invitedByUserId     String?       @map("invited_by_user_id")
+  invitedByUser       User?         @relation("OrganizationMembershipInvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  joinedAt            DateTime?     @map("joined_at")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
 
   @@unique([organizationId, userId])
   @@index([userId, status])
@@ -89,6 +106,7 @@ model OrganizationMembership {
 model AuthIdentity {
   id              String    @id @default(cuid())
   userId          String    @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider        String
   providerSubject String    @map("provider_subject")
   email           String?
@@ -105,18 +123,22 @@ model AuthIdentity {
 }
 
 model OrganizationInvite {
-  id               String    @id @default(cuid())
-  organizationId   String    @map("organization_id")
+  id               String            @id @default(cuid())
+  organizationId   String            @map("organization_id")
+  organization     Organization      @relation("OrganizationInviteOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
   email            String
-  inviteTokenHash  String    @map("invite_token_hash")
-  intendedProvider String    @default("email_magic_link") @map("intended_provider")
-  roleTemplate     Json?     @map("role_template")
-  status           String    @default("pending")
-  expiresAt        DateTime  @map("expires_at")
-  invitedByUserId  String?   @map("invited_by_user_id")
-  acceptedByUserId String?   @map("accepted_by_user_id")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  inviteTokenHash  String            @map("invite_token_hash")
+  intendedProvider String            @default("email_magic_link") @map("intended_provider")
+  roleTemplate     Json?             @map("role_template")
+  status           String            @default("pending")
+  expiresAt        DateTime          @map("expires_at")
+  invitedByUserId  String?           @map("invited_by_user_id")
+  invitedByUser    User?             @relation("OrganizationInviteInvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  acceptedByUserId String?           @map("accepted_by_user_id")
+  acceptedByUser   User?             @relation("OrganizationInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  loginChallenges  LoginChallenge[]  @relation("LoginChallengeInvite")
 
   @@index([organizationId, status])
   @@index([email, status])
@@ -124,17 +146,19 @@ model OrganizationInvite {
 }
 
 model LoginChallenge {
-  id             String    @id @default(cuid())
+  id             String               @id @default(cuid())
   channel        String
-  targetRef      String    @map("target_ref")
-  challengeHash  String    @map("challenge_hash")
+  targetRef      String               @map("target_ref")
+  challengeHash  String               @map("challenge_hash")
   purpose        String
-  organizationId String?   @map("organization_id")
-  inviteId       String?   @map("invite_id")
-  expiresAt      DateTime  @map("expires_at")
-  consumedAt     DateTime? @map("consumed_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  organizationId String?              @map("organization_id")
+  organization   Organization?        @relation("LoginChallengeOrganization", fields: [organizationId], references: [id], onDelete: SetNull)
+  inviteId       String?              @map("invite_id")
+  invite         OrganizationInvite?  @relation("LoginChallengeInvite", fields: [inviteId], references: [id], onDelete: SetNull)
+  expiresAt      DateTime             @map("expires_at")
+  consumedAt     DateTime?            @map("consumed_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
 
   @@index([targetRef, purpose, expiresAt])
   @@index([organizationId, purpose])
@@ -142,13 +166,16 @@ model LoginChallenge {
 }
 
 model OrganizationRoleAssignment {
-  id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
-  userId         String   @map("user_id")
-  roleId         String   @map("role_id")
-  isPrimary      Boolean  @default(false) @map("is_primary")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  organization   Organization  @relation("OrganizationRoleAssignmentOrganization", fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String        @map("user_id")
+  user           User          @relation("OrganizationRoleAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  roleId         String        @map("role_id")
+  role           Role          @relation("OrganizationRoleAssignmentRole", fields: [roleId], references: [id], onDelete: Cascade)
+  isPrimary      Boolean       @default(false) @map("is_primary")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
 
   @@unique([organizationId, userId, roleId])
   @@index([organizationId, userId, isPrimary])
@@ -169,6 +196,7 @@ model Role {
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
   userRoles       UserRole[]
+  organizationRoleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentRole")
   rolePermissions RolePermission[]
 
   @@unique([organizationId, slug])
