@@ -350,7 +350,7 @@ export function SystemSettingsShell() {
         </div>
 
         {/* Footer Actions */}
-        <div className="admin-settings-footer">
+        <div className="admin-floating-action-bar">
           <div style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>
             自动保存草稿于 {formatLocalDateTime(draftMeta.updatedAt)}
           </div>
@@ -369,6 +369,7 @@ export function SystemSettingsShell() {
             </Button>
             <Button 
               type="primary" 
+              shape="round" /* Added round shape to match the floating pill style */
               icon={<Send size={16} />} 
               disabled={saving || publishing || changedAreaCount === 0} 
               onClick={handlePublish}
