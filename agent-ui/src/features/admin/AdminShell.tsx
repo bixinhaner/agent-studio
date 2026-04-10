@@ -5,6 +5,7 @@ import {
   Component,
   Database,
   LayoutDashboard,
+  LogOutIcon,
   Menu,
   MessageSquareText,
   Network,
@@ -585,7 +586,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   }, [cmdSearch]);
 
   const drawerNavigation = (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="admin-sidebar-header">
         <div className="admin-brand" style={{ display: "flex" }}>
           <div className="admin-brand-icon">AS</div>
@@ -593,7 +594,10 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
         </div>
       </div>
       <AdminNavigation activeSection={section} collapsed={false} onNavigate={handleNavClick} />
-    </>
+      <div className="admin-sidebar-footer" style={{ padding: 16, borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
+        {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
+      </div>
+    </div>
   );
 
   return (
@@ -606,9 +610,23 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
                 <div className="admin-brand-icon">AS</div>
                 <span>Agent Studio</span>
               </div>
-              {sidebarCollapsed ? <div className="admin-brand-icon" style={{ margin: "0 auto" }}>AS</div> : null}
+                {sidebarCollapsed ? <div className="admin-brand-icon" style={{ margin: "0 auto" }}>AS</div> : null}
             </div>
             <AdminNavigation activeSection={section} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
+            <div className={`admin-sidebar-footer ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
+              {!sidebarCollapsed && props.currentUser ? (
+                <div style={{ padding: 16 }}>
+                  <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} />
+                </div>
+              ) : null}
+              {sidebarCollapsed && props.currentUser && props.onSignOut ? (
+                <div style={{ padding: '16px 0', display: 'flex', justifyContent: 'center' }}>
+                  <Button type="text" icon={<LogOutIcon size={18} />} onClick={() => {
+                    if (window.confirm("确认退出当前登录状态？")) props.onSignOut!();
+                  }} title="退出登录" />
+                </div>
+              ) : null}
+            </div>
           </aside>
         ) : null}
 
@@ -650,7 +668,6 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
                   返回工作台
                 </Button>
               ) : null}
-              {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
             </div>
           </header>
 
