@@ -1409,11 +1409,20 @@ body {
 .assistant-running-card {
   margin: 2px 0 0;
   width: min(420px, 100%);
-  border: 1px solid #eaeaea;
-  border-radius: 8px;
+  border: 2px solid transparent;
+  border-radius: 20px;
   padding: 10px 12px;
-  background: #ffffff;
-  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.04);
+  background: linear-gradient(#fff, #fff) padding-box,
+              linear-gradient(135deg, #FF4614, #FF007F, #4A00E0, #FF4614) border-box;
+  background-size: 300% 300%;
+  animation: magic-border-flow 4s ease infinite;
+  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.08);
+}
+
+@keyframes magic-border-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .assistant-running-head {
@@ -5470,33 +5479,35 @@ body.public-share-mode #root {
  * ----------------------------------------------------
  */
 .aui-user-message-content {
-  background: #FF4614 !important;
+  background: linear-gradient(135deg, #FF4614 0%, #FF6B33 100%) !important;
   color: #fff !important;
-  border-radius: 8px !important;
-  box-shadow: 0 2px 4px rgba(255, 70, 20, 0.1) !important;
+  border-radius: 20px 20px 4px 20px !important;
+  box-shadow: 0 8px 24px rgba(255, 70, 20, 0.15) !important;
+  padding: 12px 18px !important;
 }
 
 .aui-assistant-message-content {
   background: white !important;
-  border: 1px solid #eaeaea !important;
-  border-radius: 8px !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03) !important;
+  border: 1px solid #f0f0f0 !important;
+  border-radius: 4px 20px 20px 20px !important;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04) !important;
   color: #111 !important;
-  padding: 12px 14px !important;
+  padding: 12px 18px !important;
 }
 
 /* Composer action buttons */
 .aui-composer-send:not(:disabled),
 .aui-composer-send-btn:not(:disabled) {
-  background-color: #FF4614 !important;
-  border-color: #FF4614 !important;
+  background: linear-gradient(135deg, #FF4614 0%, #FF8533 100%) !important;
+  border-color: transparent !important;
   color: #fff !important;
-  border-radius: 8px !important;
+  border-radius: 999px !important;
   transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  box-shadow: 0 4px 12px rgba(255, 70, 20, 0.2) !important;
 }
 .aui-composer-send:hover:not(:disabled),
 .aui-composer-send-btn:hover:not(:disabled) {
-  background-color: #E63B0F !important;
+  filter: brightness(1.1) !important;
 }
 .aui-composer-send:active:not(:disabled),
 .aui-composer-send-btn:active:not(:disabled) {
@@ -5504,12 +5515,16 @@ body.public-share-mode #root {
 }
 
 .aui-thread-welcome-suggestion {
-  border-radius: 8px !important;
+  border-radius: 20px !important;
   transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  border: 1px solid #f0f0f0 !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
 }
 .aui-thread-welcome-suggestion:hover {
   border-color: #FF4614 !important;
-  background: rgba(255, 70, 20, 0.05) !important;
+  background: linear-gradient(135deg, rgba(255, 70, 20, 0.05) 0%, rgba(255, 0, 127, 0.02) 100%) !important;
+  box-shadow: 0 8px 24px rgba(255, 70, 20, 0.08) !important;
 }
 .aui-thread-welcome-suggestion:active {
   transform: scale(0.98) !important;
