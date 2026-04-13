@@ -98,7 +98,7 @@ export function CapabilityPolicyEditor({
   return (
     <PolicyRulesEditor
       title={title}
-      description="按单个能力资源维护角色、部门和用户的允许或拒绝策略。"
+      description="按单个能力资源维护角色、部门和用户的允许或拒绝策略，角色主体支持内部员工/内部管理员/外部 User/外部 Admin。"
       emptyText="当前能力资源还没有显式授权策略。"
       loadingText="加载能力授权中..."
       saveLabel="保存授权"

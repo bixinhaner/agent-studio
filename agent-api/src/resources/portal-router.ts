@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Router, type Request, type Response } from "express";
 
+import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
 import { PolicyService } from "./policy-service.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
@@ -48,14 +49,21 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    const roleIds = [currentUser.role ?? "employee"];
-    const departmentIds = await options.listDepartmentIdsForUser(currentUser.id);
+    const roleIds = resolveResourceRoleIds({
+      platformRole: currentUser.role,
+      organizationType: req.currentOrganization?.type,
+      membershipType: req.currentMembership?.membershipType
+    });
+    const departmentIds = isInternalOrganizationType(req.currentOrganization?.type)
+      ? await options.listDepartmentIdsForUser(currentUser.id)
+      : [];
 
     const allKnowledgeSets = await options.knowledgeSets.list();
     const activeKnowledgeSets = allKnowledgeSets.filter(
       (knowledgeSet) => knowledgeSet.status === "active" && knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE
     );
     const visibleKnowledgeSetIds = await options.policies.filterAllowedResources({
+      organizationId: req.currentOrganization?.id,
       userId: currentUser.id,
       roleIds,
       departmentIds,
@@ -94,13 +102,20 @@ export function createResourcesPortalRouter(options: {
       return;
     }
 
-    const roleIds = [currentUser.role ?? "employee"];
-    const departmentIds = await options.listDepartmentIdsForUser(currentUser.id);
+    const roleIds = resolveResourceRoleIds({
+      platformRole: currentUser.role,
+      organizationType: req.currentOrganization?.type,
+      membershipType: req.currentMembership?.membershipType
+    });
+    const departmentIds = isInternalOrganizationType(req.currentOrganization?.type)
+      ? await options.listDepartmentIdsForUser(currentUser.id)
+      : [];
     const allKnowledgeSets = await options.knowledgeSets.list();
     const activeKnowledgeSets = allKnowledgeSets.filter(
       (knowledgeSet) => knowledgeSet.status === "active" && knowledgeSet.sourceType === MANAGED_UPLOAD_SOURCE_TYPE
     );
     const visibleKnowledgeSetIds = await options.policies.filterAllowedResources({
+      organizationId: req.currentOrganization?.id,
       userId: currentUser.id,
       roleIds,
       departmentIds,

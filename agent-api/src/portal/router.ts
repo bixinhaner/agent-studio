@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 
+import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
 import { toPortalRuntimeOptions } from "./runtime-options.js";
 import type { PortalRuntimeOptionService } from "./runtime-option-service.js";
 
@@ -17,11 +18,19 @@ export function createPortalRouter(options: {
     }
 
     try {
+      const roleIds = resolveResourceRoleIds({
+        platformRole: currentUser.role,
+        organizationType: req.currentOrganization?.type,
+        membershipType: req.currentMembership?.membershipType
+      });
+      const departmentIds = isInternalOrganizationType(req.currentOrganization?.type)
+        ? await options.listDepartmentIdsForUser(currentUser.id)
+        : [];
       const resolved = await options.runtimeOptions.resolve({
         organizationId: req.currentOrganization?.id,
         userId: currentUser.id,
-        roleIds: [currentUser.role ?? "employee"],
-        departmentIds: await options.listDepartmentIdsForUser(currentUser.id)
+        roleIds,
+        departmentIds
       });
       res.json(toPortalRuntimeOptions(resolved));
     } catch (error) {

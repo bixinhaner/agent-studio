@@ -13,6 +13,7 @@ import { createRbacRouter } from "./admin/rbac-router.js";
 import { createAuthRouter } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
+import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
@@ -586,6 +587,7 @@ type CurrentActor = {
   organizationId: string;
   organizationSlug?: string;
   organizationType?: string;
+  membershipType?: string;
 };
 
 function stableJson(value: unknown): string {
@@ -813,19 +815,24 @@ function currentActorFromRequest(req: Request): CurrentActor {
     role: req.currentUser.role,
     organizationId: req.currentOrganization.id,
     organizationSlug: req.currentOrganization.slug,
-    organizationType: req.currentOrganization.type
+    organizationType: req.currentOrganization.type,
+    membershipType: req.currentMembership?.membershipType
   };
 }
 
 async function listDepartmentIdsForActor(actor: CurrentActor): Promise<string[]> {
-  if (trimOrUndefined(actor.organizationType) !== "internal") {
+  if (!isInternalOrganizationType(actor.organizationType)) {
     return [];
   }
   return departmentMemberships.listIdsForUser(actor.id);
 }
 
 function roleIdsForActor(actor: CurrentActor): string[] {
-  return [actor.role ?? "employee"];
+  return resolveResourceRoleIds({
+    platformRole: actor.role,
+    organizationType: actor.organizationType,
+    membershipType: actor.membershipType
+  });
 }
 
 async function resolveModeSelection(input: {

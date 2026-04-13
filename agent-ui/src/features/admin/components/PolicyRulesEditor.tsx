@@ -45,7 +45,17 @@ const EMPTY_SUBJECT_DIRECTORY: SubjectDirectory = {
   user: []
 };
 
-const FALLBACK_ROLE_SUBJECT_IDS = ["employee", "admin", "super_admin"];
+const FALLBACK_ROLE_SUBJECT_LABELS: Record<string, string> = {
+  employee: "员工",
+  admin: "管理员",
+  super_admin: "超级管理员",
+  org_internal_user: "内部员工",
+  org_internal_admin: "内部管理员",
+  org_external_user: "外部 User",
+  org_external_admin: "外部 Admin"
+};
+
+const FALLBACK_ROLE_SUBJECT_IDS = Object.keys(FALLBACK_ROLE_SUBJECT_LABELS);
 
 const SUBJECT_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleSubjectType }> = [
   { label: "role", value: "role" },
@@ -142,7 +152,14 @@ async function resolveSubjectDirectory(): Promise<SubjectDirectory> {
       const userMap = new Map<string, SubjectOption>();
 
       for (const value of FALLBACK_ROLE_SUBJECT_IDS) {
-        upsertOption(roleMap, value, buildOptionLabel(value, "legacy role"));
+        upsertOption(
+          roleMap,
+          value,
+          buildOptionLabel(
+            FALLBACK_ROLE_SUBJECT_LABELS[value] ?? value,
+            value.startsWith("org_") ? "组织上下文角色" : "legacy role"
+          )
+        );
       }
 
       for (const role of rolesResp.roles || []) {
