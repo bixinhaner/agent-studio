@@ -1413,9 +1413,9 @@ body {
   border-radius: 20px;
   padding: 10px 12px;
   background: linear-gradient(#fff, #fff) padding-box,
-              linear-gradient(135deg, #FF4614, #FF007F, #4A00E0, #FF4614) border-box;
+              linear-gradient(135deg, #FF4614, #FF833D, #FFD07A, #FF833D, #FF4614) border-box;
   background-size: 300% 300%;
-  animation: magic-border-flow 4s ease infinite;
+  animation: magic-border-flow 6s ease-in-out infinite;
   box-shadow: 0 12px 36px rgba(255, 70, 20, 0.08);
 }
 
