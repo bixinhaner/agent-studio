@@ -81,7 +81,11 @@ type UserRow = {
 
 type UserTable = {
   count(args?: unknown): Promise<number>;
-  findUnique(args: { where: { id?: string; externalId?: string; email?: string } }): Promise<UserRow | null>;
+  findUnique(args: { where: { id?: string; externalId?: string } }): Promise<UserRow | null>;
+  findFirst(args?: {
+    where?: { email?: string; status?: string; role?: string };
+    orderBy?: { createdAt?: "asc" | "desc" };
+  }): Promise<UserRow | null>;
   findMany(args?: { where?: { status?: string; role?: string }; orderBy?: { createdAt: "asc" | "desc" } }): Promise<UserRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<UserRow>;
   update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<UserRow>;
@@ -158,7 +162,10 @@ export class UserRepository implements UserRepositoryLike {
   async getByEmail(email: string): Promise<AuthenticatedUser | undefined> {
     const normalized = trimOrUndefined(email)?.toLowerCase();
     if (!normalized) return undefined;
-    const row = await this.db.user.findUnique({ where: { email: normalized } });
+    const row = await this.db.user.findFirst({
+      where: { email: normalized },
+      orderBy: { createdAt: "asc" }
+    });
     return row ? mapUser(row) : undefined;
   }
 
