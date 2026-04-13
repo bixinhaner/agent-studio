@@ -160,6 +160,34 @@ def filename_title(path: Path) -> str:
     return clean_text(path.stem.replace("_", " "))
 
 
+def bookmark_anchor_id(name: str) -> str:
+    cleaned = re.sub(r"[^0-9A-Za-z_.:-]+", "-", clean_text(name)).strip("-")
+    return cleaned or "bookmark"
+
+
+def extract_bookmark_targets_from_instr(instr: str) -> list[str]:
+    targets: list[str] = []
+    patterns = [
+        r"\b(?:REF|PAGEREF)\s+([^\s\\]+)",
+        r"\bHYPERLINK\s+\\\\l\s+([^\s\\]+)",
+        r"\bHYPERLINK\s+\\l\s+([^\s\\]+)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, instr, flags=re.IGNORECASE):
+            raw = clean_text(match.group(1)).strip('"')
+            if raw and raw not in targets:
+                targets.append(raw)
+    return targets
+
+
+def normalize_toc_link_text(text: str) -> str:
+    normalized = clean_text(text)
+    normalized = re.sub(r"\s+\d+$", "", normalized).strip()
+    normalized = re.sub(r"(?<=[A-Za-z\u4e00-\u9fff）)])\d+$", "", normalized).strip()
+    normalized = re.sub(r"^((?:\d+\.)+\d*|\d+\.)(?=[A-Za-z\u4e00-\u9fff])", r"\1 ", normalized)
+    return normalized
+
+
 def detect_docx_container(path: Path) -> tuple[str, str]:
     try:
         with path.open("rb") as handle:
@@ -539,7 +567,11 @@ class DocxMarkdownConverter:
         self.image_sequence_counter = 0
         self.core_properties: dict[str, str] = {}
         self.heading_index: list[dict[str, object]] = []
+        self.bookmarks_index: list[dict[str, object]] = []
         self.external_link_index: list[dict[str, str]] = []
+        self.internal_link_index: list[dict[str, str]] = []
+        self.field_index: list[dict[str, object]] = []
+        self.referenced_bookmarks: set[str] = set()
         self.header_texts: list[str] = []
         self.footer_texts: list[str] = []
         self.footnote_map: dict[str, str] = {}
@@ -563,6 +595,9 @@ class DocxMarkdownConverter:
             "contains_complex_tables": False,
             "contains_image_annotations": False,
             "contains_heading_numbers": False,
+            "contains_internal_links": False,
+            "contains_fields": False,
+            "contains_toc": False,
         }
 
     def convert(self) -> dict[str, object]:
@@ -596,7 +631,10 @@ class DocxMarkdownConverter:
             "core_properties": self.core_properties,
             "stats": self.stats,
             "headings": self.heading_index,
+            "bookmarks": self.bookmarks_index,
             "external_links": self.external_link_index,
+            "internal_links": self.internal_link_index,
+            "fields": self.field_index,
             "headers": self.header_texts,
             "footers": self.footer_texts,
             "footnotes": [{"id": key, "text": value} for key, value in self.footnote_map.items()],
@@ -617,7 +655,9 @@ class DocxMarkdownConverter:
             self._load_supporting_parts(archive)
             document_xml = archive.read("word/document.xml")
             self.feature_flags["contains_comments"] = "word/comments.xml" in archive.namelist()
-            body = ET.fromstring(document_xml).find("w:body", NS)
+            document_root = ET.fromstring(document_xml)
+            self._collect_document_references(document_root)
+            body = document_root.find("w:body", NS)
             if body is None:
                 raise ValueError(f"document body not found: {self.docx_path}")
 
@@ -856,6 +896,51 @@ class DocxMarkdownConverter:
         if endnote_name in names:
             self.endnote_map = self._extract_notes(archive.read(endnote_name))
 
+    def _collect_document_references(self, root: ET.Element) -> None:
+        for hyperlink in root.findall(".//w:hyperlink", NS):
+            anchor = hyperlink.get(qn("w", "anchor"))
+            if anchor:
+                self.referenced_bookmarks.add(anchor)
+
+        for field_simple in root.findall(".//w:fldSimple", NS):
+            instr = clean_text(field_simple.get(qn("w", "instr")) or "")
+            if not instr:
+                continue
+            targets = extract_bookmark_targets_from_instr(instr)
+            self.referenced_bookmarks.update(targets)
+            display_text = clean_text("".join(node.text or "" for node in field_simple.findall(".//w:t", NS)))
+            self.field_index.append(
+                {
+                    "kind": "fldSimple",
+                    "instruction": instr,
+                    "targets": targets,
+                    "display_text": display_text,
+                }
+            )
+            self.feature_flags["contains_fields"] = True
+            if " TOC " in f" {instr.upper()} " or instr.upper().startswith("TOC "):
+                self.feature_flags["contains_toc"] = True
+
+        for paragraph in root.findall(".//w:p", NS):
+            instrs = [clean_text(node.text or "") for node in paragraph.findall(".//w:instrText", NS) if clean_text(node.text or "")]
+            if not instrs:
+                continue
+            instr = " ".join(instrs)
+            targets = extract_bookmark_targets_from_instr(instr)
+            self.referenced_bookmarks.update(targets)
+            display_text = clean_text("".join(node.text or "" for node in paragraph.findall(".//w:t", NS)))
+            self.field_index.append(
+                {
+                    "kind": "instrText",
+                    "instruction": instr,
+                    "targets": targets,
+                    "display_text": display_text,
+                }
+            )
+            self.feature_flags["contains_fields"] = True
+            if " TOC " in f" {instr.upper()} " or instr.upper().startswith("TOC "):
+                self.feature_flags["contains_toc"] = True
+
     def _extract_plain_text_from_part(self, xml_bytes: bytes) -> str:
         root = ET.fromstring(xml_bytes)
         lines: list[str] = []
@@ -970,6 +1055,20 @@ class DocxMarkdownConverter:
             return None, None
         return style_id, self.style_names.get(style_id, style_id)
 
+    def _paragraph_bookmarks(self, paragraph: ET.Element) -> list[dict[str, str]]:
+        bookmarks: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for bookmark in paragraph.findall(".//w:bookmarkStart", NS):
+            name = clean_text(bookmark.get(qn("w", "name")) or "")
+            if not name or name in seen or name == "_GoBack":
+                continue
+            if name.startswith("OLE_LINK") and name not in self.referenced_bookmarks:
+                continue
+            anchor = bookmark_anchor_id(name)
+            bookmarks.append({"name": name, "anchor": anchor})
+            seen.add(name)
+        return bookmarks
+
     def _heading_level(self, style_id: str | None, style_name: str | None) -> int | None:
         for candidate in (style_name or "", style_id or ""):
             match = re.search(r"heading\s*([1-9])", candidate, re.IGNORECASE)
@@ -1000,6 +1099,7 @@ class DocxMarkdownConverter:
         self.stats["paragraphs"] += 1
         style_id, style_name = self._paragraph_style(paragraph)
         heading_level = self._heading_level(style_id, style_name)
+        paragraph_bookmarks = self._paragraph_bookmarks(paragraph)
         quote_style = self._is_quote_style(style_name)
         numbering = self._paragraph_numbering(paragraph, style_id)
         list_prefix = None if heading_level else self._list_prefix(numbering)
@@ -1047,6 +1147,7 @@ class DocxMarkdownConverter:
                         "number": number_prefix or None,
                         "text": text,
                         "full_text": full_text,
+                        "anchors": [bookmark["anchor"] for bookmark in paragraph_bookmarks] if paragraph_bookmarks else [],
                     }
                 )
                 outputs.append(f"{'#' * min(heading_level, 6)} {full_text}")
@@ -1060,6 +1161,19 @@ class DocxMarkdownConverter:
                 outputs.append("\n".join([first, *rest]).rstrip())
             else:
                 outputs.append(text)
+
+        if outputs and paragraph_bookmarks:
+            reference_text = clean_text(re.sub(r"^#+\s*", "", outputs[0].splitlines()[0]))
+            for bookmark in paragraph_bookmarks:
+                self.bookmarks_index.append(
+                    {
+                        "name": bookmark["name"],
+                        "anchor": bookmark["anchor"],
+                        "text": reference_text,
+                        "heading_level": min(heading_level, 6) if heading_level else None,
+                    }
+                )
+            outputs.insert(0, "\n".join(f'<a id="{bookmark["anchor"]}"></a>' for bookmark in paragraph_bookmarks))
         return outputs
 
     def _extract_inline_tokens(self, node: ET.Element, archive: zipfile.ZipFile) -> list[InlineToken]:
@@ -1080,9 +1194,21 @@ class DocxMarkdownConverter:
         for child in list(node):
             if child.tag == qn("w", "hyperlink"):
                 rel_id = child.get(qn("r", "id"))
+                anchor = child.get(qn("w", "anchor"))
                 inner_tokens: list[InlineToken] = []
                 self._append_node_tokens(child, inner_tokens, archive)
-                if rel_id and rel_id in self.external_links and inner_tokens and all(token.kind == "text" for token in inner_tokens):
+                if anchor and inner_tokens and all(token.kind == "text" for token in inner_tokens):
+                    link_text = clean_text("".join(token.value for token in inner_tokens))
+                    if anchor.startswith("_Toc"):
+                        link_text = normalize_toc_link_text(link_text)
+                    target_anchor = bookmark_anchor_id(anchor)
+                    if link_text:
+                        self.feature_flags["contains_internal_links"] = True
+                        self.internal_link_index.append({"text": link_text, "target": anchor, "href": f"#{target_anchor}"})
+                        tokens.append(InlineToken("text", f"[{link_text}](#{target_anchor})"))
+                    else:
+                        tokens.append(InlineToken("text", f"#{target_anchor}"))
+                elif rel_id and rel_id in self.external_links and inner_tokens and all(token.kind == "text" for token in inner_tokens):
                     link_text = clean_text("".join(token.value for token in inner_tokens))
                     link_url = self.external_links[rel_id]
                     if link_text:
@@ -1812,6 +1938,11 @@ def validate_output_dir(output_dir: Path) -> list[str]:
         errors.append("doc.md is empty")
     if TABLE_IMAGE_ANNOTATION_PLACEHOLDER_PATTERN.search(markdown):
         errors.append("table image annotation placeholders remain in doc.md")
+    internal_targets = set(re.findall(r"\]\(#([^)]+)\)", markdown))
+    anchor_ids = set(re.findall(r'<a id="([^"]+)"></a>', markdown))
+    missing_targets = sorted(internal_targets - anchor_ids)
+    if missing_targets:
+        errors.append(f"missing internal anchors: {', '.join(missing_targets[:5])}")
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     if not meta.get("title"):

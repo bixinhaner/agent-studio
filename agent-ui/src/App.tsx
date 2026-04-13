@@ -279,7 +279,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             />
             <button
               className="auth-modern-primary-btn"
-              style={{ marginTop: 12, background: 'var(--admin-color-text, #111)', color: 'var(--admin-color-panel, #fff)', borderColor: 'var(--admin-color-text, #111)' }}
+              style={{ marginTop: 12, background: '#FF4614', color: '#fff', borderColor: '#FF4614' }}
               disabled={verifyPending}
               onClick={() => void handleVerifyEmailCode()}
             >

@@ -48,8 +48,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--admin-color-text, #111);
-  color: var(--admin-color-panel, #fff);
+  background: #FF4614;
+  color: #fff;
   border: none;
   border-radius: 8px;
   font-size: 14px;
@@ -98,7 +98,7 @@
   color: inherit;
 }
 .auth-modern-input:focus {
-  border-color: var(--admin-color-text, #111);
+  border-color: #FF4614;
 }
 
 .auth-modern-primary-btn {

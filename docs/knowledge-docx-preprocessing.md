@@ -14,6 +14,8 @@ Current behavior:
 - the extracted cover or heading title is kept in `meta.json.title_resolution`
 - heading numbering such as `2.1` and `3.2.1` is preserved when it comes from Word numbering definitions
 - ordered lists keep their numeric prefixes instead of being flattened to `-`
+- internal bookmarks are emitted as HTML anchors and internal Word links are preserved as Markdown `#anchor` links when possible
+- Word field instructions and cross-reference metadata are indexed into `meta.json`
 - unsupported `.docx` containers are reported in `report.json` instead of crashing the run
 - optional image annotation can call Codex vision and write short inline notes back into `doc.md`
 - repeated images can reuse a shared annotation cache instead of calling the model again
@@ -92,6 +94,7 @@ The validator checks:
 - generic title regressions
 - image-heavy documents with unusually low extracted text
 - textbox extraction regressions when non-empty textbox content is present
+- generated internal links have matching anchor targets
 
 ## Image Annotation Output
 

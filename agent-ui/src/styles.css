@@ -5454,3 +5454,46 @@ body.public-share-mode #root {
     border-radius: 12px;
   }
 }
+
+/* 
+ * ----------------------------------------------------
+ * NA Tech Style Overrides for @assistant-ui
+ * ----------------------------------------------------
+ */
+.aui-user-message-content {
+  background: #FF4614 !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 4px rgba(255, 70, 20, 0.1) !important;
+}
+
+.aui-assistant-message-content {
+  background: white !important;
+  border: 1px solid #eaeaea !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03) !important;
+  color: #111 !important;
+  padding: 12px 14px !important;
+}
+
+/* Composer action buttons */
+.aui-composer-send:not(:disabled),
+.aui-composer-send-btn:not(:disabled) {
+  background-color: #FF4614 !important;
+  border-color: #FF4614 !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+}
+.aui-composer-send:hover:not(:disabled),
+.aui-composer-send-btn:hover:not(:disabled) {
+  background-color: #E63B0F !important;
+}
+
+.aui-thread-welcome-suggestion {
+  border-radius: 8px !important;
+  transition: all 0.2s !important;
+}
+.aui-thread-welcome-suggestion:hover {
+  border-color: #FF4614 !important;
+  background: rgba(255, 70, 20, 0.05) !important;
+}
