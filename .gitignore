@@ -22,3 +22,10 @@
 
 # large data files
 zendesk-data/
+
+# Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python

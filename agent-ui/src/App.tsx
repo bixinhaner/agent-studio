@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { fetchInvite, type AuthInvite } from "./features/auth/api";
+import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
 const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then((module) => ({ default: module.PortalShell })));
@@ -187,127 +188,112 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     }
   }
 
+  const [showInviteField, setShowInviteField] = useState(false);
+
   return (
-    <div className="auth-screen">
-      <div className="auth-card auth-card-shell">
-        <div className="auth-card-head">
-          <div>
-            <p className="auth-eyebrow">Agent Studio</p>
-            <h1>多租户访问入口</h1>
-            <p className="auth-subtitle">内部员工继续使用钉钉免登，外部客户和协作者使用邮箱验证码进入所属组织。</p>
-          </div>
-          <div className="auth-card-badge">长期开放版</div>
+    <div className="auth-modern-screen">
+      <div className="auth-modern-card">
+        <div className="auth-modern-header">
+          <h1 className="auth-modern-logo">Agent Studio</h1>
+          <p className="auth-modern-subtitle">Sign in to your organization</p>
         </div>
 
         {inviteLoading ? (
-          <section className="auth-invite-banner">
-            <strong>正在读取邀请信息</strong>
-            <p>系统正在确认组织、邮箱和邀请状态。</p>
-          </section>
+          <div className="auth-modern-invite">正在读取邀请信息...</div>
         ) : invite ? (
-          <section className="auth-invite-banner">
-            <div className="auth-invite-banner-head">
-              <strong>{invite.organization.name}</strong>
-              {inviteStatusText ? <span className="auth-status-chip">{inviteStatusText}</span> : null}
-            </div>
-            <p>
-              {invite.emailHint ? `目标邮箱：${invite.emailHint}` : "已识别邀请链接。"}
-              {invite.membershipType ? ` 加入身份：${inviteMembershipTypeLabel(invite.membershipType)}。` : ""}
-            </p>
-            {invite.expiresAt ? <p>有效期截止：{formatInviteExpiry(invite.expiresAt)}</p> : null}
-          </section>
+          <div className="auth-modern-invite">
+            🌟 <strong>{invite.organization.name}</strong> 邀请你加入
+            {inviteStatusText ? ` (${inviteStatusText})` : ""}
+          </div>
         ) : null}
 
-        {inviteError ? <p className="err-text">{inviteError}</p> : null}
-        {props.auth.error ? <p className="err-text">{props.auth.error}</p> : null}
-        {formError ? <p className="err-text">{formError}</p> : null}
+        {inviteError && <p className="err-text" style={{margin:0,textAlign:'center'}}>{inviteError}</p>}
+        {props.auth.error && <p className="err-text" style={{margin:0,textAlign:'center'}}>{props.auth.error}</p>}
+        {formError && <p className="err-text" style={{margin:0,textAlign:'center'}}>{formError}</p>}
 
-        <div className="auth-entry-grid">
-          <section className="auth-option-panel">
-            <div className="auth-option-copy">
-              <p className="auth-option-kicker">内部员工</p>
-              <h2>钉钉单点登录</h2>
-              <p>适用于企业内部成员，沿用现有钉钉身份与部门同步，不需要额外账号。</p>
-            </div>
-            <button
-              type="button"
-              className="picker-btn auth-primary-btn"
-              onClick={() => void props.auth.startSignIn()}
-            >
-              使用钉钉登录
-            </button>
-          </section>
+        {!codeRequested && (
+          <button
+            className="auth-modern-sso-btn"
+            onClick={() => void props.auth.startSignIn()}
+          >
+            Continue with DingTalk
+          </button>
+        )}
 
-          <section className="auth-option-panel auth-option-panel-email">
-            <div className="auth-option-copy">
-              <p className="auth-option-kicker">外部用户</p>
-              <h2>邮箱验证码登录</h2>
-              <p>适用于外部组织的 Admin、User 和受邀协作者。首次使用会根据邀请自动建立组织成员关系。</p>
-            </div>
+        {!codeRequested && <div className="auth-modern-divider">OR</div>}
 
-            <label className="auth-field">
-              <span>邮箱地址</span>
+        {!codeRequested ? (
+          <div className="auth-modern-field auth-modern-fade-enter">
+            <input
+              className="auth-modern-input"
+              type="email"
+              placeholder="Email address"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            
+            {showInviteField && !props.inviteToken && (
               <input
-                className="auth-field-input"
-                type="email"
-                placeholder="name@example.com"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                className="auth-modern-input"
+                style={{ marginTop: 8 }}
+                type="text"
+                placeholder="Invite token (Optional)"
+                value={manualInviteToken}
+                onChange={(e) => setManualInviteToken(e.target.value)}
               />
-            </label>
+            )}
+            
+            <button
+              className="auth-modern-primary-btn"
+              style={{ marginTop: 8 }}
+              disabled={requestPending}
+              onClick={() => void handleRequestEmailCode()}
+            >
+              {requestPending ? "Sending..." : "Continue with Email"}
+            </button>
 
-            {!props.inviteToken ? (
-              <label className="auth-field">
-                <span>邀请码（可选）</span>
-                <input
-                  className="auth-field-input"
-                  type="text"
-                  placeholder="输入邀请链接中的 token"
-                  value={manualInviteToken}
-                  onChange={(event) => setManualInviteToken(event.target.value)}
-                />
-              </label>
-            ) : null}
-
-            {codeRequested ? (
-              <label className="auth-field">
-                <span>邮箱验证码</span>
-                <input
-                  className="auth-field-input"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="输入 6 位验证码"
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                />
-              </label>
-            ) : null}
-
-            {emailHint ? <p className="auth-hint">验证码已发送至 {emailHint}。</p> : null}
-
-            <div className="auth-action-row">
-              <button
-                type="button"
-                className="picker-btn"
-                disabled={requestPending}
-                onClick={() => void handleRequestEmailCode()}
+            {!props.inviteToken && !showInviteField && (
+              <button 
+                className="auth-modern-dropdown-link" 
+                onClick={() => setShowInviteField(true)}
               >
-                {requestPending ? "发送中..." : codeRequested ? "重新发送验证码" : "发送验证码"}
+                Have an invite code?
               </button>
-              {codeRequested ? (
-                <button
-                  type="button"
-                  className="picker-btn auth-primary-btn"
-                  disabled={verifyPending}
-                  onClick={() => void handleVerifyEmailCode()}
-                >
-                  {verifyPending ? "验证中..." : "验证并进入组织"}
-                </button>
-              ) : null}
-            </div>
-          </section>
-        </div>
+            )}
+          </div>
+        ) : (
+          <div className="auth-modern-field auth-modern-fade-enter">
+            <p className="auth-modern-hint">
+              {emailHint ? `We sent a code to ${emailHint}` : `Enter the verification code sent to your email.`}
+            </p>
+            <input
+              className="auth-modern-input"
+              style={{ marginTop: 8, letterSpacing: '0.2em', textAlign: 'center', fontSize: 18, fontWeight: 600 }}
+              type="text"
+              inputMode="numeric"
+              placeholder="000 000"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoFocus
+            />
+            <button
+              className="auth-modern-primary-btn"
+              style={{ marginTop: 12, background: 'var(--admin-color-text, #111)', color: 'var(--admin-color-panel, #fff)', borderColor: 'var(--admin-color-text, #111)' }}
+              disabled={verifyPending}
+              onClick={() => void handleVerifyEmailCode()}
+            >
+              {verifyPending ? "Verifying..." : "Verify & Sign In"}
+            </button>
+            <button
+              className="auth-modern-primary-btn"
+              style={{ marginTop: 8 }}
+              onClick={() => setCodeRequested(false)}
+            >
+              Back
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -369,11 +355,11 @@ function AppContent(props: { inviteToken?: string }) {
 
   if (auth.loading) {
     return (
-      <div className="auth-screen" aria-live="polite">
-        <div className="auth-card">
+      <div className="auth-modern-screen" aria-live="polite">
+        <div className="auth-modern-card" style={{ textAlign: "center" }}>
           <p className="auth-eyebrow">Agent Studio</p>
-          <h1>正在检查登录状态</h1>
-          <p>正在读取账号、组织和当前会话上下文。</p>
+          <h1 className="auth-modern-logo">正在检查登录状态</h1>
+          <p className="auth-modern-subtitle" style={{marginTop: 8}}>正在读取账号、组织和当前会话上下文。</p>
         </div>
       </div>
     );
@@ -385,14 +371,14 @@ function AppContent(props: { inviteToken?: string }) {
 
   if (adminEligible && view === "admin") {
     return (
-      <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>管理控制台加载中...</p></div></div>}>
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>管理控制台加载中...</p></div></div>}>
         <AdminShellLazy currentUser={auth.user} onOpenPortal={openPortal} onSignOut={() => void auth.signOut()} />
       </Suspense>
     );
   }
 
   return (
-    <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>工作台加载中...</p></div></div>}>
+    <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>工作台加载中...</p></div></div>}>
       <PortalShellLazy
         currentUser={auth.user}
         onOpenAdmin={openAdmin}
@@ -409,7 +395,7 @@ export default function App() {
 
   if (publicShareToken) {
     return (
-      <Suspense fallback={<div className="auth-screen"><div className="auth-card"><p>公开链接加载中...</p></div></div>}>
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>公开链接加载中...</p></div></div>}>
         <PublicSharePageLazy token={publicShareToken} />
       </Suspense>
     );
