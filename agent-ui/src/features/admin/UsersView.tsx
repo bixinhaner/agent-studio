@@ -1,6 +1,6 @@
 import { Edit, Search, Shield } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Empty, Input, Select, Space, Switch, Table, Tag, Tooltip } from "antd";
+import { Alert, Button, Drawer, Empty, Input, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { UserRoleEditor } from "../rbac/UserRoleEditor";
@@ -132,6 +132,7 @@ function upsertOrganization(
 }
 
 export function UsersView() {
+  const [activeTab, setActiveTab] = useState<"users" | "orgs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [organizations, setOrganizations] = useState<AdminCustomerOrganization[]>([]);
   const [loading, setLoading] = useState(true);
@@ -511,40 +512,57 @@ export function UsersView() {
   ];
 
   return (
-    <div className="admin-page-container">
-      <div className="admin-page-header">
-        <div>
-          <h1 className="admin-page-title">用户治理</h1>
-          <p className="admin-page-desc">内部管理员统一维护客户组织，并将外部用户邀请到指定组织。</p>
+    <>
+    <div className="admin-page-container" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0, paddingBottom: 0 }}>
+      <div style={{ flex: "none", marginBottom: 16 }}>
+        <div className="admin-page-header" style={{ paddingBottom: 16 }}>
+          <div>
+            <h1 className="admin-page-title">用户治理</h1>
+            <p className="admin-page-desc">平台所有成员的管理和外部组织邀请等维护工作。</p>
+          </div>
+          <Space wrap>
+            <Tag color="blue" style={{ borderRadius: "var(--admin-radius-full)" }}>
+              {activeTab === "users" ? `筛选命中 ${filteredUsers.length} 人` : `当前 ${organizations.length} 个客户组织`}
+            </Tag>
+          </Space>
         </div>
-        <Space wrap>
-          <Tag color="blue" style={{ borderRadius: "var(--admin-radius-full)" }}>
-            筛选结果 {filteredUsers.length} 人
-          </Tag>
-        </Space>
+        <Tabs 
+          activeKey={activeTab} 
+          onChange={(k) => setActiveTab(k as "users" | "orgs")} 
+          items={[
+            { key: "users", label: "成员列表" },
+            { key: "orgs", label: "客户组织与邀请" }
+          ]}
+          style={{ marginBottom: -16 }}
+        />
       </div>
 
-      <div className="admin-page-summary-grid">
-        {summaryItems.map((item) => (
-          <section key={item.label} className="admin-page-summary-card">
-            <div className="admin-page-summary-label">{item.label}</div>
-            <div className="admin-page-summary-value">{item.value}</div>
-            <div className="admin-page-summary-meta">{item.meta}</div>
-          </section>
-        ))}
-      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16, flexShrink: 0 }} /> : null}
+        {successText ? <Alert type="success" showIcon message={successText} style={{ marginBottom: 16, flexShrink: 0 }} /> : null}
 
-      {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16 }} /> : null}
-      {successText ? <Alert type="success" showIcon message={successText} style={{ marginBottom: 16 }} /> : null}
+        <div style={{ display: activeTab === "users" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div className="admin-page-summary-grid">
+            {summaryItems.map((item) => (
+              <section key={item.label} className="admin-page-summary-card">
+                <div className="admin-page-summary-label">{item.label}</div>
+                <div className="admin-page-summary-value">{item.value}</div>
+                <div className="admin-page-summary-meta">{item.meta}</div>
+              </section>
+            ))}
+          </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isNarrowScreen ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
-          gap: 16,
-          marginBottom: 16
-        }}
-      >
+        </div>
+
+        <div style={{ display: activeTab === "orgs" ? "block" : "none" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrowScreen ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
+              gap: 16,
+              marginBottom: 16
+            }}
+          >
         <section className="admin-page-summary-card" aria-label="创建客户组织">
           <div className="admin-page-summary-label">创建客户组织</div>
           <div className="admin-page-summary-meta" style={{ marginBottom: 16 }}>
@@ -707,7 +725,10 @@ export function UsersView() {
           </div>
         )}
       </section>
+    </div>
 
+    {/* User list table wrapper moved inside users tab above */}
+    {activeTab === "users" && (
       <div
         style={{
           display: "flex",
@@ -715,7 +736,8 @@ export function UsersView() {
           flex: 1,
           minHeight: isNarrowScreen ? 420 : 0,
           padding: 0,
-          background: "transparent"
+          background: "transparent",
+          marginTop: 16
         }}
       >
         <div
@@ -820,7 +842,7 @@ export function UsersView() {
               rowKey="id"
               pagination={false}
               loading={loading}
-              scroll={{ y: 640, x: 1260 }}
+              scroll={{ y: "calc(100vh - 380px)", x: 1260 }}
               virtual
               size="middle"
               rowClassName={() => "admin-table-row-hover"}
@@ -828,6 +850,9 @@ export function UsersView() {
           )}
         </div>
       </div>
+    )}
+    </div>
+  </div>
 
       <Drawer
         title="编辑用户设置"
@@ -970,6 +995,6 @@ export function UsersView() {
           onCancel={() => setRoleEditorUserId(null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }
