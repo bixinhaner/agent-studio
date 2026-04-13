@@ -83,6 +83,9 @@ NS = {
     "v": "urn:schemas-microsoft-com:vml",
     "cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
     "dc": "http://purl.org/dc/elements/1.1/",
+    "ep": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "cust": "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
+    "vt": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
 }
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -186,6 +189,35 @@ def normalize_toc_link_text(text: str) -> str:
     normalized = re.sub(r"(?<=[A-Za-z\u4e00-\u9fff）)])\d+$", "", normalized).strip()
     normalized = re.sub(r"^((?:\d+\.)+\d*|\d+\.)(?=[A-Za-z\u4e00-\u9fff])", r"\1 ", normalized)
     return normalized
+
+
+def flatten_markdown_link_text(text: str) -> str:
+    flattened = text
+    pattern = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+    while True:
+        updated = pattern.sub(r"\1", flattened)
+        if updated == flattened:
+            break
+        flattened = updated
+    return clean_text(flattened)
+
+
+def collapse_adjacent_markdown_links(text: str) -> str:
+    collapsed = text
+    pattern = re.compile(r"\[([^\]]+)\]\((#[^)]+)\)\s+\[([^\]]+)\]\(\2\)")
+    while True:
+        updated = pattern.sub(lambda m: f"[{clean_text(m.group(1) + ' ' + m.group(3))}]({m.group(2)})", collapsed)
+        if updated == collapsed:
+            break
+        collapsed = updated
+    return collapsed
+
+
+def parse_docproperty_name(instruction: str) -> str:
+    match = re.search(r"\bDOCPROPERTY\s+(?:\"([^\"]+)\"|([^\s\\]+))", instruction, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return clean_text(match.group(1) or match.group(2) or "")
 
 
 def detect_docx_container(path: Path) -> tuple[str, str]:
@@ -566,6 +598,8 @@ class DocxMarkdownConverter:
         self.image_counter = 0
         self.image_sequence_counter = 0
         self.core_properties: dict[str, str] = {}
+        self.document_properties: dict[str, str] = {}
+        self.document_properties_lookup: dict[str, str] = {}
         self.heading_index: list[dict[str, object]] = []
         self.bookmarks_index: list[dict[str, object]] = []
         self.external_link_index: list[dict[str, str]] = []
@@ -629,6 +663,7 @@ class DocxMarkdownConverter:
             "title": title_info["title"],
             "title_resolution": title_info,
             "core_properties": self.core_properties,
+            "document_properties": self.document_properties,
             "stats": self.stats,
             "headings": self.heading_index,
             "bookmarks": self.bookmarks_index,
@@ -862,12 +897,46 @@ class DocxMarkdownConverter:
     def _load_core_properties(self, archive: zipfile.ZipFile) -> None:
         core_name = "docProps/core.xml"
         if core_name not in archive.namelist():
+            root = None
+        else:
+            root = ET.fromstring(archive.read(core_name))
+        if root is not None:
+            for key in ("title", "subject", "creator", "description"):
+                node = root.find(f"dc:{key}", NS) or root.find(f"cp:{key}", NS)
+                if node is not None and node.text:
+                    value = clean_text(node.text)
+                    self.core_properties[key] = value
+                    self._set_document_property(key, value)
+
+        custom_name = "docProps/custom.xml"
+        if custom_name in archive.namelist():
+            custom_root = ET.fromstring(archive.read(custom_name))
+            for prop in custom_root.findall("cust:property", NS):
+                name = clean_text(prop.get("name") or "")
+                if not name:
+                    continue
+                value = clean_text("".join(prop.itertext()))
+                if value:
+                    self._set_document_property(name, value)
+
+        app_name = "docProps/app.xml"
+        if app_name in archive.namelist():
+            app_root = ET.fromstring(archive.read(app_name))
+            for key in ("Company", "Manager", "Application", "AppVersion"):
+                node = app_root.find(f"ep:{key}", NS)
+                if node is not None and node.text:
+                    self._set_document_property(key, clean_text(node.text))
+
+    def _set_document_property(self, name: str, value: str) -> None:
+        clean_name = clean_text(name)
+        clean_value = clean_text(value)
+        if not clean_name or not clean_value:
             return
-        root = ET.fromstring(archive.read(core_name))
-        for key in ("title", "subject", "creator", "description"):
-            node = root.find(f"dc:{key}", NS) or root.find(f"cp:{key}", NS)
-            if node is not None and node.text:
-                self.core_properties[key] = clean_text(node.text)
+        self.document_properties[clean_name] = clean_value
+        self.document_properties_lookup[normalize_title_key(clean_name)] = clean_value
+
+    def _lookup_document_property(self, name: str) -> str:
+        return self.document_properties_lookup.get(normalize_title_key(name), "")
 
     def _load_supporting_parts(self, archive: zipfile.ZipFile) -> None:
         names = archive.namelist()
@@ -907,6 +976,7 @@ class DocxMarkdownConverter:
             if not instr:
                 continue
             targets = extract_bookmark_targets_from_instr(instr)
+            property_name = parse_docproperty_name(instr)
             self.referenced_bookmarks.update(targets)
             display_text = clean_text("".join(node.text or "" for node in field_simple.findall(".//w:t", NS)))
             self.field_index.append(
@@ -915,6 +985,8 @@ class DocxMarkdownConverter:
                     "instruction": instr,
                     "targets": targets,
                     "display_text": display_text,
+                    "doc_property_name": property_name or None,
+                    "doc_property_value": self._lookup_document_property(property_name) if property_name else None,
                 }
             )
             self.feature_flags["contains_fields"] = True
@@ -927,6 +999,7 @@ class DocxMarkdownConverter:
                 continue
             instr = " ".join(instrs)
             targets = extract_bookmark_targets_from_instr(instr)
+            property_name = parse_docproperty_name(instr)
             self.referenced_bookmarks.update(targets)
             display_text = clean_text("".join(node.text or "" for node in paragraph.findall(".//w:t", NS)))
             self.field_index.append(
@@ -935,6 +1008,8 @@ class DocxMarkdownConverter:
                     "instruction": instr,
                     "targets": targets,
                     "display_text": display_text,
+                    "doc_property_name": property_name or None,
+                    "doc_property_value": self._lookup_document_property(property_name) if property_name else None,
                 }
             )
             self.feature_flags["contains_fields"] = True
@@ -1124,6 +1199,7 @@ class DocxMarkdownConverter:
             text = segment.value.strip()
             if not text:
                 continue
+            text = collapse_adjacent_markdown_links(text)
             is_caption = looks_like_image_caption(text)
             if is_caption and self.pending_image_sequences:
                 self._assign_caption_to_pending_image(text)
@@ -1178,7 +1254,7 @@ class DocxMarkdownConverter:
 
     def _extract_inline_tokens(self, node: ET.Element, archive: zipfile.ZipFile) -> list[InlineToken]:
         tokens: list[InlineToken] = []
-        self._append_node_tokens(node, tokens, archive)
+        self._append_child_sequence_tokens(list(node), tokens, archive)
         compact: list[InlineToken] = []
         for token in tokens:
             if token.kind == "text":
@@ -1190,15 +1266,27 @@ class DocxMarkdownConverter:
                 compact.append(token)
         return compact
 
+    def _append_child_sequence_tokens(self, children: list[ET.Element], tokens: list[InlineToken], archive: zipfile.ZipFile) -> None:
+        index = 0
+        while index < len(children):
+            consumed, field_tokens = self._extract_field_sequence(children, index, archive)
+            if consumed:
+                tokens.extend(field_tokens)
+                index += consumed
+                continue
+            self._append_node_tokens(children[index], tokens, archive)
+            index += 1
+
     def _append_node_tokens(self, node: ET.Element, tokens: list[InlineToken], archive: zipfile.ZipFile) -> None:
-        for child in list(node):
-            if child.tag == qn("w", "hyperlink"):
-                rel_id = child.get(qn("r", "id"))
-                anchor = child.get(qn("w", "anchor"))
+        children = list(node)
+        if children:
+            if node.tag == qn("w", "hyperlink"):
+                rel_id = node.get(qn("r", "id"))
+                anchor = node.get(qn("w", "anchor"))
                 inner_tokens: list[InlineToken] = []
-                self._append_node_tokens(child, inner_tokens, archive)
+                self._append_child_sequence_tokens(children, inner_tokens, archive)
                 if anchor and inner_tokens and all(token.kind == "text" for token in inner_tokens):
-                    link_text = clean_text("".join(token.value for token in inner_tokens))
+                    link_text = flatten_markdown_link_text("".join(token.value for token in inner_tokens))
                     if anchor.startswith("_Toc"):
                         link_text = normalize_toc_link_text(link_text)
                     target_anchor = bookmark_anchor_id(anchor)
@@ -1208,59 +1296,147 @@ class DocxMarkdownConverter:
                         tokens.append(InlineToken("text", f"[{link_text}](#{target_anchor})"))
                     else:
                         tokens.append(InlineToken("text", f"#{target_anchor}"))
-                elif rel_id and rel_id in self.external_links and inner_tokens and all(token.kind == "text" for token in inner_tokens):
-                    link_text = clean_text("".join(token.value for token in inner_tokens))
+                    return
+                if rel_id and rel_id in self.external_links and inner_tokens and all(token.kind == "text" for token in inner_tokens):
+                    link_text = flatten_markdown_link_text("".join(token.value for token in inner_tokens))
                     link_url = self.external_links[rel_id]
                     if link_text:
                         self.external_link_index.append({"text": link_text, "url": link_url})
                         tokens.append(InlineToken("text", f"[{link_text}]({link_url})"))
                     else:
                         tokens.append(InlineToken("text", link_url))
-                else:
-                    tokens.extend(inner_tokens)
-                continue
+                    return
+                tokens.extend(inner_tokens)
+                return
+            self._append_child_sequence_tokens(children, tokens, archive)
+            return
 
-            if child.tag in {qn("w", "r"), qn("w", "smartTag"), qn("w", "sdt"), qn("w", "ins")}:
-                self._append_node_tokens(child, tokens, archive)
-                continue
+        if node.tag == qn("w", "t"):
+            if node.text:
+                tokens.append(InlineToken("text", normalize_text(node.text)))
+            return
+        if node.tag == qn("w", "instrText"):
+            return
+        if node.tag == qn("w", "tab"):
+            tokens.append(InlineToken("text", "\t"))
+            return
+        if node.tag in {qn("w", "br"), qn("w", "cr")}:
+            br_type = node.get(qn("w", "type"), "")
+            tokens.append(InlineToken("text", "\n---\n" if br_type == "page" else "\n"))
+            return
+        if node.tag in {qn("w", "noBreakHyphen"), qn("w", "softHyphen")}:
+            tokens.append(InlineToken("text", "-"))
+            return
+        if node.tag == qn("w", "footnoteReference"):
+            note_id = node.get(qn("w", "id"))
+            if note_id and note_id in self.footnote_map:
+                if note_id not in self._seen_footnote_ids:
+                    self._seen_footnote_ids.add(note_id)
+                    self.referenced_footnote_ids.append(note_id)
+                tokens.append(InlineToken("text", f"[^{f'fn-{note_id}'}]"))
+            return
+        if node.tag == qn("w", "endnoteReference"):
+            note_id = node.get(qn("w", "id"))
+            if note_id and note_id in self.endnote_map:
+                if note_id not in self._seen_endnote_ids:
+                    self._seen_endnote_ids.add(note_id)
+                    self.referenced_endnote_ids.append(note_id)
+                tokens.append(InlineToken("text", f"[^{f'en-{note_id}'}]"))
+            return
+        if node.tag in {qn("w", "drawing"), qn("w", "pict")}:
+            tokens.extend(self._extract_embedded_tokens_from_node(node, archive))
+            return
 
-            if child.tag == qn("w", "t"):
-                if child.text:
-                    tokens.append(InlineToken("text", normalize_text(child.text)))
-                continue
+    def _run_field_char_type(self, node: ET.Element) -> str | None:
+        if node.tag != qn("w", "r"):
+            return None
+        fld_char = node.find("w:fldChar", NS)
+        if fld_char is None:
+            return None
+        return fld_char.get(qn("w", "fldCharType"))
 
-            if child.tag == qn("w", "tab"):
-                tokens.append(InlineToken("text", "\t"))
-                continue
+    def _extract_field_sequence(
+        self,
+        children: list[ET.Element],
+        start_index: int,
+        archive: zipfile.ZipFile,
+    ) -> tuple[int, list[InlineToken]]:
+        if self._run_field_char_type(children[start_index]) != "begin":
+            return 0, []
 
-            if child.tag in {qn("w", "br"), qn("w", "cr")}:
-                br_type = child.get(qn("w", "type"), "")
-                tokens.append(InlineToken("text", "\n---\n" if br_type == "page" else "\n"))
+        instruction_parts: list[str] = []
+        result_tokens: list[InlineToken] = []
+        mode = "instruction"
+        index = start_index + 1
+        while index < len(children):
+            child = children[index]
+            field_type = self._run_field_char_type(child)
+            if field_type == "separate":
+                mode = "result"
+                index += 1
                 continue
+            if field_type == "end":
+                instruction = clean_text("".join(instruction_parts))
+                return index - start_index + 1, self._render_field_result(instruction, result_tokens)
+            if mode == "instruction":
+                for instr in child.findall(".//w:instrText", NS):
+                    if instr.text:
+                        instruction_parts.append(instr.text)
+            else:
+                self._append_field_result_node_tokens(child, result_tokens, archive)
+            index += 1
+        return 0, []
 
-            if child.tag == qn("w", "footnoteReference"):
-                note_id = child.get(qn("w", "id"))
-                if note_id and note_id in self.footnote_map:
-                    if note_id not in self._seen_footnote_ids:
-                        self._seen_footnote_ids.add(note_id)
-                        self.referenced_footnote_ids.append(note_id)
-                    tokens.append(InlineToken("text", f"[^{f'fn-{note_id}'}]"))
-                continue
+    def _append_field_result_node_tokens(self, node: ET.Element, tokens: list[InlineToken], archive: zipfile.ZipFile) -> None:
+        if node.tag == qn("w", "hyperlink"):
+            self._append_node_tokens(node, tokens, archive)
+            return
+        children = list(node)
+        if children:
+            self._append_child_sequence_tokens(children, tokens, archive)
+            return
+        if node.tag == qn("w", "t"):
+            if node.text:
+                tokens.append(InlineToken("text", normalize_text(node.text)))
+            return
+        if node.tag in {qn("w", "noBreakHyphen"), qn("w", "softHyphen")}:
+            tokens.append(InlineToken("text", "-"))
+            return
+        if node.tag == qn("w", "tab"):
+            tokens.append(InlineToken("text", "\t"))
+            return
+        if node.tag in {qn("w", "br"), qn("w", "cr")}:
+            tokens.append(InlineToken("text", "\n"))
+            return
 
-            if child.tag == qn("w", "endnoteReference"):
-                note_id = child.get(qn("w", "id"))
-                if note_id and note_id in self.endnote_map:
-                    if note_id not in self._seen_endnote_ids:
-                        self._seen_endnote_ids.add(note_id)
-                        self.referenced_endnote_ids.append(note_id)
-                    tokens.append(InlineToken("text", f"[^{f'en-{note_id}'}]"))
-                continue
+    def _render_field_result(self, instruction: str, result_tokens: list[InlineToken]) -> list[InlineToken]:
+        property_name = parse_docproperty_name(instruction)
+        property_value = self._lookup_document_property(property_name) if property_name else ""
+        if not result_tokens:
+            if property_value:
+                return [InlineToken("text", property_value)]
+            return []
+        display_text = clean_text("".join(token.value for token in result_tokens if token.kind == "text"))
+        if not display_text:
+            if property_value:
+                return [InlineToken("text", property_value)]
+            return result_tokens
+        if property_value and normalize_title_key(display_text) == normalize_title_key(property_name):
+            display_text = property_value
 
-            if child.tag in {qn("w", "drawing"), qn("w", "pict")}:
-                tokens.extend(self._extract_embedded_tokens_from_node(child, archive))
-                continue
+        targets = extract_bookmark_targets_from_instr(instruction)
+        if targets:
+            target = targets[0]
+            href = f"#{bookmark_anchor_id(target)}"
+            self.feature_flags["contains_internal_links"] = True
+            self.internal_link_index.append({"text": display_text, "target": target, "href": href})
+            return [InlineToken("text", f"[{display_text}]({href})")]
 
-            self._append_node_tokens(child, tokens, archive)
+        if "HYPERLINK" in instruction.upper() and display_text.startswith(("http://", "https://")):
+            self.external_link_index.append({"text": display_text, "url": display_text})
+            return [InlineToken("text", f"[{display_text}]({display_text})")]
+
+        return result_tokens
 
     def _extract_embedded_tokens_from_node(self, node: ET.Element, archive: zipfile.ZipFile) -> list[InlineToken]:
         tokens: list[InlineToken] = []
@@ -1505,7 +1681,7 @@ class DocxMarkdownConverter:
                 parts: list[str] = []
                 for segment in self._tokens_to_segments(tokens):
                     if segment.kind == "text":
-                        parts.append(segment.value.replace("\n", "<br/>"))
+                        parts.append(collapse_adjacent_markdown_links(segment.value).replace("\n", "<br/>"))
                     else:
                         parts.append(segment.value)
                         sequence = int(segment.data.get("sequence", 0)) if segment.data else 0

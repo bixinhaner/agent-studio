@@ -1409,11 +1409,11 @@ body {
 .assistant-running-card {
   margin: 2px 0 0;
   width: min(420px, 100%);
-  border: 1px solid #c7dcff;
-  border-radius: 12px;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
   padding: 10px 12px;
   background: #ffffff;
-  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.08);
+  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.04);
 }
 
 .assistant-running-head {
@@ -1423,29 +1423,37 @@ body {
 }
 
 .assistant-running-spinner {
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  border: 2px solid #bfdbfe;
-  border-top-color: #2563eb;
-  animation: assistant-running-spin 900ms linear infinite;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #FF4614;
+  border: none;
+  animation: assistant-pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
   flex: 0 0 auto;
+  box-shadow: 0 0 8px rgba(255, 70, 20, 0.6);
+}
+
+@keyframes assistant-pulse-ring {
+  0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(255, 70, 20, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255, 70, 20, 0); }
+  100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(255, 70, 20, 0); }
 }
 
 .assistant-running-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1e3a8a;
+  color: #333;
 }
 
 .assistant-running-chip {
   margin-left: auto;
-  border: 1px solid #bfdbfe;
-  border-radius: 999px;
+  border: 1px solid #ffccba;
+  border-radius: 4px;
   padding: 1px 8px;
   font-size: 11px;
-  color: #1d4ed8;
-  background: #eff6ff;
+  color: #E63B0F;
+  background: #fff3f0;
+  font-variant-numeric: tabular-nums;
 }
 
 .assistant-running-phase {
@@ -1454,6 +1462,7 @@ body {
   font-size: 12px;
   line-height: 1.45;
   color: #334155;
+  font-variant-numeric: tabular-nums;
 }
 
 .assistant-running-track {
@@ -5483,17 +5492,35 @@ body.public-share-mode #root {
   border-color: #FF4614 !important;
   color: #fff !important;
   border-radius: 8px !important;
+  transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
 }
 .aui-composer-send:hover:not(:disabled),
 .aui-composer-send-btn:hover:not(:disabled) {
   background-color: #E63B0F !important;
 }
+.aui-composer-send:active:not(:disabled),
+.aui-composer-send-btn:active:not(:disabled) {
+  transform: scale(0.92) !important;
+}
 
 .aui-thread-welcome-suggestion {
   border-radius: 8px !important;
-  transition: all 0.2s !important;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
 }
 .aui-thread-welcome-suggestion:hover {
   border-color: #FF4614 !important;
   background: rgba(255, 70, 20, 0.05) !important;
+}
+.aui-thread-welcome-suggestion:active {
+  transform: scale(0.98) !important;
+}
+
+/* Global Tabular Numerics for Metrics */
+time,
+.token-count,
+.aui-md-inline-code,
+.aui-md-pre,
+.public-share-process-time,
+.assistant-file-change-meta span {
+  font-variant-numeric: tabular-nums;
 }

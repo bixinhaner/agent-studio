@@ -15,7 +15,9 @@ Current behavior:
 - heading numbering such as `2.1` and `3.2.1` is preserved when it comes from Word numbering definitions
 - ordered lists keep their numeric prefixes instead of being flattened to `-`
 - internal bookmarks are emitted as HTML anchors and internal Word links are preserved as Markdown `#anchor` links when possible
+- split cross-references that target the same bookmark, such as `[3](#...) [Initial Setup Wizard](#...)`, are collapsed into a single Markdown link
 - Word field instructions and cross-reference metadata are indexed into `meta.json`
+- `DOCPROPERTY` fields can fall back to resolved values from `docProps/core.xml`, `docProps/custom.xml`, and `docProps/app.xml`
 - unsupported `.docx` containers are reported in `report.json` instead of crashing the run
 - optional image annotation can call Codex vision and write short inline notes back into `doc.md`
 - repeated images can reuse a shared annotation cache instead of calling the model again
@@ -90,6 +92,7 @@ The validator checks:
 
 - `doc.md` exists and is non-empty
 - `meta.json` exists
+- `document_properties` in `meta.json` capture resolved DOCX core/custom/app property values when available
 - Markdown image references are not broken
 - generic title regressions
 - image-heavy documents with unusually low extracted text

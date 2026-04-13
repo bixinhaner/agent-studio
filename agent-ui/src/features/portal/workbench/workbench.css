@@ -41,9 +41,14 @@
   justify-content: space-between;
   height: 60px;
   padding: 0 16px;
-  background: var(--workbench-sidebar-bg);
+  background: rgba(251, 251, 251, 0.75);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
   border-bottom: 1px solid var(--workbench-border);
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .portal-topbar-left {
@@ -105,6 +110,7 @@
   background: transparent;
   color: var(--workbench-muted-text);
   box-shadow: none;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .portal-topbar-ghost-btn.ant-btn:hover {
@@ -112,14 +118,23 @@
   color: #111827;
 }
 
+.portal-topbar-ghost-btn.ant-btn:active {
+  transform: scale(0.92);
+}
+
 .portal-topbar-primary-btn.ant-btn {
-  border-radius: 6px;
+  border-radius: 8px;
   font-weight: 500;
   background-color: var(--workbench-accent);
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .portal-topbar-primary-btn.ant-btn:hover {
   background-color: var(--workbench-accent-strong);
+}
+
+.portal-topbar-primary-btn.ant-btn:active {
+  transform: scale(0.94);
 }
 
 [data-thread-list-root],
@@ -173,12 +188,16 @@
   border: none;
   cursor: pointer;
   font-weight: 500;
-  transition: background-color 0.2s;
+  transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   font-size: 14px;
 }
 
 .session-rail-new-btn:hover {
   background-color: var(--workbench-accent-strong);
+}
+
+.session-rail-new-btn:active {
+  transform: scale(0.95);
 }
 
 .session-rail-list {
@@ -357,9 +376,42 @@
 
 .preview-workbench-empty {
   margin: 10px 0 0;
-  color: #64748b;
+  padding: 24px 16px;
+  background: #fdfdfd;
+  border: 1px dashed #eaeaea;
+  border-radius: 8px;
+  color: #888;
   font-size: 13px;
+  text-align: center;
   line-height: 1.5;
+}
+
+/* Base class for shimmer skeletons */
+.shimmer-bg {
+  background: #f6f7f8;
+  background-image: linear-gradient(
+    to right,
+    #f6f7f8 0%,
+    #edeef1 20%,
+    #f6f7f8 40%,
+    #f6f7f8 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 800px 100%;
+  animation-duration: 1.5s;
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+  animation-name: placeholderShimmer;
+  animation-timing-function: linear;
+}
+
+@keyframes placeholderShimmer {
+  0% {
+    background-position: -468px 0;
+  }
+  100% {
+    background-position: 468px 0;
+  }
 }
 
 .preview-workbench-items {
