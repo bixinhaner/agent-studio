@@ -18,6 +18,7 @@ Current behavior:
 - split cross-references that target the same bookmark, such as `[3](#...) [Initial Setup Wizard](#...)`, are collapsed into a single Markdown link
 - Word field instructions and cross-reference metadata are indexed into `meta.json`
 - `DOCPROPERTY` fields can fall back to resolved values from `docProps/core.xml`, `docProps/custom.xml`, and `docProps/app.xml`
+- `INCLUDEPICTURE` field results are extracted as normal images when Word stores an embedded result image, and the field URL is preserved in the image metadata
 - unsupported `.docx` containers are reported in `report.json` instead of crashing the run
 - optional image annotation can call Codex vision and write short inline notes back into `doc.md`
 - repeated images can reuse a shared annotation cache instead of calling the model again
@@ -110,6 +111,7 @@ When `--annotate-images` is enabled:
 - decorative images may be marked in metadata without adding extra inline text
 - `.emf` and `.wmf` images are kept as Markdown image references but skipped for LLM annotation by default
 - repeated image annotations are reused from `<output-root>/.image-annotation-cache.jsonl` when the image content hash, model and prompt/schema versions match
+- images created from `INCLUDEPICTURE` fields keep the original field URL in `images[].field_source_url`
 - budget/rate/token-limit failures stop the current document so the next run can skip already completed documents and resume from the first incomplete one
 
 Inline Markdown shape:

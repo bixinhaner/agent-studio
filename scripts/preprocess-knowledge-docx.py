@@ -220,6 +220,13 @@ def parse_docproperty_name(instruction: str) -> str:
     return clean_text(match.group(1) or match.group(2) or "")
 
 
+def parse_includepicture_url(instruction: str) -> str:
+    match = re.search(r"\bINCLUDEPICTURE\b.*?\"([^\"]+)\"", instruction, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return clean_text(match.group(1))
+
+
 def detect_docx_container(path: Path) -> tuple[str, str]:
     try:
         with path.open("rb") as handle:
@@ -1383,17 +1390,29 @@ class DocxMarkdownConverter:
                     if instr.text:
                         instruction_parts.append(instr.text)
             else:
-                self._append_field_result_node_tokens(child, result_tokens, archive)
+                instruction = clean_text("".join(instruction_parts))
+                include_picture_url = parse_includepicture_url(instruction)
+                self._append_field_result_node_tokens(child, result_tokens, archive, include_picture_url)
             index += 1
         return 0, []
 
-    def _append_field_result_node_tokens(self, node: ET.Element, tokens: list[InlineToken], archive: zipfile.ZipFile) -> None:
+    def _append_field_result_node_tokens(
+        self,
+        node: ET.Element,
+        tokens: list[InlineToken],
+        archive: zipfile.ZipFile,
+        include_picture_url: str | None = None,
+    ) -> None:
         if node.tag == qn("w", "hyperlink"):
             self._append_node_tokens(node, tokens, archive)
             return
+        if node.tag in {qn("w", "drawing"), qn("w", "pict")}:
+            tokens.extend(self._extract_embedded_tokens_from_node(node, archive, include_picture_url))
+            return
         children = list(node)
         if children:
-            self._append_child_sequence_tokens(children, tokens, archive)
+            for child in children:
+                self._append_field_result_node_tokens(child, tokens, archive, include_picture_url)
             return
         if node.tag == qn("w", "t"):
             if node.text:
@@ -1412,9 +1431,13 @@ class DocxMarkdownConverter:
     def _render_field_result(self, instruction: str, result_tokens: list[InlineToken]) -> list[InlineToken]:
         property_name = parse_docproperty_name(instruction)
         property_value = self._lookup_document_property(property_name) if property_name else ""
+        include_picture_url = parse_includepicture_url(instruction)
         if not result_tokens:
             if property_value:
                 return [InlineToken("text", property_value)]
+            if include_picture_url:
+                self.external_link_index.append({"text": include_picture_url, "url": include_picture_url})
+                return [InlineToken("text", f"[{include_picture_url}]({include_picture_url})")]
             return []
         display_text = clean_text("".join(token.value for token in result_tokens if token.kind == "text"))
         if not display_text:
@@ -1438,7 +1461,12 @@ class DocxMarkdownConverter:
 
         return result_tokens
 
-    def _extract_embedded_tokens_from_node(self, node: ET.Element, archive: zipfile.ZipFile) -> list[InlineToken]:
+    def _extract_embedded_tokens_from_node(
+        self,
+        node: ET.Element,
+        archive: zipfile.ZipFile,
+        source_url: str | None = None,
+    ) -> list[InlineToken]:
         tokens: list[InlineToken] = []
         alt_text = ""
 
@@ -1457,16 +1485,16 @@ class DocxMarkdownConverter:
             if current.tag == qn("a", "blip"):
                 rel_id = current.get(qn("r", "embed")) or current.get(qn("r", "link"))
                 if rel_id:
-                    target = self.relationships.get(rel_id)
-                    if not target:
-                        self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
-                    else:
-                        occurrence = self._extract_image_target(target, archive, alt_text)
-                        if occurrence:
-                            markdown_path = str(occurrence["output_path"])
-                            tokens.append(
-                                InlineToken(
-                                    "image",
+                        target = self.relationships.get(rel_id)
+                        if not target:
+                            self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
+                        else:
+                            occurrence = self._extract_image_target(target, archive, alt_text, source_url)
+                            if occurrence:
+                                markdown_path = str(occurrence["output_path"])
+                                tokens.append(
+                                    InlineToken(
+                                        "image",
                                     f"![{alt_text or Path(markdown_path).stem}]({markdown_path})",
                                     {"sequence": occurrence["sequence"]},
                                 )
@@ -1476,16 +1504,16 @@ class DocxMarkdownConverter:
             if current.tag == qn("v", "imagedata"):
                 rel_id = current.get(qn("r", "id"))
                 if rel_id:
-                    target = self.relationships.get(rel_id)
-                    if not target:
-                        self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
-                    else:
-                        occurrence = self._extract_image_target(target, archive, alt_text)
-                        if occurrence:
-                            markdown_path = str(occurrence["output_path"])
-                            tokens.append(
-                                InlineToken(
-                                    "image",
+                        target = self.relationships.get(rel_id)
+                        if not target:
+                            self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
+                        else:
+                            occurrence = self._extract_image_target(target, archive, alt_text, source_url)
+                            if occurrence:
+                                markdown_path = str(occurrence["output_path"])
+                                tokens.append(
+                                    InlineToken(
+                                        "image",
                                     f"![{alt_text or Path(markdown_path).stem}]({markdown_path})",
                                     {"sequence": occurrence["sequence"]},
                                 )
@@ -1512,7 +1540,13 @@ class DocxMarkdownConverter:
             self.stats["textboxes"] += 1
         return blocks
 
-    def _extract_image_target(self, target: str, archive: zipfile.ZipFile, alt_text: str) -> dict[str, object] | None:
+    def _extract_image_target(
+        self,
+        target: str,
+        archive: zipfile.ZipFile,
+        alt_text: str,
+        source_url: str | None = None,
+    ) -> dict[str, object] | None:
         normalized_target = posixpath.normpath(posixpath.join("word", target.replace("\\", "/")))
         if normalized_target.upper().endswith("NULL"):
             return None
@@ -1543,6 +1577,7 @@ class DocxMarkdownConverter:
             "content_sha256": self.image_hashes.get(normalized_target),
             "file_suffix": Path(str(self.image_targets[normalized_target])).suffix.lower(),
             "container": "unknown",
+            "field_source_url": source_url or None,
         }
         self.image_occurrences.append(occurrence)
         self.image_occurrence_by_sequence[self.image_sequence_counter] = occurrence

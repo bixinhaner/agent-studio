@@ -7,6 +7,6 @@ export const PORTAL_ANTD_THEME: ThemeConfig = {
     colorBgContainer: "#ffffff",
     colorText: "#111827",
     colorTextSecondary: "#666666",
-    borderRadius: 8
+    borderRadius: 16
   }
 };
