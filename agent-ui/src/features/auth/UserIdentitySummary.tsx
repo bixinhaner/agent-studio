@@ -72,53 +72,36 @@ export function UserIdentitySummary(props: {
     <section className={props.compact ? "user-identity-card compact" : "user-identity-card"} aria-label="当前登录用户">
       <div className="user-identity-stack">
         <div className="user-identity-copy">
-          <p className="user-identity-name">{name}</p>
-          <p className="user-identity-meta">
+          <p className="user-identity-name" style={{ marginBottom: 4 }}>{name}</p>
+          <p className="user-identity-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
             <span className="user-identity-role">{roleLabel(props.user.role)}</span>
-            <span className="user-identity-divider" aria-hidden="true">
-              ·
-            </span>
-            <span>{userTypeLabel(props.user.userType)}</span>
-            <span className="user-identity-divider" aria-hidden="true">
-              ·
-            </span>
+            <span className="user-identity-divider" aria-hidden="true" style={{ margin: "0 6px" }}>·</span>
+            {organizationOptions.length > 1 ? (
+              <select
+                style={{ appearance: "auto", border: "none", background: "transparent", padding: 0, color: "inherit", fontSize: "inherit", cursor: "pointer", outline: "none", maxWidth: 120, textOverflow: "ellipsis" }}
+                title="切换组织"
+                value={auth.activeOrganization?.id ?? ""}
+                disabled={switchingOrganization}
+                onChange={(event) => void handleOrganizationChange(event.target.value)}
+              >
+                {organizationOptions.map((membership) =>
+                  membership.organization ? (
+                    <option key={membership.organization.id} value={membership.organization.id}>
+                      {membership.organization.name}
+                    </option>
+                  ) : null
+                )}
+              </select>
+            ) : (
+              <span>{activeOrganizationName}</span>
+            )}
+          </p>
+          <p className="user-identity-meta" style={{ marginTop: 2 }}>
             <span className="user-identity-email">{email}</span>
           </p>
         </div>
 
-        <div className="user-identity-org-row">
-          <span className="user-identity-org-label">当前组织</span>
-          {organizationOptions.length > 1 ? (
-            <select
-              className="user-identity-org-select"
-              value={auth.activeOrganization?.id ?? ""}
-              disabled={switchingOrganization}
-              onChange={(event) => void handleOrganizationChange(event.target.value)}
-            >
-              {organizationOptions.map((membership) =>
-                membership.organization ? (
-                  <option key={membership.organization.id} value={membership.organization.id}>
-                    {membership.organization.name}
-                  </option>
-                ) : null
-              )}
-            </select>
-          ) : (
-            <span className="user-identity-org-name">{activeOrganizationName}</span>
-          )}
-        </div>
-
-        {providerLabels.length ? (
-          <div className="user-identity-provider-list" aria-label="已绑定登录方式">
-            {providerLabels.map((label) => (
-              <span key={label} className="user-identity-provider-badge">
-                {label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {auth.error ? <p className="user-identity-alert">{auth.error}</p> : null}
+        {auth.error ? <p className="user-identity-alert" style={{ marginTop: 8 }}>{auth.error}</p> : null}
       </div>
 
       {props.onSignOut ? (
