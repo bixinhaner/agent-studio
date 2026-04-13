@@ -73,9 +73,9 @@ function membershipTypeLabel(membershipType: string): string {
     case "employee":
       return "员工";
     case "customer_admin":
-      return "客户管理员";
+      return "Admin";
     case "customer_member":
-      return "客户成员";
+      return "User";
     default:
       return membershipType || "未命名成员";
   }
@@ -96,7 +96,19 @@ function userContact(user: AdminUser): string {
 }
 
 function userPrimaryRole(user: AdminUser): string {
-  return user.primaryRole?.name || user.local.role;
+  if (user.primaryRole?.name) {
+    return user.primaryRole.name;
+  }
+  if (user.local.role === "employee") {
+    return userSource(user).userType === "external_user" ? "User" : "员工";
+  }
+  if (user.local.role === "admin") {
+    return "管理员";
+  }
+  if (user.local.role === "super_admin") {
+    return "超级管理员";
+  }
+  return user.local.role;
 }
 
 function userIdentitySources(user: AdminUser): string[] {
@@ -551,8 +563,8 @@ export function UsersView() {
               value={inviteMembershipType}
               onChange={setInviteMembershipType}
               options={[
-                { value: "customer_member", label: "客户成员" },
-                { value: "customer_admin", label: "客户管理员" }
+                { value: "customer_member", label: "User" },
+                { value: "customer_admin", label: "Admin" }
               ]}
               disabled={!organizations.length}
             />
@@ -830,7 +842,10 @@ export function UsersView() {
                 onChange={setRole}
                 style={{ width: "100%" }}
                 options={[
-                  { value: "employee", label: "普通员工 (Employee)" },
+                  {
+                    value: "employee",
+                    label: userSource(editingUser).userType === "external_user" ? "普通用户 (User)" : "普通员工 (Employee)"
+                  },
                   { value: "admin", label: "系统管理员 (Admin)" }
                 ]}
               />

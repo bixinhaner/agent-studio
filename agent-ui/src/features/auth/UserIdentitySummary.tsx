@@ -2,16 +2,16 @@ import { LogOutIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "./AuthProvider";
-import type { AuthUser } from "./api";
+import type { AuthUser, AuthUserType } from "./api";
 
-function roleLabel(role: string | undefined): string {
+function roleLabel(role: string | undefined, userType: AuthUserType | undefined): string {
   switch ((role || "").trim()) {
     case "super_admin":
       return "超级管理员";
     case "admin":
       return "管理员";
     case "employee":
-      return "员工";
+      return userType === "external_user" ? "User" : "员工";
     default:
       return role?.trim() || "未知角色";
   }
@@ -74,7 +74,7 @@ export function UserIdentitySummary(props: {
         <div className="user-identity-copy">
           <p className="user-identity-name" style={{ marginBottom: 4 }}>{name}</p>
           <p className="user-identity-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-            <span className="user-identity-role">{roleLabel(props.user.role)}</span>
+            <span className="user-identity-role">{roleLabel(props.user.role, props.user.userType)}</span>
             <span className="user-identity-divider" aria-hidden="true" style={{ margin: "0 6px" }}>·</span>
             {organizationOptions.length > 1 ? (
               <select

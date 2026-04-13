@@ -64,6 +64,19 @@ function formatInviteExpiry(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+function inviteMembershipTypeLabel(value: string | null | undefined): string {
+  switch ((value || "").trim()) {
+    case "customer_admin":
+      return "Admin";
+    case "customer_member":
+      return "User";
+    case "employee":
+      return "员工";
+    default:
+      return value?.trim() || "";
+  }
+}
+
 function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string }) {
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   const [inviteLoading, setInviteLoading] = useState(Boolean(props.inviteToken));
@@ -199,7 +212,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             </div>
             <p>
               {invite.emailHint ? `目标邮箱：${invite.emailHint}` : "已识别邀请链接。"}
-              {invite.membershipType ? ` 加入身份：${invite.membershipType}。` : ""}
+              {invite.membershipType ? ` 加入身份：${inviteMembershipTypeLabel(invite.membershipType)}。` : ""}
             </p>
             {invite.expiresAt ? <p>有效期截止：{formatInviteExpiry(invite.expiresAt)}</p> : null}
           </section>
@@ -229,7 +242,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             <div className="auth-option-copy">
               <p className="auth-option-kicker">外部用户</p>
               <h2>邮箱验证码登录</h2>
-              <p>适用于客户管理员、客户成员和受邀协作者。首次使用会根据邀请自动建立组织成员关系。</p>
+              <p>适用于外部组织的 Admin、User 和受邀协作者。首次使用会根据邀请自动建立组织成员关系。</p>
             </div>
 
             <label className="auth-field">
