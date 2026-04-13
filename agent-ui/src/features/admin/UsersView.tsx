@@ -220,58 +220,6 @@ export function UsersView() {
     });
   }, [filterText, users]);
 
-  const summaryItems = useMemo(() => {
-    const activeCount = users.filter((user) => user.effective.status === "active").length;
-    const internalCount = users.filter((user) => userSource(user).userType === "internal_employee").length;
-    const externalCount = users.filter((user) => userSource(user).userType === "external_user").length;
-    const multiOrgCount = users.filter((user) => userSource(user).organizations.length > 1).length;
-    const manualDisabledCount = users.filter((user) => user.local.manualDisabled).length;
-    const customerOrganizationCount = organizations.length;
-    const pendingInviteCount = organizations.reduce((total, organization) => total + organization.pendingInviteCount, 0);
-
-    return [
-      {
-        label: "总用户数",
-        value: String(users.length),
-        meta: filterText.trim() ? `当前筛选命中 ${filteredUsers.length} 人` : "平台内全部成员"
-      },
-      {
-        label: "客户组织",
-        value: String(customerOrganizationCount),
-        meta: "由内部管理员创建和维护"
-      },
-      {
-        label: "内部成员",
-        value: String(internalCount),
-        meta: "继续走钉钉组织同步链路"
-      },
-      {
-        label: "外部成员",
-        value: String(externalCount),
-        meta: "通过邀请和邮箱免密进入"
-      },
-      {
-        label: "待处理邀请",
-        value: String(pendingInviteCount),
-        meta: "尚未完成首次验证的外部用户"
-      },
-      {
-        label: "多组织成员",
-        value: String(multiOrgCount),
-        meta: "拥有 2 个及以上组织成员关系"
-      },
-      {
-        label: "正常可用",
-        value: String(activeCount),
-        meta: "当前仍可发起会话的成员"
-      },
-      {
-        label: "手动禁用",
-        value: String(manualDisabledCount),
-        meta: "被管理员显式关闭访问的成员"
-      }
-    ];
-  }, [filterText, filteredUsers.length, organizations, users]);
 
   function openEditor(user: AdminUser) {
     setEditingUserId(user.id);
@@ -541,18 +489,6 @@ export function UsersView() {
         {errorText ? <Alert type="error" showIcon message={errorText} style={{ marginBottom: 16, flexShrink: 0 }} /> : null}
         {successText ? <Alert type="success" showIcon message={successText} style={{ marginBottom: 16, flexShrink: 0 }} /> : null}
 
-        <div style={{ display: activeTab === "users" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <div className="admin-page-summary-grid">
-            {summaryItems.map((item) => (
-              <section key={item.label} className="admin-page-summary-card">
-                <div className="admin-page-summary-label">{item.label}</div>
-                <div className="admin-page-summary-value">{item.value}</div>
-                <div className="admin-page-summary-meta">{item.meta}</div>
-              </section>
-            ))}
-          </div>
-
-        </div>
 
         <div style={{ display: activeTab === "orgs" ? "block" : "none" }}>
           <div
