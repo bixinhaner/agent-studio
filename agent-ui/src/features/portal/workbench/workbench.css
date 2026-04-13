@@ -306,16 +306,16 @@
 }
 .aui-composer-root {
   border: 1px solid var(--workbench-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+  border-radius: 24px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
   background: #ffffff;
   transition: border-color 0.2s, box-shadow 0.2s;
   margin: 0 20px 20px 20px;
 }
 
 .aui-composer-root:focus-within {
-  border-color: var(--workbench-accent);
-  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.1);
+  border-color: #FF4614;
+  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.12), 0 0 0 3px rgba(255, 70, 20, 0.1);
 }
 
 .portal-topbar-runtime-chip {
