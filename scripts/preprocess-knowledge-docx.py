@@ -59,6 +59,21 @@ GENERIC_TITLES = {
     "版权声明",
     "免责声明",
 }
+ROMAN_NUMERALS = (
+    (1000, "M"),
+    (900, "CM"),
+    (500, "D"),
+    (400, "CD"),
+    (100, "C"),
+    (90, "XC"),
+    (50, "L"),
+    (40, "XL"),
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
+)
 
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -88,6 +103,48 @@ def normalize_text(value: str) -> str:
 
 def clean_text(value: str) -> str:
     return re.sub(r"[ \t]+", " ", normalize_text(value)).strip()
+
+
+def alpha_index(value: int, uppercase: bool) -> str:
+    if value <= 0:
+        return str(value)
+    letters: list[str] = []
+    current = value
+    while current > 0:
+        current -= 1
+        current, remainder = divmod(current, 26)
+        letters.append(chr(ord("A") + remainder))
+    rendered = "".join(reversed(letters))
+    return rendered if uppercase else rendered.lower()
+
+
+def roman_index(value: int, uppercase: bool) -> str:
+    if value <= 0:
+        return str(value)
+    remaining = value
+    parts: list[str] = []
+    for integer, numeral in ROMAN_NUMERALS:
+        while remaining >= integer:
+            remaining -= integer
+            parts.append(numeral)
+    rendered = "".join(parts)
+    return rendered if uppercase else rendered.lower()
+
+
+def format_number_value(value: int, num_fmt: str) -> str:
+    if num_fmt in {"decimal", "decimalEnclosedCircle", "decimalEnclosedParen"}:
+        return str(value)
+    if num_fmt == "decimalZero":
+        return f"{value:02d}"
+    if num_fmt == "upperLetter":
+        return alpha_index(value, uppercase=True)
+    if num_fmt == "lowerLetter":
+        return alpha_index(value, uppercase=False)
+    if num_fmt == "upperRoman":
+        return roman_index(value, uppercase=True)
+    if num_fmt == "lowerRoman":
+        return roman_index(value, uppercase=False)
+    return str(value)
 
 
 def normalize_title_key(value: str) -> str:
@@ -464,6 +521,13 @@ class DocxMarkdownConverter:
             "table_colspans": 0,
         }
         self.style_names: dict[str, str] = {}
+        self.style_based_on: dict[str, str] = {}
+        self.style_numpr_direct: dict[str, tuple[str | None, int | None]] = {}
+        self.style_numpr_cache: dict[str, tuple[str | None, int | None]] = {}
+        self.abstract_numbering: dict[str, dict[int, dict[str, object]]] = {}
+        self.num_id_to_abstract: dict[str, str] = {}
+        self.num_start_overrides: dict[str, dict[int, int]] = {}
+        self.numbering_state: dict[str, dict[int, int]] = {}
         self.relationships: dict[str, str] = {}
         self.external_links: dict[str, str] = {}
         self.image_targets: dict[str, str] = {}
@@ -498,6 +562,7 @@ class DocxMarkdownConverter:
             "contains_comments": False,
             "contains_complex_tables": False,
             "contains_image_annotations": False,
+            "contains_heading_numbers": False,
         }
 
     def convert(self) -> dict[str, object]:
@@ -546,6 +611,7 @@ class DocxMarkdownConverter:
     def _convert_docx(self) -> str:
         with zipfile.ZipFile(self.docx_path) as archive:
             self._load_styles(archive)
+            self._load_numbering(archive)
             self._load_relationships(archive)
             self._load_core_properties(archive)
             self._load_supporting_parts(archive)
@@ -591,6 +657,151 @@ class DocxMarkdownConverter:
             name = style.find("w:name", NS)
             if style_id:
                 self.style_names[style_id] = name.get(qn("w", "val")) if name is not None else style_id
+                based_on = style.find("w:basedOn", NS)
+                if based_on is not None and based_on.get(qn("w", "val")):
+                    self.style_based_on[style_id] = based_on.get(qn("w", "val")) or ""
+                ppr = style.find("w:pPr", NS)
+                self.style_numpr_direct[style_id] = self._parse_num_pr(ppr.find("w:numPr", NS) if ppr is not None else None)
+
+    def _load_numbering(self, archive: zipfile.ZipFile) -> None:
+        numbering_name = "word/numbering.xml"
+        if numbering_name not in archive.namelist():
+            return
+        root = ET.fromstring(archive.read(numbering_name))
+        for abstract in root.findall("w:abstractNum", NS):
+            abstract_id = abstract.get(qn("w", "abstractNumId")) or ""
+            if not abstract_id:
+                continue
+            levels: dict[int, dict[str, object]] = {}
+            for lvl in abstract.findall("w:lvl", NS):
+                level_value = lvl.get(qn("w", "ilvl"))
+                if level_value is None:
+                    continue
+                level = int(level_value)
+                start = lvl.find("w:start", NS)
+                lvl_text = lvl.find("w:lvlText", NS)
+                num_fmt = lvl.find("w:numFmt", NS)
+                suff = lvl.find("w:suff", NS)
+                levels[level] = {
+                    "start": int(start.get(qn("w", "val"), "1")) if start is not None else 1,
+                    "lvl_text": lvl_text.get(qn("w", "val")) if lvl_text is not None else f"%{level + 1}",
+                    "num_fmt": num_fmt.get(qn("w", "val")) if num_fmt is not None else "decimal",
+                    "suff": suff.get(qn("w", "val")) if suff is not None else "tab",
+                }
+            if levels:
+                self.abstract_numbering[abstract_id] = levels
+
+        for num in root.findall("w:num", NS):
+            num_id = num.get(qn("w", "numId")) or ""
+            abstract_id_node = num.find("w:abstractNumId", NS)
+            abstract_id = abstract_id_node.get(qn("w", "val")) if abstract_id_node is not None else None
+            if not num_id or not abstract_id:
+                continue
+            self.num_id_to_abstract[num_id] = abstract_id
+            overrides: dict[int, int] = {}
+            for override in num.findall("w:lvlOverride", NS):
+                level_value = override.get(qn("w", "ilvl"))
+                start_override = override.find("w:startOverride", NS)
+                if level_value is None or start_override is None:
+                    continue
+                overrides[int(level_value)] = int(start_override.get(qn("w", "val"), "1"))
+            if overrides:
+                self.num_start_overrides[num_id] = overrides
+
+    def _parse_num_pr(self, num_pr: ET.Element | None) -> tuple[str | None, int | None]:
+        if num_pr is None:
+            return None, None
+        num_id_node = num_pr.find("w:numId", NS)
+        ilvl_node = num_pr.find("w:ilvl", NS)
+        num_id = num_id_node.get(qn("w", "val")) if num_id_node is not None else None
+        ilvl = int(ilvl_node.get(qn("w", "val"), "0")) if ilvl_node is not None else None
+        if num_id in {None, "", "0"}:
+            num_id = None
+        return num_id, ilvl
+
+    def _resolved_style_numpr(self, style_id: str | None) -> tuple[str | None, int | None]:
+        if not style_id:
+            return None, None
+        cached = self.style_numpr_cache.get(style_id)
+        if cached is not None:
+            return cached
+        direct_num_id, direct_ilvl = self.style_numpr_direct.get(style_id, (None, None))
+        inherited_num_id, inherited_ilvl = self._resolved_style_numpr(self.style_based_on.get(style_id))
+        resolved = (
+            direct_num_id or inherited_num_id,
+            direct_ilvl if direct_ilvl is not None else inherited_ilvl,
+        )
+        self.style_numpr_cache[style_id] = resolved
+        return resolved
+
+    def _effective_num_pr(self, paragraph: ET.Element, style_id: str | None) -> tuple[str | None, int | None]:
+        ppr = paragraph.find("w:pPr", NS)
+        direct_num_id, direct_ilvl = self._parse_num_pr(ppr.find("w:numPr", NS) if ppr is not None else None)
+        style_num_id, style_ilvl = self._resolved_style_numpr(style_id)
+        num_id = direct_num_id or style_num_id
+        ilvl = direct_ilvl if direct_ilvl is not None else style_ilvl
+        if num_id in {None, "", "0"} or ilvl is None:
+            return None, None
+        return num_id, ilvl
+
+    def _advance_numbering(self, num_id: str, ilvl: int) -> dict[str, object] | None:
+        abstract_id = self.num_id_to_abstract.get(num_id)
+        if not abstract_id:
+            return None
+        levels = self.abstract_numbering.get(abstract_id)
+        if not levels or ilvl not in levels:
+            return None
+
+        for level in range(ilvl):
+            if level not in levels:
+                continue
+            if level not in self.numbering_state.setdefault(num_id, {}):
+                self.numbering_state[num_id][level] = self.num_start_overrides.get(num_id, {}).get(
+                    level,
+                    int(levels[level].get("start", 1)),
+                )
+
+        state = self.numbering_state.setdefault(num_id, {})
+        for level in list(state.keys()):
+            if level > ilvl:
+                del state[level]
+
+        start_value = self.num_start_overrides.get(num_id, {}).get(ilvl, int(levels[ilvl].get("start", 1)))
+        state[ilvl] = start_value if ilvl not in state else int(state[ilvl]) + 1
+
+        current_level = levels[ilvl]
+        pattern = str(current_level.get("lvl_text") or f"%{ilvl + 1}")
+
+        def replace(match: re.Match[str]) -> str:
+            level = int(match.group(1)) - 1
+            if level not in state:
+                return ""
+            level_def = levels.get(level, {})
+            return format_number_value(int(state[level]), str(level_def.get("num_fmt") or "decimal"))
+
+        rendered = re.sub(r"%(\d+)", replace, pattern).strip()
+        return {
+            "num_id": num_id,
+            "ilvl": ilvl,
+            "prefix": rendered,
+            "num_fmt": str(current_level.get("num_fmt") or "decimal"),
+        }
+
+    def _paragraph_numbering(self, paragraph: ET.Element, style_id: str | None) -> dict[str, object] | None:
+        num_id, ilvl = self._effective_num_pr(paragraph, style_id)
+        if not num_id or ilvl is None:
+            return None
+        return self._advance_numbering(num_id, ilvl)
+
+    def _heading_has_number_prefix(self, text: str, prefix: str) -> bool:
+        candidate = clean_text(text)
+        normalized_prefixes = {
+            clean_text(prefix),
+            clean_text(prefix).rstrip("."),
+            clean_text(prefix).rstrip(".)"),
+        }
+        normalized_prefixes.discard("")
+        return any(candidate == normalized or candidate.startswith(f"{normalized} ") for normalized in normalized_prefixes)
 
     def _load_relationships(self, archive: zipfile.ZipFile) -> None:
         rels_name = "word/_rels/document.xml.rels"
@@ -722,7 +933,7 @@ class DocxMarkdownConverter:
         if self.heading_index and clean_text(self.heading_index[0]["text"]) == clean_text(title):
             return
         self.stats["headings"] += 1
-        self.heading_index.insert(0, {"level": 1, "text": title})
+        self.heading_index.insert(0, {"level": 1, "number": None, "text": title, "full_text": title})
 
     def _append_referenced_notes(self, blocks: list[str]) -> None:
         if self.referenced_footnote_ids:
@@ -772,24 +983,26 @@ class DocxMarkdownConverter:
         lowered = style_name.lower()
         return "quote" in lowered or "引用" in style_name
 
-    def _list_prefix(self, paragraph: ET.Element) -> str | None:
-        ppr = paragraph.find("w:pPr", NS)
-        if ppr is None:
+    def _list_prefix(self, numbering: dict[str, object] | None) -> str | None:
+        if not numbering:
             return None
-        num_pr = ppr.find("w:numPr", NS)
-        if num_pr is None:
-            return None
-        ilvl = num_pr.find("w:ilvl", NS)
-        level = int(ilvl.get(qn("w", "val"), "0")) if ilvl is not None else 0
+        level = int(numbering.get("ilvl", 0))
         self.stats["lists"] += 1
-        return f"{'  ' * level}- "
+        num_fmt = str(numbering.get("num_fmt") or "decimal")
+        if num_fmt == "bullet":
+            return f"{'  ' * level}- "
+        prefix = clean_text(str(numbering.get("prefix") or ""))
+        if not prefix:
+            return f"{'  ' * level}- "
+        return f"{'  ' * level}{prefix} "
 
     def _render_paragraph(self, paragraph: ET.Element, archive: zipfile.ZipFile) -> list[str]:
         self.stats["paragraphs"] += 1
         style_id, style_name = self._paragraph_style(paragraph)
         heading_level = self._heading_level(style_id, style_name)
         quote_style = self._is_quote_style(style_name)
-        list_prefix = self._list_prefix(paragraph)
+        numbering = self._paragraph_numbering(paragraph, style_id)
+        list_prefix = None if heading_level else self._list_prefix(numbering)
         tokens = self._extract_inline_tokens(paragraph, archive)
         if not tokens:
             return []
@@ -818,9 +1031,25 @@ class DocxMarkdownConverter:
             elif self.pending_image_sequences:
                 self.pending_image_sequences.clear()
             if heading_level and index == 0 and len(segments) == 1:
+                number_prefix = (
+                    clean_text(str(numbering.get("prefix") or ""))
+                    if numbering and str(numbering.get("num_fmt") or "") != "bullet"
+                    else ""
+                )
+                full_text = text
+                if number_prefix and not self._heading_has_number_prefix(text, number_prefix):
+                    full_text = f"{number_prefix} {text}"
+                    self.feature_flags["contains_heading_numbers"] = True
                 self.stats["headings"] += 1
-                self.heading_index.append({"level": min(heading_level, 6), "text": text})
-                outputs.append(f"{'#' * min(heading_level, 6)} {text}")
+                self.heading_index.append(
+                    {
+                        "level": min(heading_level, 6),
+                        "number": number_prefix or None,
+                        "text": text,
+                        "full_text": full_text,
+                    }
+                )
+                outputs.append(f"{'#' * min(heading_level, 6)} {full_text}")
             elif quote_style:
                 self.stats["quotes"] += 1
                 outputs.append("\n".join(f"> {line}" if line else ">" for line in text.splitlines()))

@@ -12,6 +12,8 @@ Current behavior:
 
 - the canonical document title is the source filename without extension
 - the extracted cover or heading title is kept in `meta.json.title_resolution`
+- heading numbering such as `2.1` and `3.2.1` is preserved when it comes from Word numbering definitions
+- ordered lists keep their numeric prefixes instead of being flattened to `-`
 - unsupported `.docx` containers are reported in `report.json` instead of crashing the run
 - optional image annotation can call Codex vision and write short inline notes back into `doc.md`
 - repeated images can reuse a shared annotation cache instead of calling the model again
