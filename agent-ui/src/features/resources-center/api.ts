@@ -3,9 +3,11 @@ import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/ap
 import type {
   CreateKnowledgeSetInput,
   DeleteKnowledgeSetResponse,
+  KnowledgeSetLibraryResponse,
   KnowledgeSetItemsResponse,
   KnowledgeSetListResponse,
   KnowledgeSetResponse,
+  KnowledgeSetTreeResponse,
   ResourcePoliciesResponse,
   ResourcePolicyInput,
   ResourcePolicyResourceType,
@@ -85,6 +87,60 @@ export async function putResourcePolicies(
 
 export async function fetchKnowledgeSetItems(knowledgeSetId: string): Promise<KnowledgeSetItemsResponse> {
   return api<KnowledgeSetItemsResponse>(`/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}/items`);
+}
+
+export async function fetchKnowledgeSetLibrary(knowledgeSetId: string): Promise<KnowledgeSetLibraryResponse> {
+  return api<KnowledgeSetLibraryResponse>(`/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}/summary`);
+}
+
+export async function fetchKnowledgeSetTree(
+  knowledgeSetId: string,
+  input: { path?: string; includeJsonl?: boolean } = {}
+): Promise<KnowledgeSetTreeResponse> {
+  const params = new URLSearchParams();
+  if (input.path?.trim()) {
+    params.set("path", input.path.trim());
+  }
+  if (input.includeJsonl) {
+    params.set("includeJsonl", "true");
+  }
+  const query = params.toString();
+  return api<KnowledgeSetTreeResponse>(
+    `/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}/tree${query ? `?${query}` : ""}`
+  );
+}
+
+export async function fetchKnowledgeSetFileText(knowledgeSetId: string, relativePath: string): Promise<string> {
+  const query = new URLSearchParams({ path: relativePath });
+  const response = await fetch(
+    `${apiBase()}/api/admin/knowledge-sets/${encodeURIComponent(knowledgeSetId)}/files/content?${query.toString()}`,
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...authHeaders()
+      }
+    }
+  );
+
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    const text = await response.text();
+    let detail = `请求失败(${response.status})`;
+    if (text) {
+      try {
+        const payload = JSON.parse(text) as { detail?: string };
+        if (typeof payload.detail === "string" && payload.detail.trim()) {
+          detail = payload.detail.trim();
+        }
+      } catch {
+        // ignore non-json error payload
+      }
+    }
+    throw new Error(detail);
+  }
+
+  return response.text();
 }
 
 export async function uploadKnowledgeSetFiles(

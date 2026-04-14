@@ -84,3 +84,85 @@ export type KnowledgeSetItemsResponse = {
   items: KnowledgeSetItemRecord[];
   mountPath?: string;
 };
+
+export type KnowledgeSetDocumentStatus = "ready" | "missing_meta" | "missing_doc" | "partial";
+
+export type KnowledgeSetDocumentRecord = {
+  id: string;
+  kind: "document_unit" | "standalone_markdown";
+  title: string;
+  titleSource: "meta" | "path";
+  relativePath: string;
+  directoryPath: string;
+  topLevelDirectory: string;
+  docPath?: string;
+  metaPath?: string;
+  status: KnowledgeSetDocumentStatus;
+  updatedAt?: string;
+  totalFiles: number;
+  markdownFileCount: number;
+  mediaFileCount: number;
+  imageCount: number;
+  auxiliaryFileCount: number;
+  hasDocMarkdown: boolean;
+  hasMetaJson: boolean;
+  hasMediaDirectory: boolean;
+  sourceArchiveNames: string[];
+};
+
+export type KnowledgeSetSummaryDirectory = {
+  path: string;
+  label: string;
+  documentCount: number;
+  warningDocumentCount: number;
+  fileCount: number;
+};
+
+export type KnowledgeSetLibrarySummary = {
+  totalDocuments: number;
+  readyDocuments: number;
+  warningDocuments: number;
+  totalVisibleFiles: number;
+  totalMarkdownFiles: number;
+  totalMediaFiles: number;
+  looseFileCount: number;
+  ignoredJsonlFileCount: number;
+  topLevelDirectoryCount: number;
+  lastUpdatedAt?: string;
+};
+
+export type KnowledgeSetLibraryResponse = {
+  summary: KnowledgeSetLibrarySummary;
+  directories: KnowledgeSetSummaryDirectory[];
+  documents: KnowledgeSetDocumentRecord[];
+  knownFileNames: string[];
+};
+
+export type KnowledgeSetTreeDirectoryEntry = {
+  kind: "directory";
+  name: string;
+  relativePath: string;
+  fileCount: number;
+  documentCount: number;
+  warningDocumentCount: number;
+};
+
+export type KnowledgeSetTreeFileEntry = {
+  kind: "file";
+  name: string;
+  relativePath: string;
+  sizeBytes?: string;
+  updatedAt?: string;
+  mimeType?: string;
+  sourceArchiveName?: string;
+  extension: string;
+};
+
+export type KnowledgeSetTreeEntry = KnowledgeSetTreeDirectoryEntry | KnowledgeSetTreeFileEntry;
+
+export type KnowledgeSetTreeResponse = {
+  currentPath: string;
+  parentPath: string | null;
+  hiddenEntryCount: number;
+  entries: KnowledgeSetTreeEntry[];
+};

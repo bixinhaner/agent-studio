@@ -3944,6 +3944,301 @@ body {
   gap: 2px;
 }
 
+.resource-center-inline-muted {
+  font-size: 12px;
+}
+
+.knowledge-set-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.knowledge-set-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.knowledge-set-summary-card.warning {
+  border-color: #facc15;
+  background: linear-gradient(180deg, #fffdf2 0%, #fff8db 100%);
+}
+
+.knowledge-set-summary-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.knowledge-set-summary-value {
+  font-size: 28px;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.knowledge-set-summary-note {
+  font-size: 12px;
+  color: #475569;
+}
+
+.knowledge-set-document-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 220px) minmax(150px, 180px);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.knowledge-set-document-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.knowledge-set-document-list {
+  display: grid;
+  gap: 12px;
+  max-height: 780px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.knowledge-set-document-card {
+  border: 1px solid #d6e2f3;
+  border-radius: 16px;
+  background: #f8fbff;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.knowledge-set-document-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.knowledge-set-document-card.active {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.12);
+}
+
+.knowledge-set-document-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.knowledge-set-document-card-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.knowledge-set-document-card-head strong {
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.knowledge-set-document-card-path {
+  font-size: 12px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.knowledge-set-document-card-meta,
+.knowledge-set-document-card-tags,
+.knowledge-set-document-preview-meta,
+.knowledge-set-browser-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.knowledge-set-document-preview-panel {
+  border: 1px solid #d6e2f3;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 18px;
+  min-height: 480px;
+  display: grid;
+  gap: 12px;
+}
+
+.knowledge-set-document-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.knowledge-set-document-preview-head > div {
+  min-width: 0;
+}
+
+.knowledge-set-document-preview-head h4 {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.knowledge-set-document-preview-head p {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.knowledge-set-document-preview-body {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: auto;
+  max-height: 620px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.knowledge-set-browser {
+  display: grid;
+  gap: 14px;
+}
+
+.knowledge-set-browser-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.knowledge-set-browser-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-set-browser-crumb {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #475569;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.knowledge-set-browser-crumb.active {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.knowledge-set-browser-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.knowledge-set-browser-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.knowledge-set-browser-list {
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-set-browser-row {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.knowledge-set-browser-row.directory {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.knowledge-set-browser-row.file {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.knowledge-set-browser-directory-main,
+.knowledge-set-browser-file-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.knowledge-set-browser-directory-main {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.knowledge-set-browser-file-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.knowledge-set-browser-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dbeafe;
+  color: #1d4ed8;
+  flex: 0 0 auto;
+}
+
+.knowledge-set-browser-title {
+  color: #0f172a;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.knowledge-set-browser-path {
+  font-size: 12px;
+  color: #475569;
+  word-break: break-all;
+}
+
+.knowledge-set-browser-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .knowledge-set-tree-list {
   list-style: none;
   margin: 0;
@@ -4082,6 +4377,10 @@ body {
   .resource-center-form-grid,
   .resource-policy-fields,
   .knowledge-set-upload-grid,
+  .knowledge-set-summary-grid,
+  .knowledge-set-document-layout,
+  .knowledge-set-browser-row.directory,
+  .knowledge-set-browser-row.file,
   .knowledge-set-tree-file-row,
   .system-settings-history-grid,
   .system-settings-preview-grid {
@@ -4108,6 +4407,23 @@ body {
   .knowledge-set-upload-actions .knowledge-set-inline-field {
     flex-basis: 100%;
     min-width: 0;
+  }
+
+  .knowledge-set-document-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-set-document-list {
+    max-height: none;
+  }
+
+  .knowledge-set-document-preview-panel {
+    min-height: 0;
+  }
+
+  .knowledge-set-browser-toolbar,
+  .knowledge-set-browser-actions {
+    justify-content: flex-start;
   }
 }
 

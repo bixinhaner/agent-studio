@@ -184,3 +184,24 @@ export async function renameFile(rootPath: string, relativePath: string, nextRel
   }
   await fs.rename(sourceRealPath, targetRealPath);
 }
+
+export async function readFileBytes(
+  rootPath: string,
+  relativePath: string
+): Promise<{ filePath: string; displayName: string; content: Buffer }> {
+  const resolvedRoot = await ensureSafeRootDirectory(rootPath);
+  const targetPath = await resolveInsideRoot(resolvedRoot, relativePath);
+  const targetRealPath = ensureRealPathInsideRoot(resolvedRoot, await fs.realpath(targetPath));
+  const stats = await fs.lstat(targetRealPath);
+  if (stats.isSymbolicLink()) {
+    throw new Error("knowledge set path cannot traverse symlinks");
+  }
+  if (!stats.isFile()) {
+    throw new Error("knowledge set file path does not reference a file");
+  }
+  return {
+    filePath: targetRealPath,
+    displayName: path.basename(targetRealPath),
+    content: await fs.readFile(targetRealPath)
+  };
+}

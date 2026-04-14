@@ -104,6 +104,10 @@ def iso_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def timestamp_now() -> str:
+    return datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+
+
 def normalize_text(value: str) -> str:
     value = value.replace("\u00A0", " ").replace("\u200B", "")
     value = value.replace("\r\n", "\n").replace("\r", "\n")
@@ -2370,6 +2374,125 @@ def append_progress(progress_path: Path, record: dict[str, object]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def detect_subset_run(args: argparse.Namespace, source_root: Path, scan_root: Path) -> bool:
+    if scan_root != source_root:
+        return True
+    if args.include_glob:
+        return True
+    if args.exclude_glob:
+        return True
+    return False
+
+
+def default_run_log_paths(output_root: Path, run_id: str) -> tuple[Path, Path, Path]:
+    run_logs = output_root / "run-logs"
+    return (
+        run_logs / f"manifest-{run_id}.json",
+        run_logs / f"report-{run_id}.json",
+        run_logs / f"progress-{run_id}.jsonl",
+    )
+
+
+def summarize_results(
+    *,
+    source_paths: list[Path],
+    results: list[dict[str, object]],
+    deleted_sources: list[str],
+    workers: int,
+    force: bool,
+    clean_deleted: bool,
+    image_annotation: ImageAnnotationConfig,
+    output_root: Path,
+    rebuilt_summary_only: bool = False,
+) -> dict[str, object]:
+    converted_count = sum(1 for item in results if item.get("status") == "converted")
+    skipped_count = sum(1 for item in results if item.get("status") == "skipped")
+    failed_count = sum(1 for item in results if item.get("status") == "failed")
+    unsupported_count = sum(1 for item in results if item.get("status") == "unsupported")
+    validation_failure_count = sum(1 for item in results if item.get("validation_errors"))
+
+    return {
+        "discovered_count": len(source_paths),
+        "converted_count": converted_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "unsupported_count": unsupported_count,
+        "validation_failure_count": validation_failure_count,
+        "deleted_output_count": len(deleted_sources),
+        "workers": workers,
+        "force": force,
+        "clean_deleted": clean_deleted,
+        "image_annotation_enabled": image_annotation.enabled,
+        "image_annotation_model": image_annotation.model if image_annotation.enabled else None,
+        "image_annotation_limit_per_doc": image_annotation.limit_per_doc if image_annotation.enabled else None,
+        "image_annotation_fail_on_error": image_annotation.fail_on_error if image_annotation.enabled else None,
+        "image_annotation_cache_path": str((output_root / ".image-annotation-cache.jsonl")) if image_annotation.enabled else None,
+        "rebuilt_summary_only": rebuilt_summary_only,
+    }
+
+
+def rebuild_summary_results(
+    *,
+    source_root: Path,
+    output_root: Path,
+    source_paths: list[Path],
+    image_annotation: ImageAnnotationConfig,
+) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for source_path in source_paths:
+        relative = source_path.relative_to(source_root).as_posix()
+        output_dir = build_output_dir(output_root, source_root, source_path)
+        container_kind, container_detail = detect_docx_container(source_path)
+
+        if container_kind != "ooxml":
+            results.append(
+                {
+                    "source_relative_path": relative,
+                    "output_relative_path": output_dir.relative_to(output_root).as_posix(),
+                    "status": "unsupported",
+                    "title": filename_title(source_path),
+                    "warnings_count": 0,
+                    "images_count": 0,
+                    "validation_errors": [],
+                    "error": f"unsupported_container:{container_kind}:{container_detail}",
+                }
+            )
+            continue
+
+        meta = load_existing_meta(output_dir)
+        doc_path = output_dir / "doc.md"
+        if not meta or not doc_path.exists():
+            results.append(
+                {
+                    "source_relative_path": relative,
+                    "output_relative_path": output_dir.relative_to(output_root).as_posix(),
+                    "status": "failed",
+                    "title": filename_title(source_path),
+                    "warnings_count": len(meta.get("warnings") or []) if isinstance(meta, dict) else 0,
+                    "images_count": len(meta.get("images") or []) if isinstance(meta, dict) else 0,
+                    "validation_errors": validate_output_dir(output_dir) if output_dir.exists() else ["missing output directory"],
+                    "error": "missing_converted_output",
+                }
+            )
+            continue
+
+        validation_errors = validate_output_dir(output_dir)
+        results.append(
+            {
+                "source_relative_path": relative,
+                "output_relative_path": output_dir.relative_to(output_root).as_posix(),
+                "status": "converted",
+                "title": meta.get("title") or source_path.stem,
+                "warnings_count": len(meta.get("warnings") or []),
+                "images_count": len(meta.get("images") or []),
+                "validation_errors": validation_errors,
+                "meta": meta,
+            }
+        )
+    results.sort(key=lambda item: str(item.get("source_relative_path", "")))
+    return results
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Recursively convert DOCX knowledge documents into doc.md + media + meta.json."
@@ -2381,6 +2504,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional subdirectory to scan recursively. Defaults to --source-root.",
     )
     parser.add_argument("--output-root", required=True, type=Path, help="Directory where converted outputs are written.")
+    parser.add_argument(
+        "--manifest-json",
+        type=Path,
+        help="Optional path for a manifest JSON. Defaults to <output-root>/manifest.json for full runs, or run-logs/manifest-<timestamp>.json for subset runs.",
+    )
     parser.add_argument(
         "--include-glob",
         action="append",
@@ -2440,7 +2568,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--progress-jsonl",
         type=Path,
-        help="Optional JSONL progress path. Defaults to <output-root>/progress.jsonl.",
+        help="Optional JSONL progress path. Defaults to <output-root>/progress.jsonl for full runs, or run-logs/progress-<timestamp>.jsonl for subset runs.",
+    )
+    parser.add_argument(
+        "--rebuild-summary-only",
+        action="store_true",
+        help="Do not convert documents; rebuild manifest/report from current source files and existing outputs.",
     )
     return parser.parse_args()
 
@@ -2450,9 +2583,6 @@ def main() -> int:
     source_root = args.source_root.resolve()
     scan_root = args.scan_root.resolve() if args.scan_root else source_root
     output_root = args.output_root.resolve()
-    manifest_path = output_root / "manifest.json"
-    report_path = args.report_json.resolve() if args.report_json else output_root / "report.json"
-    progress_path = args.progress_jsonl.resolve() if args.progress_jsonl else output_root / "progress.jsonl"
 
     if not source_root.exists():
         raise SystemExit(f"source root does not exist: {source_root}")
@@ -2461,13 +2591,23 @@ def main() -> int:
     if source_root not in {scan_root, *scan_root.parents}:
         raise SystemExit("--scan-root must be the same as or a child of --source-root")
 
+    run_id = timestamp_now()
+    subset_run = detect_subset_run(args, source_root, scan_root)
+    default_manifest_path = output_root / "manifest.json"
+    default_report_path = output_root / "report.json"
+    default_progress_path = output_root / "progress.jsonl"
+    if subset_run and not args.rebuild_summary_only:
+        default_manifest_path, default_report_path, default_progress_path = default_run_log_paths(output_root, run_id)
+
+    manifest_path = args.manifest_json.resolve() if args.manifest_json else default_manifest_path
+    report_path = args.report_json.resolve() if args.report_json else default_report_path
+    progress_path = args.progress_jsonl.resolve() if args.progress_jsonl else default_progress_path
+
     include_globs = args.include_glob or DEFAULT_INCLUDE_GLOBS
     exclude_globs = list(DEFAULT_EXCLUDE_GLOBS)
     exclude_globs.extend(args.exclude_glob or [])
 
     previous_manifest = load_previous_manifest(manifest_path)
-    progress_path.parent.mkdir(parents=True, exist_ok=True)
-    progress_path.write_text("", encoding="utf-8")
     source_paths = discover_docx_files(source_root, scan_root, include_globs, exclude_globs)
     current_relative_paths = {path.relative_to(source_root).as_posix() for path in source_paths}
     image_annotation = ImageAnnotationConfig(
@@ -2479,6 +2619,42 @@ def main() -> int:
         fail_on_error=bool(args.image_annotation_fail_on_error),
     )
     image_annotation_cache = ImageAnnotationCache(output_root / ".image-annotation-cache.jsonl") if image_annotation.enabled else None
+
+    if args.rebuild_summary_only:
+        results = rebuild_summary_results(
+            source_root=source_root,
+            output_root=output_root,
+            source_paths=source_paths,
+            image_annotation=image_annotation,
+        )
+        summary = summarize_results(
+            source_paths=source_paths,
+            results=results,
+            deleted_sources=[],
+            workers=0,
+            force=False,
+            clean_deleted=False,
+            image_annotation=image_annotation,
+            output_root=output_root,
+            rebuilt_summary_only=True,
+        )
+        write_manifest(manifest_path, source_root, output_root, summary, results)
+        write_report(report_path, summary, results)
+        payload = {
+            "ok": summary["failed_count"] == 0 and summary["validation_failure_count"] == 0,
+            "summary": summary,
+            "manifest_path": str(manifest_path),
+            "report_path": str(report_path),
+            "progress_path": None,
+            "run_id": run_id,
+            "subset_run": subset_run,
+            "rebuild_summary_only": True,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 1 if summary["failed_count"] or summary["validation_failure_count"] else 0
+
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text("", encoding="utf-8")
 
     deleted_sources = clean_deleted_outputs(output_root, current_relative_paths, previous_manifest) if args.clean_deleted else []
 
@@ -2541,43 +2717,31 @@ def main() -> int:
                         break
 
     results.sort(key=lambda item: str(item.get("source_relative_path", "")))
-
-    converted_count = sum(1 for item in results if item.get("status") == "converted")
-    skipped_count = sum(1 for item in results if item.get("status") == "skipped")
-    failed_count = sum(1 for item in results if item.get("status") == "failed")
-    unsupported_count = sum(1 for item in results if item.get("status") == "unsupported")
-    validation_failure_count = sum(1 for item in results if item.get("validation_errors"))
-
-    summary = {
-        "discovered_count": len(source_paths),
-        "converted_count": converted_count,
-        "skipped_count": skipped_count,
-        "failed_count": failed_count,
-        "unsupported_count": unsupported_count,
-        "validation_failure_count": validation_failure_count,
-        "deleted_output_count": len(deleted_sources),
-        "workers": args.workers,
-        "force": bool(args.force),
-        "clean_deleted": bool(args.clean_deleted),
-        "image_annotation_enabled": image_annotation.enabled,
-        "image_annotation_model": image_annotation.model if image_annotation.enabled else None,
-        "image_annotation_limit_per_doc": image_annotation.limit_per_doc if image_annotation.enabled else None,
-        "image_annotation_fail_on_error": image_annotation.fail_on_error if image_annotation.enabled else None,
-        "image_annotation_cache_path": str((output_root / ".image-annotation-cache.jsonl")) if image_annotation.enabled else None,
-    }
+    summary = summarize_results(
+        source_paths=source_paths,
+        results=results,
+        deleted_sources=deleted_sources,
+        workers=args.workers,
+        force=bool(args.force),
+        clean_deleted=bool(args.clean_deleted),
+        image_annotation=image_annotation,
+        output_root=output_root,
+    )
 
     write_manifest(manifest_path, source_root, output_root, summary, results)
     write_report(report_path, summary, results)
 
     payload = {
-        "ok": failed_count == 0 and validation_failure_count == 0,
+        "ok": summary["failed_count"] == 0 and summary["validation_failure_count"] == 0,
         "summary": summary,
         "manifest_path": str(manifest_path),
         "report_path": str(report_path),
         "progress_path": str(progress_path),
+        "run_id": run_id,
+        "subset_run": subset_run,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-    return 1 if failed_count or validation_failure_count else 0
+    return 1 if summary["failed_count"] or summary["validation_failure_count"] else 0
 
 
 if __name__ == "__main__":

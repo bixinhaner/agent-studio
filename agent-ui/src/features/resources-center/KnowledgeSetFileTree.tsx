@@ -1,53 +1,18 @@
-import { useMemo, useState } from "react";
-import { Button, Input, Modal, Typography } from "antd";
+import { FolderOpenOutlined, FileOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
+import { Button, Empty, Input, Modal, Switch, Tag, Typography } from "antd";
 
-import type { KnowledgeSetItemRecord } from "./types";
+import { fetchKnowledgeSetTree } from "./api";
+import type { KnowledgeSetTreeDirectoryEntry, KnowledgeSetTreeEntry, KnowledgeSetTreeResponse } from "./types";
 import { openWarningConfirm } from "../../lib/warning-modal";
 
 type KnowledgeSetFileTreeProps = {
-  items: KnowledgeSetItemRecord[];
+  knowledgeSetId: string;
   disabled?: boolean;
-  requireRenameConfirm?: boolean;
+  reloadKey?: number;
   onDelete: (relativePath: string) => void | Promise<void>;
   onRename: (relativePath: string, nextRelativePath: string) => void | Promise<void>;
 };
-
-type DirectoryNode = {
-  name: string;
-  path: string;
-  directories: Map<string, DirectoryNode>;
-  files: KnowledgeSetItemRecord[];
-};
-
-function createDirectoryNode(name: string, path: string): DirectoryNode {
-  return {
-    name,
-    path,
-    directories: new Map(),
-    files: []
-  };
-}
-
-function buildTree(items: KnowledgeSetItemRecord[]) {
-  const root = createDirectoryNode("", "");
-  for (const item of items) {
-    const segments = item.relativePath.split("/").filter(Boolean);
-    if (segments.length === 0) continue;
-    let current = root;
-    const directories = segments.slice(0, -1);
-    for (const segment of directories) {
-      const nextPath = current.path ? `${current.path}/${segment}` : segment;
-      let next = current.directories.get(segment);
-      if (!next) {
-        next = createDirectoryNode(segment, nextPath);
-        current.directories.set(segment, next);
-      }
-      current = next;
-    }
-    current.files.push(item);
-  }
-  return root;
-}
 
 function formatLocalDateTime(value?: string) {
   if (!value) return null;
@@ -65,87 +30,82 @@ function formatSize(sizeBytes?: string) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type DirectoryListProps = {
-  node: DirectoryNode;
-  disabled: boolean;
-  onRequestDelete(relativePath: string): void;
-  onRequestRename(relativePath: string): void;
-};
+function breadcrumbItems(currentPath: string): Array<{ label: string; path: string }> {
+  if (!currentPath) return [{ label: "根目录", path: "" }];
+  const segments = currentPath.split("/").filter(Boolean);
+  const items = [{ label: "根目录", path: "" }];
+  let current = "";
+  for (const segment of segments) {
+    current = current ? `${current}/${segment}` : segment;
+    items.push({ label: segment, path: current });
+  }
+  return items;
+}
 
-function DirectoryList({ node, disabled, onRequestDelete, onRequestRename }: DirectoryListProps) {
-  const directories = [...node.directories.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
-  const files = [...node.files].sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"));
-
+function DirectoryMeta({ entry }: { entry: KnowledgeSetTreeDirectoryEntry }) {
   return (
-    <ul className={node.path ? "knowledge-set-tree-list nested" : "knowledge-set-tree-list"} role="tree">
-      {directories.map((directory) => (
-        <li key={`dir:${directory.path}`} className="knowledge-set-tree-directory" role="treeitem" aria-expanded="true">
-          <div className="knowledge-set-tree-directory-row">
-            <span className="knowledge-set-tree-directory-name">{directory.name}</span>
-          </div>
-          <DirectoryList
-            node={directory}
-            disabled={disabled}
-            onRequestDelete={onRequestDelete}
-            onRequestRename={onRequestRename}
-          />
-        </li>
-      ))}
-
-      {files.map((item) => {
-        const sizeText = formatSize(item.sizeBytes);
-        const updatedText = formatLocalDateTime(item.updatedAt);
-        return (
-          <li key={`file:${item.relativePath}`} className="knowledge-set-tree-file" role="treeitem">
-            <div className="knowledge-set-tree-file-row">
-              <div className="knowledge-set-tree-file-main">
-                <span className="knowledge-set-tree-file-name">{item.displayName}</span>
-                <span className="knowledge-set-tree-file-path">{item.relativePath}</span>
-                <div className="knowledge-set-tree-file-meta">
-                  {sizeText ? <span>{sizeText}</span> : null}
-                  {item.sourceArchiveName ? <span>来源 {item.sourceArchiveName}</span> : null}
-                  {updatedText ? <span>更新于 {updatedText}</span> : null}
-                </div>
-              </div>
-
-              <div className="knowledge-set-tree-file-actions">
-                <Button
-                  type="default"
-                  disabled={disabled}
-                  aria-label="重命名文件"
-                  onClick={() => onRequestRename(item.relativePath)}
-                >
-                  重命名
-                </Button>
-                <Button
-                  type="default"
-                  disabled={disabled}
-                  aria-label="删除文件"
-                  onClick={() => onRequestDelete(item.relativePath)}
-                >
-                  删除
-                </Button>
-              </div>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="knowledge-set-browser-meta">
+      <span>{entry.documentCount} 篇文档</span>
+      <span>{entry.fileCount} 个文件</span>
+      {entry.warningDocumentCount > 0 ? <span>{entry.warningDocumentCount} 个异常</span> : null}
+    </div>
   );
 }
 
 export function KnowledgeSetFileTree({
-  items,
+  knowledgeSetId,
   disabled = false,
-  requireRenameConfirm = false,
+  reloadKey = 0,
   onDelete,
   onRename
 }: KnowledgeSetFileTreeProps) {
-  const tree = useMemo(() => buildTree(items), [items]);
+  const [tree, setTree] = useState<KnowledgeSetTreeResponse | null>(null);
+  const [currentPath, setCurrentPath] = useState("");
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState("");
+  const [includeJsonl, setIncludeJsonl] = useState(false);
   const [renameDraft, setRenameDraft] = useState<{ sourcePath: string; nextPath: string } | null>(null);
   const [renameErrorText, setRenameErrorText] = useState("");
 
-  async function handleDeleteRequest(relativePath: string) {
+  useEffect(() => {
+    setCurrentPath("");
+    setTree(null);
+    setErrorText("");
+  }, [knowledgeSetId]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadTree() {
+      setLoading(true);
+      setErrorText("");
+      try {
+        const response = await fetchKnowledgeSetTree(knowledgeSetId, {
+          path: currentPath,
+          includeJsonl
+        });
+        if (!active) return;
+        setTree(response);
+      } catch (error) {
+        if (active) {
+          setErrorText(error instanceof Error ? error.message : "加载原始文件失败");
+          setTree(null);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadTree();
+    return () => {
+      active = false;
+    };
+  }, [currentPath, includeJsonl, knowledgeSetId, refreshNonce, reloadKey]);
+
+  async function handleDelete(relativePath: string) {
     const confirmed = await openWarningConfirm({
       title: "确认删除文件",
       content: `确认删除 ${relativePath} 吗？`,
@@ -158,11 +118,6 @@ export function KnowledgeSetFileTree({
     await onDelete(relativePath);
   }
 
-  function handleRenameRequest(relativePath: string) {
-    setRenameErrorText("");
-    setRenameDraft({ sourcePath: relativePath, nextPath: relativePath });
-  }
-
   async function handleRenameConfirm() {
     if (!renameDraft) return;
     const nextRelativePath = renameDraft.nextPath.trim();
@@ -170,40 +125,130 @@ export function KnowledgeSetFileTree({
       setRenameErrorText("新的相对路径不能为空");
       return;
     }
-
     if (nextRelativePath === renameDraft.sourcePath) {
       setRenameDraft(null);
       return;
     }
-
-    if (requireRenameConfirm) {
-      const confirmed = await openWarningConfirm({
-        title: "确认重命名文件",
-        content: `确认将 ${renameDraft.sourcePath} 重命名为 ${nextRelativePath} 吗？`,
-        dangerLevel: "warning",
-        okText: "确认重命名",
-        cancelText: "取消",
-        okButtonDanger: false
-      });
-      if (!confirmed) return;
-    }
-
     await onRename(renameDraft.sourcePath, nextRelativePath);
     setRenameDraft(null);
   }
 
-  if (items.length === 0) {
-    return <p className="resource-center-empty">当前资料集没有文件清单。</p>;
-  }
+  const breadcrumbs = breadcrumbItems(tree?.currentPath ?? currentPath);
+  const parentPath = tree?.parentPath ?? null;
 
   return (
-    <>
-      <DirectoryList
-        node={tree}
-        disabled={disabled}
-        onRequestDelete={(relativePath) => void handleDeleteRequest(relativePath)}
-        onRequestRename={handleRenameRequest}
-      />
+    <div className="knowledge-set-browser">
+      <div className="knowledge-set-browser-toolbar">
+        <div className="knowledge-set-browser-breadcrumbs">
+          {breadcrumbs.map((item, index) => (
+            <button
+              key={`${item.path || "root"}-${index}`}
+              type="button"
+              className={`knowledge-set-browser-crumb${index === breadcrumbs.length - 1 ? " active" : ""}`}
+              onClick={() => setCurrentPath(item.path)}
+              disabled={loading || (index === breadcrumbs.length - 1 && !loading)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="knowledge-set-browser-actions">
+          <label className="knowledge-set-browser-toggle">
+            <span>显示 `.jsonl`</span>
+            <Switch checked={includeJsonl} onChange={setIncludeJsonl} disabled={loading} />
+          </label>
+          <Button
+            type="default"
+            icon={<ReloadOutlined />}
+            onClick={() => setRefreshNonce((value) => value + 1)}
+            disabled={loading}
+          >
+            刷新
+          </Button>
+          <Button type="default" onClick={() => setCurrentPath(parentPath || "")} disabled={!parentPath || loading}>
+            返回上级
+          </Button>
+        </div>
+      </div>
+
+      {tree?.hiddenEntryCount ? (
+        <Typography.Text type="secondary" className="resource-center-inline-muted">
+          当前目录及其子树默认隐藏了 {tree.hiddenEntryCount} 个 `.jsonl` 文件。
+        </Typography.Text>
+      ) : null}
+      {errorText ? <Typography.Text type="danger">{errorText}</Typography.Text> : null}
+
+      {loading ? <p className="resource-center-subtle">加载原始文件中...</p> : null}
+
+      {!loading && !tree?.entries.length ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={tree ? "当前目录没有可显示的文件。" : "当前资料集没有原始文件。"}
+        />
+      ) : null}
+
+      {!loading && tree?.entries.length ? (
+        <div className="knowledge-set-browser-list">
+          {tree.entries.map((entry: KnowledgeSetTreeEntry) => {
+            if (entry.kind === "directory") {
+              return (
+                <article key={`dir:${entry.relativePath}`} className="knowledge-set-browser-row directory">
+                  <button
+                    type="button"
+                    className="knowledge-set-browser-directory-main"
+                    onClick={() => setCurrentPath(entry.relativePath)}
+                    disabled={loading}
+                  >
+                    <span className="knowledge-set-browser-icon">
+                      <FolderOpenOutlined />
+                    </span>
+                    <span className="knowledge-set-browser-title">{entry.name}</span>
+                  </button>
+                  <DirectoryMeta entry={entry} />
+                  {entry.warningDocumentCount > 0 ? <Tag color="warning">含异常文档</Tag> : <Tag>目录</Tag>}
+                </article>
+              );
+            }
+
+            const sizeText = formatSize(entry.sizeBytes);
+            const updatedText = formatLocalDateTime(entry.updatedAt);
+            return (
+              <article key={`file:${entry.relativePath}`} className="knowledge-set-browser-row file">
+                <div className="knowledge-set-browser-file-main">
+                  <div className="knowledge-set-browser-file-head">
+                    <span className="knowledge-set-browser-icon">
+                      <FileOutlined />
+                    </span>
+                    <span className="knowledge-set-browser-title">{entry.name}</span>
+                  </div>
+                  <span className="knowledge-set-browser-path">{entry.relativePath}</span>
+                  <div className="knowledge-set-browser-meta">
+                    {sizeText ? <span>{sizeText}</span> : null}
+                    {entry.sourceArchiveName ? <span>来源 {entry.sourceArchiveName}</span> : null}
+                    {updatedText ? <span>更新于 {updatedText}</span> : null}
+                  </div>
+                </div>
+                <div className="knowledge-set-browser-file-actions">
+                  <Button
+                    type="default"
+                    disabled={disabled}
+                    onClick={() => {
+                      setRenameErrorText("");
+                      setRenameDraft({ sourcePath: entry.relativePath, nextPath: entry.relativePath });
+                    }}
+                  >
+                    重命名
+                  </Button>
+                  <Button type="default" danger={false} disabled={disabled} onClick={() => void handleDelete(entry.relativePath)}>
+                    删除
+                  </Button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
 
       <Modal
         title="重命名文件"
@@ -235,6 +280,6 @@ export function KnowledgeSetFileTree({
         </label>
         {renameErrorText ? <Typography.Text type="danger">{renameErrorText}</Typography.Text> : null}
       </Modal>
-    </>
+    </div>
   );
 }

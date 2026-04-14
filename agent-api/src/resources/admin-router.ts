@@ -1,8 +1,14 @@
+import path from "node:path";
+
 import express, { Router, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import multer, { MulterError } from "multer";
 
 import type { ResourcePolicyRecord } from "../persistence/resource-policy-repository.js";
-import { deleteFile, renameFile, scanDirectory } from "./filesystem-knowledge-set-ops.js";
+import {
+  buildKnowledgeSetLibraryView,
+  buildKnowledgeSetTreeView
+} from "./knowledge-set-derived-view.js";
+import { deleteFile, readFileBytes, renameFile, scanDirectory } from "./filesystem-knowledge-set-ops.js";
 import type { KnowledgeSetStorage } from "./storage/knowledge-set-storage.js";
 
 const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
@@ -93,6 +99,15 @@ type ResourcePolicyGroupInput = {
 };
 
 type ResourcePolicyReplacementInput = Omit<ResourcePolicyRecord, "id" | "createdAt" | "updatedAt">;
+
+type KnowledgeSetItemLike = {
+  relativePath: string;
+  displayName: string;
+  sizeBytes?: string | bigint;
+  mimeType?: string;
+  sourceArchiveName?: string;
+  updatedAt?: string;
+};
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -350,6 +365,23 @@ function parsePatchKnowledgeSetItem(body: unknown): { action: "rename"; relative
   return { action: "rename", relativePath, nextRelativePath };
 }
 
+function normalizeDirectoryQuery(value: unknown): string {
+  const raw = toTrimmedString(value);
+  if (!raw || raw === ".") return "";
+  const normalized = path.posix.normalize(raw.replaceAll("\\", "/")).replace(/^\/+/, "").replace(/\/$/, "");
+  if (!normalized || normalized === ".") return "";
+  if (normalized.startsWith("../") || normalized.includes("\0") || path.posix.isAbsolute(normalized)) {
+    throw new Error("knowledge set directory path is invalid");
+  }
+  return normalized;
+}
+
+function parseBooleanQuery(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function resolveKnowledgeSetRoot(
   knowledgeSet: { sourceType?: string; rootPath?: string; storageKey?: string },
   storage: KnowledgeSetStorage,
@@ -594,6 +626,67 @@ export function createResourcesAdminRouter(options: {
     try {
       const items = await options.knowledgeSets.listItems(req.params.knowledgeSetId);
       res.json({ items });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/knowledge-sets/:knowledgeSetId/summary", requirePermission("knowledge_set.read"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, knowledgeSetId);
+      const items = (await options.knowledgeSets.listItems(knowledgeSetId)) as KnowledgeSetItemLike[];
+      const summary = await buildKnowledgeSetLibraryView(items, { rootPath });
+      res.json(summary);
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/knowledge-sets/:knowledgeSetId/tree", requirePermission("knowledge_set.read"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const currentPath = normalizeDirectoryQuery(req.query.path);
+      const includeJsonl = parseBooleanQuery(req.query.includeJsonl);
+      const items = (await options.knowledgeSets.listItems(knowledgeSetId)) as KnowledgeSetItemLike[];
+      const summary = await buildKnowledgeSetLibraryView(items);
+      const tree = buildKnowledgeSetTreeView(items, summary.documents, { currentPath, includeJsonl });
+      res.json(tree);
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/knowledge-sets/:knowledgeSetId/files/content", requirePermission("knowledge_set.read"), async (req: Request, res: Response) => {
+    try {
+      const knowledgeSetId = req.params.knowledgeSetId;
+      const knowledgeSet = await options.knowledgeSets.get(knowledgeSetId);
+      if (!knowledgeSet) {
+        res.status(404).json({ detail: "knowledge set 不存在" });
+        return;
+      }
+      const relativePath = normalizeDirectoryQuery(req.query.path);
+      if (!relativePath) {
+        res.status(400).json({ detail: "knowledge set file path is required" });
+        return;
+      }
+      const rootPath = resolveKnowledgeSetRoot(knowledgeSet, options.storage, knowledgeSetId);
+      const file = await readFileBytes(rootPath, relativePath);
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.displayName)}`);
+      res.type(path.extname(file.displayName) || "application/octet-stream");
+      res.status(200).send(file.content);
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
     }
