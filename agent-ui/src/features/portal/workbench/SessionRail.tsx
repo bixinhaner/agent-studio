@@ -20,13 +20,13 @@ export function SessionRail(
         {!props.collapsed ? (
           <div className="session-rail-controls">
             {props.newThreadSlot ?? (
-              <Button aria-label="新会话" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
-                新会话
+              <Button aria-label="New session" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
+                New session
               </Button>
             )}
             <Input
-              aria-label="搜索会话"
-              placeholder="搜索会话..."
+              aria-label="Search sessions"
+              placeholder="Search sessions..."
               prefix={<Search size={14} style={{ color: '#9ca3af' }} />}
               value={props.searchValue}
               onChange={(event) => props.onSearchChange(event.target.value)}
@@ -35,7 +35,7 @@ export function SessionRail(
             />
           </div>
         ) : (
-          <Tooltip title="新会话" placement="right">
+          <Tooltip title="New session" placement="right">
             <Button
               type="primary"
               icon={<Plus size={16} />}

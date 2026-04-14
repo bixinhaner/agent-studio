@@ -47,7 +47,7 @@ function authErrorMessage(error: unknown): string | null {
     }
     return detail;
   }
-  return "认证信息加载失败";
+  return "Failed to load authentication state";
 }
 
 function emptySession(): Pick<AuthContextValue, "user" | "activeOrganization" | "memberships" | "identities"> {
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const onAuthInvalid = () => {
       resetSession();
       setLoading(false);
-      setError("登录状态已失效，请重新登录。");
+      setError("Your session has expired. Please sign in again.");
     };
 
     async function bootstrap() {

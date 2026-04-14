@@ -19,8 +19,8 @@ export function RightWorkbenchDrawer(props: {
         activeKey={props.activeTab}
         onChange={(key) => props.onTabChange(key as WorkbenchTab)}
         items={[
-          { key: "preview", label: "预览", forceRender: true, children: props.previewContent },
-          { key: "collaboration", label: "协作面板", forceRender: true, children: props.collaborationContent }
+          { key: "preview", label: "Preview", forceRender: true, children: props.previewContent },
+          { key: "collaboration", label: "Collaboration", forceRender: true, children: props.collaborationContent }
         ]}
       />
     </div>

@@ -105,7 +105,7 @@ function normalizeFilePath(rawPath: string): string {
 
 function fileNameFromPath(filePath: string): string {
   const normalized = normalizeFilePath(filePath);
-  if (!normalized) return "未命名文件";
+  if (!normalized) return "Untitled file";
   const segments = normalized.split("/").filter(Boolean);
   return segments[segments.length - 1] || normalized;
 }
@@ -198,7 +198,7 @@ function addOrUpdateFile(
   const nextMimeType = asString(input.mimeType);
   const next: ThreadFileRecord = {
     filePath: normalizedPath,
-    displayName: nextDisplayName || "未命名文件",
+    displayName: nextDisplayName || "Untitled file",
     mimeType: nextMimeType || existing?.mimeType || "",
     source: input.source,
     updatedAt: Math.max(input.updatedAt, existing?.updatedAt ?? 0)
@@ -366,7 +366,7 @@ async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<
   if (!response.ok) {
     notifyAuthInvalidStatus(response.status);
     const text = await response.text();
-    let detail = `读取文件失败(${response.status})`;
+    let detail = `Failed to read file (${response.status})`;
     if (text) {
       try {
         const payload = JSON.parse(text) as { detail?: string };
@@ -394,7 +394,7 @@ async function fetchPortalResourceFileBlob(filePath: string): Promise<Response> 
   if (!response.ok) {
     notifyAuthInvalidStatus(response.status);
     const text = await response.text();
-    let detail = `读取资料集文件失败(${response.status})`;
+    let detail = `Failed to read knowledge set file (${response.status})`;
     if (text) {
       try {
         const payload = JSON.parse(text) as { detail?: string };
@@ -419,7 +419,7 @@ async function convertDocxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
   };
   const converter = mammothModule.default?.convertToHtml || mammothModule.convertToHtml;
   if (!converter) {
-    throw new Error("DOCX 解析器不可用");
+    throw new Error("DOCX parser is unavailable");
   }
   const result = await converter({ arrayBuffer });
   return asString(result?.value);
@@ -442,7 +442,7 @@ async function convertXlsxToSheets(arrayBuffer: ArrayBuffer): Promise<XlsxSheetP
     });
     return {
       name: sheetName,
-      rows: rows.length > 0 ? rows : [["(空表)"]]
+      rows: rows.length > 0 ? rows : [["(Empty sheet)"]]
     };
   });
 }
@@ -479,7 +479,7 @@ async function convertPptxToSlides(arrayBuffer: ArrayBuffer): Promise<PptxSlideP
       .slice(0, 120);
     slides.push({
       title: `Slide ${index + 1}`,
-      lines: lines.length > 0 ? lines : ["(空白页)"]
+      lines: lines.length > 0 ? lines : ["(Blank slide)"]
     });
   }
 
@@ -702,7 +702,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
             content: {
               kind: "unsupported",
               objectUrl: createdObjectUrl,
-              reason: "当前文件格式无法在内置预览器中渲染，请使用新窗口打开或下载查看。"
+              reason: "This file format cannot be rendered in the built-in preview. Open it in a new window or download it."
             }
           });
           createdObjectUrl = "";
@@ -712,7 +712,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
         if (!cancelled) {
           setPreview({
             status: "error",
-            message: error instanceof Error ? error.message : "读取文件失败"
+            message: error instanceof Error ? error.message : "Failed to read file"
           });
         }
       }
@@ -731,11 +731,11 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
   return (
     <div className="preview-workbench-shell">
       <section className="preview-workbench-list">
-        <h3>会话文件</h3>
+        <h3>Session Files</h3>
         {!props.threadId.trim() ? (
-          <p className="preview-workbench-empty">当前没有激活线程，无法展示文件。</p>
+          <p className="preview-workbench-empty">No active thread selected, so files cannot be shown.</p>
         ) : threadFiles.length === 0 ? (
-          <p className="preview-workbench-empty">暂未检测到 AI 生成或上传的文件。</p>
+          <p className="preview-workbench-empty">No AI-generated or uploaded files were detected yet.</p>
         ) : (
           <div className="preview-workbench-items" role="list">
             {threadFiles.map((file) => (
@@ -749,7 +749,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
               >
                 <span className="preview-file-name">{file.displayName}</span>
                 <span className="preview-file-meta">
-                  {file.source === "file_change" ? "AI 生成" : "附件上传"} · {formatUpdatedAt(file.updatedAt)}
+                  {file.source === "file_change" ? "AI generated" : "Uploaded"} · {formatUpdatedAt(file.updatedAt)}
                 </span>
               </button>
             ))}
@@ -759,7 +759,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
 
       <section className="preview-workbench-viewer">
         {!activeFile ? (
-          <div className="preview-workbench-placeholder">选择左侧文件后即可预览。</div>
+          <div className="preview-workbench-placeholder">Select a file on the left to preview.</div>
         ) : (
           <>
             <header className="preview-viewer-head">
@@ -770,10 +770,10 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
               {activePreview ? (
                 <div className="preview-viewer-actions">
                   <a href={activePreview.objectUrl} target="_blank" rel="noreferrer">
-                    新窗口打开
+                    Open in new window
                   </a>
                   <a href={activePreview.objectUrl} download={activeFile.displayName}>
-                    下载
+                    Download
                   </a>
                 </div>
               ) : null}
@@ -783,7 +783,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
               {preview.status === "loading" ? (
                 <div className="preview-loading">
                   <Spin size="small" />
-                  <span>正在加载预览...</span>
+                  <span>Loading preview...</span>
                 </div>
               ) : null}
 
@@ -802,12 +802,12 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
                   className="preview-iframe"
                   title={activeFile.displayName}
                   sandbox=""
-                  srcDoc={activePreview.html || "<p>文档为空</p>"}
+                  srcDoc={activePreview.html || "<p>Document is empty</p>"}
                 />
               ) : null}
 
               {activePreview?.kind === "text" ? (
-                <pre className="preview-text">{activePreview.text || "(文件为空)"}</pre>
+                <pre className="preview-text">{activePreview.text || "(File is empty)"}</pre>
               ) : null}
 
               {activePreview?.kind === "xlsx" ? (

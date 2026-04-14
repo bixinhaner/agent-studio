@@ -7,7 +7,7 @@ import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types"
 async function copyTextToClipboard(value: string): Promise<void> {
   const text = value.trim();
   if (!text) {
-    throw new Error("没有可复制的内容");
+    throw new Error("Nothing to copy");
   }
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -25,7 +25,7 @@ async function copyTextToClipboard(value: string): Promise<void> {
   const copied = document.execCommand("copy");
   document.body.removeChild(textarea);
   if (!copied) {
-    throw new Error("浏览器不支持自动复制，请手动复制");
+    throw new Error("Your browser does not support automatic copy. Please copy manually.");
   }
 }
 
@@ -155,7 +155,7 @@ function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: strin
       lines.push("");
 
       if (processRows.length > 0) {
-        lines.push("#### 过程记录");
+        lines.push("#### Process Log");
         lines.push("");
         processRows.forEach((row, index) => {
           lines.push(`##### Step ${index + 1} · ${row.title}`);
@@ -172,14 +172,14 @@ function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: strin
       }
 
       if (text) {
-        lines.push("#### 最终回复");
+        lines.push("#### Final Response");
         lines.push("");
         lines.push(text);
         lines.push("");
       }
 
       if (sourceParts.length > 0) {
-        lines.push("#### 参考链接");
+        lines.push("#### References");
         lines.push("");
         sourceParts.forEach((part) => {
           lines.push(`- [${part.title || part.url}](${part.url})`);
@@ -198,14 +198,14 @@ function formatProcessRowTime(value?: string): string {
 }
 
 function processRowKindLabel(kind: string): string {
-  if (kind === "reasoning") return "思考";
-  if (kind === "tool") return "工具";
-  if (kind === "source") return "来源";
-  if (kind === "meta") return "准备";
-  if (kind === "done") return "完成";
-  if (kind === "error") return "异常";
-  if (kind === "debug") return "调试";
-  return "步骤";
+  if (kind === "reasoning") return "Reasoning";
+  if (kind === "tool") return "Tool";
+  if (kind === "source") return "Source";
+  if (kind === "meta") return "Setup";
+  if (kind === "done") return "Done";
+  if (kind === "error") return "Error";
+  if (kind === "debug") return "Debug";
+  return "Step";
 }
 
 function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
@@ -237,10 +237,10 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
         <details className="public-share-process-card">
           <summary>
             <span className="public-share-process-summary-copy">
-              <span className="public-share-process-summary-label">过程记录</span>
-              <span className="public-share-process-summary-caption">按真实助手轨迹查看回答形成过程</span>
+              <span className="public-share-process-summary-label">Process log</span>
+              <span className="public-share-process-summary-caption">View how the response was formed from the real assistant trace</span>
             </span>
-            <span className="public-share-process-summary-count">{processRows.length} 步</span>
+            <span className="public-share-process-summary-count">{processRows.length} steps</span>
           </summary>
           <ol className="public-share-process-list">
             {processRows.map((row, index) => (
@@ -266,7 +266,7 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
 
       {text ? (
         <div className="public-share-final-card">
-          <div className="public-share-final-label">最终回复</div>
+          <div className="public-share-final-label">Final response</div>
           <PublicShareMarkdown text={text} className="public-share-final-markdown" />
           {sourceParts.length > 0 ? (
             <div className="public-share-source-list">
@@ -315,7 +315,7 @@ export function PublicSharePage(props: { token?: string }) {
     async function load() {
       if (!token) {
         setLoading(false);
-        setErrorText("公开链接无效");
+        setErrorText("Invalid public link");
         return;
       }
       setLoading(true);
@@ -326,7 +326,7 @@ export function PublicSharePage(props: { token?: string }) {
         setShare(next);
       } catch (error) {
         if (cancelled) return;
-        setErrorText(error instanceof Error ? error.message : "读取公开链接失败");
+        setErrorText(error instanceof Error ? error.message : "Failed to load public link");
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -364,7 +364,7 @@ export function PublicSharePage(props: { token?: string }) {
     };
   }, [share?.title]);
 
-  const userLabel = share?.user_display_name?.trim() || "用户";
+  const userLabel = share?.user_display_name?.trim() || "User";
   const shareMarkdown = useMemo(
     () => (share ? buildPublicShareMarkdown(share, userLabel) : ""),
     [share, userLabel]
@@ -383,16 +383,16 @@ export function PublicSharePage(props: { token?: string }) {
   async function handleCopyMarkdown() {
     try {
       await copyTextToClipboard(shareMarkdown);
-      setActionStatus("Markdown 已复制");
+      setActionStatus("Markdown copied");
     } catch (error) {
-      setActionStatus(error instanceof Error ? error.message : "复制失败");
+      setActionStatus(error instanceof Error ? error.message : "Copy failed");
     }
   }
 
   function handleDownloadMarkdown() {
     if (!shareMarkdown) return;
     downloadTextFile(downloadFileName, shareMarkdown);
-    setActionStatus(`已下载 ${downloadFileName}`);
+    setActionStatus(`Downloaded ${downloadFileName}`);
   }
 
   return (
@@ -416,23 +416,23 @@ export function PublicSharePage(props: { token?: string }) {
           <h1>{share?.title || "Shared conversation"}</h1>
           <p>
             {loading
-              ? "正在加载公开快照"
+              ? "Loading public snapshot"
               : share
-                ? `任何拿到链接的人都可以查看此快照。生成时间：${formatLocalDateTime(share.created_at)}`
-                : "当前公开链接不可用。"}
+                ? `Anyone with this link can view this snapshot. Generated at: ${formatLocalDateTime(share.created_at)}`
+                : "This public link is not available."}
           </p>
           {actionStatus ? <div className="public-share-header-status">{actionStatus}</div> : null}
         </header>
 
         {loading ? (
           <section className="public-share-state-card">
-            <p>正在读取公开内容...</p>
+            <p>Loading public content...</p>
           </section>
         ) : null}
 
         {!loading && errorText ? (
           <section className="public-share-state-card public-share-state-card-error">
-            <h2>链接不可用</h2>
+            <h2>Link unavailable</h2>
             <p>{errorText}</p>
           </section>
         ) : null}
@@ -441,11 +441,11 @@ export function PublicSharePage(props: { token?: string }) {
           <>
             <section className="public-share-meta-row">
               <div className="public-share-meta-card">
-                <span>已分享轮次</span>
+                <span>Shared turns</span>
                 <strong>{share.selected_turn_count}</strong>
               </div>
               <div className="public-share-meta-card">
-                <span>线程标题</span>
+                <span>Thread title</span>
                 <strong>{share.snapshot.threadTitle || share.title}</strong>
               </div>
             </section>

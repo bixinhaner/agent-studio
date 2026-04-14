@@ -213,24 +213,24 @@ type SessionGroupLabelContextValue = {
 const DEFAULT_WORKSPACE = ".";
 
 const SANDBOX_OPTIONS: Array<{ value: SandboxMode; label: string }> = [
-  { value: "workspace-write", label: "workspace-write（推荐：可读写工作区）" },
-  { value: "read-only", label: "read-only（只读）" },
-  { value: "danger-full-access", label: "danger-full-access（完全权限）" }
+  { value: "workspace-write", label: "workspace-write (Recommended: read/write workspace)" },
+  { value: "read-only", label: "read-only (Read-only)" },
+  { value: "danger-full-access", label: "danger-full-access (Full access)" }
 ];
 
 const APPROVAL_OPTIONS: Array<{ value: ApprovalPolicy; label: string }> = [
-  { value: "never", label: "never（不请求审批）" },
-  { value: "on-request", label: "on-request（按需审批）" },
-  { value: "on-failure", label: "on-failure（失败时审批）" },
-  { value: "untrusted", label: "untrusted（不可信操作审批）" }
+  { value: "never", label: "never (No approval)" },
+  { value: "on-request", label: "on-request (Ask when needed)" },
+  { value: "on-failure", label: "on-failure (Ask on failure)" },
+  { value: "untrusted", label: "untrusted (Approval for untrusted actions)" }
 ];
 
 const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
-  { value: "disabled", label: "disabled（关闭）" },
-  { value: "cached", label: "cached（缓存搜索）" },
-  { value: "live", label: "live（实时搜索）" }
+  { value: "disabled", label: "disabled (Off)" },
+  { value: "cached", label: "cached (Cached search)" },
+  { value: "live", label: "live (Live search)" }
 ];
-const DEFAULT_RUNNING_STAGE_TEXT = "正在等待模型响应";
+const DEFAULT_RUNNING_STAGE_TEXT = "Waiting for model response";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
@@ -255,7 +255,7 @@ const ThreadPublicShareSelectionContext = createContext<ThreadPublicShareSelecti
 async function copyTextToClipboard(value: string): Promise<void> {
   const text = value.trim();
   if (!text) {
-    throw new Error("复制内容为空");
+    throw new Error("Nothing to copy");
   }
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -273,7 +273,7 @@ async function copyTextToClipboard(value: string): Promise<void> {
   const copied = document.execCommand("copy");
   document.body.removeChild(textarea);
   if (!copied) {
-    throw new Error("浏览器不支持自动复制，请手动复制链接");
+    throw new Error("Your browser does not support automatic copy. Please copy the link manually.");
   }
 }
 
@@ -511,12 +511,12 @@ function AssistantMarkdownImage(props: {
 
   const caption = typeof alt === "string" ? alt.trim() : "";
   const imageTitle = typeof title === "string" ? title.trim() : "";
-  const ariaLabel = caption || imageTitle || "预览图片";
+  const ariaLabel = caption || imageTitle || "Preview image";
 
   if (!resolvedSrc) {
     return (
       <span className="assistant-inline-image-unresolved" title={typeof src === "string" ? src : undefined}>
-        图片引用无法解析
+        Image reference could not be resolved
       </span>
     );
   }
@@ -576,9 +576,9 @@ function AssistantMarkdownLink(props: {
   const displayName =
     linkLabel && linkLabel !== href && !isLikelyHttpUrl(linkLabel) ? linkLabel : fileNameFromPreviewPath(previewPath);
   return (
-    <span className="assistant-inline-file-link-card" role="group" aria-label={`文件 ${displayName}`}>
+    <span className="assistant-inline-file-link-card" role="group" aria-label={`File ${displayName}`}>
       <span className="assistant-inline-file-link-meta">
-        <span className="assistant-inline-file-link-tag">文件</span>
+        <span className="assistant-inline-file-link-tag">File</span>
         <span className="assistant-inline-file-link-name">{displayName}</span>
         <span className="assistant-inline-file-link-path">{previewPath}</span>
       </span>
@@ -591,7 +591,7 @@ function AssistantMarkdownLink(props: {
           requestPreview(previewPath);
         }}
       >
-        预览
+        Preview
       </button>
     </span>
   );
@@ -643,7 +643,7 @@ function shorten(text: string, max = 1000): string {
   const normalized = text.trim();
   if (!normalized) return "";
   if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, max)}\n...（已截断）`;
+  return `${normalized.slice(0, max)}\n... (truncated)`;
 }
 
 function detailFromUnknown(value: unknown): string {
@@ -752,7 +752,7 @@ const TEXT_LIKE_FILE_NAMES = new Set(["dockerfile", "makefile", "jenkinsfile", "
 
 function truncateForPrompt(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}\n...（内容过长，已截断）`;
+  return `${value.slice(0, maxChars)}\n... (content truncated)`;
 }
 
 function fileNameFromUnknown(value: unknown, fallback: string): string {
@@ -806,12 +806,12 @@ function decodeMaybeUri(value: string): string {
 function uploadedMetaFromUnknown(value: unknown): UploadedAttachmentMeta {
   const obj = asRecord(value);
   if (!obj) {
-    throw new Error("上传响应异常：缺少 attachment");
+    throw new Error("Invalid upload response: missing attachment");
   }
-  const name = fileNameFromUnknown(decodeMaybeUri(String(obj.name ?? "")), "未命名文件");
+  const name = fileNameFromUnknown(decodeMaybeUri(String(obj.name ?? "")), "Untitled file");
   const pathValue = String(obj.path ?? "").trim();
   if (!pathValue) {
-    throw new Error("上传响应异常：缺少文件路径");
+    throw new Error("Invalid upload response: missing file path");
   }
   const relativePath = String(obj.relative_path ?? "").trim();
   const mimeType = fileNameFromUnknown(decodeMaybeUri(String(obj.mime_type ?? "")), "application/octet-stream");
@@ -845,7 +845,7 @@ async function uploadThreadAttachment(threadId: string, file: File): Promise<Upl
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
     notifyAuthInvalidStatus(res.status);
-    const msg = (data && typeof data.detail === "string" && data.detail) || `上传失败(${res.status})`;
+    const msg = (data && typeof data.detail === "string" && data.detail) || `Upload failed (${res.status})`;
     throw new Error(msg);
   }
 
@@ -855,7 +855,7 @@ async function uploadThreadAttachment(threadId: string, file: File): Promise<Upl
 function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
   return [
     `<uploaded_file name=${JSON.stringify(meta.name)} path=${JSON.stringify(meta.path)} relativePath=${JSON.stringify(meta.relativePath)} mimeType=${JSON.stringify(meta.mimeType)} bytes=${meta.size}>`,
-    "文件已上传到工作区。请使用文件系统工具读取该路径，而不是假设内容已在上下文中。",
+    "The file has been uploaded to the workspace. Use filesystem tools to read this path instead of assuming the content is already in context.",
     "</uploaded_file>"
   ].join("\n");
 }
@@ -866,7 +866,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
   constructor(private readonly resolveThreadId: () => Promise<string>) {}
 
   public async add(state: { file: File }): Promise<PendingAttachment> {
-    const name = fileNameFromUnknown(state.file.name, "未命名文件");
+    const name = fileNameFromUnknown(state.file.name, "Untitled file");
     const id =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -886,7 +886,7 @@ class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
     const file = attachment.file;
     const threadId = await this.resolveThreadId();
     if (!threadId) {
-      throw new Error("当前会话初始化失败，请重试");
+      throw new Error("Failed to initialize the current session. Please try again.");
     }
     const uploaded = await uploadThreadAttachment(threadId, file);
     const content: ThreadUserMessagePart[] = [{ type: "text", text: buildUploadedAttachmentHint(uploaded) }];
@@ -941,9 +941,9 @@ function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
 
 function formatProcessStatus(status: string | undefined): string {
   if (!status) return "";
-  if (status === "in_progress") return "进行中";
-  if (status === "completed") return "已完成";
-  if (status === "failed") return "失败";
+  if (status === "in_progress") return "In progress";
+  if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
   return status;
 }
 
@@ -968,24 +968,24 @@ function formatThreadGroupLabel(value: string | undefined, referenceDate = new D
   targetDay.setHours(0, 0, 0, 0);
   let diffDays = Math.floor((currentDay.getTime() - targetDay.getTime()) / dayMs);
   if (diffDays < 0) diffDays = 0;
-  if (diffDays === 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays <= 7) return "7天";
-  if (diffDays <= 30) return "30天";
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "Last 7 days";
+  if (diffDays <= 30) return "Last 30 days";
   const year = targetDay.getFullYear();
   const month = String(targetDay.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
 }
 
 function timelineKindLabel(kind: TimelineRow["kind"]): string {
-  if (kind === "reasoning") return "思考";
-  if (kind === "tool") return "工具";
-  if (kind === "source") return "来源";
-  if (kind === "meta") return "准备";
-  if (kind === "done") return "完成";
-  if (kind === "error") return "错误";
-  if (kind === "debug") return "调试";
-  return "步骤";
+  if (kind === "reasoning") return "Reasoning";
+  if (kind === "tool") return "Tool";
+  if (kind === "source") return "Source";
+  if (kind === "meta") return "Setup";
+  if (kind === "done") return "Done";
+  if (kind === "error") return "Error";
+  if (kind === "debug") return "Debug";
+  return "Step";
 }
 
 function toTokenCount(value: unknown): number | null {
@@ -1033,37 +1033,37 @@ function stageTextForCodexItem(
   item: Record<string, unknown> | null
 ): string {
   if (lifecycle === "started") {
-    if (itemType === "reasoning") return "正在思考解决方案";
+    if (itemType === "reasoning") return "Reasoning about a solution";
     if (itemType === "command_execution") {
       const command = typeof item?.command === "string" ? ellipsizeSingleLine(item.command, 28) : "";
-      return command ? `正在执行命令：${command}` : "正在执行命令";
+      return command ? `Running command: ${command}` : "Running command";
     }
     if (itemType === "mcp_tool_call") {
       const server = typeof item?.server === "string" ? item.server.trim() : "";
       const tool = typeof item?.tool === "string" ? item.tool.trim() : "";
       const toolName = [server, tool].filter(Boolean).join(".");
-      return toolName ? `正在调用工具：${ellipsizeSingleLine(toolName, 30)}` : "正在调用工具";
+      return toolName ? `Calling tool: ${ellipsizeSingleLine(toolName, 30)}` : "Calling tool";
     }
     if (itemType === "web_search") {
       const query = typeof item?.query === "string" ? ellipsizeSingleLine(item.query, 20) : "";
-      return query ? `正在检索资料：${query}` : "正在检索资料";
+      return query ? `Searching resources: ${query}` : "Searching resources";
     }
-    if (itemType === "todo_list") return "正在更新执行计划";
-    if (itemType === "file_change") return "正在写入文件变更";
-    if (itemType === "agent_message") return "正在生成回复";
-    if (itemType === "error") return "正在处理异常信息";
-    return "正在执行步骤";
+    if (itemType === "todo_list") return "Updating execution plan";
+    if (itemType === "file_change") return "Writing file changes";
+    if (itemType === "agent_message") return "Generating response";
+    if (itemType === "error") return "Handling error details";
+    return "Running step";
   }
 
-  if (itemType === "reasoning") return "思考完成，继续处理中";
-  if (itemType === "command_execution") return "命令执行完成";
-  if (itemType === "mcp_tool_call") return "工具调用完成";
-  if (itemType === "web_search") return "检索完成，整理结果";
-  if (itemType === "todo_list") return "执行计划已更新";
-  if (itemType === "file_change") return "文件变更已写入";
-  if (itemType === "agent_message") return "正在生成回复";
-  if (itemType === "error") return "检测到执行错误";
-  return "步骤完成，继续处理中";
+  if (itemType === "reasoning") return "Reasoning completed, continuing";
+  if (itemType === "command_execution") return "Command execution completed";
+  if (itemType === "mcp_tool_call") return "Tool call completed";
+  if (itemType === "web_search") return "Search completed, summarizing results";
+  if (itemType === "todo_list") return "Execution plan updated";
+  if (itemType === "file_change") return "File changes written";
+  if (itemType === "agent_message") return "Generating response";
+  if (itemType === "error") return "Execution error detected";
+  return "Step completed, continuing";
 }
 
 function messageTextForTitle(messages: readonly ThreadMessage[]): string {
@@ -1086,10 +1086,10 @@ function messageTextForTitle(messages: readonly ThreadMessage[]): string {
 
 function guessThreadTitle(messages: readonly ThreadMessage[]): string {
   const text = messageTextForTitle(messages)
-    .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "上传文件")
+    .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "uploaded file")
     .replace(/\s+/g, " ")
     .trim();
-  if (!text) return "新对话";
+  if (!text) return "New conversation";
   return text.length <= 22 ? text : `${text.slice(0, 22)}...`;
 }
 
@@ -1125,18 +1125,18 @@ function normalizePreviewFilePath(value: string): string {
 
 function fileNameFromPreviewPath(filePath: string): string {
   const normalized = normalizePreviewFilePath(filePath);
-  if (!normalized) return "未命名文件";
+  if (!normalized) return "Untitled file";
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || normalized;
 }
 
 function fileChangeKindLabel(kind: string): string {
   const normalized = kind.trim().toLowerCase();
-  if (!normalized || normalized === "update" || normalized === "updated") return "更新";
-  if (normalized === "create" || normalized === "created" || normalized === "add" || normalized === "added") return "新增";
-  if (normalized === "delete" || normalized === "deleted" || normalized === "remove" || normalized === "removed") return "删除";
-  if (normalized === "rename" || normalized === "renamed" || normalized === "move" || normalized === "moved") return "重命名";
-  return kind.trim() || "变更";
+  if (!normalized || normalized === "update" || normalized === "updated") return "Updated";
+  if (normalized === "create" || normalized === "created" || normalized === "add" || normalized === "added") return "Added";
+  if (normalized === "delete" || normalized === "deleted" || normalized === "remove" || normalized === "removed") return "Deleted";
+  if (normalized === "rename" || normalized === "renamed" || normalized === "move" || normalized === "moved") return "Renamed";
+  return kind.trim() || "Change";
 }
 
 function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: string }> {
@@ -1273,11 +1273,11 @@ function pushPromptText(bucket: PromptBucket, value: unknown) {
   bucket.textParts.push(truncateForPrompt(trimmed, PROMPT_TEXT_MAX_CHARS));
 }
 
-function pushPromptImageName(bucket: PromptBucket, value: unknown, fallback = "未命名图片") {
+function pushPromptImageName(bucket: PromptBucket, value: unknown, fallback = "Untitled image") {
   bucket.imageNames.add(fileNameFromUnknown(value, fallback));
 }
 
-function pushPromptFileName(bucket: PromptBucket, value: unknown, fallback = "未命名文件") {
+function pushPromptFileName(bucket: PromptBucket, value: unknown, fallback = "Untitled file") {
   bucket.fileNames.add(fileNameFromUnknown(value, fallback));
 }
 
@@ -1290,7 +1290,7 @@ function pushPromptFilePart(
   pushPromptFileName(bucket, name);
 }
 
-function collectPromptPart(bucket: PromptBucket, part: unknown, fallbackName = "未命名文件") {
+function collectPromptPart(bucket: PromptBucket, part: unknown, fallbackName = "Untitled file") {
   if (!part || typeof part !== "object") return;
   const type = (part as { type?: unknown }).type;
   if (type === "text") {
@@ -1309,11 +1309,11 @@ function collectPromptPart(bucket: PromptBucket, part: unknown, fallbackName = "
 function collectPromptAttachment(bucket: PromptBucket, attachment: unknown) {
   if (!attachment || typeof attachment !== "object") return;
   const att = attachment as { type?: unknown; name?: unknown; content?: unknown };
-  const attachmentName = fileNameFromUnknown(att.name, "未命名文件");
+  const attachmentName = fileNameFromUnknown(att.name, "Untitled file");
   if (att.type === "image") {
-    pushPromptImageName(bucket, attachmentName, "未命名图片");
+    pushPromptImageName(bucket, attachmentName, "Untitled image");
   } else {
-    pushPromptFileName(bucket, attachmentName, "未命名文件");
+    pushPromptFileName(bucket, attachmentName, "Untitled file");
   }
 
   if (!Array.isArray(att.content)) return;
@@ -1353,10 +1353,10 @@ function extractLatestPrompt(messages: unknown): string {
     const mainText = bucket.textParts.join("\n").trim();
     const attachmentHints: string[] = [];
     if (bucket.imageNames.size > 0) {
-      attachmentHints.push(`用户上传了图片：${Array.from(bucket.imageNames).join("、")}`);
+      attachmentHints.push(`User uploaded images: ${Array.from(bucket.imageNames).join(", ")}`);
     }
     if (bucket.fileNames.size > 0) {
-      attachmentHints.push(`用户上传了文件：${Array.from(bucket.fileNames).join("、")}`);
+      attachmentHints.push(`User uploaded files: ${Array.from(bucket.fileNames).join(", ")}`);
     }
     const combined = [mainText, attachmentHints.join("\n")].filter(Boolean).join("\n\n").trim();
     if (combined) return combined;
@@ -1471,7 +1471,7 @@ const ReasoningPart: FC<any> = ({ text }) => {
   if (!value) return null;
   return (
     <details className="process-block process-reasoning" open={false}>
-      <summary>思考摘要</summary>
+      <summary>Reasoning summary</summary>
       <pre>{value}</pre>
     </details>
   );
@@ -1484,7 +1484,7 @@ const SourcePart: FC<any> = ({ url, title }) => {
   return (
     <p className="process-source">
       <a href={link} target="_blank" rel="noreferrer">
-        来源：{label}
+        Source: {label}
       </a>
     </p>
   );
@@ -1501,12 +1501,12 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
       className="assistant-running-card"
       role="status"
       aria-live="polite"
-      aria-label={`助手正在处理中：${runningStageText}`}
+      aria-label={`Assistant is processing: ${runningStageText}`}
     >
       <div className="assistant-running-head">
         <span className="assistant-running-spinner" aria-hidden="true" />
-        <span className="assistant-running-title">正在处理请求</span>
-        <span className="assistant-running-chip">实时</span>
+        <span className="assistant-running-title">Processing request</span>
+        <span className="assistant-running-chip">Live</span>
       </div>
       <p className="assistant-running-phase">{runningStageText}</p>
       <div className="assistant-running-track" aria-hidden="true">
@@ -1542,7 +1542,7 @@ const ProcessDataFallback: FC<any> = ({
         const kind = ["reasoning", "tool", "source", "meta", "process", "done", "error", "debug"].includes(kindRaw)
           ? (kindRaw as TimelineRow["kind"])
           : "process";
-        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "过程事件";
+        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "Process event";
         const detail = typeof obj.detail === "string" ? obj.detail.trim() : "";
         const at = typeof obj.at === "string" ? normalizeProcessTime(obj.at) : "";
         return {
@@ -1564,7 +1564,7 @@ const ProcessDataFallback: FC<any> = ({
 
     return (
       <details className="trace-panel trace-panel-inline" open={batchOpen}>
-        <summary className="trace-summary">{`过程轨迹 ${rows.length} 条（思考 ${reasoningCount} / 工具 ${toolCount} / 步骤 ${stepCount}）`}</summary>
+        <summary className="trace-summary">{`Process trace ${rows.length} entries (reasoning ${reasoningCount} / tools ${toolCount} / steps ${stepCount})`}</summary>
         <ol className="trace-timeline">
           {rows.map((row, index) => {
             const isActiveStep = row.id === resolvedActiveId || (!resolvedActiveId && index === rows.length - 1);
@@ -1592,8 +1592,8 @@ const ProcessDataFallback: FC<any> = ({
     const changes = collectCodexFileChanges(data);
     if (changes.length === 0) return null;
     return (
-      <section className="assistant-file-change-block" aria-label="文件变更">
-        <p className="assistant-file-change-title">已生成文件</p>
+      <section className="assistant-file-change-block" aria-label="File changes">
+        <p className="assistant-file-change-title">Generated files</p>
         <ul className="assistant-file-change-list">
           {changes.map((item) => {
             const label = fileChangeKindLabel(item.kind);
@@ -1606,7 +1606,7 @@ const ProcessDataFallback: FC<any> = ({
                 </div>
                 <div className="assistant-file-change-actions">
                   <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
-                    预览
+                    Preview
                   </button>
                 </div>
               </li>
@@ -1620,13 +1620,13 @@ const ProcessDataFallback: FC<any> = ({
   if (name !== "codex_process") {
     return (
       <details className="process-block process-data" open={false}>
-        <summary>数据事件</summary>
+        <summary>Data event</summary>
         <pre>{shorten(detailFromUnknown(data), 1200)}</pre>
       </details>
     );
   }
   const row = (data && typeof data === "object" ? data : {}) as ProcessData;
-  const title = typeof row.title === "string" ? row.title : "过程事件";
+  const title = typeof row.title === "string" ? row.title : "Process event";
   const detail = typeof row.detail === "string" ? row.detail : "";
   const kind = typeof row.kind === "string" ? row.kind : "process";
   const at = typeof row.at === "string" ? row.at.replace("T", " ").replace("Z", "").slice(0, 19) : "";
@@ -1657,7 +1657,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       rows.push({
         id: `timeline-${++seq}`,
         kind: "reasoning",
-        title: "思考摘要",
+        title: "Reasoning summary",
         detail: shorten(text, 1200)
       });
       continue;
@@ -1670,7 +1670,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       rows.push({
         id: `timeline-${++seq}`,
         kind: "tool",
-        title: `工具调用 · ${toolName}`,
+        title: `Tool call · ${toolName}`,
         detail: [shorten(argsText, 800), shorten(resultText, 1000)].filter(Boolean).join("\n\n")
       });
       continue;
@@ -1679,7 +1679,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
     if (type === "source") {
       const url = typeof p.url === "string" ? p.url.trim() : "";
       if (!url) continue;
-      const title = typeof p.title === "string" && p.title.trim() ? p.title.trim() : "来源链接";
+      const title = typeof p.title === "string" && p.title.trim() ? p.title.trim() : "Source link";
       rows.push({
         id: `timeline-${++seq}`,
         kind: "source",
@@ -1693,7 +1693,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       const data = p.data as Record<string, unknown>;
       const kindRaw = typeof data.kind === "string" ? data.kind : "process";
       const kind = ["meta", "process", "done", "error", "debug"].includes(kindRaw) ? (kindRaw as TimelineRow["kind"]) : "process";
-      const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "过程事件";
+      const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Process event";
       const detail = typeof data.detail === "string" ? data.detail.trim() : "";
       const at = typeof data.at === "string" ? normalizeProcessTime(data.at) : "";
       rows.push({
@@ -1714,7 +1714,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       rows.push({
         id: `timeline-${++seq}`,
         kind: "process",
-        title: "数据事件",
+        title: "Data event",
         detail: shorten(detailFromUnknown(p), 1200)
       });
     }
@@ -1808,7 +1808,7 @@ const AgentThreadListItem: FC = () => {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const remoteId = String(threadRemoteId || "").trim();
   const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
-  const threadTitleForFilter = threadTitle.trim() || "新对话";
+  const threadTitleForFilter = threadTitle.trim() || "New conversation";
 
   useEffect(() => {
     setIsRenaming(false);
@@ -1852,7 +1852,7 @@ const AgentThreadListItem: FC = () => {
       await aui.threadListItem().rename(renameDraft.trim());
       setIsRenaming(false);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "会话重命名失败";
+      const detail = error instanceof Error ? error.message : "Failed to rename session";
       window.alert(detail);
     } finally {
       setRenameSaving(false);
@@ -1889,14 +1889,14 @@ const AgentThreadListItem: FC = () => {
               value={renameDraft}
               onChange={(event) => setRenameDraft(event.target.value)}
               onKeyDown={onRenameInputKeyDown}
-              placeholder="输入会话名称"
+              placeholder="Enter session name"
               disabled={renameSaving}
             />
           </div>
         ) : (
           <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
             <p className="aui-thread-list-item-title">
-              <ThreadListItemPrimitive.Title fallback="新对话" />
+              <ThreadListItemPrimitive.Title fallback="New conversation" />
             </p>
           </ThreadListItemPrimitive.Trigger>
         )}
@@ -1906,8 +1906,8 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn thread-item-save-btn"
-                title="保存会话名称"
-                aria-label="保存会话名称"
+                title="Save session name"
+                aria-label="Save session name"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -1920,8 +1920,8 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn"
-                title="取消修改"
-                aria-label="取消修改"
+                title="Cancel edit"
+                aria-label="Cancel edit"
                 onClick={cancelRename}
                 disabled={renameSaving}
               >
@@ -1932,8 +1932,8 @@ const AgentThreadListItem: FC = () => {
             <button
               type="button"
               className="thread-item-action-btn"
-              title="重命名会话"
-              aria-label="重命名会话"
+              title="Rename session"
+              aria-label="Rename session"
               onClick={beginRename}
             >
               <PencilIcon size={14} />
@@ -1941,11 +1941,11 @@ const AgentThreadListItem: FC = () => {
           )}
           <ThreadListItemPrimitive.Delete
             className="thread-item-action-btn thread-item-delete-btn"
-            title="删除会话"
-            aria-label="删除会话"
+            title="Delete session"
+            aria-label="Delete session"
             disabled={isRenaming}
             onClick={(e) => {
-              const confirmed = window.confirm("确认永久删除该会话吗？该操作不可恢复。");
+              const confirmed = window.confirm("Permanently delete this session? This action cannot be undone.");
               if (!confirmed) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2053,10 +2053,10 @@ const ThreadPublicShareControls: FC<
       const share = await createThreadPublicShare(threadId, selectedTurnIds);
       const publicUrl = resolveThreadPublicShareUrl(share.public_path);
       await copyTextToClipboard(publicUrl);
-      onStatusChange?.("公开链接已创建并复制");
+      onStatusChange?.("Public link created and copied");
       cancelSelectionMode();
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "创建公开链接失败");
+      setErrorText(error instanceof Error ? error.message : "Failed to create public link");
     } finally {
       setSubmitting(false);
     }
@@ -2085,7 +2085,7 @@ const ThreadPublicShareControls: FC<
               className="thread-public-share-toolbar-btn"
               onClick={enterSelectionMode}
               disabled={shareActionDisabled}
-              title={threadRunning ? "线程运行中，稍后再创建公开链接" : "Create public link"}
+              title={threadRunning ? "Thread is running. Create a public link later." : "Create public link"}
             >
               <Share2Icon size={16} />
               <span>Create public link</span>
@@ -2138,7 +2138,7 @@ const ThreadPublicShareControls: FC<
                   className="thread-public-share-close-btn"
                   onClick={() => setConfirmOpen(false)}
                   disabled={submitting}
-                  aria-label="关闭公开链接确认弹窗"
+                  aria-label="Close public link confirmation dialog"
                 >
                   <XIcon size={18} />
                 </button>
@@ -2385,7 +2385,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
 
-  const [statusText, setStatusText] = useState("就绪");
+  const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
@@ -2471,7 +2471,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         });
       } catch (error) {
         if (!active) return;
-        setErrorText(error instanceof Error ? error.message : "加载运行策略失败");
+        setErrorText(error instanceof Error ? error.message : "Failed to load runtime policies");
       }
     }
 
@@ -2509,7 +2509,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (cancelled) return null;
         threadCollaborationRef.current = null;
         setThreadCollaboration(null);
-        setThreadCollaborationErrorText(error instanceof Error ? error.message : "加载协作状态失败");
+        setThreadCollaborationErrorText(error instanceof Error ? error.message : "Failed to load collaboration status");
         return null;
       })
       .finally(() => {
@@ -2570,7 +2570,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         });
       } catch (error) {
         if (!active) return;
-        setResourceErrorText(error instanceof Error ? error.message : "加载知识集资源失败");
+        setResourceErrorText(error instanceof Error ? error.message : "Failed to load knowledge-set resources");
       }
     }
 
@@ -2649,7 +2649,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       setPickerDirectories(Array.isArray(out.directories) ? out.directories : []);
     } catch (error) {
       if (requestSeq !== pickerRequestSeqRef.current) return;
-      const detail = error instanceof Error ? error.message : "读取目录失败";
+      const detail = error instanceof Error ? error.message : "Failed to read directory";
       setPickerError(detail);
       if (!options.keepDirectoriesOnError) {
         setPickerDirectories([]);
@@ -2676,7 +2676,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     const candidate = pickerPathInput.trim();
     cancelPickerAutoJump();
     if (!candidate) {
-      setPickerError("请输入目录路径");
+      setPickerError("Enter a directory path");
       return;
     }
     void loadDirectoryTree(candidate, { syncInput: true, keepDirectoriesOnError: true });
@@ -2731,7 +2731,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         additionalDirectoriesRaw: formatDirectories([...list, normalized])
       };
     });
-    setStatusText(`已添加附加目录：${normalized}`);
+    setStatusText(`Added extra directory: ${normalized}`);
   };
 
   const removeAdditionalDirectory = (pathToRemove: string) => {
@@ -2831,7 +2831,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
 
         const title = existingTitle || guessThreadTitle(messages);
-        const shouldPersist = !existingTitle && title.trim() && title !== "新对话";
+        const shouldPersist = !existingTitle && title.trim() && title !== "New conversation";
         if (shouldPersist) {
           await api(`/api/threads/${encodeURIComponent(remoteId)}`, {
             method: "PATCH",
@@ -2839,7 +2839,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           });
         }
         return createAssistantStream((controller) => {
-          controller.appendText(title || "新对话");
+          controller.appendText(title || "New conversation");
           controller.close();
         });
       },
@@ -2887,8 +2887,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedModelLabel = MODEL_OPTIONS.find((item) => item.value === appliedConfig.model)?.label || appliedConfig.model;
   const selectedReasoningLabel =
     reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort;
-  const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "当前用户";
-  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · 上下文 ${contextUsageView.usedPercent}%`;
+  const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
+  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
 
   const requestPreviewForPath = useCallback((filePath: string) => {
     const normalizedPath = normalizePreviewFilePath(filePath);
@@ -2925,7 +2925,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       run: async function* (options) {
         const prompt = extractLatestPrompt(options.messages);
         if (!prompt) {
-          throw new Error("未识别到用户输入文本");
+          throw new Error("No user input text detected");
         }
 
         const threadId = await resolveRunThreadId({
@@ -2940,7 +2940,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           waitMs: 80
         });
         if (!threadId) {
-          throw new Error("无法识别当前线程 ID（线程可能仍在初始化，请稍后重试）");
+          throw new Error("Unable to resolve the current thread ID (the thread may still be initializing, please try again).");
         }
         activeRemoteThreadIdRef.current = threadId;
         const readActiveCollaboration = () => {
@@ -2957,7 +2957,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               ? threadCollaborationPendingRef.current.promise
               : null;
           if (pendingCollaboration) {
-            updateRunningStage("等待线程协作权限");
+            updateRunningStage("Waiting for thread collaboration permission");
             await Promise.race([
               pendingCollaboration,
               new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1500))
@@ -2966,7 +2966,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         }
         const activeCollaboration = readActiveCollaboration();
         if (activeCollaboration && !activeCollaboration.access.canRun) {
-          throw new Error("当前共享线程为只读模式，不能继续运行。");
+          throw new Error("The current shared thread is read-only and cannot continue running.");
         }
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
@@ -2983,8 +2983,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const session = ensured.session;
 
         setErrorText("");
-        setStatusText("生成中...");
-        updateRunningStage("请求已提交，等待模型响应");
+        setStatusText("Generating...");
+        updateRunningStage("Request submitted, waiting for model response");
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -3090,9 +3090,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
             if (event === "error") {
               const detail =
-                (payload && typeof payload.detail === "string" ? payload.detail : "") || "请求失败";
+                (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
               setErrorText(detail);
-              updateRunningStage("执行失败");
+              updateRunningStage("Execution failed");
               if (processEnabled) {
                 updates.push({
                   type: "data",
@@ -3100,7 +3100,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "error",
                     at: new Date().toISOString(),
-                    title: "执行失败",
+                    title: "Execution failed",
                     detail: shorten(detail, 1400)
                   } satisfies ProcessData
                 });
@@ -3119,7 +3119,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             if (event === "done") {
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
-              updateRunningStage("回复生成完成");
+              updateRunningStage("Response generation completed");
               if (!hasTextUpdate && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
               }
@@ -3130,7 +3130,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "done",
                     at: new Date().toISOString(),
-                    title: "回答完成"
+                    title: "Response completed"
                   } satisfies ProcessData
                 });
               }
@@ -3149,7 +3149,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage("会话已建立，开始执行");
+              updateRunningStage("Session established, starting execution");
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
@@ -3160,7 +3160,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "meta",
                     at: new Date().toISOString(),
-                    title: "会话已开始",
+                    title: "Session started",
                     detail: [model, reasoning].filter(Boolean).join(" / ")
                   } satisfies ProcessData
                 });
@@ -3255,7 +3255,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: `命令执行 ${formatProcessStatus(status)}`.trim(),
+                  title: `Command execution ${formatProcessStatus(status)}`.trim(),
                   detail: [command ? `$ ${command}` : "", exitCode !== undefined ? `exit_code=${exitCode}` : ""]
                     .filter(Boolean)
                     .join("\n"),
@@ -3293,7 +3293,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: errMsg ? "error" : "process",
                   at: new Date().toISOString(),
-                  title: `工具调用 ${errMsg ? "失败" : "已完成"}`,
+                  title: `Tool call ${errMsg ? "Failed" : "Completed"}`,
                   detail: [
                     server ? `server: ${server}` : "",
                     tool ? `tool: ${tool}` : "",
@@ -3335,7 +3335,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "process",
                     at: new Date().toISOString(),
-                    title: "Web 检索",
+                    title: "Web search",
                     detail: query,
                     event: eventType,
                     item_type: itemType
@@ -3363,7 +3363,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: "执行计划（Todo）",
+                  title: "Execution plan (Todo)",
                   detail: lines,
                   event: eventType,
                   item_type: itemType
@@ -3408,7 +3408,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "process",
                     at: new Date().toISOString(),
-                    title: "文件变更",
+                    title: "File changes",
                     detail: lines,
                     event: eventType,
                     item_type: itemType
@@ -3425,7 +3425,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "error",
                   at: new Date().toISOString(),
-                  title: "执行错误",
+                  title: "Execution error",
                   detail: shorten(message, 1200),
                   event: eventType,
                   item_type: itemType
@@ -3449,7 +3449,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: `过程事件 ${eventType}`,
+                  title: `Process event ${eventType}`,
                   detail: shorten(detailFromUnknown(item), 800),
                   event: eventType,
                   item_type: itemType,
@@ -3477,7 +3477,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             };
           }
         } finally {
-          setStatusText("就绪");
+          setStatusText("Ready");
           updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT);
         }
       }
@@ -3505,7 +3505,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       .switchToThread(requestedThreadId)
       .catch((error) => {
         if (cancelled) return;
-        setErrorText(error instanceof Error ? error.message : "恢复当前会话失败");
+        setErrorText(error instanceof Error ? error.message : "Failed to restore current session");
       })
       .finally(() => {
         if (!cancelled) {
@@ -3531,8 +3531,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     >
       {sharedThreadReadonly ? (
         <div className="thread-readonly-banner" role="status">
-          <strong>共享只读线程</strong>
-          <span>共享视图中可查看消息和附件，但不能继续运行该线程。</span>
+          <strong>Shared read-only thread</strong>
+          <span>In shared view, you can read messages and attachments, but cannot continue running this thread.</span>
         </div>
       ) : null}
       <ThreadPublicShareControls
@@ -3546,21 +3546,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
               strings={{
                 threadList: {
-                  new: { label: "新会话" },
+                  new: { label: "New session" },
                   item: {
-                    title: { fallback: "新对话" }
+                    title: { fallback: "New conversation" }
                   }
                 },
                 composer: {
                   input: {
-                    placeholder: canUpload ? "直接输入问题，支持上传任意附件；可拖拽到对话窗口" : "直接输入问题"
+                    placeholder: canUpload ? "Type your question directly. Any attachments are supported; you can also drag files into the chat window." : "Type your question directly"
                   },
-                  send: { tooltip: "发送消息" },
-                  cancel: { tooltip: "停止生成" }
+                  send: { tooltip: "Send message" },
+                  cancel: { tooltip: "Stop generation" }
                 }
               }}
               welcome={{
-                message: "你好，我是 Agent Studio。请直接提问。",
+                message: "Hello, I'm Agent Studio. Ask anything directly.",
                 suggestions: PORTAL_STARTER_SUGGESTIONS
               }}
               components={{
@@ -3585,8 +3585,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
-            <p>共享线程已切换为只读模式。</p>
-            <p>你仍可浏览消息、附件与右侧协作面板中的评论区。</p>
+            <p>This shared thread has switched to read-only mode.</p>
+            <p>You can still browse messages, attachments, and comments in the right collaboration panel.</p>
           </div>
         </div>
       ) : null}
@@ -3631,11 +3631,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   onSearchChange={setSessionSearchValue}
                   onCreateThread={() => undefined}
                   onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
-                  newThreadSlot={<ThreadList.New aria-label="新会话" className="session-rail-new-btn" />}
+                  newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
                   footer={
                     <div className="session-rail-footer-stack">
                       {props.currentUser ? (
-                        <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} />
+                        <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} locale="en" />
                       ) : (
                         <p className="session-rail-user-fallback">{currentUserName}</p>
                       )}
@@ -3684,12 +3684,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               collaborationContent={
                 <div className="workbench-collaboration-content">
                   <section className="workbench-priority-card">
-                    <h3>优先项 B：评论与 @ 提及</h3>
-                    <p>先同步上下文和分歧，评论会实时留痕，便于后续追踪。</p>
+                    <h3>Priority B: Comments and @mentions</h3>
+                    <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
                   </section>
                   <section className="workbench-priority-card">
-                    <h3>优先项 D：负责人和跟进</h3>
-                    <p>锁定 owner 与 followers，确保每个动作都能有人接住。</p>
+                    <h3>Priority D: Owner and follow-up</h3>
+                    <p>Assign owner and followers so every action has clear accountability.</p>
                   </section>
                   <ThreadCollaborationPanel
                     threadId={String(activeThreadIdentity.remoteId || "").trim()}
@@ -3731,34 +3731,34 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       onChange={handleKnowledgeSetChange}
                     />
                   ) : (
-                    <p className="field-help knowledge-set-loading">知识集资源加载中...</p>
+                    <p className="field-help knowledge-set-loading">Loading knowledge-set resources...</p>
                   )}
                   {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
                 </div>
 
                 <label className="field checkbox-field">
-                  <span className="field-label">显示过程轨迹</span>
+                  <span className="field-label">Show process trace</span>
                   <input
                     type="checkbox"
                     checked={showProcessTrace}
                     onChange={(e) => setShowProcessTrace(e.target.checked)}
                   />
-                  <span className="field-help">在消息中显示思考摘要、工具调用与执行步骤。</span>
+                  <span className="field-help">Show reasoning summaries, tool calls, and execution steps in messages.</span>
                 </label>
 
                 <label className="field checkbox-field">
-                  <span className="field-label">完成后折叠最终步骤</span>
+                  <span className="field-label">Collapse final trace when done</span>
                   <input
                     type="checkbox"
                     checked={collapseFinalTraceOnDone}
                     onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
                     disabled={!showProcessTrace}
                   />
-                  <span className="field-help">启用后，仅保留最终结论文本展开；完成轨迹默认收起。</span>
+                  <span className="field-help">When enabled, only the final conclusion remains expanded and completed traces collapse by default.</span>
                 </label>
 
                 <label className="field">
-                  <span className="field-label">策略模式</span>
+                  <span className="field-label">Policy mode</span>
                   <select
                     className="field-input"
                     value={runtimeMode}
@@ -3771,27 +3771,27 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       </option>
                     ))}
                   </select>
-                  <span className="field-help">由 `/api/portal/runtime-options` 提供，员工仅能选择允许的策略。</span>
+                  <span className="field-help">Provided by `/api/portal/runtime-options`; employees can only choose allowed policies.</span>
                 </label>
 
                 {selectedMode ? (
                   <div className="field">
-                    <span className="field-label">策略快照</span>
+                    <span className="field-label">Policy snapshot</span>
                     <RuntimeProfileView profile={selectedMode.runtimeProfile} />
-                    <span className="field-help">以下运行参数由当前策略模式绑定的 run profile 决定。</span>
+                    <span className="field-help">The runtime parameters below are determined by the run profile bound to the current policy mode.</span>
                   </div>
                 ) : null}
 
                 <div className="status-box">
                   <p>
-                    <strong>状态：</strong>
+                    <strong>Status: </strong>
                     {statusText}
                   </p>
                   <p>
-                    <strong>附件策略：</strong>
-                    {runtimeOptions?.canUpload ? "允许上传" : "当前禁止上传"}
+                    <strong>Attachment policy: </strong>
+                    {runtimeOptions?.canUpload ? "Upload allowed" : "Uploads currently disabled"}
                   </p>
-                  <p className="field-help">运行配置修改后将自动在下一轮对话生效。</p>
+                  <p className="field-help">Runtime setting changes take effect automatically in the next turn.</p>
                   {errorText ? <p className="err-text">{errorText}</p> : null}
                 </div>
               </div>
@@ -3802,9 +3802,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
             <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
             <div className="dir-modal-head">
-              <h3>{pickerTarget === "workspace" ? "选择工作目录" : "选择附加目录"}</h3>
+              <h3>{pickerTarget === "workspace" ? "Select workspace directory" : "Select additional directory"}</h3>
               <button type="button" className="picker-btn" onClick={() => setPickerOpen(false)}>
-                关闭
+                Close
               </button>
             </div>
             <div className="dir-path-input-row">
@@ -3813,7 +3813,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 value={pickerPathInput}
                 onChange={(e) => onPickerPathInputChange(e.target.value)}
                 onKeyDown={onPickerPathInputKeyDown}
-                placeholder="输入目录路径，实时跳转并加载子目录"
+                placeholder="Enter a directory path to jump and load subdirectories"
               />
               <button
                 type="button"
@@ -3821,10 +3821,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 onClick={jumpToDirectoryFromInput}
                 disabled={pickerLoading}
               >
-                跳转
+                Jump
               </button>
             </div>
-            <p className="dir-modal-current">当前目录：{pickerCwd || "..."}</p>
+            <p className="dir-modal-current">Current directory: {pickerCwd || "..."}</p>
             <div className="dir-modal-toolbar">
               <button
                 type="button"
@@ -3835,7 +3835,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }}
                 disabled={!pickerParent || pickerLoading}
               >
-                上一级
+                Up one level
               </button>
               <button
                 type="button"
@@ -3843,7 +3843,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 onClick={() => selectDirectory(pickerCwd)}
                 disabled={!pickerCwd || pickerLoading}
               >
-                {pickerTarget === "workspace" ? "设为工作目录" : "添加当前目录"}
+                {pickerTarget === "workspace" ? "Set as workspace" : "Add current directory"}
               </button>
             </div>
             <div className="dir-root-list">
@@ -3864,9 +3864,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             </div>
             {pickerError ? <p className="err-text">{pickerError}</p> : null}
             <div className="dir-modal-list">
-              {pickerLoading ? <p className="trace-empty">目录加载中...</p> : null}
+              {pickerLoading ? <p className="trace-empty">Loading directories...</p> : null}
               {!pickerLoading && pickerDirectories.length === 0 ? (
-                <p className="trace-empty">当前目录没有可进入的子目录。</p>
+                <p className="trace-empty">No subdirectories available in the current directory.</p>
               ) : null}
               {!pickerLoading && pickerDirectories.length > 0 ? (
                 <ul className="dir-list">
@@ -3888,7 +3888,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         className="picker-btn"
                         onClick={() => selectDirectory(item.path)}
                       >
-                        选择
+                        Select
                       </button>
                     </li>
                   ))}

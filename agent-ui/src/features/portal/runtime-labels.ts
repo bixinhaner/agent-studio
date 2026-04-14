@@ -10,9 +10,9 @@ type WorkspaceOption = {
 };
 
 function fallbackModeLabel(modeId: string): string {
-  if (modeId === "review") return "复核助手";
-  if (modeId === "standard") return "通用助手";
-  return "受控助手";
+  if (modeId === "review") return "Review Assistant";
+  if (modeId === "standard") return "General Assistant";
+  return "Controlled Assistant";
 }
 
 export function resolveModeOptions(options: ModeOption[], currentMode: string): ModeOption[] {
@@ -28,11 +28,11 @@ export function resolveModeLabel(options: ModeOption[], currentMode: string): st
 
 export function resolveWorkspaceOptions(options: WorkspaceOption[], currentWorkspace: string): WorkspaceOption[] {
   if (options.length > 0) return options;
-  return [{ id: currentWorkspace, label: "默认工作区", isDefault: true }];
+  return [{ id: currentWorkspace, label: "Default workspace", isDefault: true }];
 }
 
 export function resolveWorkspaceLabel(options: WorkspaceOption[], currentWorkspace: string): string {
   const selected = options.find((option) => option.id === currentWorkspace);
   if (selected?.label) return selected.label;
-  return resolveWorkspaceOptions(options, currentWorkspace)[0]?.label || "默认工作区";
+  return resolveWorkspaceOptions(options, currentWorkspace)[0]?.label || "Default workspace";
 }

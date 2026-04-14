@@ -10,7 +10,7 @@ export function AdvancedSettingsPanel(props: {
 }) {
   return (
     <Drawer
-      title="运行配置"
+      title="Runtime settings"
       placement="left"
       width="min(420px, calc(100vw - 16px))"
       open={props.open}
@@ -18,10 +18,10 @@ export function AdvancedSettingsPanel(props: {
       rootClassName="workbench-left-drawer"
     >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
-        <Typography.Text strong>模型</Typography.Text>
+        <Typography.Text strong>Model</Typography.Text>
         <Typography.Paragraph>{props.modelLabel}</Typography.Paragraph>
 
-        <Typography.Text strong>思考深度</Typography.Text>
+        <Typography.Text strong>Reasoning</Typography.Text>
         <Typography.Paragraph>{props.reasoningLabel}</Typography.Paragraph>
 
         {props.children}

@@ -22,11 +22,13 @@ export async function fetchPublicThreadShare(token: string): Promise<ThreadPubli
   const text = await response.text();
   const contentType = response.headers.get("content-type") || "";
   if (text && !contentType.toLowerCase().includes("application/json")) {
-    throw new Error("公开链接接口返回了 HTML 页面，请检查反向代理是否已将 /public-api/* 转发到后端。");
+    throw new Error(
+      "The public link API returned an HTML page. Check whether your reverse proxy forwards /public-api/* to the backend."
+    );
   }
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    const detail = data && typeof data.detail === "string" ? data.detail : `请求失败(${response.status})`;
+    const detail = data && typeof data.detail === "string" ? data.detail : `Request failed (${response.status})`;
     throw new Error(detail);
   }
   return (data as { share: ThreadPublicShareView }).share;

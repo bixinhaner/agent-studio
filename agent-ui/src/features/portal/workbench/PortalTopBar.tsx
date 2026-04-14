@@ -4,8 +4,8 @@ import { LayoutPanelLeft, Settings, PanelRightClose, PanelRightOpen, Shield } fr
 import type { WorkbenchTab } from "./layout-state";
 
 const WORKBENCH_TAB_LABEL: Record<WorkbenchTab, string> = {
-  preview: "预览",
-  collaboration: "协作"
+  preview: "Preview",
+  collaboration: "Collaboration"
 };
 
 export function PortalTopBar(props: {
@@ -21,16 +21,16 @@ export function PortalTopBar(props: {
   const isRightPanelOpen = props.drawerOpen;
 
   return (
-    <header className="portal-topbar" aria-label="工作台顶栏">
+    <header className="portal-topbar" aria-label="Workbench top bar">
       <div className="portal-topbar-left">
-        <Tooltip title={props.sessionRailCollapsed ? "展开会话栏" : "收起会话栏"} placement="bottom">
+        <Tooltip title={props.sessionRailCollapsed ? "Expand session rail" : "Collapse session rail"} placement="bottom">
           <Button
             type="text"
             className="portal-topbar-ghost-btn"
             icon={<LayoutPanelLeft size={18} />}
             onClick={props.onToggleRail}
             style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            aria-label={props.sessionRailCollapsed ? "展开会话栏" : "收起会话栏"}
+            aria-label={props.sessionRailCollapsed ? "Expand session rail" : "Collapse session rail"}
           />
         </Tooltip>
 
@@ -54,35 +54,35 @@ export function PortalTopBar(props: {
 
         <Space size={8} className="portal-topbar-action-group">
           {props.onOpenAdmin ? (
-            <Tooltip title="进入管理台" placement="bottom">
+            <Tooltip title="Open admin console" placement="bottom">
               <Button
                 type="text"
                 className="portal-topbar-ghost-btn"
                 icon={<Shield size={18} />}
                 onClick={props.onOpenAdmin}
                 style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                aria-label="进入管理台"
+                aria-label="Open admin console"
               />
             </Tooltip>
           ) : null}
-          <Tooltip title="运行参数" placement="bottom">
+          <Tooltip title="Runtime settings" placement="bottom">
             <Button 
               type="text" 
               className="portal-topbar-ghost-btn" 
               icon={<Settings size={18} />} 
               onClick={props.onOpenAdvancedSettings}
               style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="高级设置"
+              aria-label="Advanced settings"
             />
           </Tooltip>
-          <Tooltip title={isRightPanelOpen ? "关闭工作台" : "打开工作台"} placement="bottomLeft">
+          <Tooltip title={isRightPanelOpen ? "Close right panel" : "Open right panel"} placement="bottomLeft">
             <Button 
               type="text" 
               className="portal-topbar-ghost-btn"
               icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
               onClick={props.onToggleDrawer}
               style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="打开/关闭工作台"
+              aria-label="Toggle right panel"
             />
           </Tooltip>
         </Space>

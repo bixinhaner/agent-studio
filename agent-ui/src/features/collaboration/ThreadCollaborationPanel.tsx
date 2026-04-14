@@ -86,8 +86,8 @@ export function ThreadCollaborationPanel({
 
   const commentSummary = useMemo(() => {
     const count = collaboration?.comments.length ?? 0;
-    if (count === 0) return "暂无协作评论";
-    return `共 ${count} 条协作评论`;
+    if (count === 0) return "No collaboration comments yet";
+    return `${count} collaboration comment${count > 1 ? "s" : ""}`;
   }, [collaboration?.comments.length]);
 
   async function handleShareSave() {
@@ -101,7 +101,7 @@ export function ThreadCollaborationPanel({
       onCollaborationChange({ ...latestCollaborationRef.current, shares });
     } catch (error) {
       if (currentThreadIdRef.current === requestThreadId) {
-        setPanelErrorText(error instanceof Error ? error.message : "更新共享失败");
+        setPanelErrorText(error instanceof Error ? error.message : "Failed to update sharing settings");
       }
     } finally {
       if (currentThreadIdRef.current === requestThreadId) {
@@ -131,7 +131,7 @@ export function ThreadCollaborationPanel({
       }
     } catch (error) {
       if (currentThreadIdRef.current === requestThreadId) {
-        setPanelErrorText(error instanceof Error ? error.message : "发送评论失败");
+        setPanelErrorText(error instanceof Error ? error.message : "Failed to send comment");
       }
     } finally {
       if (currentThreadIdRef.current === requestThreadId) {
@@ -158,7 +158,7 @@ export function ThreadCollaborationPanel({
       });
     } catch (error) {
       if (currentThreadIdRef.current === requestThreadId) {
-        setPanelErrorText(error instanceof Error ? error.message : "保存协作负责人失败");
+        setPanelErrorText(error instanceof Error ? error.message : "Failed to save collaboration owner");
       }
     } finally {
       if (currentThreadIdRef.current === requestThreadId) {
@@ -184,7 +184,7 @@ export function ThreadCollaborationPanel({
       });
     } catch (error) {
       if (currentThreadIdRef.current === requestThreadId) {
-        setPanelErrorText(error instanceof Error ? error.message : "保存捕获标记失败");
+        setPanelErrorText(error instanceof Error ? error.message : "Failed to save capture flag");
       }
     } finally {
       if (currentThreadIdRef.current === requestThreadId) {
@@ -194,30 +194,32 @@ export function ThreadCollaborationPanel({
   }
 
   return (
-    <aside className="panel collaboration-panel" aria-label="线程协作面板">
+    <aside className="panel collaboration-panel" aria-label="Thread collaboration panel">
       <div className="panel-title-row collaboration-panel-title-row">
         <div>
-          <h2>协作</h2>
-          <p className="collaboration-panel-subtitle">分享线程、记录评论、指定负责人、标记知识捕获。</p>
+          <h2>Collaboration</h2>
+          <p className="collaboration-panel-subtitle">
+            Share threads, track comments, assign owners, and mark high-value knowledge capture.
+          </p>
         </div>
         {threadId ? <span className="tag">{threadId}</span> : null}
       </div>
 
-      {!threadId ? <p className="field-help">选择线程后加载协作状态。</p> : null}
-      {loading ? <p className="field-help">协作状态加载中...</p> : null}
+      {!threadId ? <p className="field-help">Select a thread to load collaboration status.</p> : null}
+      {loading ? <p className="field-help">Loading collaboration status...</p> : null}
       {errorText ? <p className="err-text">{errorText}</p> : null}
       {panelErrorText ? <p className="err-text">{panelErrorText}</p> : null}
-      {readonlySharedThread ? <p className="warn-text">共享视图中只能查看历史与发表评论，不能继续运行该线程。</p> : null}
+      {readonlySharedThread ? <p className="warn-text">This shared view is read-only. You can view history and comment, but cannot continue running this thread.</p> : null}
 
       {collaboration ? (
         <div className="collaboration-panel-sections">
           <section className="collaboration-panel-section">
             <div className="collaboration-panel-section-head">
-              <h3>共享范围</h3>
-              <span className="field-help">每行 `user:id` 或 `department:id`</span>
+              <h3>Share Scope</h3>
+              <span className="field-help">One per line: `user:id` or `department:id`</span>
             </div>
             <label className="field">
-              <span className="field-label">共享对象</span>
+              <span className="field-label">Shared with</span>
               <textarea
                 className="field-input textarea collaboration-textarea"
                 value={shareDraft}
@@ -231,13 +233,13 @@ export function ThreadCollaborationPanel({
               onClick={() => void handleShareSave()}
               disabled={!canManage || pendingAction !== null}
             >
-              更新共享
+              Save sharing
             </button>
           </section>
 
           <section className="collaboration-panel-section">
             <div className="collaboration-panel-section-head">
-              <h3>协作评论</h3>
+              <h3>Comments</h3>
               <span className="field-help">{commentSummary}</span>
             </div>
             <div className="collaboration-comment-list">
@@ -245,21 +247,21 @@ export function ThreadCollaborationPanel({
                 collaboration.comments.map((comment) => (
                   <article key={comment.id} className="collaboration-comment-card">
                     <div className="collaboration-comment-meta">
-                      <strong>{comment.authorUserId || "未知用户"}</strong>
+                      <strong>{comment.authorUserId || "Unknown user"}</strong>
                       <span>{formatLocalDateTime(comment.createdAt)}</span>
                     </div>
                     <p>{comment.bodyMarkdown}</p>
                     {comment.mentionedUserIds.length > 0 ? (
-                      <p className="field-help">提及: {comment.mentionedUserIds.join(", ")}</p>
+                      <p className="field-help">Mentions: {comment.mentionedUserIds.join(", ")}</p>
                     ) : null}
                   </article>
                 ))
               ) : (
-                <p className="field-help">暂无评论。</p>
+                <p className="field-help">No comments yet.</p>
               )}
             </div>
             <label className="field">
-              <span className="field-label">评论内容</span>
+              <span className="field-label">Comment</span>
               <textarea
                 className="field-input textarea collaboration-textarea"
                 value={commentDraft}
@@ -268,12 +270,12 @@ export function ThreadCollaborationPanel({
               />
             </label>
             <label className="field">
-              <span className="field-label">提及用户 ID</span>
+              <span className="field-label">Mention user IDs</span>
               <input
                 className="field-input"
                 value={mentionDraft}
                 onChange={(event) => setMentionDraft(event.target.value)}
-                placeholder="多个 ID 用逗号分隔"
+                placeholder="Separate multiple IDs with commas"
                 disabled={!canComment || pendingAction === "comment"}
               />
             </label>
@@ -283,17 +285,17 @@ export function ThreadCollaborationPanel({
               onClick={() => void handleCommentSubmit()}
               disabled={!canComment || !commentDraft.trim() || pendingAction !== null}
             >
-              发送评论
+              Send comment
             </button>
           </section>
 
           <section className="collaboration-panel-section">
             <div className="collaboration-panel-section-head">
-              <h3>协作负责人</h3>
-              <span className="field-help">负责人 1 人，关注人可多个</span>
+              <h3>Ownership</h3>
+              <span className="field-help">Set one owner and multiple followers</span>
             </div>
             <label className="field">
-              <span className="field-label">协作负责人</span>
+              <span className="field-label">Owner</span>
               <input
                 className="field-input"
                 value={ownerDraft}
@@ -302,12 +304,12 @@ export function ThreadCollaborationPanel({
               />
             </label>
             <label className="field">
-              <span className="field-label">关注人 ID</span>
+              <span className="field-label">Follower IDs</span>
               <input
                 className="field-input"
                 value={followersDraft}
                 onChange={(event) => setFollowersDraft(event.target.value)}
-                placeholder="多个 ID 用逗号分隔"
+                placeholder="Separate multiple IDs with commas"
                 disabled={!canManage || pendingAction === "assignment"}
               />
             </label>
@@ -317,17 +319,17 @@ export function ThreadCollaborationPanel({
               onClick={() => void handleAssignmentSave()}
               disabled={!canManage || !ownerDraft.trim() || pendingAction !== null}
             >
-              保存协作人
+              Save owner/followers
             </button>
           </section>
 
           <section className="collaboration-panel-section">
             <div className="collaboration-panel-section-head">
-              <h3>知识捕获</h3>
-              <span className="field-help">标记高价值线程供后续沉淀</span>
+              <h3>Knowledge Capture</h3>
+              <span className="field-help">Flag high-value threads for later knowledge curation</span>
             </div>
             <label className="field checkbox-field collaboration-capture-toggle">
-              <span className="field-label">标记为待知识捕获</span>
+              <span className="field-label">Mark for knowledge capture</span>
               <input
                 type="checkbox"
                 checked={captureEnabled}
@@ -336,7 +338,7 @@ export function ThreadCollaborationPanel({
               />
             </label>
             <label className="field">
-              <span className="field-label">捕获备注</span>
+              <span className="field-label">Capture note</span>
               <textarea
                 className="field-input textarea collaboration-textarea"
                 value={captureNoteDraft}
@@ -350,7 +352,7 @@ export function ThreadCollaborationPanel({
               onClick={() => void handleCaptureSave()}
               disabled={!canManage || pendingAction !== null}
             >
-              保存捕获标记
+              Save capture flag
             </button>
           </section>
         </div>

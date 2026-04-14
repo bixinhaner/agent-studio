@@ -4,38 +4,41 @@ import { useState } from "react";
 import { useAuth } from "./AuthProvider";
 import type { AuthUser, AuthUserType } from "./api";
 
-function roleLabel(role: string | undefined, userType: AuthUserType | undefined): string {
+type UserIdentityLocale = "zh" | "en";
+
+function roleLabel(role: string | undefined, userType: AuthUserType | undefined, locale: UserIdentityLocale): string {
   switch ((role || "").trim()) {
     case "super_admin":
-      return "超级管理员";
+      return locale === "en" ? "Super admin" : "超级管理员";
     case "admin":
-      return "管理员";
+      return locale === "en" ? "Admin" : "管理员";
     case "employee":
-      return userType === "external_user" ? "User" : "员工";
+      if (userType === "external_user") return "User";
+      return locale === "en" ? "Employee" : "员工";
     default:
-      return role?.trim() || "未知角色";
+      return role?.trim() || (locale === "en" ? "Unknown role" : "未知角色");
   }
 }
 
-function userTypeLabel(userType: string | undefined): string {
+function userTypeLabel(userType: string | undefined, locale: UserIdentityLocale): string {
   switch ((userType || "").trim()) {
     case "internal_employee":
-      return "内部成员";
+      return locale === "en" ? "Internal member" : "内部成员";
     case "external_user":
-      return "外部成员";
+      return locale === "en" ? "External member" : "外部成员";
     default:
-      return userType?.trim() || "平台用户";
+      return userType?.trim() || (locale === "en" ? "Platform user" : "平台用户");
   }
 }
 
-function providerLabel(provider: string): string {
+function providerLabel(provider: string, locale: UserIdentityLocale): string {
   switch (provider.trim()) {
     case "dingtalk":
-      return "钉钉";
+      return locale === "en" ? "DingTalk" : "钉钉";
     case "email_magic_link":
-      return "邮箱免密";
+      return locale === "en" ? "Email magic link" : "邮箱免密";
     default:
-      return provider.trim() || "未知身份";
+      return provider.trim() || (locale === "en" ? "Unknown identity" : "未知身份");
   }
 }
 
@@ -43,18 +46,20 @@ export function UserIdentitySummary(props: {
   user: AuthUser;
   compact?: boolean;
   onSignOut?: () => void;
+  locale?: UserIdentityLocale;
 }) {
   const auth = useAuth();
   const [switchingOrganization, setSwitchingOrganization] = useState(false);
+  const locale: UserIdentityLocale = props.locale || "zh";
   const name = props.user.displayName?.trim() || props.user.email?.trim() || props.user.id;
-  const email = props.user.email?.trim() || "未绑定邮箱";
-  const activeOrganizationName = auth.activeOrganization?.name?.trim() || "未选择组织";
-  const providerLabels = [...new Set(auth.identities.map((identity) => providerLabel(identity.provider)).filter(Boolean))];
+  const email = props.user.email?.trim() || (locale === "en" ? "No email linked" : "未绑定邮箱");
+  const activeOrganizationName = auth.activeOrganization?.name?.trim() || (locale === "en" ? "No organization selected" : "未选择组织");
+  const providerLabels = [...new Set(auth.identities.map((identity) => providerLabel(identity.provider, locale)).filter(Boolean))];
   const organizationOptions = auth.memberships.filter((membership) => membership.organization);
 
   const handleSignOut = () => {
     if (!props.onSignOut) return;
-    if (!window.confirm("确认退出当前登录状态？")) return;
+    if (!window.confirm(locale === "en" ? "Sign out of the current session?" : "确认退出当前登录状态？")) return;
     props.onSignOut();
   };
 
@@ -69,17 +74,17 @@ export function UserIdentitySummary(props: {
   };
 
   return (
-    <section className={props.compact ? "user-identity-card compact" : "user-identity-card"} aria-label="当前登录用户">
+    <section className={props.compact ? "user-identity-card compact" : "user-identity-card"} aria-label={locale === "en" ? "Current signed-in user" : "当前登录用户"}>
       <div className="user-identity-stack">
         <div className="user-identity-copy">
           <p className="user-identity-name" style={{ marginBottom: 4 }}>{name}</p>
           <p className="user-identity-meta" style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
-            <span className="user-identity-role">{roleLabel(props.user.role, props.user.userType)}</span>
+            <span className="user-identity-role">{roleLabel(props.user.role, props.user.userType, locale)}</span>
             <span className="user-identity-divider" aria-hidden="true" style={{ margin: "0 6px" }}>·</span>
             {organizationOptions.length > 1 ? (
               <select
                 style={{ appearance: "auto", border: "none", background: "transparent", padding: 0, color: "inherit", fontSize: "inherit", cursor: "pointer", outline: "none", maxWidth: 120, textOverflow: "ellipsis" }}
-                title="切换组织"
+                title={locale === "en" ? "Switch organization" : "切换组织"}
                 value={auth.activeOrganization?.id ?? ""}
                 disabled={switchingOrganization}
                 onChange={(event) => void handleOrganizationChange(event.target.value)}
@@ -109,8 +114,8 @@ export function UserIdentitySummary(props: {
           <button
             type="button"
             className="user-identity-action-btn"
-            aria-label="退出登录"
-            title="退出登录"
+            aria-label={locale === "en" ? "Sign out" : "退出登录"}
+            title={locale === "en" ? "Sign out" : "退出登录"}
             onClick={handleSignOut}
           >
             <LogOutIcon size={16} strokeWidth={2} />

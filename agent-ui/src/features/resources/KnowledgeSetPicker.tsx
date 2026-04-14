@@ -19,16 +19,16 @@ export function KnowledgeSetPicker({
   };
 
   return (
-    <section className="knowledge-set-panel" aria-label="知识集">
+    <section className="knowledge-set-panel" aria-label="Knowledge sets">
       <div className="knowledge-set-copy">
-        <h3>知识集</h3>
-        <p>可按当前 Agent 选择挂载资料集，也可以不选择。</p>
+        <h3>Knowledge Sets</h3>
+        <p>Select knowledge sets to mount for the current agent, or leave all unselected.</p>
       </div>
 
       <div className="knowledge-set-group">
         <div className="knowledge-set-group-header">
-          <span className="knowledge-set-group-label">可用知识集</span>
-          <span className="knowledge-set-group-hint">仅显示已授权项</span>
+          <span className="knowledge-set-group-label">Available knowledge sets</span>
+          <span className="knowledge-set-group-hint">Only authorized items are shown</span>
         </div>
         {knowledgeSets.length > 0 ? (
           <div className="knowledge-set-option-list">
@@ -49,7 +49,7 @@ export function KnowledgeSetPicker({
             })}
           </div>
         ) : (
-          <p className="knowledge-set-empty">当前没有可选知识集。</p>
+          <p className="knowledge-set-empty">No knowledge sets are currently available.</p>
         )}
       </div>
     </section>

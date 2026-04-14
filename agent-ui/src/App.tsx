@@ -72,7 +72,7 @@ function inviteMembershipTypeLabel(value: string | null | undefined): string {
     case "customer_member":
       return "User";
     case "employee":
-      return "员工";
+      return "Employee";
     default:
       return value?.trim() || "";
   }
@@ -113,7 +113,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
       .catch((error) => {
         if (!active) return;
         setInvite(null);
-        setInviteError(error instanceof Error ? error.message : "读取邀请失败");
+        setInviteError(error instanceof Error ? error.message : "Failed to load invitation");
       })
       .finally(() => {
         if (active) {
@@ -130,13 +130,20 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const fallbackEmail = invite?.status === "pending" ? invite.email?.trim() || "" : "";
   const activeInviteToken = routeInvitePending ?? (manualInviteToken.trim() || undefined);
   const resolvedEmail = email.trim() || fallbackEmail;
-  const inviteStatusText = invite?.status === "pending" ? "待接受邀请" : invite?.status === "accepted" ? "已接受" : invite?.status === "expired" ? "已过期" : "";
+  const inviteStatusText =
+    invite?.status === "pending"
+      ? "Pending acceptance"
+      : invite?.status === "accepted"
+        ? "Accepted"
+        : invite?.status === "expired"
+          ? "Expired"
+          : "";
 
   async function handleRequestEmailCode() {
     setFormError(null);
     props.auth.clearError();
     if (!resolvedEmail && !activeInviteToken) {
-      setFormError("请输入邮箱，或提供有效邀请码。");
+      setFormError("Enter an email address or a valid invite code.");
       return;
     }
 
@@ -153,7 +160,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
       setCodeRequested(true);
       setCode("");
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "发送验证码失败");
+      setFormError(error instanceof Error ? error.message : "Failed to send verification code");
     } finally {
       setRequestPending(false);
     }
@@ -163,11 +170,11 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     setFormError(null);
     props.auth.clearError();
     if (!resolvedEmail) {
-      setFormError("请输入邮箱。");
+      setFormError("Enter your email address.");
       return;
     }
     if (!code.trim()) {
-      setFormError("请输入验证码。");
+      setFormError("Enter the verification code.");
       return;
     }
 
@@ -182,7 +189,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         replaceLocationPath("/");
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "验证码校验失败");
+      setFormError(error instanceof Error ? error.message : "Verification failed");
     } finally {
       setVerifyPending(false);
     }
@@ -199,10 +206,10 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         </div>
 
         {inviteLoading ? (
-          <div className="auth-modern-invite">正在读取邀请信息...</div>
+          <div className="auth-modern-invite">Loading invitation details...</div>
         ) : invite ? (
           <div className="auth-modern-invite">
-            🌟 <strong>{invite.organization.name}</strong> 邀请你加入
+            🌟 <strong>{invite.organization.name}</strong> invited you to join
             {inviteStatusText ? ` (${inviteStatusText})` : ""}
           </div>
         ) : null}
@@ -358,8 +365,8 @@ function AppContent(props: { inviteToken?: string }) {
       <div className="auth-modern-screen" aria-live="polite">
         <div className="auth-modern-card" style={{ textAlign: "center" }}>
           <p className="auth-eyebrow">Agent Studio</p>
-          <h1 className="auth-modern-logo">正在检查登录状态</h1>
-          <p className="auth-modern-subtitle" style={{marginTop: 8}}>正在读取账号、组织和当前会话上下文。</p>
+          <h1 className="auth-modern-logo">Checking sign-in status</h1>
+          <p className="auth-modern-subtitle" style={{marginTop: 8}}>Loading account, organization, and active session context.</p>
         </div>
       </div>
     );
@@ -378,7 +385,7 @@ function AppContent(props: { inviteToken?: string }) {
   }
 
   return (
-    <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>工作台加载中...</p></div></div>}>
+    <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading workspace...</p></div></div>}>
       <PortalShellLazy
         currentUser={auth.user}
         onOpenAdmin={openAdmin}
@@ -395,7 +402,7 @@ export default function App() {
 
   if (publicShareToken) {
     return (
-      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>公开链接加载中...</p></div></div>}>
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading public link...</p></div></div>}>
         <PublicSharePageLazy token={publicShareToken} />
       </Suspense>
     );
