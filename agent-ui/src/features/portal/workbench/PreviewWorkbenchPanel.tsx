@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Spin } from "antd";
 import { useAuiState } from "@assistant-ui/store";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
 
@@ -27,6 +29,7 @@ type PreviewContent =
   | { kind: "pdf"; objectUrl: string }
   | { kind: "html"; html: string; objectUrl: string }
   | { kind: "text"; text: string; objectUrl: string }
+  | { kind: "markdown"; text: string; objectUrl: string; filePath: string; anchor: string }
   | { kind: "docx"; html: string; objectUrl: string }
   | { kind: "xlsx"; sheets: XlsxSheetPreview[]; objectUrl: string }
   | { kind: "pptx"; slides: PptxSlidePreview[]; objectUrl: string }
@@ -103,11 +106,92 @@ function normalizeFilePath(rawPath: string): string {
   return rawPath.replace(/\\/g, "/").trim();
 }
 
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function splitPreviewTarget(rawTarget: string): { filePath: string; anchor: string } {
+  const normalized = normalizeFilePath(rawTarget);
+  const hashIndex = normalized.indexOf("#");
+  if (hashIndex < 0) return { filePath: normalized, anchor: "" };
+  return {
+    filePath: normalized.slice(0, hashIndex),
+    anchor: normalizeMarkdownAnchor(normalized.slice(hashIndex + 1))
+  };
+}
+
 function fileNameFromPath(filePath: string): string {
-  const normalized = normalizeFilePath(filePath);
+  const normalized = splitPreviewTarget(filePath).filePath;
   if (!normalized) return "Untitled file";
   const segments = normalized.split("/").filter(Boolean);
   return segments[segments.length - 1] || normalized;
+}
+
+function fileDirnameFromPath(filePath: string): string {
+  const normalized = splitPreviewTarget(filePath).filePath;
+  if (!normalized || normalized === "/") return "/";
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length <= 1) return normalized.startsWith("/") ? "/" : "";
+  return `${normalized.startsWith("/") ? "/" : ""}${segments.slice(0, -1).join("/")}`;
+}
+
+function isLikelyExternalUrl(value: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value.trim());
+}
+
+function normalizeMarkdownAnchor(value: string): string {
+  return safeDecodeURIComponent(value.trim())
+    .replace(/^#+/g, "")
+    .trim();
+}
+
+function slugifyMarkdownHeading(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")
+    .replace(/[`~!@#$%^&*()+=[\]{}\\|;:'",.<>/?，。！？、（）【】《》]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function flattenReactNodeText(value: ReactNode): string {
+  if (value === null || value === undefined || typeof value === "boolean") return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map((item) => flattenReactNodeText(item)).join("");
+  if (typeof value === "object" && "props" in value) {
+    return flattenReactNodeText((value as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+function resolveRelativePreviewFilePath(baseFilePath: string, relativeTarget: string): string | null {
+  const baseDir = fileDirnameFromPath(baseFilePath);
+  const target = relativeTarget.trim().replace(/\\/g, "/");
+  if (!baseDir || !target || target.startsWith("#") || target.startsWith("/") || isLikelyExternalUrl(target)) return null;
+
+  const targetWithoutHash = target.split("#", 1)[0] || "";
+  const targetWithoutQuery = targetWithoutHash.split("?", 1)[0] || "";
+  const baseSegments = baseDir.split("/").filter(Boolean);
+  const targetSegments = targetWithoutQuery.split("/").filter(Boolean);
+  const resolvedSegments = [...baseSegments];
+
+  for (const segment of targetSegments) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      if (resolvedSegments.length === 0) return null;
+      resolvedSegments.pop();
+      continue;
+    }
+    resolvedSegments.push(segment);
+  }
+
+  return `${baseDir.startsWith("/") ? "/" : ""}${resolvedSegments.join("/")}`;
 }
 
 function parseDateToMs(value: unknown): number {
@@ -351,6 +435,46 @@ function isKnowledgeSetFilePath(filePath: string): boolean {
   return normalized.includes("/data/knowledge-sets/");
 }
 
+function buildPreviewFileContentUrl(threadId: string, filePath: string): string | null {
+  const normalizedPath = splitPreviewTarget(filePath).filePath;
+  if (!normalizedPath) return null;
+  const query = new URLSearchParams({ path: normalizedPath });
+  if (isKnowledgeSetFilePath(normalizedPath)) {
+    return `${apiBase()}/api/portal/resources/files/content?${query.toString()}`;
+  }
+  if (!threadId.trim()) return null;
+  return `${apiBase()}/api/threads/${encodeURIComponent(threadId.trim())}/files/content?${query.toString()}`;
+}
+
+function resolveMarkdownLinkedFilePath(baseFilePath: string, rawTarget: string): { filePath: string; anchor: string } | null {
+  const target = rawTarget.trim();
+  if (!target || target.startsWith("#") || /^(mailto|tel|javascript|data|blob):/i.test(target)) return null;
+
+  if (isLikelyExternalUrl(target)) {
+    try {
+      const parsed = new URL(target, window.location.href);
+      if (parsed.origin !== window.location.origin) return null;
+      const filePath = normalizeFilePath(safeDecodeURIComponent(parsed.pathname || ""));
+      if (!filePath || filePath.startsWith("/api/")) return null;
+      return {
+        filePath,
+        anchor: normalizeMarkdownAnchor(parsed.hash.slice(1))
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  if (target.startsWith("/")) {
+    return splitPreviewTarget(target.split("?", 1)[0] || target);
+  }
+
+  const relativePath = resolveRelativePreviewFilePath(baseFilePath, target);
+  if (!relativePath) return null;
+  const anchor = target.includes("#") ? normalizeMarkdownAnchor(target.slice(target.indexOf("#") + 1)) : "";
+  return { filePath: relativePath, anchor };
+}
+
 async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<Response> {
   const query = new URLSearchParams({ path: filePath });
   const response = await fetch(
@@ -497,14 +621,114 @@ function formatUpdatedAt(ms: number): string {
   }).format(date);
 }
 
+function preprocessPreviewMarkdown(text: string): string {
+  return text.replace(/<a\s+id=(?:"[^"]+"|'[^']+')[^>]*>\s*<\/a>/gi, "");
+}
+
+function createPreviewMarkdownHeading(tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+  return function PreviewMarkdownHeading(props: { children?: ReactNode; className?: string }) {
+    const headingText = flattenReactNodeText(props.children);
+    const anchor = slugifyMarkdownHeading(headingText);
+    const Tag = tag;
+    return (
+      <Tag
+        className={props.className}
+        id={anchor || undefined}
+        data-preview-anchor={anchor || undefined}
+        data-preview-anchor-text={headingText.trim() || undefined}
+      >
+        {props.children}
+      </Tag>
+    );
+  };
+}
+
+function PreviewMarkdown(props: { text: string; filePath: string; threadId: string; anchor: string }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const normalizedAnchor = useMemo(() => normalizeMarkdownAnchor(props.anchor), [props.anchor]);
+  const processedText = useMemo(() => preprocessPreviewMarkdown(props.text), [props.text]);
+
+  useEffect(() => {
+    if (!normalizedAnchor) return;
+    const root = rootRef.current;
+    if (!root) return;
+
+    const candidates = new Set([normalizedAnchor, slugifyMarkdownHeading(normalizedAnchor)].filter(Boolean));
+    const target = Array.from(root.querySelectorAll<HTMLElement>("[data-preview-anchor]")).find((element) => {
+      const anchor = element.dataset.previewAnchor || "";
+      const anchorText = element.dataset.previewAnchorText || "";
+      return candidates.has(anchor) || candidates.has(slugifyMarkdownHeading(anchorText));
+    });
+
+    if (!target) return;
+    root.querySelectorAll(".preview-markdown-anchor-hit").forEach((element) => {
+      element.classList.remove("preview-markdown-anchor-hit");
+    });
+    target.classList.add("preview-markdown-anchor-hit");
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [normalizedAnchor, processedText]);
+
+  const components = useMemo(
+    () => ({
+      h1: createPreviewMarkdownHeading("h1"),
+      h2: createPreviewMarkdownHeading("h2"),
+      h3: createPreviewMarkdownHeading("h3"),
+      h4: createPreviewMarkdownHeading("h4"),
+      h5: createPreviewMarkdownHeading("h5"),
+      h6: createPreviewMarkdownHeading("h6"),
+      a: ({ href, children, className }: { href?: string; children?: ReactNode; className?: string }) => {
+        if (!href) return <span className={className}>{children}</span>;
+        const linkedFile = resolveMarkdownLinkedFilePath(props.filePath, href);
+        const fileUrl = linkedFile ? buildPreviewFileContentUrl(props.threadId, linkedFile.filePath) : null;
+        if (!linkedFile || !fileUrl) {
+          return (
+            <a className={className} href={href} target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          );
+        }
+        const resolvedHref = linkedFile.anchor ? `${fileUrl}#${encodeURIComponent(linkedFile.anchor)}` : fileUrl;
+        return (
+          <a
+            className={className}
+            href={resolvedHref}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {children}
+          </a>
+        );
+      },
+      img: ({ src, alt, title, className }: { src?: string; alt?: string; title?: string; className?: string }) => {
+        const linkedFile = src ? resolveMarkdownLinkedFilePath(props.filePath, src) : null;
+        const imageUrl = linkedFile ? buildPreviewFileContentUrl(props.threadId, linkedFile.filePath) : src || "";
+        if (!imageUrl) return null;
+        return <img className={className} src={imageUrl} alt={alt || title || "Document image"} title={title} loading="lazy" />;
+      }
+    }),
+    [props.filePath, props.threadId]
+  );
+
+  return (
+    <div ref={rootRef} className="preview-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components as any}>
+        {processedText || "_File is empty._"}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePath?: string }) {
   const threadMessages = useAuiState((s) => s.thread.messages);
   const threadFiles = useMemo(() => collectThreadFiles(threadMessages), [threadMessages]);
-  const requestedFilePath = useMemo(
-    () => normalizeFilePath(asString(props.requestedFilePath)),
+  const requestedTarget = useMemo(
+    () => splitPreviewTarget(asString(props.requestedFilePath)),
     [props.requestedFilePath]
   );
+  const requestedFilePath = requestedTarget.filePath;
+  const requestedAnchor = requestedTarget.anchor;
   const [selectedFilePath, setSelectedFilePath] = useState("");
+  const [selectedAnchor, setSelectedAnchor] = useState("");
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const previewObjectUrlRef = useRef("");
 
@@ -530,12 +754,14 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
 
   useEffect(() => {
     setSelectedFilePath("");
+    setSelectedAnchor("");
   }, [props.threadId]);
 
   useEffect(() => {
     if (!requestedFilePath) return;
     setSelectedFilePath(requestedFilePath);
-  }, [requestedFilePath]);
+    setSelectedAnchor(requestedAnchor);
+  }, [requestedAnchor, requestedFilePath]);
 
   useEffect(() => {
     if (selectedFilePath || requestedFilePath) return;
@@ -634,14 +860,23 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
 
         if (kind === "text") {
           const text = await blob.text();
+          const isMarkdown = ["md", "markdown"].includes(fileExtension(filePath));
           if (!cancelled) {
             setPreview({
               status: "ready",
-              content: {
-                kind: "text",
-                text,
-                objectUrl: createdObjectUrl
-              }
+              content: isMarkdown
+                ? {
+                    kind: "markdown",
+                    text,
+                    objectUrl: createdObjectUrl,
+                    filePath,
+                    anchor: selectedAnchor
+                  }
+                : {
+                    kind: "text",
+                    text,
+                    objectUrl: createdObjectUrl
+                  }
             });
             createdObjectUrl = "";
           }
@@ -724,7 +959,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
       cancelled = true;
       releaseObjectUrl();
     };
-  }, [activeFile, props.threadId]);
+  }, [activeFile, props.threadId, selectedAnchor]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
 
@@ -744,7 +979,10 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
                 type="button"
                 role="listitem"
                 className={file.filePath === selectedFilePath ? "preview-file-item active" : "preview-file-item"}
-                onClick={() => setSelectedFilePath(file.filePath)}
+                onClick={() => {
+                  setSelectedFilePath(file.filePath);
+                  setSelectedAnchor("");
+                }}
                 title={file.filePath}
               >
                 <span className="preview-file-name">{file.displayName}</span>
@@ -766,6 +1004,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
               <div className="preview-viewer-title-group">
                 <h4>{activeFile.displayName}</h4>
                 <p>{activeFile.filePath}</p>
+                {selectedAnchor ? <span className="preview-viewer-anchor">Target section: {selectedAnchor}</span> : null}
               </div>
               {activePreview ? (
                 <div className="preview-viewer-actions">
@@ -808,6 +1047,15 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
 
               {activePreview?.kind === "text" ? (
                 <pre className="preview-text">{activePreview.text || "(File is empty)"}</pre>
+              ) : null}
+
+              {activePreview?.kind === "markdown" ? (
+                <PreviewMarkdown
+                  text={activePreview.text}
+                  filePath={activePreview.filePath}
+                  threadId={props.threadId}
+                  anchor={activePreview.anchor}
+                />
               ) : null}
 
               {activePreview?.kind === "xlsx" ? (

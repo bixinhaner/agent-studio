@@ -353,11 +353,11 @@ function resolvePreviewPathFromFileContentHref(href: string): string | null {
     if (parsed.origin !== window.location.origin) return null;
     if (parsed.pathname === "/api/portal/resources/files/content") {
       const resolved = normalizeUrlPathParam(parsed.searchParams.get("path"));
-      return resolved || null;
+      return resolved ? `${resolved}${parsed.hash || ""}` : null;
     }
     if (/^\/api\/threads\/[^/]+\/files\/content$/.test(parsed.pathname)) {
       const absolutePath = normalizeUrlPathParam(parsed.searchParams.get("path"));
-      return absolutePath || null;
+      return absolutePath ? `${absolutePath}${parsed.hash || ""}` : null;
     }
   } catch {
     return null;
@@ -381,7 +381,7 @@ function resolvePreviewPathFromMarkdownTarget(target: string): string | null {
       if (parsed.origin !== window.location.origin) return null;
       const pathname = normalizePreviewFilePath(decodeMaybeUri(parsed.pathname || ""));
       if (!pathname || pathname.startsWith("/api/")) return null;
-      return pathname;
+      return `${pathname}${parsed.hash || ""}`;
     } catch {
       return null;
     }
@@ -396,14 +396,14 @@ function resolvePreviewPathFromMarkdownTarget(target: string): string | null {
 }
 
 function isLikelyBaseDocumentPreviewPath(previewPath: string): boolean {
-  const extension = fileExtensionFromPreviewPath(previewPath);
+  const extension = fileExtensionFromPreviewPath(splitPreviewPathAnchor(previewPath).filePath);
   if (!extension) return false;
   if (IMAGE_FILE_EXTENSIONS.has(extension)) return false;
   return ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS.has(extension);
 }
 
 function dirnameFromPreviewPath(filePath: string): string {
-  const normalized = normalizePreviewFilePath(filePath);
+  const normalized = splitPreviewPathAnchor(filePath).filePath;
   if (!normalized || normalized === "/") return "/";
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length <= 1) return normalized.startsWith("/") ? "/" : "";
@@ -438,7 +438,7 @@ function resolveRelativePreviewPath(baseFilePath: string, relativeTarget: string
 }
 
 function buildAssistantContentFileUrl(previewPath: string, activeThreadId: string): string | null {
-  const normalizedPreviewPath = normalizePreviewFilePath(previewPath);
+  const normalizedPreviewPath = splitPreviewPathAnchor(previewPath).filePath;
   if (!normalizedPreviewPath || normalizedPreviewPath.startsWith("/thread-")) return null;
 
   const query = new URLSearchParams({ path: normalizedPreviewPath });
@@ -447,6 +447,26 @@ function buildAssistantContentFileUrl(previewPath: string, activeThreadId: strin
   }
   if (!activeThreadId.trim()) return null;
   return `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/files/content?${query.toString()}`;
+}
+
+function derivePreviewPathWithLabelAnchor(previewPath: string, label: string): string {
+  const { filePath, anchor } = splitPreviewPathAnchor(previewPath);
+  if (!filePath || anchor) return previewPath;
+  const extension = fileExtensionFromPreviewPath(filePath);
+  if (extension !== "md" && extension !== "markdown") return previewPath;
+
+  const segments = label
+    .split("/")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const dashSegments = label
+    .split(/\s+[–—-]\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const sectionLabel = segments.length >= 2 ? segments[segments.length - 1] || "" : dashSegments[dashSegments.length - 1] || "";
+  if (!sectionLabel || sectionLabel === label.trim()) return previewPath;
+  const sectionAnchor = slugifyPreviewAnchorText(sectionLabel);
+  return sectionAnchor ? `${filePath}#${encodeURIComponent(sectionAnchor)}` : previewPath;
 }
 
 function resolveAssistantMarkdownImagePreviewPath(input: {
@@ -614,6 +634,7 @@ function AssistantMarkdownLink(props: {
     );
   }
   const linkLabel = flattenNodeText(children).trim();
+  const previewPathForRequest = derivePreviewPathWithLabelAnchor(previewPath, linkLabel);
   const displayName =
     linkLabel && linkLabel !== href && !isLikelyHttpUrl(linkLabel) ? linkLabel : fileNameFromPreviewPath(previewPath);
   return (
@@ -621,7 +642,7 @@ function AssistantMarkdownLink(props: {
       <span className="assistant-inline-file-link-meta">
         <span className="assistant-inline-file-link-tag">File</span>
         <span className="assistant-inline-file-link-name">{displayName}</span>
-        <span className="assistant-inline-file-link-path">{previewPath}</span>
+        <span className="assistant-inline-file-link-path">{previewPathForRequest}</span>
       </span>
       <button
         type="button"
@@ -629,7 +650,7 @@ function AssistantMarkdownLink(props: {
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          requestPreview(previewPath);
+          requestPreview(previewPathForRequest);
         }}
       >
         Preview
@@ -1165,8 +1186,29 @@ function normalizePreviewFilePath(value: string): string {
     .trim();
 }
 
+function splitPreviewPathAnchor(value: string): { filePath: string; anchor: string } {
+  const normalized = normalizePreviewFilePath(value);
+  const hashIndex = normalized.indexOf("#");
+  if (hashIndex < 0) return { filePath: normalized, anchor: "" };
+  return {
+    filePath: normalized.slice(0, hashIndex),
+    anchor: decodeMaybeUri(normalized.slice(hashIndex + 1)).replace(/^#+/g, "").trim()
+  };
+}
+
+function slugifyPreviewAnchorText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")
+    .replace(/[`~!@#$%^&*()+=[\]{}\\|;:'",.<>/?，。！？、（）【】《》]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 function fileNameFromPreviewPath(filePath: string): string {
-  const normalized = normalizePreviewFilePath(filePath);
+  const normalized = splitPreviewPathAnchor(filePath).filePath;
   if (!normalized) return "Untitled file";
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || normalized;
@@ -1222,24 +1264,25 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
     try {
       const parsed = new URL(rawHref, window.location.href);
       if (parsed.origin !== window.location.origin) return "";
-      return parsed.pathname || "";
+      return `${parsed.pathname || ""}${parsed.hash || ""}`;
     } catch {
       return "";
     }
   };
-  const pathname = decodeURIComponent(resolvePathname());
+  const pathnameWithHash = decodeURIComponent(resolvePathname());
+  const { filePath: pathname } = splitPreviewPathAnchor(pathnameWithHash);
   if (!pathname || pathname.startsWith("/api/")) return null;
-  if (isKnowledgeSetPreviewPath(pathname)) return pathname;
+  if (isKnowledgeSetPreviewPath(pathname)) return pathnameWithHash;
 
   if (!normalizedThreadId) {
-    return pathname.includes("/thread-") ? pathname : null;
+    return pathname.includes("/thread-") ? pathnameWithHash : null;
   }
 
   const threadSegment = `/thread-${normalizedThreadId}`;
   if (pathname !== threadSegment && !pathname.includes(`${threadSegment}/`)) {
     return null;
   }
-  return pathname;
+  return pathnameWithHash;
 }
 
 function readPortalThreadIdFromLocation(search: string): string {
