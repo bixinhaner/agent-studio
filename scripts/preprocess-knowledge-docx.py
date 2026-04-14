@@ -27,13 +27,43 @@ try:
 except ImportError:  # pragma: no cover - optional dependency in some environments
     Image = None
 
+try:
+    from openpyxl import load_workbook
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    load_workbook = None
+
+try:
+    import xlrd
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    xlrd = None
+
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    PdfReader = None
+
+try:
+    import fitz
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    fitz = None
+
+try:
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    Presentation = None
+    MSO_SHAPE_TYPE = None
+
 
 FORMAT_VERSION = 3
 CONVERTER_VERSION = "1.2.1"
-DEFAULT_INCLUDE_GLOBS = ["**/*.docx", "*.docx"]
-DEFAULT_EXCLUDE_GLOBS = ["**/~$*.docx", "~$*.docx", "**/.~*.docx", ".~*.docx"]
+SUPPORTED_SOURCE_EXTENSIONS = (".docx", ".txt", ".xlsx", ".pdf", ".pptx", ".xls", ".doc")
+DEFAULT_INCLUDE_GLOBS = [f"**/*{suffix}" for suffix in SUPPORTED_SOURCE_EXTENSIONS] + [f"*{suffix}" for suffix in SUPPORTED_SOURCE_EXTENSIONS]
+DEFAULT_EXCLUDE_GLOBS = ["**/~$*", "~$*", "**/.~*", ".~*", "**/.DS_Store", ".DS_Store"]
 DEFAULT_UNSUPPORTED_ANNOTATION_IMAGE_SUFFIXES = {".emf", ".wmf"}
 DEFAULT_CONVERT_TO_PNG_ANNOTATION_IMAGE_SUFFIXES = {".bmp"}
+IMAGE_ANNOTATION_SUPPORTED_SOURCE_EXTENSIONS = {".docx", ".pdf"}
+XLSX_ROWS_PER_TABLE_BLOCK = 200
 IMAGE_ANNOTATION_PROMPT_VERSION = "visual-v2"
 IMAGE_ANNOTATION_SCHEMA_VERSION = 1
 TABLE_IMAGE_ANNOTATION_PLACEHOLDER_PATTERN = re.compile(r"<!-- image-annotation:(\d+) -->")
@@ -116,6 +146,139 @@ def normalize_text(value: str) -> str:
 
 def clean_text(value: str) -> str:
     return re.sub(r"[ \t]+", " ", normalize_text(value)).strip()
+
+
+def source_format_for_path(path: Path) -> str:
+    return path.suffix.lower().lstrip(".")
+
+
+def default_stats() -> dict[str, int]:
+    return {
+        "paragraphs": 0,
+        "tables": 0,
+        "images": 0,
+        "lists": 0,
+        "quotes": 0,
+        "headings": 0,
+        "textboxes": 0,
+        "captions": 0,
+        "table_rowspans": 0,
+        "table_colspans": 0,
+    }
+
+
+def default_feature_flags() -> dict[str, bool]:
+    return {
+        "has_headers": False,
+        "has_footers": False,
+        "has_footnotes": False,
+        "has_endnotes": False,
+        "contains_textboxes": False,
+        "contains_comments": False,
+        "contains_complex_tables": False,
+        "contains_image_annotations": False,
+        "contains_heading_numbers": False,
+        "contains_internal_links": False,
+        "contains_fields": False,
+        "contains_toc": False,
+    }
+
+
+def build_title_resolution(
+    source_path: Path,
+    *,
+    content_title: str = "",
+    core_title: str = "",
+    source: str = "filename",
+) -> dict[str, str | bool]:
+    chosen_title = filename_title(source_path)
+    return {
+        "title": chosen_title,
+        "source": source,
+        "filename_title": chosen_title,
+        "content_title": clean_text(content_title),
+        "content_title_is_generic": bool(content_title and is_generic_title(content_title)),
+        "core_title": clean_text(core_title),
+        "core_title_is_generic": bool(core_title and is_generic_title(core_title)),
+    }
+
+
+def html_cell(value: str) -> str:
+    text = normalize_text(value)
+    if not text.strip():
+        return "&nbsp;"
+    return html.escape(text).replace("\n", "<br/>")
+
+
+def render_html_table(rows: list[list[str]]) -> str:
+    lines = ["<table>"]
+    for row in rows:
+        lines.append("  <tr>")
+        for value in row:
+            lines.append(f"    <td>{html_cell(value)}</td>")
+        lines.append("  </tr>")
+    lines.append("</table>")
+    return "\n".join(lines)
+
+
+def build_basic_metadata(
+    *,
+    source_root: Path,
+    source_path: Path,
+    output_dir: Path,
+    markdown: str,
+    title_resolution: dict[str, str | bool],
+    stats: dict[str, object],
+    feature_flags: dict[str, object],
+    warnings: list[str],
+    headings: list[dict[str, object]] | None = None,
+    external_links: list[dict[str, str]] | None = None,
+    internal_links: list[dict[str, str]] | None = None,
+    images: list[dict[str, object]] | None = None,
+    core_properties: dict[str, str] | None = None,
+    document_properties: dict[str, str] | None = None,
+    bookmarks: list[dict[str, object]] | None = None,
+    fields: list[dict[str, object]] | None = None,
+    headers: list[str] | None = None,
+    footers: list[str] | None = None,
+    footnotes: list[dict[str, str]] | None = None,
+    endnotes: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    source_stat = source_path.stat()
+    source_sha256 = sha256_file(source_path)
+    text_chars, word_count = markdown_text_metrics(markdown)
+    stats = dict(stats)
+    stats["text_chars"] = text_chars
+    stats["word_count_approx"] = word_count
+    return {
+        "format_version": FORMAT_VERSION,
+        "converter_version": CONVERTER_VERSION,
+        "generated_at": iso_now(),
+        "source_format": source_format_for_path(source_path),
+        "source_name": source_path.name,
+        "source_relative_path": source_path.relative_to(source_root).as_posix(),
+        "source_sha256": source_sha256,
+        "source_size_bytes": source_stat.st_size,
+        "source_mtime_ns": source_stat.st_mtime_ns,
+        "output_dir": str(output_dir),
+        "title": title_resolution["title"],
+        "title_resolution": title_resolution,
+        "core_properties": core_properties or {},
+        "document_properties": document_properties or {},
+        "stats": stats,
+        "headings": headings or [],
+        "bookmarks": bookmarks or [],
+        "external_links": external_links or [],
+        "internal_links": internal_links or [],
+        "fields": fields or [],
+        "headers": headers or [],
+        "footers": footers or [],
+        "footnotes": footnotes or [],
+        "endnotes": endnotes or [],
+        "feature_flags": feature_flags,
+        "images": images or [],
+        "warnings": warnings,
+    }
 
 
 def alpha_index(value: int, uppercase: bool) -> str:
@@ -229,6 +392,26 @@ def markdown_image_alt_text(value: str, fallback: str) -> str:
     return text or "image"
 
 
+def clean_legacy_doc_markdown(markdown: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in normalize_text(markdown).splitlines():
+        line = raw_line.strip()
+        if not line:
+            cleaned_lines.append("")
+            continue
+        if line.startswith("HYPERLINK \\l "):
+            match = re.match(r'^HYPERLINK\s+\\l\s+\S+\s+(.+)$', line)
+            if match:
+                visible = clean_text(match.group(1))
+                if visible:
+                    cleaned_lines.append(visible)
+                continue
+        cleaned_lines.append(raw_line)
+    cleaned = "\n".join(cleaned_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() + "\n"
+    return cleaned
+
+
 def parse_docproperty_name(instruction: str) -> str:
     match = re.search(r"\bDOCPROPERTY\s+(?:\"([^\"]+)\"|([^\s\\]+))", instruction, flags=re.IGNORECASE)
     if not match:
@@ -288,6 +471,10 @@ def sha256_file(path: Path) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def ensure_within_root(root: Path, target: Path) -> None:
@@ -705,6 +892,7 @@ class DocxMarkdownConverter:
             "format_version": FORMAT_VERSION,
             "converter_version": CONVERTER_VERSION,
             "generated_at": iso_now(),
+            "source_format": source_format_for_path(self.docx_path),
             "source_name": self.docx_path.name,
             "source_relative_path": self.relative_path.as_posix(),
             "source_sha256": source_sha256,
@@ -1778,6 +1966,944 @@ class DocxMarkdownConverter:
         return "<br/>".join(fragment for fragment in fragments if fragment) or "&nbsp;"
 
 
+class TxtMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+
+    def convert(self) -> dict[str, object]:
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        raw_text = self._read_text()
+        title = filename_title(self.source_path)
+        markdown = f"# {title}\n\n```text\n{raw_text.rstrip()}\n```\n" if raw_text.strip() else f"# {title}\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+
+        line_count = len(normalize_text(raw_text).splitlines()) if raw_text else 0
+        paragraph_count = len([part for part in re.split(r"\n\s*\n", normalize_text(raw_text)) if clean_text(part)]) if raw_text else 0
+        stats = default_stats()
+        stats["paragraphs"] = paragraph_count
+        stats["headings"] = 1
+        stats["line_count"] = line_count
+        feature_flags = default_feature_flags()
+        feature_flags["contains_code_block"] = True
+        title_resolution = build_title_resolution(self.source_path)
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=[{"level": 1, "number": None, "text": title, "full_text": title}],
+            external_links=self._extract_external_links(raw_text),
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _read_text(self) -> str:
+        last_error: Exception | None = None
+        for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+            try:
+                text = self.source_path.read_text(encoding=encoding)
+                if encoding != "utf-8":
+                    self.warnings.append(f"decoded text file using fallback encoding: {encoding}")
+                return normalize_text(text)
+            except UnicodeDecodeError as exc:
+                last_error = exc
+        raise RuntimeError(f"unable to decode text file: {last_error}") from last_error
+
+    def _extract_external_links(self, text: str) -> list[dict[str, str]]:
+        seen: set[str] = set()
+        links: list[dict[str, str]] = []
+        for url in re.findall(r"https?://[^\s)>\"']+", text or ""):
+            if url in seen:
+                continue
+            seen.add(url)
+            links.append({"text": url, "url": url})
+        return links
+
+
+class XlsxMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+        self.external_links: list[dict[str, str]] = []
+        self._seen_external_links: set[tuple[str, str]] = set()
+
+    def convert(self) -> dict[str, object]:
+        if load_workbook is None:
+            raise RuntimeError("openpyxl is required to convert .xlsx files")
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        workbook = load_workbook(self.source_path, data_only=True, read_only=False)
+        title = filename_title(self.source_path)
+        blocks = [f"# {title}"]
+        headings = [{"level": 1, "number": None, "text": title, "full_text": title}]
+        stats = default_stats()
+        feature_flags = default_feature_flags()
+        stats["headings"] = 1
+        stats["worksheets"] = len(workbook.worksheets)
+
+        for sheet in workbook.worksheets:
+            headings.append({"level": 2, "number": None, "text": sheet.title, "full_text": sheet.title})
+            stats["headings"] += 1
+            sheet_blocks, sheet_stats, sheet_flags = self._render_sheet(sheet)
+            blocks.extend(sheet_blocks)
+            for key, value in sheet_stats.items():
+                stats[key] = int(stats.get(key, 0)) + int(value)
+            for key, value in sheet_flags.items():
+                if value:
+                    feature_flags[key] = True
+
+        markdown = "\n\n".join(block.rstrip() for block in blocks if block and block.strip()).strip() + "\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+
+        core_properties = {}
+        document_properties = {}
+        props = getattr(workbook, "properties", None)
+        if props is not None:
+            for key in ("title", "subject", "creator", "description", "keywords", "category", "lastModifiedBy"):
+                value = clean_text(str(getattr(props, key, "") or ""))
+                if not value:
+                    continue
+                if key in {"title", "subject", "creator", "description"}:
+                    core_properties[key] = value
+                document_properties[key] = value
+
+        title_resolution = build_title_resolution(
+            self.source_path,
+            content_title=str(getattr(props, "title", "") or ""),
+            core_title=str(getattr(props, "title", "") or ""),
+        )
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=headings,
+            external_links=self.external_links,
+            core_properties=core_properties,
+            document_properties=document_properties,
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _render_sheet(self, sheet) -> tuple[list[str], dict[str, int], dict[str, bool]]:
+        blocks = [f"## {sheet.title}"]
+        stats = {"tables": 0, "paragraphs": 0, "lists": 0, "quotes": 0, "images": 0, "textboxes": 0, "captions": 0, "table_rowspans": 0, "table_colspans": 0}
+        flags = {"contains_comments": False, "contains_complex_tables": False}
+        merged_lookup: dict[tuple[int, int], tuple[int, int]] = {}
+        for merged_range in sheet.merged_cells.ranges:
+            bounds = merged_range.bounds
+            for row in range(bounds[1], bounds[3] + 1):
+                for col in range(bounds[0], bounds[2] + 1):
+                    merged_lookup[(row, col)] = (bounds[1], bounds[0])
+            flags["contains_complex_tables"] = True
+            stats["table_rowspans"] += max(0, bounds[3] - bounds[1])
+            stats["table_colspans"] += max(0, bounds[2] - bounds[0])
+
+        max_row = int(sheet.max_row or 0)
+        max_col = int(sheet.max_column or 0)
+        used_row = 0
+        used_col = 0
+        for row in range(1, max_row + 1):
+            row_has_content = False
+            for col in range(1, max_col + 1):
+                if self._cell_text(sheet, row, col, merged_lookup):
+                    row_has_content = True
+                    used_col = max(used_col, col)
+            if row_has_content:
+                used_row = row
+
+        blocks.append(f"Rows: {used_row or 0}, Columns: {used_col or 0}")
+        stats["paragraphs"] += 1
+        if used_row == 0 or used_col == 0:
+            blocks.append("_Empty sheet._")
+            stats["paragraphs"] += 1
+            return blocks, stats, flags
+
+        rows: list[list[str]] = []
+        for row in range(1, used_row + 1):
+            values = [self._cell_text(sheet, row, col, merged_lookup) for col in range(1, used_col + 1)]
+            if any(clean_text(value) for value in values):
+                rows.append(values)
+
+        if not rows:
+            blocks.append("_Empty sheet._")
+            stats["paragraphs"] += 1
+            return blocks, stats, flags
+
+        for start in range(0, len(rows), XLSX_ROWS_PER_TABLE_BLOCK):
+            chunk = rows[start:start + XLSX_ROWS_PER_TABLE_BLOCK]
+            row_start = start + 1
+            row_end = start + len(chunk)
+            if len(rows) > XLSX_ROWS_PER_TABLE_BLOCK:
+                blocks.append(f"### Sheet Rows {row_start}-{row_end}")
+                stats["paragraphs"] += 1
+            blocks.append(render_html_table(chunk))
+            stats["tables"] += 1
+        return blocks, stats, flags
+
+    def _cell_text(self, sheet, row: int, col: int, merged_lookup: dict[tuple[int, int], tuple[int, int]]) -> str:
+        master_row, master_col = merged_lookup.get((row, col), (row, col))
+        cell = sheet.cell(master_row, master_col)
+        parts: list[str] = []
+        if cell.value is not None:
+            parts.append(self._stringify_cell_value(cell.value))
+        hyperlink = getattr(cell, "hyperlink", None)
+        target = clean_text(str(getattr(hyperlink, "target", "") or getattr(hyperlink, "location", "") or ""))
+        if target:
+            if not parts:
+                parts.append(target)
+            elif target not in parts[0]:
+                parts.append(f"URL: {target}")
+            label = clean_text(parts[0])
+            key = (label or target, target)
+            if key not in self._seen_external_links:
+                self._seen_external_links.add(key)
+                self.external_links.append({"text": label or target, "url": target})
+        comment = getattr(cell, "comment", None)
+        comment_text = clean_text(str(getattr(comment, "text", "") or ""))
+        if comment_text:
+            parts.append(f"Comment: {comment_text}")
+        if comment_text:
+            self.warnings.append(f"worksheet {sheet.title} contains cell comments")
+        return "\n".join(part for part in parts if clean_text(part))
+
+    def _stringify_cell_value(self, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ", timespec="seconds")
+        return normalize_text(str(value))
+
+
+class PdfMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+        self.rendered_blocks: list[str] = []
+        self.image_block_sequences: list[int] = []
+        self.image_occurrences: list[dict[str, object]] = []
+        self.image_occurrence_by_sequence: dict[int, dict[str, object]] = {}
+        self.image_counter = 0
+        self.image_sequence_counter = 0
+        self.image_hash_to_output: dict[str, str] = {}
+        self.external_links: list[dict[str, str]] = []
+        self._seen_external_links: set[tuple[str, str]] = set()
+
+    def convert(self) -> dict[str, object]:
+        if fitz is None:
+            raise RuntimeError("PyMuPDF (fitz) is required to convert PDF files with image extraction")
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        title = filename_title(self.source_path)
+        page_records, document_properties = self._extract_pages()
+        blocks = [f"# {title}"]
+        headings = [{"level": 1, "number": None, "text": title, "full_text": title}]
+        stats = default_stats()
+        feature_flags = default_feature_flags()
+        stats["headings"] = 1
+        stats["pages"] = len(page_records)
+        stats["images"] = 0
+        feature_flags["contains_images"] = False
+        feature_flags["contains_pdf_page_renders"] = False
+
+        for page_record in page_records:
+            index = int(page_record["page_number"])
+            page_heading = f"Page {index}"
+            headings.append({"level": 2, "number": None, "text": page_heading, "full_text": page_heading})
+            stats["headings"] += 1
+            blocks.append(f"## {page_heading}")
+
+            page_blocks = list(page_record.get("blocks") or [])
+            if not page_blocks:
+                blocks.append("_No extractable page content._")
+                stats["paragraphs"] += 1
+                self.warnings.append(f"page {index} has no extractable content")
+                continue
+
+            page_has_text = False
+            for block in page_blocks:
+                kind = block.get("kind")
+                if kind == "text":
+                    text = normalize_text(str(block.get("text") or "")).strip()
+                    if not text:
+                        continue
+                    blocks.append(text)
+                    stats["paragraphs"] += 1
+                    page_has_text = True
+                elif kind == "image":
+                    sequence = int(block.get("sequence") or 0)
+                    occurrence = self.image_occurrence_by_sequence.get(sequence)
+                    if not occurrence:
+                        continue
+                    image_path = str(occurrence["output_path"])
+                    alt_text = markdown_image_alt_text(str(occurrence.get("alt_text") or ""), Path(image_path).stem)
+                    blocks.append(f"![{alt_text}]({image_path})")
+                    self.image_block_sequences.append(sequence)
+                    feature_flags["contains_images"] = True
+                    if occurrence.get("render_mode") == "page_render":
+                        feature_flags["contains_pdf_page_renders"] = True
+
+            if not page_has_text:
+                self.warnings.append(f"page {index} has no extractable text")
+
+        stats["images"] = len(self.image_hash_to_output)
+
+        markdown = "\n\n".join(block.rstrip() for block in blocks if block and block.strip()).strip() + "\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+        self.rendered_blocks = list(blocks)
+
+        title_resolution = build_title_resolution(
+            self.source_path,
+            content_title=document_properties.get("title", ""),
+            core_title=document_properties.get("title", ""),
+        )
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=headings,
+            external_links=self.external_links,
+            images=self.image_occurrences,
+            core_properties={key: value for key, value in document_properties.items() if key in {"title", "subject", "author", "creator"}},
+            document_properties=document_properties,
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _extract_pages(self) -> tuple[list[dict[str, object]], dict[str, str]]:
+        document_properties: dict[str, str] = {}
+        doc = fitz.open(self.source_path)
+        fitz_metadata = doc.metadata or {}
+        for key, value in fitz_metadata.items():
+            cleaned_value = clean_text(str(value or ""))
+            if cleaned_value:
+                document_properties[str(key).lower()] = cleaned_value
+        document_properties.setdefault("extractor", "pymupdf")
+
+        if PdfReader is not None:
+            try:
+                reader = PdfReader(str(self.source_path))
+                metadata = getattr(reader, "metadata", None) or {}
+                for key, value in dict(metadata).items():
+                    normalized_key = str(key).lstrip("/")
+                    cleaned_value = clean_text(str(value or ""))
+                    if cleaned_value:
+                        document_properties.setdefault(normalized_key.lower(), cleaned_value)
+            except Exception as exc:
+                self.warnings.append(f"pypdf metadata extraction failed: {clean_text(str(exc))}")
+
+        page_records: list[dict[str, object]] = []
+        for page_number, page in enumerate(doc, start=1):
+            page_blocks: list[dict[str, object]] = []
+            page_has_text = False
+            page_has_images = False
+            page_seen_hashes: set[str] = set()
+            text_dict = page.get_text("dict", sort=True)
+            for block in text_dict.get("blocks", []):
+                block_type = int(block.get("type", -1))
+                if block_type == 0:
+                    text = self._pdf_text_block_to_markdown(block)
+                    if not text:
+                        continue
+                    page_blocks.append({"kind": "text", "text": text})
+                    page_has_text = True
+                    self._collect_external_links_from_text(text)
+                elif block_type == 1:
+                    occurrence = self._extract_pdf_embedded_image(block, page_number=page_number)
+                    if not occurrence:
+                        continue
+                    page_blocks.append({"kind": "image", "sequence": occurrence["sequence"]})
+                    page_has_images = True
+                    if occurrence.get("content_sha256"):
+                        page_seen_hashes.add(str(occurrence["content_sha256"]))
+
+            if not page_has_images:
+                xref_occurrences = self._extract_pdf_xref_fallback_images(doc, page, page_number, page_seen_hashes)
+                for occurrence in xref_occurrences:
+                    page_blocks.append({"kind": "image", "sequence": occurrence["sequence"]})
+                    page_has_images = True
+
+            if not page_has_images and not page_has_text and (page.get_drawings() or page.get_images(full=True)):
+                occurrence = self._render_pdf_page_fallback(page, page_number)
+                page_blocks.append({"kind": "image", "sequence": occurrence["sequence"]})
+                page_has_images = True
+
+            page_records.append(
+                {
+                    "page_number": page_number,
+                    "blocks": page_blocks,
+                    "has_text": page_has_text,
+                    "has_images": page_has_images,
+                }
+            )
+        doc.close()
+        return page_records, document_properties
+
+    def _pdf_text_block_to_markdown(self, block: dict[str, object]) -> str:
+        lines_out: list[str] = []
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            line_text = "".join(str(span.get("text") or "") for span in spans)
+            cleaned = clean_text(line_text)
+            if cleaned:
+                lines_out.append(cleaned)
+        return "\n".join(lines_out).strip()
+
+    def _extract_pdf_embedded_image(self, block: dict[str, object], *, page_number: int) -> dict[str, object] | None:
+        image_bytes = block.get("image")
+        if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+            return None
+        ext = clean_text(str(block.get("ext") or "png")).lower() or "png"
+        bbox = [float(value) for value in block.get("bbox", [])] if block.get("bbox") else []
+        return self._register_pdf_image(
+            image_bytes=bytes(image_bytes),
+            file_ext=ext,
+            page_number=page_number,
+            bbox=bbox,
+            render_mode="embedded",
+            alt_text=f"Page {page_number} image",
+            source_ref=f"pdf-block-{page_number}-{block.get('number')}",
+        )
+
+    def _extract_pdf_xref_fallback_images(
+        self,
+        doc,
+        page,
+        page_number: int,
+        page_seen_hashes: set[str],
+    ) -> list[dict[str, object]]:
+        occurrences: list[dict[str, object]] = []
+        for index, image_info in enumerate(page.get_images(full=True), start=1):
+            xref = int(image_info[0])
+            try:
+                extracted = doc.extract_image(xref)
+            except Exception as exc:
+                self.warnings.append(f"page {page_number} image xref {xref} extract failed: {clean_text(str(exc))}")
+                continue
+            image_bytes = extracted.get("image")
+            if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+                continue
+            image_hash = sha256_bytes(bytes(image_bytes))
+            if image_hash in page_seen_hashes:
+                continue
+            page_seen_hashes.add(image_hash)
+            bbox = []
+            try:
+                rects = page.get_image_rects(xref)
+                if rects:
+                    rect = rects[0]
+                    bbox = [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+            except Exception:
+                bbox = []
+            occurrence = self._register_pdf_image(
+                image_bytes=bytes(image_bytes),
+                file_ext=clean_text(str(extracted.get("ext") or "png")).lower() or "png",
+                page_number=page_number,
+                bbox=bbox,
+                render_mode="xref_fallback",
+                alt_text=f"Page {page_number} image {index}",
+                source_ref=f"xref-{xref}",
+            )
+            occurrences.append(occurrence)
+        return occurrences
+
+    def _render_pdf_page_fallback(self, page, page_number: int) -> dict[str, object]:
+        matrix = fitz.Matrix(1.5, 1.5)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+        image_bytes = pixmap.tobytes("png")
+        return self._register_pdf_image(
+            image_bytes=image_bytes,
+            file_ext="png",
+            page_number=page_number,
+            bbox=[],
+            render_mode="page_render",
+            alt_text=f"Page {page_number} render",
+            source_ref=f"page-render-{page_number}",
+        )
+
+    def _register_pdf_image(
+        self,
+        *,
+        image_bytes: bytes,
+        file_ext: str,
+        page_number: int,
+        bbox: list[float],
+        render_mode: str,
+        alt_text: str,
+        source_ref: str,
+    ) -> dict[str, object]:
+        safe_ext = file_ext.lower().lstrip(".") or "png"
+        if not re.fullmatch(r"[a-z0-9]+", safe_ext):
+            safe_ext = "png"
+        image_hash = sha256_bytes(image_bytes)
+        output_rel = self.image_hash_to_output.get(image_hash)
+        if output_rel is None:
+            self.image_counter += 1
+            output_name = f"{self.image_counter:04d}-page{page_number:03d}.{safe_ext}"
+            output_path = self.media_dir / output_name
+            output_path.write_bytes(image_bytes)
+            output_rel = f"./media/{output_name}"
+            self.image_hash_to_output[image_hash] = output_rel
+
+        self.image_sequence_counter += 1
+        occurrence = {
+            "sequence": self.image_sequence_counter,
+            "source_target": source_ref,
+            "output_path": output_rel,
+            "alt_text": alt_text,
+            "content_sha256": image_hash,
+            "file_suffix": Path(output_rel).suffix.lower(),
+            "container": "pdf_block",
+            "page_number": page_number,
+            "bbox": bbox,
+            "render_mode": render_mode,
+        }
+        self.image_occurrences.append(occurrence)
+        self.image_occurrence_by_sequence[self.image_sequence_counter] = occurrence
+        return occurrence
+
+    def _collect_external_links_from_text(self, text: str) -> None:
+        for url in re.findall(r"https?://[^\s)>\"']+", text or ""):
+            key = (url, url)
+            if key in self._seen_external_links:
+                continue
+            self._seen_external_links.add(key)
+            self.external_links.append({"text": url, "url": url})
+
+
+class PptxMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+        self.rendered_blocks: list[str] = []
+        self.image_block_sequences: list[int] = []
+        self.image_occurrences: list[dict[str, object]] = []
+        self.image_occurrence_by_sequence: dict[int, dict[str, object]] = {}
+        self.image_counter = 0
+        self.image_sequence_counter = 0
+        self.image_hash_to_output: dict[str, str] = {}
+        self.external_links: list[dict[str, str]] = []
+        self._seen_external_links: set[tuple[str, str]] = set()
+
+    def convert(self) -> dict[str, object]:
+        if Presentation is None or MSO_SHAPE_TYPE is None:
+            raise RuntimeError("python-pptx is required to convert .pptx files")
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        presentation = Presentation(str(self.source_path))
+        core_title = clean_text(str(getattr(presentation.core_properties, "title", "") or ""))
+        title = filename_title(self.source_path)
+        blocks = [f"# {title}"]
+        headings = [{"level": 1, "number": None, "text": title, "full_text": title}]
+        stats = default_stats()
+        stats["headings"] = 1
+        stats["slides"] = len(presentation.slides)
+        feature_flags = default_feature_flags()
+        feature_flags["contains_images"] = False
+        feature_flags["contains_speaker_notes"] = False
+
+        for slide_number, slide in enumerate(presentation.slides, start=1):
+            slide_title = self._slide_title(slide) or f"Slide {slide_number}"
+            heading_text = f"Slide {slide_number}: {slide_title}" if slide_title != f"Slide {slide_number}" else slide_title
+            blocks.append(f"## {heading_text}")
+            headings.append({"level": 2, "number": None, "text": heading_text, "full_text": heading_text})
+            stats["headings"] += 1
+
+            slide_blocks = self._render_slide_shapes(slide, slide_number, stats, feature_flags)
+            if slide_blocks:
+                blocks.extend(slide_blocks)
+            else:
+                blocks.append("_No extractable slide content._")
+                stats["paragraphs"] += 1
+
+            notes_blocks = self._render_slide_notes(slide)
+            if notes_blocks:
+                feature_flags["contains_speaker_notes"] = True
+                blocks.append("### Notes")
+                stats["headings"] += 1
+                blocks.extend(notes_blocks)
+                stats["paragraphs"] += len(notes_blocks)
+
+        stats["images"] = len(self.image_hash_to_output)
+        if stats["images"] > 0:
+            feature_flags["contains_images"] = True
+
+        markdown = "\n\n".join(block.rstrip() for block in blocks if block and block.strip()).strip() + "\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+        self.rendered_blocks = list(blocks)
+
+        core_properties = {}
+        document_properties = {}
+        cp = presentation.core_properties
+        for key in ("title", "subject", "author", "keywords", "comments", "category", "last_modified_by"):
+            value = clean_text(str(getattr(cp, key, "") or ""))
+            if not value:
+                continue
+            document_properties[key] = value
+            if key in {"title", "subject", "author", "comments"}:
+                core_properties[key] = value
+
+        title_resolution = build_title_resolution(
+            self.source_path,
+            content_title=core_title,
+            core_title=core_title,
+        )
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=headings,
+            external_links=self.external_links,
+            images=self.image_occurrences,
+            core_properties=core_properties,
+            document_properties=document_properties,
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _slide_title(self, slide) -> str:
+        title_shape = getattr(slide.shapes, "title", None)
+        if title_shape is not None:
+            text = self._extract_shape_text(title_shape)
+            if text:
+                return clean_text(text.splitlines()[0])
+        for shape in slide.shapes:
+            text = self._extract_shape_text(shape)
+            if text:
+                return clean_text(text.splitlines()[0])
+        return ""
+
+    def _render_slide_shapes(self, slide, slide_number: int, stats: dict[str, int], feature_flags: dict[str, bool]) -> list[str]:
+        blocks: list[str] = []
+        for shape_index, shape in enumerate(slide.shapes, start=1):
+            blocks.extend(self._render_shape(shape, slide_number, shape_index, stats, feature_flags))
+        return blocks
+
+    def _render_shape(
+        self,
+        shape,
+        slide_number: int,
+        shape_index: int,
+        stats: dict[str, int],
+        feature_flags: dict[str, bool],
+    ) -> list[str]:
+        blocks: list[str] = []
+        shape_type = getattr(shape, "shape_type", None)
+
+        if shape_type == MSO_SHAPE_TYPE.GROUP:
+            for child_index, child in enumerate(shape.shapes, start=1):
+                blocks.extend(self._render_shape(child, slide_number, int(f"{shape_index}{child_index}"), stats, feature_flags))
+            return blocks
+
+        if hasattr(shape, "has_table") and shape.has_table:
+            rows: list[list[str]] = []
+            for row in shape.table.rows:
+                values = [self._extract_shape_text(cell) for cell in row.cells]
+                rows.append(values)
+            blocks.append(render_html_table(rows))
+            stats["tables"] += 1
+            return blocks
+
+        if self._shape_has_image(shape):
+            occurrence = self._extract_pptx_image(shape, slide_number, shape_index)
+            if occurrence is not None:
+                image_path = str(occurrence["output_path"])
+                alt_text = markdown_image_alt_text(str(occurrence.get("alt_text") or ""), Path(image_path).stem)
+                blocks.append(f"![{alt_text}]({image_path})")
+                self.image_block_sequences.append(int(occurrence["sequence"]))
+                return blocks
+
+        text = self._extract_shape_text(shape)
+        if text:
+            blocks.append(text)
+            stats["paragraphs"] += 1
+            self._collect_external_links_from_text(text)
+            return blocks
+
+        return blocks
+
+    def _render_slide_notes(self, slide) -> list[str]:
+        try:
+            notes_slide = slide.notes_slide
+        except Exception:
+            return []
+        blocks: list[str] = []
+        for shape in notes_slide.shapes:
+            text = self._extract_shape_text(shape)
+            if not text:
+                continue
+            cleaned = clean_text(text)
+            if not cleaned or cleaned.lower() in {"click to add notes", "点击此处添加备注"}:
+                continue
+            blocks.append(text)
+            self._collect_external_links_from_text(text)
+        return blocks
+
+    def _extract_shape_text(self, shape) -> str:
+        text_frame = getattr(shape, "text_frame", None)
+        if text_frame is not None:
+            lines: list[str] = []
+            for paragraph in text_frame.paragraphs:
+                text = clean_text("".join(run.text for run in paragraph.runs) or paragraph.text or "")
+                if not text:
+                    continue
+                level = int(getattr(paragraph, "level", 0) or 0)
+                bullet = f"{'  ' * level}- " if level > 0 or len(text_frame.paragraphs) > 1 else ""
+                lines.append(f"{bullet}{text}" if bullet else text)
+            return "\n".join(lines).strip()
+        if hasattr(shape, "text"):
+            return clean_text(str(shape.text or ""))
+        if hasattr(shape, "cells"):
+            rows = [" | ".join(clean_text(cell.text) for cell in row.cells) for row in shape.rows]
+            return "\n".join(row for row in rows if row.strip())
+        return ""
+
+    def _shape_has_image(self, shape) -> bool:
+        if hasattr(shape, "image"):
+            return True
+        shape_type = getattr(shape, "shape_type", None)
+        return shape_type in {MSO_SHAPE_TYPE.PICTURE, MSO_SHAPE_TYPE.LINKED_PICTURE}
+
+    def _extract_pptx_image(self, shape, slide_number: int, shape_index: int) -> dict[str, object] | None:
+        try:
+            image = shape.image
+        except Exception:
+            return None
+        image_bytes = image.blob
+        if not image_bytes:
+            return None
+        image_hash = sha256_bytes(image_bytes)
+        output_rel = self.image_hash_to_output.get(image_hash)
+        ext = clean_text(str(getattr(image, "ext", "") or "")).lower() or "png"
+        if output_rel is None:
+            self.image_counter += 1
+            output_name = f"{self.image_counter:04d}-slide{slide_number:03d}.{ext}"
+            output_path = self.media_dir / output_name
+            output_path.write_bytes(image_bytes)
+            output_rel = f"./media/{output_name}"
+            self.image_hash_to_output[image_hash] = output_rel
+        self.image_sequence_counter += 1
+        occurrence = {
+            "sequence": self.image_sequence_counter,
+            "source_target": f"slide-{slide_number}-shape-{shape_index}",
+            "output_path": output_rel,
+            "alt_text": clean_text(getattr(shape, "name", "") or f"Slide {slide_number} image"),
+            "content_sha256": image_hash,
+            "file_suffix": Path(output_rel).suffix.lower(),
+            "container": "pptx_block",
+            "slide_number": slide_number,
+        }
+        self.image_occurrences.append(occurrence)
+        self.image_occurrence_by_sequence[self.image_sequence_counter] = occurrence
+        return occurrence
+
+    def _collect_external_links_from_text(self, text: str) -> None:
+        for url in re.findall(r"https?://[^\s)>\"']+", text or ""):
+            key = (url, url)
+            if key in self._seen_external_links:
+                continue
+            self._seen_external_links.add(key)
+            self.external_links.append({"text": url, "url": url})
+
+
+class XlsMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+
+    def convert(self) -> dict[str, object]:
+        if xlrd is None:
+            raise RuntimeError("xlrd is required to convert .xls files")
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        workbook = xlrd.open_workbook(str(self.source_path), formatting_info=False)
+        title = filename_title(self.source_path)
+        blocks = [f"# {title}"]
+        headings = [{"level": 1, "number": None, "text": title, "full_text": title}]
+        stats = default_stats()
+        feature_flags = default_feature_flags()
+        stats["headings"] = 1
+        stats["worksheets"] = workbook.nsheets
+
+        for sheet in workbook.sheets():
+            headings.append({"level": 2, "number": None, "text": sheet.name, "full_text": sheet.name})
+            stats["headings"] += 1
+            sheet_blocks, sheet_stats = self._render_sheet(workbook, sheet)
+            blocks.extend(sheet_blocks)
+            for key, value in sheet_stats.items():
+                stats[key] = int(stats.get(key, 0)) + int(value)
+
+        markdown = "\n\n".join(block.rstrip() for block in blocks if block and block.strip()).strip() + "\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+
+        title_resolution = build_title_resolution(self.source_path)
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=headings,
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _render_sheet(self, workbook, sheet) -> tuple[list[str], dict[str, int]]:
+        blocks = [f"## {sheet.name}"]
+        stats = {"tables": 0, "paragraphs": 1, "lists": 0, "quotes": 0, "images": 0, "textboxes": 0, "captions": 0, "table_rowspans": 0, "table_colspans": 0}
+        used_rows: list[list[str]] = []
+        max_col = 0
+        for rowx in range(sheet.nrows):
+            values = [self._cell_to_text(workbook, sheet, rowx, colx) for colx in range(sheet.ncols)]
+            if any(clean_text(value) for value in values):
+                used_rows.append(values)
+                max_col = max(max_col, len(values))
+        blocks.append(f"Rows: {len(used_rows)}, Columns: {max_col}")
+        if not used_rows:
+            blocks.append("_Empty sheet._")
+            stats["paragraphs"] += 1
+            return blocks, stats
+        for start in range(0, len(used_rows), XLSX_ROWS_PER_TABLE_BLOCK):
+            chunk = used_rows[start:start + XLSX_ROWS_PER_TABLE_BLOCK]
+            row_start = start + 1
+            row_end = start + len(chunk)
+            if len(used_rows) > XLSX_ROWS_PER_TABLE_BLOCK:
+                blocks.append(f"### Sheet Rows {row_start}-{row_end}")
+                stats["paragraphs"] += 1
+            blocks.append(render_html_table(chunk))
+            stats["tables"] += 1
+        return blocks, stats
+
+    def _cell_to_text(self, workbook, sheet, rowx: int, colx: int) -> str:
+        cell = sheet.cell(rowx, colx)
+        ctype = cell.ctype
+        value = cell.value
+        if ctype == xlrd.XL_CELL_EMPTY:
+            return ""
+        if ctype == xlrd.XL_CELL_TEXT:
+            return normalize_text(str(value))
+        if ctype == xlrd.XL_CELL_NUMBER:
+            if float(value).is_integer():
+                return str(int(value))
+            return str(value)
+        if ctype == xlrd.XL_CELL_DATE:
+            try:
+                dt = xlrd.xldate_as_datetime(value, workbook.datemode)
+                return dt.isoformat(sep=" ", timespec="seconds")
+            except Exception:
+                return str(value)
+        if ctype == xlrd.XL_CELL_BOOLEAN:
+            return "TRUE" if value else "FALSE"
+        if ctype == xlrd.XL_CELL_ERROR:
+            return f"#ERROR:{value}"
+        return normalize_text(str(value))
+
+
+class DocMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+
+    def convert(self) -> dict[str, object]:
+        with tempfile.TemporaryDirectory(prefix="legacy-doc-convert-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            temp_docx = temp_dir / f"{self.source_path.stem}.docx"
+            command = ["textutil", "-convert", "docx", str(self.source_path), "-output", str(temp_docx)]
+            completed = subprocess.run(command, text=True, capture_output=True, check=False)
+            if completed.returncode != 0 or not temp_docx.exists():
+                message = clean_text(completed.stderr or completed.stdout or "textutil failed")
+                raise RuntimeError(f"textutil doc conversion failed: {message}")
+
+            converter = DocxMarkdownConverter(temp_dir, temp_docx, self.output_dir)
+            metadata = converter.convert()
+
+        doc_path = self.output_dir / "doc.md"
+        markdown = clean_legacy_doc_markdown(doc_path.read_text(encoding="utf-8"))
+        doc_path.write_text(markdown, encoding="utf-8")
+        source_stat = self.source_path.stat()
+        metadata["source_format"] = "doc"
+        metadata["source_name"] = self.source_path.name
+        metadata["source_relative_path"] = self.source_path.relative_to(self.source_root).as_posix()
+        metadata["source_sha256"] = sha256_file(self.source_path)
+        metadata["source_size_bytes"] = source_stat.st_size
+        metadata["source_mtime_ns"] = source_stat.st_mtime_ns
+        metadata["document_properties"] = dict(metadata.get("document_properties") or {})
+        metadata["document_properties"]["converted_from"] = "legacy-doc-via-textutil"
+        text_chars, word_count = markdown_text_metrics(markdown)
+        metadata["stats"] = dict(metadata.get("stats") or {})
+        metadata["stats"]["text_chars"] = text_chars
+        metadata["stats"]["word_count_approx"] = word_count
+        meta_path = self.output_dir / "meta.json"
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+
 def is_image_block(block: str) -> bool:
     return bool(re.fullmatch(r"!\[[^\]]*]\([^)]+\)", block.strip()))
 
@@ -2132,8 +3258,12 @@ def matches_globs(relative_path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(relative_path, pattern) for pattern in patterns)
 
 
-def discover_docx_files(source_root: Path, scan_root: Path, include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
-    candidates = sorted(path for path in scan_root.rglob("*.docx") if path.is_file())
+def discover_source_files(source_root: Path, scan_root: Path, include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
+    candidates = sorted(
+        path
+        for path in scan_root.rglob("*")
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_EXTENSIONS
+    )
     selected: list[Path] = []
     for path in candidates:
         relative = path.relative_to(source_root).as_posix()
@@ -2171,9 +3301,11 @@ def should_skip_conversion(
         stat = source_path.stat()
     except OSError:
         return False
+    source_format = source_format_for_path(source_path)
     return (
         meta.get("converter_version") == CONVERTER_VERSION
         and meta.get("format_version") == FORMAT_VERSION
+        and meta.get("source_format") in {None, source_format}
         and meta.get("source_size_bytes") == stat.st_size
         and meta.get("source_mtime_ns") == stat.st_mtime_ns
         and annotation_state_matches(meta, image_annotation)
@@ -2229,24 +3361,44 @@ def build_output_dir(output_root: Path, source_root: Path, source_path: Path) ->
     return output_root / relative.with_suffix("")
 
 
+def build_converter(source_root: Path, source_path: Path, output_dir: Path):
+    source_format = source_path.suffix.lower()
+    if source_format == ".docx":
+        return DocxMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".txt":
+        return TxtMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".xlsx":
+        return XlsxMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".pdf":
+        return PdfMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".pptx":
+        return PptxMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".xls":
+        return XlsMarkdownConverter(source_root, source_path, output_dir)
+    if source_format == ".doc":
+        return DocMarkdownConverter(source_root, source_path, output_dir)
+    raise RuntimeError(f"unsupported source format: {source_format}")
+
+
 def process_document(task: DocumentTask) -> dict[str, object]:
     output_dir = build_output_dir(task.output_root, task.source_root, task.source_path)
     relative = task.source_path.relative_to(task.source_root).as_posix()
-    container_kind, container_detail = detect_docx_container(task.source_path)
-
-    if container_kind != "ooxml":
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
-        return {
-            "source_relative_path": relative,
-            "output_relative_path": output_dir.relative_to(task.output_root).as_posix(),
-            "status": "unsupported",
-            "title": filename_title(task.source_path),
-            "warnings_count": 0,
-            "images_count": 0,
-            "validation_errors": [],
-            "error": f"unsupported_container:{container_kind}:{container_detail}",
-        }
+    source_format = task.source_path.suffix.lower()
+    if source_format == ".docx":
+        container_kind, container_detail = detect_docx_container(task.source_path)
+        if container_kind != "ooxml":
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+            return {
+                "source_relative_path": relative,
+                "output_relative_path": output_dir.relative_to(task.output_root).as_posix(),
+                "status": "unsupported",
+                "title": filename_title(task.source_path),
+                "warnings_count": 0,
+                "images_count": 0,
+                "validation_errors": [],
+                "error": f"unsupported_container:{container_kind}:{container_detail}",
+            }
 
     if should_skip_conversion(task.source_path, output_dir, task.force, task.image_annotation):
         meta = load_existing_meta(output_dir) or {}
@@ -2262,15 +3414,17 @@ def process_document(task: DocumentTask) -> dict[str, object]:
             "meta": meta,
         }
 
-    converter = DocxMarkdownConverter(task.source_root, task.source_path, output_dir)
+    converter = build_converter(task.source_root, task.source_path, output_dir)
     metadata = converter.convert()
-    if task.image_annotation.enabled:
+    if task.image_annotation.enabled and source_format in IMAGE_ANNOTATION_SUPPORTED_SOURCE_EXTENSIONS:
+        rendered_blocks = getattr(converter, "rendered_blocks", [])
+        image_block_sequences = getattr(converter, "image_block_sequences", [])
         metadata = annotate_document_images(
             doc_path=output_dir / "doc.md",
             meta_path=output_dir / "meta.json",
             metadata=metadata,
-            blocks=converter.rendered_blocks,
-            image_block_sequences=converter.image_block_sequences,
+            blocks=rendered_blocks,
+            image_block_sequences=image_block_sequences,
             config=task.image_annotation,
             workspace_root=PROJECT_ROOT,
             annotation_cache=task.image_annotation_cache,
@@ -2442,9 +3596,12 @@ def rebuild_summary_results(
     for source_path in source_paths:
         relative = source_path.relative_to(source_root).as_posix()
         output_dir = build_output_dir(output_root, source_root, source_path)
-        container_kind, container_detail = detect_docx_container(source_path)
+        if source_path.suffix.lower() == ".docx":
+            container_kind, container_detail = detect_docx_container(source_path)
+        else:
+            container_kind, container_detail = "supported", source_path.suffix.lower()
 
-        if container_kind != "ooxml":
+        if source_path.suffix.lower() == ".docx" and container_kind != "ooxml":
             results.append(
                 {
                     "source_relative_path": relative,
@@ -2495,9 +3652,9 @@ def rebuild_summary_results(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Recursively convert DOCX knowledge documents into doc.md + media + meta.json."
+        description="Recursively convert supported knowledge documents into doc.md + media + meta.json."
     )
-    parser.add_argument("--source-root", required=True, type=Path, help="Root directory of source DOCX files.")
+    parser.add_argument("--source-root", required=True, type=Path, help="Root directory of source knowledge files.")
     parser.add_argument(
         "--scan-root",
         type=Path,
@@ -2513,7 +3670,7 @@ def parse_args() -> argparse.Namespace:
         "--include-glob",
         action="append",
         default=[],
-        help="Glob pattern relative to source root. May be repeated. Defaults to DOCX files recursively.",
+        help="Glob pattern relative to source root. May be repeated. Defaults to supported files recursively.",
     )
     parser.add_argument(
         "--exclude-glob",
@@ -2557,7 +3714,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--clean-deleted",
         action="store_true",
-        help="Remove output directories whose source DOCX files no longer exist in the scanned set.",
+        help="Remove output directories whose source files no longer exist in the scanned set.",
     )
     parser.add_argument("--fail-fast", action="store_true", help="Stop after the first conversion failure.")
     parser.add_argument(
@@ -2608,7 +3765,7 @@ def main() -> int:
     exclude_globs.extend(args.exclude_glob or [])
 
     previous_manifest = load_previous_manifest(manifest_path)
-    source_paths = discover_docx_files(source_root, scan_root, include_globs, exclude_globs)
+    source_paths = discover_source_files(source_root, scan_root, include_globs, exclude_globs)
     current_relative_paths = {path.relative_to(source_root).as_posix() for path in source_paths}
     image_annotation = ImageAnnotationConfig(
         enabled=bool(args.annotate_images),
