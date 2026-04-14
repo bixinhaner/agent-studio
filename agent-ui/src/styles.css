@@ -4560,9 +4560,11 @@ body {
 .thread-public-share-toolbar-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   height: 36px;
-  padding: 0 14px;
+  width: 36px; /* Optimized to icon button */
+  padding: 0;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
@@ -4572,10 +4574,14 @@ body {
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
+.thread-public-share-toolbar-btn span {
+  display: none; /* Hide text to save space */
+}
+
 .thread-public-share-toolbar-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: rgba(51, 109, 244, 0.35);
-  box-shadow: 0 16px 34px rgba(51, 109, 244, 0.16);
+  border-color: rgba(255, 70, 20, 0.35);
+  box-shadow: 0 16px 34px rgba(255, 70, 20, 0.16);
 }
 
 .thread-public-share-toolbar-btn:disabled {
@@ -4613,7 +4619,7 @@ body {
 .thread-public-share-actionbar-link {
   border: 0;
   background: transparent;
-  color: #336df4;
+  color: #FF4614;
   cursor: pointer;
   padding: 0;
   font-weight: 600;
@@ -4646,10 +4652,10 @@ body {
 
 .thread-public-share-primary-btn,
 .thread-public-share-modal-primary {
-  border-color: #4f7cf7;
-  background: linear-gradient(135deg, #4f7cf7 0%, #6a8dff 100%);
+  border-color: #FF4614;
+  background: linear-gradient(135deg, #FF4614 0%, #FF8533 100%);
   color: #ffffff;
-  box-shadow: 0 10px 22px rgba(79, 124, 247, 0.28);
+  box-shadow: 0 10px 22px rgba(255, 70, 20, 0.28);
 }
 
 .thread-public-share-secondary-btn:disabled,
