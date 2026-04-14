@@ -119,7 +119,6 @@ import { initSSE, sendSSE } from "./sse.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
-  snapshotHasStructuredProcessRows,
   type ThreadPublicShareSnapshot
 } from "./public-share/thread-public-share-snapshot.js";
 
@@ -661,7 +660,7 @@ function threadPublicShareOut(share: {
     title: share.title,
     selected_turn_count: share.selectedTurnCount,
     public_path: `/share/${encodeURIComponent(share.token)}`,
-    snapshot: share.snapshot,
+    snapshot: rewritePublicShareKnowledgeImages(share.snapshot, share.token),
     user_display_name: share.userDisplayName,
     created_at: share.createdAt,
     updated_at: share.updatedAt
@@ -676,6 +675,75 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 
 function createThreadPublicShareToken(): string {
   return randomBytes(18).toString("base64url");
+}
+
+const KNOWLEDGE_SET_PATH_SEGMENT = `${path.sep}data${path.sep}knowledge-sets${path.sep}`;
+const PUBLIC_SHARE_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
+const KNOWLEDGE_SET_IMAGE_PATH_PATTERN =
+  /\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/[^\n<>"'`]*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif)/giu;
+
+function publicShareKnowledgeImageUrl(token: string, imagePath: string): string {
+  const query = new URLSearchParams({ path: imagePath });
+  return `/public-api/thread-shares/${encodeURIComponent(token)}/files/content?${query.toString()}`;
+}
+
+function rewriteKnowledgeImagePathsInText(text: string, token: string): string {
+  return text.replace(KNOWLEDGE_SET_IMAGE_PATH_PATTERN, (match) => publicShareKnowledgeImageUrl(token, match));
+}
+
+function rewritePublicShareKnowledgeImages(snapshot: unknown, token: string): unknown {
+  const publicSnapshot = structuredClone(snapshot) as ThreadPublicShareSnapshot;
+  for (const turn of publicSnapshot.turns ?? []) {
+    for (const message of turn.messages ?? []) {
+      for (const part of message.parts ?? []) {
+        if (part.type === "text") {
+          part.text = rewriteKnowledgeImagePathsInText(part.text, token);
+        }
+      }
+      for (const row of message.processRows ?? []) {
+        if (row.detail) {
+          row.detail = rewriteKnowledgeImagePathsInText(row.detail, token);
+        }
+      }
+    }
+  }
+  return publicSnapshot;
+}
+
+function collectKnowledgeImagePathsFromSnapshot(snapshot: ThreadPublicShareSnapshot): Set<string> {
+  const imagePaths = new Set<string>();
+  const addFromText = (text: string | undefined) => {
+    if (!text) return;
+    KNOWLEDGE_SET_IMAGE_PATH_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null = null;
+    while ((match = KNOWLEDGE_SET_IMAGE_PATH_PATTERN.exec(text)) !== null) {
+      imagePaths.add(path.resolve(match[0]));
+    }
+  };
+
+  for (const turn of snapshot.turns ?? []) {
+    for (const message of turn.messages ?? []) {
+      for (const part of message.parts ?? []) {
+        if (part.type === "text") {
+          addFromText(part.text);
+        }
+      }
+      for (const row of message.processRows ?? []) {
+        addFromText(row.detail);
+      }
+    }
+  }
+  return imagePaths;
+}
+
+function isPublicShareKnowledgeImagePath(candidatePath: string): boolean {
+  const normalized = path.resolve(candidatePath);
+  const ext = path.extname(normalized).toLowerCase();
+  return (
+    normalized.includes(KNOWLEDGE_SET_PATH_SEGMENT) &&
+    normalized.includes(`${path.sep}media${path.sep}`) &&
+    PUBLIC_SHARE_IMAGE_EXTENSIONS.has(ext)
+  );
 }
 
 async function resolveThreadPublicShareUserDisplayName(userId?: string): Promise<string | undefined> {
@@ -693,10 +761,6 @@ async function resolveThreadPublicShareSnapshotForRead<
     snapshot: ThreadPublicShareSnapshot;
   }
 >(share: T): Promise<T> {
-  if (snapshotHasStructuredProcessRows(share.snapshot)) {
-    return share;
-  }
-
   const leadMessageIds = share.snapshot.turns
     .map((turn) => trimOrUndefined(turn.leadMessageId))
     .filter((value): value is string => Boolean(value));
@@ -1739,6 +1803,53 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read public link";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/public-api/thread-shares/:token/files/content", async (req: Request, res: Response) => {
+  try {
+    const token = String(req.params.token || "").trim();
+    const rawPath = trimOrUndefined(typeof req.query.path === "string" ? req.query.path : undefined);
+    if (!token || !rawPath) {
+      res.status(400).json({ detail: "Token and path are required" });
+      return;
+    }
+
+    const requestedPath = path.resolve(rawPath);
+    if (!isPublicShareKnowledgeImagePath(requestedPath)) {
+      res.status(400).json({ detail: "Only shared knowledge-set images are supported" });
+      return;
+    }
+
+    const share = await threadPublicShares.getActiveByToken(token);
+    if (!share) {
+      res.status(404).json({ detail: "Public link does not exist or has expired" });
+      return;
+    }
+
+    const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
+    const allowedImagePaths = collectKnowledgeImagePathsFromSnapshot(resolvedShare.snapshot);
+    if (!allowedImagePaths.has(requestedPath)) {
+      res.status(403).json({ detail: "This image is not part of the public share" });
+      return;
+    }
+
+    const stat = await fs.stat(requestedPath).catch(() => null);
+    if (!stat || !stat.isFile()) {
+      res.status(404).json({ detail: "File does not exist" });
+      return;
+    }
+
+    const fileName = path.basename(requestedPath);
+    const fileBuffer = await fs.readFile(requestedPath);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.type(path.extname(fileName) || "application/octet-stream");
+    res.status(200).send(fileBuffer);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read public share image";
     res.status(400).json({ detail });
   }
 });

@@ -75,6 +75,9 @@ function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
+const KNOWLEDGE_SET_IMAGE_PATH_PATTERN =
+  /\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/[^\n<>"'`]*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif)/giu;
+
 function pushTextPart(parts: ThreadPublicShareSnapshotPart[], text: string) {
   if (!text.trim()) return;
   const normalized = redactSensitiveText(text);
@@ -91,14 +94,25 @@ function pushTextPart(parts: ThreadPublicShareSnapshotPart[], text: string) {
 }
 
 function redactSensitiveText(text: string): string {
+  const preservedPaths: string[] = [];
+  const protectedText = text.replace(KNOWLEDGE_SET_IMAGE_PATH_PATTERN, (match) => {
+    const token = `__PUBLIC_SHARE_KNOWLEDGE_IMAGE_${preservedPaths.length}__`;
+    preservedPaths.push(match);
+    return token;
+  });
   const patterns = [
     /(^|[\s("'`])((?:\/Users|\/home|\/usr\/local|\/var|\/opt|\/tmp)[^\s"'`)\]}]+)/g,
     /(^|[\s("'`])([A-Za-z]:\\[^\s"'`)\]}]+)/g
   ];
-  return patterns.reduce(
+  const redacted = patterns.reduce(
     (current, pattern) =>
       current.replace(pattern, (_match, prefix: string) => `${prefix}[redacted path]`),
-    text
+    protectedText
+  );
+  return preservedPaths.reduce(
+    (current, preservedPath, index) =>
+      current.replaceAll(`__PUBLIC_SHARE_KNOWLEDGE_IMAGE_${index}__`, preservedPath),
+    redacted
   );
 }
 

@@ -45,6 +45,21 @@ function isHttpUrl(value: string | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
 
+const RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN =
+  /(!\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/public-api\/))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+
+function publicShareImageUrl(token: string, imagePath: string): string {
+  const query = new URLSearchParams({ path: imagePath });
+  return `/public-api/thread-shares/${encodeURIComponent(token)}/files/content?${query.toString()}`;
+}
+
+function preprocessPublicShareMarkdown(text: string, token: string): string {
+  if (!token.trim()) return text;
+  return text.replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+    return `${prefix}<${publicShareImageUrl(token, destination)}>${suffix}`;
+  });
+}
+
 function PublicShareMarkdownLink(props: {
   href?: string;
   className?: string;
@@ -62,7 +77,38 @@ function PublicShareMarkdownLink(props: {
   );
 }
 
-function PublicShareMarkdown(props: { text: string; className?: string }) {
+function PublicShareMarkdownImage(props: {
+  src?: string;
+  alt?: string;
+  className?: string;
+  title?: string;
+  [key: string]: unknown;
+}) {
+  const { src, alt, className, title, ...rest } = props;
+  const normalizedSrc = typeof src === "string" ? src.trim() : "";
+  if (!normalizedSrc) {
+    return <span className="public-share-image-missing">Image unavailable</span>;
+  }
+  if (!/^https?:\/\//i.test(normalizedSrc) && !normalizedSrc.startsWith("/public-api/thread-shares/")) {
+    return <span className="public-share-image-missing">{alt || "Image unavailable"}</span>;
+  }
+  return (
+    <span className="public-share-image-card">
+      <img
+        {...rest}
+        className={className ? `public-share-image ${className}` : "public-share-image"}
+        src={normalizedSrc}
+        alt={alt || ""}
+        title={title}
+        loading="lazy"
+      />
+      {alt ? <span className="public-share-image-caption">{alt}</span> : null}
+    </span>
+  );
+}
+
+function PublicShareMarkdown(props: { text: string; token: string; className?: string }) {
+  const processedText = useMemo(() => preprocessPublicShareMarkdown(props.text, props.token), [props.text, props.token]);
   return (
     <div className={props.className ? `public-share-markdown ${props.className}` : "public-share-markdown"}>
       <ReactMarkdown
@@ -84,10 +130,11 @@ function PublicShareMarkdown(props: { text: string; className?: string }) {
             ) : (
               <code className="aui-md-inline-code" {...rest} />
             ),
-          pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />
+          pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />,
+          img: PublicShareMarkdownImage as any
         }}
       >
-        {props.text}
+        {processedText}
       </ReactMarkdown>
     </div>
   );
@@ -208,7 +255,7 @@ function processRowKindLabel(kind: string): string {
   return "Step";
 }
 
-function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
+function UserMessageBlock(props: { message: PublicShareSnapshotMessage; token: string; userLabel: string }) {
   const text = collectMessageText(props.message);
   return (
     <section className="public-share-message public-share-message-user">
@@ -216,13 +263,13 @@ function UserMessageBlock(props: { message: PublicShareSnapshotMessage; userLabe
         <span className="public-share-message-role">{props.userLabel}</span>
       </div>
       <div className="public-share-message-body">
-        <PublicShareMarkdown text={text} />
+        <PublicShareMarkdown text={text} token={props.token} />
       </div>
     </section>
   );
 }
 
-function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
+function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; token: string }) {
   const text = collectMessageText(props.message);
   const sourceParts = props.message.parts.filter((part) => part.type === "source");
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
@@ -256,7 +303,7 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
                     <span className="public-share-process-step-title">{row.title}</span>
                     {row.at ? <span className="public-share-process-step-time">{formatProcessRowTime(row.at)}</span> : null}
                   </div>
-                  {row.detail ? <PublicShareMarkdown text={row.detail} className="public-share-process-markdown" /> : null}
+                  {row.detail ? <PublicShareMarkdown text={row.detail} token={props.token} className="public-share-process-markdown" /> : null}
                 </div>
               </li>
             ))}
@@ -267,7 +314,7 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
       {text ? (
         <div className="public-share-final-card">
           <div className="public-share-final-label">Final response</div>
-          <PublicShareMarkdown text={text} className="public-share-final-markdown" />
+          <PublicShareMarkdown text={text} token={props.token} className="public-share-final-markdown" />
           {sourceParts.length > 0 ? (
             <div className="public-share-source-list">
               {sourceParts.map((part) => (
@@ -283,11 +330,11 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage }) {
   );
 }
 
-function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; userLabel: string }) {
+function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; token: string; userLabel: string }) {
   if (props.message.role === "user") {
-    return <UserMessageBlock message={props.message} userLabel={props.userLabel} />;
+    return <UserMessageBlock message={props.message} token={props.token} userLabel={props.userLabel} />;
   }
-  return <AssistantMessageBlock message={props.message} />;
+  return <AssistantMessageBlock message={props.message} token={props.token} />;
 }
 
 export function PublicSharePage(props: { token?: string }) {
@@ -456,7 +503,7 @@ export function PublicSharePage(props: { token?: string }) {
                   <div className="public-share-turn-index">Turn {index + 1}</div>
                   <div className="public-share-turn-body">
                     {turn.messages.map((message) => (
-                      <PublicShareMessageBlock key={message.id} message={message} userLabel={userLabel} />
+                      <PublicShareMessageBlock key={message.id} message={message} token={share.token} userLabel={userLabel} />
                     ))}
                   </div>
                 </article>
