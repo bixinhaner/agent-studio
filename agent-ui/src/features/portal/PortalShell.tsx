@@ -2884,14 +2884,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedModelLabel = appliedConfig.model;
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
+  const isExternalPortalUser = props.currentUser?.userType === "external_user";
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
 
   const requestPreviewForPath = useCallback((filePath: string) => {
+    if (isExternalPortalUser) return;
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
     setRequestedPreviewPath(normalizedPath);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
-  }, []);
+  }, [isExternalPortalUser]);
 
   const handleThreadLinkClickCapture = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
@@ -2915,6 +2917,20 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   useEffect(() => {
     setRequestedPreviewPath("");
   }, [activeRemoteThreadId]);
+
+  useEffect(() => {
+    if (!isExternalPortalUser) return;
+    setLayoutState((prev) => {
+      if (!prev.isRightDrawerOpen && !prev.isAdvancedSettingsOpen) {
+        return prev;
+      }
+      return {
+        ...prev,
+        isRightDrawerOpen: false,
+        isAdvancedSettingsOpen: false
+      };
+    });
+  }, [isExternalPortalUser]);
 
   const chatAdapter = useMemo<ChatModelAdapter>(
     () => ({
@@ -3600,16 +3616,29 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               sessionRailCollapsed={layoutState.isSessionRailCollapsed}
               onToggleRail={() => setLayoutState((prev) => toggleSessionRail(prev))}
               onOpenAdvancedSettings={() =>
-                setLayoutState((prev) => ({
-                  ...prev,
-                  isAdvancedSettingsOpen: true
-                }))
+                setLayoutState((prev) =>
+                  isExternalPortalUser
+                    ? prev
+                    : {
+                        ...prev,
+                        isAdvancedSettingsOpen: true
+                      }
+                )
               }
               onToggleDrawer={() =>
-                setLayoutState((prev) => (prev.isRightDrawerOpen ? closeWorkbenchDrawer(prev) : openWorkbenchDrawer(prev)))
+                setLayoutState((prev) =>
+                  isExternalPortalUser
+                    ? prev
+                    : prev.isRightDrawerOpen
+                      ? closeWorkbenchDrawer(prev)
+                      : openWorkbenchDrawer(prev)
+                )
               }
               onOpenAdmin={props.onOpenAdmin}
               runtimeSummary={runtimeSummaryText}
+              showRuntimeSummary={!isExternalPortalUser}
+              showAdvancedSettings={!isExternalPortalUser}
+              showRightPanelToggle={!isExternalPortalUser}
               drawerOpen={layoutState.isRightDrawerOpen}
               activeDrawerTab={layoutState.activeRightDrawerTab}
             />
@@ -3666,7 +3695,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   </main>
                 </Panel>
 
-                {layoutState.isRightDrawerOpen && (
+                {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
                   <>
                     <PanelResizeHandle className="Resizer" />
                     <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
@@ -3707,91 +3736,93 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               </PanelGroup>
             </div>
 
-            <AdvancedSettingsPanel
-              open={layoutState.isAdvancedSettingsOpen}
-              onClose={() =>
-                setLayoutState((prev) => ({
-                  ...prev,
-                  isAdvancedSettingsOpen: false
-                }))
-              }
-              modelLabel={selectedModelLabel}
-              reasoningLabel={selectedReasoningLabel}
-            >
-              <div className="advanced-settings-content">
-                <div className="knowledge-set-shell">
-                  {portalResources ? (
-                    <KnowledgeSetPicker
-                      knowledgeSets={portalResources.knowledgeSets ?? []}
-                      selectedIds={selectedKnowledgeSetIdsNormalized}
-                      onChange={handleKnowledgeSetChange}
-                    />
-                  ) : (
-                    <p className="field-help knowledge-set-loading">Loading knowledge-set resources...</p>
-                  )}
-                  {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
-                </div>
-
-                <label className="field checkbox-field">
-                  <span className="field-label">Show process trace</span>
-                  <input
-                    type="checkbox"
-                    checked={showProcessTrace}
-                    onChange={(e) => setShowProcessTrace(e.target.checked)}
-                  />
-                  <span className="field-help">Show reasoning summaries, tool calls, and execution steps in messages.</span>
-                </label>
-
-                <label className="field checkbox-field">
-                  <span className="field-label">Collapse final trace when done</span>
-                  <input
-                    type="checkbox"
-                    checked={collapseFinalTraceOnDone}
-                    onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
-                    disabled={!showProcessTrace}
-                  />
-                  <span className="field-help">When enabled, only the final conclusion remains expanded and completed traces collapse by default.</span>
-                </label>
-
-                <label className="field">
-                  <span className="field-label">Policy mode</span>
-                  <select
-                    className="field-input"
-                    value={runtimeMode}
-                    onChange={(e) => setRuntimeMode(e.target.value)}
-                    disabled={!runtimeOptions}
-                  >
-                    {modeOptions.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {mode.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="field-help">Provided by `/api/portal/runtime-options`; employees can only choose allowed policies.</span>
-                </label>
-
-                {selectedMode ? (
-                  <div className="field">
-                    <span className="field-label">Policy snapshot</span>
-                    <RuntimeProfileView profile={selectedMode.runtimeProfile} />
-                    <span className="field-help">The runtime parameters below are determined by the run profile bound to the current policy mode.</span>
+            {!isExternalPortalUser ? (
+              <AdvancedSettingsPanel
+                open={layoutState.isAdvancedSettingsOpen}
+                onClose={() =>
+                  setLayoutState((prev) => ({
+                    ...prev,
+                    isAdvancedSettingsOpen: false
+                  }))
+                }
+                modelLabel={selectedModelLabel}
+                reasoningLabel={selectedReasoningLabel}
+              >
+                <div className="advanced-settings-content">
+                  <div className="knowledge-set-shell">
+                    {portalResources ? (
+                      <KnowledgeSetPicker
+                        knowledgeSets={portalResources.knowledgeSets ?? []}
+                        selectedIds={selectedKnowledgeSetIdsNormalized}
+                        onChange={handleKnowledgeSetChange}
+                      />
+                    ) : (
+                      <p className="field-help knowledge-set-loading">Loading knowledge-set resources...</p>
+                    )}
+                    {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
                   </div>
-                ) : null}
 
-                <div className="status-box">
-                  <p>
-                    <strong>Status: </strong>
-                    {statusText}
-                  </p>
-                  <p>
-                    <strong>Attachment policy: </strong>
-                    {runtimeOptions?.canUpload ? "Upload allowed" : "Uploads currently disabled"}
-                  </p>
-                  <p className="field-help">Runtime setting changes take effect automatically in the next turn.</p>
-                  {errorText ? <p className="err-text">{errorText}</p> : null}
+                  <label className="field checkbox-field">
+                    <span className="field-label">Show process trace</span>
+                    <input
+                      type="checkbox"
+                      checked={showProcessTrace}
+                      onChange={(e) => setShowProcessTrace(e.target.checked)}
+                    />
+                    <span className="field-help">Show reasoning summaries, tool calls, and execution steps in messages.</span>
+                  </label>
+
+                  <label className="field checkbox-field">
+                    <span className="field-label">Collapse final trace when done</span>
+                    <input
+                      type="checkbox"
+                      checked={collapseFinalTraceOnDone}
+                      onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
+                      disabled={!showProcessTrace}
+                    />
+                    <span className="field-help">When enabled, only the final conclusion remains expanded and completed traces collapse by default.</span>
+                  </label>
+
+                  <label className="field">
+                    <span className="field-label">Policy mode</span>
+                    <select
+                      className="field-input"
+                      value={runtimeMode}
+                      onChange={(e) => setRuntimeMode(e.target.value)}
+                      disabled={!runtimeOptions}
+                    >
+                      {modeOptions.map((mode) => (
+                        <option key={mode.id} value={mode.id}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="field-help">Provided by `/api/portal/runtime-options`; employees can only choose allowed policies.</span>
+                  </label>
+
+                  {selectedMode ? (
+                    <div className="field">
+                      <span className="field-label">Policy snapshot</span>
+                      <RuntimeProfileView profile={selectedMode.runtimeProfile} />
+                      <span className="field-help">The runtime parameters below are determined by the run profile bound to the current policy mode.</span>
+                    </div>
+                  ) : null}
+
+                  <div className="status-box">
+                    <p>
+                      <strong>Status: </strong>
+                      {statusText}
+                    </p>
+                    <p>
+                      <strong>Attachment policy: </strong>
+                      {runtimeOptions?.canUpload ? "Upload allowed" : "Uploads currently disabled"}
+                    </p>
+                    <p className="field-help">Runtime setting changes take effect automatically in the next turn.</p>
+                    {errorText ? <p className="err-text">{errorText}</p> : null}
+                  </div>
                 </div>
-              </div>
-            </AdvancedSettingsPanel>
+              </AdvancedSettingsPanel>
+            ) : null}
           </div>
         </ConfigProvider>
         {pickerOpen ? (

@@ -17,8 +17,14 @@ export function PortalTopBar(props: {
   runtimeSummary?: string;
   drawerOpen?: boolean;
   activeDrawerTab?: WorkbenchTab;
+  showRuntimeSummary?: boolean;
+  showAdvancedSettings?: boolean;
+  showRightPanelToggle?: boolean;
 }) {
   const isRightPanelOpen = props.drawerOpen;
+  const showRuntimeSummary = props.showRuntimeSummary ?? true;
+  const showAdvancedSettings = props.showAdvancedSettings ?? true;
+  const showRightPanelToggle = props.showRightPanelToggle ?? true;
 
   return (
     <header className="portal-topbar" aria-label="Workbench top bar">
@@ -46,7 +52,7 @@ export function PortalTopBar(props: {
       </div>
       
       <div className="portal-topbar-right">
-        {props.runtimeSummary ? (
+        {showRuntimeSummary && props.runtimeSummary ? (
           <span className="portal-topbar-runtime-chip" title={props.runtimeSummary}>
             {props.runtimeSummary}
           </span>
@@ -65,26 +71,30 @@ export function PortalTopBar(props: {
               />
             </Tooltip>
           ) : null}
-          <Tooltip title="Runtime settings" placement="bottom">
-            <Button 
-              type="text" 
-              className="portal-topbar-ghost-btn" 
-              icon={<Settings size={18} />} 
-              onClick={props.onOpenAdvancedSettings}
-              style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="Advanced settings"
-            />
-          </Tooltip>
-          <Tooltip title={isRightPanelOpen ? "Close right panel" : "Open right panel"} placement="bottomLeft">
-            <Button 
-              type="text" 
-              className="portal-topbar-ghost-btn"
-              icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
-              onClick={props.onToggleDrawer}
-              style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="Toggle right panel"
-            />
-          </Tooltip>
+          {showAdvancedSettings ? (
+            <Tooltip title="Runtime settings" placement="bottom">
+              <Button
+                type="text"
+                className="portal-topbar-ghost-btn"
+                icon={<Settings size={18} />}
+                onClick={props.onOpenAdvancedSettings}
+                style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+                aria-label="Advanced settings"
+              />
+            </Tooltip>
+          ) : null}
+          {showRightPanelToggle ? (
+            <Tooltip title={isRightPanelOpen ? "Close right panel" : "Open right panel"} placement="bottomLeft">
+              <Button
+                type="text"
+                className="portal-topbar-ghost-btn"
+                icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+                onClick={props.onToggleDrawer}
+                style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+                aria-label="Toggle right panel"
+              />
+            </Tooltip>
+          ) : null}
         </Space>
       </div>
     </header>
