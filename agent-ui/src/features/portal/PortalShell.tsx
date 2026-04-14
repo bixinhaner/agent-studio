@@ -291,6 +291,8 @@ function flattenNodeText(value: unknown): string {
 }
 
 const ASSISTANT_MARKDOWN_LINK_PATTERN = /(!?\[[^\]]*]\()([^)\n]+)(\))/g;
+const RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN =
+  /(!?\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:md|markdown|txt|json|pdf|html|htm|xml|ya?ml|png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
 const IMAGE_FILE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
 const ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS = new Set([
   "md",
@@ -313,6 +315,12 @@ function normalizeMarkdownAssetTarget(value: string): string {
   const unwrapped =
     trimmed.startsWith("<") && trimmed.endsWith(">") && trimmed.length > 1 ? trimmed.slice(1, -1).trim() : trimmed;
   return decodeMaybeUri(unwrapped);
+}
+
+function preprocessAssistantMarkdown(text: string): string {
+  return text.replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+    return `${prefix}<${destination}>${suffix}`;
+  });
 }
 
 function normalizeUrlPathParam(value: string | null): string {
@@ -596,6 +604,7 @@ function AssistantMarkdownLink(props: {
 }
 
 const AssistantMarkdownText = makeMarkdownText({
+  preprocess: preprocessAssistantMarkdown,
   components: {
     a: AssistantMarkdownLink as any,
     img: AssistantMarkdownImage as any
