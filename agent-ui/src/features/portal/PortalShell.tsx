@@ -2387,7 +2387,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
-  const [showProcessTrace, setShowProcessTrace] = useState(true);
+  const [showProcessTrace, setShowProcessTrace] = useState(() => props.currentUser?.userType !== "external_user");
   const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
@@ -2930,6 +2930,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         isAdvancedSettingsOpen: false
       };
     });
+  }, [isExternalPortalUser]);
+
+  useEffect(() => {
+    if (!isExternalPortalUser) return;
+    setShowProcessTrace(false);
   }, [isExternalPortalUser]);
 
   const chatAdapter = useMemo<ChatModelAdapter>(
