@@ -22,12 +22,18 @@ from pathlib import Path
 from typing import Iterable
 import xml.etree.ElementTree as ET
 
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover - optional dependency in some environments
+    Image = None
+
 
 FORMAT_VERSION = 3
-CONVERTER_VERSION = "1.2.0"
+CONVERTER_VERSION = "1.2.1"
 DEFAULT_INCLUDE_GLOBS = ["**/*.docx", "*.docx"]
 DEFAULT_EXCLUDE_GLOBS = ["**/~$*.docx", "~$*.docx", "**/.~*.docx", ".~*.docx"]
 DEFAULT_UNSUPPORTED_ANNOTATION_IMAGE_SUFFIXES = {".emf", ".wmf"}
+DEFAULT_CONVERT_TO_PNG_ANNOTATION_IMAGE_SUFFIXES = {".bmp"}
 IMAGE_ANNOTATION_PROMPT_VERSION = "visual-v2"
 IMAGE_ANNOTATION_SCHEMA_VERSION = 1
 TABLE_IMAGE_ANNOTATION_PLACEHOLDER_PATTERN = re.compile(r"<!-- image-annotation:(\d+) -->")
@@ -211,6 +217,12 @@ def collapse_adjacent_markdown_links(text: str) -> str:
             break
         collapsed = updated
     return collapsed
+
+
+def markdown_image_alt_text(value: str, fallback: str) -> str:
+    text = re.sub(r"\s+", " ", normalize_text(value or fallback)).strip()
+    text = text.replace("[", "(").replace("]", ")")
+    return text or "image"
 
 
 def parse_docproperty_name(instruction: str) -> str:
@@ -484,6 +496,7 @@ class CodexImageAnnotator:
             next_text=next_text,
             alt_text=alt_text,
         )
+        prepared_image_path, prepared_temp_dir = self._prepare_annotation_input_image(image_path)
         command = [
             self.config.command,
             "exec",
@@ -495,17 +508,21 @@ class CodexImageAnnotator:
             "--output-schema",
             str(self.schema_path),
             "-i",
-            str(image_path),
+            str(prepared_image_path),
             "-",
         ]
-        completed = subprocess.run(
-            command,
-            input=prompt,
-            text=True,
-            capture_output=True,
-            timeout=self.config.timeout_seconds,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                timeout=self.config.timeout_seconds,
+                check=False,
+            )
+        finally:
+            if prepared_temp_dir is not None:
+                prepared_temp_dir.cleanup()
         if completed.returncode != 0:
             stderr = clean_text(completed.stderr or completed.stdout or "codex exec failed")
             raise RuntimeError(stderr)
@@ -530,6 +547,29 @@ class CodexImageAnnotator:
             "cache_hit": False,
             "generated_at": iso_now(),
         }
+
+    def _prepare_annotation_input_image(self, image_path: Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+        if image_path.suffix.lower() not in DEFAULT_CONVERT_TO_PNG_ANNOTATION_IMAGE_SUFFIXES:
+            return image_path, None
+        temp_dir = tempfile.TemporaryDirectory(prefix="docx-image-annotation-input-")
+        converted_path = Path(temp_dir.name) / f"{image_path.stem}.png"
+        try:
+            self._convert_image_to_png(image_path, converted_path)
+        except Exception:
+            temp_dir.cleanup()
+            raise
+        return converted_path, temp_dir
+
+    def _convert_image_to_png(self, source_path: Path, target_path: Path) -> None:
+        if Image is None:
+            raise RuntimeError("BMP annotation input requires Pillow to convert to PNG before sending to the LLM")
+        with Image.open(source_path) as image:
+            converted = image
+            if image.mode == "P":
+                converted = image.convert("RGBA")
+            elif image.mode not in {"1", "L", "LA", "RGB", "RGBA"}:
+                converted = image.convert("RGBA")
+            converted.save(target_path, format="PNG")
 
     def _build_prompt(
         self,
@@ -1285,6 +1325,9 @@ class DocxMarkdownConverter:
             index += 1
 
     def _append_node_tokens(self, node: ET.Element, tokens: list[InlineToken], archive: zipfile.ZipFile) -> None:
+        if node.tag in {qn("w", "drawing"), qn("w", "pict")}:
+            tokens.extend(self._extract_embedded_tokens_from_node(node, archive))
+            return
         children = list(node)
         if children:
             if node.tag == qn("w", "hyperlink"):
@@ -1350,10 +1393,6 @@ class DocxMarkdownConverter:
                     self.referenced_endnote_ids.append(note_id)
                 tokens.append(InlineToken("text", f"[^{f'en-{note_id}'}]"))
             return
-        if node.tag in {qn("w", "drawing"), qn("w", "pict")}:
-            tokens.extend(self._extract_embedded_tokens_from_node(node, archive))
-            return
-
     def _run_field_char_type(self, node: ET.Element) -> str | None:
         if node.tag != qn("w", "r"):
             return None
@@ -1485,17 +1524,18 @@ class DocxMarkdownConverter:
             if current.tag == qn("a", "blip"):
                 rel_id = current.get(qn("r", "embed")) or current.get(qn("r", "link"))
                 if rel_id:
-                        target = self.relationships.get(rel_id)
-                        if not target:
-                            self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
-                        else:
-                            occurrence = self._extract_image_target(target, archive, alt_text, source_url)
-                            if occurrence:
-                                markdown_path = str(occurrence["output_path"])
-                                tokens.append(
-                                    InlineToken(
-                                        "image",
-                                    f"![{alt_text or Path(markdown_path).stem}]({markdown_path})",
+                    target = self.relationships.get(rel_id)
+                    if not target:
+                        self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
+                    else:
+                        occurrence = self._extract_image_target(target, archive, alt_text, source_url)
+                        if occurrence:
+                            markdown_path = str(occurrence["output_path"])
+                            markdown_alt = markdown_image_alt_text(alt_text, Path(markdown_path).stem)
+                            tokens.append(
+                                InlineToken(
+                                    "image",
+                                    f"![{markdown_alt}]({markdown_path})",
                                     {"sequence": occurrence["sequence"]},
                                 )
                             )
@@ -1504,17 +1544,18 @@ class DocxMarkdownConverter:
             if current.tag == qn("v", "imagedata"):
                 rel_id = current.get(qn("r", "id"))
                 if rel_id:
-                        target = self.relationships.get(rel_id)
-                        if not target:
-                            self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
-                        else:
-                            occurrence = self._extract_image_target(target, archive, alt_text, source_url)
-                            if occurrence:
-                                markdown_path = str(occurrence["output_path"])
-                                tokens.append(
-                                    InlineToken(
-                                        "image",
-                                    f"![{alt_text or Path(markdown_path).stem}]({markdown_path})",
+                    target = self.relationships.get(rel_id)
+                    if not target:
+                        self.warnings.append(f"missing relationship for image relId={rel_id} in {self.docx_path.name}")
+                    else:
+                        occurrence = self._extract_image_target(target, archive, alt_text, source_url)
+                        if occurrence:
+                            markdown_path = str(occurrence["output_path"])
+                            markdown_alt = markdown_image_alt_text(alt_text, Path(markdown_path).stem)
+                            tokens.append(
+                                InlineToken(
+                                    "image",
+                                    f"![{markdown_alt}]({markdown_path})",
                                     {"sequence": occurrence["sequence"]},
                                 )
                             )
@@ -1862,6 +1903,8 @@ def annotation_state_matches(meta: dict[str, object], config: ImageAnnotationCon
     if not config.enabled:
         return not (isinstance(stored, dict) and stored.get("enabled"))
     if not isinstance(stored, dict):
+        return False
+    if int(stored.get("error_count") or 0) > 0:
         return False
     return (
         stored.get("enabled") is True

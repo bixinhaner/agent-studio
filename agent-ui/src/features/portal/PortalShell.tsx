@@ -19,6 +19,7 @@ import {
   ThreadPrimitive,
   ThreadListItemPrimitive,
   useAui,
+  useMessagePartText,
   useLocalRuntime,
   unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
   type ChatModelAdapter,
@@ -291,6 +292,269 @@ function flattenNodeText(value: unknown): string {
   return "";
 }
 
+const ASSISTANT_MARKDOWN_LINK_PATTERN = /(!?\[[^\]]*]\()([^)\n]+)(\))/g;
+const IMAGE_FILE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
+const ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS = new Set([
+  "md",
+  "markdown",
+  "txt",
+  "doc",
+  "docx",
+  "pdf",
+  "html",
+  "htm",
+  "json",
+  "yaml",
+  "yml",
+  "xml"
+]);
+
+function normalizeMarkdownAssetTarget(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const unwrapped =
+    trimmed.startsWith("<") && trimmed.endsWith(">") && trimmed.length > 1 ? trimmed.slice(1, -1).trim() : trimmed;
+  return decodeMaybeUri(unwrapped);
+}
+
+function normalizeUrlPathParam(value: string | null): string {
+  return value ? normalizePreviewFilePath(decodeMaybeUri(value)) : "";
+}
+
+function fileExtensionFromPreviewPath(filePath: string): string {
+  const fileName = fileNameFromPreviewPath(filePath).trim().toLowerCase();
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex + 1);
+}
+
+function isRelativeMarkdownAssetTarget(target: string): boolean {
+  const normalized = normalizeMarkdownAssetTarget(target);
+  if (!normalized) return false;
+  if (normalized.startsWith("#")) return false;
+  if (normalized.startsWith("/")) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(normalized)) return false;
+  return true;
+}
+
+function resolvePreviewPathFromFileContentHref(href: string): string | null {
+  const rawHref = href.trim();
+  if (!rawHref) return null;
+
+  try {
+    const parsed = new URL(rawHref, window.location.href);
+    if (parsed.origin !== window.location.origin) return null;
+    if (parsed.pathname === "/api/portal/resources/files/content") {
+      const resolved = normalizeUrlPathParam(parsed.searchParams.get("path"));
+      return resolved || null;
+    }
+    if (/^\/api\/threads\/[^/]+\/files\/content$/.test(parsed.pathname)) {
+      const absolutePath = normalizeUrlPathParam(parsed.searchParams.get("path"));
+      return absolutePath || null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolvePreviewPathFromMarkdownTarget(target: string): string | null {
+  const normalized = normalizeMarkdownAssetTarget(target);
+  if (!normalized) return null;
+  if (normalized.startsWith("#")) return null;
+  if (/^(mailto|tel|javascript|data|blob):/i.test(normalized)) return null;
+
+  const fromFileContentHref = resolvePreviewPathFromFileContentHref(normalized);
+  if (fromFileContentHref) return fromFileContentHref;
+
+  if (isLikelyHttpUrl(normalized)) {
+    try {
+      const parsed = new URL(normalized, window.location.href);
+      if (parsed.origin !== window.location.origin) return null;
+      const pathname = normalizePreviewFilePath(decodeMaybeUri(parsed.pathname || ""));
+      if (!pathname || pathname.startsWith("/api/")) return null;
+      return pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  if (normalized.startsWith("/")) {
+    if (normalized.startsWith("/api/")) return null;
+    return normalizePreviewFilePath(normalized);
+  }
+
+  return null;
+}
+
+function isLikelyBaseDocumentPreviewPath(previewPath: string): boolean {
+  const extension = fileExtensionFromPreviewPath(previewPath);
+  if (!extension) return false;
+  if (IMAGE_FILE_EXTENSIONS.has(extension)) return false;
+  return ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS.has(extension);
+}
+
+function dirnameFromPreviewPath(filePath: string): string {
+  const normalized = normalizePreviewFilePath(filePath);
+  if (!normalized || normalized === "/") return "/";
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length <= 1) return normalized.startsWith("/") ? "/" : "";
+  return `${normalized.startsWith("/") ? "/" : ""}${segments.slice(0, -1).join("/")}`;
+}
+
+function resolveRelativePreviewPath(baseFilePath: string, relativeTarget: string): string | null {
+  const normalizedTarget = normalizeMarkdownAssetTarget(relativeTarget);
+  if (!normalizedTarget || !isRelativeMarkdownAssetTarget(normalizedTarget)) return null;
+
+  const baseDir = dirnameFromPreviewPath(baseFilePath);
+  if (!baseDir) return null;
+
+  const baseSegments = normalizePreviewFilePath(baseDir).split("/").filter(Boolean);
+  const relativeSegments = normalizedTarget
+    .split(/[\\/]+/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const resolvedSegments = [...baseSegments];
+
+  for (const segment of relativeSegments) {
+    if (segment === ".") continue;
+    if (segment === "..") {
+      if (resolvedSegments.length === 0) return null;
+      resolvedSegments.pop();
+      continue;
+    }
+    resolvedSegments.push(segment);
+  }
+
+  return `${baseDir.startsWith("/") ? "/" : ""}${resolvedSegments.join("/")}`;
+}
+
+function buildAssistantContentFileUrl(previewPath: string, activeThreadId: string): string | null {
+  const normalizedPreviewPath = normalizePreviewFilePath(previewPath);
+  if (!normalizedPreviewPath || normalizedPreviewPath.startsWith("/thread-")) return null;
+
+  const query = new URLSearchParams({ path: normalizedPreviewPath });
+  if (isKnowledgeSetPreviewPath(normalizedPreviewPath)) {
+    return `${apiBase()}/api/portal/resources/files/content?${query.toString()}`;
+  }
+  if (!activeThreadId.trim()) return null;
+  return `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/files/content?${query.toString()}`;
+}
+
+function resolveAssistantMarkdownImagePreviewPath(input: {
+  src: string;
+  messageText: string;
+}): string | null {
+  const normalizedSrc = normalizeMarkdownAssetTarget(input.src);
+  if (!normalizedSrc) return null;
+
+  const directPreviewPath = resolvePreviewPathFromMarkdownTarget(normalizedSrc);
+  if (directPreviewPath) return directPreviewPath;
+  if (!isRelativeMarkdownAssetTarget(normalizedSrc)) return null;
+
+  let currentBaseDocumentPath: string | null = null;
+  let sawMatchingImage = false;
+  ASSISTANT_MARKDOWN_LINK_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+
+  while ((match = ASSISTANT_MARKDOWN_LINK_PATTERN.exec(input.messageText)) !== null) {
+    const fullMatch = match[0] || "";
+    const matchTarget = normalizeMarkdownAssetTarget(match[2] || "");
+    const previewPath = resolvePreviewPathFromMarkdownTarget(matchTarget);
+
+    if (previewPath && isLikelyBaseDocumentPreviewPath(previewPath)) {
+      currentBaseDocumentPath = previewPath;
+    }
+
+    if (!fullMatch.startsWith("!")) continue;
+    if (matchTarget !== normalizedSrc) continue;
+    sawMatchingImage = true;
+
+    if (previewPath) return previewPath;
+    if (currentBaseDocumentPath) {
+      return resolveRelativePreviewPath(currentBaseDocumentPath, matchTarget);
+    }
+  }
+
+  if (!currentBaseDocumentPath || !sawMatchingImage) return null;
+  return resolveRelativePreviewPath(currentBaseDocumentPath, normalizedSrc);
+}
+
+function AssistantMarkdownImage(props: {
+  src?: string;
+  alt?: string;
+  className?: string;
+  title?: string;
+  [key: string]: unknown;
+}) {
+  const { src, alt, className, title, ...rest } = props;
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const requestPreview = useContext(PreviewRequestContext);
+  const messagePart = useMessagePartText();
+
+  const previewPath = useMemo(() => {
+    if (typeof src !== "string" || !src.trim()) return null;
+    return resolveAssistantMarkdownImagePreviewPath({
+      src,
+      messageText: messagePart.text
+    });
+  }, [messagePart.text, src]);
+
+  const resolvedSrc = useMemo(() => {
+    const normalizedSrc = typeof src === "string" ? normalizeMarkdownAssetTarget(src) : "";
+    if (!normalizedSrc) return "";
+    if (/^(data|blob):/i.test(normalizedSrc) || isLikelyHttpUrl(normalizedSrc)) return normalizedSrc;
+    if (!previewPath) return "";
+    return buildAssistantContentFileUrl(previewPath, activeThreadId) ?? "";
+  }, [activeThreadId, previewPath, src]);
+
+  const caption = typeof alt === "string" ? alt.trim() : "";
+  const imageTitle = typeof title === "string" ? title.trim() : "";
+  const ariaLabel = caption || imageTitle || "预览图片";
+
+  if (!resolvedSrc) {
+    return (
+      <span className="assistant-inline-image-unresolved" title={typeof src === "string" ? src : undefined}>
+        图片引用无法解析
+      </span>
+    );
+  }
+
+  const image = (
+    <img
+      {...rest}
+      className={className ? `assistant-inline-image-element ${className}` : "assistant-inline-image-element"}
+      src={resolvedSrc}
+      alt={caption}
+      title={imageTitle || undefined}
+      loading="lazy"
+    />
+  );
+
+  return (
+    <span className="assistant-inline-image-card">
+      {previewPath ? (
+        <button
+          type="button"
+          className="assistant-inline-image-trigger"
+          aria-label={ariaLabel}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            requestPreview(previewPath);
+          }}
+        >
+          {image}
+        </button>
+      ) : (
+        image
+      )}
+      {caption ? <span className="assistant-inline-image-caption">{caption}</span> : null}
+    </span>
+  );
+}
+
 function AssistantMarkdownLink(props: {
   href?: string;
   className?: string;
@@ -335,7 +599,8 @@ function AssistantMarkdownLink(props: {
 
 const AssistantMarkdownText = makeMarkdownText({
   components: {
-    a: AssistantMarkdownLink as any
+    a: AssistantMarkdownLink as any,
+    img: AssistantMarkdownImage as any
   }
 });
 
@@ -907,6 +1172,9 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
   if (!rawHref) return null;
   if (rawHref.startsWith("#")) return null;
   if (/^(mailto|tel|javascript):/i.test(rawHref)) return null;
+
+  const previewPathFromFileContentHref = resolvePreviewPathFromFileContentHref(rawHref);
+  if (previewPathFromFileContentHref) return previewPathFromFileContentHref;
 
   const resolvePathname = (): string => {
     try {
