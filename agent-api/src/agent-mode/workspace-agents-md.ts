@@ -197,17 +197,17 @@ export async function readWorkspaceAgentsMdTemplateById(
 async function readAgentsContentFromPath(filePathValue: string): Promise<string> {
   const normalized = filePathValue.trim();
   if (!normalized) {
-    throw new Error("workspace_agents_md path 不能为空");
+    throw new Error("workspace_agents_md path is required");
   }
   const absolutePath = path.isAbsolute(normalized) ? normalized : path.resolve(process.cwd(), normalized);
   let stat;
   try {
     stat = await fs.stat(absolutePath);
   } catch {
-    throw new Error(`workspace_agents_md path 不存在: ${absolutePath}`);
+    throw new Error(`workspace_agents_md path does not exist: ${absolutePath}`);
   }
   if (!stat.isFile()) {
-    throw new Error(`workspace_agents_md path 不是文件: ${absolutePath}`);
+    throw new Error(`workspace_agents_md path is not a file: ${absolutePath}`);
   }
   return fs.readFile(absolutePath, "utf8");
 }
@@ -224,7 +224,7 @@ export async function resolveWorkspaceAgentsMdContent(sourceRef: string): Promis
   if (parsed.kind === "template") {
     const template = await readWorkspaceAgentsMdTemplateById(parsed.templateId);
     if (!template) {
-      throw new Error(`workspace_agents_md 模板不存在: ${parsed.templateId}`);
+      throw new Error(`workspace_agents_md template does not exist: ${parsed.templateId}`);
     }
     return template.content.trim() ? template.content : undefined;
   }

@@ -33,7 +33,7 @@ export async function* iterateSSE(url: string, options: SSEIterateOptions): Asyn
   });
   if (!res.ok || !res.body) {
     notifyAuthInvalidStatus(res.status);
-    throw new Error(`SSE 请求失败(${res.status})`);
+    throw new Error(`SSE request failed (${res.status})`);
   }
 
   const reader = res.body.getReader();

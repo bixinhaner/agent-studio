@@ -124,7 +124,7 @@ export class LoginChallengeRepository {
   async consume(id: string): Promise<LoginChallengeRecord> {
     const normalized = trimOrUndefined(id);
     if (!normalized) {
-      throw new Error("challenge 不存在");
+      throw new Error("Challenge does not exist");
     }
     const updated = await this.db.loginChallenge.update({
       where: { id: normalized },

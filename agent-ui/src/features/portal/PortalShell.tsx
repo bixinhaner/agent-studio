@@ -54,10 +54,8 @@ import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "reac
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import {
   DEFAULT_MODEL,
-  MODEL_OPTIONS,
   contextLimitForModel,
   normalizeReasoningEffortForModel,
-  reasoningOptionsForModel,
   type ReasoningEffort
 } from "../../lib/model-config";
 import { iterateSSE } from "../../lib/sse";
@@ -2868,7 +2866,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     [runtimeOptions?.canUpload]
   );
 
-  const reasoningOptions = useMemo(() => reasoningOptionsForModel(appliedConfig.model), [appliedConfig.model]);
   const canUpload = runtimeOptions?.canUpload ?? false;
   const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
@@ -2884,9 +2881,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const sharedThreadReadonly = Boolean(
     activeThreadCollaboration && activeThreadCollaboration.access.canRead && !activeThreadCollaboration.access.canRun
   );
-  const selectedModelLabel = MODEL_OPTIONS.find((item) => item.value === appliedConfig.model)?.label || appliedConfig.model;
-  const selectedReasoningLabel =
-    reasoningOptions.find((level) => level.value === appliedConfig.reasoningEffort)?.label || appliedConfig.reasoningEffort;
+  const selectedModelLabel = appliedConfig.model;
+  const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
 

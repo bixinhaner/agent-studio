@@ -168,11 +168,11 @@ export class KnowledgeSetRepository {
   ): Promise<KnowledgeSetRecord> {
     const knowledgeSetId = trimOrUndefined(id);
     if (!knowledgeSetId) {
-      throw new Error("knowledge set 不存在");
+      throw new Error("Knowledge set does not exist");
     }
     const existing = await this.db.knowledgeSet.findUnique({ where: { id: knowledgeSetId } });
     if (!existing) {
-      throw new Error("knowledge set 不存在");
+      throw new Error("Knowledge set does not exist");
     }
     const updated = await this.db.knowledgeSet.update({
       where: { id: knowledgeSetId },
@@ -239,11 +239,11 @@ export class KnowledgeSetRepository {
   private async requireKnowledgeSet(db: KnowledgeSetRepositoryDb, knowledgeSetId: string): Promise<KnowledgeSetRow> {
     const normalized = trimOrUndefined(knowledgeSetId);
     if (!normalized) {
-      throw new Error("knowledge set 不存在");
+      throw new Error("Knowledge set does not exist");
     }
     const row = await db.knowledgeSet.findUnique({ where: { id: normalized } });
     if (!row) {
-      throw new Error("knowledge set 不存在");
+      throw new Error("Knowledge set does not exist");
     }
     return row;
   }

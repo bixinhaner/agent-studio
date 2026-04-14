@@ -180,7 +180,7 @@ export class RuntimeKnowledgeSetService {
   }): Promise<Record<string, unknown> | undefined> {
     const workspacePath = trimOrUndefined(input.workspacePath);
     if (!workspacePath) {
-      throw new Error("会话目录不存在或无效");
+      throw new Error("Session workspace does not exist or is invalid");
     }
 
     const selectedKnowledgeSetIds = resolveSelectedKnowledgeSetIds({
@@ -211,7 +211,7 @@ export class RuntimeKnowledgeSetService {
         resultStatus: "denied",
         userId: input.userId
       });
-      throw new Error("knowledge set 不存在或未启用");
+      throw new Error("Knowledge set does not exist or is not enabled");
     }
 
     const allowedKnowledgeSetIds = new Set(
@@ -235,13 +235,13 @@ export class RuntimeKnowledgeSetService {
         resultStatus: "denied",
         userId: input.userId
       });
-      throw new Error("knowledge set 未授权");
+      throw new Error("Knowledge set is not authorized");
     }
 
     const mountPaths = selectedKnowledgeSetIds.map((knowledgeSetId) => {
       const knowledgeSet = knowledgeSetById.get(knowledgeSetId);
       if (!knowledgeSet) {
-        throw new Error("knowledge set 不存在或未启用");
+        throw new Error("Knowledge set does not exist or is not enabled");
       }
       return this.options.storage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
     });

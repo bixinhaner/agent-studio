@@ -131,11 +131,11 @@ export class OrganizationRepository {
   }): Promise<OrganizationRecord> {
     const normalized = trimOrUndefined(id);
     if (!normalized) {
-      throw new Error("organization 不存在");
+      throw new Error("Organization does not exist");
     }
     const existing = await this.db.organization.findUnique({ where: { id: normalized } });
     if (!existing) {
-      throw new Error("organization 不存在");
+      throw new Error("Organization does not exist");
     }
     const updated = await this.db.organization.update({
       where: { id: normalized },

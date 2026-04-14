@@ -174,7 +174,7 @@ export class SessionRepository {
   ): Promise<SessionRecord> {
     const row = await this.db.runtimeSession.findUnique({ where: { externalId: sessionId } });
     if (!row || !row.externalId) {
-      throw new Error("session 不存在");
+      throw new Error("Session does not exist");
     }
 
     const metadata = parseMetadata(row.metadata);

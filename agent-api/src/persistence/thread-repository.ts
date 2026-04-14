@@ -383,7 +383,7 @@ export class ThreadRepository {
   async appendMessage(threadId: string, item: StoredMessageItem): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
-      if (!thread) throw new Error("thread 不存在");
+      if (!thread) throw new Error("Thread does not exist");
 
       const messages = await tx.message.findMany({
         where: { threadId },
@@ -461,7 +461,7 @@ export class ThreadRepository {
   ): Promise<ThreadRecord> {
     return this.db.$transaction(async (tx) => {
       const thread = await tx.thread.findUnique({ where: { id: threadId } });
-      if (!thread) throw new Error("thread 不存在");
+      if (!thread) throw new Error("Thread does not exist");
 
       await tx.message.deleteMany({ where: { threadId } });
       const externalIds = persistedExternalIds(repository.messages);
@@ -496,7 +496,7 @@ export class ThreadRepository {
 
   async getRepository(threadId: string): Promise<{ headId?: string | null; messages: StoredMessageItem[] }> {
     const thread = await this.db.thread.findUnique({ where: { id: threadId } });
-    if (!thread) throw new Error("thread 不存在");
+    if (!thread) throw new Error("Thread does not exist");
     const messages = await this.db.message.findMany({
       where: { threadId },
       orderBy: { position: "asc" }
@@ -512,7 +512,7 @@ export class ThreadRepository {
     payload: Omit<ThreadFeedback, "id" | "createdAt">
   ): Promise<ThreadFeedback> {
     const thread = await this.db.thread.findUnique({ where: { id: threadId } });
-    if (!thread) throw new Error("thread 不存在");
+    if (!thread) throw new Error("Thread does not exist");
 
     const feedback: ThreadFeedback = {
       id: randomUUID(),
@@ -535,7 +535,7 @@ export class ThreadRepository {
 
   private async requireThread(threadId: string, db: ThreadRepositoryDb = this.db): Promise<ThreadRecord> {
     const row = await db.thread.findUnique({ where: { id: threadId } });
-    if (!row) throw new Error("thread 不存在");
+    if (!row) throw new Error("Thread does not exist");
     return this.loadThreadRecord(db, row);
   }
 

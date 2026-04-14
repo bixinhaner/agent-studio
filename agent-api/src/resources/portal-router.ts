@@ -92,13 +92,13 @@ export function createResourcesPortalRouter(options: {
 
     const rawPath = trimOrUndefined(req.query.path);
     if (!rawPath) {
-      res.status(400).json({ detail: "path 不能为空" });
+      res.status(400).json({ detail: "Path is required" });
       return;
     }
 
     const normalizedRequestedPath = path.resolve(rawPath);
     if (!normalizedRequestedPath.includes(KNOWLEDGE_SET_PATH_SEGMENT)) {
-      res.status(400).json({ detail: "仅支持资料集文件预览" });
+      res.status(400).json({ detail: "Only knowledge-set file preview is supported" });
       return;
     }
 
@@ -134,13 +134,13 @@ export function createResourcesPortalRouter(options: {
       }
     });
     if (!matchedKnowledgeSet) {
-      res.status(403).json({ detail: "当前用户无权预览该资料集文件" });
+      res.status(403).json({ detail: "Current user does not have permission to preview this knowledge-set file" });
       return;
     }
 
     const stat = await fs.stat(normalizedRequestedPath).catch(() => null);
     if (!stat || !stat.isFile()) {
-      res.status(404).json({ detail: "文件不存在" });
+      res.status(404).json({ detail: "File does not exist" });
       return;
     }
 

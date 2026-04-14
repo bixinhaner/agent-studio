@@ -1305,7 +1305,7 @@ body {
 }
 
 .thread-dropzone[data-dragging="true"]::after {
-  content: "松开即可上传附件";
+  content: "Release to upload attachments";
   position: absolute;
   left: 50%;
   top: 50%;
@@ -5158,7 +5158,7 @@ body.public-share-mode #root {
 }
 
 .public-share-process-card summary::after {
-  content: "展开";
+  content: "Expand";
   padding-left: 16px;
   color: rgba(148, 163, 184, 0.82);
   font-size: 12px;
@@ -5172,7 +5172,7 @@ body.public-share-mode #root {
 }
 
 .public-share-process-card[open] summary::after {
-  content: "收起";
+  content: "Collapse";
 }
 
 .public-share-process-list {

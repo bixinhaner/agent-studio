@@ -106,13 +106,13 @@ function placeholderForUnsupportedPart(part: Record<string, unknown>, role: "use
   const type = asTrimmedString(part.type);
   if (type === "file") {
     const filename = asTrimmedString(part.filename);
-    return filename ? `[附件：${filename}]` : "[附件已省略]";
+    return filename ? `[Attachment: ${filename}]` : "[Attachment omitted]";
   }
   if (type === "image") {
-    return role === "user" ? "[图片已省略]" : "[图片输出已省略]";
+    return role === "user" ? "[Image omitted]" : "[Generated image omitted]";
   }
   if (type === "audio") {
-    return "[音频已省略]";
+    return "[Audio omitted]";
   }
   if (type === "reasoning" || type === "tool-call" || type === "data") {
     return "";
@@ -127,7 +127,7 @@ function normalizeProcessKind(value: unknown): ThreadPublicShareSnapshotProcessK
     : "process";
 }
 
-function sanitizeProcessTitle(value: unknown, fallback = "过程事件"): string {
+function sanitizeProcessTitle(value: unknown, fallback = "Process event"): string {
   const title = redactSensitiveText(asTrimmedString(value));
   return title || fallback;
 }
@@ -191,7 +191,7 @@ function extractFallbackProcessRows(parts: unknown): ThreadPublicShareSnapshotPr
       rows.push({
         id: asTrimmedString(part.id) || `process-row-${index + 1}`,
         kind: "reasoning",
-        title: "思考摘要",
+        title: "Reasoning summary",
         detail
       });
       continue;
@@ -205,7 +205,7 @@ function extractFallbackProcessRows(parts: unknown): ThreadPublicShareSnapshotPr
       rows.push({
         id: asTrimmedString(part.toolCallId) || `process-row-${index + 1}`,
         kind: "tool",
-        title: `工具调用 · ${toolName}`,
+        title: `Tool call · ${toolName}`,
         detail: detail || undefined
       });
       continue;
@@ -284,7 +284,7 @@ function sanitizeMessageParts(
   }
 
   if (sanitized.length === 0 && unsupportedOnly && !hasStructuredProcess) {
-    pushTextPart(sanitized, role === "user" ? "[此消息包含未公开内容]" : "[此回复包含未公开内容]");
+    pushTextPart(sanitized, role === "user" ? "[This message contains non-public content]" : "[This reply contains non-public content]");
   }
 
   return sanitized;
@@ -379,7 +379,7 @@ export function buildThreadPublicShareSnapshot(input: {
   const turns = groupedTurns.filter((turn) => turnIds.has(turn.id));
 
   if (turns.length === 0) {
-    throw new Error("至少选择一个可公开的对话轮次");
+    throw new Error("Select at least one shareable conversation turn");
   }
 
   const snapshot: ThreadPublicShareSnapshot = {
@@ -410,7 +410,7 @@ export function buildThreadPublicShareSnapshotFromLeadMessageIds(input: {
   const turns = groupedTurns.filter((turn) => leadMessageIds.has(turn.leadMessageId));
 
   if (turns.length === 0) {
-    throw new Error("无法根据公开链接恢复所选对话轮次");
+    throw new Error("Unable to restore selected conversation turns from this public link");
   }
 
   const snapshot: ThreadPublicShareSnapshot = {

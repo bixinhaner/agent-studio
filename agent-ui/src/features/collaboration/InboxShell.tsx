@@ -14,10 +14,10 @@ import type { InboxCategory, InboxItemRecord } from "./types";
 type InboxTab = "all" | InboxCategory;
 
 const TABS: Array<{ id: InboxTab; label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "collaboration", label: "协作" },
-  { id: "alert", label: "告警" },
-  { id: "broadcast", label: "广播" }
+  { id: "all", label: "All" },
+  { id: "collaboration", label: "Collaboration" },
+  { id: "alert", label: "Alerts" },
+  { id: "broadcast", label: "Broadcasts" }
 ];
 
 function formatLocalDateTime(value?: string): string {
@@ -28,9 +28,9 @@ function formatLocalDateTime(value?: string): string {
 }
 
 function statusLabel(item: InboxItemRecord): string {
-  if (item.status === "archived") return "已归档";
-  if (item.status === "read") return "已读";
-  return "未读";
+  if (item.status === "archived") return "Archived";
+  if (item.status === "read") return "Read";
+  return "Unread";
 }
 
 export function InboxShell() {
@@ -51,7 +51,7 @@ export function InboxShell() {
         const next = await fetchInboxItems();
         if (active) setItems(next);
       } catch (error) {
-        if (active) setErrorText(error instanceof Error ? error.message : "加载通知中心失败");
+        if (active) setErrorText(error instanceof Error ? error.message : "Failed to load notification center");
       } finally {
         if (active) setLoading(false);
       }
@@ -79,7 +79,7 @@ export function InboxShell() {
       const next = await action(itemId);
       setItems((current) => current.map((item) => (item.id === itemId ? next : item)));
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "更新通知状态失败");
+      setErrorText(error instanceof Error ? error.message : "Failed to update notification status");
     } finally {
       setPendingItemIds((current) => current.filter((currentItemId) => currentItemId !== itemId));
     }
@@ -92,16 +92,16 @@ export function InboxShell() {
       <div className="admin-page-header">
         <div>
           <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
-            通知中心
+            Notification Center
           </Typography.Title>
-          <Typography.Text type="secondary">统一处理协作动态、告警事件和系统广播。</Typography.Text>
+          <Typography.Text type="secondary">Handle collaboration updates, alert events, and system broadcasts in one place.</Typography.Text>
         </div>
         <Space>
           <Tag color={unreadCount > 0 ? "processing" : "default"} style={{ borderRadius: 'var(--admin-radius-full)' }}>
-            {unreadCount} 条未读
+            {unreadCount} unread
           </Tag>
           <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce(n => n + 1)} loading={loading}>
-            刷新
+            Refresh
           </Button>
         </Space>
       </div>
@@ -131,7 +131,7 @@ export function InboxShell() {
         ) : filteredItems.length === 0 ? (
           <Empty 
             image={Empty.PRESENTED_IMAGE_SIMPLE} 
-            description="当前筛选下暂无消息" 
+            description="No messages for the current filter" 
             style={{ padding: '60px 0' }}
           />
         ) : (
@@ -180,7 +180,7 @@ export function InboxShell() {
                         onClick={() => void applyItemUpdate(item.id, markInboxItemRead)}
                         style={{ borderRadius: 'var(--admin-radius-full)' }}
                       >
-                        标记已读
+                        Mark read
                       </Button>
                     )}
                     {item.status === "read" && (
@@ -190,7 +190,7 @@ export function InboxShell() {
                         onClick={() => void applyItemUpdate(item.id, markInboxItemUnread)}
                         style={{ borderRadius: 'var(--admin-radius-full)' }}
                       >
-                        标记未读
+                        Mark unread
                       </Button>
                     )}
                     {item.status !== "archived" && (
@@ -201,7 +201,7 @@ export function InboxShell() {
                         onClick={() => void applyItemUpdate(item.id, archiveInboxItem)}
                         style={{ borderRadius: 'var(--admin-radius-full)' }}
                       >
-                        归档
+                        Archive
                       </Button>
                     )}
                     {item.status === "archived" && (
@@ -211,7 +211,7 @@ export function InboxShell() {
                         onClick={() => void applyItemUpdate(item.id, unarchiveInboxItem)}
                         style={{ borderRadius: 'var(--admin-radius-full)' }}
                       >
-                        取消归档
+                        Unarchive
                       </Button>
                     )}
                   </div>

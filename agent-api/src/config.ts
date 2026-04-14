@@ -161,5 +161,5 @@ export function resolveWorkspace(input?: string | null): string {
       return candidate;
     }
   }
-  throw new Error("workspace 不在允许目录白名单中");
+  throw new Error("Workspace is not within the allowed whitelist");
 }

@@ -37,7 +37,7 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
     notifyAuthInvalidStatus(res.status);
-    const msg = (data && typeof data.detail === "string" && data.detail) || `请求失败(${res.status})`;
+    const msg = (data && typeof data.detail === "string" && data.detail) || `Request failed (${res.status})`;
     throw new Error(msg);
   }
   return data as T;

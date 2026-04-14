@@ -24,19 +24,19 @@ const selectOrganizationSchema = z.object({
 });
 
 const requestEmailSchema = z.object({
-  email: z.string().trim().email("请输入有效邮箱").optional(),
+  email: z.string().trim().email("Enter a valid email address").optional(),
   invite_token: z.string().trim().min(1).optional()
 });
 
 const verifyEmailSchema = z.object({
-  email: z.string().trim().email("请输入有效邮箱"),
-  code: z.string().trim().min(4, "请输入验证码"),
+  email: z.string().trim().email("Enter a valid email address"),
+  code: z.string().trim().min(4, "Enter the verification code"),
   invite_token: z.string().trim().min(1).optional()
 });
 
 const createInviteSchema = z.object({
   organization_id: z.string().trim().min(1).optional(),
-  email: z.string().trim().email("请输入有效邮箱"),
+  email: z.string().trim().email("Enter a valid email address"),
   membership_type: z.string().trim().min(1).optional()
 });
 
@@ -336,7 +336,7 @@ export function createAuthRouter(options: {
       const input = selectOrganizationSchema.parse(req.body ?? {});
       const membership = await options.memberships.getActiveForUserAndOrganization(currentUser.id, input.organization_id);
       if (!membership?.organization) {
-        res.status(404).json({ detail: "organization 不存在或未授权" });
+        res.status(404).json({ detail: "Organization does not exist or is not authorized" });
         return;
       }
       const identities = await options.identities.listForUser(currentUser.id);
@@ -348,7 +348,7 @@ export function createAuthRouter(options: {
         identities
       }));
     } catch (error) {
-      res.status(400).json({ detail: error instanceof Error ? error.message : "切换组织失败" });
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to switch organization" });
     }
   });
 
@@ -356,17 +356,17 @@ export function createAuthRouter(options: {
     try {
       const token = trimOrUndefined(req.params.token);
       if (!token) {
-        res.status(404).json({ detail: "邀请不存在" });
+        res.status(404).json({ detail: "Invite not found" });
         return;
       }
       const invite = await options.invites.getByTokenHash(hashToken(token));
       if (!invite) {
-        res.status(404).json({ detail: "邀请不存在" });
+        res.status(404).json({ detail: "Invite not found" });
         return;
       }
       const organization = await options.organizations.getById(invite.organizationId);
       if (!organization) {
-        res.status(404).json({ detail: "组织不存在" });
+        res.status(404).json({ detail: "Organization not found" });
         return;
       }
       const expired = new Date(invite.expiresAt).getTime() <= Date.now();
@@ -389,7 +389,7 @@ export function createAuthRouter(options: {
         }
       });
     } catch (error) {
-      res.status(400).json({ detail: error instanceof Error ? error.message : "读取邀请失败" });
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to read invite" });
     }
   });
 
@@ -408,7 +408,7 @@ export function createAuthRouter(options: {
       }
       const organization = await options.organizations.getById(organizationId);
       if (!organization || organization.status !== "active" || organization.type !== "customer") {
-        res.status(404).json({ detail: "organization 不存在或不可用" });
+        res.status(404).json({ detail: "Organization does not exist or is unavailable" });
         return;
       }
 
@@ -429,10 +429,10 @@ export function createAuthRouter(options: {
       const inviteUrl = inviteUrlBase ? `${inviteUrlBase.replace(/\/+$/, "")}/invite/${rawToken}` : undefined;
       await options.emailSender.send({
         to: invite.email,
-        subject: `${organization.name} 邀请你加入 Agent Studio`,
+        subject: `${organization.name} invited you to Agent Studio`,
         text: inviteUrl
-          ? `你已被邀请加入 ${organization.name}。\n\n访问链接：${inviteUrl}\n\n如果页面提示，请使用该邮箱获取验证码登录。`
-          : `你已被邀请加入 ${organization.name}。\n\n邀请码：${rawToken}\n\n请打开登录页并输入该邀请码获取验证码。`,
+          ? `You were invited to join ${organization.name}.\n\nOpen this link: ${inviteUrl}\n\nIf prompted, use this email address to request a verification code.`
+          : `You were invited to join ${organization.name}.\n\nInvite code: ${rawToken}\n\nOpen the sign-in page and enter this invite code to request a verification code.`,
         debugLabel: "organization-invite"
       });
 
@@ -446,7 +446,7 @@ export function createAuthRouter(options: {
         }
       });
     } catch (error) {
-      res.status(400).json({ detail: error instanceof Error ? error.message : "创建邀请失败" });
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to create invite" });
     }
   });
 
@@ -462,7 +462,7 @@ export function createAuthRouter(options: {
       }
 
       if (invite && invite.email !== email) {
-        res.status(400).json({ detail: "邀请邮箱不匹配" });
+        res.status(400).json({ detail: "Invite email does not match" });
         return;
       }
 
@@ -486,15 +486,15 @@ export function createAuthRouter(options: {
 
       const organization = invite?.organizationId ? await options.organizations.getById(invite.organizationId) : undefined;
       const subject = invite && organization
-        ? `${organization.name} 邀请登录验证码`
-        : "Agent Studio 登录验证码";
+        ? `${organization.name} invite sign-in verification code`
+        : "Agent Studio sign-in verification code";
       await options.emailSender.send({
         to: email,
         subject,
         text: [
-          invite && organization ? `你正在接受 ${organization.name} 的邀请。` : "你正在登录 Agent Studio。",
-          `验证码：${code}`,
-          "验证码 15 分钟内有效。"
+          invite && organization ? `You are accepting an invite from ${organization.name}.` : "You are signing in to Agent Studio.",
+          `Verification code: ${code}`,
+          "This code expires in 15 minutes."
         ].join("\n"),
         debugLabel: "email-login-code"
       });
@@ -505,7 +505,7 @@ export function createAuthRouter(options: {
         email_hint: maskEmail(email)
       });
     } catch (error) {
-      res.status(400).json({ detail: error instanceof Error ? error.message : "发送验证码失败" });
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to send verification code" });
     }
   });
 
@@ -516,7 +516,7 @@ export function createAuthRouter(options: {
       const invite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
       const email = input.email.trim().toLowerCase();
       if (invite && invite.email !== email) {
-        res.status(400).json({ detail: "邀请邮箱不匹配" });
+        res.status(400).json({ detail: "Invite email does not match" });
         return;
       }
 
@@ -527,7 +527,7 @@ export function createAuthRouter(options: {
       });
       const challenge = challenges.find((item) => item.challengeHash === hashToken(input.code));
       if (!challenge) {
-        res.status(400).json({ detail: "验证码无效或已过期" });
+        res.status(400).json({ detail: "Verification code is invalid or expired" });
         return;
       }
       await options.challenges.consume(challenge.id);
@@ -553,7 +553,7 @@ export function createAuthRouter(options: {
       if (invite) {
         const expired = new Date(invite.expiresAt).getTime() <= Date.now();
         if (invite.status !== "pending" || expired) {
-          res.status(400).json({ detail: "邀请已失效" });
+          res.status(400).json({ detail: "Invite has expired" });
           return;
         }
         const membershipType =
@@ -578,7 +578,7 @@ export function createAuthRouter(options: {
           : undefined) ??
         activeMemberships[0]?.organizationId;
       if (!selectedOrganizationId) {
-        res.status(403).json({ detail: "当前账号尚未加入任何组织" });
+        res.status(403).json({ detail: "This account has not joined any organization yet" });
         return;
       }
 
@@ -609,7 +609,7 @@ export function createAuthRouter(options: {
         identities: identities.length ? identities : [identity]
       }));
     } catch (error) {
-      res.status(400).json({ detail: error instanceof Error ? error.message : "邮箱登录失败" });
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Email sign-in failed" });
     }
   });
 

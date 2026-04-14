@@ -164,7 +164,7 @@ export class ThreadStore {
   async update(threadId: string, patch: UpdateThreadPayload): Promise<ThreadRecord> {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
-    if (!record) throw new Error("thread 不存在");
+    if (!record) throw new Error("Thread does not exist");
 
     if (patch.status) record.status = patch.status;
     if (patch.title !== undefined) {
@@ -192,7 +192,7 @@ export class ThreadStore {
   async appendMessage(threadId: string, item: StoredMessageItem): Promise<ThreadRecord> {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
-    if (!record) throw new Error("thread 不存在");
+    if (!record) throw new Error("Thread does not exist");
 
     const incomingId = messageIdOf(item.message);
     if (incomingId) {
@@ -217,7 +217,7 @@ export class ThreadStore {
   ): Promise<ThreadRecord> {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
-    if (!record) throw new Error("thread 不存在");
+    if (!record) throw new Error("Thread does not exist");
     record.messages = Array.isArray(repository.messages) ? repository.messages : [];
     record.headId = repository.headId ?? null;
     record.updatedAt = new Date().toISOString();
@@ -228,7 +228,7 @@ export class ThreadStore {
   async getRepository(threadId: string): Promise<{ headId?: string | null; messages: StoredMessageItem[] }> {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
-    if (!record) throw new Error("thread 不存在");
+    if (!record) throw new Error("Thread does not exist");
     return {
       headId: record.headId ?? null,
       messages: record.messages
@@ -241,7 +241,7 @@ export class ThreadStore {
   ): Promise<ThreadFeedback> {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
-    if (!record) throw new Error("thread 不存在");
+    if (!record) throw new Error("Thread does not exist");
     const feedback: ThreadFeedback = {
       id: uuidv4(),
       createdAt: new Date().toISOString(),

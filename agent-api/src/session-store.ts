@@ -59,7 +59,7 @@ export class SessionStore {
   ): SessionState {
     const item = this.sessions.get(sessionId);
     if (!item) {
-      throw new Error("session 不存在");
+      throw new Error("Session does not exist");
     }
     if (patch.model) item.model = patch.model;
     if (patch.reasoningEffort) item.reasoningEffort = patch.reasoningEffort;

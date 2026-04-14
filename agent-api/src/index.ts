@@ -564,7 +564,7 @@ const threadFileContentQuerySchema = z
     path: z.string().optional()
   })
   .refine((value) => Boolean(trimOrUndefined(value.relative_path) || trimOrUndefined(value.path)), {
-    message: "必须提供 relative_path 或 path"
+    message: "Either relative_path or path is required"
   });
 
 type SessionOptions = {
@@ -848,7 +848,7 @@ async function resolveModeSelection(input: {
     departmentIds
   });
   if (!runtimeOptions.modes.length) {
-    throw new Error("当前账号无可用 Agent 模式");
+    throw new Error("No available agent mode for the current account");
   }
 
   const requestedModeId = trimOrUndefined(input.modeHint);
@@ -857,7 +857,7 @@ async function resolveModeSelection(input: {
     runtimeOptions.modes.find((mode) => mode.id === runtimeOptions.defaults.mode) ||
     runtimeOptions.modes[0];
   if (!selectedMode) {
-    throw new Error("当前账号无可用 Agent 模式");
+    throw new Error("No available agent mode for the current account");
   }
 
   return {
@@ -1059,7 +1059,7 @@ async function assertQuotaAllowsNewSession(input: {
         thresholdValue: decision.thresholdValue
       });
     }
-    throw new Error("当前配额已超限，无法创建新的会话");
+    throw new Error("Current quota limit has been exceeded; cannot create a new session");
   }
 }
 
@@ -1074,7 +1074,7 @@ async function ensureThreadSession(
   }
 ) {
   const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
-  if (!thread) throw new Error("thread 不存在");
+  if (!thread) throw new Error("Thread does not exist");
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
@@ -1231,25 +1231,25 @@ function resolveThreadFileAbsolutePath(input: {
       .map((segment) => segment.trim())
       .filter(Boolean);
     if (relativeSegments.length === 0) {
-      throw new Error("relative_path 无效");
+      throw new Error("Invalid relative_path");
     }
     const candidate = path.resolve(normalizedUploadDir, ...relativeSegments);
     if (!isPathInside(normalizedUploadDir, candidate)) {
-      throw new Error("附件路径不在允许目录中");
+      throw new Error("Attachment path is outside the allowed directory");
     }
     return candidate;
   }
 
   const normalizedFilePath = trimOrUndefined(input.filePath);
   if (!normalizedFilePath) {
-    throw new Error("必须提供 relative_path 或 path");
+    throw new Error("Either relative_path or path is required");
   }
 
   const candidate = path.isAbsolute(normalizedFilePath)
     ? path.resolve(normalizedFilePath)
     : path.resolve(normalizedWorkspacePath, normalizedFilePath);
   if (!isPathInside(normalizedWorkspacePath, candidate)) {
-    throw new Error("文件路径不在线程工作区内");
+    throw new Error("File path is outside the thread workspace");
   }
   return candidate;
 }
@@ -1438,7 +1438,7 @@ app.get("/api/fs/directories", async (req: Request, res: Response) => {
     const cwd = resolveWorkspace(query.path);
     const root = findWhitelistRoot(cwd);
     if (!root) {
-      throw new Error("workspace 不在允许目录白名单中");
+      throw new Error("Workspace is not within the allowed whitelist");
     }
 
     const directories = await listDirectories(cwd);
@@ -1458,7 +1458,7 @@ app.get("/api/fs/directories", async (req: Request, res: Response) => {
       directories
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "读取目录失败";
+    const detail = error instanceof Error ? error.message : "Failed to read directory";
     res.status(400).json({ detail });
   }
 });
@@ -1468,19 +1468,19 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     if (!threadId) {
-      res.status(400).json({ detail: "threadId 不能为空" });
+      res.status(400).json({ detail: "threadId is required" });
       return;
     }
 
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
 
     const payload = req.body;
     if (!Buffer.isBuffer(payload) || payload.length === 0) {
-      res.status(400).json({ detail: "上传内容为空" });
+      res.status(400).json({ detail: "Upload payload is empty" });
       return;
     }
 
@@ -1488,7 +1488,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     const mimeType = normalizeMimeType(String(req.headers["x-file-type"] || ""));
     const expectedSize = Number(String(req.headers["x-file-size"] || "0"));
     if (Number.isFinite(expectedSize) && expectedSize > 0 && expectedSize !== payload.length) {
-      res.status(400).json({ detail: "上传体积与文件声明不一致" });
+      res.status(400).json({ detail: "Upload size does not match the declared file size" });
       return;
     }
 
@@ -1525,7 +1525,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
       }
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "上传附件失败";
+    const detail = error instanceof Error ? error.message : "Failed to upload attachment";
     res.status(400).json({ detail });
   }
 });
@@ -1535,7 +1535,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     if (!threadId) {
-      res.status(400).json({ detail: "threadId 不能为空" });
+      res.status(400).json({ detail: "threadId is required" });
       return;
     }
 
@@ -1546,13 +1546,13 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
 
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
 
     const workspacePath = trimOrUndefined(thread.workspace);
     if (!workspacePath) {
-      res.status(404).json({ detail: "thread 工作目录不存在" });
+      res.status(404).json({ detail: "Thread workspace does not exist" });
       return;
     }
 
@@ -1566,7 +1566,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
 
     const stat = await fs.stat(absolutePath).catch(() => null);
     if (!stat || !stat.isFile()) {
-      res.status(404).json({ detail: "文件不存在" });
+      res.status(404).json({ detail: "File does not exist" });
       return;
     }
 
@@ -1580,7 +1580,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
     res.type(ext || "application/octet-stream");
     res.status(200).send(fileBuffer);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "读取文件失败";
+    const detail = error instanceof Error ? error.message : "Failed to read file";
     res.status(400).json({ detail });
   }
 });
@@ -1716,8 +1716,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
     const created = await createSession(sessionOptions);
     res.json(sessionOut(created));
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "创建 session 失败";
-    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
+    const detail = error instanceof Error ? error.message : "Failed to create session";
+    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
   }
 });
 
@@ -1726,7 +1726,7 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
     const token = String(req.params.token || "").trim();
     const share = await threadPublicShares.getActiveByToken(token);
     if (!share) {
-      res.status(404).json({ detail: "公开链接不存在或已失效" });
+      res.status(404).json({ detail: "Public link does not exist or has expired" });
       return;
     }
     const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
@@ -1738,7 +1738,7 @@ app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) 
       })
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "读取公开链接失败";
+    const detail = error instanceof Error ? error.message : "Failed to read public link";
     res.status(400).json({ detail });
   }
 });
@@ -1797,8 +1797,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       session: sessionOut(session)
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "创建 thread 失败";
-    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
+    const detail = error instanceof Error ? error.message : "Failed to create thread";
+    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
   }
 });
 
@@ -1806,7 +1806,7 @@ app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
   const thread = await threads.getOwned(String(req.params.threadId || "").trim(), currentUser.id, currentUser.organizationId);
   if (!thread) {
-    res.status(404).json({ detail: "thread 不存在" });
+    res.status(404).json({ detail: "Thread does not exist" });
     return;
   }
   res.json({ thread: threadOut(thread) });
@@ -1819,7 +1819,7 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
     const input = patchThreadSchema.parse(req.body || {});
     const existing = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!existing) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
 
@@ -1838,7 +1838,7 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
     const updated = await threads.update(threadId, patch);
     res.json({ thread: threadOut(updated) });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "更新 thread 失败";
+    const detail = error instanceof Error ? error.message : "Failed to update thread";
     res.status(400).json({ detail });
   }
 });
@@ -1849,7 +1849,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
     if (thread.sessionId) {
@@ -1864,7 +1864,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
     await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });
     res.json({ ok: true });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "删除 thread 失败";
+    const detail = error instanceof Error ? error.message : "Failed to delete thread";
     res.status(400).json({ detail });
   }
 });
@@ -1877,8 +1877,8 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const session = await ensureThreadSession(currentUser, threadId, input);
     res.json({ session: sessionOut(session) });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "确保 thread session 失败";
-    res.status(detail === "当前配额已超限，无法创建新的会话" ? 403 : 400).json({ detail });
+    const detail = error instanceof Error ? error.message : "Failed to ensure thread session";
+    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
   }
 });
 
@@ -1888,7 +1888,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
     const repository = await threads.getRepository(threadId);
@@ -1901,7 +1901,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       }))
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "读取消息历史失败";
+    const detail = error instanceof Error ? error.message : "Failed to read message history";
     res.status(400).json({ detail });
   }
 });
@@ -1913,7 +1913,7 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
 
@@ -1942,7 +1942,7 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
       })
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "创建公开链接失败";
+    const detail = error instanceof Error ? error.message : "Failed to create public link";
     res.status(400).json({ detail });
   }
 });
@@ -1953,7 +1953,7 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
     const input = appendMessageSchema.parse(req.body || {});
@@ -1964,7 +1964,7 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
     });
     res.json({ ok: true, head_id: updated.headId ?? null });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "追加消息失败";
+    const detail = error instanceof Error ? error.message : "Failed to append message";
     res.status(400).json({ detail });
   }
 });
@@ -1975,7 +1975,7 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
     const input = replaceMessagesSchema.parse(req.body || {});
@@ -1989,7 +1989,7 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
     });
     res.json({ ok: true });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "覆盖消息历史失败";
+    const detail = error instanceof Error ? error.message : "Failed to replace message history";
     res.status(400).json({ detail });
   }
 });
@@ -2000,7 +2000,7 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
     const threadId = String(req.params.threadId || "").trim();
     const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
-      res.status(404).json({ detail: "thread 不存在" });
+      res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
     const input = feedbackSchema.parse(req.body || {});
@@ -2011,7 +2011,7 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
     });
     res.json({ feedback });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "提交反馈失败";
+    const detail = error instanceof Error ? error.message : "Failed to submit feedback";
     res.status(400).json({ detail });
   }
 });
@@ -2033,7 +2033,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         await sessions.remove(session.sessionId);
         liveRuntimeThreads.delete(session.sessionId);
       }
-      sendSSE(res, "error", { detail: "session 不存在或已过期" });
+      sendSSE(res, "error", { detail: "Session does not exist or has expired" });
       res.end();
       return;
     }
@@ -2043,12 +2043,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (requestedThreadId) {
       const boundThreadId = String(currentSession.threadId || "").trim();
       if (!boundThreadId) {
-        sendSSE(res, "error", { detail: "session 未绑定 thread，请刷新后重试" });
+        sendSSE(res, "error", { detail: "Session is not bound to a thread. Refresh and try again." });
         res.end();
         return;
       }
       if (boundThreadId !== requestedThreadId) {
-        sendSSE(res, "error", { detail: "session 与 thread 不匹配，请重试" });
+        sendSSE(res, "error", { detail: "Session does not match the requested thread. Please try again." });
         res.end();
         return;
       }
@@ -2120,7 +2120,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "聊天流失败";
+    const detail = error instanceof Error ? error.message : "Chat stream failed";
     sendSSE(res, "error", { detail });
   } finally {
     clearInterval(heartbeat);
