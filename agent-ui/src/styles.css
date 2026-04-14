@@ -5424,6 +5424,15 @@ body.public-share-mode #root {
   margin: 14px 0 16px;
 }
 
+.public-share-image-trigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+}
+
 .public-share-image {
   display: block;
   max-width: min(100%, 960px);
@@ -5453,6 +5462,68 @@ body.public-share-mode #root {
   padding: 4px 10px;
   color: rgba(203, 213, 225, 0.78);
   font-size: 12px;
+}
+
+.public-share-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 4vw, 56px);
+  background:
+    radial-gradient(circle at 50% 18%, rgba(96, 165, 250, 0.2), transparent 34%),
+    rgba(2, 6, 23, 0.86);
+  backdrop-filter: blur(16px);
+  cursor: zoom-out;
+}
+
+.public-share-image-lightbox-figure {
+  max-width: min(96vw, 1280px);
+  max-height: 92vh;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+  cursor: default;
+}
+
+.public-share-image-lightbox-image {
+  display: block;
+  max-width: min(96vw, 1280px);
+  max-height: min(82vh, 900px);
+  border: 1px solid rgba(226, 232, 240, 0.24);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
+  object-fit: contain;
+}
+
+.public-share-image-lightbox-caption {
+  max-width: min(96vw, 1280px);
+  color: rgba(248, 250, 252, 0.92);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  word-break: break-word;
+}
+
+.public-share-image-lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(226, 232, 240, 0.24);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #f8fafc;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.public-share-image-lightbox-close:hover {
+  background: rgba(30, 41, 59, 0.94);
 }
 
 .public-share-process-card,

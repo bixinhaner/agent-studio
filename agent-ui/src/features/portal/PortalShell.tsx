@@ -12,6 +12,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PropsWithChildren
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -496,8 +497,8 @@ function AssistantMarkdownImage(props: {
 }) {
   const { src, alt, className, title, ...rest } = props;
   const activeThreadId = useContext(ActiveThreadIdContext);
-  const requestPreview = useContext(PreviewRequestContext);
   const messagePart = useMessagePartText();
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const previewPath = useMemo(() => {
     if (typeof src !== "string" || !src.trim()) return null;
@@ -517,7 +518,18 @@ function AssistantMarkdownImage(props: {
 
   const caption = typeof alt === "string" ? alt.trim() : "";
   const imageTitle = typeof title === "string" ? title.trim() : "";
-  const ariaLabel = caption || imageTitle || "Preview image";
+  const ariaLabel = caption || imageTitle || "Open image detail";
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxOpen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxOpen]);
 
   if (!resolvedSrc) {
     return (
@@ -540,23 +552,46 @@ function AssistantMarkdownImage(props: {
 
   return (
     <span className="assistant-inline-image-card">
-      {previewPath ? (
-        <button
-          type="button"
-          className="assistant-inline-image-trigger"
-          aria-label={ariaLabel}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            requestPreview(previewPath);
-          }}
-        >
-          {image}
-        </button>
-      ) : (
-        image
-      )}
+      <button
+        type="button"
+        className="assistant-inline-image-trigger"
+        aria-label={ariaLabel}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setLightboxOpen(true);
+        }}
+      >
+        {image}
+      </button>
       {caption ? <span className="assistant-inline-image-caption">{caption}</span> : null}
+      {lightboxOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="assistant-image-lightbox"
+              role="dialog"
+              aria-modal="true"
+              aria-label={ariaLabel}
+              onClick={() => setLightboxOpen(false)}
+            >
+              <button
+                type="button"
+                className="assistant-image-lightbox-close"
+                aria-label="Close image detail"
+                onClick={() => setLightboxOpen(false)}
+              >
+                ×
+              </button>
+              <figure className="assistant-image-lightbox-figure" onClick={(event) => event.stopPropagation()}>
+                <img className="assistant-image-lightbox-image" src={resolvedSrc} alt={caption} />
+                {caption || imageTitle ? (
+                  <figcaption className="assistant-image-lightbox-caption">{caption || imageTitle}</figcaption>
+                ) : null}
+              </figure>
+            </div>,
+            document.body
+          )
+        : null}
     </span>
   );
 }

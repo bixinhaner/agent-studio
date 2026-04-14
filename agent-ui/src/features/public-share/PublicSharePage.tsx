@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
 import { fetchPublicThreadShare } from "./api";
@@ -85,24 +86,78 @@ function PublicShareMarkdownImage(props: {
   [key: string]: unknown;
 }) {
   const { src, alt, className, title, ...rest } = props;
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const normalizedSrc = typeof src === "string" ? src.trim() : "";
+  const caption = typeof alt === "string" ? alt.trim() : "";
+  const imageTitle = typeof title === "string" ? title.trim() : "";
+  const ariaLabel = caption || imageTitle || "Open image detail";
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightboxOpen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxOpen]);
+
   if (!normalizedSrc) {
     return <span className="public-share-image-missing">Image unavailable</span>;
   }
   if (!/^https?:\/\//i.test(normalizedSrc) && !normalizedSrc.startsWith("/public-api/thread-shares/")) {
-    return <span className="public-share-image-missing">{alt || "Image unavailable"}</span>;
+    return <span className="public-share-image-missing">{caption || "Image unavailable"}</span>;
   }
   return (
     <span className="public-share-image-card">
-      <img
-        {...rest}
-        className={className ? `public-share-image ${className}` : "public-share-image"}
-        src={normalizedSrc}
-        alt={alt || ""}
-        title={title}
-        loading="lazy"
-      />
-      {alt ? <span className="public-share-image-caption">{alt}</span> : null}
+      <button
+        type="button"
+        className="public-share-image-trigger"
+        aria-label={ariaLabel}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setLightboxOpen(true);
+        }}
+      >
+        <img
+          {...rest}
+          className={className ? `public-share-image ${className}` : "public-share-image"}
+          src={normalizedSrc}
+          alt={caption}
+          title={imageTitle || undefined}
+          loading="lazy"
+        />
+      </button>
+      {caption ? <span className="public-share-image-caption">{caption}</span> : null}
+      {lightboxOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="public-share-image-lightbox"
+              role="dialog"
+              aria-modal="true"
+              aria-label={ariaLabel}
+              onClick={() => setLightboxOpen(false)}
+            >
+              <button
+                type="button"
+                className="public-share-image-lightbox-close"
+                aria-label="Close image detail"
+                onClick={() => setLightboxOpen(false)}
+              >
+                ×
+              </button>
+              <figure className="public-share-image-lightbox-figure" onClick={(event) => event.stopPropagation()}>
+                <img className="public-share-image-lightbox-image" src={normalizedSrc} alt={caption} />
+                {caption || imageTitle ? (
+                  <figcaption className="public-share-image-lightbox-caption">{caption || imageTitle}</figcaption>
+                ) : null}
+              </figure>
+            </div>,
+            document.body
+          )
+        : null}
     </span>
   );
 }
