@@ -260,7 +260,12 @@ type FeedbackCommentDraftStore = {
   };
 };
 const FeedbackCommentDraftContext = createContext<MutableRefObject<FeedbackCommentDraftStore> | null>(null);
+const feedbackCommentMemory = new Map<string, string>();
 const PORTAL_THREAD_SEARCH_PARAM = "thread";
+
+function feedbackCommentKey(threadId: string, messageId: string): string {
+  return `${threadId}::${messageId}`;
+}
 type ThreadPublicShareSelectionContextValue = {
   selectionMode: boolean;
   leadTurnIdByMessageId: Record<string, string>;
@@ -1960,7 +1965,9 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
   const [comment, setComment] = useState("");
 
   const openFeedbackDialog = () => {
-    setComment(draftsRef?.current.commentsByMessageId.get(messageId) ?? storedComment);
+    const remoteId = String(activeThreadId || aui.threadListItem().getState().remoteId || "").trim();
+    const cachedComment = remoteId && messageId ? feedbackCommentMemory.get(feedbackCommentKey(remoteId, messageId)) : undefined;
+    setComment(cachedComment ?? draftsRef?.current.commentsByMessageId.get(messageId) ?? storedComment);
     setOpen(true);
   };
 
@@ -1968,10 +1975,13 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
     const normalizedComment = comment.trim();
     const remoteId = String(activeThreadId || aui.threadListItem().getState().remoteId || "").trim();
     if (!remoteId || !messageId) return;
+    const cacheKey = feedbackCommentKey(remoteId, messageId);
 
     if (normalizedComment) {
+      feedbackCommentMemory.set(cacheKey, normalizedComment);
       draftsRef?.current.commentsByMessageId.set(messageId, normalizedComment);
     } else {
+      feedbackCommentMemory.delete(cacheKey);
       draftsRef?.current.commentsByMessageId.delete(messageId);
     }
     if (draftsRef) {
@@ -1990,9 +2000,25 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
       }
     })
       .then(() => {
+        const metadata = message.metadata as { custom?: Record<string, unknown> };
+        const previousCustom = asRecord(metadata.custom) || {};
+        const previousFeedback = asRecord(previousCustom.feedback) || {};
+        metadata.custom = {
+          ...previousCustom,
+          feedback: {
+            ...previousFeedback,
+            type: "negative",
+            comment: normalizedComment
+          }
+        };
         aui.message().submitFeedback({ type: "negative" });
       })
       .catch(() => {
+        if (normalizedComment) {
+          feedbackCommentMemory.set(cacheKey, normalizedComment);
+        } else {
+          feedbackCommentMemory.delete(cacheKey);
+        }
         if (draftsRef?.current.skipNextSubmit?.type === "negative") {
           draftsRef.current.skipNextSubmit = undefined;
         }
@@ -2621,13 +2647,17 @@ const AgentRuntimeAdapterProvider: FC<
           return;
         }
         const comment = payload.type === "negative" ? store.commentsByMessageId.get(messageId)?.trim() || undefined : undefined;
+        const cacheKey = feedbackCommentKey(remoteId, messageId);
         if (payload.type === "negative") {
           if (comment) {
+            feedbackCommentMemory.set(cacheKey, comment);
             store.commentsByMessageId.set(messageId, comment);
           } else {
+            feedbackCommentMemory.delete(cacheKey);
             store.commentsByMessageId.delete(messageId);
           }
         } else {
+          feedbackCommentMemory.delete(cacheKey);
           store.commentsByMessageId.delete(messageId);
         }
         void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
