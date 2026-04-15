@@ -1,19 +1,28 @@
 import { Router, type Request, type Response, type RequestHandler } from "express";
 
+import { buildOperationsInsights } from "./operations-insights.js";
 import type { AlertEventRepository } from "../persistence/alert-event-repository.js";
 import type { AlertRuleRepository, CreateAlertRuleInput } from "../persistence/alert-rule-repository.js";
 import type { CostProfileRepository, UpsertCostProfileInput } from "../persistence/cost-profile-repository.js";
+import type { DepartmentRepository } from "../persistence/department-repository.js";
 import type { NotificationRecordRepository } from "../persistence/notification-record-repository.js";
+import type { OrganizationRepository } from "../persistence/organization-repository.js";
 import type { QuotaPolicyRepository, UpsertQuotaPolicyInput } from "../persistence/quota-policy-repository.js";
 import type { ResourceAccessLogRepository } from "../persistence/resource-access-log-repository.js";
+import type { SessionRepository } from "../persistence/session-repository.js";
 import type { UsageDailyRollupRecord, UsageRollupRepository } from "../persistence/usage-rollup-repository.js";
 import type { UsageEventRecord, UsageEventRepository } from "../persistence/usage-event-repository.js";
+import type { UserRepositoryLike } from "../persistence/user-repository.js";
 
 type MonitoringRouterOptions = {
   requirePermission: (permissionKey: string) => RequestHandler;
   resourceAccessLogs: Pick<ResourceAccessLogRepository, "list">;
   usageEvents: Pick<UsageEventRepository, "list">;
   usageRollups: Pick<UsageRollupRepository, "list">;
+  sessions: Pick<SessionRepository, "listByIds">;
+  users: Pick<UserRepositoryLike, "getById">;
+  organizations: Pick<OrganizationRepository, "listByIds">;
+  departments: Pick<DepartmentRepository, "getById">;
   quotaPolicies: Pick<QuotaPolicyRepository, "list" | "upsert" | "getById" | "update">;
   costProfiles: Pick<CostProfileRepository, "list" | "listActive" | "upsert" | "getById" | "update">;
   alertRules: Pick<AlertRuleRepository, "list" | "create" | "getById" | "update">;
@@ -41,6 +50,12 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function parsePositiveInt(value: unknown, fallback: number, min = 1, max = 365): number {
+  const parsed = typeof value === "string" ? Number.parseInt(value, 10) : typeof value === "number" ? Math.trunc(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function toNumber(value: unknown): number {
@@ -246,6 +261,60 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
           }))
         }
       });
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/monitoring/operations-insights", options.requirePermission("monitoring.read"), async (req: Request, res: Response) => {
+    try {
+      const days = parsePositiveInt(req.query.days, 30, 1, 90);
+      const sessionPage = parsePositiveInt(req.query.sessionPage, 1, 1, 10_000);
+      const sessionPageSize = parsePositiveInt(req.query.sessionPageSize, 20, 10, 100);
+      const filters = {
+        days,
+        timeZone: trimOrUndefined(typeof req.query.timezone === "string" ? req.query.timezone : undefined) ?? "UTC",
+        organizationId: trimOrUndefined(typeof req.query.organizationId === "string" ? req.query.organizationId : undefined),
+        model: trimOrUndefined(typeof req.query.model === "string" ? req.query.model : undefined),
+        path: trimOrUndefined(typeof req.query.path === "string" ? req.query.path : undefined),
+        entry: trimOrUndefined(typeof req.query.entry === "string" ? req.query.entry : undefined),
+        query: trimOrUndefined(typeof req.query.query === "string" ? req.query.query : undefined),
+        sessionPage,
+        sessionPageSize
+      } as const;
+
+      const usageEvents = await options.usageEvents.list({
+        organizationId: filters.organizationId,
+        model: filters.model,
+        from: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      });
+
+      const sessionIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.sessionId)).filter(Boolean) as string[])];
+      const organizationIds = [
+        ...new Set(usageEvents.map((item) => trimOrUndefined(item.organizationId)).filter(Boolean) as string[])
+      ];
+      const userIds = [...new Set(usageEvents.map((item) => trimOrUndefined(item.userId)).filter(Boolean) as string[])];
+      const departmentIds = [
+        ...new Set(usageEvents.map((item) => trimOrUndefined(item.departmentIdSnapshot)).filter(Boolean) as string[])
+      ];
+
+      const [sessions, organizations, users, departments] = await Promise.all([
+        options.sessions.listByIds(sessionIds),
+        options.organizations.listByIds(organizationIds),
+        Promise.all(userIds.map(async (userId) => [userId, await options.users.getById(userId)] as const)),
+        Promise.all(departmentIds.map(async (departmentId) => [departmentId, await options.departments.getById(departmentId)] as const))
+      ]);
+
+      res.json(
+        buildOperationsInsights({
+          usageEvents,
+          sessionsById: new Map(sessions.map((item) => [item.sessionId, item] as const)),
+          organizationsById: new Map(organizations.map((item) => [item.id, item] as const)),
+          usersById: new Map(users.flatMap(([key, value]) => (value ? [[key, value] as const] : []))),
+          departmentsById: new Map(departments),
+          filters
+        })
+      );
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }

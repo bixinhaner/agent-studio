@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowRight,
+  BarChart3,
   Bell,
   Component,
   Database,
@@ -31,6 +32,9 @@ import "./admin-console.css";
 
 const MonitoringShellLazy = lazy(() =>
   import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell }))
+);
+const OperationsAnalyticsViewLazy = lazy(() =>
+  import("../monitoring/OperationsAnalyticsView").then((module) => ({ default: module.OperationsAnalyticsView }))
 );
 const BroadcastAdminViewLazy = lazy(() =>
   import("../collaboration/BroadcastAdminView").then((module) => ({ default: module.BroadcastAdminView }))
@@ -91,6 +95,7 @@ const GROUPS: AdminGroupMeta[] = [
 
 const SECTION_ORDER: AdminConsoleSection[] = [
   "overview",
+  "analytics",
   "conversations",
   "monitoring",
   "broadcasts",
@@ -113,6 +118,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["概览", "运营", "dashboard"],
     icon: <LayoutDashboard size={18} />
+  },
+  analytics: {
+    id: "analytics",
+    title: "运营分析",
+    description: "按组织、用户、模型、路径和会话维度分析消耗与价值。",
+    scope: "运营分析",
+    cadence: "建议每日巡检",
+    group: "operations",
+    keywords: ["运营", "分析", "价值", "session"],
+    icon: <BarChart3 size={18} />
   },
   conversations: {
     id: "conversations",
@@ -413,6 +428,12 @@ function AdminSectionContent(props: {
   switch (props.section) {
     case "overview":
       return <OverviewWorkspace overview={props.overview} loading={props.loading} onNavigate={props.onNavigate} />;
+    case "analytics":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <OperationsAnalyticsViewLazy />
+        </Suspense>
+      );
     case "users":
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>

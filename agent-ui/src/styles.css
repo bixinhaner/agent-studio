@@ -3080,6 +3080,212 @@ body {
   font-size: 12px;
 }
 
+.ops-analytics-header-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ops-analytics-filterbar {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d6e2f3;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(248, 251, 255, 0.95) 0%, rgba(255, 255, 255, 0.98) 100%),
+    #ffffff;
+}
+
+.ops-analytics-search {
+  grid-column: span 2;
+}
+
+.ops-analytics-refresh {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.ops-analytics-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.ops-analytics-hero {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ops-analytics-metric-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid #d6e2f3;
+  background:
+    linear-gradient(135deg, rgba(244, 248, 255, 0.96) 0%, rgba(255, 255, 255, 1) 56%, rgba(241, 247, 255, 0.96) 100%);
+  min-height: 126px;
+}
+
+.ops-analytics-metric-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4b5d79;
+  letter-spacing: 0;
+}
+
+.ops-analytics-metric-value {
+  font-size: 28px;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.ops-analytics-metric-meta {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ops-analytics-context-strip {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.ops-analytics-context-block {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid #d6e2f3;
+  background: #f8fbff;
+}
+
+.ops-analytics-context-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.ops-analytics-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.ops-analytics-panel,
+.ops-analytics-table-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid #d6e2f3;
+  background: #ffffff;
+}
+
+.ops-analytics-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ops-analytics-panel-head h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.ops-analytics-panel-head p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.ops-analytics-breakdown-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ops-analytics-breakdown-item {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-analytics-breakdown-topline,
+.ops-analytics-breakdown-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ops-analytics-breakdown-topline strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.ops-analytics-breakdown-topline span,
+.ops-analytics-breakdown-meta span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ops-analytics-breakdown-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e7eef8;
+  overflow: hidden;
+}
+
+.ops-analytics-breakdown-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f62fe 0%, #3ea0ff 100%);
+}
+
+.ops-analytics-cell-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.ops-analytics-cell-stack strong {
+  color: #0f172a;
+}
+
+.ops-analytics-cell-stack span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ops-analytics-code-stack strong,
+.ops-analytics-code-stack span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.ops-analytics-pagination {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ops-analytics-session-meta {
+  display: flex;
+  align-items: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
 .resource-center-shell {
   width: 100%;
   display: grid;
@@ -4370,6 +4576,17 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .ops-analytics-filterbar,
+  .ops-analytics-hero,
+  .ops-analytics-breakdown-grid,
+  .ops-analytics-context-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-analytics-search {
+    grid-column: 1 / -1;
+  }
+
   .resource-center-toolbar,
   .resource-center-stats-row,
   .resource-center-body,
@@ -4444,6 +4661,13 @@ body {
 
   .monitoring-metric-grid,
   .monitoring-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-analytics-filterbar,
+  .ops-analytics-hero,
+  .ops-analytics-breakdown-grid,
+  .ops-analytics-context-strip {
     grid-template-columns: 1fr;
   }
 

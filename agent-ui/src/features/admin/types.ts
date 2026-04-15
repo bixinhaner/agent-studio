@@ -1,5 +1,6 @@
 export type AdminSection =
   | "overview"
+  | "analytics"
   | "conversations"
   | "users"
   | "resources"

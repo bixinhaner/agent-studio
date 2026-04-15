@@ -44,7 +44,14 @@ type RuntimeSessionRow = {
 type RuntimeSessionTable = {
   count(args: { where?: { status?: "active" | "ended" | "failed" } }): Promise<number>;
   findUnique(args: { where: { externalId: string } }): Promise<RuntimeSessionRow | null>;
-  findMany(args: { where: { updatedAt: { lt: Date } }; select: { externalId: true } }): Promise<Array<{ externalId: string | null }>>;
+  findMany(args: {
+    where?: {
+      status?: "active" | "ended" | "failed";
+      updatedAt?: { lt: Date };
+      externalId?: { in: string[] };
+    };
+    select?: { externalId: true };
+  }): Promise<Array<RuntimeSessionRow | { externalId: string | null }>>;
   create(args: { data: Record<string, unknown> }): Promise<RuntimeSessionRow>;
   update(args: { where: { externalId: string }; data: Record<string, unknown> }): Promise<RuntimeSessionRow>;
   deleteMany(args: { where: { externalId?: string; updatedAt?: { lt: Date } } }): Promise<{ count: number }>;
@@ -220,10 +227,10 @@ export class SessionRepository {
     }
 
     const cutoff = new Date(Date.now() - ttlMs);
-    const expired = await this.db.runtimeSession.findMany({
+    const expired = (await this.db.runtimeSession.findMany({
       where: { updatedAt: { lt: cutoff } },
       select: { externalId: true }
-    });
+    })) as Array<{ externalId: string | null }>;
     const sessionIds = expired.map((item) => item.externalId).filter((value): value is string => typeof value === "string" && value.trim().length > 0);
     if (!sessionIds.length) {
       return [];
@@ -233,6 +240,17 @@ export class SessionRepository {
       where: { updatedAt: { lt: cutoff } }
     });
     return sessionIds;
+  }
+
+  async listByIds(sessionIds: string[]): Promise<SessionRecord[]> {
+    const normalizedIds = [...new Set(sessionIds.map((item) => trimOrUndefined(item)).filter(Boolean) as string[])];
+    if (!normalizedIds.length) {
+      return [];
+    }
+    const rows = (await this.db.runtimeSession.findMany({
+      where: { externalId: { in: normalizedIds } }
+    })) as RuntimeSessionRow[];
+    return rows.map((row) => this.mapSession(row));
   }
 
   private mapSession(row: RuntimeSessionRow): SessionRecord {

@@ -10,6 +10,7 @@ import type {
   MonitoringOverviewResponse,
   MonitoringRankingsResponse,
   NotificationRecordListResponse,
+  OperationsInsightsResponse,
   QuotaPolicyListResponse,
   ResourceAccessLogResponse,
   UpdateAlertRuleInput,
@@ -24,6 +25,31 @@ export async function fetchMonitoringOverview(): Promise<MonitoringOverviewRespo
 
 export async function fetchMonitoringRankings(): Promise<MonitoringRankingsResponse> {
   return api<MonitoringRankingsResponse>("/api/admin/monitoring/rankings");
+}
+
+export async function fetchOperationsInsights(input: {
+  days?: number;
+  timezone?: string;
+  organizationId?: string;
+  model?: string;
+  path?: string;
+  entry?: string;
+  query?: string;
+  sessionPage?: number;
+  sessionPageSize?: number;
+} = {}): Promise<OperationsInsightsResponse> {
+  const query = new URLSearchParams();
+  if (input.days) query.set("days", String(input.days));
+  if (input.timezone) query.set("timezone", input.timezone);
+  if (input.organizationId) query.set("organizationId", input.organizationId);
+  if (input.model) query.set("model", input.model);
+  if (input.path) query.set("path", input.path);
+  if (input.entry) query.set("entry", input.entry);
+  if (input.query) query.set("query", input.query);
+  if (input.sessionPage) query.set("sessionPage", String(input.sessionPage));
+  if (input.sessionPageSize) query.set("sessionPageSize", String(input.sessionPageSize));
+  const suffix = query.toString();
+  return api<OperationsInsightsResponse>(`/api/admin/monitoring/operations-insights${suffix ? `?${suffix}` : ""}`);
 }
 
 export async function fetchMonitoringTrends(): Promise<MonitoringOverviewResponse["trends"]> {
