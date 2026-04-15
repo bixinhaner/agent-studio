@@ -9,9 +9,11 @@ export type CodexStreamEvent = {
   raw?: unknown;
 };
 
-type CodexRuntimeOptions = {
+export type CodexRuntimeOptions = {
   baseUrl?: string;
   apiKey?: string;
+  config?: Record<string, any>;
+  envOverrides?: Record<string, string>;
 };
 
 function pickText(value: unknown): string {
@@ -89,9 +91,22 @@ export class CodexRuntime {
   private readonly codex: any;
 
   constructor(options: CodexRuntimeOptions = {}) {
+    const env =
+      options.envOverrides && Object.keys(options.envOverrides).length > 0
+        ? Object.fromEntries(
+            Object.entries({
+              ...Object.fromEntries(
+                Object.entries(process.env).flatMap(([key, value]) => (value === undefined ? [] : [[key, value]]))
+              ),
+              ...options.envOverrides
+            }).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : []))
+          )
+        : undefined;
     this.codex = new Codex({
       baseUrl: options.baseUrl,
-      apiKey: options.apiKey
+      apiKey: options.apiKey,
+      config: options.config,
+      env
     });
   }
 

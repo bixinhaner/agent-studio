@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  normalizeManagedCodexProviderSnapshot,
+  type ManagedCodexProviderSnapshot
+} from "../managed-codex-provider.js";
 import type { ReasoningEffort } from "../model-config.js";
 
 export type SessionRecord = {
@@ -12,6 +16,7 @@ export type SessionRecord = {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   codexThreadId?: string;
+  providerSnapshot?: ManagedCodexProviderSnapshot;
   createdAt: string;
   updatedAt: string;
 };
@@ -22,6 +27,7 @@ type RuntimeSessionMetadata = {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   codexThreadId?: string;
+  providerSnapshot?: ManagedCodexProviderSnapshot;
 };
 
 type RuntimeSessionRow = {
@@ -77,7 +83,8 @@ function parseMetadata(value: unknown): RuntimeSessionMetadata {
     reasoningEffort: (typeof obj?.reasoningEffort === "string" ? obj.reasoningEffort : "high") as ReasoningEffort,
     workspace: typeof obj?.workspace === "string" ? obj.workspace : "",
     codexRunConfig: asRecord(obj?.codexRunConfig ?? undefined) ?? undefined,
-    codexThreadId: typeof obj?.codexThreadId === "string" ? obj.codexThreadId : undefined
+    codexThreadId: typeof obj?.codexThreadId === "string" ? obj.codexThreadId : undefined,
+    providerSnapshot: normalizeManagedCodexProviderSnapshot(obj?.providerSnapshot)
   };
 }
 
@@ -102,7 +109,8 @@ export class SessionRepository {
           reasoningEffort: payload.reasoningEffort,
           workspace: payload.workspace,
           codexRunConfig: payload.codexRunConfig,
-          codexThreadId: payload.codexThreadId
+          codexThreadId: payload.codexThreadId,
+          providerSnapshot: payload.providerSnapshot
         }
       }
     });
@@ -170,7 +178,9 @@ export class SessionRepository {
 
   async update(
     sessionId: string,
-    patch: Partial<Pick<SessionRecord, "model" | "reasoningEffort" | "workspace" | "codexRunConfig" | "codexThreadId">>
+    patch: Partial<
+      Pick<SessionRecord, "model" | "reasoningEffort" | "workspace" | "codexRunConfig" | "codexThreadId" | "providerSnapshot">
+    >
   ): Promise<SessionRecord> {
     const row = await this.db.runtimeSession.findUnique({ where: { externalId: sessionId } });
     if (!row || !row.externalId) {
@@ -179,6 +189,7 @@ export class SessionRepository {
 
     const metadata = parseMetadata(row.metadata);
     const hasCodexThreadIdPatch = Object.prototype.hasOwnProperty.call(patch, "codexThreadId");
+    const hasProviderSnapshotPatch = Object.prototype.hasOwnProperty.call(patch, "providerSnapshot");
     const updated = await this.db.runtimeSession.update({
       where: { externalId: sessionId },
       data: {
@@ -187,7 +198,8 @@ export class SessionRepository {
           reasoningEffort: patch.reasoningEffort ?? metadata.reasoningEffort,
           workspace: patch.workspace ?? metadata.workspace,
           codexRunConfig: patch.codexRunConfig ?? metadata.codexRunConfig,
-          codexThreadId: hasCodexThreadIdPatch ? patch.codexThreadId : metadata.codexThreadId
+          codexThreadId: hasCodexThreadIdPatch ? patch.codexThreadId : metadata.codexThreadId,
+          providerSnapshot: hasProviderSnapshotPatch ? patch.providerSnapshot : metadata.providerSnapshot
         }
       }
     });
@@ -235,6 +247,7 @@ export class SessionRepository {
       workspace: metadata.workspace,
       codexRunConfig: metadata.codexRunConfig,
       codexThreadId: metadata.codexThreadId,
+      providerSnapshot: metadata.providerSnapshot,
       createdAt: toIsoString(row.createdAt),
       updatedAt: toIsoString(row.updatedAt)
     };

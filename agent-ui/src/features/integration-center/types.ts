@@ -166,7 +166,9 @@ export type ZendeskSecretInput = {
 };
 
 export type OpenAICodexConfigInput = {
+  providerKind?: 'chatgpt' | 'openai_api' | 'azure_openai';
   baseUrl?: string;
+  azureApiVersion?: string;
   defaultModel?: string;
   defaultReasoningEffort?: string;
 };
@@ -176,7 +178,9 @@ export type OpenAICodexSecretInput = {
 };
 
 export type OpenAICodexConfigDraft = {
+  providerKind: 'chatgpt' | 'openai_api' | 'azure_openai';
   baseUrl: string;
+  azureApiVersion: string;
   defaultModel: string;
   defaultReasoningEffort: string;
   apiKeyDraft: string;

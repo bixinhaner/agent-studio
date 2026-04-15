@@ -168,11 +168,47 @@ check_codex_runtime() {
 
   run_as_app_user_shell "cd '$APP_API_DIR' && node --input-type=module <<'EOF'
 import { CodexRuntime } from './dist/codex-runtime.js';
+import { getDbClient } from './dist/db/client.js';
+import { ManagedCodexProviderResolver } from './dist/managed-codex-provider.js';
+import { SystemSettingsRepository } from './dist/system-settings/repository.js';
 
-const runtime = new CodexRuntime();
+function asRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
+}
+
+const db = getDbClient();
+const resolver = new ManagedCodexProviderResolver({
+  integrations: {
+    async listOpenAICodexInstances() {
+      const rows = await db.integrationInstance.findMany({
+        where: { type: 'openai_codex' },
+        orderBy: { createdAt: 'asc' }
+      });
+      return await Promise.all(
+        rows.map(async (row) => {
+          const [configRow, secretRow] = await Promise.all([
+            db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: row.id } }),
+            db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: row.id } })
+          ]);
+          return {
+            id: row.id,
+            slug: row.slug,
+            status: row.status,
+            updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt ?? ''),
+            config: asRecord(configRow?.config),
+            secretState: asRecord(secretRow?.secretState)
+          };
+        })
+      );
+    }
+  },
+  systemSettings: new SystemSettingsRepository(db)
+});
+const snapshot = await resolver.resolveActiveProviderSnapshot();
+const runtime = new CodexRuntime(snapshot.runtimeOptions);
 await runtime.validateProvider({
-  model: 'gpt-5.4',
-  reasoningEffort: 'high'
+  model: snapshot.config.defaultModel,
+  reasoningEffort: snapshot.config.defaultReasoningEffort
 });
 console.log('codex runtime ok');
 EOF"

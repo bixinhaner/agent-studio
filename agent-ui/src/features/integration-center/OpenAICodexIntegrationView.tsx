@@ -31,13 +31,24 @@ const REASONING_OPTIONS = [
   { label: "xhigh", value: "xhigh" }
 ];
 
+const PROVIDER_KIND_OPTIONS = [
+  { label: "服务器本地登录态", value: "chatgpt" },
+  { label: "OpenAI API Key", value: "openai_api" },
+  { label: "Azure OpenAI", value: "azure_openai" }
+] as const;
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
 function buildDraft(detail: IntegrationDetail): OpenAICodexConfigDraft {
   return {
+    providerKind:
+      detail.config.providerKind === "openai_api" || detail.config.providerKind === "azure_openai"
+        ? detail.config.providerKind
+        : "chatgpt",
     baseUrl: asString(detail.config.baseUrl),
+    azureApiVersion: asString(detail.config.azureApiVersion),
     apiKeyDraft: "",
     defaultModel: asString(detail.config.defaultModel),
     defaultReasoningEffort: asString(detail.config.defaultReasoningEffort)
@@ -84,7 +95,9 @@ export function OpenAICodexIntegrationView(props: {
         description: description.trim() || null,
         status,
         config: {
+          providerKind: draft.providerKind,
           baseUrl: draft.baseUrl.trim(),
+          azureApiVersion: draft.azureApiVersion.trim(),
           defaultModel: draft.defaultModel.trim(),
           defaultReasoningEffort: draft.defaultReasoningEffort.trim()
         },
@@ -192,23 +205,75 @@ export function OpenAICodexIntegrationView(props: {
                   label: "供应方连接与默认模型",
                   children: (
                     <div className="resource-center-form-grid">
-                      <label className="field resource-center-form-span-2">
-                        <span className="field-label">Base URL</span>
-                        <Input
-                          value={draft.baseUrl}
-                          disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
-                        />
-                      </label>
                       <label className="field">
-                        <span className="field-label">API Key</span>
-                        <Input.Password
-                          value={draft.apiKeyDraft}
-                          placeholder="留空则保持现状"
+                        <span className="field-label">连接方式</span>
+                        <Select
+                          value={draft.providerKind}
+                          options={[...PROVIDER_KIND_OPTIONS]}
                           disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, apiKeyDraft: event.target.value }))}
+                          onChange={(value) =>
+                            setDraft((current) => ({
+                              ...current,
+                              providerKind: value,
+                              baseUrl: value === "chatgpt" ? "" : current.baseUrl,
+                              azureApiVersion: value === "azure_openai" ? current.azureApiVersion : ""
+                            }))
+                          }
                         />
                       </label>
+                      <div className="field">
+                        <span className="field-label">连接说明</span>
+                        <p className="resource-center-subtle">
+                          {draft.providerKind === "chatgpt"
+                            ? "使用服务器用户当前的 Codex/ChatGPT 本地登录态。"
+                            : draft.providerKind === "azure_openai"
+                              ? "Azure 模式需要 Endpoint、API Version 和 API Key。默认模型请填写 Azure 上实际可用的部署名或模型标识。"
+                              : "使用 OpenAI API Key 或兼容的 Base URL。默认模型会作为新会话的首选模型。"}
+                        </p>
+                      </div>
+                      {draft.providerKind !== "chatgpt" ? (
+                        <label className="field resource-center-form-span-2">
+                          <span className="field-label">
+                            {draft.providerKind === "azure_openai" ? "Azure Endpoint" : "Base URL"}
+                          </span>
+                          <Input
+                            value={draft.baseUrl}
+                            placeholder={
+                              draft.providerKind === "azure_openai"
+                                ? "https://<resource>.openai.azure.com/openai"
+                                : "留空则使用 OpenAI 默认地址"
+                            }
+                            disabled={saving}
+                            onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+                          />
+                        </label>
+                      ) : null}
+                      {draft.providerKind === "azure_openai" ? (
+                        <label className="field">
+                          <span className="field-label">API Version</span>
+                          <Input
+                            value={draft.azureApiVersion}
+                            placeholder="例如 2025-04-01-preview"
+                            disabled={saving}
+                            onChange={(event) =>
+                              setDraft((current) => ({ ...current, azureApiVersion: event.target.value }))
+                            }
+                          />
+                        </label>
+                      ) : null}
+                      {draft.providerKind !== "chatgpt" ? (
+                        <label className="field">
+                          <span className="field-label">API Key</span>
+                          <Input.Password
+                            value={draft.apiKeyDraft}
+                            placeholder="留空则保持现状"
+                            disabled={saving}
+                            onChange={(event) =>
+                              setDraft((current) => ({ ...current, apiKeyDraft: event.target.value }))
+                            }
+                          />
+                        </label>
+                      ) : null}
                       <label className="field">
                         <span className="field-label">默认模型</span>
                         <Input

@@ -1,6 +1,10 @@
 import { appConfig } from "../../config.js";
 import { CodexRuntime } from "../../codex-runtime.js";
 import {
+  createManagedCodexProviderSnapshot,
+  type ManagedCodexProviderKind
+} from "../../managed-codex-provider.js";
+import {
   REASONING_EFFORT_VALUES,
   normalizeModel,
   normalizeReasoningEffortForModel,
@@ -9,7 +13,9 @@ import {
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 
 type OpenAICodexValidationPayload = {
+  providerKind: ManagedCodexProviderKind;
   baseUrl?: string;
+  azureApiVersion?: string;
   apiKey?: string;
   defaultModel: string;
   defaultReasoningEffort: ReasoningEffort;
@@ -45,7 +51,11 @@ function detailFromError(error: unknown): string {
 function normalizePayload(input: Record<string, unknown>): OpenAICodexValidationPayload {
   const defaultModel = normalizeModel(asString(input.defaultModel) || appConfig.defaultModel);
   return {
+    providerKind:
+      (asString(input.providerKind) as ManagedCodexProviderKind | undefined) ??
+      ("chatgpt" as ManagedCodexProviderKind),
     baseUrl: asString(input.baseUrl),
+    azureApiVersion: asString(input.azureApiVersion),
     apiKey: asString(input.apiKey),
     defaultModel,
     defaultReasoningEffort: normalizeReasoningEffortForModel(
@@ -57,7 +67,12 @@ function normalizePayload(input: Record<string, unknown>): OpenAICodexValidation
 
 export class OpenAICodexIntegrationAdapter {
   constructor(
-    private readonly runtimeFactory: (config: { baseUrl?: string; apiKey?: string }) => OpenAICodexValidationRuntime = (
+    private readonly runtimeFactory: (config: {
+      baseUrl?: string;
+      apiKey?: string;
+      config?: Record<string, unknown>;
+      envOverrides?: Record<string, string>;
+    }) => OpenAICodexValidationRuntime = (
       config
     ) => new CodexRuntime(config)
   ) {}
@@ -66,10 +81,19 @@ export class OpenAICodexIntegrationAdapter {
     const payload = normalizePayload(asRecord(input) ?? {});
 
     try {
-      const runtime = this.runtimeFactory({
-        baseUrl: payload.baseUrl,
-        apiKey: payload.apiKey
+      const snapshot = createManagedCodexProviderSnapshot({
+        config: {
+          providerKind: payload.providerKind,
+          baseUrl: payload.baseUrl,
+          azureApiVersion: payload.azureApiVersion,
+          defaultModel: payload.defaultModel,
+          defaultReasoningEffort: payload.defaultReasoningEffort
+        },
+        secrets: {
+          apiKey: payload.apiKey
+        }
       });
+      const runtime = this.runtimeFactory(snapshot.runtimeOptions);
       await runtime.validateProvider({
         model: payload.defaultModel,
         reasoningEffort: payload.defaultReasoningEffort
@@ -79,6 +103,7 @@ export class OpenAICodexIntegrationAdapter {
         summary: "OpenAI/Codex provider validation succeeded",
         detail: {
           validated: "provider",
+          providerKind: payload.providerKind,
           defaultModel: payload.defaultModel,
           defaultReasoningEffort: payload.defaultReasoningEffort
         }

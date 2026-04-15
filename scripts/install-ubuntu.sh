@@ -822,7 +822,7 @@ ensure_integration_bootstrap() {
   record_install_state dingtalk_scope "$DINGTALK_SCOPE"
   record_install_state dingtalk_bootstrap_status "$dingtalk_status"
 
-  if confirm_or_default "Record OpenAI/Codex install hints now? (runtime still prefers the server user's local Codex auth)" "n"; then
+  if confirm_or_default "Record OpenAI/Codex install hints now? (these values can also be switched later in the admin UI)" "n"; then
     input_value="$(state_read openai_codex_provider "openai_codex")"
     prompt_optional input_value "Enter the OpenAI/Codex provider label (informational)" "$input_value"
     record_install_state openai_codex_provider "$input_value"
@@ -949,8 +949,48 @@ ensure_codex_verification() {
 
   if run_as_app_user_shell "cd '$APP_API_DIR' && node --input-type=module <<'EON'
 import { CodexRuntime } from './dist/codex-runtime.js';
-const runtime = new CodexRuntime();
-await runtime.validateProvider({ model: 'gpt-5.4', reasoningEffort: 'high' });
+import { getDbClient } from './dist/db/client.js';
+import { ManagedCodexProviderResolver } from './dist/managed-codex-provider.js';
+import { SystemSettingsRepository } from './dist/system-settings/repository.js';
+
+function asRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
+}
+
+const db = getDbClient();
+const resolver = new ManagedCodexProviderResolver({
+  integrations: {
+    async listOpenAICodexInstances() {
+      const rows = await db.integrationInstance.findMany({
+        where: { type: 'openai_codex' },
+        orderBy: { createdAt: 'asc' }
+      });
+      return await Promise.all(
+        rows.map(async (row) => {
+          const [configRow, secretRow] = await Promise.all([
+            db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: row.id } }),
+            db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: row.id } })
+          ]);
+          return {
+            id: row.id,
+            slug: row.slug,
+            status: row.status,
+            updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt ?? ''),
+            config: asRecord(configRow?.config),
+            secretState: asRecord(secretRow?.secretState)
+          };
+        })
+      );
+    }
+  },
+  systemSettings: new SystemSettingsRepository(db)
+});
+const snapshot = await resolver.resolveActiveProviderSnapshot();
+const runtime = new CodexRuntime(snapshot.runtimeOptions);
+await runtime.validateProvider({
+  model: snapshot.config.defaultModel,
+  reasoningEffort: snapshot.config.defaultReasoningEffort
+});
 console.log('codex runtime ok');
 EON"; then
     record_step_status codex_runtime_check complete "Codex runtime validation passed"

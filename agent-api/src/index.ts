@@ -24,6 +24,13 @@ import { ThreadCollaborationService } from "./collaboration/thread-collaboration
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { getDbClient } from "./db/client.js";
+import {
+  ManagedCodexProviderResolver,
+  createLocalAuthProviderSnapshot,
+  resolveManagedCodexDefaults,
+  type ManagedCodexProviderInstance,
+  type ManagedCodexProviderSnapshot
+} from "./managed-codex-provider.js";
 import { DepartmentRepository, type DepartmentRepositoryDb } from "./persistence/department-repository.js";
 import {
   DepartmentMembershipRepository,
@@ -162,9 +169,38 @@ const runProfiles = new RunProfileRepository(db as unknown as RunProfileReposito
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const systemSettings = new SystemSettingsRepository(db as never);
+const codexProviders = new ManagedCodexProviderResolver({
+  integrations: {
+    async listOpenAICodexInstances(): Promise<ManagedCodexProviderInstance[]> {
+      const rows = await db.integrationInstance.findMany({
+        where: { type: "openai_codex" },
+        orderBy: { createdAt: "asc" }
+      });
+      return await Promise.all(
+        rows.map(async (row) => {
+          const [configRow, secretRow] = await Promise.all([
+            db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: row.id } }),
+            db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: row.id } })
+          ]);
+          return {
+            id: row.id,
+            slug: row.slug,
+            status: row.status,
+            updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt ?? ""),
+            config: asRecord(configRow?.config) ?? undefined,
+            secretState: asRecord(secretRow?.secretState) ?? undefined
+          };
+        })
+      );
+    }
+  },
+  systemSettings
+});
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const authEmailSender = createAuthEmailSender(appConfig.authEmail);
-const zendesk = new ZendeskIntegrationService();
+const zendesk = new ZendeskIntegrationService({
+  resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot())
+});
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
@@ -183,6 +219,21 @@ const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
   costProfiles
 });
+const managedRouterRuntime = {
+  async startThreadWithOptions(options: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }) {
+    const snapshot = await codexProviders.resolveActiveProviderSnapshot();
+    const providerRuntime = createRuntimeForProviderSnapshot(snapshot);
+    return await providerRuntime.startThreadWithOptions(options);
+  },
+  async *runStreamed(thread: Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>, message: string) {
+    yield* runtime.runStreamed(thread, message);
+  }
+};
 const notificationDispatch = new NotificationDispatchService({
   notifications: notificationRecords,
   dingtalk: ({ message }) => {
@@ -454,7 +505,11 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
   }
 
   try {
-    const liveThread = await runtime.resumeThreadWithOptions({
+    const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
+      existingSnapshot: session.providerSnapshot,
+      fallbackToLocalAuth: true
+    }));
+    const liveThread = await sessionRuntime.resumeThreadWithOptions({
       threadId: codexThreadId,
       model: session.model,
       reasoningEffort: session.reasoningEffort,
@@ -575,6 +630,7 @@ type SessionOptions = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  providerSnapshot: ManagedCodexProviderSnapshot;
 };
 
 type ModeSelection = {
@@ -686,6 +742,23 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function createRuntimeForProviderSnapshot(snapshot?: ManagedCodexProviderSnapshot): CodexRuntime {
+  return new CodexRuntime(snapshot?.runtimeOptions);
+}
+
+async function resolveProviderSnapshot(input?: {
+  existingSnapshot?: ManagedCodexProviderSnapshot;
+  fallbackToLocalAuth?: boolean;
+}): Promise<ManagedCodexProviderSnapshot> {
+  if (input?.existingSnapshot) {
+    return input.existingSnapshot;
+  }
+  if (input?.fallbackToLocalAuth) {
+    return createLocalAuthProviderSnapshot();
+  }
+  return await codexProviders.resolveActiveProviderSnapshot();
 }
 
 function createThreadPublicShareToken(): string {
@@ -1014,8 +1087,12 @@ async function createSession(options: SessionOptions, threadId?: string) {
     ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
     : options.codexRunConfig;
 
+  const providerSnapshot = await resolveProviderSnapshot({
+    existingSnapshot: options.providerSnapshot
+  });
+  const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot);
   const started = await startLiveRuntimeSession({
-    runtime,
+    runtime: sessionRuntime,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
@@ -1031,7 +1108,8 @@ async function createSession(options: SessionOptions, threadId?: string) {
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
     codexRunConfig,
-    codexThreadId
+    codexThreadId,
+    providerSnapshot
   });
   liveRuntimeThreads.set(session.sessionId, started.liveThread);
   return session;
@@ -1085,24 +1163,31 @@ async function resolveSessionOptions(
     reasoning_effort?: ReasoningEffort;
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
+    providerSnapshot?: ManagedCodexProviderSnapshot;
   },
   currentUser: CurrentActor,
   workspacePath: string,
   modeId: string
 ): Promise<SessionOptions> {
-  const model = normalizeModel(input.model || appConfig.defaultModel);
-  const reasoningEffort = normalizeReasoningEffortForModel(
-    model,
-    input.reasoning_effort || appConfig.defaultReasoningEffort
-  );
+  const [providerSnapshot, publishedSystemSettings] = await Promise.all([
+    resolveProviderSnapshot({ existingSnapshot: input.providerSnapshot }),
+    codexProviders.getPublishedSystemSettings()
+  ]);
+  const defaults = resolveManagedCodexDefaults({
+    systemSettings: publishedSystemSettings,
+    providerSnapshot,
+    model: input.model,
+    reasoningEffort: input.reasoning_effort
+  });
   const sourceCodexRunConfig = withRunConfigMode(input.codex_run_config, modeId);
   await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
   return {
     userId: currentUser.id,
     organizationId: currentUser.organizationId,
-    model,
-    reasoningEffort,
+    model: defaults.model,
+    reasoningEffort: defaults.reasoningEffort,
     workspace: workspacePath,
+    providerSnapshot,
     codexRunConfig: await resolveKnowledgeSetRunConfig({
       currentUser,
       workspacePath,
@@ -1154,6 +1239,14 @@ async function ensureThreadSession(
 ) {
   const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
   if (!thread) throw new Error("Thread does not exist");
+  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
+  const [providerSnapshot, publishedSystemSettings] = await Promise.all([
+    resolveProviderSnapshot({
+      existingSnapshot: active?.providerSnapshot,
+      fallbackToLocalAuth: Boolean(active && !active.providerSnapshot)
+    }),
+    codexProviders.getPublishedSystemSettings()
+  ]);
 
   const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
@@ -1172,11 +1265,12 @@ async function ensureThreadSession(
     );
   await fs.mkdir(workspacePath, { recursive: true });
   const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId);
-  const desiredModel = normalizeModel(patch?.model || thread.model || appConfig.defaultModel);
-  const desiredReasoning = normalizeReasoningEffortForModel(
-    desiredModel,
-    patch?.reasoning_effort || thread.reasoningEffort || appConfig.defaultReasoningEffort
-  );
+  const defaults = resolveManagedCodexDefaults({
+    systemSettings: publishedSystemSettings,
+    providerSnapshot,
+    model: patch?.model || thread.model,
+    reasoningEffort: patch?.reasoning_effort || thread.reasoningEffort
+  });
   const desiredBaseCodexRunConfig = await resolveKnowledgeSetRunConfig({
     currentUser,
     workspacePath,
@@ -1189,9 +1283,10 @@ async function ensureThreadSession(
   const desired: SessionOptions = {
     organizationId: currentUser.organizationId,
     userId: thread.userId ?? currentUser.id,
-    model: desiredModel,
-    reasoningEffort: desiredReasoning,
+    model: defaults.model,
+    reasoningEffort: defaults.reasoningEffort,
     workspace: workspacePath,
+    providerSnapshot,
     codexRunConfig: desiredCodexRunConfig
   };
 
@@ -1216,7 +1311,6 @@ async function ensureThreadSession(
     });
   }
 
-  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
   const hasLiveRuntime = active
     ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
     : false;
@@ -1492,7 +1586,7 @@ registerCommonApiRoutes(app, {
 app.use(
   "/openai/v1",
   createOpenAICompatibleRouter({
-    runtime,
+    runtime: managedRouterRuntime,
     integrationsDb: db as never,
     agentModes,
     runProfiles,
@@ -1756,8 +1850,14 @@ app.post("/api/session", async (req: Request, res: Response) => {
             model: (input.model || existing.model).trim(),
             featureType: "chat"
           });
+          const sessionRuntime = createRuntimeForProviderSnapshot(
+            await resolveProviderSnapshot({
+              existingSnapshot: existing.providerSnapshot,
+              fallbackToLocalAuth: !existing.providerSnapshot
+            })
+          );
           const updated = await replaceLiveRuntimeSession({
-            runtime,
+            runtime: sessionRuntime,
             liveRuntimeThreads,
             sessionId: existing.sessionId,
             threadId: existing.threadId,
@@ -1771,7 +1871,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
                 reasoningEffort: payload.reasoningEffort,
                 workspace: payload.workspace,
                 codexRunConfig: payload.codexRunConfig,
-                codexThreadId: payload.codexThreadId
+                codexThreadId: payload.codexThreadId,
+                providerSnapshot: existing.providerSnapshot ?? createLocalAuthProviderSnapshot()
               })
           });
           res.json(sessionOut(updated));

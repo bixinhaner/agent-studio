@@ -184,10 +184,12 @@ function buildSetupGuide(settings: ZendeskIntegrationSettings): ZendeskSetupGuid
 }
 
 export class ZendeskIntegrationService {
-  private readonly runtime = new CodexRuntime();
   private readonly queues = new Map<string, Promise<unknown>>();
 
   constructor(
+    private readonly dependencies: {
+      resolveRuntime?: () => Promise<CodexRuntime>;
+    } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
     private readonly bindingStore = new ZendeskBindingStore(),
     private readonly runStore = new ZendeskRunStore()
@@ -447,7 +449,10 @@ export class ZendeskIntegrationService {
   }
 
   private async runAgent(context: ZendeskTicketContext, settings: ZendeskIntegrationSettings): Promise<string> {
-    const thread = await this.runtime.startThreadWithOptions({
+    const runtime = this.dependencies.resolveRuntime
+      ? await this.dependencies.resolveRuntime()
+      : new CodexRuntime();
+    const thread = await runtime.startThreadWithOptions({
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
       workspace: settings.workspace,
@@ -455,7 +460,7 @@ export class ZendeskIntegrationService {
     });
     const prompt = buildZendeskAgentPrompt(context, settings);
     let output = "";
-    for await (const event of this.runtime.runStreamed(thread, prompt)) {
+    for await (const event of runtime.runStreamed(thread, prompt)) {
       if (event.delta) output += event.delta;
       else if (!output && event.text) output += event.text;
     }

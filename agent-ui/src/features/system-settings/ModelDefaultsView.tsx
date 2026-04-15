@@ -1,4 +1,4 @@
-import { Input } from "antd";
+import { Input, Select } from "antd";
 
 import type { SystemSettingsFieldErrors, SystemSettingsPlatformDefaults } from "./types";
 import { getFieldError } from "./validation";
@@ -27,12 +27,16 @@ export function ModelDefaultsView({ value, fieldErrors, disabled, onChange }: Mo
 
       <div className="resource-center-form-grid">
         <label className="field">
-          <span className="field-label">默认提供方</span>
-          <Input
+          <span className="field-label">运行时来源</span>
+          <Select
             value={value.provider}
+            options={[
+              { label: "管理台 OpenAI Codex 集成", value: "openai_codex" },
+              { label: "服务器本地登录态", value: "local_auth" }
+            ]}
             aria-invalid={Boolean(providerError)}
             disabled={disabled}
-            onChange={(event) => onChange({ provider: event.target.value })}
+            onChange={(next) => onChange({ provider: next })}
           />
           {providerError ? <p className="field-error">{providerError}</p> : null}
         </label>
