@@ -1,4 +1,5 @@
 import { Alert, Button, Empty, Input, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs } from "antd";
+import { createPortal } from "react-dom";
 import {
   Activity,
   Clock3,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { formatUsdAmount } from "../../lib/formatters";
 import {
@@ -159,21 +161,214 @@ function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
   return "系统";
 }
 
-function MarkdownLink(props: { href?: string; children?: ReactNode }) {
-  const href = typeof props.href === "string" ? props.href : "";
-  if (!href) return <span>{props.children}</span>;
-  return <a href={href} target="_blank" rel="noreferrer">{props.children}</a>;
+function decodeMaybeUri(value: string): string {
+  if (!value.trim()) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeKnowledgeSetPath(value: string): string {
+  return decodeMaybeUri(String(value || "").trim()).replace(/\\/g, "/");
+}
+
+function fileNameFromPath(filePath: string): string {
+  const normalized = normalizeKnowledgeSetPath(filePath);
+  if (!normalized) return "Untitled file";
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function flattenNodeText(value: ReactNode): string {
+  if (value === null || value === undefined || typeof value === "boolean") return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map((item) => flattenNodeText(item)).join("");
+  if (typeof value === "object" && "props" in value) {
+    return flattenNodeText((value as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+function isHttpUrl(value: string | undefined): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
+}
+
+const RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN =
+  /(!\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/portal\/resources\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+const RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN =
+  /(!?\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/portal\/resources\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:md|markdown|txt|json|pdf|html|htm|xml|ya?ml|png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+
+function adminKnowledgeSetFileUrl(filePath: string): string {
+  const query = new URLSearchParams({ path: normalizeKnowledgeSetPath(filePath) });
+  return `/api/portal/resources/files/content?${query.toString()}`;
+}
+
+function preprocessConversationAuditMarkdown(text: string): string {
+  return text
+    .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+      return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
+    })
+    .replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+      return `${prefix}<${destination}>${suffix}`;
+    });
+}
+
+function resolveKnowledgeSetFilePathFromHref(href: string): string | null {
+  const rawHref = href.trim();
+  if (!rawHref) return null;
+  const normalized =
+    rawHref.startsWith("<") && rawHref.endsWith(">") && rawHref.length > 1 ? rawHref.slice(1, -1).trim() : rawHref;
+  const decoded = normalizeKnowledgeSetPath(normalized);
+  if (decoded.startsWith("/usr/local/agent-studio/data/knowledge-sets/")) return decoded;
+
+  try {
+    const parsed = new URL(normalized, window.location.href);
+    if (parsed.origin !== window.location.origin) return null;
+    if (parsed.pathname !== "/api/portal/resources/files/content") return null;
+    return normalizeKnowledgeSetPath(parsed.searchParams.get("path") || "");
+  } catch {
+    return null;
+  }
+}
+
+function ConversationAuditMarkdownLink(props: {
+  href?: string;
+  className?: string;
+  children?: ReactNode;
+  [key: string]: unknown;
+}) {
+  const { href, className, children, ...rest } = props;
+  const filePath = typeof href === "string" ? resolveKnowledgeSetFilePathFromHref(href) : null;
+  if (filePath) {
+    const displayName = flattenNodeText(children).trim() || fileNameFromPath(filePath);
+    return (
+      <span className="admin-conversation-file-card" role="group" aria-label={`File ${displayName}`}>
+        <span className="admin-conversation-file-meta">
+          <span className="admin-conversation-file-tag">File</span>
+          <span className="admin-conversation-file-name">{displayName}</span>
+          <span className="admin-conversation-file-path">{filePath}</span>
+        </span>
+        <a
+          className="admin-conversation-file-btn"
+          href={adminKnowledgeSetFileUrl(filePath)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open
+        </a>
+      </span>
+    );
+  }
+
+  const resolvedHref = typeof href === "string" ? href : "";
+  if (!resolvedHref) return <span className={className}>{children}</span>;
+  return (
+    <a className={className} href={resolvedHref} target="_blank" rel="noreferrer" {...rest}>
+      {children}
+    </a>
+  );
+}
+
+function ConversationAuditMarkdownImage(props: {
+  src?: string;
+  alt?: string;
+  className?: string;
+  title?: string;
+  [key: string]: unknown;
+}) {
+  const { src, alt, className, title, ...rest } = props;
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const normalizedSrc = typeof src === "string" ? src.trim() : "";
+  const knowledgeSetFilePath = normalizedSrc ? resolveKnowledgeSetFilePathFromHref(normalizedSrc) : null;
+  const resolvedSrc = knowledgeSetFilePath
+    ? adminKnowledgeSetFileUrl(knowledgeSetFilePath)
+    : normalizedSrc.startsWith("/api/portal/resources/files/content") || isHttpUrl(normalizedSrc)
+      ? normalizedSrc
+      : "";
+  const caption = typeof alt === "string" ? alt.trim() : "";
+  const imageTitle = typeof title === "string" ? title.trim() : "";
+  const ariaLabel = caption || imageTitle || "Open image detail";
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLightboxOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxOpen]);
+
+  if (!resolvedSrc) {
+    return <span className="admin-conversation-image-missing">{caption || "Image unavailable"}</span>;
+  }
+
+  return (
+    <span className="admin-conversation-image-card">
+      <button
+        type="button"
+        className="admin-conversation-image-trigger"
+        aria-label={ariaLabel}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setLightboxOpen(true);
+        }}
+      >
+        <img
+          {...rest}
+          className={className ? `admin-conversation-image ${className}` : "admin-conversation-image"}
+          src={resolvedSrc}
+          alt={caption}
+          title={imageTitle || undefined}
+          loading="lazy"
+        />
+      </button>
+      {caption ? <span className="admin-conversation-image-caption">{caption}</span> : null}
+      {lightboxOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="admin-conversation-image-lightbox"
+              role="dialog"
+              aria-modal="true"
+              aria-label={ariaLabel}
+              onClick={() => setLightboxOpen(false)}
+            >
+              <button
+                type="button"
+                className="admin-conversation-image-lightbox-close"
+                aria-label="Close image detail"
+                onClick={() => setLightboxOpen(false)}
+              >
+                ×
+              </button>
+              <figure className="admin-conversation-image-lightbox-figure" onClick={(event) => event.stopPropagation()}>
+                <img className="admin-conversation-image-lightbox-image" src={resolvedSrc} alt={caption} />
+                {caption || imageTitle ? (
+                  <figcaption className="admin-conversation-image-lightbox-caption">{caption || imageTitle}</figcaption>
+                ) : null}
+              </figure>
+            </div>,
+            document.body
+          )
+        : null}
+    </span>
+  );
 }
 
 function ConversationAuditMarkdown(props: { text: string; className?: string }) {
+  const processedText = useMemo(() => preprocessConversationAuditMarkdown(props.text), [props.text]);
   return (
     <div className={props.className ? `conversation-audit-markdown ${props.className}` : "conversation-audit-markdown"}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
-          a: MarkdownLink as never,
+          a: ConversationAuditMarkdownLink as never,
+          img: ConversationAuditMarkdownImage as never
         }}
       >
-        {props.text}
+        {processedText}
       </ReactMarkdown>
     </div>
   );

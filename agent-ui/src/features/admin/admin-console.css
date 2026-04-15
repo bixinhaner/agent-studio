@@ -749,10 +749,13 @@
 }
 
 .admin-chat-bubble-container.is-assistant .admin-chat-bubble {
-  background: #ffffff;
+  background:
+    radial-gradient(circle at top left, rgba(0, 102, 255, 0.05), transparent 38%),
+    #ffffff;
   color: var(--admin-color-text);
   border-bottom-left-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
 }
 
 .dark .admin-chat-bubble-container.is-assistant .admin-chat-bubble {
@@ -763,6 +766,333 @@
   font-size: 11px;
   color: var(--admin-color-subtle);
   margin-top: 6px;
+}
+
+.conversation-audit-markdown {
+  font-size: 14px;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.conversation-audit-markdown > :first-child {
+  margin-top: 0;
+}
+
+.conversation-audit-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.conversation-audit-markdown h1,
+.conversation-audit-markdown h2,
+.conversation-audit-markdown h3,
+.conversation-audit-markdown h4 {
+  margin: 1.05em 0 0.5em;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+
+.conversation-audit-markdown p,
+.conversation-audit-markdown ul,
+.conversation-audit-markdown ol,
+.conversation-audit-markdown blockquote,
+.conversation-audit-markdown pre,
+.conversation-audit-markdown table {
+  margin: 0.75em 0;
+}
+
+.conversation-audit-markdown ul,
+.conversation-audit-markdown ol {
+  padding-left: 1.3rem;
+}
+
+.conversation-audit-markdown li + li {
+  margin-top: 0.3rem;
+}
+
+.conversation-audit-markdown a {
+  color: var(--admin-color-accent);
+  text-decoration-color: rgba(0, 102, 255, 0.28);
+}
+
+.conversation-audit-markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.conversation-audit-markdown code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.05);
+  color: inherit;
+}
+
+.conversation-audit-markdown pre {
+  overflow-x: auto;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.conversation-audit-markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.conversation-audit-markdown blockquote {
+  padding: 0.9rem 1rem;
+  border-left: 3px solid rgba(0, 102, 255, 0.42);
+  border-radius: 0 14px 14px 0;
+  background: rgba(0, 102, 255, 0.06);
+  color: inherit;
+}
+
+.conversation-audit-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.conversation-audit-markdown th,
+.conversation-audit-markdown td {
+  border: 1px solid var(--admin-color-border);
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.conversation-audit-markdown th {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.admin-chat-bubble-container.is-user .conversation-audit-markdown a {
+  color: rgba(255, 255, 255, 0.96);
+  text-decoration-color: rgba(255, 255, 255, 0.4);
+}
+
+.admin-chat-bubble-container.is-user .conversation-audit-markdown code {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.admin-chat-bubble-container.is-user .conversation-audit-markdown blockquote {
+  border-left-color: rgba(255, 255, 255, 0.44);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.admin-chat-bubble-container.is-user .conversation-audit-markdown pre {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(3, 7, 18, 0.72);
+}
+
+.admin-conversation-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(100%, 680px);
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.dark .admin-conversation-file-card {
+  background: rgba(28, 28, 30, 0.88);
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-file-card {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: none;
+}
+
+.admin-conversation-file-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-conversation-file-tag {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 102, 255, 0.1);
+  color: var(--admin-color-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-file-tag {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.admin-conversation-file-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+  word-break: break-word;
+}
+
+.admin-conversation-file-path {
+  font-size: 11px;
+  color: var(--admin-color-subtle);
+  word-break: break-all;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-file-path {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.admin-conversation-file-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--admin-color-accent);
+  background: rgba(0, 102, 255, 0.08);
+  color: var(--admin-color-accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-file-btn {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.admin-conversation-image-card {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 14px 0 16px;
+}
+
+.admin-conversation-image-trigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.admin-conversation-image {
+  display: block;
+  max-width: min(100%, 920px);
+  max-height: 600px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+  object-fit: contain;
+}
+
+.admin-conversation-image-caption {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--admin-color-subtle);
+  word-break: break-word;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-image-caption {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.admin-conversation-image-missing {
+  display: inline-flex;
+  align-items: center;
+  margin: 8px 0;
+  padding: 4px 10px;
+  border: 1px dashed rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-image-missing {
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.admin-conversation-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 4vw, 56px);
+  background:
+    radial-gradient(circle at 50% 18%, rgba(0, 102, 255, 0.18), transparent 34%),
+    rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(14px);
+  cursor: zoom-out;
+}
+
+.admin-conversation-image-lightbox-figure {
+  max-width: min(96vw, 1280px);
+  max-height: 92vh;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+  cursor: default;
+}
+
+.admin-conversation-image-lightbox-image {
+  display: block;
+  max-width: min(96vw, 1280px);
+  max-height: min(82vh, 900px);
+  border: 1px solid rgba(226, 232, 240, 0.24);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+  object-fit: contain;
+}
+
+.admin-conversation-image-lightbox-caption {
+  max-width: min(96vw, 1280px);
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  word-break: break-word;
+}
+
+.admin-conversation-image-lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(226, 232, 240, 0.24);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #f8fafc;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.admin-conversation-image-lightbox-close:hover {
+  background: rgba(30, 41, 59, 0.94);
 }
 
 /* Custom Tree View Styles */
