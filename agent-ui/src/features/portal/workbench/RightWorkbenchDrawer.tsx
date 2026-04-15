@@ -16,11 +16,9 @@ export function RightWorkbenchDrawer(props: {
   return (
     <div style={{ padding: '16px', height: '100%', overflowY: 'auto' }}>
       <Tabs
-        activeKey={props.activeTab}
-        onChange={(key) => props.onTabChange(key as WorkbenchTab)}
+        activeKey="preview"
         items={[
-          { key: "preview", label: "Preview", forceRender: true, children: props.previewContent },
-          { key: "collaboration", label: "Collaboration", forceRender: true, children: props.collaborationContent }
+          { key: "preview", label: "Preview", forceRender: true, children: props.previewContent }
         ]}
       />
     </div>

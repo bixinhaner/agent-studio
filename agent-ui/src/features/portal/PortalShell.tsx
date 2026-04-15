@@ -670,7 +670,6 @@ function AssistantMarkdownLink(props: {
       <span className="assistant-inline-file-link-meta">
         <span className="assistant-inline-file-link-tag">File</span>
         <span className="assistant-inline-file-link-name">{displayName}</span>
-        <span className="assistant-inline-file-link-path">{previewPathForRequest}</span>
       </span>
       <button
         type="button"
@@ -1739,7 +1738,6 @@ const ProcessDataFallback: FC<any> = ({
                 <div className="assistant-file-change-meta">
                   <span className="assistant-file-change-kind">{label}</span>
                   <span className="assistant-file-change-name">{fileNameFromPreviewPath(item.path)}</span>
-                  <span className="assistant-file-change-path">{item.path}</span>
                 </div>
                 <div className="assistant-file-change-actions">
                   <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
@@ -3984,7 +3982,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     ? prev
                     : prev.isRightDrawerOpen
                       ? closeWorkbenchDrawer(prev)
-                      : openWorkbenchDrawer(prev)
+                      : openWorkbenchDrawer(prev, "preview")
                 )
               }
               onOpenAdmin={props.onOpenAdmin}

@@ -29,7 +29,7 @@ type PreviewContent =
   | { kind: "pdf"; objectUrl: string }
   | { kind: "html"; html: string; objectUrl: string }
   | { kind: "text"; text: string; objectUrl: string }
-  | { kind: "markdown"; text: string; objectUrl: string; filePath: string; anchor: string }
+  | { kind: "markdown"; text: string; objectUrl: string; filePath: string }
   | { kind: "docx"; html: string; objectUrl: string }
   | { kind: "xlsx"; sheets: XlsxSheetPreview[]; objectUrl: string }
   | { kind: "pptx"; slides: PptxSlidePreview[]; objectUrl: string }
@@ -643,7 +643,16 @@ function createPreviewMarkdownHeading(tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h
   };
 }
 
-function PreviewMarkdown(props: { text: string; filePath: string; threadId: string; anchor: string }) {
+function parseLineAnchor(value: string): number | null {
+  const normalized = normalizeMarkdownAnchor(value);
+  const match = normalized.match(/^l(\d+)$/i);
+  if (!match) return null;
+  const line = Number(match[1]);
+  if (!Number.isFinite(line) || line <= 0) return null;
+  return Math.floor(line);
+}
+
+function PreviewMarkdown(props: { text: string; filePath: string; threadId: string; anchor: string; jumpToken: number }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const normalizedAnchor = useMemo(() => normalizeMarkdownAnchor(props.anchor), [props.anchor]);
   const processedText = useMemo(() => preprocessPreviewMarkdown(props.text), [props.text]);
@@ -666,7 +675,7 @@ function PreviewMarkdown(props: { text: string; filePath: string; threadId: stri
     });
     target.classList.add("preview-markdown-anchor-hit");
     target.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [normalizedAnchor, processedText]);
+  }, [normalizedAnchor, processedText, props.jumpToken]);
 
   const components = useMemo(
     () => ({
@@ -718,6 +727,46 @@ function PreviewMarkdown(props: { text: string; filePath: string; threadId: stri
   );
 }
 
+function PreviewText(props: { text: string; anchor: string; jumpToken: number }) {
+  const normalizedAnchor = useMemo(() => normalizeMarkdownAnchor(props.anchor), [props.anchor]);
+  const targetLine = useMemo(() => parseLineAnchor(normalizedAnchor), [normalizedAnchor]);
+  const lines = useMemo(() => props.text.split(/\r?\n/g), [props.text]);
+  const targetLineRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (!targetLine || !targetLineRef.current) return;
+    const target = targetLineRef.current;
+    target.classList.remove("preview-text-line-hit");
+    // Force class reflow so repeated clicks can re-trigger highlight animation.
+    void target.offsetWidth;
+    target.classList.add("preview-text-line-hit");
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [targetLine, props.text, props.jumpToken]);
+
+  if (!targetLine) {
+    return <pre className="preview-text">{props.text || "(File is empty)"}</pre>;
+  }
+
+  return (
+    <pre className="preview-text preview-text-with-lines">
+      {(lines.length > 0 ? lines : [""]).map((line, index) => {
+        const lineNo = index + 1;
+        const isTarget = lineNo === targetLine;
+        return (
+          <span
+            key={`line-${lineNo}`}
+            className={isTarget ? "preview-text-line is-target" : "preview-text-line"}
+            ref={isTarget ? targetLineRef : undefined}
+          >
+            <span className="preview-text-line-number">{lineNo}</span>
+            <span className="preview-text-line-content">{line || " "}</span>
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
+
 export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePath?: string }) {
   const threadMessages = useAuiState((s) => s.thread.messages);
   const threadFiles = useMemo(() => collectThreadFiles(threadMessages), [threadMessages]);
@@ -729,6 +778,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
   const requestedAnchor = requestedTarget.anchor;
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [selectedAnchor, setSelectedAnchor] = useState("");
+  const [anchorJumpToken, setAnchorJumpToken] = useState(0);
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const previewObjectUrlRef = useRef("");
 
@@ -782,6 +832,19 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
       updatedAt: Date.now()
     };
   }, [selectedFilePath, threadFiles]);
+  const activeFilePath = useMemo(() => normalizeFilePath(activeFile?.filePath || ""), [activeFile?.filePath]);
+  const activeFileDisplayName = activeFile?.displayName || fileNameFromPath(activeFilePath);
+  const activeFileMimeType = activeFile?.mimeType || "";
+  const activeFileForKind = useMemo(
+    (): ThreadFileRecord => ({
+      filePath: activeFilePath,
+      displayName: activeFileDisplayName,
+      mimeType: activeFileMimeType,
+      source: "file_change",
+      updatedAt: 0
+    }),
+    [activeFileDisplayName, activeFileMimeType, activeFilePath]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -795,11 +858,11 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
     };
 
     const loadPreview = async () => {
-      if (!activeFile) {
+      if (!activeFilePath) {
         setPreview({ status: "idle" });
         return;
       }
-      const filePath = normalizeFilePath(activeFile.filePath);
+      const filePath = activeFilePath;
       const isKnowledgeSetFile = isKnowledgeSetFilePath(filePath);
       if (!isKnowledgeSetFile && !props.threadId.trim()) {
         setPreview({ status: "idle" });
@@ -812,7 +875,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
           : await fetchThreadFileBlob(props.threadId, filePath);
         const blob = await response.blob();
         createdObjectUrl = URL.createObjectURL(blob);
-        const kind = resolvePreviewKind(activeFile, response.headers.get("content-type") || blob.type || "");
+        const kind = resolvePreviewKind(activeFileForKind, response.headers.get("content-type") || blob.type || "");
 
         if (kind === "image") {
           if (!cancelled) {
@@ -869,8 +932,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
                     kind: "markdown",
                     text,
                     objectUrl: createdObjectUrl,
-                    filePath,
-                    anchor: selectedAnchor
+                    filePath
                   }
                 : {
                     kind: "text",
@@ -937,7 +999,7 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
             content: {
               kind: "unsupported",
               objectUrl: createdObjectUrl,
-              reason: "This file format cannot be rendered in the built-in preview. Open it in a new window or download it."
+              reason: "This file format cannot be rendered in the built-in preview."
             }
           });
           createdObjectUrl = "";
@@ -959,9 +1021,10 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
       cancelled = true;
       releaseObjectUrl();
     };
-  }, [activeFile, props.threadId, selectedAnchor]);
+  }, [activeFileForKind, activeFilePath, props.threadId]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
+  const markdownLineAnchor = activePreview?.kind === "markdown" ? parseLineAnchor(selectedAnchor) : null;
 
   return (
     <div className="preview-workbench-shell">
@@ -983,7 +1046,6 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
                   setSelectedFilePath(file.filePath);
                   setSelectedAnchor("");
                 }}
-                title={file.filePath}
               >
                 <span className="preview-file-name">{file.displayName}</span>
                 <span className="preview-file-meta">
@@ -1003,19 +1065,17 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
             <header className="preview-viewer-head">
               <div className="preview-viewer-title-group">
                 <h4>{activeFile.displayName}</h4>
-                <p>{activeFile.filePath}</p>
-                {selectedAnchor ? <span className="preview-viewer-anchor">Target section: {selectedAnchor}</span> : null}
+                {selectedAnchor ? (
+                  <button
+                    type="button"
+                    className="preview-viewer-anchor"
+                    onClick={() => setAnchorJumpToken((value) => value + 1)}
+                    title="Jump to the target section again"
+                  >
+                    Target section: {selectedAnchor}
+                  </button>
+                ) : null}
               </div>
-              {activePreview ? (
-                <div className="preview-viewer-actions">
-                  <a href={activePreview.objectUrl} target="_blank" rel="noreferrer">
-                    Open in new window
-                  </a>
-                  <a href={activePreview.objectUrl} download={activeFile.displayName}>
-                    Download
-                  </a>
-                </div>
-              ) : null}
             </header>
 
             <div className="preview-viewer-body">
@@ -1046,16 +1106,21 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
               ) : null}
 
               {activePreview?.kind === "text" ? (
-                <pre className="preview-text">{activePreview.text || "(File is empty)"}</pre>
+                <PreviewText text={activePreview.text} anchor={selectedAnchor} jumpToken={anchorJumpToken} />
               ) : null}
 
               {activePreview?.kind === "markdown" ? (
-                <PreviewMarkdown
-                  text={activePreview.text}
-                  filePath={activePreview.filePath}
-                  threadId={props.threadId}
-                  anchor={activePreview.anchor}
-                />
+                markdownLineAnchor ? (
+                  <PreviewText text={activePreview.text} anchor={selectedAnchor} jumpToken={anchorJumpToken} />
+                ) : (
+                  <PreviewMarkdown
+                    text={activePreview.text}
+                    filePath={activePreview.filePath}
+                    threadId={props.threadId}
+                    anchor={selectedAnchor}
+                    jumpToken={anchorJumpToken}
+                  />
+                )
               ) : null}
 
               {activePreview?.kind === "xlsx" ? (

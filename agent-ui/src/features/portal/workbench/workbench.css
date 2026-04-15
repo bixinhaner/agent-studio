@@ -514,6 +514,16 @@
   font-weight: 600;
   line-height: 1.4;
   word-break: break-word;
+  cursor: pointer;
+}
+
+.preview-viewer-anchor:hover {
+  background: #ffedd5;
+}
+
+.preview-viewer-anchor:focus-visible {
+  outline: 2px solid #fb923c;
+  outline-offset: 1px;
 }
 
 .preview-viewer-actions {
@@ -590,6 +600,53 @@
   max-height: 56vh;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.preview-text-with-lines {
+  display: block;
+  white-space: pre;
+  overflow: auto;
+}
+
+.preview-text-line {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: start;
+}
+
+.preview-text-line-number {
+  position: sticky;
+  left: 0;
+  padding-right: 10px;
+  text-align: right;
+  color: #94a3b8;
+  user-select: none;
+  background: #f8fafc;
+}
+
+.preview-text-line-content {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.preview-text-line.is-target .preview-text-line-number,
+.preview-text-line.is-target .preview-text-line-content {
+  background: #fff7ed;
+}
+
+.preview-text-line-hit .preview-text-line-number,
+.preview-text-line-hit .preview-text-line-content {
+  animation: previewLinePulse 1.4s ease;
+}
+
+@keyframes previewLinePulse {
+  0% {
+    background: #fed7aa;
+  }
+  100% {
+    background: #fff7ed;
+  }
 }
 
 .preview-markdown {
