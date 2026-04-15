@@ -2728,6 +2728,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
   const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
+  const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
 
   const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
@@ -3238,6 +3239,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
     setRequestedPreviewPath(normalizedPath);
+    setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
   }, [isExternalPortalUser]);
 
@@ -4056,7 +4058,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               activeTab={layoutState.activeRightDrawerTab}
               onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
               onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
-              previewContent={<PreviewWorkbenchPanel threadId={activeRemoteThreadId} requestedFilePath={requestedPreviewPath} />}
+              previewContent={
+                <PreviewWorkbenchPanel
+                  threadId={activeRemoteThreadId}
+                  requestedFilePath={requestedPreviewPath}
+                  requestNonce={previewRequestNonce}
+                />
+              }
               collaborationContent={
                 <div className="workbench-collaboration-content">
                   <section className="workbench-priority-card">
