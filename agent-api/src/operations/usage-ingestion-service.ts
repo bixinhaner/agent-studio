@@ -29,6 +29,10 @@ function formatCost(value: number): string {
   return value.toFixed(6);
 }
 
+function pricePerToken(pricePerMillionTokens: number): number {
+  return pricePerMillionTokens / 1_000_000;
+}
+
 function calculateEstimatedCost(input: {
   profile: CostProfileRecord | null;
   inputTokens: number;
@@ -42,9 +46,9 @@ function calculateEstimatedCost(input: {
     };
   }
 
-  const inputTokenPrice = parseDecimal(input.profile.inputTokenPrice);
-  const cachedInputTokenPrice = parseDecimal(input.profile.cachedInputTokenPrice);
-  const outputTokenPrice = parseDecimal(input.profile.outputTokenPrice);
+  const inputTokenPrice = pricePerToken(parseDecimal(input.profile.inputTokenPrice));
+  const cachedInputTokenPrice = pricePerToken(parseDecimal(input.profile.cachedInputTokenPrice));
+  const outputTokenPrice = pricePerToken(parseDecimal(input.profile.outputTokenPrice));
   const internalCostMultiplier = parseDecimal(input.profile.internalCostMultiplier, 1);
 
   const estimated =

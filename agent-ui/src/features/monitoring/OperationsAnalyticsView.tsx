@@ -322,7 +322,7 @@ export function OperationsAnalyticsView() {
   const valueHint =
     data && data.summary.estimatedCost === "0.000000" && data.summary.internalCost === "0.000000"
       ? "当前价值列为 0，说明模型定价尚未配置或未命中成本档。"
-      : "价值按模型定价配置折算；内部价值=预估价值 × 内部成本系数。";
+      : "价值按每 1M tokens 的模型定价折算；内部价值=预估价值 × 内部成本系数。";
 
   return (
     <div className="admin-page-container">

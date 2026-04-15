@@ -21,7 +21,7 @@ type PermissionRow = {
 
 type RolePermissionTable = {
   findMany(args?: {
-    where?: { roleId?: string; roleIdIn?: string[] };
+    where?: { roleId?: string | { in: string[] } };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<RolePermissionRow[]>;
   deleteMany(args: { where: { roleId: string } }): Promise<{ count: number }>;
@@ -74,7 +74,10 @@ export class RolePermissionRepository {
   async listPermissionKeysForRoleIds(roleIds: string[]): Promise<string[]> {
     const normalizedRoleIds = roleIds.map(trimOrUndefined).filter((value): value is string => Boolean(value));
     if (normalizedRoleIds.length === 0) return [];
-    const bindings = await this.db.rolePermission.findMany({ where: { roleIdIn: normalizedRoleIds }, orderBy: { createdAt: "asc" } });
+    const bindings = await this.db.rolePermission.findMany({
+      where: { roleId: { in: normalizedRoleIds } },
+      orderBy: { createdAt: "asc" }
+    });
     const permissions = await this.db.permission.findMany({ orderBy: { createdAt: "asc" } });
     const keyById = new Map(permissions.filter((item) => item.isActive).map((item) => [item.id, item.key]));
     return [

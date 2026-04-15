@@ -9,10 +9,10 @@ export function CostProfilesView() {
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [model, setModel] = useState("gpt-5.4");
-  const [inputTokenPrice, setInputTokenPrice] = useState("0.010000");
-  const [cachedInputTokenPrice, setCachedInputTokenPrice] = useState("0.002000");
-  const [outputTokenPrice, setOutputTokenPrice] = useState("0.020000");
-  const [internalCostMultiplier, setInternalCostMultiplier] = useState("1.2000");
+  const [inputTokenPrice, setInputTokenPrice] = useState("2.500000");
+  const [cachedInputTokenPrice, setCachedInputTokenPrice] = useState("0.250000");
+  const [outputTokenPrice, setOutputTokenPrice] = useState("15.000000");
+  const [internalCostMultiplier, setInternalCostMultiplier] = useState("1.0000");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -72,7 +72,7 @@ export function CostProfilesView() {
           <Typography.Title level={4} className="admin-card-heading">
             模型定价
           </Typography.Title>
-          <Typography.Paragraph>配置模型输入、缓存、输出价格和内部成本系数。</Typography.Paragraph>
+          <Typography.Paragraph>按每 1M tokens 配置输入、缓存输入、输出价格和内部成本系数。</Typography.Paragraph>
         </div>
       </div>
       <form className="monitoring-form" onSubmit={handleSubmit}>
@@ -81,11 +81,11 @@ export function CostProfilesView() {
           <input className="field-input" value={model} onChange={(event) => setModel(event.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">输入单价</span>
+          <span className="field-label">输入 / 1M tokens</span>
           <input className="field-input" value={inputTokenPrice} onChange={(event) => setInputTokenPrice(event.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">缓存单价</span>
+          <span className="field-label">缓存输入 / 1M tokens</span>
           <input
             className="field-input"
             value={cachedInputTokenPrice}
@@ -93,7 +93,7 @@ export function CostProfilesView() {
           />
         </label>
         <label className="field">
-          <span className="field-label">输出单价</span>
+          <span className="field-label">输出 / 1M tokens</span>
           <input className="field-input" value={outputTokenPrice} onChange={(event) => setOutputTokenPrice(event.target.value)} />
         </label>
         <label className="field">
@@ -116,9 +116,9 @@ export function CostProfilesView() {
           <thead>
             <tr>
               <th>模型</th>
-              <th>输入</th>
-              <th>缓存</th>
-              <th>输出</th>
+              <th>输入 / 1M</th>
+              <th>缓存 / 1M</th>
+              <th>输出 / 1M</th>
               <th>内部系数</th>
               <th>状态</th>
               <th>操作</th>
