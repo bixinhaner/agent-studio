@@ -1,4 +1,4 @@
-import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs } from "antd";
 import { RefreshCcw, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
@@ -41,7 +41,7 @@ function MetricCard(props: { label: string; value: string; meta: string }) {
   return (
     <article className="ops-analytics-metric-card">
       <span className="ops-analytics-metric-label">{props.label}</span>
-      <strong className="ops-analytics-metric-value">{props.value}</strong>
+      <strong className="ops-analytics-metric-value" title={props.value}>{props.value}</strong>
       <span className="ops-analytics-metric-meta">{props.meta}</span>
     </article>
   );
@@ -348,22 +348,12 @@ export function OperationsAnalyticsView() {
       : "价值按每 1M tokens 的模型定价折算；内部价值=预估价值 × 内部成本系数。";
 
   return (
-    <div className="admin-page-container">
-      <div className="admin-page-header">
-        <div>
-          <h1 className="admin-page-title">运营分析</h1>
-          <p className="admin-page-desc">按组织、用户、模型、路径和会话五个层级统一追踪消耗、价值和提问结构。</p>
-        </div>
-        <div className="ops-analytics-header-tags">
-          <Tag color="processing">本地时区：{timeZone}</Tag>
-          <Tag color="blue">默认窗口：近 {days} 天</Tag>
-        </div>
-      </div>
-
+    <div className="admin-page-container ops-analytics-page">
       <section className="ops-analytics-filterbar">
         <label className="field">
           <span className="field-label">时间窗口</span>
           <Select
+            size="small"
             value={days}
             options={DAY_OPTIONS}
             onChange={(value) => {
@@ -375,6 +365,7 @@ export function OperationsAnalyticsView() {
         <label className="field">
           <span className="field-label">组织</span>
           <Select
+            size="small"
             allowClear
             placeholder="全部组织"
             value={organizationId}
@@ -388,6 +379,7 @@ export function OperationsAnalyticsView() {
         <label className="field">
           <span className="field-label">模型</span>
           <Select
+            size="small"
             allowClear
             placeholder="全部模型"
             value={model}
@@ -401,6 +393,7 @@ export function OperationsAnalyticsView() {
         <label className="field">
           <span className="field-label">路径</span>
           <Select
+            size="small"
             allowClear
             placeholder="全部路径"
             value={path}
@@ -414,6 +407,7 @@ export function OperationsAnalyticsView() {
         <label className="field">
           <span className="field-label">入口</span>
           <Select
+            size="small"
             allowClear
             placeholder="全部入口"
             value={entry}
@@ -427,6 +421,7 @@ export function OperationsAnalyticsView() {
         <label className="field ops-analytics-search">
           <span className="field-label">搜索</span>
           <Input
+            size="small"
             prefix={<Search size={14} />}
             value={query}
             placeholder="搜索用户 / 组织 / session / 线程 / 路径"
@@ -438,7 +433,7 @@ export function OperationsAnalyticsView() {
         </label>
         <div className="field ops-analytics-refresh">
           <span className="field-label">刷新</span>
-          <Button icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((current) => current + 1)}>
+          <Button size="small" icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((current) => current + 1)}>
             重新拉取
           </Button>
         </div>
