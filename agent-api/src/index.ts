@@ -2142,6 +2142,8 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
+    const rawBody = asRecord(req.body) ?? {};
+    const hasCommentInput = Object.prototype.hasOwnProperty.call(rawBody, "comment");
     const input = feedbackSchema.parse(req.body || {});
     const targetMessage = thread.messages.find((item) => storedMessageId(item.message) === input.message_id);
     if (!targetMessage || storedMessageRole(targetMessage.message) !== "assistant") {
@@ -2152,7 +2154,7 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
       type: input.type,
       messageId: input.message_id,
       contentPreview: summarizeText(input.content_preview || ""),
-      comment: input.type === "negative" ? summarizeText(input.comment || "", 1000) : undefined,
+      comment: input.type === "negative" && hasCommentInput ? summarizeText(input.comment || "", 1000) : undefined,
       userId: currentUser.id
     });
     res.json({ feedback: feedbackOut(feedback) });

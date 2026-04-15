@@ -254,10 +254,9 @@ const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 type FeedbackCommentDraftStore = {
   commentsByMessageId: Map<string, string>;
-  pendingNegative?: {
+  skipNextSubmit?: {
     messageId: string;
-    comment: string;
-    createdAt: number;
+    type: "positive" | "negative";
   };
 };
 const FeedbackCommentDraftContext = createContext<MutableRefObject<FeedbackCommentDraftStore> | null>(null);
@@ -1949,6 +1948,8 @@ const AgentAssistantReloadButton: FC = () => {
 const AgentAssistantFeedbackNegativeButton: FC = () => {
   const aui = useAui();
   const draftsRef = useContext(FeedbackCommentDraftContext);
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const message = useAuiState((s) => s.message);
   const messageId = useAuiState((s) => s.message.id);
   const submittedType = useAuiState((s) => s.message.metadata.submittedFeedback?.type);
   const storedComment = useAuiState((s) => {
@@ -1965,19 +1966,37 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
 
   const submitNegativeFeedback = () => {
     const normalizedComment = comment.trim();
+    const remoteId = String(activeThreadId || aui.threadListItem().getState().remoteId || "").trim();
+    if (!remoteId || !messageId) return;
+
+    if (normalizedComment) {
+      draftsRef?.current.commentsByMessageId.set(messageId, normalizedComment);
+    } else {
+      draftsRef?.current.commentsByMessageId.delete(messageId);
+    }
     if (draftsRef) {
-      if (normalizedComment) {
-        draftsRef.current.commentsByMessageId.set(messageId, normalizedComment);
-      } else {
-        draftsRef.current.commentsByMessageId.delete(messageId);
-      }
-      draftsRef.current.pendingNegative = {
+      draftsRef.current.skipNextSubmit = {
         messageId,
-        comment: normalizedComment,
-        createdAt: Date.now()
+        type: "negative"
       };
     }
-    aui.message().submitFeedback({ type: "negative" });
+    void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
+      method: "POST",
+      json: {
+        type: "negative",
+        message_id: messageId,
+        content_preview: messageTextForSuggestions(message as ThreadMessage),
+        comment: normalizedComment
+      }
+    })
+      .then(() => {
+        aui.message().submitFeedback({ type: "negative" });
+      })
+      .catch(() => {
+        if (draftsRef?.current.skipNextSubmit?.type === "negative") {
+          draftsRef.current.skipNextSubmit = undefined;
+        }
+      });
     setOpen(false);
   };
 
@@ -2597,23 +2616,19 @@ const AgentRuntimeAdapterProvider: FC<
         const preview = messageTextForSuggestions(payload.message);
         const messageId = payload.message.id;
         const store = feedbackCommentDraftsRef.current;
-        const pendingNegative = store.pendingNegative;
-        const pendingComment =
-          pendingNegative && Date.now() - pendingNegative.createdAt < 5000 ? pendingNegative.comment.trim() : "";
-        const comment =
-          payload.type === "negative"
-            ? store.commentsByMessageId.get(messageId)?.trim() || pendingComment || undefined
-            : undefined;
+        if (store.skipNextSubmit?.type === payload.type) {
+          store.skipNextSubmit = undefined;
+          return;
+        }
+        const comment = payload.type === "negative" ? store.commentsByMessageId.get(messageId)?.trim() || undefined : undefined;
         if (payload.type === "negative") {
           if (comment) {
             store.commentsByMessageId.set(messageId, comment);
           } else {
             store.commentsByMessageId.delete(messageId);
           }
-          store.pendingNegative = undefined;
         } else {
           store.commentsByMessageId.delete(messageId);
-          store.pendingNegative = undefined;
         }
         void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
           method: "POST",

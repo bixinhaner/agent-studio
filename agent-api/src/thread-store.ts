@@ -253,7 +253,10 @@ export class ThreadStore {
     if (!record) throw new Error("Thread does not exist");
     const now = new Date().toISOString();
     const existing = record.feedback.find((item) => matchesFeedbackTarget(item, payload));
-    const comment = typeof payload.comment === "string" && payload.comment.trim() ? payload.comment.trim() : undefined;
+    const rawComment = typeof payload.comment === "string" ? payload.comment : undefined;
+    const hasComment = rawComment !== undefined;
+    const normalizedComment = rawComment?.trim() ? rawComment.trim() : undefined;
+    const comment = payload.type === "negative" ? (hasComment ? normalizedComment : existing?.comment) : undefined;
     const feedback: ThreadFeedback = {
       id: existing?.id ?? uuidv4(),
       createdAt: existing?.createdAt ?? now,
