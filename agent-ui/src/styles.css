@@ -5944,6 +5944,20 @@ body.public-share-mode #root {
   line-height: 1.5;
 }
 
+.assistant-feedback-textarea-field {
+  margin-bottom: 28px;
+}
+
+.assistant-feedback-textarea-field .ant-input-textarea-show-count::after {
+  display: block;
+  margin-top: 8px;
+  line-height: 18px;
+}
+
+.assistant-feedback-modal .ant-modal-footer {
+  margin-top: 8px;
+}
+
 /* Composer action buttons */
 .aui-composer-send:not(:disabled),
 .aui-composer-send-btn:not(:disabled) {

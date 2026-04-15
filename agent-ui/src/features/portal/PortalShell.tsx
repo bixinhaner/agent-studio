@@ -252,7 +252,15 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
 });
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
-const FeedbackCommentDraftContext = createContext<MutableRefObject<Map<string, string>> | null>(null);
+type FeedbackCommentDraftStore = {
+  commentsByMessageId: Map<string, string>;
+  pendingNegative?: {
+    messageId: string;
+    comment: string;
+    createdAt: number;
+  };
+};
+const FeedbackCommentDraftContext = createContext<MutableRefObject<FeedbackCommentDraftStore> | null>(null);
 const PORTAL_THREAD_SEARCH_PARAM = "thread";
 type ThreadPublicShareSelectionContextValue = {
   selectionMode: boolean;
@@ -1951,7 +1959,7 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
   const [comment, setComment] = useState("");
 
   const openFeedbackDialog = () => {
-    setComment(storedComment);
+    setComment(draftsRef?.current.commentsByMessageId.get(messageId) ?? storedComment);
     setOpen(true);
   };
 
@@ -1959,10 +1967,15 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
     const normalizedComment = comment.trim();
     if (draftsRef) {
       if (normalizedComment) {
-        draftsRef.current.set(messageId, normalizedComment);
+        draftsRef.current.commentsByMessageId.set(messageId, normalizedComment);
       } else {
-        draftsRef.current.delete(messageId);
+        draftsRef.current.commentsByMessageId.delete(messageId);
       }
+      draftsRef.current.pendingNegative = {
+        messageId,
+        comment: normalizedComment,
+        createdAt: Date.now()
+      };
     }
     aui.message().submitFeedback({ type: "negative" });
     setOpen(false);
@@ -1983,6 +1996,7 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
       <Modal
         title="What should be improved?"
         open={open}
+        className="assistant-feedback-modal"
         okText="Submit feedback"
         cancelText="Cancel"
         onOk={submitNegativeFeedback}
@@ -1992,14 +2006,16 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         <p className="assistant-feedback-modal-help">
           This note will be saved with the answer so reviewers can understand the issue.
         </p>
-        <Input.TextArea
-          value={comment}
-          onChange={(event) => setComment(event.target.value.slice(0, 1000))}
-          placeholder="For example: the answer is incomplete, a step is inaccurate, or it missed key details from an uploaded file..."
-          autoSize={{ minRows: 4, maxRows: 7 }}
-          maxLength={1000}
-          showCount
-        />
+        <div className="assistant-feedback-textarea-field">
+          <Input.TextArea
+            value={comment}
+            onChange={(event) => setComment(event.target.value.slice(0, 1000))}
+            placeholder="For example: the answer is incomplete, a step is inaccurate, or it missed key details from an uploaded file..."
+            autoSize={{ minRows: 4, maxRows: 7 }}
+            maxLength={1000}
+            showCount
+          />
+        </div>
       </Modal>
     </>
   );
@@ -2496,7 +2512,9 @@ const AgentRuntimeAdapterProvider: FC<
   const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const activeLocalId = useAuiState((s) => s.threadListItem.id);
   const autoTitleTriggeredRemoteIdsRef = useRef<Set<string>>(new Set());
-  const feedbackCommentDraftsRef = useRef<Map<string, string>>(new Map());
+  const feedbackCommentDraftsRef = useRef<FeedbackCommentDraftStore>({
+    commentsByMessageId: new Map<string, string>()
+  });
 
   useEffect(() => {
     onThreadIdentityChange?.({
@@ -2578,9 +2596,25 @@ const AgentRuntimeAdapterProvider: FC<
         if (!remoteId) return;
         const preview = messageTextForSuggestions(payload.message);
         const messageId = payload.message.id;
+        const store = feedbackCommentDraftsRef.current;
+        const pendingNegative = store.pendingNegative;
+        const pendingComment =
+          pendingNegative && Date.now() - pendingNegative.createdAt < 5000 ? pendingNegative.comment.trim() : "";
         const comment =
-          payload.type === "negative" ? feedbackCommentDraftsRef.current.get(messageId)?.trim() || undefined : undefined;
-        feedbackCommentDraftsRef.current.delete(messageId);
+          payload.type === "negative"
+            ? store.commentsByMessageId.get(messageId)?.trim() || pendingComment || undefined
+            : undefined;
+        if (payload.type === "negative") {
+          if (comment) {
+            store.commentsByMessageId.set(messageId, comment);
+          } else {
+            store.commentsByMessageId.delete(messageId);
+          }
+          store.pendingNegative = undefined;
+        } else {
+          store.commentsByMessageId.delete(messageId);
+          store.pendingNegative = undefined;
+        }
         void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
           method: "POST",
           json: {
