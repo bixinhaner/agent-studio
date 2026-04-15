@@ -230,14 +230,9 @@ function ConversationDetail(props: {
                     </Button>
                   ) : null}
                 </div>
-                {item.comment ? (
-                  <div style={{ fontSize: 13, color: 'var(--admin-color-text)', whiteSpace: 'pre-wrap' }}>{item.comment}</div>
-                ) : null}
-                {item.contentPreview ? (
-                  <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', whiteSpace: 'pre-wrap' }}>
-                    {item.contentPreview}
-                  </div>
-                ) : null}
+                <div style={{ fontSize: 13, color: 'var(--admin-color-text)', whiteSpace: 'pre-wrap' }}>
+                  {item.comment || (item.type === "negative" ? "未填写反馈备注" : "用户标记这条回答有帮助")}
+                </div>
               </div>
             ))}
           </div>
@@ -560,13 +555,7 @@ export function ConversationAuditView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="admin-page-container" style={{ paddingBottom: 0, gap: 0, flex: 'none', marginBottom: 24 }}>
-        <div className="admin-page-header" style={{ padding: '0 0 16px 0' }}>
-          <div>
-            <h1 className="admin-page-title">审计工作台</h1>
-            <p className="admin-page-desc">统一查看用户交互会话、反馈记录与底层 API 调用轨迹。</p>
-          </div>
-        </div>
+      <div className="admin-page-container" style={{ paddingBottom: 0, paddingTop: 0, gap: 0, flex: 'none', marginBottom: 12 }}>
         <Tabs 
           activeKey={mode} 
           onChange={k => setMode(k as AuditMode)} 
@@ -574,7 +563,7 @@ export function ConversationAuditView() {
             { key: "conversations", label: "用户交互会话" },
             { key: "api", label: "底层 API 调用" }
           ]}
-          style={{ marginBottom: -16 }}
+          style={{ marginBottom: -12 }}
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

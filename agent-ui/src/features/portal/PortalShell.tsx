@@ -1944,19 +1944,21 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         <ThumbsDownIcon size={16} strokeWidth={2} />
       </button>
       <Modal
-        title="这条回答哪里需要改进？"
+        title="What should be improved?"
         open={open}
-        okText="提交反馈"
-        cancelText="先不提交"
+        okText="Submit feedback"
+        cancelText="Cancel"
         onOk={submitNegativeFeedback}
         onCancel={() => setOpen(false)}
         destroyOnHidden
       >
-        <p className="assistant-feedback-modal-help">备注会和这条回答一起进入审计工作台，帮助定位具体问题。</p>
+        <p className="assistant-feedback-modal-help">
+          This note will be saved with the answer so reviewers can understand the issue.
+        </p>
         <Input.TextArea
           value={comment}
           onChange={(event) => setComment(event.target.value.slice(0, 1000))}
-          placeholder="例如：回答不完整、步骤不准确、没有引用上传文件里的关键信息..."
+          placeholder="For example: the answer is incomplete, a step is inaccurate, or it missed key details from an uploaded file..."
           autoSize={{ minRows: 4, maxRows: 7 }}
           maxLength={1000}
           showCount
