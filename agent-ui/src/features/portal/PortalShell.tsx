@@ -4061,7 +4061,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
               }}
               welcome={{
-                message: "Hello, I'm Agent Studio. Ask anything directly.",
+                message: "Hello, I'm your Baicells AI Assistant. Ask about products, versions, deployment, alarms, or troubleshooting.",
                 suggestions: PORTAL_STARTER_SUGGESTIONS
               }}
               components={{

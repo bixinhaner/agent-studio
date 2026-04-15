@@ -2,19 +2,19 @@ import type { SuggestionConfig } from "@assistant-ui/react-ui";
 
 export const PORTAL_STARTER_SUGGESTIONS: SuggestionConfig[] = [
   {
-    text: "Build execution plan",
-    prompt: "Create an execution plan for my goal with this structure: objective, scope, milestones, owners, risks, and acceptance criteria."
+    text: "Check product & version fit",
+    prompt: "Help me identify the correct Baicells product line, model, software branch, and version scope for this scenario. If key context is missing, ask for the minimum details needed before giving a conclusion."
   },
   {
-    text: "Draft meeting notes",
-    prompt: "Generate structured meeting notes from the current context, including: background, conclusions, action items, owners, and due dates."
+    text: "Review deployment plan",
+    prompt: "Review this Baicells deployment or configuration plan. Point out mismatches, risks, and the recommended next steps based on official product guidance."
   },
   {
-    text: "Generate retrospective",
-    prompt: "Provide a retrospective template and fill it with current context: goals, process, outcomes, issues, and improvement plan."
+    text: "Analyze alarm or KPI issue",
+    prompt: "Analyze this Baicells alarm, KPI, log, or fault symptom. Explain likely causes, the recommended troubleshooting path, and what information is still needed."
   },
   {
-    text: "Draft external announcement",
-    prompt: "Turn this conversation into a professional external announcement draft with complete information and key Q&A."
+    text: "Recommend solution design",
+    prompt: "Recommend a Baicells product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
   }
 ];
