@@ -5926,6 +5926,24 @@ body.public-share-mode #root {
   padding: 12px 18px !important;
 }
 
+.assistant-feedback-negative-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.assistant-feedback-negative-button[data-submitted="true"] {
+  color: #dc2626;
+}
+
+.assistant-feedback-modal-help {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Composer action buttons */
 .aui-composer-send:not(:disabled),
 .aui-composer-send-btn:not(:disabled) {

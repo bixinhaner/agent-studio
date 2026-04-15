@@ -59,6 +59,7 @@ import { ThreadCommentRepository, type ThreadCommentRepositoryDb } from "./persi
 import {
   ThreadRepository,
   type ReasoningEffort,
+  type ThreadFeedback,
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
@@ -545,8 +546,9 @@ const replaceMessagesSchema = z.object({
 
 const feedbackSchema = z.object({
   type: z.enum(["positive", "negative"]),
-  message_id: z.string().optional(),
-  content_preview: z.string().optional()
+  message_id: z.string().trim().min(1),
+  content_preview: z.string().optional(),
+  comment: z.string().max(1000).optional()
 });
 
 const createThreadPublicShareSchema = z.object({
@@ -641,6 +643,19 @@ function threadOut(thread: ThreadRecord) {
     workspace: thread.workspace,
     created_at: thread.createdAt,
     updated_at: thread.updatedAt
+  };
+}
+
+function feedbackOut(feedback: ThreadFeedback) {
+  return {
+    id: feedback.id,
+    type: feedback.type,
+    message_id: feedback.messageId ?? null,
+    content_preview: feedback.contentPreview ?? null,
+    comment: feedback.comment ?? null,
+    user_id: feedback.userId ?? null,
+    created_at: feedback.createdAt,
+    updated_at: feedback.updatedAt ?? null
   };
 }
 
@@ -1230,11 +1245,23 @@ async function ensureThreadSession(
   return createSession(desired, threadId);
 }
 
-function summarizeText(text: string): string {
+function summarizeText(text: string, limit = 120): string {
   const value = text.trim();
   if (!value) return "";
-  if (value.length <= 120) return value;
-  return `${value.slice(0, 120)}...`;
+  if (value.length <= limit) return value;
+  if (limit <= 3) return value.slice(0, limit);
+  return `${value.slice(0, limit - 3)}...`;
+}
+
+function storedMessageId(message: unknown): string | undefined {
+  const obj = asRecord(message);
+  const id = typeof obj?.id === "string" ? obj.id.trim() : "";
+  return id || undefined;
+}
+
+function storedMessageRole(message: unknown): string {
+  const obj = asRecord(message);
+  return typeof obj?.role === "string" ? obj.role.trim() : "";
 }
 
 function decodeHeaderMaybeUri(value: string): string {
@@ -2009,7 +2036,8 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
         parent_id: item.parentId,
         message: item.message,
         run_config: item.runConfig
-      }))
+      })),
+      feedback: thread.feedback.map(feedbackOut)
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to read message history";
@@ -2115,12 +2143,19 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
       return;
     }
     const input = feedbackSchema.parse(req.body || {});
+    const targetMessage = thread.messages.find((item) => storedMessageId(item.message) === input.message_id);
+    if (!targetMessage || storedMessageRole(targetMessage.message) !== "assistant") {
+      res.status(400).json({ detail: "Feedback target must be an assistant message in this thread" });
+      return;
+    }
     const feedback = await threads.addFeedback(threadId, {
       type: input.type,
       messageId: input.message_id,
-      contentPreview: summarizeText(input.content_preview || "")
+      contentPreview: summarizeText(input.content_preview || ""),
+      comment: input.type === "negative" ? summarizeText(input.comment || "", 1000) : undefined,
+      userId: currentUser.id
     });
-    res.json({ feedback });
+    res.json({ feedback: feedbackOut(feedback) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to submit feedback";
     res.status(400).json({ detail });

@@ -17,7 +17,10 @@ export type ThreadFeedback = {
   type: "positive" | "negative";
   messageId?: string;
   contentPreview?: string;
+  comment?: string;
+  userId?: string;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type ThreadRecord = {
@@ -65,6 +68,12 @@ type UpdateThreadPayload = Partial<{
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function matchesFeedbackTarget(item: ThreadFeedback, payload: Omit<ThreadFeedback, "id" | "createdAt">): boolean {
+  if (!item.messageId || !payload.messageId || item.messageId !== payload.messageId) return false;
+  if (item.userId && payload.userId && item.userId !== payload.userId) return false;
+  return true;
 }
 
 function messageIdOf(message: unknown): string | null {
@@ -242,13 +251,20 @@ export class ThreadStore {
     await this.ensureLoaded();
     const record = this.threads.get(threadId);
     if (!record) throw new Error("Thread does not exist");
+    const now = new Date().toISOString();
+    const existing = record.feedback.find((item) => matchesFeedbackTarget(item, payload));
+    const comment = typeof payload.comment === "string" && payload.comment.trim() ? payload.comment.trim() : undefined;
     const feedback: ThreadFeedback = {
-      id: uuidv4(),
-      createdAt: new Date().toISOString(),
+      id: existing?.id ?? uuidv4(),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: existing ? now : undefined,
       type: payload.type,
       messageId: payload.messageId,
-      contentPreview: payload.contentPreview
+      contentPreview: payload.contentPreview,
+      comment,
+      userId: payload.userId
     };
+    record.feedback = record.feedback.filter((item) => !matchesFeedbackTarget(item, payload));
     record.feedback.push(feedback);
     record.updatedAt = new Date().toISOString();
     await this.commit();

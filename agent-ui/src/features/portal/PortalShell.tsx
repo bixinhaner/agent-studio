@@ -7,6 +7,7 @@ import {
   useState,
   useContext,
   type FC,
+  type MutableRefObject,
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -28,14 +29,16 @@ import {
   type ThreadMessage
 } from "@assistant-ui/react";
 import {
+  AssistantActionBar,
   AssistantMessage,
+  BranchPicker,
   Thread,
   UserMessage,
   ThreadWelcome,
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
-import { CheckIcon, PencilIcon, Share2Icon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, PencilIcon, Share2Icon, ThumbsDownIcon, Trash2Icon, XIcon } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
   type AttachmentAdapter,
@@ -49,7 +52,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, Input, Modal } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
@@ -135,6 +138,18 @@ type ThreadMessagesOut = {
     message: unknown;
     run_config?: Record<string, unknown>;
   }>;
+  feedback?: ThreadFeedbackOut[];
+};
+
+type ThreadFeedbackOut = {
+  id: string;
+  type: "positive" | "negative";
+  message_id: string | null;
+  content_preview: string | null;
+  comment: string | null;
+  user_id: string | null;
+  created_at: string;
+  updated_at: string | null;
 };
 
 type DirectoryBrowseOut = {
@@ -237,6 +252,7 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
 });
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
+const FeedbackCommentDraftContext = createContext<MutableRefObject<Map<string, string>> | null>(null);
 const PORTAL_THREAD_SEARCH_PARAM = "thread";
 type ThreadPublicShareSelectionContextValue = {
   selectionMode: boolean;
@@ -1538,6 +1554,30 @@ function reviveMessage(message: unknown): unknown {
   return revived;
 }
 
+function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | undefined): unknown {
+  const obj = asRecord(message);
+  if (!obj || obj.role !== "assistant" || !feedback) return message;
+
+  const metadata = asRecord(obj.metadata) || {};
+  return {
+    ...obj,
+    metadata: {
+      ...metadata,
+      submittedFeedback: { type: feedback.type },
+      custom: {
+        ...(asRecord(metadata.custom) || {}),
+        feedback: {
+          id: feedback.id,
+          type: feedback.type,
+          comment: feedback.comment,
+          createdAt: feedback.created_at,
+          updatedAt: feedback.updated_at
+        }
+      }
+    }
+  };
+}
+
 function messageTextForSuggestions(message: ThreadMessage): string {
   return message.content
     .map((part) => {
@@ -1861,6 +1901,82 @@ const AgentUserMessage: FC = () => {
   );
 };
 
+const AgentAssistantFeedbackNegativeButton: FC = () => {
+  const aui = useAui();
+  const draftsRef = useContext(FeedbackCommentDraftContext);
+  const messageId = useAuiState((s) => s.message.id);
+  const submittedType = useAuiState((s) => s.message.metadata.submittedFeedback?.type);
+  const storedComment = useAuiState((s) => {
+    const feedback = asRecord(asRecord(s.message.metadata.custom)?.feedback);
+    return typeof feedback?.comment === "string" ? feedback.comment : "";
+  });
+  const [open, setOpen] = useState(false);
+  const [comment, setComment] = useState("");
+
+  const openFeedbackDialog = () => {
+    setComment(storedComment);
+    setOpen(true);
+  };
+
+  const submitNegativeFeedback = () => {
+    const normalizedComment = comment.trim();
+    if (draftsRef) {
+      if (normalizedComment) {
+        draftsRef.current.set(messageId, normalizedComment);
+      } else {
+        draftsRef.current.delete(messageId);
+      }
+    }
+    aui.message().submitFeedback({ type: "negative" });
+    setOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="aui-button aui-button-ghost aui-button-icon assistant-feedback-negative-button aui-assistant-action-bar-feedback-negative"
+        data-submitted={submittedType === "negative" ? "true" : undefined}
+        title="Bad response"
+        aria-label="Bad response"
+        onClick={openFeedbackDialog}
+      >
+        <ThumbsDownIcon size={16} strokeWidth={2} />
+      </button>
+      <Modal
+        title="这条回答哪里需要改进？"
+        open={open}
+        okText="提交反馈"
+        cancelText="先不提交"
+        onOk={submitNegativeFeedback}
+        onCancel={() => setOpen(false)}
+        destroyOnHidden
+      >
+        <p className="assistant-feedback-modal-help">备注会和这条回答一起进入审计工作台，帮助定位具体问题。</p>
+        <Input.TextArea
+          value={comment}
+          onChange={(event) => setComment(event.target.value.slice(0, 1000))}
+          placeholder="例如：回答不完整、步骤不准确、没有引用上传文件里的关键信息..."
+          autoSize={{ minRows: 4, maxRows: 7 }}
+          maxLength={1000}
+          showCount
+        />
+      </Modal>
+    </>
+  );
+};
+
+const AgentAssistantActionBar: FC = () => {
+  return (
+    <AssistantActionBar.Root hideWhenRunning autohide="not-last" autohideFloat="single-branch">
+      <AssistantActionBar.Copy />
+      <AssistantActionBar.Reload />
+      <AssistantActionBar.FeedbackPositive />
+      <AgentAssistantFeedbackNegativeButton />
+    </AssistantActionBar.Root>
+  );
+};
+
 const AgentAssistantMessage: FC = () => {
   return (
     <ThreadPublicShareMessageShell tone="assistant">
@@ -1875,6 +1991,8 @@ const AgentAssistantMessage: FC = () => {
             data: { Fallback: ProcessDataFallback as any }
           }}
         />
+        <BranchPicker />
+        <AgentAssistantActionBar />
       </AssistantMessage.Root>
     </ThreadPublicShareMessageShell>
   );
@@ -2339,6 +2457,7 @@ const AgentRuntimeAdapterProvider: FC<
   const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const activeLocalId = useAuiState((s) => s.threadListItem.id);
   const autoTitleTriggeredRemoteIdsRef = useRef<Set<string>>(new Set());
+  const feedbackCommentDraftsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     onThreadIdentityChange?.({
@@ -2353,13 +2472,28 @@ const AgentRuntimeAdapterProvider: FC<
         const remoteId = aui.threadListItem().getState().remoteId;
         if (!remoteId) return { messages: [] };
         const out = await api<ThreadMessagesOut>(`/api/threads/${encodeURIComponent(remoteId)}/messages`);
+        const feedbackByMessageId = new Map<string, ThreadFeedbackOut>();
+        for (const item of out.feedback ?? []) {
+          const messageId = typeof item.message_id === "string" ? item.message_id.trim() : "";
+          if (!messageId) continue;
+          const previous = feedbackByMessageId.get(messageId);
+          const previousTime = Date.parse(previous?.updated_at || previous?.created_at || "");
+          const itemTime = Date.parse(item.updated_at || item.created_at || "");
+          if (!previous || itemTime >= previousTime) {
+            feedbackByMessageId.set(messageId, item);
+          }
+        }
         const repository: ExportedMessageRepository = {
           headId: out.head_id ?? null,
-          messages: (out.messages || []).map((item) => ({
-            parentId: item.parent_id ?? null,
-            message: reviveMessage(item.message) as any,
-            ...(item.run_config ? { runConfig: item.run_config } : undefined)
-          }))
+          messages: (out.messages || []).map((item) => {
+            const revived = reviveMessage(item.message);
+            const messageId = typeof asRecord(revived)?.id === "string" ? String(asRecord(revived)?.id).trim() : "";
+            return {
+              parentId: item.parent_id ?? null,
+              message: applyStoredFeedback(revived, messageId ? feedbackByMessageId.get(messageId) : undefined) as any,
+              ...(item.run_config ? { runConfig: item.run_config } : undefined)
+            };
+          })
         };
         return repository;
       },
@@ -2404,12 +2538,17 @@ const AgentRuntimeAdapterProvider: FC<
         const remoteId = aui.threadListItem().getState().remoteId;
         if (!remoteId) return;
         const preview = messageTextForSuggestions(payload.message);
+        const messageId = payload.message.id;
+        const comment =
+          payload.type === "negative" ? feedbackCommentDraftsRef.current.get(messageId)?.trim() || undefined : undefined;
+        feedbackCommentDraftsRef.current.delete(messageId);
         void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
           method: "POST",
           json: {
             type: payload.type,
-            message_id: payload.message.id,
-            content_preview: preview
+            message_id: messageId,
+            content_preview: preview,
+            ...(comment ? { comment } : {})
           }
         }).catch(() => {});
       }
@@ -2442,7 +2581,11 @@ const AgentRuntimeAdapterProvider: FC<
     [attachments, feedback, history]
   );
 
-  return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
+  return (
+    <FeedbackCommentDraftContext.Provider value={feedbackCommentDraftsRef}>
+      <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>
+    </FeedbackCommentDraftContext.Provider>
+  );
 };
 
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {

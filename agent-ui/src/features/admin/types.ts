@@ -48,7 +48,10 @@ export type AdminConversationFeedback = {
   type: "positive" | "negative";
   messageId: string | null;
   contentPreview: string | null;
+  comment: string | null;
+  userId: string | null;
   createdAt: string;
+  updatedAt: string | null;
 };
 
 export type AdminConversationSummary = {

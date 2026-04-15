@@ -28,6 +28,7 @@ import type {
   AdminApiAuditResultFilter,
   AdminApiAuditSort,
   AdminConversationDetailResponse,
+  AdminConversationFeedback,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
   AdminConversationSort,
@@ -44,6 +45,14 @@ const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: strin
   { value: "all", label: "全部状态" },
   { value: "regular", label: "活跃线程" },
   { value: "archived", label: "已归档" }
+];
+
+const FEEDBACK_OPTIONS: Array<{ value: AdminConversationFeedbackFilter; label: string }> = [
+  { value: "all", label: "全部反馈" },
+  { value: "with_feedback", label: "有反馈" },
+  { value: "positive", label: "只看赞" },
+  { value: "negative", label: "只看踩" },
+  { value: "none", label: "无反馈" }
 ];
 
 const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
@@ -64,6 +73,14 @@ function displayUserLabel(user: AdminConversationUser | null): string {
 
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "processing";
+}
+
+function feedbackLabel(type: AdminConversationFeedback["type"]): string {
+  return type === "positive" ? "赞" : "踩";
+}
+
+function feedbackColor(type: AdminConversationFeedback["type"]): string {
+  return type === "positive" ? "success" : "error";
 }
 
 function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
@@ -129,7 +146,7 @@ function ConversationDetail(props: {
   loading: boolean;
   errorText: string;
 }) {
-  const [transcriptQuery, setTranscriptQuery] = useState("");
+  const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const messageRefs = useRef(new Map<string, HTMLElement>());
 
   if (props.loading && !props.detail) {
@@ -145,6 +162,11 @@ function ConversationDetail(props: {
   }
 
   const { conversation, transcript } = props.detail;
+  const focusFeedbackMessage = (messageId: string | null) => {
+    if (!messageId) return;
+    setHighlightedMessageId(messageId);
+    messageRefs.current.get(messageId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -179,6 +201,47 @@ function ConversationDetail(props: {
             <span>{conversation.workspace || "无关联工作区"}</span>
           </div>
         </div>
+
+        {conversation.feedback.length > 0 ? (
+          <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-color-text)' }}>回答反馈</div>
+            {conversation.feedback.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  border: '1px solid var(--admin-color-border)',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  background: '#fff',
+                  display: 'grid',
+                  gap: 6
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Tag color={feedbackColor(item.type)} icon={item.type === "positive" ? <ThumbsUp size={12} /> : <ThumbsDown size={12} />}>
+                    {feedbackLabel(item.type)}
+                  </Tag>
+                  <span style={{ color: 'var(--admin-color-subtle)', fontSize: 12 }}>
+                    {formatLocalDateTime(item.updatedAt || item.createdAt)}
+                  </span>
+                  {item.messageId ? (
+                    <Button size="small" type="link" onClick={() => focusFeedbackMessage(item.messageId)}>
+                      定位回答
+                    </Button>
+                  ) : null}
+                </div>
+                {item.comment ? (
+                  <div style={{ fontSize: 13, color: 'var(--admin-color-text)', whiteSpace: 'pre-wrap' }}>{item.comment}</div>
+                ) : null}
+                {item.contentPreview ? (
+                  <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', whiteSpace: 'pre-wrap' }}>
+                    {item.contentPreview}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* Messages Area */}
@@ -190,9 +253,13 @@ function ConversationDetail(props: {
             <TranscriptMessageBubble 
               key={msg.id} 
               message={msg} 
-              highlighted={false} 
+              highlighted={highlightedMessageId === msg.id} 
               onMount={(node) => {
-                if (node) messageRefs.current.set(msg.id, node);
+                if (node) {
+                  messageRefs.current.set(msg.id, node);
+                } else {
+                  messageRefs.current.delete(msg.id);
+                }
               }} 
             />
           ))
@@ -205,6 +272,7 @@ function ConversationDetail(props: {
 function ConversationWorkspace() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<AdminConversationStatusFilter>("all");
+  const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
   const [sort, setSort] = useState<AdminConversationSort>("updated_desc");
   const [page, setPage] = useState(1);
   
@@ -220,11 +288,11 @@ function ConversationWorkspace() {
   useEffect(() => {
     let active = true;
     setListLoading(true);
-    fetchAdminConversationAuditList({ query: deferredQuery || undefined, status: statusFilter, sort, page, pageSize: 20 })
+    fetchAdminConversationAuditList({ query: deferredQuery || undefined, status: statusFilter, feedback: feedbackFilter, sort, page, pageSize: 20 })
       .then(res => active && setListData(res))
       .finally(() => active && setListLoading(false));
     return () => { active = false; };
-  }, [deferredQuery, statusFilter, sort, page]);
+  }, [deferredQuery, statusFilter, feedbackFilter, sort, page]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -249,8 +317,27 @@ function ConversationWorkspace() {
             style={{ marginBottom: 12 }}
           />
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Select size="small" value={statusFilter} options={STATUS_OPTIONS} onChange={setStatusFilter} style={{ width: 100 }} />
-            <Select size="small" value={sort} options={SORT_OPTIONS} onChange={setSort} style={{ width: 100 }} />
+            <Select
+              size="small"
+              value={statusFilter}
+              options={STATUS_OPTIONS}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 96 }}
+            />
+            <Select
+              size="small"
+              value={feedbackFilter}
+              options={FEEDBACK_OPTIONS}
+              onChange={(value) => {
+                setFeedbackFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 96 }}
+            />
+            <Select size="small" value={sort} options={SORT_OPTIONS} onChange={setSort} style={{ width: 96 }} />
           </Space>
         </div>
         
@@ -273,6 +360,11 @@ function ConversationWorkspace() {
                <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
                  <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
                  <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
+                 {conv.feedbackSummary.total > 0 ? (
+                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65 }}>
+                     {conv.feedbackSummary.positive} 赞 / {conv.feedbackSummary.negative} 踩
+                   </span>
+                 ) : null}
                </div>
              </button>
            ))}

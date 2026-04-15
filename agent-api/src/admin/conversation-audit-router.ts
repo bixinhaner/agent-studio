@@ -123,7 +123,10 @@ type ConversationSummary = {
     type: ThreadFeedback["type"];
     messageId: string | null;
     contentPreview: string | null;
+    comment: string | null;
+    userId: string | null;
     createdAt: string;
+    updatedAt: string | null;
   }>;
 };
 
@@ -387,7 +390,7 @@ function feedbackCountOf(feedback: ConversationSummary["feedback"], type: Thread
 
 function latestFeedbackAt(feedback: ConversationSummary["feedback"]): string | null {
   const values = feedback
-    .map((item) => parseDateString(item.createdAt))
+    .map((item) => parseDateString(item.updatedAt) ?? parseDateString(item.createdAt))
     .filter((item): item is string => Boolean(item))
     .sort((left, right) => new Date(right).getTime() - new Date(left).getTime());
   return values[0] ?? null;
@@ -408,7 +411,10 @@ function normalizeFeedback(feedback: ThreadRecord["feedback"]): ConversationSumm
       type: item.type,
       messageId: trimOrUndefined(item.messageId) ?? null,
       contentPreview: summarizeText(item.contentPreview, 240),
-      createdAt: item.createdAt
+      comment: summarizeText(item.comment, 600),
+      userId: trimOrUndefined(item.userId) ?? null,
+      createdAt: item.createdAt,
+      updatedAt: parseDateString(item.updatedAt) ?? null
     }));
 }
 
@@ -551,7 +557,8 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
     summary.user?.email,
     summary.user?.role,
     summary.preview.firstUserText,
-    summary.preview.latestText
+    summary.preview.latestText,
+    ...summary.feedback.flatMap((item) => [item.contentPreview, item.comment])
   ]
     .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
     .join("\n");

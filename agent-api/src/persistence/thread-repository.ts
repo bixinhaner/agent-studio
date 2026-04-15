@@ -16,7 +16,10 @@ export type ThreadFeedback = {
   type: "positive" | "negative";
   messageId?: string;
   contentPreview?: string;
+  comment?: string;
+  userId?: string;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type ThreadRecord = {
@@ -185,10 +188,19 @@ function normalizeFeedback(value: unknown): ThreadFeedback[] {
       messageId: typeof obj.messageId === "string" && obj.messageId.trim() ? obj.messageId.trim() : undefined,
       contentPreview:
         typeof obj.contentPreview === "string" && obj.contentPreview.trim() ? obj.contentPreview.trim() : undefined,
-      createdAt: typeof obj.createdAt === "string" && obj.createdAt.trim() ? obj.createdAt : new Date().toISOString()
+      comment: typeof obj.comment === "string" && obj.comment.trim() ? obj.comment.trim() : undefined,
+      userId: typeof obj.userId === "string" && obj.userId.trim() ? obj.userId.trim() : undefined,
+      createdAt: typeof obj.createdAt === "string" && obj.createdAt.trim() ? obj.createdAt : new Date().toISOString(),
+      updatedAt: typeof obj.updatedAt === "string" && obj.updatedAt.trim() ? obj.updatedAt : undefined
     });
   }
   return items;
+}
+
+function matchesFeedbackTarget(item: ThreadFeedback, payload: Omit<ThreadFeedback, "id" | "createdAt">): boolean {
+  if (!item.messageId || !payload.messageId || item.messageId !== payload.messageId) return false;
+  if (item.userId && payload.userId && item.userId !== payload.userId) return false;
+  return true;
 }
 
 function mapMessageRow(row: MessageRow): StoredMessageItem {
@@ -514,18 +526,26 @@ export class ThreadRepository {
     const thread = await this.db.thread.findUnique({ where: { id: threadId } });
     if (!thread) throw new Error("Thread does not exist");
 
+    const now = new Date().toISOString();
+    const currentFeedback = normalizeFeedback(thread.feedback);
+    const existing = currentFeedback.find((item) => matchesFeedbackTarget(item, payload));
+    const comment = typeof payload.comment === "string" && payload.comment.trim() ? payload.comment.trim() : undefined;
     const feedback: ThreadFeedback = {
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
+      id: existing?.id ?? randomUUID(),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: existing ? now : undefined,
       type: payload.type,
       messageId: payload.messageId,
-      contentPreview: payload.contentPreview
+      contentPreview: payload.contentPreview,
+      comment,
+      userId: payload.userId
     };
+    const nextFeedback = currentFeedback.filter((item) => !matchesFeedbackTarget(item, payload));
 
     await this.db.thread.update({
       where: { id: threadId },
       data: {
-        feedback: [...normalizeFeedback(thread.feedback), feedback],
+        feedback: [...nextFeedback, feedback],
         updatedAt: new Date()
       }
     });

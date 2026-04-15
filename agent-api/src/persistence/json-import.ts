@@ -49,7 +49,10 @@ function asFeedbackList(value: unknown): ThreadRecord["feedback"] {
       type,
       messageId: asString(obj.messageId),
       contentPreview: asString(obj.contentPreview),
-      createdAt: asString(obj.createdAt) ?? new Date().toISOString()
+      comment: asString(obj.comment),
+      userId: asString(obj.userId),
+      createdAt: asString(obj.createdAt) ?? new Date().toISOString(),
+      updatedAt: asString(obj.updatedAt)
     });
   }
   return items;
