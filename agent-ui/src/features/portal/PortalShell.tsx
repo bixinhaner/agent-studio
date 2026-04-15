@@ -152,6 +152,9 @@ type ThreadFeedbackOut = {
   updated_at: string | null;
 };
 
+type ProductFeedbackType = "bug" | "feature_request" | "usability_issue" | "other";
+type ProductFeedbackSeverity = "blocking" | "high" | "medium" | "low";
+
 type DirectoryBrowseOut = {
   roots: string[];
   cwd: string;
@@ -243,6 +246,18 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
   { value: "disabled", label: "disabled (Off)" },
   { value: "cached", label: "cached (Cached search)" },
   { value: "live", label: "live (Live search)" }
+];
+const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: ProductFeedbackType; label: string }> = [
+  { value: "bug", label: "Bug" },
+  { value: "feature_request", label: "Feature request" },
+  { value: "usability_issue", label: "Usability issue" },
+  { value: "other", label: "Other" }
+];
+const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity; label: string }> = [
+  { value: "blocking", label: "Blocking" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" }
 ];
 const DEFAULT_RUNNING_STAGE_TEXT = "Waiting for model response";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
@@ -2729,6 +2744,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
+  const [productFeedbackOpen, setProductFeedbackOpen] = useState(false);
+  const [productFeedbackType, setProductFeedbackType] = useState<ProductFeedbackType>("bug");
+  const [productFeedbackSeverity, setProductFeedbackSeverity] = useState<ProductFeedbackSeverity>("medium");
+  const [productFeedbackDescription, setProductFeedbackDescription] = useState("");
+  const [productFeedbackIncludeContext, setProductFeedbackIncludeContext] = useState(true);
+  const [productFeedbackSubmitting, setProductFeedbackSubmitting] = useState(false);
+  const [productFeedbackError, setProductFeedbackError] = useState("");
+  const [productFeedbackSubmitted, setProductFeedbackSubmitted] = useState(false);
 
   const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
@@ -3233,6 +3256,119 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
   const isExternalPortalUser = props.currentUser?.userType === "external_user";
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
+
+  const buildProductFeedbackContext = useCallback(() => {
+    const locationSnapshot =
+      typeof window === "undefined"
+        ? { path: "", search: "", hash: "" }
+        : {
+            path: window.location.pathname,
+            search: window.location.search,
+            hash: window.location.hash
+          };
+    return {
+      capturedAt: new Date().toISOString(),
+      page: locationSnapshot,
+      userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+      thread: {
+        remoteId: activeRemoteThreadId || null,
+        localId: activeThreadIdentity.localId || null,
+        readOnly: sharedThreadReadonly
+      },
+      runtime: {
+        summary: runtimeSummaryText,
+        modeId: runtimeMode,
+        modeLabel: selectedModeLabel,
+        model: appliedConfig.model,
+        reasoningEffort: appliedConfig.reasoningEffort,
+        workspace: appliedConfig.workspace,
+        sandboxMode: appliedConfig.sandboxMode,
+        approvalPolicy: appliedConfig.approvalPolicy,
+        networkAccessEnabled: appliedConfig.networkAccessEnabled,
+        webSearchMode: appliedConfig.webSearchMode,
+        knowledgeSetIds: selectedKnowledgeSetIdsNormalized
+      },
+      layout: {
+        sessionRailCollapsed: layoutState.isSessionRailCollapsed,
+        rightDrawerOpen: layoutState.isRightDrawerOpen,
+        activeRightDrawerTab: layoutState.activeRightDrawerTab,
+        advancedSettingsOpen: layoutState.isAdvancedSettingsOpen
+      },
+      contextUsage,
+      user: props.currentUser
+        ? {
+            id: props.currentUser.id,
+            displayName: props.currentUser.displayName || null,
+            email: props.currentUser.email || null,
+            role: props.currentUser.role,
+            userType: props.currentUser.userType,
+            primaryOrganizationId: props.currentUser.primaryOrganizationId || null
+          }
+        : null
+    };
+  }, [
+    activeRemoteThreadId,
+    activeThreadIdentity.localId,
+    appliedConfig,
+    contextUsage,
+    layoutState,
+    props.currentUser,
+    runtimeMode,
+    runtimeSummaryText,
+    selectedKnowledgeSetIdsNormalized,
+    selectedModeLabel,
+    sharedThreadReadonly
+  ]);
+
+  const openProductFeedbackModal = useCallback(() => {
+    setProductFeedbackOpen(true);
+    setProductFeedbackError("");
+    setProductFeedbackSubmitted(false);
+  }, []);
+
+  const closeProductFeedbackModal = useCallback(() => {
+    if (productFeedbackSubmitting) return;
+    setProductFeedbackOpen(false);
+    setProductFeedbackError("");
+    setProductFeedbackSubmitted(false);
+  }, [productFeedbackSubmitting]);
+
+  const submitProductFeedback = useCallback(async () => {
+    const description = productFeedbackDescription.trim();
+    if (!description || productFeedbackSubmitting) return;
+    setProductFeedbackSubmitting(true);
+    setProductFeedbackError("");
+    try {
+      await api<{ feedback: { id: string; status: string; created_at: string } }>("/api/portal/feedback", {
+        method: "POST",
+        json: {
+          type: productFeedbackType,
+          ...(productFeedbackType === "bug" ? { severity: productFeedbackSeverity } : {}),
+          description,
+          ...(activeRemoteThreadId ? { thread_id: activeRemoteThreadId } : {}),
+          ...(productFeedbackIncludeContext ? { context: buildProductFeedbackContext() } : {})
+        }
+      });
+      setProductFeedbackSubmitted(true);
+      setProductFeedbackDescription("");
+      window.setTimeout(() => {
+        setProductFeedbackOpen(false);
+        setProductFeedbackSubmitted(false);
+      }, 800);
+    } catch (error) {
+      setProductFeedbackError(error instanceof Error ? error.message : "Failed to submit feedback");
+    } finally {
+      setProductFeedbackSubmitting(false);
+    }
+  }, [
+    activeRemoteThreadId,
+    buildProductFeedbackContext,
+    productFeedbackDescription,
+    productFeedbackIncludeContext,
+    productFeedbackSeverity,
+    productFeedbackSubmitting,
+    productFeedbackType
+  ]);
 
   const requestPreviewForPath = useCallback((filePath: string) => {
     if (isExternalPortalUser) return;
@@ -3988,6 +4124,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 )
               }
               onOpenAdmin={props.onOpenAdmin}
+              onOpenFeedback={openProductFeedbackModal}
               runtimeSummary={runtimeSummaryText}
               showRuntimeSummary={!isExternalPortalUser}
               showAdvancedSettings={!isExternalPortalUser}
@@ -4094,6 +4231,80 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 )}
               </PanelGroup>
             </div>
+
+            <Modal
+              open={productFeedbackOpen}
+              title="Send feedback"
+              className="product-feedback-modal"
+              okText={productFeedbackSubmitted ? "Submitted" : "Submit feedback"}
+              cancelText="Cancel"
+              okButtonProps={{
+                disabled: !productFeedbackDescription.trim() || productFeedbackSubmitted,
+                loading: productFeedbackSubmitting
+              }}
+              onOk={() => void submitProductFeedback()}
+              onCancel={closeProductFeedbackModal}
+              destroyOnHidden
+            >
+              <p className="product-feedback-modal-help">
+                Tell us what happened or what would make Agent Studio better.
+              </p>
+              <label className="field product-feedback-field">
+                <span className="field-label">Feedback type</span>
+                <select
+                  className="field-input"
+                  value={productFeedbackType}
+                  onChange={(event) => setProductFeedbackType(event.target.value as ProductFeedbackType)}
+                  disabled={productFeedbackSubmitting}
+                >
+                  {PRODUCT_FEEDBACK_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {productFeedbackType === "bug" ? (
+                <label className="field product-feedback-field">
+                  <span className="field-label">Impact</span>
+                  <select
+                    className="field-input"
+                    value={productFeedbackSeverity}
+                    onChange={(event) => setProductFeedbackSeverity(event.target.value as ProductFeedbackSeverity)}
+                    disabled={productFeedbackSubmitting}
+                  >
+                    {PRODUCT_FEEDBACK_SEVERITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="field product-feedback-field">
+                <span className="field-label">Details</span>
+                <Input.TextArea
+                  value={productFeedbackDescription}
+                  onChange={(event) => setProductFeedbackDescription(event.target.value)}
+                  placeholder="What happened, or what should be improved?"
+                  rows={5}
+                  maxLength={4000}
+                  showCount
+                  disabled={productFeedbackSubmitting}
+                />
+              </label>
+              <label className="product-feedback-context-toggle">
+                <input
+                  type="checkbox"
+                  checked={productFeedbackIncludeContext}
+                  onChange={(event) => setProductFeedbackIncludeContext(event.target.checked)}
+                  disabled={productFeedbackSubmitting}
+                />
+                <span>Include current context so reviewers can reproduce it.</span>
+              </label>
+              {productFeedbackError ? <p className="product-feedback-error">{productFeedbackError}</p> : null}
+              {productFeedbackSubmitted ? <p className="product-feedback-success">Feedback submitted.</p> : null}
+            </Modal>
 
             {!isExternalPortalUser ? (
               <AdvancedSettingsPanel

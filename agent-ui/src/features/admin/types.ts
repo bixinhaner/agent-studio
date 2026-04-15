@@ -35,6 +35,12 @@ export type AdminConversationSort = "updated_desc" | "created_desc";
 export type AdminApiAuditResultFilter = "all" | "success" | "failed";
 export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
 export type AdminApiAuditSort = "created_desc" | "tokens_desc" | "latency_desc";
+export type AdminProductFeedbackType = "bug" | "feature_request" | "usability_issue" | "other";
+export type AdminProductFeedbackTypeFilter = "all" | AdminProductFeedbackType;
+export type AdminProductFeedbackSeverity = "blocking" | "high" | "medium" | "low";
+export type AdminProductFeedbackStatus = "open" | "triaged" | "in_progress" | "resolved" | "closed";
+export type AdminProductFeedbackStatusFilter = "all" | AdminProductFeedbackStatus;
+export type AdminProductFeedbackSort = "created_desc" | "updated_desc";
 
 export type AdminConversationUser = {
   id: string;
@@ -230,6 +236,63 @@ export type AdminApiAuditDetailResponse = {
     firstSeenAt: string | null;
     lastSeenAt: string | null;
   };
+};
+
+export type AdminProductFeedbackRecord = {
+  id: string;
+  organizationId?: string;
+  userId?: string;
+  threadId?: string;
+  type: AdminProductFeedbackType;
+  severity?: AdminProductFeedbackSeverity;
+  description: string;
+  context?: unknown;
+  status: AdminProductFeedbackStatus;
+  assigneeUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+  user: AdminConversationUser | null;
+};
+
+export type AdminProductFeedbackListInput = {
+  query?: string;
+  type?: AdminProductFeedbackTypeFilter;
+  status?: AdminProductFeedbackStatusFilter;
+  sort?: AdminProductFeedbackSort;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AdminProductFeedbackListResponse = {
+  filters: {
+    query: string;
+    type: AdminProductFeedbackTypeFilter;
+    status: AdminProductFeedbackStatusFilter;
+    sort: AdminProductFeedbackSort;
+  };
+  summary: {
+    totalFeedback: number;
+    openCount: number;
+    triagedCount: number;
+    inProgressCount: number;
+    resolvedCount: number;
+    closedCount: number;
+    bugCount: number;
+    featureRequestCount: number;
+    usabilityIssueCount: number;
+    uniqueUsers: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  feedback: AdminProductFeedbackRecord[];
+};
+
+export type AdminProductFeedbackDetailResponse = {
+  feedback: AdminProductFeedbackRecord;
 };
 
 export type AdminUser = {

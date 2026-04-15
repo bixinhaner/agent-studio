@@ -1,5 +1,5 @@
 import { Button, Space, Tooltip } from "antd";
-import { LayoutPanelLeft, Settings, PanelRightClose, PanelRightOpen, Shield } from "lucide-react";
+import { LayoutPanelLeft, MessageSquareText, Settings, PanelRightClose, PanelRightOpen, Shield } from "lucide-react";
 
 import type { WorkbenchTab } from "./layout-state";
 
@@ -14,6 +14,7 @@ export function PortalTopBar(props: {
   onOpenAdvancedSettings(): void;
   onToggleDrawer(): void;
   onOpenAdmin?: () => void;
+  onOpenFeedback?: () => void;
   runtimeSummary?: string;
   drawerOpen?: boolean;
   activeDrawerTab?: WorkbenchTab;
@@ -59,6 +60,18 @@ export function PortalTopBar(props: {
         ) : null}
 
         <Space size={8} className="portal-topbar-action-group">
+          {props.onOpenFeedback ? (
+            <Tooltip title="Send feedback" placement="bottom">
+              <Button
+                type="text"
+                className="portal-topbar-ghost-btn"
+                icon={<MessageSquareText size={18} />}
+                onClick={props.onOpenFeedback}
+                style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+                aria-label="Send feedback"
+              />
+            </Tooltip>
+          ) : null}
           {props.onOpenAdmin ? (
             <Tooltip title="Open admin console" placement="bottom">
               <Button

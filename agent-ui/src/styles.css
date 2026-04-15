@@ -6273,6 +6273,57 @@ body.public-share-mode #root {
   margin-top: 8px;
 }
 
+.product-feedback-modal-help {
+  margin: 0 0 16px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.product-feedback-field {
+  margin-bottom: 14px;
+}
+
+.product-feedback-field .ant-input-textarea-show-count::after {
+  display: block;
+  margin-top: 8px;
+  line-height: 18px;
+  color: #64748b;
+}
+
+.product-feedback-context-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.product-feedback-context-toggle input {
+  margin-top: 3px;
+}
+
+.product-feedback-error,
+.product-feedback-success {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.product-feedback-error {
+  color: #dc2626;
+}
+
+.product-feedback-success {
+  color: #047857;
+}
+
+.product-feedback-modal .ant-modal-footer {
+  margin-top: 10px;
+}
+
 /* Composer action buttons */
 .aui-composer-send:not(:disabled),
 .aui-composer-send-btn:not(:disabled) {

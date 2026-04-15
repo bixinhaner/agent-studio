@@ -13,6 +13,10 @@ import type {
   AdminCustomerOrganizationListResponse,
   AdminCustomerOrganizationUpdateInput,
   AdminExternalInviteInput,
+  AdminProductFeedbackDetailResponse,
+  AdminProductFeedbackListInput,
+  AdminProductFeedbackListResponse,
+  AdminProductFeedbackStatus,
   AdminOverview,
   AdminUserDetailResponse,
   AdminUserListResponse,
@@ -75,6 +79,36 @@ export async function fetchAdminApiAuditDetail(
   eventId: string
 ): Promise<AdminApiAuditDetailResponse> {
   return api<AdminApiAuditDetailResponse>(`/api/admin/conversations/api-usage/${encodeURIComponent(eventId)}`);
+}
+
+export async function fetchAdminProductFeedbackList(
+  input: AdminProductFeedbackListInput = {}
+): Promise<AdminProductFeedbackListResponse> {
+  const params = new URLSearchParams();
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.type) params.set("type", input.type);
+  if (input.status) params.set("status", input.status);
+  if (input.sort) params.set("sort", input.sort);
+  if (typeof input.page === "number") params.set("page", String(input.page));
+  if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
+  const query = params.toString();
+  return api<AdminProductFeedbackListResponse>(`/api/admin/product-feedback${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAdminProductFeedbackDetail(
+  feedbackId: string
+): Promise<AdminProductFeedbackDetailResponse> {
+  return api<AdminProductFeedbackDetailResponse>(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}`);
+}
+
+export async function updateAdminProductFeedbackStatus(
+  feedbackId: string,
+  status: AdminProductFeedbackStatus
+): Promise<AdminProductFeedbackDetailResponse> {
+  return api<AdminProductFeedbackDetailResponse>(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}`, {
+    method: "PATCH",
+    json: { status }
+  });
 }
 
 export async function fetchAdminUsers(): Promise<AdminUserListResponse> {

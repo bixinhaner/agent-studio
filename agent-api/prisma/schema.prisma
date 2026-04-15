@@ -54,6 +54,8 @@ model User {
   broadcastMessagesCreated BroadcastMessage[] @relation("BroadcastMessageCreatedBy")
   broadcastMessagesPublished BroadcastMessage[] @relation("BroadcastMessagePublishedBy")
   knowledgeCaptureMarks KnowledgeCaptureMark[] @relation("KnowledgeCaptureMarkMarkedBy")
+  productFeedbackSubmitted ProductFeedback[] @relation("ProductFeedbackReporter")
+  productFeedbackAssigned ProductFeedback[] @relation("ProductFeedbackAssignee")
 
   @@index([email])
   @@index([status, role])
@@ -76,6 +78,7 @@ model Organization {
   invites        OrganizationInvite[]         @relation("OrganizationInviteOrganization")
   loginChallenges LoginChallenge[]            @relation("LoginChallengeOrganization")
   roleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentOrganization")
+  productFeedback ProductFeedback[] @relation("ProductFeedbackOrganization")
 
   @@index([type, status])
   @@map("organizations")
@@ -401,11 +404,39 @@ model Thread {
   publicShares    ThreadPublicShare[]
   inboxItems      InboxItem[]
   knowledgeCaptureMark KnowledgeCaptureMark?
+  productFeedback ProductFeedback[] @relation("ProductFeedbackThread")
 
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
   @@index([userId])
   @@map("threads")
+}
+
+model ProductFeedback {
+  id              String        @id @default(cuid())
+  organizationId  String?       @map("organization_id")
+  userId          String?       @map("user_id")
+  threadId        String?       @map("thread_id")
+  type            String
+  severity        String?
+  description     String
+  context         Json?
+  status          String        @default("open")
+  assigneeUserId  String?       @map("assignee_user_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  organization    Organization? @relation("ProductFeedbackOrganization", fields: [organizationId], references: [id], onDelete: SetNull)
+  user            User?         @relation("ProductFeedbackReporter", fields: [userId], references: [id], onDelete: SetNull)
+  thread          Thread?       @relation("ProductFeedbackThread", fields: [threadId], references: [id], onDelete: SetNull)
+  assignee        User?         @relation("ProductFeedbackAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+  @@index([threadId])
+  @@index([userId, createdAt])
+  @@map("product_feedback")
 }
 
 model Message {

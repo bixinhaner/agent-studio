@@ -92,6 +92,10 @@ import { PermissionRepository, type PermissionRepositoryDb } from "./persistence
 import { UserRoleRepository, type UserRoleRepositoryDb } from "./persistence/user-role-repository.js";
 import { RolePermissionRepository, type RolePermissionRepositoryDb } from "./persistence/role-permission-repository.js";
 import { AdminAuditLogRepository, type AdminAuditLogRepositoryDb } from "./persistence/admin-audit-log-repository.js";
+import {
+  ProductFeedbackRepository,
+  type ProductFeedbackRepositoryDb
+} from "./persistence/product-feedback-repository.js";
 import { AlertEventRepository, type AlertEventRepositoryDb } from "./persistence/alert-event-repository.js";
 import { AlertRuleRepository, type AlertRuleRepositoryDb } from "./persistence/alert-rule-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
@@ -146,6 +150,7 @@ const permissions = new PermissionRepository(db as unknown as PermissionReposito
 const userRoles = new UserRoleRepository(db as unknown as UserRoleRepositoryDb);
 const rolePermissions = new RolePermissionRepository(db as unknown as RolePermissionRepositoryDb);
 const adminAuditLogs = new AdminAuditLogRepository(db as unknown as AdminAuditLogRepositoryDb);
+const productFeedback = new ProductFeedbackRepository(db as unknown as ProductFeedbackRepositoryDb);
 const alertRules = new AlertRuleRepository(db as unknown as AlertRuleRepositoryDb);
 const alertEvents = new AlertEventRepository(db as unknown as AlertEventRepositoryDb);
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
@@ -1575,7 +1580,8 @@ registerCommonApiRoutes(app, {
   }),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    productFeedback
   }),
   resourcesPortalRouter: createResourcesPortalRouter({
     knowledgeSets,

@@ -19,7 +19,10 @@ import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
   fetchAdminConversationAuditDetail,
-  fetchAdminConversationAuditList
+  fetchAdminConversationAuditList,
+  fetchAdminProductFeedbackDetail,
+  fetchAdminProductFeedbackList,
+  updateAdminProductFeedbackStatus
 } from "./api";
 import type {
   AdminApiAuditDeliveryFilter,
@@ -36,10 +39,18 @@ import type {
   AdminConversationStatusFilter,
   AdminConversationSummary,
   AdminConversationTranscriptMessage,
-  AdminConversationUser
+  AdminConversationUser,
+  AdminProductFeedbackDetailResponse,
+  AdminProductFeedbackListResponse,
+  AdminProductFeedbackRecord,
+  AdminProductFeedbackSort,
+  AdminProductFeedbackStatus,
+  AdminProductFeedbackStatusFilter,
+  AdminProductFeedbackType,
+  AdminProductFeedbackTypeFilter
 } from "./types";
 
-type AuditMode = "conversations" | "api";
+type AuditMode = "conversations" | "api" | "product_feedback";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
 
 type ConversationAuditHashState = {
@@ -100,6 +111,45 @@ function feedbackLabel(type: AdminConversationFeedback["type"]): string {
 
 function feedbackColor(type: AdminConversationFeedback["type"]): string {
   return type === "positive" ? "success" : "error";
+}
+
+function productFeedbackTypeLabel(type: AdminProductFeedbackType): string {
+  if (type === "feature_request") return "功能建议";
+  if (type === "usability_issue") return "体验问题";
+  if (type === "other") return "其他";
+  return "Bug";
+}
+
+function productFeedbackStatusLabel(status: AdminProductFeedbackStatus): string {
+  if (status === "triaged") return "已分诊";
+  if (status === "in_progress") return "处理中";
+  if (status === "resolved") return "已解决";
+  if (status === "closed") return "已关闭";
+  return "待处理";
+}
+
+function productFeedbackSeverityLabel(severity: AdminProductFeedbackRecord["severity"]): string {
+  if (severity === "blocking") return "阻塞";
+  if (severity === "high") return "高";
+  if (severity === "low") return "低";
+  if (severity === "medium") return "中";
+  return "未标记";
+}
+
+function productFeedbackStatusColor(status: AdminProductFeedbackStatus): string {
+  if (status === "resolved" || status === "closed") return "success";
+  if (status === "in_progress") return "processing";
+  if (status === "triaged") return "warning";
+  return "error";
+}
+
+function formatJsonBlock(value: unknown): string {
+  if (value === undefined || value === null) return "无上下文";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
@@ -586,6 +636,285 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
   );
 }
 
+const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: AdminProductFeedbackTypeFilter; label: string }> = [
+  { value: "all", label: "全部类型" },
+  { value: "bug", label: "Bug" },
+  { value: "feature_request", label: "功能建议" },
+  { value: "usability_issue", label: "体验问题" },
+  { value: "other", label: "其他" }
+];
+
+const PRODUCT_FEEDBACK_STATUS_OPTIONS: Array<{ value: AdminProductFeedbackStatusFilter; label: string }> = [
+  { value: "all", label: "全部状态" },
+  { value: "open", label: "待处理" },
+  { value: "triaged", label: "已分诊" },
+  { value: "in_progress", label: "处理中" },
+  { value: "resolved", label: "已解决" },
+  { value: "closed", label: "已关闭" }
+];
+
+const PRODUCT_FEEDBACK_STATUS_UPDATE_OPTIONS: Array<{ value: AdminProductFeedbackStatus; label: string }> = PRODUCT_FEEDBACK_STATUS_OPTIONS
+  .filter((item): item is { value: AdminProductFeedbackStatus; label: string } => item.value !== "all");
+
+const PRODUCT_FEEDBACK_SORT_OPTIONS: Array<{ value: AdminProductFeedbackSort; label: string }> = [
+  { value: "created_desc", label: "最近提交" },
+  { value: "updated_desc", label: "最近处理" }
+];
+
+function ProductFeedbackWorkspace() {
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<AdminProductFeedbackTypeFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<AdminProductFeedbackStatusFilter>("all");
+  const [sort, setSort] = useState<AdminProductFeedbackSort>("created_desc");
+  const [page, setPage] = useState(1);
+
+  const [listLoading, setListLoading] = useState(true);
+  const [listData, setListData] = useState<AdminProductFeedbackListResponse | null>(null);
+  const [selectedId, setSelectedId] = useState("");
+  const [detailData, setDetailData] = useState<AdminProductFeedbackDetailResponse | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [errorText, setErrorText] = useState("");
+
+  const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    setErrorText("");
+    fetchAdminProductFeedbackList({
+      query: deferredQuery || undefined,
+      type: typeFilter,
+      status: statusFilter,
+      sort,
+      page,
+      pageSize: 20
+    })
+      .then((res) => {
+        if (!active) return;
+        setListData(res);
+        if (!selectedId && res.feedback[0]?.id) {
+          setSelectedId(res.feedback[0].id);
+        }
+      })
+      .catch((error) => {
+        if (active) setErrorText(error instanceof Error ? error.message : "加载系统反馈失败");
+      })
+      .finally(() => active && setListLoading(false));
+    return () => { active = false; };
+  }, [deferredQuery, page, selectedId, sort, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetailData(null);
+      return;
+    }
+    let active = true;
+    setDetailLoading(true);
+    setErrorText("");
+    fetchAdminProductFeedbackDetail(selectedId)
+      .then((res) => active && setDetailData(res))
+      .catch((error) => {
+        if (active) {
+          setErrorText(error instanceof Error ? error.message : "加载系统反馈详情失败");
+          setDetailData(null);
+        }
+      })
+      .finally(() => active && setDetailLoading(false));
+    return () => { active = false; };
+  }, [selectedId]);
+
+  return (
+    <div className="admin-split-layout">
+      <div className="admin-split-master">
+        <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
+          <Input
+            prefix={<Search size={14} />}
+            placeholder="搜索反馈内容、用户或上下文..."
+            value={query}
+            onChange={e => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+            style={{ marginBottom: 12 }}
+          />
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Select
+              size="small"
+              value={typeFilter}
+              options={PRODUCT_FEEDBACK_TYPE_OPTIONS}
+              onChange={(value) => {
+                setTypeFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 96 }}
+            />
+            <Select
+              size="small"
+              value={statusFilter}
+              options={PRODUCT_FEEDBACK_STATUS_OPTIONS}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 96 }}
+            />
+            <Select size="small" value={sort} options={PRODUCT_FEEDBACK_SORT_OPTIONS} onChange={setSort} style={{ width: 96 }} />
+          </Space>
+        </div>
+
+        <div className="admin-master-list">
+          {listLoading ? <Spin style={{ margin: 'auto', padding: 24 }} /> :
+           listData?.feedback.length === 0 ? <Empty style={{ margin: 'auto' }} /> :
+           listData?.feedback.map(item => (
+             <button
+               key={item.id}
+               className={`admin-master-item ${selectedId === item.id ? 'active' : ''}`}
+               onClick={() => setSelectedId(item.id)}
+             >
+               <div className="admin-master-header">
+                 <span className="admin-master-title">{productFeedbackTypeLabel(item.type)}</span>
+                 <span className="admin-master-time">{formatLocalDateTime(item.createdAt).split(' ')[1]}</span>
+               </div>
+               <div className="admin-master-preview">
+                 {item.description || "无反馈内容"}
+               </div>
+               <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                 <Tag color={productFeedbackStatusColor(item.status)} style={{ marginInlineEnd: 0 }}>
+                   {productFeedbackStatusLabel(item.status)}
+                 </Tag>
+                 {item.severity ? <Tag style={{ marginInlineEnd: 0 }}>影响: {productFeedbackSeverityLabel(item.severity)}</Tag> : null}
+                 <span style={{ fontSize: 11, opacity: selectedId === item.id ? 0.8 : 0.5 }}>{displayUserLabel(item.user)}</span>
+               </div>
+             </button>
+           ))}
+        </div>
+        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--admin-color-border)', textAlign: 'center' }}>
+          <Pagination simple current={page} total={listData?.page.totalItems || 0} pageSize={20} onChange={setPage} />
+        </div>
+      </div>
+
+      <div className="admin-split-detail">
+        {errorText ? <Alert type="error" message={errorText} showIcon style={{ margin: 16 }} /> : null}
+        <ProductFeedbackDetail
+          detail={detailData}
+          loading={detailLoading}
+          onStatusChange={(nextStatus) => {
+            if (!detailData?.feedback) return;
+            const feedbackId = detailData.feedback.id;
+            setDetailLoading(true);
+            updateAdminProductFeedbackStatus(feedbackId, nextStatus)
+              .then((next) => {
+                setDetailData(next);
+                setListData((prev) => prev
+                  ? {
+                      ...prev,
+                      feedback: prev.feedback.map((item) => item.id === feedbackId ? next.feedback : item)
+                    }
+                  : prev
+                );
+              })
+              .catch((error) => setErrorText(error instanceof Error ? error.message : "更新系统反馈失败"))
+              .finally(() => setDetailLoading(false));
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ProductFeedbackDetail(props: {
+  detail: AdminProductFeedbackDetailResponse | null;
+  loading: boolean;
+  onStatusChange(status: AdminProductFeedbackStatus): void;
+}) {
+  if (props.loading && !props.detail) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Spin size="large" /></div>;
+  }
+  if (!props.detail) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--admin-color-subtle)' }}>
+        <Empty description="选择左侧反馈查看详情" />
+      </div>
+    );
+  }
+
+  const { feedback } = props.detail;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--admin-color-border)', background: 'var(--admin-color-surface)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px 0' }}>
+              {productFeedbackTypeLabel(feedback.type)}
+            </h2>
+            <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>
+              {displayUserLabel(feedback.user)} • {formatLocalDateTime(feedback.createdAt)}
+            </div>
+          </div>
+          <Space>
+            <Select
+              size="small"
+              value={feedback.status}
+              options={PRODUCT_FEEDBACK_STATUS_UPDATE_OPTIONS}
+              onChange={props.onStatusChange}
+              style={{ width: 104 }}
+              disabled={props.loading}
+            />
+            <Tag color={productFeedbackStatusColor(feedback.status)}>{productFeedbackStatusLabel(feedback.status)}</Tag>
+          </Space>
+        </div>
+
+        <div style={{ display: 'flex', gap: 24, fontSize: 13, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <MessageSquareText size={14} />
+            <span>类型: {productFeedbackTypeLabel(feedback.type)}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <Activity size={14} />
+            <span>影响: {productFeedbackSeverityLabel(feedback.severity)}</span>
+          </div>
+          {feedback.threadId ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+              <HardDrive size={14} />
+              <span>关联会话: {feedback.threadId.slice(0, 8)}</span>
+              <Button size="small" type="link" href={`#admin/conversations?conversation=${encodeURIComponent(feedback.threadId)}`}>
+                查看会话
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px', background: '#f9fafb' }}>
+        <div style={{ marginBottom: 24 }}>
+          <Typography.Title level={5} style={{ fontSize: 14 }}>反馈内容</Typography.Title>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid var(--admin-color-border)', fontSize: 14 }}>
+            {feedback.description}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <Typography.Title level={5} style={{ fontSize: 14 }}>提交信息</Typography.Title>
+          <div style={{ background: '#fff', padding: 16, borderRadius: 8, border: '1px solid var(--admin-color-border)', display: 'grid', gap: 8, fontSize: 13 }}>
+            <div>用户 ID: {feedback.userId || "未记录"}</div>
+            <div>组织 ID: {feedback.organizationId || "未记录"}</div>
+            <div>创建时间: {formatLocalDateTime(feedback.createdAt)}</div>
+            <div>更新时间: {formatLocalDateTime(feedback.updatedAt)}</div>
+          </div>
+        </div>
+
+        <div>
+          <Typography.Title level={5} style={{ fontSize: 14 }}>现场上下文</Typography.Title>
+          <div style={{ background: '#282c34', color: '#abb2bf', padding: 16, borderRadius: 8, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 12 }}>
+            {formatJsonBlock(feedback.context)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConversationAuditView() {
   const [mode, setMode] = useState<AuditMode>("conversations");
 
@@ -597,13 +926,20 @@ export function ConversationAuditView() {
           onChange={k => setMode(k as AuditMode)} 
           items={[
             { key: "conversations", label: "用户交互会话" },
+            { key: "product_feedback", label: "系统反馈" },
             { key: "api", label: "底层 API 调用" }
           ]}
           style={{ marginBottom: -12 }}
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {mode === "conversations" ? <ConversationWorkspace /> : <ApiAuditWorkspace />}
+        {mode === "conversations" ? (
+          <ConversationWorkspace />
+        ) : mode === "product_feedback" ? (
+          <ProductFeedbackWorkspace />
+        ) : (
+          <ApiAuditWorkspace />
+        )}
       </div>
     </div>
   );

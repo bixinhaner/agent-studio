@@ -8,6 +8,13 @@ import {
   type ThreadRecord,
   type ThreadRepositoryDb
 } from "../persistence/thread-repository.js";
+import {
+  ProductFeedbackRepository,
+  type ProductFeedbackRecord,
+  type ProductFeedbackRepositoryDb,
+  type ProductFeedbackStatus,
+  type ProductFeedbackType
+} from "../persistence/product-feedback-repository.js";
 
 const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
@@ -43,7 +50,7 @@ type IntegrationInstanceAuditRow = {
   status: string;
 };
 
-type ConversationAuditDb = ThreadRepositoryDb & {
+type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
   user: {
     findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<ConversationAuditUserRow[]>;
     findUnique(args: { where: { id: string } }): Promise<ConversationAuditUserRow | null>;
@@ -72,6 +79,9 @@ type ConversationSort = "updated_desc" | "created_desc";
 type ApiAuditResultFilter = "all" | "success" | "failed";
 type ApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
 type ApiAuditSort = "created_desc" | "tokens_desc" | "latency_desc";
+type ProductFeedbackTypeFilter = "all" | ProductFeedbackType;
+type ProductFeedbackStatusFilter = "all" | ProductFeedbackStatus;
+type ProductFeedbackSort = "created_desc" | "updated_desc";
 
 type ConversationAuditUser = {
   id: string;
@@ -178,6 +188,34 @@ type ApiAuditRecord = {
   responseStartedAt: string | null;
   responseReadyAt: string | null;
   responseCompletedAt: string | null;
+};
+
+type ProductFeedbackListResponse = {
+  filters: {
+    query: string;
+    type: ProductFeedbackTypeFilter;
+    status: ProductFeedbackStatusFilter;
+    sort: ProductFeedbackSort;
+  };
+  summary: {
+    totalFeedback: number;
+    openCount: number;
+    triagedCount: number;
+    inProgressCount: number;
+    resolvedCount: number;
+    closedCount: number;
+    bugCount: number;
+    featureRequestCount: number;
+    usabilityIssueCount: number;
+    uniqueUsers: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  feedback: ProductFeedbackRecord[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -296,6 +334,24 @@ function parseApiDeliveryFilter(value: unknown): ApiAuditDeliveryFilter {
 
 function parseApiSort(value: unknown): ApiAuditSort {
   return value === "tokens_desc" || value === "latency_desc" ? value : "created_desc";
+}
+
+function parseProductFeedbackType(value: unknown): ProductFeedbackTypeFilter {
+  if (value === "bug" || value === "feature_request" || value === "usability_issue" || value === "other") {
+    return value;
+  }
+  return "all";
+}
+
+function parseProductFeedbackStatus(value: unknown): ProductFeedbackStatusFilter {
+  if (value === "open" || value === "triaged" || value === "in_progress" || value === "resolved" || value === "closed") {
+    return value;
+  }
+  return "all";
+}
+
+function parseProductFeedbackSort(value: unknown): ProductFeedbackSort {
+  return value === "updated_desc" ? value : "created_desc";
 }
 
 function normalizeUser(row: ConversationAuditUserRow | null | undefined): ConversationAuditUser | null {
@@ -663,6 +719,66 @@ function apiLastSeenAt(records: ApiAuditRecord[], clientIp: string | null): stri
   return matches[0] ?? null;
 }
 
+function matchesProductFeedbackType(record: ProductFeedbackRecord, filter: ProductFeedbackTypeFilter): boolean {
+  return filter === "all" || record.type === filter;
+}
+
+function matchesProductFeedbackStatus(record: ProductFeedbackRecord, filter: ProductFeedbackStatusFilter): boolean {
+  return filter === "all" || record.status === filter;
+}
+
+function matchesProductFeedbackQuery(record: ProductFeedbackRecord, query: string | undefined): boolean {
+  const normalized = trimOrUndefined(query)?.toLowerCase();
+  if (!normalized) return true;
+  const contextText =
+    record.context && typeof record.context === "object"
+      ? JSON.stringify(record.context).slice(0, 6000)
+      : typeof record.context === "string"
+        ? record.context
+        : "";
+  const haystack = [
+    record.id,
+    record.organizationId,
+    record.userId,
+    record.threadId,
+    record.type,
+    record.severity,
+    record.status,
+    record.description,
+    record.user?.displayName,
+    record.user?.email,
+    contextText
+  ]
+    .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
+    .join("\n");
+  return haystack.includes(normalized);
+}
+
+function compareProductFeedbackRecord(
+  left: ProductFeedbackRecord,
+  right: ProductFeedbackRecord,
+  sort: ProductFeedbackSort
+): number {
+  const leftValue = sort === "updated_desc" ? Date.parse(left.updatedAt) : Date.parse(left.createdAt);
+  const rightValue = sort === "updated_desc" ? Date.parse(right.updatedAt) : Date.parse(right.createdAt);
+  return rightValue - leftValue;
+}
+
+function buildProductFeedbackAggregateSummary(records: ProductFeedbackRecord[]): ProductFeedbackListResponse["summary"] {
+  return {
+    totalFeedback: records.length,
+    openCount: records.filter((item) => item.status === "open").length,
+    triagedCount: records.filter((item) => item.status === "triaged").length,
+    inProgressCount: records.filter((item) => item.status === "in_progress").length,
+    resolvedCount: records.filter((item) => item.status === "resolved").length,
+    closedCount: records.filter((item) => item.status === "closed").length,
+    bugCount: records.filter((item) => item.type === "bug").length,
+    featureRequestCount: records.filter((item) => item.type === "feature_request").length,
+    usabilityIssueCount: records.filter((item) => item.type === "usability_issue").length,
+    uniqueUsers: new Set(records.map((item) => item.userId).filter(Boolean)).size
+  };
+}
+
 export function createConversationAuditRouter(options: {
   db?: ConversationAuditDb;
   getDb?: () => ConversationAuditDb;
@@ -697,6 +813,104 @@ export function createConversationAuditRouter(options: {
     const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
     return events.map((event) => buildApiAuditRecord(event, integrationMap));
   }
+
+  async function listProductFeedbackRecords(): Promise<ProductFeedbackRecord[]> {
+    const db = getDb();
+    return new ProductFeedbackRepository(db as unknown as ProductFeedbackRepositoryDb).list();
+  }
+
+  router.get("/product-feedback", async (req: Request, res: Response) => {
+    try {
+      const query = trimOrUndefined(req.query.query);
+      const type = parseProductFeedbackType(req.query.type);
+      const status = parseProductFeedbackStatus(req.query.status);
+      const sort = parseProductFeedbackSort(req.query.sort);
+      const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
+      const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
+
+      const filtered = (await listProductFeedbackRecords())
+        .filter((item) => matchesProductFeedbackType(item, type))
+        .filter((item) => matchesProductFeedbackStatus(item, status))
+        .filter((item) => matchesProductFeedbackQuery(item, query))
+        .sort((left, right) => compareProductFeedbackRecord(left, right, sort));
+
+      const totalItems = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const start = (page - 1) * pageSize;
+      const feedback = filtered.slice(start, start + pageSize);
+
+      res.json({
+        filters: {
+          query: query ?? "",
+          type,
+          status,
+          sort
+        },
+        summary: buildProductFeedbackAggregateSummary(filtered),
+        page: {
+          page,
+          pageSize,
+          totalItems,
+          totalPages
+        },
+        feedback
+      } satisfies ProductFeedbackListResponse);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载系统反馈列表失败";
+      res.status(500).json({ detail });
+    }
+  });
+
+  router.get("/product-feedback/:feedbackId", async (req: Request, res: Response) => {
+    try {
+      const feedbackId = trimOrUndefined(req.params.feedbackId);
+      if (!feedbackId) {
+        res.status(400).json({ detail: "feedbackId 不合法" });
+        return;
+      }
+
+      const repository = new ProductFeedbackRepository(getDb() as unknown as ProductFeedbackRepositoryDb);
+      const feedback = await repository.get(feedbackId);
+      if (!feedback) {
+        res.status(404).json({ detail: "系统反馈不存在" });
+        return;
+      }
+
+      res.json({ feedback });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载系统反馈详情失败";
+      res.status(500).json({ detail });
+    }
+  });
+
+  router.patch("/product-feedback/:feedbackId", async (req: Request, res: Response) => {
+    try {
+      const feedbackId = trimOrUndefined(req.params.feedbackId);
+      if (!feedbackId) {
+        res.status(400).json({ detail: "feedbackId 不合法" });
+        return;
+      }
+      const status = parseProductFeedbackStatus(req.body?.status);
+      if (status === "all") {
+        res.status(400).json({ detail: "status 不合法" });
+        return;
+      }
+
+      const repository = new ProductFeedbackRepository(getDb() as unknown as ProductFeedbackRepositoryDb);
+      const existing = await repository.get(feedbackId);
+      if (!existing) {
+        res.status(404).json({ detail: "系统反馈不存在" });
+        return;
+      }
+
+      const feedback = await repository.updateStatus(feedbackId, status);
+      res.json({ feedback });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "更新系统反馈失败";
+      res.status(500).json({ detail });
+    }
+  });
 
   router.get("/conversations", async (req: Request, res: Response) => {
     try {
