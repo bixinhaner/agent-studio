@@ -3173,6 +3173,23 @@ body {
   color: #64748b;
 }
 
+.ops-analytics-tabs {
+  margin-top: 16px;
+}
+
+.ops-analytics-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.ops-analytics-tabs .ant-tabs-tab {
+  padding: 10px 14px;
+}
+
+.ops-analytics-tabs .ops-analytics-table-section,
+.ops-analytics-tabs .ops-analytics-tab-panel {
+  margin-top: 0;
+}
+
 .ops-analytics-breakdown-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3272,6 +3289,17 @@ body {
 .ops-analytics-code-stack span {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.ops-analytics-session-link {
+  color: #0f62fe;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ops-analytics-session-link:hover {
+  color: #0043ce;
+  text-decoration: underline;
 }
 
 .ops-analytics-pagination {

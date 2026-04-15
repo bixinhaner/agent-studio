@@ -14,6 +14,7 @@ import {
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { formatUsdAmount } from "../../lib/formatters";
 import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
@@ -41,6 +42,11 @@ import type {
 type AuditMode = "conversations" | "api";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
 
+type ConversationAuditHashState = {
+  query: string;
+  conversationId: string;
+};
+
 const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
   { value: "regular", label: "活跃线程" },
@@ -65,6 +71,19 @@ function formatLocalDateTime(value: string | null | undefined): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function readConversationAuditHashState(): ConversationAuditHashState {
+  if (typeof window === "undefined") return { query: "", conversationId: "" };
+  const hash = window.location.hash;
+  const queryStart = hash.indexOf("?");
+  if (queryStart < 0) return { query: "", conversationId: "" };
+  const params = new URLSearchParams(hash.slice(queryStart + 1));
+  const conversationId = params.get("conversation")?.trim() ?? "";
+  return {
+    conversationId,
+    query: params.get("query")?.trim() || conversationId
+  };
 }
 
 function displayUserLabel(user: AdminConversationUser | null): string {
@@ -265,7 +284,8 @@ function ConversationDetail(props: {
 }
 
 function ConversationWorkspace() {
-  const [query, setQuery] = useState("");
+  const [initialHashState] = useState(readConversationAuditHashState);
+  const [query, setQuery] = useState(initialHashState.query);
   const [statusFilter, setStatusFilter] = useState<AdminConversationStatusFilter>("all");
   const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
   const [sort, setSort] = useState<AdminConversationSort>("updated_desc");
@@ -274,11 +294,27 @@ function ConversationWorkspace() {
   const [listLoading, setListLoading] = useState(true);
   const [listData, setListData] = useState<AdminConversationListResponse | null>(null);
   
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(initialHashState.conversationId);
   const [detailData, setDetailData] = useState<AdminConversationDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleHashChange = () => {
+      const next = readConversationAuditHashState();
+      if (next.query) {
+        setQuery(next.query);
+        setPage(1);
+      }
+      if (next.conversationId) {
+        setSelectedId(next.conversationId);
+      }
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -519,7 +555,7 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
             <HardDrive size={14} />
-            <span>预估成本: {record.metrics.estimatedCost}</span>
+            <span>预估成本: {formatUsdAmount(record.metrics.estimatedCost)}</span>
           </div>
         </div>
       </div>

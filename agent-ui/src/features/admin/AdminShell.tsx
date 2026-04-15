@@ -131,12 +131,12 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   conversations: {
     id: "conversations",
-    title: "审计工作台",
+    title: "对话记录",
     description: "统一查看用户会话、反馈记录与 API 调用轨迹。",
     scope: "会话与 API 调用",
     cadence: "建议持续巡检",
     group: "operations",
-    keywords: ["会话", "审计", "api"],
+    keywords: ["会话", "对话", "审计", "api"],
     icon: <MessageSquareText size={18} />
   },
   monitoring: {
@@ -238,7 +238,8 @@ const NAVIGATION_GROUPS: AdminNavigationGroupView[] = GROUPS.map((group) => ({
 
 function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
-  const value = decodeURIComponent(hash.slice(ADMIN_HASH_PREFIX.length)).trim();
+  const rawValue = hash.slice(ADMIN_HASH_PREFIX.length).split("?")[0] ?? "";
+  const value = decodeURIComponent(rawValue).trim();
   if (!SECTION_ORDER.includes(value as AdminConsoleSection)) return null;
   return value as AdminConsoleSection;
 }

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Alert, Button, Card, Spin, Tag, Typography } from "antd";
 
+import { formatUsdAmount } from "../../lib/formatters";
 import { createCostProfile, fetchCostProfiles, updateCostProfile } from "./api";
 import type { CostProfileRecord } from "./types";
 
@@ -72,7 +73,7 @@ export function CostProfilesView() {
           <Typography.Title level={4} className="admin-card-heading">
             模型定价
           </Typography.Title>
-          <Typography.Paragraph>按每 1M tokens 配置输入、缓存输入、输出价格和内部成本系数。</Typography.Paragraph>
+          <Typography.Paragraph>按每 1M tokens 配置输入、缓存输入、输出价格，金额单位为美元 USD；内部系数用于内部价值折算。</Typography.Paragraph>
         </div>
       </div>
       <form className="monitoring-form" onSubmit={handleSubmit}>
@@ -81,11 +82,11 @@ export function CostProfilesView() {
           <input className="field-input" value={model} onChange={(event) => setModel(event.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">输入 / 1M tokens</span>
+          <span className="field-label">输入 / 1M tokens (USD)</span>
           <input className="field-input" value={inputTokenPrice} onChange={(event) => setInputTokenPrice(event.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">缓存输入 / 1M tokens</span>
+          <span className="field-label">缓存输入 / 1M tokens (USD)</span>
           <input
             className="field-input"
             value={cachedInputTokenPrice}
@@ -93,7 +94,7 @@ export function CostProfilesView() {
           />
         </label>
         <label className="field">
-          <span className="field-label">输出 / 1M tokens</span>
+          <span className="field-label">输出 / 1M tokens (USD)</span>
           <input className="field-input" value={outputTokenPrice} onChange={(event) => setOutputTokenPrice(event.target.value)} />
         </label>
         <label className="field">
@@ -116,9 +117,9 @@ export function CostProfilesView() {
           <thead>
             <tr>
               <th>模型</th>
-              <th>输入 / 1M</th>
-              <th>缓存 / 1M</th>
-              <th>输出 / 1M</th>
+              <th>输入 / 1M (USD)</th>
+              <th>缓存 / 1M (USD)</th>
+              <th>输出 / 1M (USD)</th>
               <th>内部系数</th>
               <th>状态</th>
               <th>操作</th>
@@ -128,9 +129,9 @@ export function CostProfilesView() {
             {costProfiles.map((profile) => (
               <tr key={profile.id}>
                 <td>{profile.model}</td>
-                <td>{profile.inputTokenPrice}</td>
-                <td>{profile.cachedInputTokenPrice}</td>
-                <td>{profile.outputTokenPrice}</td>
+                <td>{formatUsdAmount(profile.inputTokenPrice)}</td>
+                <td>{formatUsdAmount(profile.cachedInputTokenPrice)}</td>
+                <td>{formatUsdAmount(profile.outputTokenPrice)}</td>
                 <td>{profile.internalCostMultiplier}</td>
                 <td>
                   <Tag color={profile.isActive ? "success" : "default"}>{profile.isActive ? "启用" : "停用"}</Tag>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Card, Spin, Typography } from "antd";
 
+import { formatUsdAmount } from "../../lib/formatters";
 import { fetchMonitoringRankings } from "./api";
 import type { MonitoringRankingsResponse } from "./types";
 
@@ -30,8 +31,8 @@ function RankingTable(props: { title: string; rows: Array<Record<string, string 
                 <tr key={`${row.label}`}>
                   <td>{row.label}</td>
                   <td>{formatCount(Number(row.requestCount))}</td>
-                  <td>{row.estimatedCost}</td>
-                  <td>{row.internalCost}</td>
+                  <td>{formatUsdAmount(row.estimatedCost)}</td>
+                  <td>{formatUsdAmount(row.internalCost)}</td>
                 </tr>
               ))}
             </tbody>

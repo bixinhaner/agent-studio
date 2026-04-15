@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Card, Spin, Statistic, Tag, Typography } from "antd";
 
+import { formatUsdAmount } from "../../lib/formatters";
 import { fetchMonitoringOverview } from "./api";
 import type { MonitoringOverviewResponse } from "./types";
 
@@ -59,8 +60,8 @@ export function MonitoringOverviewView() {
         <>
           <div className="monitoring-metric-grid monitoring-stat-grid">
             <Metric label="总请求" value={formatCount(data.overview.totalRequests)} />
-            <Metric label="预估成本" value={data.overview.totalEstimatedCost} />
-            <Metric label="内部成本" value={data.overview.totalInternalCost} />
+            <Metric label="预估成本" value={formatUsdAmount(data.overview.totalEstimatedCost)} />
+            <Metric label="内部成本" value={formatUsdAmount(data.overview.totalInternalCost)} />
             <Metric label="使用事件" value={formatCount(data.overview.totalUsageEvents)} />
             <Metric label="资源访问" value={formatCount(data.overview.totalResourceAccessLogs)} />
             <Metric label="开放告警" value={formatCount(data.overview.openAlertCount)} />
@@ -93,8 +94,8 @@ export function MonitoringOverviewView() {
                       <td>{formatCount(trend.requestCount)}</td>
                       <td>{formatCount(trend.successCount)}</td>
                       <td>{formatCount(trend.failureCount)}</td>
-                      <td>{trend.estimatedCost}</td>
-                      <td>{trend.internalCost}</td>
+                      <td>{formatUsdAmount(trend.estimatedCost)}</td>
+                      <td>{formatUsdAmount(trend.internalCost)}</td>
                     </tr>
                   ))}
                 </tbody>
