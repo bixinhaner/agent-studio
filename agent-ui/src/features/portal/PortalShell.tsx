@@ -38,7 +38,7 @@ import {
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
-import { CheckIcon, PencilIcon, Share2Icon, ThumbsDownIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckIcon, PencilIcon, RefreshCwIcon, Share2Icon, ThumbsDownIcon, Trash2Icon, XIcon } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
   type AttachmentAdapter,
@@ -1901,6 +1901,43 @@ const AgentUserMessage: FC = () => {
   );
 };
 
+const AgentAssistantReloadButton: FC = () => {
+  const aui = useAui();
+  const disabled = useAuiState((s) => s.thread.isRunning || s.thread.isDisabled || s.message.role !== "assistant");
+  const [open, setOpen] = useState(false);
+
+  const confirmReload = () => {
+    setOpen(false);
+    aui.message().reload();
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="aui-button aui-button-ghost aui-button-icon assistant-reload-button"
+        title="Refresh"
+        aria-label="Refresh"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        <RefreshCwIcon size={16} strokeWidth={2} />
+      </button>
+      <Modal
+        title="Regenerate this answer?"
+        open={open}
+        okText="Regenerate"
+        cancelText="Cancel"
+        onOk={confirmReload}
+        onCancel={() => setOpen(false)}
+        destroyOnHidden
+      >
+        <p className="assistant-feedback-modal-help">The current answer will be replaced by a new response.</p>
+      </Modal>
+    </>
+  );
+};
+
 const AgentAssistantFeedbackNegativeButton: FC = () => {
   const aui = useAui();
   const draftsRef = useContext(FeedbackCommentDraftContext);
@@ -1972,7 +2009,7 @@ const AgentAssistantActionBar: FC = () => {
   return (
     <AssistantActionBar.Root hideWhenRunning autohide="not-last" autohideFloat="single-branch">
       <AssistantActionBar.Copy />
-      <AssistantActionBar.Reload />
+      <AgentAssistantReloadButton />
       <AssistantActionBar.FeedbackPositive />
       <AgentAssistantFeedbackNegativeButton />
     </AssistantActionBar.Root>
