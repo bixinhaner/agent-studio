@@ -15,6 +15,12 @@
 **/temp/
 **/directory-contents.md
 .worktrees/
+/data/
+/sessions/
+/state/
+/install-state.json
+/pm2-ecosystem.config.cjs
+/agent-ui/vite.config.js
 
 # logs
 **/npm-debug.log*

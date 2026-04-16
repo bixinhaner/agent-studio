@@ -1,0 +1,14 @@
+{$DEBUG_DOMAIN}:{$DEBUG_HTTPS_PORT} {
+  encode zstd gzip
+  root * {$DEBUG_UI_DIST_ROOT}
+
+  @api path /api/* /public-api/* /openai/* /healthz
+  handle @api {
+    reverse_proxy {$DEBUG_UPSTREAM_HOST}:{$DEBUG_UPSTREAM_PORT}
+  }
+
+  handle {
+    try_files {path} /index.html
+    file_server
+  }
+}

@@ -14,6 +14,7 @@ API_PORT="${API_PORT:-8787}"
 DOMAIN="${DOMAIN:-}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
 CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
+CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
 SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
@@ -115,7 +116,7 @@ fi
 
 require_repo_checkout() {
   [[ -d "$APP_REPO_DIR" ]] || die "repository directory does not exist: $APP_REPO_DIR"
-  git -C "$APP_REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git checkout: $APP_REPO_DIR"
+  run_as_app_user_shell "git -C '$APP_REPO_DIR' rev-parse --is-inside-work-tree >/dev/null 2>&1" || die "not a git checkout: $APP_REPO_DIR"
   [[ -f "$APP_API_DIR/package.json" ]] || die "missing agent-api/package.json under $APP_API_DIR"
   [[ -f "$APP_UI_DIR/package.json" ]] || die "missing agent-ui/package.json under $APP_UI_DIR"
   [[ -f "$BACKEND_ENV_FILE" ]] || die "missing backend env file: $BACKEND_ENV_FILE"
@@ -174,6 +175,25 @@ destination.write_text(rendered)
 PY
 }
 
+append_extra_caddy_snippets() {
+  local destination="$1"
+
+  [[ -d "$CADDY_EXTRA_SNIPPET_DIR" ]] || return 0
+
+  local snippet
+  local appended=0
+  while IFS= read -r -d '' snippet; do
+    appended=1
+    printf '\n# Extra Caddy snippet: %s\n' "$snippet" >> "$destination"
+    cat "$snippet" >> "$destination"
+    printf '\n' >> "$destination"
+  done < <(find "$CADDY_EXTRA_SNIPPET_DIR" -maxdepth 1 -type f -name '*.caddy' -print0 | sort -z)
+
+  if [[ "$appended" == "1" ]]; then
+    log_info "Appended extra Caddy snippets from $CADDY_EXTRA_SNIPPET_DIR"
+  fi
+}
+
 resolve_caddy_domain() {
   if [[ -n "$DOMAIN" ]]; then
     return 0
@@ -200,6 +220,7 @@ refresh_caddy_config() {
   local rendered_config
   rendered_config="$(mktemp)"
   render_caddy_config "$caddy_template_path" "$rendered_config" "$DOMAIN" "$APP_UI_DIR/dist" "$CADDY_UPSTREAM_HOST" "$CADDY_UPSTREAM_PORT"
+  append_extra_caddy_snippets "$rendered_config"
 
   if command_exists caddy; then
     log_step "Validating Caddy config"

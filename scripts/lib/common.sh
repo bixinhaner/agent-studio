@@ -472,3 +472,26 @@ if not found:
 path.write_text("\n".join(rendered) + "\n")
 PY
 }
+
+read_env_value_if_exists() {
+  local env_file="$1"
+  local key="$2"
+
+  [[ -f "$env_file" ]] || return 0
+  python3 - "$env_file" "$key" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+
+for raw_line in path.read_text().splitlines():
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    current_key, value = raw_line.split("=", 1)
+    if current_key.strip() == key:
+        print(value.strip())
+        break
+PY
+}
