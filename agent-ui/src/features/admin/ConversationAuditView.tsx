@@ -411,7 +411,14 @@ function ConversationDetail(props: {
   errorText: string;
 }) {
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
+  const [feedbackExpanded, setFeedbackExpanded] = useState(false);
   const messageRefs = useRef(new Map<string, HTMLElement>());
+  const conversationId = props.detail?.conversation.id ?? "";
+
+  useEffect(() => {
+    if (!conversationId) return;
+    setFeedbackExpanded(false);
+  }, [conversationId]);
 
   if (props.loading && !props.detail) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Spin size="large" /></div>;
@@ -426,6 +433,14 @@ function ConversationDetail(props: {
   }
 
   const { conversation, transcript } = props.detail;
+  const hasMultipleFeedback = conversation.feedback.length > 1;
+  const latestFeedback = conversation.feedback[0];
+  const latestFeedbackText = (
+    latestFeedback?.comment ||
+    (latestFeedback?.type === "negative" ? "未填写反馈备注" : latestFeedback ? "用户标记这条回答有帮助" : "")
+  ).trim();
+  const latestFeedbackPreview = latestFeedbackText.length > 72 ? `${latestFeedbackText.slice(0, 71)}…` : latestFeedbackText;
+
   const focusFeedbackMessage = (messageId: string | null) => {
     if (!messageId) return;
     setHighlightedMessageId(messageId);
@@ -435,7 +450,7 @@ function ConversationDetail(props: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Detail Header */}
-      <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--admin-color-border)', background: 'var(--admin-color-surface)' }}>
+      <div className="conversation-detail-header">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px 0' }}>{conversation.title}</h2>
@@ -451,7 +466,7 @@ function ConversationDetail(props: {
           </Space>
         </div>
         
-        <div style={{ display: 'flex', gap: 24, fontSize: 13 }}>
+        <div className="conversation-detail-metrics">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
             <MessageSquareText size={14} />
             <span>{conversation.metrics.messageCount} 条消息</span>
@@ -467,38 +482,64 @@ function ConversationDetail(props: {
         </div>
 
         {conversation.feedback.length > 0 ? (
-          <div style={{ marginTop: 16, display: 'grid', gap: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-color-text)' }}>回答反馈</div>
-            {conversation.feedback.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  border: '1px solid var(--admin-color-border)',
-                  borderRadius: 8,
-                  padding: '10px 12px',
-                  background: '#fff',
-                  display: 'grid',
-                  gap: 6
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Tag color={feedbackColor(item.type)} icon={item.type === "positive" ? <ThumbsUp size={12} /> : <ThumbsDown size={12} />}>
-                    {feedbackLabel(item.type)}
-                  </Tag>
-                  <span style={{ color: 'var(--admin-color-subtle)', fontSize: 12 }}>
-                    {formatLocalDateTime(item.updatedAt || item.createdAt)}
+          <div className="conversation-feedback-section">
+            <div className="conversation-feedback-summary">
+              <div className="conversation-feedback-summary-main">
+                <div className="conversation-feedback-title-row">
+                  <span className="conversation-feedback-title">回答反馈</span>
+                  <span className="conversation-feedback-caption">
+                    共 {conversation.feedbackSummary.total} 条，最近更新于{" "}
+                    {formatLocalDateTime(conversation.feedbackSummary.latestAt || conversation.updatedAt)}
                   </span>
-                  {item.messageId ? (
-                    <Button size="small" type="link" onClick={() => focusFeedbackMessage(item.messageId)}>
-                      定位回答
-                    </Button>
-                  ) : null}
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--admin-color-text)', whiteSpace: 'pre-wrap' }}>
-                  {item.comment || (item.type === "negative" ? "未填写反馈备注" : "用户标记这条回答有帮助")}
+                <div className="conversation-feedback-badges">
+                  <Tag color="success" icon={<ThumbsUp size={12} />}>
+                    {conversation.feedbackSummary.positive} 赞
+                  </Tag>
+                  <Tag color="error" icon={<ThumbsDown size={12} />}>
+                    {conversation.feedbackSummary.negative} 踩
+                  </Tag>
                 </div>
+                {latestFeedbackPreview ? (
+                  <div className="conversation-feedback-preview">最新反馈：{latestFeedbackPreview}</div>
+                ) : null}
               </div>
-            ))}
+              <Button
+                type="link"
+                className="conversation-feedback-toggle"
+                onClick={() => setFeedbackExpanded((prev) => !prev)}
+              >
+                {feedbackExpanded
+                  ? "收起反馈"
+                  : hasMultipleFeedback
+                    ? `展开 ${conversation.feedback.length} 条反馈`
+                    : "展开反馈"}
+              </Button>
+            </div>
+            {feedbackExpanded ? (
+              <div className="conversation-feedback-list conversation-feedback-list-expanded">
+                {conversation.feedback.map((item) => (
+                  <div key={item.id} className="conversation-feedback-card">
+                    <div className="conversation-feedback-card-meta">
+                      <Tag color={feedbackColor(item.type)} icon={item.type === "positive" ? <ThumbsUp size={12} /> : <ThumbsDown size={12} />}>
+                        {feedbackLabel(item.type)}
+                      </Tag>
+                      <span className="conversation-feedback-card-time">
+                        {formatLocalDateTime(item.updatedAt || item.createdAt)}
+                      </span>
+                      {item.messageId ? (
+                        <Button size="small" type="link" onClick={() => focusFeedbackMessage(item.messageId)}>
+                          定位回答
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="conversation-feedback-card-body">
+                      {item.comment || (item.type === "negative" ? "未填写反馈备注" : "用户标记这条回答有帮助")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
