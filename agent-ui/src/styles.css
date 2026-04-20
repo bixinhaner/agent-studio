@@ -1782,6 +1782,80 @@ body {
   line-height: 1.6;
 }
 
+.markdown-table-scroll {
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.markdown-table-scroll .aui-md-table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: visible;
+}
+
+.markdown-table-scroll th,
+.markdown-table-scroll td {
+  min-width: 112px;
+  max-width: 360px;
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdown-table-scroll th[align="center"],
+.markdown-table-scroll td[align="center"] {
+  text-align: center;
+}
+
+.markdown-table-scroll th[align="right"],
+.markdown-table-scroll td[align="right"] {
+  text-align: right;
+}
+
+.thread-wrap .markdown-table-scroll {
+  border: 1px solid #dbe4f4;
+  background: #ffffff;
+}
+
+.thread-wrap .markdown-table-scroll th,
+.thread-wrap .markdown-table-scroll td {
+  border-right: 1px solid #dbe4f4;
+  border-bottom: 1px solid #dbe4f4;
+}
+
+.thread-wrap .markdown-table-scroll th:last-child,
+.thread-wrap .markdown-table-scroll td:last-child {
+  border-right: 0;
+}
+
+.thread-wrap .markdown-table-scroll tr:last-child td {
+  border-bottom: 0;
+}
+
+.thread-wrap .markdown-table-scroll th {
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.thread-wrap .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.thread-wrap .task-list-item > input[type="checkbox"] {
+  margin: 0.35em 0.55em 0 0;
+}
+
 .agent-thread-list-item {
   gap: 6px;
 }
@@ -6048,6 +6122,42 @@ body.public-share-mode #root {
   background: rgba(96, 165, 250, 0.08);
   border-radius: 0 14px 14px 0;
   color: rgba(226, 232, 240, 0.9);
+}
+
+.public-share-markdown .markdown-table-scroll {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.public-share-markdown .markdown-table-scroll th,
+.public-share-markdown .markdown-table-scroll td {
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: rgba(241, 245, 249, 0.94);
+}
+
+.public-share-markdown .markdown-table-scroll th:last-child,
+.public-share-markdown .markdown-table-scroll td:last-child {
+  border-right: 0;
+}
+
+.public-share-markdown .markdown-table-scroll tr:last-child td {
+  border-bottom: 0;
+}
+
+.public-share-markdown .markdown-table-scroll th {
+  background: rgba(96, 165, 250, 0.12);
+  color: #dbeafe;
+  font-weight: 700;
+}
+
+.public-share-markdown .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.public-share-markdown .task-list-item > input[type="checkbox"] {
+  margin: 0.35em 0.55em 0 0;
 }
 
 .public-share-image-card {

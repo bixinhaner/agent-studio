@@ -78,6 +78,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-share/api";
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
+import { MARKDOWN_REMARK_PLUGINS, MarkdownTable } from "../markdown/markdown-rendering";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { getBrandInitials } from "../branding/BrandMark";
@@ -707,7 +708,9 @@ function AssistantMarkdownLink(props: {
 
 const AssistantMarkdownText = makeMarkdownText({
   preprocess: preprocessAssistantMarkdown,
+  remarkPlugins: MARKDOWN_REMARK_PLUGINS,
   components: {
+    table: MarkdownTable as any,
     a: AssistantMarkdownLink as any,
     img: AssistantMarkdownImage as any
   }

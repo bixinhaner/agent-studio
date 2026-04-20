@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
 import { useBranding } from "../branding/BrandingProvider";
+import { MARKDOWN_REMARK_PLUGINS, MarkdownTable } from "../markdown/markdown-rendering";
 import { fetchPublicThreadShare } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
 
@@ -168,6 +169,7 @@ function PublicShareMarkdown(props: { text: string; token: string; className?: s
   return (
     <div className={props.className ? `public-share-markdown ${props.className}` : "public-share-markdown"}>
       <ReactMarkdown
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{
           h1: ({ className, ...rest }) => <h1 className={className ? `aui-md-h1 ${className}` : "aui-md-h1"} {...rest} />,
           h2: ({ className, ...rest }) => <h2 className={className ? `aui-md-h2 ${className}` : "aui-md-h2"} {...rest} />,
@@ -187,6 +189,7 @@ function PublicShareMarkdown(props: { text: string; token: string; className?: s
               <code className="aui-md-inline-code" {...rest} />
             ),
           pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />,
+          table: MarkdownTable as any,
           img: PublicShareMarkdownImage as any
         }}
       >
