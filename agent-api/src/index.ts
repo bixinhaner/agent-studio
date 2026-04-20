@@ -76,6 +76,11 @@ import {
 } from "./persistence/thread-public-share-repository.js";
 import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persistence/thread-share-repository.js";
 import { InboxItemRepository, type InboxItemRepositoryDb } from "./persistence/inbox-item-repository.js";
+import {
+  SubscriptionDenialLogRepository
+} from "./persistence/subscription-denial-log-repository.js";
+import { SubscriptionGrantRepository } from "./persistence/subscription-grant-repository.js";
+import { SubscriptionPlanRepository } from "./persistence/subscription-plan-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
 import { OrganizationRepository, type OrganizationRepositoryDb } from "./persistence/organization-repository.js";
@@ -118,6 +123,10 @@ import { OrgSyncService } from "./org-sync/org-sync-service.js";
 import { resolveWorkspaceAgentsMdContent } from "./agent-mode/workspace-agents-md.js";
 import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
 import { QuotaEvaluationService } from "./operations/quota-evaluation-service.js";
+import {
+  isChatAccessDeniedError,
+  SubscriptionEntitlementService
+} from "./operations/subscription-entitlement-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
@@ -164,6 +173,9 @@ const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepos
 const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
 const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
 const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryDb);
+const subscriptionPlans = new SubscriptionPlanRepository(db as never);
+const subscriptionGrants = new SubscriptionGrantRepository(db as never);
+const subscriptionDenialLogs = new SubscriptionDenialLogRepository(db as never);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
@@ -223,6 +235,12 @@ const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogReposit
 const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
   costProfiles
+});
+const subscriptionEntitlements = new SubscriptionEntitlementService({
+  grants: subscriptionGrants,
+  plans: subscriptionPlans,
+  usageEvents: usageEventRepository,
+  denialLogs: subscriptionDenialLogs
 });
 const managedRouterRuntime = {
   async startThreadWithOptions(options: {
@@ -651,6 +669,14 @@ type CurrentActor = {
   organizationType?: string;
   membershipType?: string;
 };
+
+const QUOTA_ACCESS_DENIED_MESSAGE = "Current quota limit has been exceeded; cannot create a new session";
+
+function statusCodeForSessionAccessError(error: unknown): number {
+  if (isChatAccessDeniedError(error)) return 403;
+  const detail = error instanceof Error ? error.message : "";
+  return detail === QUOTA_ACCESS_DENIED_MESSAGE ? 403 : 400;
+}
 
 function stableJson(value: unknown): string {
   try {
@@ -1202,11 +1228,24 @@ async function resolveSessionOptions(
   };
 }
 
-async function assertQuotaAllowsNewSession(input: {
+async function assertChatAllowsNewSession(input: {
   currentUser: CurrentActor;
   model: string;
+  threadId?: string;
+  sessionId?: string;
   featureType: "chat";
 }): Promise<void> {
+  await subscriptionEntitlements.enforceChatAccess({
+    currentUser: {
+      id: input.currentUser.id,
+      organizationId: input.currentUser.organizationId,
+      organizationType: input.currentUser.organizationType
+    },
+    model: input.model,
+    threadId: input.threadId,
+    sessionId: input.sessionId
+  });
+
   const departmentId =
     trimOrUndefined(input.currentUser.organizationType) === "internal"
       ? await departmentMemberships.getPreferredDepartmentIdForUser(input.currentUser.id)
@@ -1228,7 +1267,7 @@ async function assertQuotaAllowsNewSession(input: {
         thresholdValue: decision.thresholdValue
       });
     }
-    throw new Error("Current quota limit has been exceeded; cannot create a new session");
+    throw new Error(QUOTA_ACCESS_DENIED_MESSAGE);
   }
 }
 
@@ -1331,7 +1370,7 @@ async function ensureThreadSession(
     return active;
   }
 
-  await assertQuotaAllowsNewSession({
+  await assertChatAllowsNewSession({
     currentUser,
     model: desired.model,
     featureType: "chat"
@@ -1855,9 +1894,11 @@ app.post("/api/session", async (req: Request, res: Response) => {
           if (existing.threadId && trimOrUndefined(workspace)) {
             await fs.mkdir(getThreadWorkspaceUploadDir(workspace), { recursive: true });
           }
-          await assertQuotaAllowsNewSession({
+          await assertChatAllowsNewSession({
             currentUser,
             model: (input.model || existing.model).trim(),
+            sessionId: existing.sessionId,
+            threadId: existing.threadId ?? undefined,
             featureType: "chat"
           });
           const sessionRuntime = createRuntimeForProviderSnapshot(
@@ -1910,7 +1951,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
       allocated.workspacePath,
       allocated.modeId
     );
-    await assertQuotaAllowsNewSession({
+    await assertChatAllowsNewSession({
       currentUser,
       model: sessionOptions.model,
       featureType: "chat"
@@ -1919,7 +1960,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
     res.json(sessionOut(created));
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to create session";
-    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json({ detail });
   }
 });
 
@@ -2022,7 +2063,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       allocated.workspacePath,
       allocated.modeId
     );
-    await assertQuotaAllowsNewSession({
+    await assertChatAllowsNewSession({
       currentUser,
       model: options.model,
       featureType: "chat"
@@ -2047,7 +2088,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to create thread";
-    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json({ detail });
   }
 });
 
@@ -2127,7 +2168,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     res.json({ session: sessionOut(session) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to ensure thread session";
-    res.status(detail === "Current quota limit has been exceeded; cannot create a new session" ? 403 : 400).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json({ detail });
   }
 });
 
@@ -2315,9 +2356,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     // Each streamed turn is a new costly action. Gate it before execution without
     // terminating any turn that is already in flight.
-    await assertQuotaAllowsNewSession({
+    await assertChatAllowsNewSession({
       currentUser,
       model: currentSession.model,
+      threadId: currentSession.threadId ?? undefined,
+      sessionId: currentSession.sessionId,
       featureType: "chat"
     });
 

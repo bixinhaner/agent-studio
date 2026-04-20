@@ -6,6 +6,7 @@ import { getDbClient } from "../db/client.js";
 import { ZendeskIntegrationService } from "../integrations/zendesk/service.js";
 import { createOrgSyncRouter } from "./org-sync-router.js";
 import { createConversationAuditRouter } from "./conversation-audit-router.js";
+import { createSubscriptionRouter } from "./subscription-router.js";
 import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository, type DepartmentRepositoryDb, type DepartmentTreeNode } from "../persistence/department-repository.js";
 import { AdminAuditLogRepository } from "../persistence/admin-audit-log-repository.js";
@@ -615,6 +616,12 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
 
   router.use(
     createConversationAuditRouter({
+      getDb: () => getDbInstance() as never
+    })
+  );
+
+  router.use(
+    createSubscriptionRouter({
       getDb: () => getDbInstance() as never
     })
   );

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   Component,
+  Crown,
   Database,
   LayoutDashboard,
   LogOutIcon,
@@ -41,6 +42,9 @@ const BroadcastAdminViewLazy = lazy(() =>
 );
 const ConversationAuditViewLazy = lazy(() =>
   import("./ConversationAuditView").then((module) => ({ default: module.ConversationAuditView }))
+);
+const SubscriptionWorkspaceLazy = lazy(() =>
+  import("./SubscriptionWorkspace").then((module) => ({ default: module.SubscriptionWorkspace }))
 );
 const UsersViewLazy = lazy(() => import("./UsersView").then((module) => ({ default: module.UsersView })));
 const DepartmentTreeViewLazy = lazy(() =>
@@ -97,6 +101,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "overview",
   "analytics",
   "conversations",
+  "subscriptions",
   "monitoring",
   "broadcasts",
   "users",
@@ -138,6 +143,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["会话", "对话", "审计", "api"],
     icon: <MessageSquareText size={18} />
+  },
+  subscriptions: {
+    id: "subscriptions",
+    title: "订阅权益",
+    description: "管理套餐、用户可用期、组织额度和被拦截的发问记录。",
+    scope: "套餐与额度",
+    cadence: "建议每日巡检",
+    group: "operations",
+    keywords: ["订阅", "额度", "套餐", "到期"],
+    icon: <Crown size={18} />
   },
   monitoring: {
     id: "monitoring",
@@ -445,6 +460,12 @@ function AdminSectionContent(props: {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <ConversationAuditViewLazy />
+        </Suspense>
+      );
+    case "subscriptions":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <SubscriptionWorkspaceLazy />
         </Suspense>
       );
     case "resources":

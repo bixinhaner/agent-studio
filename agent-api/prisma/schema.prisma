@@ -84,6 +84,67 @@ model Organization {
   @@map("organizations")
 }
 
+model SubscriptionPlan {
+  id                        String               @id @default(cuid())
+  slug                      String               @unique
+  name                      String
+  description               String?
+  status                    String               @default("active")
+  featureType               String               @default("chat") @map("feature_type")
+  monthlyCompletedTurnLimit Int?                 @map("monthly_completed_turn_limit")
+  monthlyTokenLimit         Int?                 @map("monthly_token_limit")
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+  grants                    SubscriptionGrant[]
+
+  @@index([status, featureType])
+  @@map("subscription_plans")
+}
+
+model SubscriptionGrant {
+  id                         String            @id @default(cuid())
+  principalType              String            @map("principal_type")
+  principalId                String            @map("principal_id")
+  planId                     String?           @map("plan_id")
+  plan                       SubscriptionPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+  status                     String            @default("active")
+  startsAt                   DateTime          @map("starts_at")
+  expiresAt                  DateTime?         @map("expires_at")
+  cycleAnchorAt              DateTime          @map("cycle_anchor_at")
+  completedTurnLimitOverride Int?              @map("completed_turn_limit_override")
+  tokenLimitOverride         Int?              @map("token_limit_override")
+  note                       String?
+  createdByUserId            String?           @map("created_by_user_id")
+  createdAt                  DateTime          @default(now()) @map("created_at")
+  updatedAt                  DateTime          @updatedAt @map("updated_at")
+
+  @@unique([principalType, principalId])
+  @@index([planId])
+  @@index([status, expiresAt])
+  @@map("subscription_grants")
+}
+
+model SubscriptionDenialLog {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  userId         String?  @map("user_id")
+  threadId       String?  @map("thread_id")
+  sessionId      String?  @map("session_id")
+  principalType  String?  @map("principal_type")
+  principalId    String?  @map("principal_id")
+  reasonCode     String   @map("reason_code")
+  title          String
+  detail         String?
+  model          String?
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([reasonCode, createdAt])
+  @@map("subscription_denial_logs")
+}
+
 model OrganizationMembership {
   id                  String        @id @default(cuid())
   organizationId      String        @map("organization_id")

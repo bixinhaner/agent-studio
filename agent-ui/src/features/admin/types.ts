@@ -2,6 +2,7 @@ export type AdminSection =
   | "overview"
   | "analytics"
   | "conversations"
+  | "subscriptions"
   | "users"
   | "resources"
   | "capabilities"
@@ -293,6 +294,193 @@ export type AdminProductFeedbackListResponse = {
 
 export type AdminProductFeedbackDetailResponse = {
   feedback: AdminProductFeedbackRecord;
+};
+
+export type AdminSubscriptionSourceMode =
+  | "user"
+  | "organization"
+  | "default_internal"
+  | "default_external";
+
+export type AdminSubscriptionAccessStatus =
+  | "available"
+  | "paused"
+  | "scheduled"
+  | "expired"
+  | "exhausted"
+  | "restricted";
+
+export type AdminSubscriptionGrantSummary = {
+  id: string;
+  planId: string | null;
+  planName: string | null;
+  planSlug: string | null;
+  status: string;
+  startsAt: string;
+  expiresAt: string | null;
+  cycleAnchorAt: string;
+  note: string | null;
+  completedTurnLimitOverride: number | null;
+  tokenLimitOverride: number | null;
+  monthlyCompletedTurnLimit: number | null;
+  monthlyTokenLimit: number | null;
+  usage: {
+    cycleStartsAt: string;
+    cycleEndsAt: string;
+    usedCompletedTurns: number;
+    usedTokens: number;
+    remainingCompletedTurns: number | null;
+    remainingTokens: number | null;
+  } | null;
+  access: {
+    status: AdminSubscriptionAccessStatus;
+    title: string;
+    description: string;
+    reasonCode: string | null;
+  };
+};
+
+export type AdminSubscriptionPlan = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  status: string;
+  featureType: string;
+  monthlyCompletedTurnLimit: number | null;
+  monthlyTokenLimit: number | null;
+  createdAt: string;
+  updatedAt: string;
+  assignmentCount: {
+    users: number;
+    organizations: number;
+  };
+};
+
+export type AdminSubscriptionPlansResponse = {
+  plans: AdminSubscriptionPlan[];
+};
+
+export type AdminSubscriptionPlanInput = {
+  name: string;
+  slug?: string;
+  description?: string | null;
+  status?: string;
+  monthlyCompletedTurnLimit?: number | null;
+  monthlyTokenLimit?: number | null;
+};
+
+export type AdminSubscriptionPlanDetailResponse = {
+  plan: AdminSubscriptionPlan;
+};
+
+export type AdminSubscriptionOrganizationSummary = {
+  id: string;
+  name: string;
+  slug: string | null;
+  type: string | null;
+  status?: string;
+};
+
+export type AdminSubscriptionUserRecord = {
+  id: string;
+  displayName: string | null;
+  email: string | null;
+  userType: string;
+  organization: AdminSubscriptionOrganizationSummary | null;
+  source: {
+    mode: AdminSubscriptionSourceMode;
+    label: string;
+    planName: string | null;
+  };
+  access: {
+    status: AdminSubscriptionAccessStatus;
+    title: string;
+    description: string;
+  };
+  userGrant: AdminSubscriptionGrantSummary | null;
+  organizationGrant: AdminSubscriptionGrantSummary | null;
+};
+
+export type AdminSubscriptionUsersResponse = {
+  summary: {
+    totalUsers: number;
+    explicitUserSubscriptions: number;
+    coveredByOrganization: number;
+    internalDefaultUnlimited: number;
+    externalRestrictedByDefault: number;
+    blockedUsers: number;
+    expiringSoon: number;
+  };
+  users: AdminSubscriptionUserRecord[];
+};
+
+export type AdminSubscriptionOrganizationRecord = {
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  status: string;
+  memberCount: number;
+  source: {
+    mode: AdminSubscriptionSourceMode;
+    label: string;
+    planName: string | null;
+  };
+  access: {
+    status: AdminSubscriptionAccessStatus;
+    title: string;
+    description: string;
+  };
+  grant: AdminSubscriptionGrantSummary | null;
+};
+
+export type AdminSubscriptionOrganizationsResponse = {
+  summary: {
+    totalOrganizations: number;
+    explicitOrganizationSubscriptions: number;
+    internalDefaultUnlimited: number;
+    externalNeedSubscription: number;
+    blockedOrganizations: number;
+    expiringSoon: number;
+  };
+  organizations: AdminSubscriptionOrganizationRecord[];
+};
+
+export type AdminSubscriptionGrantInput = {
+  planId?: string | null;
+  status?: string;
+  startsAt: string;
+  expiresAt?: string | null;
+  cycleAnchorAt?: string | null;
+  completedTurnLimitOverride?: number | null;
+  tokenLimitOverride?: number | null;
+  note?: string | null;
+};
+
+export type AdminSubscriptionGrantDetailResponse = {
+  grant: AdminSubscriptionGrantSummary;
+};
+
+export type AdminSubscriptionDenialRecord = {
+  id: string;
+  reasonCode: string;
+  title: string;
+  detail: string | null;
+  model: string | null;
+  threadId: string | null;
+  sessionId: string | null;
+  createdAt: string;
+  user: {
+    id: string;
+    displayName: string | null;
+    email: string | null;
+  } | null;
+  organization: AdminSubscriptionOrganizationSummary | null;
+};
+
+export type AdminSubscriptionDenialsResponse = {
+  events: AdminSubscriptionDenialRecord[];
 };
 
 export type AdminUser = {

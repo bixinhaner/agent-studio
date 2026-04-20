@@ -49,6 +49,19 @@ export type ListUsageEventsInput = {
   take?: number;
 };
 
+export type ListUsageEventsByExactRangeInput = {
+  organizationId?: string | null;
+  model?: string;
+  featureType?: string;
+  resultStatus?: string;
+  sessionId?: string;
+  userId?: string;
+  departmentIdSnapshot?: string;
+  from: string | Date;
+  to: string | Date;
+  take?: number;
+};
+
 type UsageEventRow = {
   id: string;
   organizationId: string | null;
@@ -119,6 +132,12 @@ function toDayStart(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return new Date();
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function toExactDate(value: string | Date): Date {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date();
+  return date;
 }
 
 function mapUsageEvent(row: UsageEventRow): UsageEventRecord {
@@ -212,5 +231,27 @@ export class UsageEventRepository {
       from: input.from,
       to: input.to
     });
+  }
+
+  async listByExactCreatedAtRange(input: ListUsageEventsByExactRangeInput): Promise<UsageEventRecord[]> {
+    const rows = await this.db.usageEvent.findMany({
+      where: {
+        ...(input.organizationId !== undefined ? { organizationId: input.organizationId ?? null } : {}),
+        userId: trimOrUndefined(input.userId),
+        departmentIdSnapshot: trimOrUndefined(input.departmentIdSnapshot),
+        model: trimOrUndefined(input.model),
+        featureType: trimOrUndefined(input.featureType),
+        resultStatus: trimOrUndefined(input.resultStatus),
+        sessionId: trimOrUndefined(input.sessionId),
+        createdAt: {
+          gte: toExactDate(input.from),
+          lt: toExactDate(input.to)
+        }
+      },
+      orderBy: { createdAt: "desc" },
+      take: input.take
+    });
+
+    return rows.map(mapUsageEvent);
   }
 }

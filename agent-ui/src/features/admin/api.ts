@@ -18,6 +18,14 @@ import type {
   AdminProductFeedbackListResponse,
   AdminProductFeedbackStatus,
   AdminOverview,
+  AdminSubscriptionDenialsResponse,
+  AdminSubscriptionGrantDetailResponse,
+  AdminSubscriptionGrantInput,
+  AdminSubscriptionOrganizationsResponse,
+  AdminSubscriptionPlanDetailResponse,
+  AdminSubscriptionPlanInput,
+  AdminSubscriptionPlansResponse,
+  AdminSubscriptionUsersResponse,
   AdminUserDetailResponse,
   AdminUserListResponse,
   AdminUserLocalSettingsInput,
@@ -39,6 +47,76 @@ type CreateAdminInvitePayload = {
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
   return api<AdminOverview>("/api/admin/overview");
+}
+
+export async function fetchAdminSubscriptionPlans(): Promise<AdminSubscriptionPlansResponse> {
+  return api<AdminSubscriptionPlansResponse>("/api/admin/subscriptions/plans");
+}
+
+export async function createAdminSubscriptionPlan(
+  input: AdminSubscriptionPlanInput
+): Promise<AdminSubscriptionPlanDetailResponse> {
+  return api<AdminSubscriptionPlanDetailResponse>("/api/admin/subscriptions/plans", {
+    method: "POST",
+    json: input
+  });
+}
+
+export async function patchAdminSubscriptionPlan(
+  planId: string,
+  input: AdminSubscriptionPlanInput
+): Promise<AdminSubscriptionPlanDetailResponse> {
+  return api<AdminSubscriptionPlanDetailResponse>(`/api/admin/subscriptions/plans/${encodeURIComponent(planId)}`, {
+    method: "PATCH",
+    json: input
+  });
+}
+
+export async function fetchAdminSubscriptionUsers(): Promise<AdminSubscriptionUsersResponse> {
+  return api<AdminSubscriptionUsersResponse>("/api/admin/subscriptions/users");
+}
+
+export async function upsertAdminUserSubscriptionGrant(
+  userId: string,
+  input: AdminSubscriptionGrantInput
+): Promise<AdminSubscriptionGrantDetailResponse> {
+  return api<AdminSubscriptionGrantDetailResponse>(`/api/admin/subscriptions/users/${encodeURIComponent(userId)}/grant`, {
+    method: "PUT",
+    json: input
+  });
+}
+
+export async function deleteAdminUserSubscriptionGrant(userId: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>(`/api/admin/subscriptions/users/${encodeURIComponent(userId)}/grant`, {
+    method: "DELETE"
+  });
+}
+
+export async function fetchAdminSubscriptionOrganizations(): Promise<AdminSubscriptionOrganizationsResponse> {
+  return api<AdminSubscriptionOrganizationsResponse>("/api/admin/subscriptions/organizations");
+}
+
+export async function upsertAdminOrganizationSubscriptionGrant(
+  organizationId: string,
+  input: AdminSubscriptionGrantInput
+): Promise<AdminSubscriptionGrantDetailResponse> {
+  return api<AdminSubscriptionGrantDetailResponse>(
+    `/api/admin/subscriptions/organizations/${encodeURIComponent(organizationId)}/grant`,
+    {
+      method: "PUT",
+      json: input
+    }
+  );
+}
+
+export async function deleteAdminOrganizationSubscriptionGrant(organizationId: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>(`/api/admin/subscriptions/organizations/${encodeURIComponent(organizationId)}/grant`, {
+    method: "DELETE"
+  });
+}
+
+export async function fetchAdminSubscriptionDenials(): Promise<AdminSubscriptionDenialsResponse> {
+  return api<AdminSubscriptionDenialsResponse>("/api/admin/subscriptions/denials");
 }
 
 export async function fetchAdminConversationAuditList(
