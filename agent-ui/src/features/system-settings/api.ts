@@ -1,6 +1,15 @@
-import { api } from "../../lib/api";
+import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 
 import type { SystemSettingsPayload, SystemSettingsResponse } from "./types";
+
+export type BrandingAssetKind = "logo" | "icon" | "assistant-avatar";
+
+export type UploadedBrandingAsset = {
+  url: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
 
 export async function fetchSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings");
@@ -17,4 +26,32 @@ export async function publishSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings/publish", {
     method: "POST"
   });
+}
+
+export async function uploadSystemSettingsBrandingAsset(kind: BrandingAssetKind, file: File): Promise<UploadedBrandingAsset> {
+  const formData = new FormData();
+  formData.set("kind", kind);
+  formData.set("file", file);
+
+  const headers = new Headers(authHeaders());
+  const res = await fetch(`${apiBase()}/api/admin/system-settings/assets`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: formData
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    notifyAuthInvalidStatus(res.status);
+    const msg = (data && typeof data.detail === "string" && data.detail) || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+  const asset = (data as { asset?: Record<string, unknown> }).asset ?? {};
+  return {
+    url: typeof asset.url === "string" ? asset.url : "",
+    fileName: typeof asset.file_name === "string" ? asset.file_name : "",
+    mimeType: typeof asset.mime_type === "string" ? asset.mime_type : "",
+    sizeBytes: typeof asset.size_bytes === "number" ? asset.size_bytes : 0
+  };
 }

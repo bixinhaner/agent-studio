@@ -80,6 +80,8 @@ import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
+import { getBrandInitials } from "../branding/BrandMark";
+import { useBranding } from "../branding/BrandingProvider";
 import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
@@ -2746,6 +2748,7 @@ const AgentRuntimeAdapterProvider: FC<
 
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
   const auth = useAuth();
+  const { branding } = useBranding();
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -3321,6 +3324,15 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
   const isExternalPortalUser = props.currentUser?.userType === "external_user";
+  const assistantDisplayName = branding.assistantName.trim() || "AI Assistant";
+  const assistantAvatar = useMemo(
+    () => ({
+      ...(branding.assistantAvatarUrl.trim() ? { src: branding.assistantAvatarUrl.trim() } : {}),
+      alt: assistantDisplayName,
+      fallback: getBrandInitials(assistantDisplayName)
+    }),
+    [assistantDisplayName, branding.assistantAvatarUrl]
+  );
   const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
 
   const buildProductFeedbackContext = useCallback(() => {
@@ -4133,9 +4145,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
               }}
               welcome={{
-                message: "Hello, I'm your Baicells AI Assistant. Ask about products, versions, deployment, alarms, or troubleshooting.",
+                message: `Hello, I'm your ${assistantDisplayName}. Ask about products, versions, deployment, alarms, or troubleshooting.`,
                 suggestions: PORTAL_STARTER_SUGGESTIONS
               }}
+              assistantAvatar={assistantAvatar}
               components={{
                 UserMessage: AgentUserMessage,
                 AssistantMessage: AgentAssistantMessage,
@@ -4330,7 +4343,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               destroyOnHidden
             >
               <p className="product-feedback-modal-help">
-                Tell us what happened or what would make Agent Studio better.
+                Tell us what happened or what would make {branding.platformName} better.
               </p>
               <label className="field product-feedback-field">
                 <span className="field-label">Feedback type</span>

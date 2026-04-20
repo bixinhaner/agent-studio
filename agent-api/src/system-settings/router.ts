@@ -1,13 +1,24 @@
-import { Router, type Request, type RequestHandler, type Response } from "express";
+import { Router, type NextFunction, type Request, type RequestHandler, type Response } from "express";
+import multer, { MulterError } from "multer";
 import { z } from "zod";
 
+import { parseBrandingAssetKind, type BrandingAssetStorage } from "./branding-assets.js";
 import { systemSettingsPayloadPatchSchema } from "./types.js";
 import type { SystemSettingsState, SystemSettingsService } from "./service.js";
 
 type SystemSettingsRouterOptions = {
   service: Pick<SystemSettingsService, "read" | "updateDraft" | "publish">;
   requirePermission(permissionKey: string): RequestHandler;
+  assetStorage?: Pick<BrandingAssetStorage, "save">;
 };
+
+const brandingAssetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 1,
+    fileSize: 5 * 1024 * 1024
+  }
+});
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -29,6 +40,19 @@ function requireCurrentUser(req: Request, res: Response): req is Request & { cur
     return false;
   }
   return true;
+}
+
+function withBrandingAssetFile(fieldName: string): RequestHandler {
+  const middleware = brandingAssetUpload.single(fieldName);
+  return (req: Request, res: Response, next: NextFunction) => {
+    middleware(req, res, (error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+      next();
+    });
+  };
 }
 
 export function createSystemSettingsRouter(options: SystemSettingsRouterOptions): Router {
@@ -70,6 +94,36 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
     }
   });
 
+  router.post("/assets", requireWrite, withBrandingAssetFile("file"), async (req: Request, res: Response) => {
+    if (!requireCurrentUser(req, res)) {
+      return;
+    }
+    if (!options.assetStorage) {
+      res.status(501).json({ detail: "Branding asset storage is not configured" });
+      return;
+    }
+
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ detail: "file is required" });
+        return;
+      }
+      const kind = parseBrandingAssetKind(req.body?.kind);
+      const saved = await options.assetStorage.save({ kind, file });
+      res.status(201).json({
+        asset: {
+          url: saved.url,
+          file_name: saved.fileName,
+          mime_type: saved.mimeType,
+          size_bytes: saved.sizeBytes
+        }
+      });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/publish", requirePublish, async (req: Request, res: Response) => {
     if (!requireCurrentUser(req, res)) {
       return;
@@ -89,6 +143,16 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
       }
       res.status(500).json({ detail: detailFromError(error) });
     }
+  });
+
+  router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (error instanceof MulterError) {
+      res.status(400).json({
+        detail: error.code === "LIMIT_FILE_SIZE" ? "uploaded file is too large" : "multipart upload exceeds configured limits"
+      });
+      return;
+    }
+    next(error);
   });
 
   return router;

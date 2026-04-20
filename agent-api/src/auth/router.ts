@@ -12,6 +12,8 @@ import type { OrganizationRepository } from "../persistence/organization-reposit
 import type { UserRepositoryLike } from "../persistence/user-repository.js";
 import type { OrganizationInviteRepository } from "../persistence/organization-invite-repository.js";
 import type { LoginChallengeRepository } from "../persistence/login-challenge-repository.js";
+import { resolvePublicPlatformName } from "../system-settings/public-branding.js";
+import type { SystemSettingsVersionRecord } from "../system-settings/types.js";
 
 const dingtalkSessionSchema = z.object({
   code: z.string().trim().min(1, "code is required"),
@@ -228,6 +230,9 @@ export function createAuthRouter(options: {
   emailSender: AuthEmailSender;
   appBaseUrl?: string;
   sessionCookieReady?: boolean;
+  systemSettings?: {
+    getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
+  };
 }): Router {
   const router = Router();
 
@@ -427,9 +432,10 @@ export function createAuthRouter(options: {
 
       const inviteUrlBase = trimOrUndefined(options.appBaseUrl);
       const inviteUrl = inviteUrlBase ? `${inviteUrlBase.replace(/\/+$/, "")}/invite/${rawToken}` : undefined;
+      const platformName = await resolvePublicPlatformName(options.systemSettings);
       await options.emailSender.send({
         to: invite.email,
-        subject: `${organization.name} invited you to Agent Studio`,
+        subject: `${organization.name} invited you to ${platformName}`,
         text: inviteUrl
           ? `You were invited to join ${organization.name}.\n\nOpen this link: ${inviteUrl}\n\nIf prompted, use this email address to request a verification code.`
           : `You were invited to join ${organization.name}.\n\nInvite code: ${rawToken}\n\nOpen the sign-in page and enter this invite code to request a verification code.`,
@@ -485,14 +491,15 @@ export function createAuthRouter(options: {
       });
 
       const organization = invite?.organizationId ? await options.organizations.getById(invite.organizationId) : undefined;
+      const platformName = await resolvePublicPlatformName(options.systemSettings);
       const subject = invite && organization
         ? `${organization.name} invite sign-in verification code`
-        : "Agent Studio sign-in verification code";
+        : `${platformName} sign-in verification code`;
       await options.emailSender.send({
         to: email,
         subject,
         text: [
-          invite && organization ? `You are accepting an invite from ${organization.name}.` : "You are signing in to Agent Studio.",
+          invite && organization ? `You are accepting an invite from ${organization.name}.` : `You are signing in to ${platformName}.`,
           `Verification code: ${code}`,
           "This code expires in 15 minutes."
         ].join("\n"),

@@ -2,6 +2,8 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { fetchInvite, type AuthInvite } from "./features/auth/api";
+import { BrandMark } from "./features/branding/BrandMark";
+import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
@@ -79,6 +81,7 @@ function inviteMembershipTypeLabel(value: string | null | undefined): string {
 }
 
 function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string }) {
+  const { branding } = useBranding();
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   const [inviteLoading, setInviteLoading] = useState(Boolean(props.inviteToken));
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -201,8 +204,14 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     <div className="auth-modern-screen">
       <div className="auth-modern-card">
         <div className="auth-modern-header">
-          <h1 className="auth-modern-logo">Agent Studio</h1>
-          <p className="auth-modern-subtitle">Sign in to your organization</p>
+          <BrandMark
+            className="auth-modern-brand-mark"
+            imageClassName="auth-modern-brand-image"
+            name={branding.platformName}
+            logoUrl={branding.logoUrl || branding.iconUrl}
+          />
+          <h1 className="auth-modern-logo">{branding.platformName}</h1>
+          <p className="auth-modern-subtitle">{branding.loginCopy}</p>
         </div>
 
         {inviteLoading ? (
@@ -308,6 +317,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
 
 function AppContent(props: { inviteToken?: string }) {
   const auth = useAuth();
+  const { branding } = useBranding();
   const adminEligible = useMemo(
     () => canOpenAdmin(auth.user?.role, auth.activeOrganization?.type),
     [auth.activeOrganization?.type, auth.user?.role]
@@ -316,6 +326,10 @@ function AppContent(props: { inviteToken?: string }) {
     if (typeof window === "undefined") return "portal";
     return resolveAppShellView(window.location.hash, false);
   });
+
+  useEffect(() => {
+    document.title = branding.platformName;
+  }, [branding.platformName]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -364,7 +378,7 @@ function AppContent(props: { inviteToken?: string }) {
     return (
       <div className="auth-modern-screen" aria-live="polite">
         <div className="auth-modern-card" style={{ textAlign: "center" }}>
-          <p className="auth-eyebrow">Agent Studio</p>
+          <p className="auth-eyebrow">{branding.platformName}</p>
           <h1 className="auth-modern-logo">Checking sign-in status</h1>
           <p className="auth-modern-subtitle" style={{marginTop: 8}}>Loading account, organization, and active session context.</p>
         </div>
@@ -395,7 +409,7 @@ function AppContent(props: { inviteToken?: string }) {
   );
 }
 
-export default function App() {
+function AppRoutes() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const publicShareToken = extractPublicShareToken(pathname);
   const inviteToken = extractInviteToken(pathname);
@@ -412,5 +426,13 @@ export default function App() {
     <AuthProvider>
       <AppContent inviteToken={inviteToken} />
     </AuthProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <BrandingProvider>
+      <AppRoutes />
+    </BrandingProvider>
   );
 }

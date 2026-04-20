@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
 import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send } from "lucide-react";
 
-import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "./api";
+import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
 import { BrandingSettingsView } from "./BrandingSettingsView";
 import { ModelDefaultsView } from "./ModelDefaultsView";
 import { OrganizationDefaultsView } from "./OrganizationDefaultsView";
@@ -185,6 +185,11 @@ export function SystemSettingsShell() {
     updateDraft(c => ({ ...c, payload: { ...c.payload, behavior: { ...c.payload.behavior, ...patch } } }), fieldPaths("behavior", patch));
   }
 
+  async function uploadBrandingAsset(kind: BrandingAssetKind, file: File): Promise<string> {
+    const asset = await uploadSystemSettingsBrandingAsset(kind, file);
+    return asset.url;
+  }
+
   async function persistDraft(options?: { successText?: string }) {
     if (!draftRecord || loading || saving || publishing) return false;
     setSaving(true);
@@ -330,7 +335,15 @@ export function SystemSettingsShell() {
           {successText && <Alert type="success" showIcon message={successText} style={{ marginBottom: 24 }} closable onClose={() => setSuccessText("")} />}
 
           {section === "branding" && (
-            <BrandingSettingsView value={draftPayload.branding} behavior={draftPayload.behavior} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftBranding} onBehaviorChange={updateDraftBehavior} />
+            <BrandingSettingsView
+              value={draftPayload.branding}
+              behavior={draftPayload.behavior}
+              fieldErrors={fieldErrors}
+              disabled={saving || publishing}
+              onChange={updateDraftBranding}
+              onBehaviorChange={updateDraftBehavior}
+              onAssetUpload={uploadBrandingAsset}
+            />
           )}
           {section === "model-defaults" && (
             <ModelDefaultsView value={draftPayload.platformDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftPlatformDefaults} />

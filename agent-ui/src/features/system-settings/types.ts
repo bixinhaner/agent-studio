@@ -12,6 +12,8 @@ export type SystemSettingsBranding = {
   loginCopy: string;
   logoUrl: string;
   iconUrl: string;
+  assistantName: string;
+  assistantAvatarUrl: string;
 };
 
 export type SystemSettingsPlatformDefaults = {

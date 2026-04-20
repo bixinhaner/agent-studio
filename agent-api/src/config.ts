@@ -38,6 +38,7 @@ const schema = z.object({
   LEGACY_THREAD_OWNER_ID: z.string().optional(),
   THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
   UPLOAD_TEMP_ROOT: z.string().default("./temp/session-uploads"),
+  BRANDING_ASSET_ROOT: z.string().default("./temp/branding-assets"),
   KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets")
 });
 
@@ -74,6 +75,10 @@ const threadStoreFile = path.isAbsolute(env.THREAD_STORE_FILE)
 const uploadTempRoot = path.isAbsolute(env.UPLOAD_TEMP_ROOT)
   ? env.UPLOAD_TEMP_ROOT
   : path.resolve(process.cwd(), env.UPLOAD_TEMP_ROOT);
+
+const brandingAssetRoot = path.isAbsolute(env.BRANDING_ASSET_ROOT)
+  ? env.BRANDING_ASSET_ROOT
+  : path.resolve(process.cwd(), env.BRANDING_ASSET_ROOT);
 
 const knowledgeSetStorageRoot = path.isAbsolute(env.KNOWLEDGE_SET_STORAGE_ROOT)
   ? env.KNOWLEDGE_SET_STORAGE_ROOT
@@ -146,6 +151,7 @@ export const appConfig = {
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),
   threadStoreFile,
   uploadTempRoot,
+  brandingAssetRoot,
   knowledgeSetStorageRoot,
   orgSync: {
     enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),

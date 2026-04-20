@@ -2761,6 +2761,100 @@ body {
   border-top: 1px solid #e2e8f0;
 }
 
+.branding-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.branding-preview-card {
+  border: 1px solid #dbe6f5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.branding-preview-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.branding-preview-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.branding-preview-brand div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.branding-preview-brand strong,
+.branding-preview-brand span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branding-preview-brand strong {
+  color: #0f172a;
+}
+
+.branding-preview-brand span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.branding-preview-logo,
+.branding-preview-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #ff4614;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.branding-preview-avatar {
+  border-radius: 999px;
+}
+
+.branding-preview-logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.branding-asset-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.branding-asset-input-row .ant-btn {
+  border-radius: 8px;
+}
+
+.branding-upload-error {
+  margin: 0 0 14px;
+}
+
 .system-settings-toggle-grid {
   display: grid;
   gap: 10px;
@@ -4937,7 +5031,8 @@ body {
   .ops-analytics-filterbar,
   .ops-analytics-hero,
   .ops-analytics-breakdown-grid,
-  .ops-analytics-context-strip {
+  .ops-analytics-context-strip,
+  .branding-preview-grid {
     grid-template-columns: 1fr;
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
+import { useBranding } from "../branding/BrandingProvider";
 import { fetchPublicThreadShare } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
 
@@ -226,7 +227,7 @@ function sanitizeFileNameSegment(value: string): string {
   return normalized || "shared-conversation";
 }
 
-function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: string): string {
+function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: string, assistantLabel: string): string {
   const lines: string[] = [];
   const threadTitle = share.snapshot.threadTitle || share.title;
   lines.push(`# ${threadTitle}`);
@@ -253,7 +254,7 @@ function buildPublicShareMarkdown(share: ThreadPublicShareView, userLabel: strin
       const sourceParts = message.parts.filter((part) => part.type === "source");
       const processRows = Array.isArray(message.processRows) ? message.processRows : [];
 
-      lines.push("### Agent Studio");
+      lines.push(`### ${assistantLabel}`);
       lines.push("");
 
       if (processRows.length > 0) {
@@ -324,7 +325,7 @@ function UserMessageBlock(props: { message: PublicShareSnapshotMessage; token: s
   );
 }
 
-function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; token: string }) {
+function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; token: string; assistantLabel: string }) {
   const text = collectMessageText(props.message);
   const sourceParts = props.message.parts.filter((part) => part.type === "source");
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
@@ -332,7 +333,7 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; tok
   return (
     <section className="public-share-message public-share-message-assistant">
       <div className="public-share-message-head">
-        <span className="public-share-message-role">Agent Studio</span>
+        <span className="public-share-message-role">{props.assistantLabel}</span>
       </div>
 
       {processRows.length > 0 ? (
@@ -385,14 +386,15 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; tok
   );
 }
 
-function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; token: string; userLabel: string }) {
+function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; token: string; userLabel: string; assistantLabel: string }) {
   if (props.message.role === "user") {
     return <UserMessageBlock message={props.message} token={props.token} userLabel={props.userLabel} />;
   }
-  return <AssistantMessageBlock message={props.message} token={props.token} />;
+  return <AssistantMessageBlock message={props.message} token={props.token} assistantLabel={props.assistantLabel} />;
 }
 
 export function PublicSharePage(props: { token?: string }) {
+  const { branding } = useBranding();
   const token = useMemo(
     () => props.token || extractPublicShareToken(typeof window !== "undefined" ? window.location.pathname : ""),
     [props.token]
@@ -443,7 +445,7 @@ export function PublicSharePage(props: { token?: string }) {
   }, [token]);
 
   useEffect(() => {
-    const title = share?.title ? `${share.title} · Public Link` : "Public Link";
+    const title = share?.title ? `${share.title} · ${branding.platformName}` : `${branding.platformName} Public Link`;
     document.title = title;
 
     let robots = document.querySelector('meta[name="robots"]');
@@ -464,12 +466,13 @@ export function PublicSharePage(props: { token?: string }) {
         robots.setAttribute("content", previous);
       }
     };
-  }, [share?.title]);
+  }, [branding.platformName, share?.title]);
 
   const userLabel = share?.user_display_name?.trim() || "User";
+  const assistantLabel = branding.assistantName.trim() || branding.platformName;
   const shareMarkdown = useMemo(
-    () => (share ? buildPublicShareMarkdown(share, userLabel) : ""),
-    [share, userLabel]
+    () => (share ? buildPublicShareMarkdown(share, userLabel, assistantLabel) : ""),
+    [assistantLabel, share, userLabel]
   );
   const downloadFileName = useMemo(
     () => (share ? `${sanitizeFileNameSegment(share.snapshot.threadTitle || share.title)}.md` : "shared-conversation.md"),
@@ -503,7 +506,7 @@ export function PublicSharePage(props: { token?: string }) {
       <main className="public-share-layout">
         <header className="public-share-header">
           <div className="public-share-header-top">
-            <span className="public-share-kicker">Agent Studio Public Link</span>
+            <span className="public-share-kicker">{branding.platformName} Public Link</span>
             {share ? (
               <div className="public-share-header-actions">
                 <button type="button" className="public-share-header-btn" onClick={() => void handleCopyMarkdown()}>
@@ -558,7 +561,13 @@ export function PublicSharePage(props: { token?: string }) {
                   <div className="public-share-turn-index">Turn {index + 1}</div>
                   <div className="public-share-turn-body">
                     {turn.messages.map((message) => (
-                      <PublicShareMessageBlock key={message.id} message={message} token={share.token} userLabel={userLabel} />
+                      <PublicShareMessageBlock
+                        key={message.id}
+                        message={message}
+                        token={share.token}
+                        userLabel={userLabel}
+                        assistantLabel={assistantLabel}
+                      />
                     ))}
                   </div>
                 </article>

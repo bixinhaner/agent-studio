@@ -20,6 +20,7 @@ import { PermissionService } from "../rbac/permission-service.js";
 import { createSystemSettingsRouter } from "../system-settings/router.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { SystemSettingsService } from "../system-settings/service.js";
+import { BrandingAssetStorage } from "../system-settings/branding-assets.js";
 import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 
@@ -563,7 +564,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
               repository: new SystemSettingsRepository(db as never),
               audits: new AdminAuditLogRepository(db as never)
             }),
-            requirePermission
+            requirePermission,
+            assetStorage: new BrandingAssetStorage(appConfig.brandingAssetRoot)
           });
         }
         return systemSettingsRouter;

@@ -26,6 +26,8 @@ import type { ReactNode } from "react";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
+import { BrandMark } from "../branding/BrandMark";
+import { useBranding } from "../branding/BrandingProvider";
 import { fetchAdminOverview } from "./api";
 import { ADMIN_PREMIUM_THEME } from "./admin-theme";
 import type { AdminOverview, AdminSection } from "./types";
@@ -541,6 +543,7 @@ function AdminSectionContent(props: {
 }
 
 export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {
+  const { branding } = useBranding();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState<AdminConsoleSection>(() => {
@@ -628,12 +631,14 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
     );
   }, [cmdSearch]);
 
+  const brandLogoUrl = branding.logoUrl || branding.iconUrl;
+
   const drawerNavigation = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="admin-sidebar-header">
         <div className="admin-brand" style={{ display: "flex" }}>
-          <div className="admin-brand-icon">AS</div>
-          <span>Agent Studio</span>
+          <BrandMark className="admin-brand-icon" imageClassName="admin-brand-image" name={branding.platformName} logoUrl={brandLogoUrl} />
+          <span>{branding.platformName}</span>
         </div>
       </div>
       <AdminNavigation activeSection={section} collapsed={false} onNavigate={handleNavClick} />
@@ -650,10 +655,18 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           <aside className={`admin-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
             <div className="admin-sidebar-header">
               <div className="admin-brand" style={{ display: sidebarCollapsed ? "none" : "flex" }}>
-                <div className="admin-brand-icon">AS</div>
-                <span>Agent Studio</span>
+                <BrandMark className="admin-brand-icon" imageClassName="admin-brand-image" name={branding.platformName} logoUrl={brandLogoUrl} />
+                <span>{branding.platformName}</span>
               </div>
-                {sidebarCollapsed ? <div className="admin-brand-icon" style={{ margin: "0 auto" }}>AS</div> : null}
+                {sidebarCollapsed ? (
+                  <BrandMark
+                    className="admin-brand-icon"
+                    imageClassName="admin-brand-image"
+                    name={branding.platformName}
+                    logoUrl={brandLogoUrl}
+                    style={{ margin: "0 auto" }}
+                  />
+                ) : null}
             </div>
             <AdminNavigation activeSection={section} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
             <div className={`admin-sidebar-footer ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>

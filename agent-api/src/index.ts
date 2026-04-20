@@ -136,6 +136,8 @@ import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-se
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
+import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
+import { resolvePublicBranding } from "./system-settings/public-branding.js";
 import { initSSE, sendSSE } from "./sse.js";
 import {
   buildThreadPublicShareSnapshot,
@@ -219,6 +221,7 @@ const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot())
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+const brandingAssetStorage = new BrandingAssetStorage(appConfig.brandingAssetRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
   db: db as unknown as IntegrationCenterDb,
@@ -1540,6 +1543,36 @@ app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
 
+app.get("/public-api/branding", async (_req: Request, res: Response) => {
+  try {
+    const branding = await resolvePublicBranding(systemSettings);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json(branding);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read branding";
+    res.status(500).json({ detail });
+  }
+});
+
+app.get("/public-api/branding/assets/:fileName", async (req: Request, res: Response) => {
+  try {
+    const fileName = String(req.params.fileName || "").trim();
+    const asset = await brandingAssetStorage.resolveForRead(fileName);
+    if (!asset) {
+      res.status(404).json({ detail: "Branding asset does not exist" });
+      return;
+    }
+    const buffer = await fs.readFile(asset.absolutePath);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.type(asset.mimeType);
+    res.status(200).send(buffer);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read branding asset";
+    res.status(400).json({ detail });
+  }
+});
+
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({
     users,
@@ -1559,7 +1592,8 @@ registerCommonApiRoutes(app, {
     challenges: loginChallenges,
     emailSender: authEmailSender,
     appBaseUrl: appConfig.appBaseUrl,
-    sessionCookieReady: Boolean(appConfig.sessionCookie.secret)
+    sessionCookieReady: Boolean(appConfig.sessionCookie.secret),
+    systemSettings
   }),
   rbacAdminRouter: createRbacRouter({
     roles,

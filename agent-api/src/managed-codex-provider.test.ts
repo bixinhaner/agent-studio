@@ -79,7 +79,9 @@ describe("ManagedCodexProviderResolver", () => {
                 headerSubtitle: "test",
                 loginCopy: "test",
                 logoUrl: "",
-                iconUrl: ""
+                iconUrl: "",
+                assistantName: "test assistant",
+                assistantAvatarUrl: ""
               },
               platformDefaults: {
                 provider: "local_auth",
@@ -140,7 +142,9 @@ describe("resolveManagedCodexDefaults", () => {
             headerSubtitle: "test",
             loginCopy: "test",
             logoUrl: "",
-            iconUrl: ""
+            iconUrl: "",
+            assistantName: "test assistant",
+            assistantAvatarUrl: ""
           },
           platformDefaults: {
             provider: "openai_codex",

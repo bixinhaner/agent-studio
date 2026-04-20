@@ -1,6 +1,8 @@
 import { Button, Space, Tooltip } from "antd";
 import { LayoutPanelLeft, MessageSquareText, Settings, PanelRightClose, PanelRightOpen, Shield } from "lucide-react";
 
+import { BrandMark } from "../../branding/BrandMark";
+import { useBranding } from "../../branding/BrandingProvider";
 import type { WorkbenchTab } from "./layout-state";
 
 const WORKBENCH_TAB_LABEL: Record<WorkbenchTab, string> = {
@@ -22,6 +24,7 @@ export function PortalTopBar(props: {
   showAdvancedSettings?: boolean;
   showRightPanelToggle?: boolean;
 }) {
+  const { branding } = useBranding();
   const isRightPanelOpen = props.drawerOpen;
   const showRuntimeSummary = props.showRuntimeSummary ?? true;
   const showAdvancedSettings = props.showAdvancedSettings ?? true;
@@ -41,13 +44,16 @@ export function PortalTopBar(props: {
           />
         </Tooltip>
 
-        <div className="portal-topbar-brand" aria-label="Agent Studio">
-          <span className="portal-topbar-brand-mark" aria-hidden="true">
-            AS
-          </span>
+        <div className="portal-topbar-brand" aria-label={branding.platformName}>
+          <BrandMark
+            className="portal-topbar-brand-mark"
+            imageClassName="portal-topbar-brand-image"
+            name={branding.platformName}
+            logoUrl={branding.logoUrl || branding.iconUrl}
+          />
           <span className="portal-topbar-brand-copy">
-            <span className="portal-topbar-brand-title">Agent Studio</span>
-            <span className="portal-topbar-brand-subtitle">Workspace</span>
+            <span className="portal-topbar-brand-title">{branding.platformName}</span>
+            <span className="portal-topbar-brand-subtitle">{branding.headerSubtitle}</span>
           </span>
         </div>
       </div>

@@ -10,20 +10,23 @@ const defaultSessionWorkspaceRoot = path.resolve(moduleDir, "..", "..", "..", "s
 export const systemSettingsVersionStatusSchema = z.enum(["draft", "published"]);
 export type SystemSettingsVersionStatus = z.infer<typeof systemSettingsVersionStatusSchema>;
 
-function isValidUrl(value: string): boolean {
+function isValidBrandAssetRef(value: string): boolean {
   if (value.length === 0) {
     return true;
   }
+  if (value.startsWith("/") && !value.startsWith("//")) {
+    return !/[\u0000-\u001f\u007f]/.test(value);
+  }
   try {
-    new URL(value);
-    return true;
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }
 }
 
-const urlOrEmptySchema = z.string().trim().refine(isValidUrl, {
-  message: "must be an empty string or a valid URL"
+const brandAssetRefOrEmptySchema = z.string().trim().refine(isValidBrandAssetRef, {
+  message: "must be an empty string, an http(s) URL, or a root-relative path"
 });
 
 const positiveIntegerSchema = z.number().int().positive();
@@ -36,8 +39,10 @@ export const systemSettingsBrandingSchema = z.object({
   platformName: z.string().trim().min(1),
   headerSubtitle: z.string().trim().min(1),
   loginCopy: z.string().trim().min(1),
-  logoUrl: urlOrEmptySchema,
-  iconUrl: urlOrEmptySchema
+  logoUrl: brandAssetRefOrEmptySchema,
+  iconUrl: brandAssetRefOrEmptySchema,
+  assistantName: z.string().trim().min(1).default("Baicells AI Assistant"),
+  assistantAvatarUrl: brandAssetRefOrEmptySchema.default("")
 });
 
 export const systemSettingsPlatformDefaultsSchema = z.object({
@@ -151,7 +156,9 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     headerSubtitle: "Enterprise Agent Platform",
     loginCopy: "Sign in with DingTalk to continue.",
     logoUrl: "",
-    iconUrl: ""
+    iconUrl: "",
+    assistantName: "Baicells AI Assistant",
+    assistantAvatarUrl: ""
   },
   platformDefaults: {
     provider: "openai_codex",
