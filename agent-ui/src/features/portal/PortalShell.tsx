@@ -2850,6 +2850,12 @@ const ThreadQuestionNavigator: FC<{
   const panelStyle = {
     "--thread-question-nav-panel-top": `${Math.max(0, Math.min(100, selectedPanelTop))}%`
   } as CSSProperties;
+  const nearbyItems = useMemo(() => {
+    const maxVisible = 5;
+    if (items.length <= maxVisible) return items;
+    const start = Math.max(0, Math.min(selectedIndex - 2, items.length - maxVisible));
+    return items.slice(start, start + maxVisible);
+  }, [items, selectedIndex]);
 
   const refresh = useCallback(() => {
     const shell = shellRef.current;
@@ -2994,33 +3000,20 @@ const ThreadQuestionNavigator: FC<{
       onMouseEnter={cancelPanelClose}
       onMouseLeave={schedulePanelClose}
     >
-      <button
-        type="button"
-        className="thread-question-nav-toggle"
-        aria-label={`${items.length} questions in this conversation`}
-        aria-expanded={panelOpen}
-        onClick={() => {
-          cancelPanelClose();
-          setHoveredId((current) => current || activeId || items[0]?.id || "");
-          setPanelOpen((value) => !value);
-        }}
-      >
-        {items.length}
-      </button>
       <div className="thread-question-nav-track">
         {items.map((item, index) => {
           const fallbackTop = items.length === 1 ? 0 : (index / (items.length - 1)) * 100;
           const top = positions[item.id] ?? fallbackTop;
-          const active = item.id === activeId;
-          const preview = item.id === selectedId;
+          const current = item.id === activeId;
+          const selected = item.id === selectedId;
           return (
             <button
               key={item.id}
               type="button"
-              className={`thread-question-nav-marker ${active ? "is-active" : ""} ${preview ? "is-preview" : ""}`}
+              className={`thread-question-nav-marker ${selected ? "is-selected" : ""}`}
               style={{ top: `${top}%` }}
               aria-label={`Jump to question ${item.index}: ${item.label}`}
-              aria-current={active ? "location" : undefined}
+              aria-current={current ? "location" : undefined}
               title={item.label}
               onMouseEnter={() => openPanelForQuestion(item.id)}
               onClick={() => jumpToQuestion(item.id)}
@@ -3030,22 +3023,21 @@ const ThreadQuestionNavigator: FC<{
         })}
       </div>
       <div className="thread-question-nav-panel" onMouseEnter={cancelPanelClose} onMouseLeave={schedulePanelClose}>
-        <div className="thread-question-nav-panel-title">Questions</div>
         <div className="thread-question-nav-panel-list" ref={panelListRef}>
-          {items.map((item) => {
-            const active = item.id === activeId;
+          {nearbyItems.map((item) => {
             const selected = item.id === selectedId;
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`thread-question-nav-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
+                className={`thread-question-nav-row ${selected ? "is-selected" : ""}`}
                 data-question-nav-row-selected={selected ? "true" : undefined}
+                aria-current={item.id === activeId ? "location" : undefined}
                 onClick={() => jumpToQuestion(item.id)}
                 title={item.label}
               >
-                <span className="thread-question-nav-row-index">{item.index}</span>
                 <span className="thread-question-nav-row-text">{item.label}</span>
+                <span className="thread-question-nav-row-mark" aria-hidden="true" />
               </button>
             );
           })}
