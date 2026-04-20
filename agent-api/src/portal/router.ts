@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
+import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
 import type { ProductFeedbackRepository } from "../persistence/product-feedback-repository.js";
 import { toPortalRuntimeOptions } from "./runtime-options.js";
 import type { PortalRuntimeOptionService } from "./runtime-option-service.js";
@@ -18,6 +19,7 @@ export function createPortalRouter(options: {
   runtimeOptions: Pick<PortalRuntimeOptionService, "resolve">;
   listDepartmentIdsForUser(userId: string): Promise<string[]>;
   productFeedback?: Pick<ProductFeedbackRepository, "create">;
+  subscriptionEntitlements?: Pick<SubscriptionEntitlementService, "getPortalSubscriptionStatus">;
 }): Router {
   const router = Router();
 
@@ -88,6 +90,51 @@ export function createPortalRouter(options: {
     } catch (error) {
       res.status(500).json({
         detail: error instanceof Error ? error.message : "failed to submit product feedback"
+      });
+    }
+  });
+
+  router.get("/subscription-status", async (req: Request, res: Response) => {
+    const currentUser = req.currentUser;
+    if (!currentUser) {
+      res.status(401).json({ detail: "Unauthorized" });
+      return;
+    }
+    if (!options.subscriptionEntitlements) {
+      res.status(503).json({ detail: "Subscription status is not available" });
+      return;
+    }
+
+    try {
+      const status = await options.subscriptionEntitlements.getPortalSubscriptionStatus({
+        currentUser: {
+          id: currentUser.id,
+          organizationId: req.currentOrganization?.id ?? currentUser.primaryOrganizationId ?? "",
+          organizationType: req.currentOrganization?.type
+        },
+        model: ""
+      });
+      res.json({
+        status: {
+          access_state: status.accessState,
+          tone: status.tone,
+          source_type: status.sourceType,
+          source_label: status.sourceLabel,
+          title: status.title,
+          summary: status.summary,
+          detail: status.detail,
+          action_label: status.actionLabel,
+          plan_name: status.planName,
+          expires_at: status.expiresAt,
+          cycle_ends_at: status.cycleEndsAt,
+          remaining_completed_turns: status.remainingCompletedTurns,
+          completed_turn_limit: status.completedTurnLimit,
+          reason_code: status.reasonCode
+        }
+      });
+    } catch (error) {
+      res.status(500).json({
+        detail: error instanceof Error ? error.message : "failed to resolve subscription status"
       });
     }
   });

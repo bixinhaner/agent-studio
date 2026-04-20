@@ -74,10 +74,12 @@ import { KnowledgeSetPicker } from "../resources/KnowledgeSetPicker";
 import type { PortalResourcesResponse } from "../resources/types";
 import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
+import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-share/api";
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
 import { PortalTopBar } from "./workbench/PortalTopBar";
+import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
@@ -1060,6 +1062,20 @@ function normalizeProcessTime(value: string | undefined): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(at);
+}
+
+function formatPortalAccessTime(value: string | undefined): string {
+  if (!value) return "";
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(at);
+}
+
+function formatConversationBalance(value: number): string {
+  return value === 1 ? "1 conversation left" : `${value} conversations left`;
 }
 
 function formatThreadGroupLabel(value: string | undefined, referenceDate = new Date()): string {
@@ -2720,6 +2736,7 @@ const AgentRuntimeAdapterProvider: FC<
 };
 
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
+  const auth = useAuth();
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -2732,6 +2749,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   });
   const [runtimeOptions, setRuntimeOptions] = useState<PortalRuntimeOptions | null>(null);
   const [portalResources, setPortalResources] = useState<PortalResourcesResponse | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<PortalSubscriptionStatus | null>(null);
+  const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(false);
+  const [subscriptionStatusError, setSubscriptionStatusError] = useState("");
   const [runtimeMode, setRuntimeMode] = useState("standard");
   const [layoutState, setLayoutState] = useState(createInitialLayoutState());
   const [sessionSearchValue, setSessionSearchValue] = useState("");
@@ -2798,6 +2818,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   });
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshPortalSubscriptionStatusRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
 
   appliedConfigRef.current = appliedConfig;
   runtimeOptionsRef.current = runtimeOptions;
@@ -2809,6 +2830,32 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   activeThreadIdentityRef.current = activeThreadIdentity;
   threadCollaborationRef.current = threadCollaboration;
   threadCollaborationLoadingRef.current = threadCollaborationLoading;
+
+  const refreshPortalSubscriptionStatus = useCallback(async (options?: { silent?: boolean }) => {
+    if (!props.currentUser) {
+      setSubscriptionStatus(null);
+      setSubscriptionStatusError("");
+      setSubscriptionStatusLoading(false);
+      return;
+    }
+
+    if (!options?.silent) {
+      setSubscriptionStatusLoading(true);
+    }
+
+    try {
+      const next = await fetchPortalSubscriptionStatus();
+      setSubscriptionStatus(next);
+      setSubscriptionStatusError("");
+    } catch (error) {
+      setSubscriptionStatusError(error instanceof Error ? error.message : "Failed to load your access details");
+    } finally {
+      if (!options?.silent) {
+        setSubscriptionStatusLoading(false);
+      }
+    }
+  }, [props.currentUser?.id]);
+  refreshPortalSubscriptionStatusRef.current = refreshPortalSubscriptionStatus;
 
   useEffect(() => {
     let active = true;
@@ -2848,6 +2895,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!props.currentUser) {
+      setSubscriptionStatus(null);
+      setSubscriptionStatusError("");
+      setSubscriptionStatusLoading(false);
+      return;
+    }
+    void refreshPortalSubscriptionStatus();
+  }, [props.currentUser?.id, auth.activeOrganization?.id, refreshPortalSubscriptionStatus]);
 
   useEffect(() => {
     const remoteThreadId = String(activeThreadIdentity.remoteId || "").trim();
@@ -3593,6 +3650,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
               setErrorText(detail);
+              void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage("Execution failed");
               if (processEnabled) {
                 updates.push({
@@ -3620,6 +3678,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             if (event === "done") {
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
+              void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage("Response generation completed");
               if (!hasTextUpdate && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
@@ -4094,6 +4153,22 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     </div>
   );
 
+  const blockedSubscriptionStatus = subscriptionStatus?.accessState === "blocked" ? subscriptionStatus : null;
+  const blockedSubscriptionMeta = blockedSubscriptionStatus
+    ? [
+        blockedSubscriptionStatus.remainingCompletedTurns !== null && !blockedSubscriptionStatus.reasonCode?.includes("token_limit")
+          ? formatConversationBalance(blockedSubscriptionStatus.remainingCompletedTurns)
+          : "",
+        blockedSubscriptionStatus.cycleEndsAt
+          ? `Next reset ${formatPortalAccessTime(blockedSubscriptionStatus.cycleEndsAt)}`
+          : "",
+        blockedSubscriptionStatus.expiresAt
+          ? `Access until ${formatPortalAccessTime(blockedSubscriptionStatus.expiresAt)}`
+          : "",
+        blockedSubscriptionStatus.sourceLabel
+      ].filter(Boolean)
+    : [];
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ComposerActivationGuard runtime={runtime} />
@@ -4150,7 +4225,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   footer={
                     <div className="session-rail-footer-stack">
                       {props.currentUser ? (
-                        <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} locale="en" />
+                        <UserIdentitySummary
+                          user={props.currentUser}
+                          compact
+                          onSignOut={props.onSignOut}
+                          locale="en"
+                          accessStatus={subscriptionStatus}
+                          accessStatusLoading={subscriptionStatusLoading}
+                          accessStatusError={subscriptionStatusError}
+                          onOpenAccessStatus={() => {
+                            void refreshPortalSubscriptionStatus();
+                          }}
+                        />
                       ) : (
                         <p className="session-rail-user-fallback">{currentUserName}</p>
                       )}
@@ -4175,6 +4261,29 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
                 <Panel minSize="30">
                   <main className="portal-workbench-chat">
+                    {blockedSubscriptionStatus ? (
+                      <section className={`portal-access-notice tone-${blockedSubscriptionStatus.tone}`} role="status" aria-live="polite">
+                        <div className="portal-access-notice-marker" aria-hidden="true">
+                          !
+                        </div>
+                        <div className="portal-access-notice-copy">
+                          <p className="portal-access-notice-eyebrow">Access update</p>
+                          <h3>{blockedSubscriptionStatus.title}</h3>
+                          <p>{blockedSubscriptionStatus.summary}</p>
+                          <p>{blockedSubscriptionStatus.detail}</p>
+                          {blockedSubscriptionStatus.actionLabel ? (
+                            <p className="portal-access-notice-action">{blockedSubscriptionStatus.actionLabel}</p>
+                          ) : null}
+                          {blockedSubscriptionMeta.length > 0 ? (
+                            <div className="portal-access-notice-meta">
+                              {blockedSubscriptionMeta.map((item) => (
+                                <span key={item}>{item}</span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </section>
+                    ) : null}
                     <div className="thread-wrap">
                       {canUpload && !sharedThreadReadonly ? (
                         <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>

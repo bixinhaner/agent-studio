@@ -52,6 +52,23 @@ export type ChatAccessDecision = {
   defaultPolicy: "internal_unlimited" | "external_requires_subscription" | null;
 };
 
+export type PortalSubscriptionStatus = {
+  accessState: "available" | "blocked";
+  tone: "positive" | "caution" | "critical" | "neutral";
+  sourceType: "user" | "organization" | "default_internal" | "default_external";
+  sourceLabel: string;
+  title: string;
+  summary: string;
+  detail: string;
+  actionLabel: string | null;
+  planName: string | null;
+  expiresAt: string | null;
+  cycleEndsAt: string | null;
+  remainingCompletedTurns: number | null;
+  completedTurnLimit: number | null;
+  reasonCode: string | null;
+};
+
 export class ChatAccessDeniedError extends Error {
   readonly statusCode = 403;
 
@@ -192,6 +209,291 @@ function defaultDecision(organizationType: string | null | undefined): ChatAcces
     userGrant: null,
     organizationGrant: null,
     defaultPolicy: "external_requires_subscription"
+  };
+}
+
+function daysUntil(from: Date, to: Date): number {
+  const diffMs = to.getTime() - from.getTime();
+  return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+}
+
+function formatConversationCount(value: number): string {
+  return value === 1 ? "1 conversation" : `${value} conversations`;
+}
+
+function selectPortalEvaluation(input: {
+  userGrant: SubscriptionGrantEvaluation | null;
+  organizationGrant: SubscriptionGrantEvaluation | null;
+}): SubscriptionGrantEvaluation | null {
+  const organizationBlocked = input.organizationGrant && input.organizationGrant.access.status !== "available"
+    ? input.organizationGrant
+    : null;
+  if (organizationBlocked) return organizationBlocked;
+
+  const userBlocked = input.userGrant && input.userGrant.access.status !== "available"
+    ? input.userGrant
+    : null;
+  if (userBlocked) return userBlocked;
+
+  if (input.userGrant && input.organizationGrant) {
+    const userRemaining = input.userGrant.usage?.remainingCompletedTurns;
+    const organizationRemaining = input.organizationGrant.usage?.remainingCompletedTurns;
+
+    if (userRemaining !== null && userRemaining !== undefined && organizationRemaining !== null && organizationRemaining !== undefined) {
+      return userRemaining <= organizationRemaining ? input.userGrant : input.organizationGrant;
+    }
+    if (userRemaining !== null && userRemaining !== undefined) return input.userGrant;
+    if (organizationRemaining !== null && organizationRemaining !== undefined) return input.organizationGrant;
+
+    const userExpiresAt = input.userGrant.grant.expiresAt ? toDate(input.userGrant.grant.expiresAt) : null;
+    const organizationExpiresAt = input.organizationGrant.grant.expiresAt ? toDate(input.organizationGrant.grant.expiresAt) : null;
+    if (userExpiresAt && organizationExpiresAt) {
+      return userExpiresAt <= organizationExpiresAt ? input.userGrant : input.organizationGrant;
+    }
+    if (userExpiresAt) return input.userGrant;
+    if (organizationExpiresAt) return input.organizationGrant;
+    return input.userGrant;
+  }
+
+  return input.userGrant ?? input.organizationGrant ?? null;
+}
+
+function sourceLabelForPortalStatus(input: {
+  evaluation: SubscriptionGrantEvaluation | null;
+  defaultPolicy: ChatAccessDecision["defaultPolicy"];
+  blocked: boolean;
+}): Pick<PortalSubscriptionStatus, "sourceType" | "sourceLabel"> {
+  if (input.evaluation?.grant.principalType === "user") {
+    return {
+      sourceType: "user",
+      sourceLabel: input.blocked ? "Blocked by your personal plan" : "Managed through your personal plan"
+    };
+  }
+  if (input.evaluation?.grant.principalType === "organization") {
+    return {
+      sourceType: "organization",
+      sourceLabel: input.blocked ? "Blocked by your workspace plan" : "Managed through your workspace plan"
+    };
+  }
+  if (input.defaultPolicy === "internal_unlimited") {
+    return {
+      sourceType: "default_internal",
+      sourceLabel: "Included by your internal workspace"
+    };
+  }
+  return {
+    sourceType: "default_external",
+    sourceLabel: "A workspace plan is required"
+  };
+}
+
+function buildPortalStatus(input: {
+  decision: ChatAccessDecision;
+  now: Date;
+}): PortalSubscriptionStatus {
+  const evaluation = selectPortalEvaluation({
+    userGrant: input.decision.userGrant,
+    organizationGrant: input.decision.organizationGrant
+  });
+  const source = sourceLabelForPortalStatus({
+    evaluation,
+    defaultPolicy: input.decision.defaultPolicy,
+    blocked: !input.decision.allowed
+  });
+  const expiresAt = evaluation?.grant.expiresAt ?? null;
+  const cycleEndsAt = evaluation?.usage?.cycleEndsAt ?? null;
+  const remainingCompletedTurns = evaluation?.usage?.remainingCompletedTurns ?? null;
+  const completedTurnLimit = evaluation?.limits.monthlyCompletedTurnLimit ?? null;
+  const planName = evaluation?.plan?.name ?? null;
+  const reasonCode = input.decision.reasonCode ?? evaluation?.access.reasonCode ?? null;
+
+  if (input.decision.defaultPolicy === "internal_unlimited" && !evaluation) {
+    return {
+      accessState: "available",
+      tone: "neutral",
+      sourceType: source.sourceType,
+      sourceLabel: source.sourceLabel,
+      title: "Access is available",
+      summary: "Your internal workspace is not currently using a separate subscription limit.",
+      detail: "You can keep asking new questions without setting up a personal plan.",
+      actionLabel: null,
+      planName: null,
+      expiresAt: null,
+      cycleEndsAt: null,
+      remainingCompletedTurns: null,
+      completedTurnLimit: null,
+      reasonCode: null
+    };
+  }
+
+  if (input.decision.defaultPolicy === "external_requires_subscription" && !evaluation) {
+    return {
+      accessState: "blocked",
+      tone: "critical",
+      sourceType: source.sourceType,
+      sourceLabel: source.sourceLabel,
+      title: "A plan is required",
+      summary: "Your workspace has not enabled access yet.",
+      detail: "Ask your workspace admin to assign a plan before you start a new question.",
+      actionLabel: "Contact your workspace admin to enable access.",
+      planName: null,
+      expiresAt: null,
+      cycleEndsAt: null,
+      remainingCompletedTurns: null,
+      completedTurnLimit: null,
+      reasonCode
+    };
+  }
+
+  if (!evaluation) {
+    return {
+      accessState: input.decision.allowed ? "available" : "blocked",
+      tone: input.decision.allowed ? "neutral" : "critical",
+      sourceType: source.sourceType,
+      sourceLabel: source.sourceLabel,
+      title: input.decision.allowed ? "Access is available" : "Access is unavailable",
+      summary: input.decision.allowed ? "You can start a new question." : "You cannot start a new question right now.",
+      detail: input.decision.message,
+      actionLabel: input.decision.allowed ? null : "Please contact your workspace admin for help.",
+      planName: null,
+      expiresAt: null,
+      cycleEndsAt: null,
+      remainingCompletedTurns: null,
+      completedTurnLimit: null,
+      reasonCode
+    };
+  }
+
+  if (!input.decision.allowed) {
+    if (reasonCode?.includes("subscription_paused")) {
+      return {
+        accessState: "blocked",
+        tone: "caution",
+        sourceType: source.sourceType,
+        sourceLabel: source.sourceLabel,
+        title: "Access is paused",
+        summary: "This plan is currently paused for new questions.",
+        detail: "You can keep reading earlier chats, but you will need your admin to resume access before sending a new question.",
+        actionLabel: "Ask your workspace admin to resume this plan.",
+        planName,
+        expiresAt,
+        cycleEndsAt,
+        remainingCompletedTurns,
+        completedTurnLimit,
+        reasonCode
+      };
+    }
+    if (reasonCode?.includes("subscription_not_started")) {
+      return {
+        accessState: "blocked",
+        tone: "caution",
+        sourceType: source.sourceType,
+        sourceLabel: source.sourceLabel,
+        title: "Access starts soon",
+        summary: "Your plan has been scheduled, but it is not active yet.",
+        detail: "You can start new questions as soon as the plan begins.",
+        actionLabel: "If this start date looks wrong, contact your workspace admin.",
+        planName,
+        expiresAt,
+        cycleEndsAt,
+        remainingCompletedTurns,
+        completedTurnLimit,
+        reasonCode
+      };
+    }
+    if (reasonCode?.includes("subscription_expired")) {
+      return {
+        accessState: "blocked",
+        tone: "critical",
+        sourceType: source.sourceType,
+        sourceLabel: source.sourceLabel,
+        title: "Your access has ended",
+        summary: "This plan is no longer active for new questions.",
+        detail: "Ask your workspace admin to renew access, then try again.",
+        actionLabel: "Contact your workspace admin for a renewal.",
+        planName,
+        expiresAt,
+        cycleEndsAt,
+        remainingCompletedTurns,
+        completedTurnLimit,
+        reasonCode
+      };
+    }
+    if (reasonCode?.includes("token_limit_exceeded")) {
+      return {
+        accessState: "blocked",
+        tone: "critical",
+        sourceType: source.sourceType,
+        sourceLabel: source.sourceLabel,
+        title: "This workspace is temporarily unavailable",
+        summary: "This plan has reached its service capacity for the current cycle.",
+        detail: "You can keep reading earlier chats. To send a new question, wait for the next reset or ask your admin for more capacity.",
+        actionLabel: "Try again after the next cycle reset or contact your workspace admin.",
+        planName,
+        expiresAt,
+        cycleEndsAt,
+        remainingCompletedTurns,
+        completedTurnLimit,
+        reasonCode
+      };
+    }
+    return {
+      accessState: "blocked",
+      tone: "critical",
+      sourceType: source.sourceType,
+      sourceLabel: source.sourceLabel,
+      title: "Conversation limit reached",
+      summary: "You have used all conversations included in this cycle.",
+      detail: "You can keep reading earlier chats. To start a new question, wait for the next reset or ask your admin to adjust the plan.",
+      actionLabel: "Try again after the next cycle reset or contact your workspace admin.",
+      planName,
+      expiresAt,
+      cycleEndsAt,
+      remainingCompletedTurns,
+      completedTurnLimit,
+      reasonCode
+    };
+  }
+
+  const expiresSoon = expiresAt ? daysUntil(input.now, toDate(expiresAt)) <= 7 : false;
+  if (remainingCompletedTurns !== null && remainingCompletedTurns !== undefined) {
+    return {
+      accessState: "available",
+      tone: remainingCompletedTurns <= 3 || expiresSoon ? "caution" : "positive",
+      sourceType: source.sourceType,
+      sourceLabel: source.sourceLabel,
+      title: expiresSoon ? "Access ends soon" : "Access is active",
+      summary: `${formatConversationCount(remainingCompletedTurns)} left in this cycle.`,
+      detail: expiresSoon
+        ? "Your plan is active, but it is approaching its end date."
+        : "You can keep asking new questions within the current cycle.",
+      actionLabel: expiresSoon ? "If you need uninterrupted access, contact your workspace admin before it ends." : null,
+      planName,
+      expiresAt,
+      cycleEndsAt,
+      remainingCompletedTurns,
+      completedTurnLimit,
+      reasonCode: null
+    };
+  }
+
+  return {
+    accessState: "available",
+    tone: expiresSoon ? "caution" : "positive",
+    sourceType: source.sourceType,
+    sourceLabel: source.sourceLabel,
+    title: expiresSoon ? "Access ends soon" : "Access is active",
+    summary: "Your plan is active for new questions.",
+    detail: expiresSoon
+      ? "Your plan is active, but it is approaching its end date."
+      : "No conversation count is currently shown for this plan.",
+    actionLabel: expiresSoon ? "If you need uninterrupted access, contact your workspace admin before it ends." : null,
+    planName,
+    expiresAt,
+    cycleEndsAt,
+    remainingCompletedTurns: null,
+    completedTurnLimit,
+    reasonCode: null
   };
 }
 
@@ -411,6 +713,31 @@ export class SubscriptionEntitlementService {
     };
   }
 
+  async getPortalSubscriptionStatus(input: {
+    currentUser: CurrentActor;
+    model: string;
+    now?: Date;
+  }): Promise<PortalSubscriptionStatus> {
+    const now = input.now ?? new Date();
+    const decision = await this.evaluateAccessForChat({
+      currentUser: input.currentUser,
+      model: input.model,
+      now
+    });
+    return buildPortalStatus({
+      decision,
+      now
+    });
+  }
+
+  private buildPortalDeniedMessage(decision: ChatAccessDecision): string {
+    const status = buildPortalStatus({
+      decision,
+      now: new Date()
+    });
+    return `${status.title}. ${status.detail}`.trim();
+  }
+
   async enforceChatAccess(input: {
     currentUser: CurrentActor;
     model: string;
@@ -449,6 +776,6 @@ export class SubscriptionEntitlementService {
       });
     }
 
-    throw new ChatAccessDeniedError(decision.message);
+    throw new ChatAccessDeniedError(this.buildPortalDeniedMessage(decision));
   }
 }

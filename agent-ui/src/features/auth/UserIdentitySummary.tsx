@@ -1,4 +1,5 @@
-import { LogOutIcon } from "lucide-react";
+import { Popover, Spin } from "antd";
+import { LogOutIcon, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "./AuthProvider";
@@ -47,9 +48,28 @@ export function UserIdentitySummary(props: {
   compact?: boolean;
   onSignOut?: () => void;
   locale?: UserIdentityLocale;
+  accessStatus?: {
+    accessState: "available" | "blocked";
+    tone: "positive" | "caution" | "critical" | "neutral";
+    sourceLabel: string;
+    title: string;
+    summary: string;
+    detail: string;
+    reasonCode?: string;
+    actionLabel?: string;
+    planName?: string;
+    expiresAt?: string;
+    cycleEndsAt?: string;
+    remainingCompletedTurns: number | null;
+    completedTurnLimit: number | null;
+  } | null;
+  accessStatusLoading?: boolean;
+  accessStatusError?: string;
+  onOpenAccessStatus?: () => void;
 }) {
   const auth = useAuth();
   const [switchingOrganization, setSwitchingOrganization] = useState(false);
+  const [accessPopoverOpen, setAccessPopoverOpen] = useState(false);
   const locale: UserIdentityLocale = props.locale || "zh";
   const name = props.user.displayName?.trim() || props.user.email?.trim() || props.user.id;
   const email = props.user.email?.trim() || (locale === "en" ? "No email linked" : "未绑定邮箱");
@@ -72,6 +92,82 @@ export function UserIdentitySummary(props: {
       setSwitchingOrganization(false);
     }
   };
+
+  const formatAccessTime = (value: string | undefined) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(parsed);
+  };
+
+  const accessTone = props.accessStatus?.tone || "neutral";
+  const accessBadgeLabel = props.accessStatus?.accessState === "blocked"
+    ? "Action needed"
+    : accessTone === "caution"
+      ? "Ends soon"
+      : "Active";
+  const accessButtonLabel = locale === "en" ? "View access details" : "查看权益信息";
+  const showConversationBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
+  const accessPopoverContent = (
+    <div className="user-identity-access-panel">
+      {props.accessStatusLoading ? (
+        <div className="user-identity-access-loading">
+          <Spin size="small" />
+          <span>{locale === "en" ? "Loading your access details..." : "正在加载权益信息..."}</span>
+        </div>
+      ) : props.accessStatusError ? (
+        <div className="user-identity-access-error">
+          <p>{locale === "en" ? "We could not load your access details right now." : "暂时无法加载权益信息。"}</p>
+          <span>{props.accessStatusError}</span>
+        </div>
+      ) : props.accessStatus ? (
+        <>
+          <div className="user-identity-access-header">
+            <span className={`user-identity-access-badge tone-${accessTone}`}>{accessBadgeLabel}</span>
+            <h4 className="user-identity-access-title">{props.accessStatus.title}</h4>
+          </div>
+          <p className="user-identity-access-summary">{props.accessStatus.summary}</p>
+          <p className="user-identity-access-detail">{props.accessStatus.detail}</p>
+          <div className="user-identity-access-grid">
+            <div className="user-identity-access-metric">
+              <span className="user-identity-access-label">{locale === "en" ? "Coverage" : "权益来源"}</span>
+              <strong>{props.accessStatus.sourceLabel}</strong>
+            </div>
+            {props.accessStatus.planName ? (
+              <div className="user-identity-access-metric">
+                <span className="user-identity-access-label">{locale === "en" ? "Plan" : "套餐"}</span>
+                <strong>{props.accessStatus.planName}</strong>
+              </div>
+            ) : null}
+            {showConversationBalance ? (
+              <div className="user-identity-access-metric">
+                <span className="user-identity-access-label">{locale === "en" ? "Conversations left" : "剩余次数"}</span>
+                <strong>{props.accessStatus.remainingCompletedTurns}</strong>
+              </div>
+            ) : null}
+            {props.accessStatus.cycleEndsAt ? (
+              <div className="user-identity-access-metric">
+                <span className="user-identity-access-label">{locale === "en" ? "Next reset" : "下次重置"}</span>
+                <strong>{formatAccessTime(props.accessStatus.cycleEndsAt)}</strong>
+              </div>
+            ) : null}
+            {props.accessStatus.expiresAt ? (
+              <div className="user-identity-access-metric">
+                <span className="user-identity-access-label">{locale === "en" ? "Available until" : "可用到"}</span>
+                <strong>{formatAccessTime(props.accessStatus.expiresAt)}</strong>
+              </div>
+            ) : null}
+          </div>
+          {props.accessStatus.actionLabel ? <p className="user-identity-access-footnote">{props.accessStatus.actionLabel}</p> : null}
+        </>
+      ) : (
+        <p className="user-identity-access-empty">{locale === "en" ? "Open this panel to view your current access details." : "打开后可查看当前权益信息。"}</p>
+      )}
+    </div>
+  );
 
   return (
     <section className={props.compact ? "user-identity-card compact" : "user-identity-card"} aria-label={locale === "en" ? "Current signed-in user" : "当前登录用户"}>
@@ -109,17 +205,43 @@ export function UserIdentitySummary(props: {
         {auth.error ? <p className="user-identity-alert" style={{ marginTop: 8 }}>{auth.error}</p> : null}
       </div>
 
-      {props.onSignOut ? (
+      {props.onSignOut || props.onOpenAccessStatus ? (
         <div className="user-identity-actions">
-          <button
-            type="button"
-            className="user-identity-action-btn"
-            aria-label={locale === "en" ? "Sign out" : "退出登录"}
-            title={locale === "en" ? "Sign out" : "退出登录"}
-            onClick={handleSignOut}
-          >
-            <LogOutIcon size={16} strokeWidth={2} />
-          </button>
+          {props.onOpenAccessStatus ? (
+            <Popover
+              trigger="click"
+              placement="topRight"
+              overlayClassName="user-identity-access-popover"
+              content={accessPopoverContent}
+              open={accessPopoverOpen}
+              onOpenChange={(open) => {
+                setAccessPopoverOpen(open);
+                if (open) {
+                  props.onOpenAccessStatus?.();
+                }
+              }}
+            >
+              <button
+                type="button"
+                className={`user-identity-action-btn ${props.accessStatus?.accessState === "blocked" ? "user-identity-action-btn-attention" : ""}`}
+                aria-label={accessButtonLabel}
+                title={accessButtonLabel}
+              >
+                <ShieldCheckIcon size={16} strokeWidth={2} />
+              </button>
+            </Popover>
+          ) : null}
+          {props.onSignOut ? (
+            <button
+              type="button"
+              className="user-identity-action-btn"
+              aria-label={locale === "en" ? "Sign out" : "退出登录"}
+              title={locale === "en" ? "Sign out" : "退出登录"}
+              onClick={handleSignOut}
+            >
+              <LogOutIcon size={16} strokeWidth={2} />
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

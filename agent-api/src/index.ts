@@ -1620,7 +1620,8 @@ registerCommonApiRoutes(app, {
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
-    productFeedback
+    productFeedback,
+    subscriptionEntitlements
   }),
   resourcesPortalRouter: createResourcesPortalRouter({
     knowledgeSets,

@@ -420,8 +420,86 @@ function collectTextParts(value: unknown): string[] {
   return [];
 }
 
-function extractMessageText(message: unknown): string {
-  return collectTextParts(message).join("\n\n").trim();
+function uniqueNonEmptyLines(lines: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const normalized = trimOrUndefined(line);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function collectCodexProcessFallback(part: Record<string, unknown>): string[] {
+  if (trimOrUndefined(part.name) !== "codex_process") return [];
+  const payload = asRecord(part.data);
+  if (!payload) return [];
+  const kind = trimOrUndefined(payload.kind) ?? "";
+  if (kind !== "error") return [];
+  return uniqueNonEmptyLines([
+    trimOrUndefined(payload.title),
+    trimOrUndefined(payload.detail)
+  ]);
+}
+
+function collectCodexTraceBatchFallback(part: Record<string, unknown>): string[] {
+  if (trimOrUndefined(part.name) !== "codex_trace_batch") return [];
+  const payload = asRecord(part.data);
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const errorRows = rows
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .filter((item) => trimOrUndefined(item.kind) === "error");
+
+  return errorRows.flatMap((row) =>
+    uniqueNonEmptyLines([
+      trimOrUndefined(row.title),
+      trimOrUndefined(row.detail)
+    ])
+  );
+}
+
+function collectFallbackParts(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectFallbackParts(item));
+  }
+  const obj = asRecord(value);
+  if (!obj) return [];
+
+  if (Array.isArray(obj.content)) {
+    return obj.content.flatMap((item) => {
+      const part = asRecord(item);
+      if (!part) return [];
+      const type = trimOrUndefined(part.type);
+      if (type === "data") {
+        return [
+          ...collectCodexProcessFallback(part),
+          ...collectCodexTraceBatchFallback(part)
+        ];
+      }
+      if (type === "error") {
+        return uniqueNonEmptyLines([
+          trimOrUndefined(part.title),
+          trimOrUndefined(part.message),
+          trimOrUndefined(part.detail)
+        ]);
+      }
+      return collectFallbackParts(part.content);
+    });
+  }
+
+  return [];
+}
+
+export function extractMessageText(message: unknown): string {
+  const primaryText = collectTextParts(message).join("\n\n").trim();
+  const fallbackText = collectFallbackParts(message).join("\n\n").trim();
+  if (!primaryText) return fallbackText;
+  if (!fallbackText) return primaryText;
+  if (primaryText.includes(fallbackText)) return primaryText;
+  return `${primaryText}\n\n${fallbackText}`;
 }
 
 function extractMessageCreatedAt(message: unknown): string | null {

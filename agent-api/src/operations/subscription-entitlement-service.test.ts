@@ -131,4 +131,60 @@ describe("SubscriptionEntitlementService", () => {
     expect(decision.reasonCode).toBe("user_turn_limit_exceeded");
     expect(decision.userGrant?.usage?.usedCompletedTurns).toBe(3);
   });
+
+  it("returns an English portal summary for an internal user without a plan", async () => {
+    const service = createService();
+
+    const status = await service.getPortalSubscriptionStatus({
+      currentUser: {
+        id: "user-1",
+        organizationId: "org-1",
+        organizationType: "internal"
+      },
+      model: "gpt-5.4",
+      now: new Date("2026-04-20T00:00:00.000Z")
+    });
+
+    expect(status.accessState).toBe("available");
+    expect(status.title).toBe("Access is available");
+    expect(status.sourceType).toBe("default_internal");
+  });
+
+  it("returns an English blocked portal summary for an external user without a plan", async () => {
+    const service = createService();
+
+    const status = await service.getPortalSubscriptionStatus({
+      currentUser: {
+        id: "user-1",
+        organizationId: "org-1",
+        organizationType: "customer"
+      },
+      model: "gpt-5.4",
+      now: new Date("2026-04-20T00:00:00.000Z")
+    });
+
+    expect(status.accessState).toBe("blocked");
+    expect(status.title).toBe("A plan is required");
+    expect(status.detail).toContain("workspace admin");
+  });
+
+  it("throws an English denial message when chat access is blocked", async () => {
+    const service = createService({
+      userGrant: createGrant(),
+      plan: createPlan({ monthlyCompletedTurnLimit: 1 }),
+      usageCount: 1
+    });
+
+    await expect(
+      service.enforceChatAccess({
+        currentUser: {
+          id: "user-1",
+          organizationId: "org-1",
+          organizationType: "customer"
+        },
+        model: "gpt-5.4",
+        now: new Date("2026-04-20T00:00:00.000Z")
+      })
+    ).rejects.toThrow("Conversation limit reached");
+  });
 });
