@@ -4296,6 +4296,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   threadId={activeRemoteThreadId}
                   requestedFilePath={requestedPreviewPath}
                   requestNonce={previewRequestNonce}
+                  allowDownload={!isExternalPortalUser}
                 />
               }
               collaborationContent={

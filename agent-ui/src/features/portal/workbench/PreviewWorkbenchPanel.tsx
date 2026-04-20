@@ -801,7 +801,12 @@ function PreviewText(props: { text: string; anchor: string; jumpToken: number })
   );
 }
 
-export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePath?: string; requestNonce?: number }) {
+export function PreviewWorkbenchPanel(props: {
+  threadId: string;
+  requestedFilePath?: string;
+  requestNonce?: number;
+  allowDownload?: boolean;
+}) {
   const requestedTarget = useMemo(
     () => splitPreviewTarget(asString(props.requestedFilePath)),
     [props.requestedFilePath]
@@ -1071,6 +1076,13 @@ export function PreviewWorkbenchPanel(props: { threadId: string; requestedFilePa
                   </button>
                 ) : null}
               </div>
+              {props.allowDownload && activePreview ? (
+                <div className="preview-viewer-actions">
+                  <a href={activePreview.objectUrl} download={activeFile.displayName}>
+                    Download
+                  </a>
+                </div>
+              ) : null}
             </header>
 
             <div className="preview-viewer-body">
