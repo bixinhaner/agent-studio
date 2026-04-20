@@ -272,7 +272,7 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         description: trimOrUndefined(req.body?.description) ?? null,
         status: normalizeStatus(req.body?.status) ?? "active",
         featureType: "chat",
-        monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月问答次数"),
+        monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月 AI Request"),
         monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度")
       });
       res.status(201).json({
@@ -294,7 +294,7 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         slug: req.body?.slug === undefined ? undefined : trimOrUndefined(req.body?.slug) ?? undefined,
         description: req.body?.description === undefined ? undefined : trimOrUndefined(req.body?.description) ?? null,
         status: req.body?.status === undefined ? undefined : normalizeStatus(req.body?.status),
-        monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月问答次数"),
+        monthlyCompletedTurnLimit: parseOptionalNonNegativeInteger(req.body?.monthlyCompletedTurnLimit, "每月 AI Request"),
         monthlyTokenLimit: parseOptionalNonNegativeInteger(req.body?.monthlyTokenLimit, "每月服务额度")
       });
       const relatedGrants = await getGrants().list({ planId: plan.id });
@@ -452,7 +452,7 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         startsAt,
         expiresAt: expiresAt ?? null,
         cycleAnchorAt,
-        completedTurnLimitOverride: parseOptionalNonNegativeInteger(req.body?.completedTurnLimitOverride, "问答次数"),
+        completedTurnLimitOverride: parseOptionalNonNegativeInteger(req.body?.completedTurnLimitOverride, "AI Request"),
         tokenLimitOverride: parseOptionalNonNegativeInteger(req.body?.tokenLimitOverride, "服务额度"),
         note: trimOrUndefined(req.body?.note) ?? null,
         createdByUserId: req.currentUser?.id ?? null
@@ -579,7 +579,7 @@ export function createSubscriptionRouter(options: SubscriptionRouterOptions = {}
         startsAt,
         expiresAt: expiresAt ?? null,
         cycleAnchorAt,
-        completedTurnLimitOverride: parseOptionalNonNegativeInteger(req.body?.completedTurnLimitOverride, "问答次数"),
+        completedTurnLimitOverride: parseOptionalNonNegativeInteger(req.body?.completedTurnLimitOverride, "AI Request"),
         tokenLimitOverride: parseOptionalNonNegativeInteger(req.body?.tokenLimitOverride, "服务额度"),
         note: trimOrUndefined(req.body?.note) ?? null,
         createdByUserId: req.currentUser?.id ?? null

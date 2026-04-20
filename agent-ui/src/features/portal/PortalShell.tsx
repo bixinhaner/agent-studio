@@ -823,8 +823,8 @@ function formatAssistantErrorNotice(detail: string): string {
   const normalized = detail.replace(/\s+/g, " ").trim();
   if (!normalized) return "I couldn't complete this response. Please try again.";
 
-  if (/conversation limit reached/i.test(normalized)) {
-    return "Conversation limit reached. Please wait for the next reset or contact your workspace admin.";
+  if (/ai request limit reached|conversation limit reached/i.test(normalized)) {
+    return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
   }
   if (/a plan is required|workspace has not enabled access|has not enabled access/i.test(normalized)) {
     return "Access is not enabled yet. Please contact your workspace admin to enable a plan.";

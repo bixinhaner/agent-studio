@@ -210,7 +210,7 @@ function GrantUsagePanel(props: { grant: AdminSubscriptionGrantSummary | null; t
         <div className="subscription-progress-row">
           <div>
             <strong>{usage.usedCompletedTurns}</strong>
-            <span>已完成问答</span>
+            <span>已使用 AI Request</span>
           </div>
           <div>{props.grant.monthlyCompletedTurnLimit === null ? "不限" : `上限 ${props.grant.monthlyCompletedTurnLimit}`}</div>
         </div>
@@ -665,7 +665,7 @@ export function SubscriptionWorkspace() {
             <div className="subscription-hero-eyebrow">Subscription Studio</div>
             <div>
               <h1 className="admin-page-title">订阅权益</h1>
-              <p className="admin-page-desc">把套餐、可用期和问答额度放到同一个工作区里管理，用户触发到期或额度上限时会被直接拦截。</p>
+              <p className="admin-page-desc">把套餐、可用期和 AI Request 额度放到同一个工作区里管理，用户触发到期或额度上限时会被直接拦截。</p>
             </div>
             <div className="subscription-defaults">
               <div className="subscription-default-chip">
@@ -752,7 +752,7 @@ export function SubscriptionWorkspace() {
                     </div>
                     <div className="subscription-plan-metrics">
                       <div>
-                        <span>每月问答次数</span>
+                        <span>每月 AI Request</span>
                         <strong>{formatCount(plan.monthlyCompletedTurnLimit)}</strong>
                       </div>
                       <div>
@@ -856,7 +856,7 @@ export function SubscriptionWorkspace() {
             />
           </label>
           <label className="subscription-form-field">
-            <span>每月问答次数</span>
+            <span>每月 AI Request</span>
             <InputNumber
               min={0}
               style={{ width: "100%" }}
@@ -924,7 +924,7 @@ export function SubscriptionWorkspace() {
                   allowClear
                   placeholder="可留空，直接填写自定义额度"
                   onChange={(value) => setUserGrantForm((current) => ({ ...current, planId: value ?? "" }))}
-                  options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${formatCount(plan.monthlyCompletedTurnLimit)} 次/月` }))}
+                  options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${formatCount(plan.monthlyCompletedTurnLimit)} AI Request/月` }))}
                 />
               </label>
               <label className="subscription-form-field">
@@ -963,7 +963,7 @@ export function SubscriptionWorkspace() {
                 />
               </label>
               <label className="subscription-form-field">
-                <span>单独问答次数</span>
+                <span>单独 AI Request</span>
                 <InputNumber
                   min={0}
                   style={{ width: "100%" }}
@@ -1047,7 +1047,7 @@ export function SubscriptionWorkspace() {
                   allowClear
                   placeholder="可留空，直接填写自定义额度"
                   onChange={(value) => setOrganizationGrantForm((current) => ({ ...current, planId: value ?? "" }))}
-                  options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${formatCount(plan.monthlyCompletedTurnLimit)} 次/月` }))}
+                  options={plans.map((plan) => ({ value: plan.id, label: `${plan.name} · ${formatCount(plan.monthlyCompletedTurnLimit)} AI Request/月` }))}
                 />
               </label>
               <label className="subscription-form-field">
@@ -1092,7 +1092,7 @@ export function SubscriptionWorkspace() {
                 />
               </label>
               <label className="subscription-form-field">
-                <span>组织问答次数</span>
+                <span>组织 AI Request</span>
                 <InputNumber
                   min={0}
                   style={{ width: "100%" }}

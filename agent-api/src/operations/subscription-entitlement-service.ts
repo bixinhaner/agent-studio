@@ -179,7 +179,7 @@ function makeGrantCopy(
       }
       return {
         title: "额度用尽",
-        description: `${subject}本周期的问答次数已用完，请等待下个周期或联系管理员调整。`
+        description: `${subject}本周期的 AI Request 已用完，请等待下个周期或联系管理员调整。`
       };
     case "available":
     default:
@@ -217,8 +217,8 @@ function daysUntil(from: Date, to: Date): number {
   return Math.ceil(diffMs / (24 * 60 * 60 * 1000));
 }
 
-function formatConversationCount(value: number): string {
-  return value === 1 ? "1 conversation" : `${value} conversations`;
+function formatAiRequestCount(value: number): string {
+  return value === 1 ? "1 AI request" : `${value} AI requests`;
 }
 
 function selectPortalEvaluation(input: {
@@ -315,7 +315,7 @@ function buildPortalStatus(input: {
       sourceLabel: source.sourceLabel,
       title: "Access is available",
       summary: "Your internal workspace is not currently using a separate subscription limit.",
-      detail: "You can keep asking new questions without setting up a personal plan.",
+      detail: "You can keep sending AI requests without setting up a personal plan.",
       actionLabel: null,
       planName: null,
       expiresAt: null,
@@ -334,7 +334,7 @@ function buildPortalStatus(input: {
       sourceLabel: source.sourceLabel,
       title: "A plan is required",
       summary: "Your workspace has not enabled access yet.",
-      detail: "Ask your workspace admin to assign a plan before you start a new question.",
+      detail: "Ask your workspace admin to assign a plan before you send an AI request.",
       actionLabel: "Contact your workspace admin to enable access.",
       planName: null,
       expiresAt: null,
@@ -352,7 +352,7 @@ function buildPortalStatus(input: {
       sourceType: source.sourceType,
       sourceLabel: source.sourceLabel,
       title: input.decision.allowed ? "Access is available" : "Access is unavailable",
-      summary: input.decision.allowed ? "You can start a new question." : "You cannot start a new question right now.",
+      summary: input.decision.allowed ? "You can send a new AI request." : "You cannot send a new AI request right now.",
       detail: input.decision.message,
       actionLabel: input.decision.allowed ? null : "Please contact your workspace admin for help.",
       planName: null,
@@ -372,8 +372,8 @@ function buildPortalStatus(input: {
         sourceType: source.sourceType,
         sourceLabel: source.sourceLabel,
         title: "Access is paused",
-        summary: "This plan is currently paused for new questions.",
-        detail: "You can keep reading earlier chats, but you will need your admin to resume access before sending a new question.",
+        summary: "This plan is currently paused for new AI requests.",
+        detail: "You can keep reading earlier chats, but you will need your admin to resume access before sending a new AI request.",
         actionLabel: "Ask your workspace admin to resume this plan.",
         planName,
         expiresAt,
@@ -391,7 +391,7 @@ function buildPortalStatus(input: {
         sourceLabel: source.sourceLabel,
         title: "Access starts soon",
         summary: "Your plan has been scheduled, but it is not active yet.",
-        detail: "You can start new questions as soon as the plan begins.",
+        detail: "You can send AI requests as soon as the plan begins.",
         actionLabel: "If this start date looks wrong, contact your workspace admin.",
         planName,
         expiresAt,
@@ -408,7 +408,7 @@ function buildPortalStatus(input: {
         sourceType: source.sourceType,
         sourceLabel: source.sourceLabel,
         title: "Your access has ended",
-        summary: "This plan is no longer active for new questions.",
+        summary: "This plan is no longer active for new AI requests.",
         detail: "Ask your workspace admin to renew access, then try again.",
         actionLabel: "Contact your workspace admin for a renewal.",
         planName,
@@ -427,7 +427,7 @@ function buildPortalStatus(input: {
         sourceLabel: source.sourceLabel,
         title: "This workspace is temporarily unavailable",
         summary: "This plan has reached its service capacity for the current cycle.",
-        detail: "You can keep reading earlier chats. To send a new question, wait for the next reset or ask your admin for more capacity.",
+        detail: "You can keep reading earlier chats. To send a new AI request, wait for the next reset or ask your admin for more capacity.",
         actionLabel: "Try again after the next cycle reset or contact your workspace admin.",
         planName,
         expiresAt,
@@ -442,9 +442,9 @@ function buildPortalStatus(input: {
       tone: "critical",
       sourceType: source.sourceType,
       sourceLabel: source.sourceLabel,
-      title: "Conversation limit reached",
-      summary: "You have used all conversations included in this cycle.",
-      detail: "You can keep reading earlier chats. To start a new question, wait for the next reset or ask your admin to adjust the plan.",
+      title: "AI request limit reached",
+      summary: "You have used all AI requests included in this cycle.",
+      detail: "You can keep reading earlier chats. To send a new AI request, wait for the next reset or ask your admin to adjust the plan.",
       actionLabel: "Try again after the next cycle reset or contact your workspace admin.",
       planName,
       expiresAt,
@@ -463,10 +463,10 @@ function buildPortalStatus(input: {
       sourceType: source.sourceType,
       sourceLabel: source.sourceLabel,
       title: expiresSoon ? "Access ends soon" : "Access is active",
-      summary: `${formatConversationCount(remainingCompletedTurns)} left in this cycle.`,
+      summary: `${formatAiRequestCount(remainingCompletedTurns)} left in this cycle.`,
       detail: expiresSoon
         ? "Your plan is active, but it is approaching its end date."
-        : "You can keep asking new questions within the current cycle.",
+        : "You can keep sending AI requests within the current cycle.",
       actionLabel: expiresSoon ? "If you need uninterrupted access, contact your workspace admin before it ends." : null,
       planName,
       expiresAt,
@@ -483,10 +483,10 @@ function buildPortalStatus(input: {
     sourceType: source.sourceType,
     sourceLabel: source.sourceLabel,
     title: expiresSoon ? "Access ends soon" : "Access is active",
-    summary: "Your plan is active for new questions.",
+    summary: "Your plan is active for AI requests.",
     detail: expiresSoon
       ? "Your plan is active, but it is approaching its end date."
-      : "No conversation count is currently shown for this plan.",
+      : "No AI request limit is currently shown for this plan.",
     actionLabel: expiresSoon ? "If you need uninterrupted access, contact your workspace admin before it ends." : null,
     planName,
     expiresAt,

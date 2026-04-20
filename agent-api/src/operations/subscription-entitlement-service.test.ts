@@ -110,7 +110,7 @@ describe("SubscriptionEntitlementService", () => {
     expect(decision.reasonCode).toBe("external_subscription_required");
   });
 
-  it("blocks when completed turn limit has been exhausted", async () => {
+  it("blocks when the AI request limit has been exhausted", async () => {
     const service = createService({
       userGrant: createGrant(),
       plan: createPlan({ monthlyCompletedTurnLimit: 3 }),
@@ -185,6 +185,6 @@ describe("SubscriptionEntitlementService", () => {
         model: "gpt-5.4",
         now: new Date("2026-04-20T00:00:00.000Z")
       })
-    ).rejects.toThrow("Conversation limit reached");
+    ).rejects.toThrow("AI request limit reached");
   });
 });

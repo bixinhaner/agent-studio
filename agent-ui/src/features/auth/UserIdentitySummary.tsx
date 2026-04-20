@@ -110,11 +110,11 @@ export function UserIdentitySummary(props: {
       ? "Ends soon"
       : "Active";
   const accessButtonLabel = locale === "en" ? "View access details" : "查看权益信息";
-  const showConversationBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
+  const showAiRequestBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
   const hasAccessDetailRows = Boolean(
     props.accessStatus && (
       props.accessStatus.planName ||
-      showConversationBalance ||
+      showAiRequestBalance ||
       props.accessStatus.cycleEndsAt ||
       props.accessStatus.expiresAt
     )
@@ -150,9 +150,9 @@ export function UserIdentitySummary(props: {
                   <strong>{props.accessStatus.planName}</strong>
                 </div>
               ) : null}
-              {showConversationBalance ? (
+              {showAiRequestBalance ? (
                 <div className="user-identity-access-row">
-                  <span>{locale === "en" ? "Conversations left" : "剩余次数"}</span>
+                  <span>{locale === "en" ? "AI requests left" : "剩余 AI Request"}</span>
                   <strong>{props.accessStatus.remainingCompletedTurns}</strong>
                 </div>
               ) : null}
