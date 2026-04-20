@@ -3011,7 +3011,7 @@ const ThreadQuestionNavigator: FC<{
       if (!element) return;
       element.scrollIntoView({
         behavior: "smooth",
-        block: "start"
+        block: "center"
       });
       setActiveId(messageId);
       setPanelOpen(false);
