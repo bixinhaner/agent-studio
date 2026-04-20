@@ -295,7 +295,7 @@ const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity;
   { value: "medium", label: "Medium" },
   { value: "low", label: "Low" }
 ];
-const DEFAULT_RUNNING_STAGE_TEXT = "Waiting for model response";
+const DEFAULT_RUNNING_STAGE_TEXT = "Getting ready to answer";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
@@ -1201,37 +1201,29 @@ function stageTextForCodexItem(
   item: Record<string, unknown> | null
 ): string {
   if (lifecycle === "started") {
-    if (itemType === "reasoning") return "Reasoning about a solution";
-    if (itemType === "command_execution") {
-      const command = typeof item?.command === "string" ? ellipsizeSingleLine(item.command, 28) : "";
-      return command ? `Running command: ${command}` : "Running command";
-    }
-    if (itemType === "mcp_tool_call") {
-      const server = typeof item?.server === "string" ? item.server.trim() : "";
-      const tool = typeof item?.tool === "string" ? item.tool.trim() : "";
-      const toolName = [server, tool].filter(Boolean).join(".");
-      return toolName ? `Calling tool: ${ellipsizeSingleLine(toolName, 30)}` : "Calling tool";
-    }
+    if (itemType === "reasoning") return "Thinking through your request";
+    if (itemType === "command_execution") return "Checking the information needed to answer";
+    if (itemType === "mcp_tool_call") return "Gathering relevant details";
     if (itemType === "web_search") {
       const query = typeof item?.query === "string" ? ellipsizeSingleLine(item.query, 20) : "";
-      return query ? `Searching resources: ${query}` : "Searching resources";
+      return query ? `Looking up: ${query}` : "Looking up relevant information";
     }
-    if (itemType === "todo_list") return "Updating execution plan";
-    if (itemType === "file_change") return "Writing file changes";
-    if (itemType === "agent_message") return "Generating response";
-    if (itemType === "error") return "Handling error details";
-    return "Running step";
+    if (itemType === "todo_list") return "Organizing the next steps";
+    if (itemType === "file_change") return "Applying the requested changes";
+    if (itemType === "agent_message") return "Writing the answer";
+    if (itemType === "error") return "Trying to recover";
+    return "Working on your request";
   }
 
-  if (itemType === "reasoning") return "Reasoning completed, continuing";
-  if (itemType === "command_execution") return "Command execution completed";
-  if (itemType === "mcp_tool_call") return "Tool call completed";
-  if (itemType === "web_search") return "Search completed, summarizing results";
-  if (itemType === "todo_list") return "Execution plan updated";
-  if (itemType === "file_change") return "File changes written";
-  if (itemType === "agent_message") return "Generating response";
-  if (itemType === "error") return "Execution error detected";
-  return "Step completed, continuing";
+  if (itemType === "reasoning") return "Refining the answer";
+  if (itemType === "command_execution") return "Reviewing the results";
+  if (itemType === "mcp_tool_call") return "Reviewing the details";
+  if (itemType === "web_search") return "Reviewing what I found";
+  if (itemType === "todo_list") return "Continuing with the plan";
+  if (itemType === "file_change") return "Checking the changes";
+  if (itemType === "agent_message") return "Writing the answer";
+  if (itemType === "error") return "Something went wrong, checking it";
+  return "Still working on your request";
 }
 
 function messageTextForTitle(messages: readonly ThreadMessage[]): string {
@@ -1719,7 +1711,7 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
     >
       <div className="assistant-running-head">
         <span className="assistant-running-spinner" aria-hidden="true" />
-        <span className="assistant-running-title">Processing request</span>
+        <span className="assistant-running-title">Working on it</span>
         <span className="assistant-running-chip">Live</span>
       </div>
       <p className="assistant-running-phase">{runningStageText}</p>
@@ -3761,7 +3753,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
         setErrorText("");
         setStatusText("Generating...");
-        updateRunningStage("Request submitted, waiting for model response");
+        updateRunningStage("Getting ready to answer");
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -4087,7 +4079,44 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         };
 
         const snapshotContent = (): any[] => {
-          return orderedParts.map((part) => ({ ...part }));
+          return orderedParts.map((part) => {
+            const item = asRecord(part);
+            if (!item || item.type !== "data") return { ...part };
+            const payload = asRecord(item.data);
+            if (!payload) return { ...part };
+            if (item.name === "codex_commentary") {
+              return {
+                ...part,
+                data: {
+                  ...payload,
+                  lines: Array.isArray(payload.lines) ? [...payload.lines] : [],
+                  entries: Array.isArray(payload.entries)
+                    ? payload.entries.map((entry) => {
+                        const entryObj = asRecord(entry);
+                        if (!entryObj) return entry;
+                        return {
+                          ...entryObj,
+                          lines: Array.isArray(entryObj.lines) ? [...entryObj.lines] : []
+                        };
+                      })
+                    : []
+                }
+              };
+            }
+            if (item.name === "codex_trace_batch") {
+              return {
+                ...part,
+                data: {
+                  ...payload,
+                  rows: Array.isArray(payload.rows) ? payload.rows.map((row) => ({ ...(asRecord(row) || {}) })) : []
+                }
+              };
+            }
+            return {
+              ...part,
+              data: { ...payload }
+            };
+          });
         };
 
         try {
@@ -4145,7 +4174,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
-              updateRunningStage("Response generation completed");
+              updateRunningStage("Finishing the answer");
               const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
               if (promotedLatestCommentary) {
                 textChanged = true;
@@ -4179,7 +4208,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage("Session established, starting execution");
+              updateRunningStage("Starting the work");
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
