@@ -1998,17 +1998,18 @@ body {
 
 .process-block {
   margin-top: 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e6ebf2;
   border-radius: 10px;
-  background: #f8fbff;
+  background: #fafcff;
+  color: #5b6b7f;
 }
 
 .process-block > summary {
   cursor: pointer;
   padding: 8px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #334155;
+  font-size: 12px;
+  font-weight: 500;
+  color: #526277;
   user-select: none;
 }
 
@@ -2017,9 +2018,9 @@ body {
   padding: 0 10px 10px;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 12px;
-  line-height: 1.55;
-  color: #475569;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #617287;
   font-family: ui-monospace, Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
@@ -2027,15 +2028,15 @@ body {
   margin: 0;
   padding: 0 10px 6px;
   font-size: 11px;
-  color: #64748b;
+  color: #7b8798;
 }
 
 .process-reasoning {
-  background: #f8fafc;
+  background: #fafcff;
 }
 
 .process-tool {
-  background: #f5f8ff;
+  background: #f8fbff;
 }
 
 .process-tool-error {
@@ -2060,21 +2061,22 @@ body {
 
 .process-source {
   margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
 }
 
 .process-source a {
-  color: #1d4ed8;
+  color: #5677b9;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
 .trace-panel {
   margin-top: 10px;
-  border: 1px solid #e5eaf2;
+  border: 1px solid #e7edf4;
   border-radius: 12px;
-  background: #fafbfd;
+  background: #fbfcfe;
 }
 
 .trace-panel-inline {
@@ -2088,10 +2090,11 @@ body {
 .trace-summary {
   cursor: pointer;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: #334155;
+  color: #59697c;
   user-select: none;
+  text-transform: uppercase;
 }
 
 .trace-summary::-webkit-details-marker {
@@ -2112,7 +2115,7 @@ body {
   border: 1px solid #dbe5f1;
   border-radius: 999px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: 10px;
   color: #475569;
   background: #f8fafc;
 }
@@ -2218,9 +2221,9 @@ body {
 }
 
 .trace-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e9edf3;
   border-radius: 10px;
-  background: #fff;
+  background: #fcfdff;
   padding: 8px 10px;
 }
 
@@ -2260,11 +2263,11 @@ body {
 .trace-pill {
   border-radius: 999px;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.4;
   border: 1px solid #d5e2f5;
   background: #f7faff;
-  color: #334155;
+  color: #5d6c7f;
   white-space: nowrap;
 }
 
@@ -2319,26 +2322,46 @@ body {
 .trace-item-title {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  color: #1f2937;
+  font-size: 11px;
+  color: #5a6778;
 }
 
 .trace-item-time {
-  font-size: 11px;
-  color: #6b7280;
+  font-size: 10px;
+  color: #8894a6;
   white-space: nowrap;
 }
 
 .trace-item-detail {
   margin: 6px 0 0;
   padding: 0;
-  font-size: 12px;
-  color: #4b5563;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #657487;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 180px;
   overflow: auto;
   font-family: ui-monospace, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+.assistant-running-card {
+  color: #556476;
+}
+
+.assistant-running-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #556476;
+}
+
+.assistant-running-chip {
+  font-size: 10px;
+}
+
+.assistant-running-phase {
+  font-size: 11px;
+  color: #64748b;
 }
 
 .trace-empty {
