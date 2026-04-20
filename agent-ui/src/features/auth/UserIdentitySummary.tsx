@@ -1,5 +1,5 @@
 import { Popover, Spin } from "antd";
-import { LogOutIcon, ShieldCheckIcon } from "lucide-react";
+import { GaugeIcon, LogOutIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "./AuthProvider";
@@ -111,6 +111,14 @@ export function UserIdentitySummary(props: {
       : "Active";
   const accessButtonLabel = locale === "en" ? "View access details" : "查看权益信息";
   const showConversationBalance = props.accessStatus?.remainingCompletedTurns !== null && !props.accessStatus?.reasonCode?.includes("token_limit");
+  const hasAccessDetailRows = Boolean(
+    props.accessStatus && (
+      props.accessStatus.planName ||
+      showConversationBalance ||
+      props.accessStatus.cycleEndsAt ||
+      props.accessStatus.expiresAt
+    )
+  );
   const accessPopoverContent = (
     <div className="user-identity-access-panel">
       {props.accessStatusLoading ? (
@@ -125,42 +133,43 @@ export function UserIdentitySummary(props: {
         </div>
       ) : props.accessStatus ? (
         <>
-          <div className="user-identity-access-header">
-            <span className={`user-identity-access-badge tone-${accessTone}`}>{accessBadgeLabel}</span>
+          <div className="user-identity-access-hero">
+            <span className={`user-identity-access-badge tone-${accessTone}`}>
+              <span className="user-identity-access-badge-dot" aria-hidden="true" />
+              {accessBadgeLabel}
+            </span>
             <h4 className="user-identity-access-title">{props.accessStatus.title}</h4>
+            <p className="user-identity-access-summary">{props.accessStatus.summary}</p>
           </div>
-          <p className="user-identity-access-summary">{props.accessStatus.summary}</p>
-          <p className="user-identity-access-detail">{props.accessStatus.detail}</p>
-          <div className="user-identity-access-grid">
-            <div className="user-identity-access-metric">
-              <span className="user-identity-access-label">{locale === "en" ? "Coverage" : "权益来源"}</span>
-              <strong>{props.accessStatus.sourceLabel}</strong>
+          {props.accessStatus.detail ? <p className="user-identity-access-detail">{props.accessStatus.detail}</p> : null}
+          {hasAccessDetailRows ? (
+            <div className="user-identity-access-list">
+              {props.accessStatus.planName ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Plan" : "套餐"}</span>
+                  <strong>{props.accessStatus.planName}</strong>
+                </div>
+              ) : null}
+              {showConversationBalance ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Conversations left" : "剩余次数"}</span>
+                  <strong>{props.accessStatus.remainingCompletedTurns}</strong>
+                </div>
+              ) : null}
+              {props.accessStatus.cycleEndsAt ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Next reset" : "下次重置"}</span>
+                  <strong>{formatAccessTime(props.accessStatus.cycleEndsAt)}</strong>
+                </div>
+              ) : null}
+              {props.accessStatus.expiresAt ? (
+                <div className="user-identity-access-row">
+                  <span>{locale === "en" ? "Available until" : "可用到"}</span>
+                  <strong>{formatAccessTime(props.accessStatus.expiresAt)}</strong>
+                </div>
+              ) : null}
             </div>
-            {props.accessStatus.planName ? (
-              <div className="user-identity-access-metric">
-                <span className="user-identity-access-label">{locale === "en" ? "Plan" : "套餐"}</span>
-                <strong>{props.accessStatus.planName}</strong>
-              </div>
-            ) : null}
-            {showConversationBalance ? (
-              <div className="user-identity-access-metric">
-                <span className="user-identity-access-label">{locale === "en" ? "Conversations left" : "剩余次数"}</span>
-                <strong>{props.accessStatus.remainingCompletedTurns}</strong>
-              </div>
-            ) : null}
-            {props.accessStatus.cycleEndsAt ? (
-              <div className="user-identity-access-metric">
-                <span className="user-identity-access-label">{locale === "en" ? "Next reset" : "下次重置"}</span>
-                <strong>{formatAccessTime(props.accessStatus.cycleEndsAt)}</strong>
-              </div>
-            ) : null}
-            {props.accessStatus.expiresAt ? (
-              <div className="user-identity-access-metric">
-                <span className="user-identity-access-label">{locale === "en" ? "Available until" : "可用到"}</span>
-                <strong>{formatAccessTime(props.accessStatus.expiresAt)}</strong>
-              </div>
-            ) : null}
-          </div>
+          ) : null}
           {props.accessStatus.actionLabel ? <p className="user-identity-access-footnote">{props.accessStatus.actionLabel}</p> : null}
         </>
       ) : (
@@ -227,7 +236,7 @@ export function UserIdentitySummary(props: {
                 aria-label={accessButtonLabel}
                 title={accessButtonLabel}
               >
-                <ShieldCheckIcon size={16} strokeWidth={2} />
+                <GaugeIcon size={16} strokeWidth={2} />
               </button>
             </Popover>
           ) : null}
