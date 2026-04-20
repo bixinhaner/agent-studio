@@ -5,6 +5,10 @@ function getMatches(maxWidth: number): boolean {
   return window.matchMedia(`(max-width: ${maxWidth}px)`).matches;
 }
 
+export function isNarrowScreen(maxWidth = 980): boolean {
+  return getMatches(maxWidth);
+}
+
 export function useIsNarrowScreen(maxWidth = 980): boolean {
   const [isNarrow, setIsNarrow] = useState<boolean>(() => getMatches(maxWidth));
 

@@ -7,12 +7,15 @@ export function AdvancedSettingsPanel(props: {
   modelLabel: string;
   reasoningLabel: string;
   children?: ReactNode;
+  mobile?: boolean;
 }) {
+  const isMobile = props.mobile ?? false;
   return (
     <Drawer
       title="Runtime settings"
-      placement="left"
-      width="min(420px, calc(100vw - 16px))"
+      placement={isMobile ? "bottom" : "left"}
+      width={isMobile ? undefined : "min(420px, calc(100vw - 16px))"}
+      height={isMobile ? "min(88vh, 760px)" : undefined}
       open={props.open}
       onClose={props.onClose}
       rootClassName="workbench-left-drawer"

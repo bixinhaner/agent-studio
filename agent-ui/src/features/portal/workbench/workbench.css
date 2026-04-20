@@ -1,4 +1,8 @@
-.portal-workbench-root {
+.portal-workbench-root,
+.workbench-mobile-session-drawer,
+.workbench-mobile-right-drawer,
+.portal-topbar-mobile-actions-drawer,
+.workbench-left-drawer {
   --workbench-accent: #FF4614;
   --workbench-accent-strong: #E63B0F;
   --workbench-border: #eaeaea;
@@ -49,24 +53,30 @@
   position: sticky;
   top: 0;
   z-index: 50;
+  overflow: hidden;
 }
 
 .portal-topbar-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .portal-topbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
 .portal-topbar-brand {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .portal-topbar-brand-mark {
@@ -120,6 +130,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .portal-topbar-ghost-btn.ant-btn {
@@ -193,26 +204,33 @@
   border-radius: 8px;
 }
 
+button.session-rail-new-btn,
 .session-rail-new-btn {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   background-color: var(--workbench-accent);
   color: white;
   border-radius: 8px;
-  height: 36px;
+  height: 40px;
   border: none;
   cursor: pointer;
   font-weight: 500;
   transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   font-size: 14px;
+  box-shadow: none;
+  appearance: none;
 }
 
+button.session-rail-new-btn:hover,
 .session-rail-new-btn:hover {
   background-color: var(--workbench-accent-strong);
+  color: white;
 }
 
+button.session-rail-new-btn:active,
 .session-rail-new-btn:active {
   transform: scale(0.95);
 }
@@ -376,6 +394,72 @@
   border-left: 1px solid var(--workbench-border);
   display: flex;
   flex-direction: column;
+}
+
+.right-workbench-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.right-workbench-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 8px;
+  border-bottom: 1px solid var(--workbench-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.right-workbench-header-copy {
+  min-width: 0;
+}
+
+.right-workbench-header-eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--workbench-muted-text);
+  text-transform: uppercase;
+}
+
+.right-workbench-header h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  color: #111827;
+}
+
+.right-workbench-close-btn.ant-btn {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  color: #475569;
+}
+
+.right-workbench-tabs.ant-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.right-workbench-tabs .ant-tabs-nav {
+  margin: 0;
+  padding: 0 16px;
+}
+
+.right-workbench-tabs .ant-tabs-content-holder,
+.right-workbench-tabs .ant-tabs-content,
+.right-workbench-tabs .ant-tabs-tabpane {
+  min-height: 0;
+  height: 100%;
+}
+
+.right-workbench-tabs .ant-tabs-tabpane {
+  overflow: auto;
 }
 
 .preview-workbench-shell {
@@ -1153,17 +1237,81 @@
 
 @media (max-width: 768px) {
   .portal-topbar {
-    padding: 0 8px;
+    padding: 0 10px;
+  }
+  .portal-topbar.mobile {
+    height: auto;
+    min-height: 60px;
+    padding-block: 8px;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .portal-topbar.mobile .portal-topbar-left {
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .portal-topbar.mobile .portal-topbar-right {
+    gap: 6px;
+    padding-top: 2px;
   }
   .portal-topbar-brand-subtitle {
     display: none;
   }
   .portal-topbar-brand-copy {
-    max-width: 160px;
+    max-width: none;
+    min-width: 0;
+  }
+  .portal-topbar.mobile .portal-topbar-brand-title {
+    display: block;
+    max-width: 100%;
+  }
+  .portal-topbar-mobile-summary {
+    display: block;
+    max-width: 100%;
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--workbench-muted-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .portal-topbar-mobile-actions-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .portal-topbar-mobile-actions-summary {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fafc;
+  }
+  .portal-topbar-mobile-actions-eyebrow {
+    margin: 0 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+  }
+  .portal-topbar-mobile-actions-detail {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #0f172a;
+  }
+  .portal-topbar-mobile-actions-list {
+    display: grid;
+    gap: 10px;
+  }
+  .portal-topbar-mobile-action-btn.ant-btn {
+    height: 44px;
+    justify-content: flex-start;
+    border-radius: 8px;
   }
   .aui-composer-root {
     margin: 0 8px 8px 8px;
-    border-radius: 16px;
+    border-radius: 8px;
   }
   .aui-thread-viewport {
     padding: 10px 10px 0;
@@ -1175,5 +1323,63 @@
     position: relative;
     width: 100%;
     height: 100%;
+  }
+  .thread-wrap .aui-thread-welcome-root {
+    width: 100%;
+    gap: 18px;
+  }
+  .thread-wrap .aui-thread-welcome-center {
+    width: 100%;
+  }
+  .thread-wrap .aui-thread-welcome-center > .aui-avatar-root {
+    width: 112px;
+    height: 112px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.1);
+  }
+  .thread-wrap .aui-thread-welcome-center > .aui-avatar-root .aui-avatar-fallback {
+    font-size: 34px;
+  }
+  .thread-wrap .aui-thread-welcome-suggestions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+    padding: 0 2px 6px;
+    box-sizing: border-box;
+  }
+  .thread-wrap .aui-thread-welcome-suggestion {
+    width: 100%;
+    min-height: 64px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 12px !important;
+    border-radius: 8px !important;
+    text-align: left;
+  }
+  .thread-wrap .aui-thread-welcome-suggestion-text {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+  }
+  .right-workbench-header {
+    padding: 14px 16px 8px;
+  }
+  .right-workbench-tabs .ant-tabs-nav {
+    padding: 0 12px;
+  }
+  .right-workbench-tabs .ant-tabs-tabpane {
+    padding-bottom: 16px;
+  }
+  .agent-thread-item-actions {
+    gap: 4px;
+    padding-right: 2px;
+  }
+  .thread-item-action-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
   }
 }
