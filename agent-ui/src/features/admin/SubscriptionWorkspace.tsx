@@ -360,6 +360,7 @@ export function SubscriptionWorkspace() {
       {
         title: "成员",
         key: "user",
+        width: 260,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <strong>{record.displayName || record.email || record.id}</strong>
@@ -371,6 +372,7 @@ export function SubscriptionWorkspace() {
       {
         title: "归属组织",
         key: "organization",
+        width: 220,
         render: (_value, record) =>
           record.organization ? (
             <div className="subscription-entity-stack">
@@ -384,6 +386,7 @@ export function SubscriptionWorkspace() {
       {
         title: "当前状态",
         key: "access",
+        width: 360,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <Space size={[6, 6]} wrap>
@@ -401,6 +404,7 @@ export function SubscriptionWorkspace() {
       {
         title: "到期时间",
         key: "expiresAt",
+        width: 180,
         render: (_value, record) => <span>{formatLocalTime(record.userGrant?.expiresAt ?? record.organizationGrant?.expiresAt)}</span>
       },
       {
@@ -425,6 +429,7 @@ export function SubscriptionWorkspace() {
       {
         title: "组织",
         key: "organization",
+        width: 280,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <strong>{record.name}</strong>
@@ -438,6 +443,7 @@ export function SubscriptionWorkspace() {
       {
         title: "状态",
         key: "status",
+        width: 360,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <Space size={[6, 6]} wrap>
@@ -455,11 +461,13 @@ export function SubscriptionWorkspace() {
       {
         title: "当前方案",
         key: "plan",
+        width: 180,
         render: (_value, record) => <span>{record.grant?.planName || "未单独设置"}</span>
       },
       {
         title: "到期时间",
         key: "expiresAt",
+        width: 180,
         render: (_value, record) => <span>{formatLocalTime(record.grant?.expiresAt)}</span>
       },
       {
@@ -491,6 +499,7 @@ export function SubscriptionWorkspace() {
       {
         title: "成员",
         key: "user",
+        width: 240,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <strong>{record.user?.displayName || record.user?.email || "未识别成员"}</strong>
@@ -501,6 +510,7 @@ export function SubscriptionWorkspace() {
       {
         title: "组织",
         key: "organization",
+        width: 220,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <strong>{record.organization?.name || "未识别组织"}</strong>
@@ -511,6 +521,7 @@ export function SubscriptionWorkspace() {
       {
         title: "原因",
         key: "reason",
+        width: 420,
         render: (_value, record) => (
           <div className="subscription-entity-stack">
             <Tag color="error" style={{ borderRadius: 999, width: "fit-content" }}>
@@ -648,8 +659,8 @@ export function SubscriptionWorkspace() {
 
   return (
     <>
-      <div className="admin-page-container">
-        <section className="subscription-hero">
+      <div className="admin-page-container subscription-page">
+        <section className="subscription-hero subscription-page-block">
           <div className="subscription-hero-copy">
             <div className="subscription-hero-eyebrow">Subscription Studio</div>
             <div>
@@ -681,15 +692,16 @@ export function SubscriptionWorkspace() {
         {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
         {successText ? <Alert type="success" showIcon message={successText} /> : null}
 
-        <section className="admin-card" style={{ paddingTop: 18 }}>
+        <section className="admin-card subscription-workbench">
           <div className="subscription-toolbar">
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div className="subscription-toolbar-leading">
               <Input
                 prefix={<Search size={16} style={{ color: "var(--admin-color-subtle)" }} />}
                 placeholder="搜索套餐、成员、组织或阻断说明"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                style={{ width: isNarrowScreen ? "100%" : 320 }}
+                className="subscription-search-input"
+                style={{ width: isNarrowScreen ? "100%" : 360 }}
               />
               <Tag color="blue" style={{ borderRadius: 999, margin: 0 }}>
                 当前命中 {activeCount} 条
@@ -767,31 +779,34 @@ export function SubscriptionWorkspace() {
 
           {!loading && activeTab === "users" ? (
             <Table
+              className="subscription-table"
               rowKey="id"
               columns={userColumns}
               dataSource={filteredUsers}
               pagination={{ pageSize: 8, hideOnSinglePage: true }}
-              scroll={{ x: 920 }}
+              scroll={{ x: 1120 }}
             />
           ) : null}
 
           {!loading && activeTab === "organizations" ? (
             <Table
+              className="subscription-table"
               rowKey="id"
               columns={organizationColumns}
               dataSource={filteredOrganizations}
               pagination={{ pageSize: 8, hideOnSinglePage: true }}
-              scroll={{ x: 900 }}
+              scroll={{ x: 1100 }}
             />
           ) : null}
 
           {!loading && activeTab === "denials" ? (
             <Table
+              className="subscription-table"
               rowKey="id"
               columns={denialColumns}
               dataSource={filteredDenials}
               pagination={{ pageSize: 8, hideOnSinglePage: true }}
-              scroll={{ x: 900 }}
+              scroll={{ x: 1080 }}
             />
           ) : null}
         </section>

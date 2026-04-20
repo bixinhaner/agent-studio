@@ -280,9 +280,9 @@
 
 .subscription-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  gap: 20px;
-  padding: 28px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.9fr);
+  gap: 16px;
+  padding: 22px 24px;
   border-radius: var(--admin-radius-lg);
   border: 1px solid rgba(0, 102, 255, 0.14);
   background:
@@ -301,16 +301,36 @@
 .subscription-hero-copy {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.subscription-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.subscription-page-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.subscription-hero-copy .admin-page-title {
+  margin-bottom: 4px;
+}
+
+.subscription-hero-copy .admin-page-desc {
+  max-width: 64ch;
+  line-height: 1.55;
 }
 
 .subscription-hero-eyebrow {
   width: fit-content;
-  padding: 6px 12px;
+  padding: 5px 11px;
   border-radius: var(--admin-radius-full);
   background: var(--admin-color-accent-soft);
   color: var(--admin-color-accent);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -319,18 +339,19 @@
 .subscription-defaults {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .subscription-default-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   background: rgba(0, 102, 255, 0.08);
   color: var(--admin-color-text);
   border: 1px solid rgba(0, 102, 255, 0.12);
+  font-size: 13px;
 }
 
 .subscription-default-chip-alert {
@@ -342,10 +363,15 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  align-content: start;
 }
 
 .subscription-summary-card {
-  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 92px;
+  padding: 14px 16px;
   border-radius: var(--admin-radius-md);
   border: 1px solid var(--admin-color-border);
   background: rgba(255, 255, 255, 0.72);
@@ -360,19 +386,27 @@
 .subscription-summary-label {
   font-size: 12px;
   color: var(--admin-color-subtle);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .subscription-summary-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--admin-color-text);
+  line-height: 1;
 }
 
 .subscription-summary-meta {
   font-size: 12px;
   color: var(--admin-color-subtle);
-  margin-top: 8px;
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+.subscription-workbench {
+  width: 100%;
+  min-width: 0;
+  padding: 18px 20px 20px;
 }
 
 .subscription-toolbar {
@@ -382,6 +416,36 @@
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.subscription-toolbar-leading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 560px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.subscription-search-input {
+  flex: 1 1 360px;
+  min-width: min(100%, 320px);
+}
+
+.subscription-workbench .ant-tabs,
+.subscription-workbench .ant-tabs-content-holder,
+.subscription-workbench .ant-tabs-tabpane,
+.subscription-table,
+.subscription-table .ant-spin-nested-loading,
+.subscription-table .ant-spin-container,
+.subscription-table .ant-table-wrapper,
+.subscription-table .ant-table-container {
+  width: 100%;
+  min-width: 0;
+}
+
+.subscription-table .ant-table-cell {
+  vertical-align: top;
 }
 
 .subscription-plan-grid {
@@ -632,10 +696,16 @@
 @media (max-width: 1100px) {
   .subscription-hero {
     grid-template-columns: 1fr;
+    padding: 20px;
   }
 }
 
 @media (max-width: 768px) {
+  .subscription-hero,
+  .subscription-workbench {
+    padding: 16px;
+  }
+
   .subscription-summary-grid,
   .subscription-form-grid,
   .subscription-plan-metrics {
