@@ -87,7 +87,6 @@ import { iterateSSE } from "../../lib/sse";
 import { resolveRunThreadId } from "../../lib/thread-id-resolver";
 import { RuntimeProfileView } from "../modes/runtime-profile-view";
 import type { PortalRuntimeOptions } from "../modes/types";
-import { ThreadCollaborationPanel } from "../collaboration/ThreadCollaborationPanel";
 import { fetchThreadCollaboration } from "../collaboration/api";
 import type { ThreadCollaborationView } from "../collaboration/types";
 import { fetchPortalResources } from "../resources/api";
@@ -3660,7 +3659,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
-  const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
+  const [, setThreadCollaborationErrorText] = useState("");
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
   const [productFeedbackOpen, setProductFeedbackOpen] = useState(false);
@@ -5437,7 +5436,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
             <p>This shared thread has switched to read-only mode.</p>
-            <p>You can still browse messages, attachments, and comments in the right collaboration panel.</p>
+            <p>You can still browse existing messages and attachments.</p>
           </div>
         </div>
       ) : null}
@@ -5483,7 +5482,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 showAdvancedSettings={!isExternalPortalUser}
                 showRightPanelToggle={!isExternalPortalUser}
                 drawerOpen={layoutState.isRightDrawerOpen}
-                activeDrawerTab={layoutState.activeRightDrawerTab}
                 mobile={isMobile}
               />
 
@@ -5567,9 +5565,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       >
                         <RightWorkbenchDrawer
                           open={layoutState.isRightDrawerOpen}
-                          activeTab={layoutState.activeRightDrawerTab}
                           onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-                          onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
                           previewContent={
                             <PreviewWorkbenchPanel
                               threadId={activeRemoteThreadId}
@@ -5577,29 +5573,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                               requestNonce={previewRequestNonce}
                               allowDownload={!isExternalPortalUser}
                             />
-                          }
-                          collaborationContent={
-                            <div className="workbench-collaboration-content">
-                              <section className="workbench-priority-card">
-                                <h3>Priority B: Comments and @mentions</h3>
-                                <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
-                              </section>
-                              <section className="workbench-priority-card">
-                                <h3>Priority D: Owner and follow-up</h3>
-                                <p>Assign owner and followers so every action has clear accountability.</p>
-                              </section>
-                              <ThreadCollaborationPanel
-                                threadId={String(activeThreadIdentity.remoteId || "").trim()}
-                                collaboration={activeThreadCollaboration}
-                                loading={threadCollaborationLoading}
-                                errorText={threadCollaborationErrorText}
-                                onCollaborationChange={(next) => {
-                                  const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
-                                  if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
-                                  setThreadCollaboration(next);
-                                }}
-                              />
-                            </div>
                           }
                           mobile
                         />
@@ -5675,9 +5648,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
                         <RightWorkbenchDrawer
                           open={layoutState.isRightDrawerOpen}
-                          activeTab={layoutState.activeRightDrawerTab}
                           onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-                          onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
                           previewContent={
                             <PreviewWorkbenchPanel
                               threadId={activeRemoteThreadId}
@@ -5685,29 +5656,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                               requestNonce={previewRequestNonce}
                               allowDownload={!isExternalPortalUser}
                             />
-                          }
-                          collaborationContent={
-                            <div className="workbench-collaboration-content">
-                              <section className="workbench-priority-card">
-                                <h3>Priority B: Comments and @mentions</h3>
-                                <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
-                              </section>
-                              <section className="workbench-priority-card">
-                                <h3>Priority D: Owner and follow-up</h3>
-                                <p>Assign owner and followers so every action has clear accountability.</p>
-                              </section>
-                              <ThreadCollaborationPanel
-                                threadId={String(activeThreadIdentity.remoteId || "").trim()}
-                                collaboration={activeThreadCollaboration}
-                                loading={threadCollaborationLoading}
-                                errorText={threadCollaborationErrorText}
-                                onCollaborationChange={(next) => {
-                                  const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
-                                  if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
-                                  setThreadCollaboration(next);
-                                }}
-                              />
-                            </div>
                           }
                         />
                       </Panel>
@@ -5802,7 +5750,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
                 modelLabel={selectedModelLabel}
                 reasoningLabel={selectedReasoningLabel}
-                mobile={isMobile}
               >
                 <div className="advanced-settings-content">
                   <div className="knowledge-set-shell">

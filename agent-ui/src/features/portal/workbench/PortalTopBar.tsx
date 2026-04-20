@@ -12,12 +12,6 @@ import {
 
 import { BrandMark } from "../../branding/BrandMark";
 import { useBranding } from "../../branding/BrandingProvider";
-import type { WorkbenchTab } from "./layout-state";
-
-const WORKBENCH_TAB_LABEL: Record<WorkbenchTab, string> = {
-  preview: "Preview",
-  collaboration: "Collaboration"
-};
 
 export function PortalTopBar(props: {
   sessionRailCollapsed?: boolean;
@@ -28,7 +22,6 @@ export function PortalTopBar(props: {
   onOpenFeedback?: () => void;
   runtimeSummary?: string;
   drawerOpen?: boolean;
-  activeDrawerTab?: WorkbenchTab;
   showRuntimeSummary?: boolean;
   showAdvancedSettings?: boolean;
   showRightPanelToggle?: boolean;
