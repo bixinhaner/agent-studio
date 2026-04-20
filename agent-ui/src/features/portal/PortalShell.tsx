@@ -763,6 +763,29 @@ function detailFromUnknown(value: unknown): string {
   }
 }
 
+function formatAssistantErrorNotice(detail: string): string {
+  const normalized = detail.replace(/\s+/g, " ").trim();
+  if (!normalized) return "I couldn't complete this response. Please try again.";
+
+  if (/conversation limit reached/i.test(normalized)) {
+    return "Conversation limit reached. Please wait for the next reset or contact your workspace admin.";
+  }
+  if (/a plan is required|workspace has not enabled access|has not enabled access/i.test(normalized)) {
+    return "Access is not enabled yet. Please contact your workspace admin to enable a plan.";
+  }
+  if (/access has ended|no longer active|subscription_expired/i.test(normalized)) {
+    return "Your access has ended. Please contact your workspace admin to renew it.";
+  }
+  if (/access is paused|currently paused|subscription_paused/i.test(normalized)) {
+    return "Access is paused. Please contact your workspace admin to resume it.";
+  }
+  if (/service capacity|token limit|temporarily unavailable/i.test(normalized)) {
+    return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
+  }
+
+  return `I couldn't complete this response. ${normalized}`;
+}
+
 function parseDirectories(raw: string): string[] | undefined {
   const items = raw
     .split(/[\n,]/g)
@@ -1062,20 +1085,6 @@ function normalizeProcessTime(value: string | undefined): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(at);
-}
-
-function formatPortalAccessTime(value: string | undefined): string {
-  if (!value) return "";
-  const at = new Date(value);
-  if (Number.isNaN(at.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(at);
-}
-
-function formatConversationBalance(value: number): string {
-  return value === 1 ? "1 conversation left" : `${value} conversations left`;
 }
 
 function formatThreadGroupLabel(value: string | undefined, referenceDate = new Date()): string {
@@ -3649,9 +3658,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             if (event === "error") {
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
+              const assistantErrorNotice = formatAssistantErrorNotice(detail);
               setErrorText(detail);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage("Execution failed");
+              if (assistantErrorNotice) {
+                textChanged = appendTextPart(hasTextUpdate ? `\n\n${assistantErrorNotice}` : assistantErrorNotice) || textChanged;
+              }
               if (processEnabled) {
                 updates.push({
                   type: "data",
@@ -4153,22 +4166,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     </div>
   );
 
-  const blockedSubscriptionStatus = subscriptionStatus?.accessState === "blocked" ? subscriptionStatus : null;
-  const blockedSubscriptionMeta = blockedSubscriptionStatus
-    ? [
-        blockedSubscriptionStatus.remainingCompletedTurns !== null && !blockedSubscriptionStatus.reasonCode?.includes("token_limit")
-          ? formatConversationBalance(blockedSubscriptionStatus.remainingCompletedTurns)
-          : "",
-        blockedSubscriptionStatus.cycleEndsAt
-          ? `Next reset ${formatPortalAccessTime(blockedSubscriptionStatus.cycleEndsAt)}`
-          : "",
-        blockedSubscriptionStatus.expiresAt
-          ? `Access until ${formatPortalAccessTime(blockedSubscriptionStatus.expiresAt)}`
-          : "",
-        blockedSubscriptionStatus.sourceLabel
-      ].filter(Boolean)
-    : [];
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ComposerActivationGuard runtime={runtime} />
@@ -4261,29 +4258,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
                 <Panel minSize="30">
                   <main className="portal-workbench-chat">
-                    {blockedSubscriptionStatus ? (
-                      <section className={`portal-access-notice tone-${blockedSubscriptionStatus.tone}`} role="status" aria-live="polite">
-                        <div className="portal-access-notice-marker" aria-hidden="true">
-                          !
-                        </div>
-                        <div className="portal-access-notice-copy">
-                          <p className="portal-access-notice-eyebrow">Access update</p>
-                          <h3>{blockedSubscriptionStatus.title}</h3>
-                          <p>{blockedSubscriptionStatus.summary}</p>
-                          <p>{blockedSubscriptionStatus.detail}</p>
-                          {blockedSubscriptionStatus.actionLabel ? (
-                            <p className="portal-access-notice-action">{blockedSubscriptionStatus.actionLabel}</p>
-                          ) : null}
-                          {blockedSubscriptionMeta.length > 0 ? (
-                            <div className="portal-access-notice-meta">
-                              {blockedSubscriptionMeta.map((item) => (
-                                <span key={item}>{item}</span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </section>
-                    ) : null}
                     <div className="thread-wrap">
                       {canUpload && !sharedThreadReadonly ? (
                         <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
