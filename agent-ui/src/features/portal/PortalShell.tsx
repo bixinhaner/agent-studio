@@ -2854,7 +2854,7 @@ const ThreadQuestionNavigator: FC<{
     const viewportRect = viewport.getBoundingClientRect();
     let nextActiveId = items[0]?.id || "";
     let bestDistance = Number.POSITIVE_INFINITY;
-    const activeLine = viewport.scrollTop + Math.min(160, viewport.clientHeight * 0.32);
+    const activeLine = viewport.scrollTop + Math.min(240, viewport.clientHeight * 0.55);
 
     for (const item of items) {
       const element = findThreadQuestionElement(shell, item.id);
