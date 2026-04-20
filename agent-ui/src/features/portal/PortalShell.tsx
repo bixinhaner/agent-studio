@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   useContext,
-  type CSSProperties,
   type FC,
   type MutableRefObject,
   type ReactNode,
@@ -2838,25 +2837,13 @@ const ThreadQuestionNavigator: FC<{
   disabled?: boolean;
 }> = ({ messages, shellRef, disabled }) => {
   const items = useMemo(() => buildThreadQuestionJumpItems(messages), [messages]);
-  const [positions, setPositions] = useState<Record<string, number>>({});
   const [activeId, setActiveId] = useState("");
   const [hoveredId, setHoveredId] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
   const panelListRef = useRef<HTMLDivElement | null>(null);
   const selectedId = hoveredId || activeId || items[0]?.id || "";
-  const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
-  const selectedFallbackTop = items.length <= 1 ? 0 : (selectedIndex / (items.length - 1)) * 100;
-  const selectedPanelTop = selectedId ? (positions[selectedId] ?? selectedFallbackTop) : 0;
-  const panelStyle = {
-    "--thread-question-nav-panel-top": `${Math.max(0, Math.min(100, selectedPanelTop))}%`
-  } as CSSProperties;
-  const nearbyItems = useMemo(() => {
-    const maxVisible = 5;
-    if (items.length <= maxVisible) return items;
-    const start = Math.max(0, Math.min(selectedIndex - 2, items.length - maxVisible));
-    return items.slice(start, start + maxVisible);
-  }, [items, selectedIndex]);
 
   const refresh = useCallback(() => {
     const shell = shellRef.current;
@@ -2865,8 +2852,6 @@ const ThreadQuestionNavigator: FC<{
     if (!viewport) return;
 
     const viewportRect = viewport.getBoundingClientRect();
-    const scrollMax = Math.max(viewport.scrollHeight - viewport.clientHeight, 1);
-    const nextPositions: Record<string, number> = {};
     let nextActiveId = items[0]?.id || "";
     let bestDistance = Number.POSITIVE_INFINITY;
     const activeLine = viewport.scrollTop + Math.min(160, viewport.clientHeight * 0.32);
@@ -2876,7 +2861,6 @@ const ThreadQuestionNavigator: FC<{
       if (!element) continue;
       const rect = element.getBoundingClientRect();
       const topInScroll = viewport.scrollTop + rect.top - viewportRect.top;
-      nextPositions[item.id] = Math.max(0, Math.min(100, (topInScroll / scrollMax) * 100));
       const distance = Math.abs(topInScroll - activeLine);
       if (topInScroll <= activeLine && distance <= bestDistance) {
         bestDistance = distance;
@@ -2884,7 +2868,6 @@ const ThreadQuestionNavigator: FC<{
       }
     }
 
-    setPositions(nextPositions);
     setActiveId((current) => (current === nextActiveId ? current : nextActiveId));
   }, [items, shellRef]);
 
@@ -2965,13 +2948,59 @@ const ThreadQuestionNavigator: FC<{
     }, 180);
   }, []);
 
+  const closePanelNow = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setPanelOpen(false);
+    setHoveredId("");
+  }, []);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+
+    const isInsideNavigator = (target: EventTarget | null) => {
+      return target instanceof Node && Boolean(navRef.current?.contains(target));
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (isInsideNavigator(event.target)) {
+        cancelPanelClose();
+        return;
+      }
+      schedulePanelClose();
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isInsideNavigator(event.target)) return;
+      closePanelNow();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closePanelNow();
+      }
+    };
+
+    document.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [cancelPanelClose, closePanelNow, panelOpen, schedulePanelClose]);
+
   const openPanelForQuestion = useCallback(
-    (messageId: string) => {
+    (messageId?: string) => {
       cancelPanelClose();
-      setHoveredId(messageId);
+      setHoveredId(messageId || activeId || items[0]?.id || "");
       setPanelOpen(true);
     },
-    [cancelPanelClose]
+    [activeId, cancelPanelClose, items]
   );
 
   const jumpToQuestion = useCallback(
@@ -2995,16 +3024,15 @@ const ThreadQuestionNavigator: FC<{
 
   return (
     <nav
+      ref={navRef}
       className={`thread-question-nav ${panelOpen ? "is-open" : ""}`}
-      style={panelStyle}
       aria-label="Question quick jump"
-      onMouseEnter={cancelPanelClose}
+      onMouseEnter={() => openPanelForQuestion()}
       onMouseLeave={schedulePanelClose}
     >
-      <div className="thread-question-nav-track">
+      <div className="thread-question-nav-track" onMouseEnter={() => openPanelForQuestion()}>
         {items.map((item, index) => {
           const fallbackTop = items.length === 1 ? 0 : (index / (items.length - 1)) * 100;
-          const top = positions[item.id] ?? fallbackTop;
           const current = item.id === activeId;
           const selected = item.id === selectedId;
           return (
@@ -3012,7 +3040,7 @@ const ThreadQuestionNavigator: FC<{
               key={item.id}
               type="button"
               className={`thread-question-nav-marker ${selected ? "is-selected" : ""}`}
-              style={{ top: `${top}%` }}
+              style={{ top: `${fallbackTop}%` }}
               aria-label={`Jump to question ${item.index}: ${item.label}`}
               aria-current={current ? "location" : undefined}
               title={item.label}
@@ -3025,7 +3053,7 @@ const ThreadQuestionNavigator: FC<{
       </div>
       <div className="thread-question-nav-panel" onMouseEnter={cancelPanelClose} onMouseLeave={schedulePanelClose}>
         <div className="thread-question-nav-panel-list" ref={panelListRef}>
-          {nearbyItems.map((item) => {
+          {items.map((item) => {
             const selected = item.id === selectedId;
             return (
               <button
@@ -5312,89 +5340,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     </div>
   );
 
-  const sessionRailNode = (
-    <ThreadList.Root>
-      <SessionRail
-        collapsed={layoutState.isSessionRailCollapsed}
-        userName={currentUserName}
-        searchValue={sessionSearchValue}
-        onSearchChange={setSessionSearchValue}
-        onCreateThread={() => undefined}
-        onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
-        newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
-        footer={
-          <div className="session-rail-footer-stack">
-            {props.currentUser ? (
-              <UserIdentitySummary
-                user={props.currentUser}
-                compact
-                onSignOut={props.onSignOut}
-                locale="en"
-                accessStatus={subscriptionStatus}
-                accessStatusLoading={subscriptionStatusLoading}
-                accessStatusError={subscriptionStatusError}
-                onOpenAccessStatus={() => {
-                  void refreshPortalSubscriptionStatus();
-                }}
-              />
-            ) : (
-              <p className="session-rail-user-fallback">{currentUserName}</p>
-            )}
-          </div>
-        }
-      >
-        <SessionSearchContext.Provider value={sessionSearchValue}>
-          <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
-            <ThreadList.Items
-              components={{
-                ThreadListItem: AgentThreadListItem as any
-              }}
-            />
-          </SessionGroupLabelContext.Provider>
-        </SessionSearchContext.Provider>
-      </SessionRail>
-    </ThreadList.Root>
-  );
 
-  const rightDrawerNode = !isExternalPortalUser ? (
-    <RightWorkbenchDrawer
-      open={layoutState.isRightDrawerOpen}
-      activeTab={layoutState.activeRightDrawerTab}
-      onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-      onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
-      previewContent={
-        <PreviewWorkbenchPanel
-          threadId={activeRemoteThreadId}
-          requestedFilePath={requestedPreviewPath}
-          requestNonce={previewRequestNonce}
-          allowDownload={!isExternalPortalUser}
-        />
-      }
-      collaborationContent={
-        <div className="workbench-collaboration-content">
-          <section className="workbench-priority-card">
-            <h3>Priority B: Comments and @mentions</h3>
-            <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
-          </section>
-          <section className="workbench-priority-card">
-            <h3>Priority D: Owner and follow-up</h3>
-            <p>Assign owner and followers so every action has clear accountability.</p>
-          </section>
-          <ThreadCollaborationPanel
-            threadId={String(activeThreadIdentity.remoteId || "").trim()}
-            collaboration={activeThreadCollaboration}
-            loading={threadCollaborationLoading}
-            errorText={threadCollaborationErrorText}
-            onCollaborationChange={(next) => {
-              const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
-              if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
-              setThreadCollaboration(next);
-            }}
-          />
-        </div>
-      }
-    />
-  ) : null;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -5446,7 +5392,47 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     closable={false}
                     onClose={() => setLayoutState((prev) => toggleSessionRail(prev))}
                   >
-                    {sessionRailNode}
+                    <ThreadList.Root>
+                      <SessionRail
+                        collapsed={layoutState.isSessionRailCollapsed}
+                        userName={currentUserName}
+                        searchValue={sessionSearchValue}
+                        onSearchChange={setSessionSearchValue}
+                        onCreateThread={() => undefined}
+                        onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                        newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
+                        footer={
+                          <div className="session-rail-footer-stack">
+                            {props.currentUser ? (
+                              <UserIdentitySummary
+                                user={props.currentUser}
+                                compact
+                                onSignOut={props.onSignOut}
+                                locale="en"
+                                accessStatus={subscriptionStatus}
+                                accessStatusLoading={subscriptionStatusLoading}
+                                accessStatusError={subscriptionStatusError}
+                                onOpenAccessStatus={() => {
+                                  void refreshPortalSubscriptionStatus();
+                                }}
+                              />
+                            ) : (
+                              <p className="session-rail-user-fallback">{currentUserName}</p>
+                            )}
+                          </div>
+                        }
+                      >
+                        <SessionSearchContext.Provider value={sessionSearchValue}>
+                          <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+                            <ThreadList.Items
+                              components={{
+                                ThreadListItem: AgentThreadListItem as any
+                              }}
+                            />
+                          </SessionGroupLabelContext.Provider>
+                        </SessionSearchContext.Provider>
+                      </SessionRail>
+                    </ThreadList.Root>
                   </Drawer>
 
                   <main className="portal-workbench-chat flex-1" style={{ minHeight: 0 }}>
@@ -5468,7 +5454,43 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       closable={false}
                       onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
                     >
-                      {rightDrawerNode}
+                      <RightWorkbenchDrawer
+                        open={layoutState.isRightDrawerOpen}
+                        activeTab={layoutState.activeRightDrawerTab}
+                        onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                        onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
+                        previewContent={
+                          <PreviewWorkbenchPanel
+                            threadId={activeRemoteThreadId}
+                            requestedFilePath={requestedPreviewPath}
+                            requestNonce={previewRequestNonce}
+                            allowDownload={!isExternalPortalUser}
+                          />
+                        }
+                        collaborationContent={
+                          <div className="workbench-collaboration-content">
+                            <section className="workbench-priority-card">
+                              <h3>Priority B: Comments and @mentions</h3>
+                              <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
+                            </section>
+                            <section className="workbench-priority-card">
+                              <h3>Priority D: Owner and follow-up</h3>
+                              <p>Assign owner and followers so every action has clear accountability.</p>
+                            </section>
+                            <ThreadCollaborationPanel
+                              threadId={String(activeThreadIdentity.remoteId || "").trim()}
+                              collaboration={activeThreadCollaboration}
+                              loading={threadCollaborationLoading}
+                              errorText={threadCollaborationErrorText}
+                              onCollaborationChange={(next) => {
+                                const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
+                                if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
+                                setThreadCollaboration(next);
+                              }}
+                            />
+                          </div>
+                        }
+                      />
                     </Drawer>
                   )}
                 </div>
@@ -5476,14 +5498,54 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 <PanelGroup orientation="horizontal" className="portal-workbench-layout">
                   {!layoutState.isSessionRailCollapsed && (
                     <>
-                      <Panel defaultSize={20} minSize={15} maxSize={30} collapsible>
-                        {sessionRailNode}
+                      <Panel defaultSize="20" minSize="15" maxSize="30" collapsible>
+                        <ThreadList.Root>
+                          <SessionRail
+                            collapsed={layoutState.isSessionRailCollapsed}
+                            userName={currentUserName}
+                            searchValue={sessionSearchValue}
+                            onSearchChange={setSessionSearchValue}
+                            onCreateThread={() => undefined}
+                            onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                            newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
+                            footer={
+                              <div className="session-rail-footer-stack">
+                                {props.currentUser ? (
+                                  <UserIdentitySummary
+                                    user={props.currentUser}
+                                    compact
+                                    onSignOut={props.onSignOut}
+                                    locale="en"
+                                    accessStatus={subscriptionStatus}
+                                    accessStatusLoading={subscriptionStatusLoading}
+                                    accessStatusError={subscriptionStatusError}
+                                    onOpenAccessStatus={() => {
+                                      void refreshPortalSubscriptionStatus();
+                                    }}
+                                  />
+                                ) : (
+                                  <p className="session-rail-user-fallback">{currentUserName}</p>
+                                )}
+                              </div>
+                            }
+                          >
+                            <SessionSearchContext.Provider value={sessionSearchValue}>
+                              <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+                                <ThreadList.Items
+                                  components={{
+                                    ThreadListItem: AgentThreadListItem as any
+                                  }}
+                                />
+                              </SessionGroupLabelContext.Provider>
+                            </SessionSearchContext.Provider>
+                          </SessionRail>
+                        </ThreadList.Root>
                       </Panel>
                       <PanelResizeHandle className="Resizer" />
                     </>
                   )}
 
-                  <Panel minSize={30}>
+                  <Panel minSize="30">
                     <main className="portal-workbench-chat">
                       <div className="thread-wrap">
                         {canUpload && !sharedThreadReadonly ? (
@@ -5498,8 +5560,44 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
                     <>
                       <PanelResizeHandle className="Resizer" />
-                      <Panel defaultSize={25} minSize={20} maxSize={40} className="right-drawer-panel">
-                        {rightDrawerNode}
+                      <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
+                        <RightWorkbenchDrawer
+                          open={layoutState.isRightDrawerOpen}
+                          activeTab={layoutState.activeRightDrawerTab}
+                          onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                          onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
+                          previewContent={
+                            <PreviewWorkbenchPanel
+                              threadId={activeRemoteThreadId}
+                              requestedFilePath={requestedPreviewPath}
+                              requestNonce={previewRequestNonce}
+                              allowDownload={!isExternalPortalUser}
+                            />
+                          }
+                          collaborationContent={
+                            <div className="workbench-collaboration-content">
+                              <section className="workbench-priority-card">
+                                <h3>Priority B: Comments and @mentions</h3>
+                                <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
+                              </section>
+                              <section className="workbench-priority-card">
+                                <h3>Priority D: Owner and follow-up</h3>
+                                <p>Assign owner and followers so every action has clear accountability.</p>
+                              </section>
+                              <ThreadCollaborationPanel
+                                threadId={String(activeThreadIdentity.remoteId || "").trim()}
+                                collaboration={activeThreadCollaboration}
+                                loading={threadCollaborationLoading}
+                                errorText={threadCollaborationErrorText}
+                                onCollaborationChange={(next) => {
+                                  const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
+                                  if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
+                                  setThreadCollaboration(next);
+                                }}
+                              />
+                            </div>
+                          }
+                        />
                       </Panel>
                     </>
                   )}
