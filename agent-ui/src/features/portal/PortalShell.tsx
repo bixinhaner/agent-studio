@@ -233,10 +233,20 @@ type TimelineRow = {
   at?: string;
 };
 
+type CommentaryEntryData = {
+  id: string;
+  text: string;
+  lines: string[];
+  last_event_at?: number;
+  status: "streaming" | "completed";
+};
+
 type CommentaryPartData = {
   id: string;
   text: string;
   lines: string[];
+  entries?: CommentaryEntryData[];
+  open?: boolean;
   last_event_at?: number;
   status: "streaming" | "completed";
 };
@@ -1720,15 +1730,55 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
   );
 };
 
-const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
-  const lastPartIsCommentary = useAuiState((state) => {
-    const lastPart = state.message.parts[state.message.parts.length - 1] as Record<string, unknown> | undefined;
-    if (!lastPart || lastPart.type !== "data") return false;
-    return lastPart.name === "codex_commentary";
-  });
+const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => <RunningMessagePlaceholder {...props} />;
 
-  if (lastPartIsCommentary) return null;
-  return <RunningMessagePlaceholder {...props} />;
+const AssistantCommentaryBlock: FC<{
+  row: CommentaryPartData;
+  entries: CommentaryEntryData[];
+}> = ({ row, entries }) => {
+  const isStreaming = row.status === "streaming";
+  const entryCount = entries.length;
+  const updateCount = entries.reduce((count, entry) => count + Math.max(entry.lines.length, 1), 0);
+  const [isOpen, setIsOpen] = useState(() => isStreaming || row.open !== false);
+
+  useEffect(() => {
+    if (isStreaming) {
+      setIsOpen(true);
+      return;
+    }
+    if (row.open === false) {
+      setIsOpen(false);
+    }
+  }, [isStreaming, row.open]);
+
+  return (
+    <details
+      className={`assistant-commentary-block ${isStreaming ? "is-streaming" : "is-complete"}`}
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
+      <summary className="assistant-commentary-head">
+        <span className="assistant-commentary-chip">{isStreaming ? "Thinking..." : "Thought"}</span>
+        {!isStreaming && (
+          <span className="assistant-commentary-count">
+            {entryCount} {entryCount === 1 ? "thought" : "thoughts"} · {updateCount}{" "}
+            {updateCount === 1 ? "update" : "updates"}
+          </span>
+        )}
+      </summary>
+      <div className="assistant-commentary-text">
+        {entries.map((entry, entryIndex) => (
+          <div key={entry.id || `${row.id}-${entryIndex}`} className="assistant-commentary-entry">
+            {(entry.lines.length > 0 ? entry.lines : [entry.text]).map((line, lineIndex) => (
+              <p key={`${entry.id}-${lineIndex}`} className="assistant-commentary-line">
+                {line}
+              </p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
 };
 
 const ProcessDataFallback: FC<any> = ({
@@ -1742,28 +1792,42 @@ const ProcessDataFallback: FC<any> = ({
 
   if (name === "codex_commentary") {
     const row = (data && typeof data === "object" ? data : {}) as CommentaryPartData;
-    const lines = Array.isArray(row.lines)
-      ? row.lines
-          .map((line) => (typeof line === "string" ? line.trim() : ""))
-          .filter(Boolean)
+    const entries: CommentaryEntryData[] = Array.isArray(row.entries)
+      ? row.entries
+          .map((entry, index) => {
+            const entryObj = asRecord(entry);
+            const text = typeof entryObj?.text === "string" ? entryObj.text.trim() : "";
+            const lines = Array.isArray(entryObj?.lines)
+              ? entryObj.lines
+                  .map((line) => (typeof line === "string" ? line.trim() : ""))
+                  .filter(Boolean)
+              : [];
+            if (lines.length === 0 && !text) return null;
+            return {
+              id: typeof entryObj?.id === "string" && entryObj.id.trim() ? entryObj.id.trim() : `${row.id}-${index}`,
+              text,
+              lines,
+              status: entryObj?.status === "streaming" ? "streaming" : "completed"
+            } satisfies CommentaryEntryData;
+          })
+          .filter((entry): entry is CommentaryEntryData => Boolean(entry))
       : [];
-    const text = typeof row.text === "string" ? row.text.trim() : "";
-    if (lines.length === 0 && !text) return null;
-    const isStreaming = row.status === "streaming";
-    return (
-      <section className={`assistant-commentary-block ${isStreaming ? "is-streaming" : "is-complete"}`}>
-        <div className="assistant-commentary-head">
-          <span className="assistant-commentary-chip">{isStreaming ? "Thinking..." : "Thought"}</span>
-        </div>
-        <div className="assistant-commentary-text">
-          {(lines.length > 0 ? lines : [text]).map((line, index) => (
-            <p key={`${row.id}-${index}`} className="assistant-commentary-line">
-              {line}
-            </p>
-          ))}
-        </div>
-      </section>
-    );
+    if (entries.length === 0) {
+      const lines = Array.isArray(row.lines)
+        ? row.lines
+            .map((line) => (typeof line === "string" ? line.trim() : ""))
+            .filter(Boolean)
+        : [];
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      if (lines.length === 0 && !text) return null;
+      entries.push({
+        id: row.id || "thought",
+        text,
+        lines,
+        status: row.status
+      });
+    }
+    return <AssistantCommentaryBlock row={row} entries={entries} />;
   }
 
   if (name === "codex_trace_batch") {
@@ -3732,7 +3796,23 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return true;
         };
 
-        const createCommentaryPart = (key: string) => {
+        const commentaryGroupId = "assistant-thoughts";
+
+        const summarizeCommentaryEntries = (entries: CommentaryEntryData[]) => entries.map((entry) => entry.text.trim()).filter(Boolean);
+
+        const syncCommentaryPartSummary = (part: {
+          type: "data";
+          name: "codex_commentary";
+          data: CommentaryPartData;
+        }) => {
+          const entries = Array.isArray(part.data.entries) ? part.data.entries : [];
+          const texts = summarizeCommentaryEntries(entries);
+          part.data.text = texts.join("\n\n");
+          part.data.lines = texts;
+          part.data.status = entries.some((entry) => entry.status === "streaming") ? "streaming" : "completed";
+        };
+
+        const createCommentaryPart = () => {
           activeTextPart = null;
           const part: {
             type: "data";
@@ -3742,20 +3822,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             type: "data",
             name: "codex_commentary",
             data: {
-              id: key,
+              id: commentaryGroupId,
               text: "",
               lines: [],
+              entries: [],
+              open: true,
               status: "streaming"
             }
           };
           orderedParts.push(part);
           activeCommentaryPart = part;
-          currentCommentaryKey = key;
           return part;
         };
 
-        const ensureCommentaryPart = (key: string) => {
-          if (activeCommentaryPart && currentCommentaryKey === key) {
+        const ensureCommentaryPart = () => {
+          if (activeCommentaryPart) {
             return activeCommentaryPart;
           }
           let existing:
@@ -3768,8 +3849,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
             const item = orderedParts[i] as Record<string, unknown>;
             if (item.type !== "data" || item.name !== "codex_commentary") continue;
-            const payload = asRecord(item.data);
-            if (payload?.id !== key) continue;
             existing = item as {
               type: "data";
               name: "codex_commentary";
@@ -3780,18 +3859,37 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           if (existing) {
             activeTextPart = null;
             activeCommentaryPart = existing;
-            currentCommentaryKey = key;
             return existing;
           }
-          return createCommentaryPart(key);
+          return createCommentaryPart();
+        };
+
+        const ensureCommentaryEntry = (key: string) => {
+          const part = ensureCommentaryPart();
+          const entries = Array.isArray(part.data.entries) ? [...part.data.entries] : [];
+          let entry = entries.find((item) => item.id === key);
+          if (!entry) {
+            entry = {
+              id: key,
+              text: "",
+              lines: [],
+              status: "streaming"
+            };
+            entries.push(entry);
+            part.data.entries = entries;
+          }
+          activeTextPart = null;
+          activeCommentaryPart = part;
+          currentCommentaryKey = key;
+          return { part, entry };
         };
 
         const updateCommentaryPart = (key: string, nextText: string, mode: "append" | "replace"): boolean => {
           if (!nextText) return false;
-          const part = ensureCommentaryPart(key);
+          const { part, entry } = ensureCommentaryEntry(key);
           const now = Date.now();
-          const previousText = part.data.text;
-          const previousLines = Array.isArray(part.data.lines) ? [...part.data.lines] : [];
+          const previousText = entry.text;
+          const previousLines = Array.isArray(entry.lines) ? [...entry.lines] : [];
           const resolvedText = mode === "replace" ? nextText : `${previousText}${nextText}`;
           let nextDelta = nextText;
           if (mode === "replace" && previousText && nextText.startsWith(previousText)) {
@@ -3804,9 +3902,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             hasTextUpdate = true;
             return false;
           }
-          part.data.text = resolvedText;
+          entry.text = resolvedText;
           if (nextDelta) {
-            const lastEventAt = typeof part.data.last_event_at === "number" ? part.data.last_event_at : 0;
+            const lastEventAt = typeof entry.last_event_at === "number" ? entry.last_event_at : 0;
             const shouldStartNewLine = previousLines.length === 0 || now - lastEventAt >= commentaryLineBreakGapMs;
             if (shouldStartNewLine) {
               previousLines.push(nextDelta);
@@ -3815,48 +3913,80 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               previousLines[lastIndex] = `${previousLines[lastIndex]}${nextDelta}`;
             }
           }
-          part.data.lines = previousLines;
+          entry.lines = previousLines;
+          entry.last_event_at = now;
+          entry.status = "streaming";
+          part.data.open = true;
           part.data.last_event_at = now;
+          syncCommentaryPartSummary(part);
           part.data.status = "streaming";
           hasTextUpdate = true;
           return true;
         };
 
         const markCommentaryCompleted = (key: string): boolean => {
-          let target:
-            | {
-                type: "data";
-                name: "codex_commentary";
-                data: CommentaryPartData;
-              }
-            | undefined;
+          let changed = false;
           for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
             const item = orderedParts[i] as Record<string, unknown>;
             if (item.type !== "data" || item.name !== "codex_commentary") continue;
-            const payload = asRecord(item.data);
-            if (payload?.id !== key) continue;
-            target = item as {
+            const part = item as {
               type: "data";
               name: "codex_commentary";
               data: CommentaryPartData;
             };
-            break;
+            const entries = Array.isArray(part.data.entries) ? part.data.entries : [];
+            const entry = entries.find((item) => item.id === key);
+            if (entry) {
+              entry.status = "completed";
+              syncCommentaryPartSummary(part);
+              changed = true;
+              break;
+            }
+            if (part.data.id === key) {
+              part.data.status = "completed";
+              changed = true;
+              break;
+            }
           }
-          if (!target) return false;
-          target.data.status = "completed";
           if (currentCommentaryKey === key) {
             activeCommentaryPart = null;
             currentCommentaryKey = "";
           }
-          return true;
+          return changed;
         };
 
         const promoteLatestCommentaryToFinalText = (): boolean => {
           for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
             const item = orderedParts[i] as Record<string, unknown>;
             if (item.type !== "data" || item.name !== "codex_commentary") continue;
-            const payload = asRecord(item.data);
-            const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+            const part = item as {
+              type: "data";
+              name: "codex_commentary";
+              data: CommentaryPartData;
+            };
+            const entries = Array.isArray(part.data.entries) ? [...part.data.entries] : [];
+            if (entries.length > 0) {
+              for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+                const text = entries[entryIndex]?.text.trim() || "";
+                if (!text) {
+                  entries.splice(entryIndex, 1);
+                  continue;
+                }
+                entries.splice(entryIndex, 1);
+                if (entries.length === 0) {
+                  orderedParts.splice(i, 1);
+                } else {
+                  part.data.entries = entries;
+                  syncCommentaryPartSummary(part);
+                }
+                activeCommentaryPart = null;
+                currentCommentaryKey = "";
+                return appendTextPart(text);
+              }
+              orderedParts.splice(i, 1);
+              continue;
+            }
+            const text = part.data.text.trim();
             if (!text) {
               orderedParts.splice(i, 1);
               continue;
@@ -3867,6 +3997,30 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             return appendTextPart(text);
           }
           return false;
+        };
+
+        const collapseCommentaryParts = (): boolean => {
+          let changed = false;
+          for (const part of orderedParts) {
+            const item = part as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_commentary") continue;
+            const payload = asRecord(item.data);
+            if (!payload) continue;
+            const entries = Array.isArray(payload.entries) ? payload.entries : [];
+            for (const entry of entries) {
+              const entryObj = asRecord(entry);
+              if (entryObj && entryObj.status !== "completed") {
+                entryObj.status = "completed";
+                changed = true;
+              }
+            }
+            if (payload.open !== false || payload.status !== "completed") {
+              payload.open = false;
+              payload.status = "completed";
+              changed = true;
+            }
+          }
+          return changed;
         };
 
         const appendTraceBatch = (parts: any[]): boolean => {
@@ -3998,6 +4152,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               } else if (!hasTextUpdate && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
               }
+              const commentaryCollapsed = collapseCommentaryParts();
               if (processEnabled) {
                 updates.push({
                   type: "data",
@@ -4014,7 +4169,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               if (traceChanged && collapseFinalTraceOnDoneEnabled) {
                 collapseLatestTraceBatch();
               }
-              if (dataPartChanged || traceChanged || textChanged) {
+              if (dataPartChanged || traceChanged || textChanged || commentaryCollapsed) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };

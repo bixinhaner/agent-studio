@@ -2366,7 +2366,35 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 0;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.assistant-commentary-head::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-commentary-head::after {
+  content: "Show";
+  margin-left: auto;
+  border: 1px solid #d7e3f4;
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.assistant-commentary-block[open] .assistant-commentary-head {
   margin-bottom: 6px;
+}
+
+.assistant-commentary-block[open] .assistant-commentary-head::after {
+  content: "Hide";
 }
 
 .assistant-commentary-chip {
@@ -2388,11 +2416,31 @@ body {
   color: #3b5a8f;
 }
 
+.assistant-commentary-count {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
 .assistant-commentary-text {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.assistant-commentary-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #e6edf7;
+  padding-top: 10px;
+}
+
+.assistant-commentary-entry:first-child {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .assistant-commentary-line {
