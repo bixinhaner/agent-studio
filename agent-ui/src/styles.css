@@ -6014,10 +6014,16 @@ body {
   background: #2563eb;
 }
 
+.thread-question-nav-marker.is-preview {
+  width: 24px;
+  height: 4px;
+  background: #ff7a45;
+}
+
 .thread-question-nav-panel {
   position: absolute;
-  top: 34px;
-  right: 38px;
+  top: clamp(0px, calc(var(--thread-question-nav-panel-top, 0%) - 28px), calc(100% - 92px));
+  right: 30px;
   width: min(360px, calc(100vw - 120px));
   max-height: min(420px, calc(100vh - 190px));
   border: 1px solid rgba(148, 163, 184, 0.24);
@@ -6034,7 +6040,6 @@ body {
     transform 140ms ease;
 }
 
-.thread-question-nav:hover .thread-question-nav-panel,
 .thread-question-nav:focus-within .thread-question-nav-panel,
 .thread-question-nav.is-open .thread-question-nav-panel {
   opacity: 1;
@@ -6086,6 +6091,12 @@ body {
   border-color: #bfdbfe;
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.thread-question-nav-row.is-selected {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .thread-question-nav-row-index {

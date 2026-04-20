@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   useContext,
+  type CSSProperties,
   type FC,
   type MutableRefObject,
   type ReactNode,
@@ -2838,7 +2839,17 @@ const ThreadQuestionNavigator: FC<{
   const items = useMemo(() => buildThreadQuestionJumpItems(messages), [messages]);
   const [positions, setPositions] = useState<Record<string, number>>({});
   const [activeId, setActiveId] = useState("");
+  const [hoveredId, setHoveredId] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const panelListRef = useRef<HTMLDivElement | null>(null);
+  const selectedId = hoveredId || activeId || items[0]?.id || "";
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
+  const selectedFallbackTop = items.length <= 1 ? 0 : (selectedIndex / (items.length - 1)) * 100;
+  const selectedPanelTop = selectedId ? (positions[selectedId] ?? selectedFallbackTop) : 0;
+  const panelStyle = {
+    "--thread-question-nav-panel-top": `${Math.max(0, Math.min(100, selectedPanelTop))}%`
+  } as CSSProperties;
 
   const refresh = useCallback(() => {
     const shell = shellRef.current;
@@ -2910,7 +2921,51 @@ const ThreadQuestionNavigator: FC<{
 
   useEffect(() => {
     setPanelOpen(false);
+    setHoveredId("");
   }, [items.length]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!panelOpen || !selectedId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = panelListRef.current?.querySelector<HTMLElement>('[data-question-nav-row-selected="true"]');
+      row?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [panelOpen, selectedId]);
+
+  const cancelPanelClose = useCallback(() => {
+    if (closeTimerRef.current === null) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const schedulePanelClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+    }
+    closeTimerRef.current = window.setTimeout(() => {
+      setPanelOpen(false);
+      setHoveredId("");
+      closeTimerRef.current = null;
+    }, 180);
+  }, []);
+
+  const openPanelForQuestion = useCallback(
+    (messageId: string) => {
+      cancelPanelClose();
+      setHoveredId(messageId);
+      setPanelOpen(true);
+    },
+    [cancelPanelClose]
+  );
 
   const jumpToQuestion = useCallback(
     (messageId: string) => {
@@ -2924,6 +2979,7 @@ const ThreadQuestionNavigator: FC<{
       });
       setActiveId(messageId);
       setPanelOpen(false);
+      setHoveredId("");
     },
     [shellRef]
   );
@@ -2933,48 +2989,58 @@ const ThreadQuestionNavigator: FC<{
   return (
     <nav
       className={`thread-question-nav ${panelOpen ? "is-open" : ""}`}
+      style={panelStyle}
       aria-label="Question quick jump"
-      onMouseLeave={() => setPanelOpen(false)}
+      onMouseEnter={cancelPanelClose}
+      onMouseLeave={schedulePanelClose}
     >
       <button
         type="button"
         className="thread-question-nav-toggle"
         aria-label={`${items.length} questions in this conversation`}
         aria-expanded={panelOpen}
-        onClick={() => setPanelOpen((value) => !value)}
+        onClick={() => {
+          cancelPanelClose();
+          setHoveredId((current) => current || activeId || items[0]?.id || "");
+          setPanelOpen((value) => !value);
+        }}
       >
         {items.length}
       </button>
-      <div className="thread-question-nav-track" onMouseEnter={() => setPanelOpen(true)}>
+      <div className="thread-question-nav-track">
         {items.map((item, index) => {
           const fallbackTop = items.length === 1 ? 0 : (index / (items.length - 1)) * 100;
           const top = positions[item.id] ?? fallbackTop;
           const active = item.id === activeId;
+          const preview = item.id === selectedId;
           return (
             <button
               key={item.id}
               type="button"
-              className={`thread-question-nav-marker ${active ? "is-active" : ""}`}
+              className={`thread-question-nav-marker ${active ? "is-active" : ""} ${preview ? "is-preview" : ""}`}
               style={{ top: `${top}%` }}
               aria-label={`Jump to question ${item.index}: ${item.label}`}
               aria-current={active ? "location" : undefined}
               title={item.label}
+              onMouseEnter={() => openPanelForQuestion(item.id)}
               onClick={() => jumpToQuestion(item.id)}
-              onFocus={() => setPanelOpen(true)}
+              onFocus={() => openPanelForQuestion(item.id)}
             />
           );
         })}
       </div>
-      <div className="thread-question-nav-panel">
+      <div className="thread-question-nav-panel" onMouseEnter={cancelPanelClose} onMouseLeave={schedulePanelClose}>
         <div className="thread-question-nav-panel-title">Questions</div>
-        <div className="thread-question-nav-panel-list">
+        <div className="thread-question-nav-panel-list" ref={panelListRef}>
           {items.map((item) => {
             const active = item.id === activeId;
+            const selected = item.id === selectedId;
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`thread-question-nav-row ${active ? "is-active" : ""}`}
+                className={`thread-question-nav-row ${active ? "is-active" : ""} ${selected ? "is-selected" : ""}`}
+                data-question-nav-row-selected={selected ? "true" : undefined}
                 onClick={() => jumpToQuestion(item.id)}
                 title={item.label}
               >
