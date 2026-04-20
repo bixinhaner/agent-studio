@@ -11,16 +11,19 @@ import {
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type FormEvent as ReactFormEvent,
   type PropsWithChildren
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  AttachmentPrimitive,
   AssistantRuntimeProvider,
   ComposerPrimitive,
   RuntimeAdapterProvider,
   ThreadPrimitive,
   ThreadListItemPrimitive,
   useAui,
+  useAttachment,
   useMessagePartText,
   useLocalRuntime,
   unstable_useRemoteThreadListRuntime as useRemoteThreadListRuntime,
@@ -32,15 +35,30 @@ import {
   AssistantActionBar,
   AssistantMessage,
   BranchPicker,
+  Composer,
   Thread,
   UserMessage,
   ThreadWelcome,
   ThreadList,
   makeMarkdownText
 } from "@assistant-ui/react-ui";
-import { CheckIcon, PencilIcon, RefreshCwIcon, Share2Icon, ThumbsDownIcon, Trash2Icon, XIcon } from "lucide-react";
+import {
+  AlertCircleIcon,
+  CheckIcon,
+  FileIcon,
+  ImageIcon,
+  Loader2Icon,
+  PencilIcon,
+  RefreshCwIcon,
+  SendHorizontalIcon,
+  Share2Icon,
+  ThumbsDownIcon,
+  Trash2Icon,
+  XIcon
+} from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
+  type Attachment,
   type AttachmentAdapter,
   type CompleteAttachment,
   CompositeAttachmentAdapter,
@@ -962,6 +980,13 @@ type UploadedAttachmentMeta = {
   size: number;
 };
 
+type WorkspacePendingAttachment = PendingAttachment & {
+  uploadError?: string;
+  uploadedMeta?: UploadedAttachmentMeta;
+};
+
+const THREAD_ATTACHMENT_MAX_BYTES = 128 * 1024 * 1024;
+
 function decodeMaybeUri(value: string): string {
   if (!value.trim()) return "";
   try {
@@ -993,31 +1018,130 @@ function uploadedMetaFromUnknown(value: unknown): UploadedAttachmentMeta {
   };
 }
 
-async function uploadThreadAttachment(threadId: string, file: File): Promise<UploadedAttachmentMeta> {
-  const headers = new Headers({
-    ...authHeaders(),
-    "Content-Type": "application/octet-stream",
-    "X-File-Name": encodeURIComponent(fileNameFromUnknown(file.name, "upload.bin")),
-    "X-File-Type": encodeURIComponent(fileNameFromUnknown(file.type, "application/octet-stream")),
-    "X-File-Size": String(file.size)
-  });
-
-  const res = await fetch(`${apiBase()}/api/threads/${encodeURIComponent(threadId)}/attachments`, {
-    method: "POST",
-    credentials: "include",
-    headers,
-    body: file
-  });
-
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!res.ok) {
-    notifyAuthInvalidStatus(res.status);
-    const msg = (data && typeof data.detail === "string" && data.detail) || `Upload failed (${res.status})`;
-    throw new Error(msg);
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
   }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
 
-  return uploadedMetaFromUnknown((data as { attachment?: unknown }).attachment);
+function clampUploadProgress(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function createUploadProgressQueue() {
+  let closed = false;
+  let latest: number | null = null;
+  let resolveNext: ((value: number | null) => void) | null = null;
+
+  return {
+    push(value: number) {
+      if (closed) return;
+      const progress = clampUploadProgress(value);
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = null;
+        resolve(progress);
+        return;
+      }
+      latest = progress;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = null;
+        resolve(null);
+      }
+    },
+    next(): Promise<number | null> {
+      if (latest !== null) {
+        const progress = latest;
+        latest = null;
+        return Promise.resolve(progress);
+      }
+      if (closed) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        resolveNext = resolve;
+      });
+    }
+  };
+}
+
+function parseUploadResponse(rawText: string): Record<string, unknown> {
+  if (!rawText.trim()) return {};
+  try {
+    const parsed = JSON.parse(rawText);
+    return asRecord(parsed) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function uploadErrorMessageFromResponse(status: number, rawText: string): string {
+  const data = parseUploadResponse(rawText);
+  const detail = typeof data.detail === "string" ? data.detail.trim() : "";
+  if (detail) return detail;
+  if (status === 413) return `File is larger than the ${formatFileSize(THREAD_ATTACHMENT_MAX_BYTES)} upload limit.`;
+  return `Upload failed (${status})`;
+}
+
+function uploadThreadAttachment(
+  threadId: string,
+  file: File,
+  options?: {
+    onProgress?: (progress: number) => void;
+    onRequestStart?: (request: XMLHttpRequest) => void;
+  }
+): Promise<UploadedAttachmentMeta> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    options?.onRequestStart?.(request);
+
+    request.open("POST", `${apiBase()}/api/threads/${encodeURIComponent(threadId)}/attachments`);
+    request.withCredentials = true;
+    request.setRequestHeader("Content-Type", "application/octet-stream");
+    request.setRequestHeader("X-File-Name", encodeURIComponent(fileNameFromUnknown(file.name, "upload.bin")));
+    request.setRequestHeader("X-File-Type", encodeURIComponent(fileNameFromUnknown(file.type, "application/octet-stream")));
+    request.setRequestHeader("X-File-Size", String(file.size));
+    for (const [key, value] of Object.entries(authHeaders())) {
+      request.setRequestHeader(key, value);
+    }
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        options?.onProgress?.(Math.min(event.loaded / event.total, 0.99));
+      }
+    };
+    request.onerror = () => reject(new Error("Network error while uploading attachment. Check the connection and try again."));
+    request.ontimeout = () => reject(new Error("Attachment upload timed out. Check the connection and try again."));
+    request.onabort = () => reject(new Error("Attachment upload was cancelled."));
+    request.onload = () => {
+      const rawText = typeof request.responseText === "string" ? request.responseText : "";
+      if (request.status < 200 || request.status >= 300) {
+        notifyAuthInvalidStatus(request.status);
+        reject(new Error(uploadErrorMessageFromResponse(request.status, rawText)));
+        return;
+      }
+
+      try {
+        options?.onProgress?.(1);
+        const data = parseUploadResponse(rawText);
+        resolve(uploadedMetaFromUnknown(data.attachment));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("Invalid upload response"));
+      }
+    };
+
+    request.send(file);
+  });
 }
 
 function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
@@ -1031,48 +1155,295 @@ function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
 class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
   public accept = "*";
 
+  private readonly uploadedByAttachmentId = new Map<string, UploadedAttachmentMeta>();
+  private readonly abortUploadByAttachmentId = new Map<string, () => void>();
+  private readonly cancelledAttachmentIds = new Set<string>();
+
   constructor(private readonly resolveThreadId: () => Promise<string>) {}
 
-  public async add(state: { file: File }): Promise<PendingAttachment> {
+  public async *add(state: { file: File }): AsyncGenerator<PendingAttachment, void> {
     const name = fileNameFromUnknown(state.file.name, "Untitled file");
     const id =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `${name}-${Date.now()}`;
-
-    return {
+    const baseAttachment: WorkspacePendingAttachment = {
       id,
       type: guessAttachmentType(state.file),
       name,
       contentType: state.file.type || "application/octet-stream",
       file: state.file,
-      status: { type: "requires-action", reason: "composer-send" }
+      status: { type: "running", reason: "uploading", progress: 0 }
     };
+
+    if (state.file.size > THREAD_ATTACHMENT_MAX_BYTES) {
+      yield {
+        ...baseAttachment,
+        uploadError: `File is larger than the ${formatFileSize(THREAD_ATTACHMENT_MAX_BYTES)} upload limit.`,
+        status: { type: "incomplete", reason: "error" }
+      } as WorkspacePendingAttachment;
+      return;
+    }
+
+    yield baseAttachment;
+
+    const progressQueue = createUploadProgressQueue();
+    const uploadPromise = (async () => {
+      const threadId = await this.resolveThreadId();
+      if (!threadId) {
+        throw new Error("Failed to initialize the current session. Please try again.");
+      }
+      if (this.cancelledAttachmentIds.has(id)) {
+        throw new Error("Attachment upload was cancelled.");
+      }
+      return uploadThreadAttachment(threadId, state.file, {
+        onProgress: (progress) => progressQueue.push(progress),
+        onRequestStart: (request) => {
+          this.abortUploadByAttachmentId.set(id, () => request.abort());
+        }
+      });
+    })().finally(() => {
+      progressQueue.close();
+      this.abortUploadByAttachmentId.delete(id);
+    });
+
+    let lastProgress = 0;
+    while (true) {
+      const progress = await progressQueue.next();
+      if (progress === null) break;
+      if (this.cancelledAttachmentIds.has(id)) {
+        await uploadPromise.catch(() => undefined);
+        this.cancelledAttachmentIds.delete(id);
+        return;
+      }
+      if (progress < 1 && progress - lastProgress < 0.01) continue;
+      lastProgress = progress;
+      yield {
+        ...baseAttachment,
+        status: { type: "running", reason: "uploading", progress }
+      };
+    }
+
+    try {
+      const uploaded = await uploadPromise;
+      if (this.cancelledAttachmentIds.has(id)) return;
+      this.uploadedByAttachmentId.set(id, uploaded);
+      yield {
+        ...baseAttachment,
+        uploadedMeta: uploaded,
+        contentType: uploaded.mimeType,
+        status: { type: "requires-action", reason: "composer-send" }
+      } as WorkspacePendingAttachment;
+    } catch (error) {
+      if (this.cancelledAttachmentIds.has(id)) return;
+      yield {
+        ...baseAttachment,
+        uploadError: error instanceof Error ? error.message : "Failed to upload attachment.",
+        status: { type: "incomplete", reason: "error" }
+      } as WorkspacePendingAttachment;
+    } finally {
+      this.cancelledAttachmentIds.delete(id);
+    }
   }
 
   public async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    const file = attachment.file;
-    const threadId = await this.resolveThreadId();
-    if (!threadId) {
-      throw new Error("Failed to initialize the current session. Please try again.");
+    const workspaceAttachment = attachment as WorkspacePendingAttachment;
+    if (workspaceAttachment.status.type === "running") {
+      throw new Error("Attachment is still uploading. Wait for it to finish before sending.");
     }
-    const uploaded = await uploadThreadAttachment(threadId, file);
+    if (workspaceAttachment.status.type === "incomplete") {
+      throw new Error(workspaceAttachment.uploadError || "Attachment upload failed. Retry or remove the file before sending.");
+    }
+
+    const uploaded = workspaceAttachment.uploadedMeta ?? this.uploadedByAttachmentId.get(attachment.id);
+    if (!uploaded) {
+      throw new Error("Attachment is not ready. Retry or remove the file before sending.");
+    }
+    this.uploadedByAttachmentId.delete(attachment.id);
+
     const content: ThreadUserMessagePart[] = [{ type: "text", text: buildUploadedAttachmentHint(uploaded) }];
-    const type = guessAttachmentType(file);
+    const cleanAttachment = { ...workspaceAttachment };
+    delete cleanAttachment.uploadError;
+    delete cleanAttachment.uploadedMeta;
 
     return {
-      ...attachment,
-      type,
+      ...cleanAttachment,
       contentType: uploaded.mimeType,
       status: { type: "complete" },
       content
     };
   }
 
-  public async remove() {
-    // noop
+  public async remove(attachment: Attachment) {
+    if (attachment.status.type === "running") {
+      this.cancelledAttachmentIds.add(attachment.id);
+    }
+    this.abortUploadByAttachmentId.get(attachment.id)?.();
+    this.abortUploadByAttachmentId.delete(attachment.id);
+    this.uploadedByAttachmentId.delete(attachment.id);
   }
 }
+
+function attachmentTypeLabel(type: string): string {
+  if (type === "image") return "Image";
+  if (type === "document") return "Document";
+  return "File";
+}
+
+function uploadStatusLabel(attachment: Attachment & { uploadError?: string }): string {
+  const status = attachment.status;
+  if (status.type === "running") {
+    const percent = Math.round(clampUploadProgress(status.progress) * 100);
+    return percent >= 100 ? "Finalizing upload..." : `Uploading ${percent}%`;
+  }
+  if (status.type === "incomplete") {
+    return attachment.uploadError || "Upload failed. Retry or remove this file.";
+  }
+  if (status.type === "requires-action") return "Ready to send";
+  return "Uploaded";
+}
+
+const UploadAwareAttachment: FC = () => {
+  const aui = useAui();
+  const attachment = useAttachment((item) => item as Attachment & { source?: string; uploadError?: string });
+  const status = attachment.status;
+  const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
+  const isUploading = status.type === "running";
+  const isFailed = status.type === "incomplete";
+  const isReady = status.type === "requires-action" || status.type === "complete";
+  const typeLabel = attachmentTypeLabel(attachment.type);
+  const canRetry = isFailed && attachment.source !== "message" && attachment.file instanceof File;
+
+  const retryUpload = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const file = attachment.file;
+    if (!(file instanceof File)) return;
+    void aui
+      .composer()
+      .attachment({ id: attachment.id })
+      .remove()
+      .then(() => aui.composer().addAttachment(file))
+      .catch(() => {
+        // The failed attachment remains visible; the user can remove it manually.
+      });
+  };
+
+  return (
+    <div className="portal-upload-attachment" data-upload-status={status.type}>
+      <div className="portal-upload-attachment-main">
+        <div className="portal-upload-attachment-icon" aria-hidden="true">
+          {isUploading ? (
+            <Loader2Icon className="portal-upload-spinner" size={17} />
+          ) : isFailed ? (
+            <AlertCircleIcon size={17} />
+          ) : attachment.type === "image" ? (
+            <ImageIcon size={17} />
+          ) : (
+            <FileIcon size={17} />
+          )}
+        </div>
+        <div className="portal-upload-attachment-text">
+          <p className="portal-upload-attachment-name">
+            <AttachmentPrimitive.Name />
+          </p>
+          <p className="portal-upload-attachment-status">{uploadStatusLabel(attachment)}</p>
+        </div>
+        <span className="portal-upload-attachment-type">{isReady ? typeLabel : null}</span>
+      </div>
+      {isUploading ? (
+        <div className="portal-upload-progress" aria-label={`Uploading ${attachment.name}`}>
+          <span style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
+        </div>
+      ) : null}
+      {isFailed ? (
+        <div className="portal-upload-attachment-actions">
+          {canRetry ? (
+            <button type="button" className="portal-upload-retry" onClick={retryUpload}>
+              Retry
+            </button>
+          ) : null}
+          <span>Remove the file if you do not want to send it.</span>
+        </div>
+      ) : null}
+      {attachment.source !== "message" ? (
+        <AttachmentPrimitive.Remove asChild>
+          <button type="button" className="portal-upload-remove" aria-label={`Remove ${attachment.name}`}>
+            <XIcon size={14} />
+          </button>
+        </AttachmentPrimitive.Remove>
+      ) : null}
+    </div>
+  );
+};
+
+const UPLOAD_AWARE_ATTACHMENT_COMPONENTS = { Attachment: UploadAwareAttachment };
+
+function composerUploadBlockReason(attachments: readonly Attachment[]): "uploading" | "failed" | "" {
+  let hasUploading = false;
+  for (const attachment of attachments) {
+    if (attachment.status.type === "incomplete") return "failed";
+    if (attachment.status.type === "running") hasUploading = true;
+  }
+  return hasUploading ? "uploading" : "";
+}
+
+const UploadAwareComposer: FC = () => {
+  const aui = useAui();
+  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const composerEmpty = useAuiState((state) => state.composer.isEmpty);
+  const composerEditing = useAuiState((state) => state.composer.isEditing);
+  const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
+  const sendBlockedByUpload = uploadBlockReason !== "";
+  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload;
+  const sendTitle =
+    uploadBlockReason === "uploading"
+      ? "Wait for attachments to finish uploading"
+      : uploadBlockReason === "failed"
+        ? "Retry or remove failed uploads before sending"
+        : "Send message";
+
+  const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    if (!sendBlockedByUpload) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (sendDisabled) return;
+    aui.composer().send();
+  };
+
+  return (
+    <Composer.Root onSubmit={preventBlockedSubmit}>
+      <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
+      {sendBlockedByUpload ? (
+        <p className="portal-upload-composer-hint" role="status">
+          {uploadBlockReason === "uploading"
+            ? "Uploading attachments. You can keep typing; sending unlocks when ready."
+            : "An attachment failed to upload. Retry or remove it before sending."}
+        </p>
+      ) : null}
+      <Composer.AddAttachment />
+      <Composer.Input autoFocus />
+      {threadRunning ? (
+        <Composer.Cancel />
+      ) : (
+        <button
+          type="submit"
+          className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+          disabled={sendDisabled}
+          title={sendTitle}
+          aria-label={sendTitle}
+          onClick={sendCurrentMessage}
+        >
+          <SendHorizontalIcon size={17} />
+        </button>
+      )}
+    </Composer.Root>
+  );
+};
 
 function buildCodexRunConfig(cfg: AppliedConfig, mode: string): Record<string, unknown> {
   const runConfig: Record<string, unknown> = {
@@ -4634,6 +5005,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }}
               assistantAvatar={assistantAvatar}
               components={{
+                ...(canUpload ? { Composer: UploadAwareComposer } : {}),
                 UserMessage: AgentUserMessage,
                 AssistantMessage: AgentAssistantMessage,
                 ThreadWelcome: DraftOnlyThreadWelcome
