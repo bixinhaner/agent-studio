@@ -2428,6 +2428,8 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
           ? `thread-public-share-message-shell thread-public-share-message-shell-${tone} is-selectable`
           : `thread-public-share-message-shell thread-public-share-message-shell-${tone}`
       }
+      data-thread-message-id={messageId}
+      data-thread-message-role={tone}
     >
       {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
       {children}
@@ -2793,6 +2795,200 @@ const AgentThreadListItem: FC = () => {
   );
 };
 
+type ThreadQuestionJumpItem = {
+  id: string;
+  index: number;
+  label: string;
+};
+
+function buildThreadQuestionJumpItems(messages: readonly ThreadMessage[]): ThreadQuestionJumpItem[] {
+  let questionIndex = 0;
+  return messages
+    .filter((message) => message.role === "user")
+    .map((message) => {
+      questionIndex += 1;
+      const text = userTextFromUnknownMessage(message)
+        .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "attached file")
+        .replace(/\s+/g, " ")
+        .trim();
+      return {
+        id: message.id,
+        index: questionIndex,
+        label: text || `Question ${questionIndex}`
+      };
+    })
+    .filter((item) => item.id);
+}
+
+function findThreadQuestionElement(shell: HTMLElement, messageId: string): HTMLElement | null {
+  const nodes = shell.querySelectorAll<HTMLElement>(
+    '.thread-public-share-message-shell-user[data-thread-message-id]'
+  );
+  for (const node of nodes) {
+    if (node.dataset.threadMessageId === messageId) return node;
+  }
+  return null;
+}
+
+const ThreadQuestionNavigator: FC<{
+  messages: readonly ThreadMessage[];
+  shellRef: MutableRefObject<HTMLDivElement | null>;
+  disabled?: boolean;
+}> = ({ messages, shellRef, disabled }) => {
+  const items = useMemo(() => buildThreadQuestionJumpItems(messages), [messages]);
+  const [positions, setPositions] = useState<Record<string, number>>({});
+  const [activeId, setActiveId] = useState("");
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const refresh = useCallback(() => {
+    const shell = shellRef.current;
+    if (!shell || items.length < 2) return;
+    const viewport = shell.querySelector<HTMLElement>(".aui-thread-viewport");
+    if (!viewport) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const scrollMax = Math.max(viewport.scrollHeight - viewport.clientHeight, 1);
+    const nextPositions: Record<string, number> = {};
+    let nextActiveId = items[0]?.id || "";
+    let bestDistance = Number.POSITIVE_INFINITY;
+    const activeLine = viewport.scrollTop + Math.min(160, viewport.clientHeight * 0.32);
+
+    for (const item of items) {
+      const element = findThreadQuestionElement(shell, item.id);
+      if (!element) continue;
+      const rect = element.getBoundingClientRect();
+      const topInScroll = viewport.scrollTop + rect.top - viewportRect.top;
+      nextPositions[item.id] = Math.max(0, Math.min(100, (topInScroll / scrollMax) * 100));
+      const distance = Math.abs(topInScroll - activeLine);
+      if (topInScroll <= activeLine && distance <= bestDistance) {
+        bestDistance = distance;
+        nextActiveId = item.id;
+      }
+    }
+
+    setPositions(nextPositions);
+    setActiveId((current) => (current === nextActiveId ? current : nextActiveId));
+  }, [items, shellRef]);
+
+  useEffect(() => {
+    if (disabled || items.length < 2) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const viewport = shell.querySelector<HTMLElement>(".aui-thread-viewport");
+    if (!viewport) return;
+
+    let frame = 0;
+    const scheduleRefresh = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(refresh);
+    };
+
+    scheduleRefresh();
+    const laterRefresh = window.setTimeout(scheduleRefresh, 250);
+    viewport.addEventListener("scroll", scheduleRefresh, { passive: true });
+    window.addEventListener("resize", scheduleRefresh);
+
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleRefresh) : null;
+    resizeObserver?.observe(viewport);
+
+    const mutationObserver = typeof MutationObserver !== "undefined" ? new MutationObserver(scheduleRefresh) : null;
+    mutationObserver?.observe(viewport, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.clearTimeout(laterRefresh);
+      viewport.removeEventListener("scroll", scheduleRefresh);
+      window.removeEventListener("resize", scheduleRefresh);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [disabled, items.length, refresh, shellRef]);
+
+  useEffect(() => {
+    setPanelOpen(false);
+  }, [items.length]);
+
+  const jumpToQuestion = useCallback(
+    (messageId: string) => {
+      const shell = shellRef.current;
+      if (!shell) return;
+      const element = findThreadQuestionElement(shell, messageId);
+      if (!element) return;
+      element.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+      setActiveId(messageId);
+      setPanelOpen(false);
+    },
+    [shellRef]
+  );
+
+  if (disabled || items.length < 2) return null;
+
+  return (
+    <nav
+      className={`thread-question-nav ${panelOpen ? "is-open" : ""}`}
+      aria-label="Question quick jump"
+      onMouseLeave={() => setPanelOpen(false)}
+    >
+      <button
+        type="button"
+        className="thread-question-nav-toggle"
+        aria-label={`${items.length} questions in this conversation`}
+        aria-expanded={panelOpen}
+        onClick={() => setPanelOpen((value) => !value)}
+      >
+        {items.length}
+      </button>
+      <div className="thread-question-nav-track" onMouseEnter={() => setPanelOpen(true)}>
+        {items.map((item, index) => {
+          const fallbackTop = items.length === 1 ? 0 : (index / (items.length - 1)) * 100;
+          const top = positions[item.id] ?? fallbackTop;
+          const active = item.id === activeId;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`thread-question-nav-marker ${active ? "is-active" : ""}`}
+              style={{ top: `${top}%` }}
+              aria-label={`Jump to question ${item.index}: ${item.label}`}
+              aria-current={active ? "location" : undefined}
+              title={item.label}
+              onClick={() => jumpToQuestion(item.id)}
+              onFocus={() => setPanelOpen(true)}
+            />
+          );
+        })}
+      </div>
+      <div className="thread-question-nav-panel">
+        <div className="thread-question-nav-panel-title">Questions</div>
+        <div className="thread-question-nav-panel-list">
+          {items.map((item) => {
+            const active = item.id === activeId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`thread-question-nav-row ${active ? "is-active" : ""}`}
+                onClick={() => jumpToQuestion(item.id)}
+                title={item.label}
+              >
+                <span className="thread-question-nav-row-index">{item.index}</span>
+                <span className="thread-question-nav-row-text">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </nav>
+  );
+};
+
 const ThreadPublicShareControls: FC<
   PropsWithChildren<{
     threadId: string;
@@ -2803,6 +2999,7 @@ const ThreadPublicShareControls: FC<
   const messages = useAuiState((s) => s.thread.messages);
   const threadRunning = useAuiState((s) => s.thread.isRunning);
   const turns = useMemo(() => groupThreadMessagesIntoPublicShareTurns(messages), [messages]);
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedTurnIds, setSelectedTurnIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -2909,8 +3106,13 @@ const ThreadPublicShareControls: FC<
 
   return (
     <ThreadPublicShareSelectionContext.Provider value={selectionContext}>
-      <div className="thread-public-share-shell" data-share-selection-mode={selectionMode ? "true" : "false"}>
+      <div
+        ref={shellRef}
+        className="thread-public-share-shell"
+        data-share-selection-mode={selectionMode ? "true" : "false"}
+      >
         {children}
+        <ThreadQuestionNavigator messages={messages} shellRef={shellRef} disabled={selectionMode} />
         {!selectionMode && threadId && !disabled ? (
           <div className="thread-public-share-toolbar">
             <button
