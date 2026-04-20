@@ -23,7 +23,17 @@ export function userOut(user: AuthenticatedUser) {
     email: user.email ?? null,
     display_name: user.displayName ?? null,
     role: user.role ?? "employee",
-    status: user.status ?? "active"
+    status: user.status ?? "active",
+    portal_preferences: user.portalPreferences
+      ? {
+          show_process_trace:
+            typeof user.portalPreferences.showProcessTrace === "boolean" ? user.portalPreferences.showProcessTrace : null,
+          collapse_final_trace_on_done:
+            typeof user.portalPreferences.collapseFinalTraceOnDone === "boolean"
+              ? user.portalPreferences.collapseFinalTraceOnDone
+              : null
+        }
+      : null
   };
 }
 

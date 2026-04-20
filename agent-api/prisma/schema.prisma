@@ -21,6 +21,7 @@ model User {
   syncState          String                @default("active") @map("sync_state")
   manualDisabled     Boolean               @default(false) @map("manual_disabled")
   adminNote          String?               @map("admin_note")
+  preferencesJson    Json?                 @map("preferences_json")
   lastSyncedAt       DateTime?             @map("last_synced_at")
   dingtalkOpenId     String?               @map("dingtalk_open_id")
   dingtalkUserId     String?               @unique @map("dingtalk_user_id")

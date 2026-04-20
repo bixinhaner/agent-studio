@@ -7,8 +7,14 @@ export type AuthenticatedUser = {
   displayName?: string;
   role?: string;
   status?: string;
+  portalPreferences?: UserPortalPreferences;
   createdAt: string;
   updatedAt: string;
+};
+
+export type UserPortalPreferences = {
+  showProcessTrace?: boolean;
+  collapseFinalTraceOnDone?: boolean;
 };
 
 export type UserRecord = AuthenticatedUser & {
@@ -56,6 +62,10 @@ export interface UserRepositoryLike {
     manualDisabled: boolean;
     adminNote?: string | null;
   }): Promise<UserRecord>;
+  updatePortalPreferences?(input: {
+    userId: string;
+    portalPreferences: UserPortalPreferences;
+  }): Promise<AuthenticatedUser>;
 }
 
 type UserRow = {
@@ -71,6 +81,7 @@ type UserRow = {
   syncState?: string | null;
   manualDisabled?: boolean;
   adminNote?: string | null;
+  preferencesJson?: unknown;
   lastSyncedAt?: Date | string | null;
   dingtalkOpenId?: string | null;
   dingtalkUserId?: string | null;
@@ -101,6 +112,65 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function normalizePortalPreferences(value: unknown): UserPortalPreferences | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const showProcessTrace =
+    typeof record.showProcessTrace === "boolean"
+      ? record.showProcessTrace
+      : typeof record.show_process_trace === "boolean"
+        ? record.show_process_trace
+        : undefined;
+  const collapseFinalTraceOnDone =
+    typeof record.collapseFinalTraceOnDone === "boolean"
+      ? record.collapseFinalTraceOnDone
+      : typeof record.collapse_final_trace_on_done === "boolean"
+        ? record.collapse_final_trace_on_done
+        : undefined;
+  if (showProcessTrace === undefined && collapseFinalTraceOnDone === undefined) {
+    return undefined;
+  }
+  return {
+    ...(showProcessTrace !== undefined ? { showProcessTrace } : {}),
+    ...(collapseFinalTraceOnDone !== undefined ? { collapseFinalTraceOnDone } : {})
+  };
+}
+
+function readPortalPreferences(value: unknown): UserPortalPreferences | undefined {
+  const root = asRecord(value);
+  if (!root) return undefined;
+  return normalizePortalPreferences(root.portal ?? root.portalPreferences ?? root.portal_preferences);
+}
+
+function mergePreferencesJson(
+  existingValue: unknown,
+  portalPreferences: UserPortalPreferences
+): Record<string, unknown> | null {
+  const existing = asRecord(existingValue) ? { ...(asRecord(existingValue) as Record<string, unknown>) } : {};
+  const currentPortal = readPortalPreferences(existing) ?? {};
+  const nextPortal: UserPortalPreferences = {
+    ...(currentPortal.showProcessTrace !== undefined ? { showProcessTrace: currentPortal.showProcessTrace } : {}),
+    ...(currentPortal.collapseFinalTraceOnDone !== undefined
+      ? { collapseFinalTraceOnDone: currentPortal.collapseFinalTraceOnDone }
+      : {}),
+    ...(portalPreferences.showProcessTrace !== undefined ? { showProcessTrace: portalPreferences.showProcessTrace } : {}),
+    ...(portalPreferences.collapseFinalTraceOnDone !== undefined
+      ? { collapseFinalTraceOnDone: portalPreferences.collapseFinalTraceOnDone }
+      : {})
+  };
+  if (Object.keys(nextPortal).length > 0) {
+    existing.portal = nextPortal;
+  } else {
+    delete existing.portal;
+  }
+  return Object.keys(existing).length > 0 ? existing : null;
+}
+
 function toIsoString(value: Date | string): string {
   if (value instanceof Date) {
     return value.toISOString();
@@ -122,6 +192,7 @@ function mapUser(row: UserRow): AuthenticatedUser {
     displayName: trimOrUndefined(row.displayName),
     role: trimOrUndefined(row.role) ?? "employee",
     status: trimOrUndefined(row.status) ?? "active",
+    portalPreferences: readPortalPreferences(row.preferencesJson),
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
   };
@@ -356,6 +427,30 @@ export class UserRepository implements UserRepositoryLike {
       where: { id: userId },
       data: {
         role: trimOrUndefined(input.role) ?? existing.role ?? "employee",
+        updatedAt: new Date()
+      }
+    });
+    return mapUser(updated);
+  }
+
+  async updatePortalPreferences(input: {
+    userId: string;
+    portalPreferences: UserPortalPreferences;
+  }): Promise<AuthenticatedUser> {
+    const userId = trimOrUndefined(input.userId);
+    if (!userId) {
+      throw new Error("user 不存在");
+    }
+
+    const existing = await this.db.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      throw new Error("user 不存在");
+    }
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data: {
+        preferencesJson: mergePreferencesJson(existing.preferencesJson, input.portalPreferences),
         updatedAt: new Date()
       }
     });

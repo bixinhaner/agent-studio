@@ -42,6 +42,18 @@ const createInviteSchema = z.object({
   membership_type: z.string().trim().min(1).optional()
 });
 
+const updatePortalPreferencesSchema = z.object({
+  portal_preferences: z
+    .object({
+      show_process_trace: z.boolean().optional(),
+      collapse_final_trace_on_done: z.boolean().optional()
+    })
+    .refine(
+      (value) => value.show_process_trace !== undefined || value.collapse_final_trace_on_done !== undefined,
+      "portal_preferences must include at least one field"
+    )
+});
+
 function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -324,6 +336,37 @@ export function createAuthRouter(options: {
       activeOrganizationId: req.currentOrganization?.id,
       identities
     }));
+  });
+
+  router.patch("/portal-preferences", requireCurrentUser, async (req: Request, res: Response) => {
+    try {
+      const currentUser = req.currentUser!;
+      if (!options.users.updatePortalPreferences) {
+        res.status(501).json({ detail: "User preferences are not supported" });
+        return;
+      }
+      const input = updatePortalPreferencesSchema.parse(req.body ?? {});
+      const updatedUser = await options.users.updatePortalPreferences({
+        userId: currentUser.id,
+        portalPreferences: {
+          showProcessTrace: input.portal_preferences.show_process_trace,
+          collapseFinalTraceOnDone: input.portal_preferences.collapse_final_trace_on_done
+        }
+      });
+      req.currentUser = updatedUser;
+      const memberships = await options.memberships.listActiveForUser(updatedUser.id);
+      const identities = await options.identities.listForUser(updatedUser.id);
+      res.json(
+        await buildAuthEnvelope({
+          user: updatedUser,
+          memberships,
+          activeOrganizationId: req.currentOrganization?.id,
+          identities
+        })
+      );
+    } catch (error) {
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Failed to update portal preferences" });
+    }
   });
 
   router.get("/organizations", requireCurrentUser, async (req: Request, res: Response) => {

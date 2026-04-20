@@ -10,10 +10,12 @@ import {
   redirectTo,
   requestEmailSignIn,
   selectActiveOrganization,
+  updateCurrentUserPortalPreferences,
   verifyEmailSignIn,
   type AuthIdentity,
   type AuthMembership,
   type AuthOrganization,
+  type AuthUserPortalPreferences,
   type AuthSession,
   type AuthUser,
   type EmailRequestResponse
@@ -32,6 +34,7 @@ type AuthContextValue = {
   requestEmailSignIn: (input: { email?: string; inviteToken?: string }) => Promise<EmailRequestResponse>;
   verifyEmailSignIn: (input: { email: string; code: string; inviteToken?: string }) => Promise<void>;
   selectOrganization: (organizationId: string) => Promise<void>;
+  updatePortalPreferences: (input: AuthUserPortalPreferences) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -172,6 +175,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }
 
+  async function updatePortalPreferences(input: AuthUserPortalPreferences) {
+    setError(null);
+    try {
+      const next = await updateCurrentUserPortalPreferences(input);
+      applySession(next);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      throw err;
+    }
+  }
+
   async function signOut() {
     setError(null);
     try {
@@ -198,6 +212,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       requestEmailSignIn: requestEmailCode,
       verifyEmailSignIn: completeEmailSignIn,
       selectOrganization: changeOrganization,
+      updatePortalPreferences,
       signOut
     }),
     [error, loading, sessionValue]

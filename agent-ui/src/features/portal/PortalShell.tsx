@@ -233,11 +233,27 @@ type TimelineRow = {
   at?: string;
 };
 
+type CommentaryPartData = {
+  id: string;
+  text: string;
+  lines: string[];
+  last_event_at?: number;
+  status: "streaming" | "completed";
+};
+
 type SessionGroupLabelContextValue = {
   groupHeaderByRemoteId: Record<string, string>;
 };
 
 const DEFAULT_WORKSPACE = ".";
+
+function resolveShowProcessTracePreference(user?: AuthUser | null): boolean {
+  return user?.portalPreferences?.showProcessTrace ?? false;
+}
+
+function resolveCollapseFinalTraceOnDonePreference(user?: AuthUser | null): boolean {
+  return user?.portalPreferences?.collapseFinalTraceOnDone ?? true;
+}
 
 const SANDBOX_OPTIONS: Array<{ value: SandboxMode; label: string }> = [
   { value: "workspace-write", label: "workspace-write (Recommended: read/write workspace)" },
@@ -1704,6 +1720,17 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
   );
 };
 
+const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
+  const lastPartIsCommentary = useAuiState((state) => {
+    const lastPart = state.message.parts[state.message.parts.length - 1] as Record<string, unknown> | undefined;
+    if (!lastPart || lastPart.type !== "data") return false;
+    return lastPart.name === "codex_commentary";
+  });
+
+  if (lastPartIsCommentary) return null;
+  return <RunningMessagePlaceholder {...props} />;
+};
+
 const ProcessDataFallback: FC<any> = ({
   name,
   data
@@ -1712,6 +1739,32 @@ const ProcessDataFallback: FC<any> = ({
   data?: ProcessData | unknown;
 }) => {
   const requestPreview = useContext(PreviewRequestContext);
+
+  if (name === "codex_commentary") {
+    const row = (data && typeof data === "object" ? data : {}) as CommentaryPartData;
+    const lines = Array.isArray(row.lines)
+      ? row.lines
+          .map((line) => (typeof line === "string" ? line.trim() : ""))
+          .filter(Boolean)
+      : [];
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    if (lines.length === 0 && !text) return null;
+    const isStreaming = row.status === "streaming";
+    return (
+      <section className={`assistant-commentary-block ${isStreaming ? "is-streaming" : "is-complete"}`}>
+        <div className="assistant-commentary-head">
+          <span className="assistant-commentary-chip">{isStreaming ? "Thinking..." : "Thought"}</span>
+        </div>
+        <div className="assistant-commentary-text">
+          {(lines.length > 0 ? lines : [text]).map((line, index) => (
+            <p key={`${row.id}-${index}`} className="assistant-commentary-line">
+              {line}
+            </p>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   if (name === "codex_trace_batch") {
     const payload = asRecord(data) || {};
@@ -2135,7 +2188,7 @@ const AgentAssistantMessage: FC = () => {
         <AssistantMessage.Content
           components={{
             Text: AssistantMarkdownText,
-            Empty: RunningMessagePlaceholder as any,
+            Empty: AssistantMessageEmpty as any,
             Reasoning: ReasoningPart as any,
             Source: SourcePart as any,
             data: { Fallback: ProcessDataFallback as any }
@@ -2759,6 +2812,7 @@ const AgentRuntimeAdapterProvider: FC<
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
   const auth = useAuth();
   const { branding } = useBranding();
+  const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
     model: DEFAULT_MODEL,
@@ -2799,8 +2853,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
-  const [showProcessTrace, setShowProcessTrace] = useState(() => props.currentUser?.userType !== "external_user");
-  const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(true);
+  const [showProcessTrace, setShowProcessTrace] = useState(() => resolveShowProcessTracePreference(portalPreferenceUser));
+  const [collapseFinalTraceOnDone, setCollapseFinalTraceOnDone] = useState(() =>
+    resolveCollapseFinalTraceOnDonePreference(portalPreferenceUser)
+  );
+  const [portalPreferenceSaving, setPortalPreferenceSaving] = useState(false);
+  const [portalPreferenceErrorText, setPortalPreferenceErrorText] = useState("");
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -2816,6 +2874,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     typeof window === "undefined" ? "" : readPortalThreadIdFromLocation(window.location.search)
   );
   const [portalThreadRestoreSettled, setPortalThreadRestoreSettled] = useState(() => !initialLocationThreadIdRef.current);
+
+  useEffect(() => {
+    setShowProcessTrace(resolveShowProcessTracePreference(portalPreferenceUser));
+    setCollapseFinalTraceOnDone(resolveCollapseFinalTraceOnDonePreference(portalPreferenceUser));
+    setPortalPreferenceErrorText("");
+  }, [portalPreferenceUser?.id]);
 
   const appliedConfigRef = useRef(appliedConfig);
   const runtimeOptionsRef = useRef(runtimeOptions);
@@ -2878,6 +2942,66 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }
   }, [props.currentUser?.id]);
   refreshPortalSubscriptionStatusRef.current = refreshPortalSubscriptionStatus;
+
+  const persistPortalPreferences = useCallback(
+    async (next: { showProcessTrace: boolean; collapseFinalTraceOnDone: boolean }) => {
+      setPortalPreferenceSaving(true);
+      setPortalPreferenceErrorText("");
+      try {
+        await auth.updatePortalPreferences({
+          showProcessTrace: next.showProcessTrace,
+          collapseFinalTraceOnDone: next.collapseFinalTraceOnDone
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Failed to save portal preferences";
+        setPortalPreferenceErrorText(detail);
+        throw error;
+      } finally {
+        setPortalPreferenceSaving(false);
+      }
+    },
+    [auth]
+  );
+
+  const handleShowProcessTraceChange = useCallback(
+    async (checked: boolean) => {
+      const previous = {
+        showProcessTrace,
+        collapseFinalTraceOnDone
+      };
+      const next = {
+        showProcessTrace: checked,
+        collapseFinalTraceOnDone
+      };
+      setShowProcessTrace(checked);
+      try {
+        await persistPortalPreferences(next);
+      } catch {
+        setShowProcessTrace(previous.showProcessTrace);
+      }
+    },
+    [collapseFinalTraceOnDone, persistPortalPreferences, showProcessTrace]
+  );
+
+  const handleCollapseFinalTraceOnDoneChange = useCallback(
+    async (checked: boolean) => {
+      const previous = {
+        showProcessTrace,
+        collapseFinalTraceOnDone
+      };
+      const next = {
+        showProcessTrace,
+        collapseFinalTraceOnDone: checked
+      };
+      setCollapseFinalTraceOnDone(checked);
+      try {
+        await persistPortalPreferences(next);
+      } catch {
+        setCollapseFinalTraceOnDone(previous.collapseFinalTraceOnDone);
+      }
+    },
+    [collapseFinalTraceOnDone, persistPortalPreferences, showProcessTrace]
+  );
 
   useEffect(() => {
     let active = true;
@@ -3579,14 +3703,26 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         let doneAnswer = "";
         const orderedParts: any[] = [];
         let activeTextPart: { type: "text"; text: string } | null = null;
+        let activeCommentaryPart:
+          | {
+              type: "data";
+              name: "codex_commentary";
+              data: CommentaryPartData;
+            }
+          | null = null;
+        let currentCommentaryKey = "";
+        let commentarySeq = 0;
         let traceBatchSeq = 0;
         let seq = 0;
+        const commentaryLineBreakGapMs = 900;
 
         const processEnabled = showProcessTraceRef.current;
         const collapseFinalTraceOnDoneEnabled = collapseFinalTraceOnDoneRef.current;
 
         const appendTextPart = (chunk: string): boolean => {
           if (!chunk) return false;
+          activeCommentaryPart = null;
+          currentCommentaryKey = "";
           if (!activeTextPart) {
             activeTextPart = { type: "text", text: "" };
             orderedParts.push(activeTextPart);
@@ -3596,11 +3732,150 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return true;
         };
 
+        const createCommentaryPart = (key: string) => {
+          activeTextPart = null;
+          const part: {
+            type: "data";
+            name: "codex_commentary";
+            data: CommentaryPartData;
+          } = {
+            type: "data",
+            name: "codex_commentary",
+            data: {
+              id: key,
+              text: "",
+              lines: [],
+              status: "streaming"
+            }
+          };
+          orderedParts.push(part);
+          activeCommentaryPart = part;
+          currentCommentaryKey = key;
+          return part;
+        };
+
+        const ensureCommentaryPart = (key: string) => {
+          if (activeCommentaryPart && currentCommentaryKey === key) {
+            return activeCommentaryPart;
+          }
+          let existing:
+            | {
+                type: "data";
+                name: "codex_commentary";
+                data: CommentaryPartData;
+              }
+            | undefined;
+          for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
+            const item = orderedParts[i] as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_commentary") continue;
+            const payload = asRecord(item.data);
+            if (payload?.id !== key) continue;
+            existing = item as {
+              type: "data";
+              name: "codex_commentary";
+              data: CommentaryPartData;
+            };
+            break;
+          }
+          if (existing) {
+            activeTextPart = null;
+            activeCommentaryPart = existing;
+            currentCommentaryKey = key;
+            return existing;
+          }
+          return createCommentaryPart(key);
+        };
+
+        const updateCommentaryPart = (key: string, nextText: string, mode: "append" | "replace"): boolean => {
+          if (!nextText) return false;
+          const part = ensureCommentaryPart(key);
+          const now = Date.now();
+          const previousText = part.data.text;
+          const previousLines = Array.isArray(part.data.lines) ? [...part.data.lines] : [];
+          const resolvedText = mode === "replace" ? nextText : `${previousText}${nextText}`;
+          let nextDelta = nextText;
+          if (mode === "replace" && previousText && nextText.startsWith(previousText)) {
+            nextDelta = nextText.slice(previousText.length);
+          } else if (mode === "replace" && previousText && !nextText.startsWith(previousText)) {
+            previousLines.length = 0;
+            nextDelta = nextText;
+          }
+          if (resolvedText === previousText && part.data.status === "streaming") {
+            hasTextUpdate = true;
+            return false;
+          }
+          part.data.text = resolvedText;
+          if (nextDelta) {
+            const lastEventAt = typeof part.data.last_event_at === "number" ? part.data.last_event_at : 0;
+            const shouldStartNewLine = previousLines.length === 0 || now - lastEventAt >= commentaryLineBreakGapMs;
+            if (shouldStartNewLine) {
+              previousLines.push(nextDelta);
+            } else {
+              const lastIndex = previousLines.length - 1;
+              previousLines[lastIndex] = `${previousLines[lastIndex]}${nextDelta}`;
+            }
+          }
+          part.data.lines = previousLines;
+          part.data.last_event_at = now;
+          part.data.status = "streaming";
+          hasTextUpdate = true;
+          return true;
+        };
+
+        const markCommentaryCompleted = (key: string): boolean => {
+          let target:
+            | {
+                type: "data";
+                name: "codex_commentary";
+                data: CommentaryPartData;
+              }
+            | undefined;
+          for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
+            const item = orderedParts[i] as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_commentary") continue;
+            const payload = asRecord(item.data);
+            if (payload?.id !== key) continue;
+            target = item as {
+              type: "data";
+              name: "codex_commentary";
+              data: CommentaryPartData;
+            };
+            break;
+          }
+          if (!target) return false;
+          target.data.status = "completed";
+          if (currentCommentaryKey === key) {
+            activeCommentaryPart = null;
+            currentCommentaryKey = "";
+          }
+          return true;
+        };
+
+        const promoteLatestCommentaryToFinalText = (): boolean => {
+          for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
+            const item = orderedParts[i] as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_commentary") continue;
+            const payload = asRecord(item.data);
+            const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+            if (!text) {
+              orderedParts.splice(i, 1);
+              continue;
+            }
+            orderedParts.splice(i, 1);
+            activeCommentaryPart = null;
+            currentCommentaryKey = "";
+            return appendTextPart(text);
+          }
+          return false;
+        };
+
         const appendTraceBatch = (parts: any[]): boolean => {
           if (parts.length === 0) return false;
           const rows = extractTimelineRows(parts);
           if (rows.length === 0) return false;
           activeTextPart = null;
+          activeCommentaryPart = null;
+          currentCommentaryKey = "";
           for (const part of orderedParts) {
             const item = part as Record<string, unknown>;
             if (item.type !== "data" || item.name !== "codex_trace_batch") continue;
@@ -3632,6 +3907,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
             if (name !== "codex_file_change") continue;
             activeTextPart = null;
+            activeCommentaryPart = null;
+            currentCommentaryKey = "";
             orderedParts.push({
               type: "data",
               name,
@@ -3715,7 +3992,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage("Response generation completed");
-              if (!hasTextUpdate && doneAnswer.trim()) {
+              const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
+              if (promotedLatestCommentary) {
+                textChanged = true;
+              } else if (!hasTextUpdate && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
               }
               if (processEnabled) {
@@ -3780,6 +4060,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const raw = asRecord(payload?.raw);
             const item = asRecord(raw?.item);
             const itemType = typeof item?.type === "string" ? item.type : "";
+            const itemId = typeof item?.id === "string" && item.id.trim() ? item.id.trim() : "";
 
             if (eventType === "turn.completed") {
               const usage = parseTurnUsage(raw?.usage ?? payload?.usage);
@@ -3805,13 +4086,22 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               itemType === "agent_message";
 
             if (shouldAppendAgentText) {
-              textChanged = appendTextPart(append) || textChanged;
+              const commentaryKey = itemId || currentCommentaryKey || `commentary-${++commentarySeq}`;
+              const nextMode = delta ? "append" : "replace";
+              textChanged = updateCommentaryPart(commentaryKey, append, nextMode) || textChanged;
             }
 
             const isStarted = eventType === "item.started";
             const isCompleted = eventType === "item.completed";
             if (itemType && (isStarted || isCompleted)) {
               updateRunningStage(stageTextForCodexItem(itemType, isStarted ? "started" : "completed", item));
+            }
+
+            if (itemType === "agent_message" && isCompleted) {
+              const completedKey = itemId || currentCommentaryKey;
+              if (completedKey) {
+                markCommentaryCompleted(completedKey);
+              }
             }
 
             if (itemType === "reasoning" && isCompleted && processEnabled) {
@@ -4444,7 +4734,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     <input
                       type="checkbox"
                       checked={showProcessTrace}
-                      onChange={(e) => setShowProcessTrace(e.target.checked)}
+                      onChange={(e) => void handleShowProcessTraceChange(e.target.checked)}
+                      disabled={portalPreferenceSaving}
                     />
                     <span className="field-help">Show reasoning summaries, tool calls, and execution steps in messages.</span>
                   </label>
@@ -4454,11 +4745,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     <input
                       type="checkbox"
                       checked={collapseFinalTraceOnDone}
-                      onChange={(e) => setCollapseFinalTraceOnDone(e.target.checked)}
-                      disabled={!showProcessTrace}
+                      onChange={(e) => void handleCollapseFinalTraceOnDoneChange(e.target.checked)}
+                      disabled={!showProcessTrace || portalPreferenceSaving}
                     />
                     <span className="field-help">When enabled, only the final conclusion remains expanded and completed traces collapse by default.</span>
                   </label>
+
+                  {portalPreferenceErrorText ? <p className="err-text">{portalPreferenceErrorText}</p> : null}
 
                   <label className="field">
                     <span className="field-label">Policy mode</span>

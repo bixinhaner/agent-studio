@@ -3,6 +3,11 @@ import { api } from "../../lib/api";
 export type AuthUserRole = "employee" | "admin" | "super_admin" | string;
 export type AuthUserType = "internal_employee" | "external_user" | string;
 
+export type AuthUserPortalPreferences = {
+  showProcessTrace?: boolean;
+  collapseFinalTraceOnDone?: boolean;
+};
+
 export type AuthUser = {
   id: string;
   role: AuthUserRole;
@@ -12,6 +17,7 @@ export type AuthUser = {
   displayName?: string;
   email?: string;
   status?: string;
+  portalPreferences?: AuthUserPortalPreferences;
 };
 
 export type AuthOrganization = {
@@ -57,6 +63,10 @@ type AuthUserPayload = {
   display_name?: string | null;
   email?: string | null;
   status?: string | null;
+  portal_preferences?: {
+    show_process_trace?: boolean | null;
+    collapse_final_trace_on_done?: boolean | null;
+  } | null;
 };
 
 type AuthOrganizationPayload = {
@@ -159,6 +169,19 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 }
 
 function normalizeAuthUser(user: AuthUserPayload): AuthUser {
+  const portalPreferences =
+    user.portal_preferences &&
+    (typeof user.portal_preferences.show_process_trace === "boolean" ||
+      typeof user.portal_preferences.collapse_final_trace_on_done === "boolean")
+      ? {
+          ...(typeof user.portal_preferences.show_process_trace === "boolean"
+            ? { showProcessTrace: user.portal_preferences.show_process_trace }
+            : {}),
+          ...(typeof user.portal_preferences.collapse_final_trace_on_done === "boolean"
+            ? { collapseFinalTraceOnDone: user.portal_preferences.collapse_final_trace_on_done }
+            : {})
+        }
+      : undefined;
   return {
     id: user.id,
     role: user.role,
@@ -167,7 +190,8 @@ function normalizeAuthUser(user: AuthUserPayload): AuthUser {
     externalId: user.external_id ?? null,
     displayName: trimOrUndefined(user.display_name),
     email: trimOrUndefined(user.email),
-    status: trimOrUndefined(user.status)
+    status: trimOrUndefined(user.status),
+    ...(portalPreferences ? { portalPreferences } : {})
   };
 }
 
@@ -301,6 +325,24 @@ export async function selectActiveOrganization(organizationId: string): Promise<
     method: "POST",
     json: {
       organization_id: organizationId.trim()
+    }
+  });
+  return normalizeAuthSession(payload);
+}
+
+export async function updateCurrentUserPortalPreferences(input: {
+  showProcessTrace?: boolean;
+  collapseFinalTraceOnDone?: boolean;
+}): Promise<WhoAmIResponse> {
+  const payload = await api<WhoAmIPayload>("/api/auth/portal-preferences", {
+    method: "PATCH",
+    json: {
+      portal_preferences: {
+        ...(typeof input.showProcessTrace === "boolean" ? { show_process_trace: input.showProcessTrace } : {}),
+        ...(typeof input.collapseFinalTraceOnDone === "boolean"
+          ? { collapse_final_trace_on_done: input.collapseFinalTraceOnDone }
+          : {})
+      }
     }
   });
   return normalizeAuthSession(payload);
