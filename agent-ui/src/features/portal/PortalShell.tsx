@@ -71,7 +71,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { useAuiState } from "@assistant-ui/store";
-import { ConfigProvider, Input, Modal } from "antd";
+import { ConfigProvider, Input, Modal, Drawer } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
@@ -120,6 +120,7 @@ import {
 } from "./workbench/layout-state";
 import { PORTAL_STARTER_SUGGESTIONS } from "./workbench/starter-suggestions";
 import { PORTAL_ANTD_THEME } from "./workbench/theme";
+import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import "./workbench/workbench.css";
 
 type SessionOut = {
@@ -3517,11 +3518,27 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [subscriptionStatusError, setSubscriptionStatusError] = useState("");
   const [runtimeMode, setRuntimeMode] = useState("standard");
   const [layoutState, setLayoutState] = useState(createInitialLayoutState());
+  const isMobile = useIsNarrowScreen(768);
+  const mobileInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (isMobile && !mobileInitializedRef.current) {
+      setLayoutState(prev => ({ ...prev, isSessionRailCollapsed: true }));
+      mobileInitializedRef.current = true;
+    }
+  }, [isMobile]);
   const [sessionSearchValue, setSessionSearchValue] = useState("");
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
     groupHeaderByRemoteId: {}
   });
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
+
+  useEffect(() => {
+    if (isMobile) {
+      setLayoutState(prev => prev.isSessionRailCollapsed ? prev : { ...prev, isSessionRailCollapsed: true });
+    }
+  }, [activeThreadIdentity.remoteId, isMobile]);
+
   const [threadCollaboration, setThreadCollaboration] = useState<ThreadCollaborationView | null>(null);
   const [threadCollaborationLoading, setThreadCollaborationLoading] = useState(false);
   const [threadCollaborationErrorText, setThreadCollaborationErrorText] = useState("");
@@ -5295,6 +5312,90 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     </div>
   );
 
+  const sessionRailNode = (
+    <ThreadList.Root>
+      <SessionRail
+        collapsed={layoutState.isSessionRailCollapsed}
+        userName={currentUserName}
+        searchValue={sessionSearchValue}
+        onSearchChange={setSessionSearchValue}
+        onCreateThread={() => undefined}
+        onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
+        newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
+        footer={
+          <div className="session-rail-footer-stack">
+            {props.currentUser ? (
+              <UserIdentitySummary
+                user={props.currentUser}
+                compact
+                onSignOut={props.onSignOut}
+                locale="en"
+                accessStatus={subscriptionStatus}
+                accessStatusLoading={subscriptionStatusLoading}
+                accessStatusError={subscriptionStatusError}
+                onOpenAccessStatus={() => {
+                  void refreshPortalSubscriptionStatus();
+                }}
+              />
+            ) : (
+              <p className="session-rail-user-fallback">{currentUserName}</p>
+            )}
+          </div>
+        }
+      >
+        <SessionSearchContext.Provider value={sessionSearchValue}>
+          <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+            <ThreadList.Items
+              components={{
+                ThreadListItem: AgentThreadListItem as any
+              }}
+            />
+          </SessionGroupLabelContext.Provider>
+        </SessionSearchContext.Provider>
+      </SessionRail>
+    </ThreadList.Root>
+  );
+
+  const rightDrawerNode = !isExternalPortalUser ? (
+    <RightWorkbenchDrawer
+      open={layoutState.isRightDrawerOpen}
+      activeTab={layoutState.activeRightDrawerTab}
+      onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+      onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
+      previewContent={
+        <PreviewWorkbenchPanel
+          threadId={activeRemoteThreadId}
+          requestedFilePath={requestedPreviewPath}
+          requestNonce={previewRequestNonce}
+          allowDownload={!isExternalPortalUser}
+        />
+      }
+      collaborationContent={
+        <div className="workbench-collaboration-content">
+          <section className="workbench-priority-card">
+            <h3>Priority B: Comments and @mentions</h3>
+            <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
+          </section>
+          <section className="workbench-priority-card">
+            <h3>Priority D: Owner and follow-up</h3>
+            <p>Assign owner and followers so every action has clear accountability.</p>
+          </section>
+          <ThreadCollaborationPanel
+            threadId={String(activeThreadIdentity.remoteId || "").trim()}
+            collaboration={activeThreadCollaboration}
+            loading={threadCollaborationLoading}
+            errorText={threadCollaborationErrorText}
+            onCollaborationChange={(next) => {
+              const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
+              if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
+              setThreadCollaboration(next);
+            }}
+          />
+        </div>
+      }
+    />
+  ) : null;
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ComposerActivationGuard runtime={runtime} />
@@ -5335,58 +5436,20 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             />
 
             <div className="portal-workbench-body">
-              <PanelGroup orientation="horizontal" className="portal-workbench-layout">
-                {!layoutState.isSessionRailCollapsed && (
-                  <>
-                    <Panel defaultSize="20" minSize="15" maxSize="30" collapsible>
-                      <ThreadList.Root>
-                <SessionRail
-                  collapsed={layoutState.isSessionRailCollapsed}
-                  userName={currentUserName}
-                  searchValue={sessionSearchValue}
-                  onSearchChange={setSessionSearchValue}
-                  onCreateThread={() => undefined}
-                  onToggleCollapsed={() => setLayoutState((prev) => toggleSessionRail(prev))}
-                  newThreadSlot={<ThreadList.New aria-label="New session" className="session-rail-new-btn" />}
-                  footer={
-                    <div className="session-rail-footer-stack">
-                      {props.currentUser ? (
-                        <UserIdentitySummary
-                          user={props.currentUser}
-                          compact
-                          onSignOut={props.onSignOut}
-                          locale="en"
-                          accessStatus={subscriptionStatus}
-                          accessStatusLoading={subscriptionStatusLoading}
-                          accessStatusError={subscriptionStatusError}
-                          onOpenAccessStatus={() => {
-                            void refreshPortalSubscriptionStatus();
-                          }}
-                        />
-                      ) : (
-                        <p className="session-rail-user-fallback">{currentUserName}</p>
-                      )}
-                    </div>
-                  }
-                >
-                  <SessionSearchContext.Provider value={sessionSearchValue}>
-                    <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
-                      <ThreadList.Items
-                        components={{
-                          ThreadListItem: AgentThreadListItem as any
-                        }}
-                      />
-                    </SessionGroupLabelContext.Provider>
-                  </SessionSearchContext.Provider>
-                    </SessionRail>
-                  </ThreadList.Root>
-                </Panel>
-                <PanelResizeHandle className="Resizer" />
-                </>
-                )}
+              {isMobile ? (
+                <div className="mobile-workbench-layout">
+                  <Drawer
+                    placement="left"
+                    open={!layoutState.isSessionRailCollapsed}
+                    width="85%"
+                    styles={{ body: { padding: 0 } }}
+                    closable={false}
+                    onClose={() => setLayoutState((prev) => toggleSessionRail(prev))}
+                  >
+                    {sessionRailNode}
+                  </Drawer>
 
-                <Panel minSize="30">
-                  <main className="portal-workbench-chat">
+                  <main className="portal-workbench-chat flex-1" style={{ minHeight: 0 }}>
                     <div className="thread-wrap">
                       {canUpload && !sharedThreadReadonly ? (
                         <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
@@ -5395,54 +5458,53 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       )}
                     </div>
                   </main>
-                </Panel>
 
-                {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
-                  <>
-                    <PanelResizeHandle className="Resizer" />
-                    <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
-
-            <RightWorkbenchDrawer
-              open={layoutState.isRightDrawerOpen}
-              activeTab={layoutState.activeRightDrawerTab}
-              onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
-              onTabChange={(tab) => setLayoutState((prev) => switchWorkbenchTab(prev, tab))}
-              previewContent={
-                <PreviewWorkbenchPanel
-                  threadId={activeRemoteThreadId}
-                  requestedFilePath={requestedPreviewPath}
-                  requestNonce={previewRequestNonce}
-                  allowDownload={!isExternalPortalUser}
-                />
-              }
-              collaborationContent={
-                <div className="workbench-collaboration-content">
-                  <section className="workbench-priority-card">
-                    <h3>Priority B: Comments and @mentions</h3>
-                    <p>Align on context and disagreements first. Comments are tracked in real time for follow-up.</p>
-                  </section>
-                  <section className="workbench-priority-card">
-                    <h3>Priority D: Owner and follow-up</h3>
-                    <p>Assign owner and followers so every action has clear accountability.</p>
-                  </section>
-                  <ThreadCollaborationPanel
-                    threadId={String(activeThreadIdentity.remoteId || "").trim()}
-                    collaboration={activeThreadCollaboration}
-                    loading={threadCollaborationLoading}
-                    errorText={threadCollaborationErrorText}
-                    onCollaborationChange={(next) => {
-                      const currentRemoteThreadId = String(activeThreadIdentityRef.current.remoteId || "").trim();
-                      if (!currentRemoteThreadId || next.threadId !== currentRemoteThreadId) return;
-                      setThreadCollaboration(next);
-                    }}
-                  />
+                  {!isExternalPortalUser && (
+                    <Drawer
+                      placement="right"
+                      open={layoutState.isRightDrawerOpen}
+                      width="100%"
+                      styles={{ body: { padding: 0 } }}
+                      closable={false}
+                      onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
+                    >
+                      {rightDrawerNode}
+                    </Drawer>
+                  )}
                 </div>
-              }
-            />
-                    </Panel>
-                  </>
-                )}
-              </PanelGroup>
+              ) : (
+                <PanelGroup orientation="horizontal" className="portal-workbench-layout">
+                  {!layoutState.isSessionRailCollapsed && (
+                    <>
+                      <Panel defaultSize={20} minSize={15} maxSize={30} collapsible>
+                        {sessionRailNode}
+                      </Panel>
+                      <PanelResizeHandle className="Resizer" />
+                    </>
+                  )}
+
+                  <Panel minSize={30}>
+                    <main className="portal-workbench-chat">
+                      <div className="thread-wrap">
+                        {canUpload && !sharedThreadReadonly ? (
+                          <ComposerPrimitive.AttachmentDropzone asChild>{threadContent}</ComposerPrimitive.AttachmentDropzone>
+                        ) : (
+                          threadContent
+                        )}
+                      </div>
+                    </main>
+                  </Panel>
+
+                  {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
+                    <>
+                      <PanelResizeHandle className="Resizer" />
+                      <Panel defaultSize={25} minSize={20} maxSize={40} className="right-drawer-panel">
+                        {rightDrawerNode}
+                      </Panel>
+                    </>
+                  )}
+                </PanelGroup>
+              )}
             </div>
 
             <Modal

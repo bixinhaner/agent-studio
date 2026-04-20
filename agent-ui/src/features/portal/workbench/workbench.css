@@ -1150,3 +1150,30 @@
 .assistant-image-lightbox-close:hover {
   background: rgba(30, 41, 59, 0.92);
 }
+
+@media (max-width: 768px) {
+  .portal-topbar {
+    padding: 0 8px;
+  }
+  .portal-topbar-brand-subtitle {
+    display: none;
+  }
+  .portal-topbar-brand-copy {
+    max-width: 160px;
+  }
+  .aui-composer-root {
+    margin: 0 8px 8px 8px;
+    border-radius: 16px;
+  }
+  .aui-thread-viewport {
+    padding: 10px 10px 0;
+  }
+  .mobile-workbench-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+}

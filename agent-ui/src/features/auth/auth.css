@@ -199,3 +199,19 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@media (max-width: 768px) {
+  .auth-modern-screen {
+    padding: 16px;
+  }
+  .auth-modern-card {
+    padding: 24px 20px;
+    border-radius: 16px;
+  }
+  .auth-modern-logo {
+    font-size: 20px;
+  }
+  .auth-modern-subtitle {
+    font-size: 13px;
+  }
+}
