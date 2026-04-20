@@ -1070,10 +1070,11 @@ export function PreviewWorkbenchPanel(props: {
   }, [activeFileForKind, activeFilePath, props.threadId]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
+  const previewKind = activePreview?.kind ?? (activeFile ? preview.status : "idle");
 
   return (
     <div className="preview-workbench-shell">
-      <section className="preview-workbench-viewer">
+      <section className="preview-workbench-viewer" data-preview-kind={previewKind}>
         {!activeFile ? (
           <div className="preview-workbench-placeholder">Click "Preview" on a file card in the conversation to open it here.</div>
         ) : (
@@ -1101,7 +1102,7 @@ export function PreviewWorkbenchPanel(props: {
               ) : null}
             </header>
 
-            <div className="preview-viewer-body">
+            <div className="preview-viewer-body" data-preview-kind={previewKind}>
               {preview.status === "loading" ? (
                 <div className="preview-loading">
                   <Spin size="small" />
