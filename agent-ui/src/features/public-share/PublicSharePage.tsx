@@ -3,7 +3,13 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
 import { useBranding } from "../branding/BrandingProvider";
-import { MARKDOWN_REMARK_PLUGINS, MarkdownTable } from "../markdown/markdown-rendering";
+import {
+  extractMermaidCodeFromPreChildren,
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MarkdownMermaidBlock,
+  MarkdownTable
+} from "../markdown/markdown-rendering";
 import { fetchPublicThreadShare } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
 
@@ -169,6 +175,7 @@ function PublicShareMarkdown(props: { text: string; token: string; className?: s
   return (
     <div className={props.className ? `public-share-markdown ${props.className}` : "public-share-markdown"}>
       <ReactMarkdown
+        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{
           h1: ({ className, ...rest }) => <h1 className={className ? `aui-md-h1 ${className}` : "aui-md-h1"} {...rest} />,
@@ -188,7 +195,11 @@ function PublicShareMarkdown(props: { text: string; token: string; className?: s
             ) : (
               <code className="aui-md-inline-code" {...rest} />
             ),
-          pre: ({ className, ...rest }) => <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest} />,
+          pre: ({ className, children, ...rest }) => {
+            const mermaidCode = extractMermaidCodeFromPreChildren(children);
+            if (mermaidCode) return <MarkdownMermaidBlock code={mermaidCode} />;
+            return <pre className={className ? `aui-md-pre ${className}` : "aui-md-pre"} {...rest}>{children}</pre>;
+          },
           table: MarkdownTable as any,
           img: PublicShareMarkdownImage as any
         }}

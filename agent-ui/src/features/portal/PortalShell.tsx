@@ -78,7 +78,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-share/api";
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
-import { MARKDOWN_REMARK_PLUGINS, MarkdownTable } from "../markdown/markdown-rendering";
+import {
+  MARKDOWN_COMPONENTS_BY_LANGUAGE,
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MarkdownTable
+} from "../markdown/markdown-rendering";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import { getBrandInitials } from "../branding/BrandMark";
@@ -708,7 +713,9 @@ function AssistantMarkdownLink(props: {
 
 const AssistantMarkdownText = makeMarkdownText({
   preprocess: preprocessAssistantMarkdown,
+  rehypePlugins: MARKDOWN_REHYPE_PLUGINS,
   remarkPlugins: MARKDOWN_REMARK_PLUGINS,
+  componentsByLanguage: MARKDOWN_COMPONENTS_BY_LANGUAGE,
   components: {
     table: MarkdownTable as any,
     a: AssistantMarkdownLink as any,

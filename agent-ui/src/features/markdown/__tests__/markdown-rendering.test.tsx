@@ -1,15 +1,36 @@
 import { render, screen } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { MARKDOWN_REMARK_PLUGINS, MarkdownTable } from "../markdown-rendering";
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn(async (id: string, code: string) => ({
+      svg: `<svg data-mermaid-id="${id}" data-mermaid-code="${code.replace(/"/g, "&quot;")}"></svg>`
+    }))
+  }
+}));
+
+import {
+  extractMermaidCodeFromPreChildren,
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MarkdownMermaidBlock,
+  MarkdownTable
+} from "../markdown-rendering";
 
 function TestMarkdown(props: { text: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+      rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
       components={{
-        table: MarkdownTable as any
+        table: MarkdownTable as any,
+        pre: ({ children, ...rest }) => {
+          const mermaidCode = extractMermaidCodeFromPreChildren(children);
+          if (mermaidCode) return <MarkdownMermaidBlock code={mermaidCode} />;
+          return <pre {...rest}>{children}</pre>;
+        }
       }}
     >
       {props.text}
@@ -63,5 +84,41 @@ describe("markdown rendering", () => {
     expect(taskItems.length).toBe(2);
     expect(deletedText?.textContent).toBe("Removed");
     expect(link.getAttribute("href")).toBe("https://example.com/docs");
+  });
+
+  it("renders math formulas with katex markup", () => {
+    const { container } = render(
+      <TestMarkdown
+        text={[
+          "Inline math $E=mc^2$ works.",
+          "",
+          "$$",
+          "\\int_0^1 x^2 dx",
+          "$$"
+        ].join("\n")}
+      />
+    );
+
+    expect(container.querySelector(".katex")).toBeTruthy();
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+    expect(container.textContent?.includes("E=mc2")).toBe(true);
+  });
+
+  it("renders mermaid code blocks as diagrams", async () => {
+    const { container } = render(
+      <TestMarkdown
+        text={[
+          "```mermaid",
+          "graph TD",
+          "  A[Start] --> B[Done]",
+          "```"
+        ].join("\n")}
+      />
+    );
+
+    const diagram = await screen.findByRole("img", { name: "Mermaid diagram" });
+    expect(diagram).toBeTruthy();
+    expect(container.querySelector(".markdown-mermaid-block")).toBeTruthy();
+    expect(container.querySelector("svg[data-mermaid-id]")).toBeTruthy();
   });
 });

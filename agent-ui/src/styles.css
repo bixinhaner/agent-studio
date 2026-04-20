@@ -1856,6 +1856,71 @@ body {
   margin: 0.35em 0.55em 0 0;
 }
 
+.markdown-mermaid-block {
+  margin: 1em 0;
+  border: 1px solid #dbe4f4;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-mermaid-canvas {
+  min-width: min-content;
+  padding: 12px;
+}
+
+.markdown-mermaid-canvas svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-mermaid-status {
+  padding: 12px 14px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.markdown-mermaid-block-error {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.markdown-mermaid-block-error .markdown-mermaid-status {
+  color: #b91c1c;
+  font-weight: 600;
+  padding-bottom: 0;
+}
+
+.markdown-mermaid-error-detail {
+  margin: 0;
+  padding: 0 14px 14px;
+  white-space: pre-wrap;
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.thread-wrap .katex-display,
+.public-share-markdown .katex-display,
+.conversation-audit-markdown .katex-display,
+.preview-markdown .katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.thread-wrap .katex-display > .katex,
+.public-share-markdown .katex-display > .katex,
+.conversation-audit-markdown .katex-display > .katex,
+.preview-markdown .katex-display > .katex {
+  min-width: fit-content;
+}
+
 .agent-thread-list-item {
   gap: 6px;
 }
@@ -6158,6 +6223,15 @@ body.public-share-mode #root {
 
 .public-share-markdown .task-list-item > input[type="checkbox"] {
   margin: 0.35em 0.55em 0 0;
+}
+
+.public-share-markdown .markdown-mermaid-block {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.public-share-markdown .markdown-mermaid-status {
+  color: #334155;
 }
 
 .public-share-image-card {

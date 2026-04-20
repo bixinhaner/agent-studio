@@ -14,9 +14,15 @@ import {
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 import { formatUsdAmount } from "../../lib/formatters";
+import {
+  extractMermaidCodeFromPreChildren,
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MarkdownMermaidBlock,
+  MarkdownTable
+} from "../markdown/markdown-rendering";
 import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
@@ -362,8 +368,15 @@ function ConversationAuditMarkdown(props: { text: string; className?: string }) 
   return (
     <div className={props.className ? `conversation-audit-markdown ${props.className}` : "conversation-audit-markdown"}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{
+          pre: ({ children, ...rest }) => {
+            const mermaidCode = extractMermaidCodeFromPreChildren(children);
+            if (mermaidCode) return <MarkdownMermaidBlock code={mermaidCode} />;
+            return <pre {...rest}>{children}</pre>;
+          },
+          table: MarkdownTable as never,
           a: ConversationAuditMarkdownLink as never,
           img: ConversationAuditMarkdownImage as never
         }}

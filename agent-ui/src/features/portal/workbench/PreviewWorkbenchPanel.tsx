@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Spin } from "antd";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 import { apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
+import {
+  extractMermaidCodeFromPreChildren,
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MarkdownMermaidBlock,
+  MarkdownTable
+} from "../../markdown/markdown-rendering";
 
 type ThreadFileRecord = {
   filePath: string;
@@ -747,14 +753,24 @@ function PreviewMarkdown(props: { text: string; filePath: string; threadId: stri
         const imageUrl = linkedFile ? buildPreviewFileContentUrl(props.threadId, linkedFile.filePath) : src || "";
         if (!imageUrl) return null;
         return <img className={className} src={imageUrl} alt={alt || title || "Document image"} title={title} loading="lazy" />;
-      }
+      },
+      pre: ({ children, className, ...rest }: { children?: ReactNode; className?: string }) => {
+        const mermaidCode = extractMermaidCodeFromPreChildren(children);
+        if (mermaidCode) return <MarkdownMermaidBlock code={mermaidCode} />;
+        return <pre className={className} {...rest}>{children}</pre>;
+      },
+      table: MarkdownTable
     }),
     [props.filePath, props.threadId]
   );
 
   return (
     <div ref={rootRef} className="preview-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components as any}>
+      <ReactMarkdown
+        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        components={components as any}
+      >
         {processedText || "_File is empty._"}
       </ReactMarkdown>
     </div>
