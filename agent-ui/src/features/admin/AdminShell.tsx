@@ -6,6 +6,7 @@ import {
   Component,
   Crown,
   Database,
+  FileUser,
   LayoutDashboard,
   LogOutIcon,
   Menu,
@@ -47,6 +48,9 @@ const ConversationAuditViewLazy = lazy(() =>
 );
 const SubscriptionWorkspaceLazy = lazy(() =>
   import("./SubscriptionWorkspace").then((module) => ({ default: module.SubscriptionWorkspace }))
+);
+const AccessRequestsWorkspaceLazy = lazy(() =>
+  import("../access-requests/AccessRequestsWorkspace").then((module) => ({ default: module.AccessRequestsWorkspace }))
 );
 const UsersViewLazy = lazy(() => import("./UsersView").then((module) => ({ default: module.UsersView })));
 const DepartmentTreeViewLazy = lazy(() =>
@@ -104,6 +108,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "analytics",
   "conversations",
   "subscriptions",
+  "access-requests",
   "monitoring",
   "broadcasts",
   "users",
@@ -155,6 +160,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["订阅", "额度", "套餐", "到期"],
     icon: <Crown size={18} />
+  },
+  "access-requests": {
+    id: "access-requests",
+    title: "访问申请",
+    description: "处理公开试用申请、审核路由和开通动作。",
+    scope: "申请单与开通",
+    cadence: "建议持续跟进",
+    group: "operations",
+    keywords: ["trial", "access", "申请", "审核", "开通"],
+    icon: <FileUser size={18} />
   },
   monitoring: {
     id: "monitoring",
@@ -468,6 +483,12 @@ function AdminSectionContent(props: {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <SubscriptionWorkspaceLazy />
+        </Suspense>
+      );
+    case "access-requests":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <AccessRequestsWorkspaceLazy />
         </Suspense>
       );
     case "resources":

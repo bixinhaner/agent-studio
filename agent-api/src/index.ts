@@ -10,6 +10,10 @@ import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createAdminRouter } from "./admin/router.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
+import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
+import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
+import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
+import { createAccessRequestService } from "./access-requests/service.js";
 import { createAuthRouter } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
@@ -81,6 +85,10 @@ import {
 } from "./persistence/subscription-denial-log-repository.js";
 import { SubscriptionGrantRepository } from "./persistence/subscription-grant-repository.js";
 import { SubscriptionPlanRepository } from "./persistence/subscription-plan-repository.js";
+import { AccessRequestRepository } from "./persistence/access-request-repository.js";
+import { AccessRequestReviewerRepository } from "./persistence/access-request-reviewer-repository.js";
+import { AccessRequestEventRepository } from "./persistence/access-request-event-repository.js";
+import { AccessRequestPolicyRepository } from "./persistence/access-request-policy-repository.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
 import { OrganizationRepository, type OrganizationRepositoryDb } from "./persistence/organization-repository.js";
@@ -177,6 +185,10 @@ const threadCollaboration = new ThreadCollaborationRepository(db as unknown as T
 const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryDb);
 const subscriptionPlans = new SubscriptionPlanRepository(db as never);
 const subscriptionGrants = new SubscriptionGrantRepository(db as never);
+const accessRequests = new AccessRequestRepository(db as never);
+const accessRequestReviewers = new AccessRequestReviewerRepository(db as never);
+const accessRequestEvents = new AccessRequestEventRepository(db as never);
+const accessRequestPolicies = new AccessRequestPolicyRepository(db as never);
 const subscriptionDenialLogs = new SubscriptionDenialLogRepository(db as never);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
@@ -217,6 +229,40 @@ const codexProviders = new ManagedCodexProviderResolver({
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const authEmailSender = createAuthEmailSender(appConfig.authEmail);
+const accessRequestService = createAccessRequestService({
+  requests: accessRequests,
+  reviewers: accessRequestReviewers,
+  events: accessRequestEvents,
+  users,
+  organizations,
+  memberships: organizationMemberships,
+  invites: organizationInvites,
+  subscriptionPlans,
+  subscriptionGrants,
+  policies: accessRequestPolicies,
+  emailSender: authEmailSender,
+  appBaseUrl: appConfig.appBaseUrl,
+  accessRequestConfig: appConfig.accessRequests,
+  findInternalUsers: async () => {
+    const rows = await db.user.findMany({
+      where: {
+        status: "active",
+        userType: "internal_employee",
+        email: { not: null }
+      },
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }]
+    });
+    return rows
+      .filter((row) => row.email)
+      .map((row) => ({
+        id: row.id,
+        email: String(row.email).trim().toLowerCase(),
+        displayName: typeof row.displayName === "string" ? row.displayName.trim() || undefined : undefined,
+        role: typeof row.role === "string" ? row.role : "employee",
+        userType: typeof row.userType === "string" ? row.userType : "internal_employee"
+      }));
+  }
+});
 const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot())
 });
@@ -1573,6 +1619,8 @@ app.get("/public-api/branding/assets/:fileName", async (req: Request, res: Respo
   }
 });
 
+app.use("/public-api/access-requests", createPublicAccessRequestRouter(accessRequestService));
+
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({
     users,
@@ -1593,6 +1641,10 @@ registerCommonApiRoutes(app, {
     emailSender: authEmailSender,
     appBaseUrl: appConfig.appBaseUrl,
     sessionCookieReady: Boolean(appConfig.sessionCookie.secret),
+    accessRequests: {
+      markActivatedFromInvite: (organizationInviteId, userId) =>
+        accessRequestService.markActivatedFromInvite(organizationInviteId, userId)
+    },
     systemSettings
   }),
   rbacAdminRouter: createRbacRouter({
@@ -1666,6 +1718,13 @@ registerCommonApiRoutes(app, {
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });
+
+app.use(
+  "/api/admin/access-requests",
+  createAdminAccessRequestRouter(accessRequestService)
+);
+
+app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessRequestService));
 
 app.use(
   "/openai/v1",

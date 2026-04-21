@@ -40,6 +40,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const DINGTALK_NONCE_KEY = "agent_studio_dingtalk_nonce";
+const POST_AUTH_REDIRECT_KEY = "agent_studio_post_auth_redirect";
 
 function authErrorMessage(error: unknown): string | null {
   if (!error) return null;
@@ -106,12 +107,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
           const next = await createDingTalkSession({ code, state, nonce });
           applySession(next);
           setError(null);
+          const redirectPath = window.sessionStorage.getItem(POST_AUTH_REDIRECT_KEY)?.trim();
+          const nextLocation = redirectPath || `${window.location.pathname}${window.location.hash}`;
+          window.history.replaceState({}, document.title, nextLocation);
         } catch (err) {
           resetSession();
           setError(authErrorMessage(err));
         } finally {
           window.sessionStorage.removeItem(DINGTALK_NONCE_KEY);
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+          window.sessionStorage.removeItem(POST_AUTH_REDIRECT_KEY);
           setLoading(false);
         }
         return;
@@ -132,6 +136,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     try {
       const { config } = await fetchDingTalkConfig();
       window.sessionStorage.setItem(DINGTALK_NONCE_KEY, config.nonce);
+      window.sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, `${window.location.pathname}${window.location.hash}`);
       redirectTo(buildDingTalkAuthorizeUrl(config));
     } catch (err) {
       setError(authErrorMessage(err));

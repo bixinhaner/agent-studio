@@ -57,6 +57,10 @@ model User {
   knowledgeCaptureMarks KnowledgeCaptureMark[] @relation("KnowledgeCaptureMarkMarkedBy")
   productFeedbackSubmitted ProductFeedback[] @relation("ProductFeedbackReporter")
   productFeedbackAssigned ProductFeedback[] @relation("ProductFeedbackAssignee")
+  ownedAccessRequests AccessRequest[] @relation("AccessRequestOwner")
+  targetAccessRequests AccessRequest[] @relation("AccessRequestTargetUser")
+  accessRequestReviewAssignments AccessRequestReviewer[] @relation("AccessRequestReviewerUser")
+  accessRequestEvents AccessRequestEvent[] @relation("AccessRequestEventActorUser")
 
   @@index([email])
   @@index([status, role])
@@ -80,6 +84,7 @@ model Organization {
   loginChallenges LoginChallenge[]            @relation("LoginChallengeOrganization")
   roleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentOrganization")
   productFeedback ProductFeedback[] @relation("ProductFeedbackOrganization")
+  accessRequests  AccessRequest[]             @relation("AccessRequestTargetOrganization")
 
   @@index([type, status])
   @@map("organizations")
@@ -97,6 +102,8 @@ model SubscriptionPlan {
   createdAt                 DateTime             @default(now()) @map("created_at")
   updatedAt                 DateTime             @updatedAt @map("updated_at")
   grants                    SubscriptionGrant[]
+  requestedByAccessRequests AccessRequest[]      @relation("AccessRequestRequestedPlan")
+  approvedByAccessRequests  AccessRequest[]      @relation("AccessRequestApprovedPlan")
 
   @@index([status, featureType])
   @@map("subscription_plans")
@@ -204,10 +211,118 @@ model OrganizationInvite {
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
   loginChallenges  LoginChallenge[]  @relation("LoginChallengeInvite")
+  accessRequest    AccessRequest?    @relation("AccessRequestInvite")
 
   @@index([organizationId, status])
   @@index([email, status])
   @@map("organization_invites")
+}
+
+model AccessRequest {
+  id                   String              @id @default(cuid())
+  requestType          String              @default("trial") @map("request_type")
+  commercialIntent     String              @default("trial") @map("commercial_intent")
+  status               String              @default("submitted")
+  applicantEmail       String              @map("applicant_email")
+  applicantEmailDomain String              @map("applicant_email_domain")
+  contactName          String?             @map("contact_name")
+  companyName          String              @map("company_name")
+  countryRegion        String?             @map("country_region")
+  deviceInfoText       String              @map("device_info_text")
+  purchaseDate         DateTime?           @map("purchase_date")
+  poNumber             String              @map("po_number")
+  salesContactEmail    String              @map("sales_contact_email")
+  customerNote         String?             @map("customer_note")
+  adminNote            String?             @map("admin_note")
+  reviewSummary        String?             @map("review_summary")
+  rejectionReason      String?             @map("rejection_reason")
+  reviewMode           String              @default("any_to_approve") @map("review_mode")
+  minimumApprovals     Int?                @map("minimum_approvals")
+  rejectionMode        String              @default("any_to_reject") @map("rejection_mode")
+  ownerUserId          String?             @map("owner_user_id")
+  ownerUser            User?               @relation("AccessRequestOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  requestedPlanId      String?             @map("requested_plan_id")
+  requestedPlan        SubscriptionPlan?   @relation("AccessRequestRequestedPlan", fields: [requestedPlanId], references: [id], onDelete: SetNull)
+  approvedPlanId       String?             @map("approved_plan_id")
+  approvedPlan         SubscriptionPlan?   @relation("AccessRequestApprovedPlan", fields: [approvedPlanId], references: [id], onDelete: SetNull)
+  targetOrganizationId String?             @map("target_organization_id")
+  targetOrganization   Organization?       @relation("AccessRequestTargetOrganization", fields: [targetOrganizationId], references: [id], onDelete: SetNull)
+  targetUserId         String?             @map("target_user_id")
+  targetUser           User?               @relation("AccessRequestTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  organizationInviteId String?             @unique @map("organization_invite_id")
+  organizationInvite   OrganizationInvite? @relation("AccessRequestInvite", fields: [organizationInviteId], references: [id], onDelete: SetNull)
+  publicToken          String              @unique @map("public_token")
+  lastSubmittedAt      DateTime?           @map("last_submitted_at")
+  reviewRequestedAt    DateTime?           @map("review_requested_at")
+  approvedAt           DateTime?           @map("approved_at")
+  rejectedAt           DateTime?           @map("rejected_at")
+  provisionedAt        DateTime?           @map("provisioned_at")
+  invitedAt            DateTime?           @map("invited_at")
+  activatedAt          DateTime?           @map("activated_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  reviewers            AccessRequestReviewer[]
+  events               AccessRequestEvent[]
+
+  @@index([status, createdAt])
+  @@index([salesContactEmail, createdAt])
+  @@index([applicantEmail, createdAt])
+  @@index([applicantEmailDomain, createdAt])
+  @@index([ownerUserId, status])
+  @@index([targetOrganizationId, status])
+  @@map("access_requests")
+}
+
+model AccessRequestPolicy {
+  id                       String   @id @default(cuid())
+  policyKey                String   @unique @default("global") @map("policy_key")
+  internalEmailDomains     String[] @default(["baicells.com"]) @map("internal_email_domains")
+  publicEmailBlocklistExtra String[] @default([]) @map("public_email_blocklist_extra")
+  defaultTrialDays         Int      @default(14) @map("default_trial_days")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  @@map("access_request_policies")
+}
+
+model AccessRequestReviewer {
+  id             String        @id @default(cuid())
+  accessRequestId String       @map("access_request_id")
+  accessRequest   AccessRequest @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  reviewerEmail   String        @map("reviewer_email")
+  reviewerUserId  String?       @map("reviewer_user_id")
+  reviewerUser    User?         @relation("AccessRequestReviewerUser", fields: [reviewerUserId], references: [id], onDelete: SetNull)
+  deliveryType    String        @default("to") @map("delivery_type")
+  decision        String        @default("pending")
+  comment         String?
+  notifiedAt      DateTime?     @map("notified_at")
+  decidedAt       DateTime?     @map("decided_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@unique([accessRequestId, reviewerEmail])
+  @@index([reviewerUserId, decision])
+  @@index([reviewerEmail, decision])
+  @@map("access_request_reviewers")
+}
+
+model AccessRequestEvent {
+  id              String        @id @default(cuid())
+  accessRequestId String        @map("access_request_id")
+  accessRequest   AccessRequest @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  eventType       String        @map("event_type")
+  actorType       String        @map("actor_type")
+  actorUserId     String?       @map("actor_user_id")
+  actorUser       User?         @relation("AccessRequestEventActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorEmail      String?       @map("actor_email")
+  title           String
+  detail          String?
+  metadata        Json?
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([accessRequestId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("access_request_events")
 }
 
 model LoginChallenge {

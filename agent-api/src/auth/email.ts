@@ -16,9 +16,19 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+function normalizeAddressList(value: string | string[] | null | undefined): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => trimOrUndefined(item)).filter(Boolean) as string[];
+  }
+  const single = trimOrUndefined(value);
+  return single ? [single] : [];
+}
+
 export type AuthEmailSender = {
   send(input: {
-    to: string;
+    to: string | string[];
+    cc?: string | string[];
+    replyTo?: string;
     subject: string;
     text: string;
     html?: string;
@@ -43,8 +53,10 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
 
   return {
     async send(input) {
-      const to = trimOrUndefined(input.to);
-      if (!to) {
+      const to = normalizeAddressList(input.to);
+      const cc = normalizeAddressList(input.cc);
+      const replyTo = trimOrUndefined(input.replyTo);
+      if (!to.length) {
         throw new Error("email target is required");
       }
 
@@ -52,6 +64,8 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
         const label = trimOrUndefined(input.debugLabel) ?? "auth-email";
         console.info(`[${label}]`, {
           to,
+          cc,
+          replyTo,
           subject: input.subject,
           text: input.text
         });
@@ -60,7 +74,9 @@ export function createAuthEmailSender(config: AuthEmailTransportConfig): AuthEma
 
       await transporter.sendMail({
         from,
-        to,
+        to: to.join(", "),
+        cc: cc.length ? cc.join(", ") : undefined,
+        replyTo,
         subject: input.subject,
         text: input.text,
         html: input.html

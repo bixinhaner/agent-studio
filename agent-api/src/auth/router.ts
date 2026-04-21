@@ -304,6 +304,9 @@ export function createAuthRouter(options: {
   emailSender: AuthEmailSender;
   appBaseUrl?: string;
   sessionCookieReady?: boolean;
+  accessRequests?: {
+    markActivatedFromInvite(organizationInviteId: string, userId: string): Promise<void>;
+  };
   systemSettings?: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
   };
@@ -692,6 +695,7 @@ export function createAuthRouter(options: {
           joinedAt: new Date()
         });
         await options.invites.accept(invite.id, user.id);
+        await options.accessRequests?.markActivatedFromInvite(invite.id, user.id);
         activeOrganizationId = invite.organizationId;
       }
 

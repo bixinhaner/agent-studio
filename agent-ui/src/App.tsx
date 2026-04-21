@@ -7,6 +7,12 @@ import { BrandingProvider, useBranding } from "./features/branding/BrandingProvi
 import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
+const PublicAccessRequestPageLazy = lazy(() =>
+  import("./features/access-requests/PublicAccessRequestPage").then((module) => ({ default: module.PublicAccessRequestPage }))
+);
+const ReviewAccessRequestPageLazy = lazy(() =>
+  import("./features/access-requests/ReviewAccessRequestPage").then((module) => ({ default: module.ReviewAccessRequestPage }))
+);
 const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then((module) => ({ default: module.PortalShell })));
 const PublicSharePageLazy = lazy(() =>
   import("./features/public-share/PublicSharePage").then((module) => ({ default: module.PublicSharePage }))
@@ -30,6 +36,20 @@ function extractInviteToken(pathname: string): string | undefined {
   const match = pathname.match(/^\/invite\/([^/]+)\/?$/);
   const token = match ? decodeURIComponent(match[1] || "") : "";
   return token || undefined;
+}
+
+function extractAccessRequestToken(pathname: string): string | null | undefined {
+  if (/^\/access\/apply\/?$/.test(pathname)) return null;
+  const match = pathname.match(/^\/access\/apply\/([^/]+)\/?$/);
+  if (!match) return undefined;
+  const token = decodeURIComponent(match[1] || "");
+  return token || null;
+}
+
+function extractAccessRequestReviewId(pathname: string): string | undefined {
+  const match = pathname.match(/^\/review\/access-requests\/([^/]+)\/?$/);
+  const requestId = match ? decodeURIComponent(match[1] || "") : "";
+  return requestId || undefined;
 }
 
 function resolveAppShellView(hash: string, adminEligible: boolean): AppShellView {
@@ -277,6 +297,11 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
                 Have an invite code?
               </button>
             )}
+            {!props.inviteToken ? (
+              <button className="auth-modern-dropdown-link" onClick={() => replaceLocationPath("/access/apply")}>
+                Apply for Trial Access
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className="auth-modern-field auth-modern-fade-enter">
@@ -315,7 +340,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   );
 }
 
-function AppContent(props: { inviteToken?: string }) {
+function AppContent(props: { inviteToken?: string; reviewRequestId?: string }) {
   const auth = useAuth();
   const { branding } = useBranding();
   const adminEligible = useMemo(
@@ -390,6 +415,14 @@ function AppContent(props: { inviteToken?: string }) {
     return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} />;
   }
 
+  if (props.reviewRequestId) {
+    return (
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading review...</p></div></div>}>
+        <ReviewAccessRequestPageLazy requestId={props.reviewRequestId} />
+      </Suspense>
+    );
+  }
+
   if (adminEligible && view === "admin") {
     return (
       <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>管理控制台加载中...</p></div></div>}>
@@ -413,6 +446,8 @@ function AppRoutes() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const publicShareToken = extractPublicShareToken(pathname);
   const inviteToken = extractInviteToken(pathname);
+  const accessRequestToken = extractAccessRequestToken(pathname);
+  const reviewRequestId = extractAccessRequestReviewId(pathname);
 
   if (publicShareToken) {
     return (
@@ -422,9 +457,17 @@ function AppRoutes() {
     );
   }
 
+  if (accessRequestToken !== undefined) {
+    return (
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading access request...</p></div></div>}>
+        <PublicAccessRequestPageLazy token={accessRequestToken ?? undefined} />
+      </Suspense>
+    );
+  }
+
   return (
     <AuthProvider>
-      <AppContent inviteToken={inviteToken} />
+      <AppContent inviteToken={inviteToken} reviewRequestId={reviewRequestId} />
     </AuthProvider>
   );
 }

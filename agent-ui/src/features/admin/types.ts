@@ -3,6 +3,7 @@ export type AdminSection =
   | "analytics"
   | "conversations"
   | "subscriptions"
+  | "access-requests"
   | "users"
   | "resources"
   | "capabilities"

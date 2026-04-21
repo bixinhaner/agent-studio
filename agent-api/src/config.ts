@@ -33,6 +33,9 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   AUTH_EMAIL_FROM: z.string().optional(),
   AUTH_EMAIL_DEBUG: z.string().optional(),
+  ACCESS_REQUEST_INTERNAL_EMAIL_DOMAINS: z.string().optional(),
+  ACCESS_REQUEST_PUBLIC_EMAIL_BLOCKLIST_EXTRA: z.string().optional(),
+  ACCESS_REQUEST_DEFAULT_TRIAL_DAYS: z.string().optional(),
   ORG_SYNC_ENABLED: z.string().optional(),
   ORG_SYNC_INTERVAL_MINUTES: z.string().optional(),
   WORKSPACE_WHITELIST: z.string().default("."),
@@ -151,6 +154,17 @@ export const appConfig = {
     pass: (env.SMTP_PASS || "").trim(),
     from: (env.AUTH_EMAIL_FROM || "").trim(),
     debug: parseBooleanWithDefault(env.AUTH_EMAIL_DEBUG, false)
+  },
+  accessRequests: {
+    internalEmailDomains: ((env.ACCESS_REQUEST_INTERNAL_EMAIL_DOMAINS || "").trim() || "baicells.com")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+    publicEmailBlocklistExtra: (env.ACCESS_REQUEST_PUBLIC_EMAIL_BLOCKLIST_EXTRA || "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+    defaultTrialDays: parseInteger(env.ACCESS_REQUEST_DEFAULT_TRIAL_DAYS, 14)
   },
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),
