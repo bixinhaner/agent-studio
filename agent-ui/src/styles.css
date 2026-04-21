@@ -7211,6 +7211,19 @@ body.public-share-mode #root {
   padding: 12px 18px !important;
 }
 
+.aui-assistant-action-bar-root {
+  align-items: center;
+  min-height: 24px;
+}
+
+.aui-assistant-action-bar-root[data-floating="true"] {
+  border: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
 .assistant-feedback-negative-button {
   border: 0;
   background: transparent;

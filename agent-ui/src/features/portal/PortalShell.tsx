@@ -3642,6 +3642,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const isMobile = useIsNarrowScreen(768);
 
   useEffect(() => {
+    document.body.classList.add("portal-workbench-mode");
+    return () => {
+      document.body.classList.remove("portal-workbench-mode");
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isMobile) return;
     setLayoutState((prev) => (prev.isSessionRailCollapsed ? prev : { ...prev, isSessionRailCollapsed: true }));
   }, [isMobile]);

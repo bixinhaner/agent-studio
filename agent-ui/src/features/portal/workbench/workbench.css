@@ -15,15 +15,32 @@
   --workbench-sidebar-active-text: #FF4614;
 }
 
+body.portal-workbench-mode {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .portal-workbench-root {
   height: 100vh;
-  min-height: 100dvh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: var(--workbench-bg);
   color: #111827;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;
+  overscroll-behavior: none;
+}
+
+@supports (height: 100dvh) {
+  .portal-workbench-root {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+}
+
+.portal-workbench-root {
+  -webkit-text-size-adjust: 100%;
 }
 
 .workbench-mobile-session-drawer .ant-drawer-content,
@@ -1309,6 +1326,10 @@ button.session-rail-new-btn:active,
   .aui-composer-root {
     margin: 0 8px 8px 8px;
     border-radius: 8px;
+  }
+  .portal-workbench-root .thread-wrap .aui-composer-input {
+    font-size: 16px;
+    line-height: 1.5;
   }
   .aui-thread-viewport {
     padding: 10px 10px 0;
