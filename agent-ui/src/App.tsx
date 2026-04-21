@@ -113,6 +113,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const [emailHint, setEmailHint] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [codeRequested, setCodeRequested] = useState(false);
+  const [accessHelpOpen, setAccessHelpOpen] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [verifyPending, setVerifyPending] = useState(false);
 
@@ -181,9 +182,16 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
       if (resolvedEmail) {
         setEmail(resolvedEmail);
       }
-      setEmailHint(response.emailHint ?? invite?.emailHint ?? (resolvedEmail || null));
-      setCodeRequested(true);
-      setCode("");
+      if (response.challengeId) {
+        setEmailHint(response.emailHint ?? invite?.emailHint ?? (resolvedEmail || null));
+        setCodeRequested(true);
+        setCode("");
+        setAccessHelpOpen(false);
+      } else {
+        setCodeRequested(false);
+        setCode("");
+        setAccessHelpOpen(true);
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Failed to send verification code");
     } finally {
@@ -338,6 +346,52 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
           </div>
         )}
       </div>
+      {accessHelpOpen ? (
+        <div className="auth-access-modal-mask" onClick={() => setAccessHelpOpen(false)}>
+          <div
+            className="auth-access-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-access-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="auth-access-modal-head">
+              <h2 id="auth-access-modal-title">No email access found</h2>
+              <button
+                type="button"
+                className="auth-access-modal-close"
+                aria-label="Close access help dialog"
+                onClick={() => setAccessHelpOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <p className="auth-access-modal-copy">
+              If this email already has access, ask your administrator to resend the invite. Otherwise, apply for trial
+              access to start the review process.
+            </p>
+            <div className="auth-access-modal-actions">
+              <button
+                type="button"
+                className="auth-modern-sso-btn auth-access-modal-primary"
+                onClick={() => {
+                  setAccessHelpOpen(false);
+                  replaceLocationPath("/access/apply");
+                }}
+              >
+                Apply for Trial Access
+              </button>
+              <button
+                type="button"
+                className="auth-modern-primary-btn"
+                onClick={() => setAccessHelpOpen(false)}
+              >
+                Stay on Sign In
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -191,6 +191,78 @@
   color: var(--admin-color-text, #111);
 }
 
+.auth-access-modal-mask {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 17, 17, 0.42);
+  z-index: 1000;
+}
+
+.auth-access-modal {
+  width: min(100%, 420px);
+  background: var(--admin-color-surface-solid, #ffffff);
+  border: 1px solid var(--admin-color-border, #eaeaea);
+  border-radius: 24px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.14);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-access-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-access-modal-head h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+  color: var(--admin-color-text, #111);
+}
+
+.auth-access-modal-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--admin-color-subtle, #666);
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.auth-access-modal-close:hover {
+  background: rgba(17, 17, 17, 0.06);
+  color: var(--admin-color-text, #111);
+}
+
+.auth-access-modal-copy {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--admin-color-subtle, #666);
+}
+
+.auth-access-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-access-modal-primary {
+  height: 48px;
+}
+
 .auth-modern-fade-enter {
   animation: authFadeIn 0.3s ease-out forwards;
 }
@@ -207,6 +279,10 @@
   .auth-modern-card {
     padding: 24px 20px;
     border-radius: 16px;
+  }
+  .auth-access-modal {
+    border-radius: 16px;
+    padding: 20px;
   }
   .auth-modern-logo {
     font-size: 20px;
