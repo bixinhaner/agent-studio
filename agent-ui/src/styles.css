@@ -5934,29 +5934,25 @@ body {
 
 .thread-question-nav {
   position: absolute;
-  top: 45%;
-  right: 14px;
+  top: 50%;
+  right: 8px;
   z-index: 10;
   display: flex;
-  width: 44px;
-  height: clamp(160px, 40vh, 320px);
+  width: 56px;
+  height: 112px;
   flex-direction: column;
   align-items: center;
-  pointer-events: none;
+  justify-content: center;
+  pointer-events: auto;
   transform: translateY(-50%);
 }
 
 .thread-question-nav-track {
   position: relative;
-  width: 100%;
+  width: 40px;
   height: 100%;
   pointer-events: auto;
-  transition: opacity 0.2s ease;
-}
-
-.thread-question-nav.is-open .thread-question-nav-track {
-  opacity: 0;
-  pointer-events: none;
+  border-radius: 999px;
 }
 
 .thread-question-nav-track::before {
@@ -5965,31 +5961,32 @@ body {
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 1px;
+  width: 2px;
   transform: translateX(-50%);
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0.42), rgba(148, 163, 184, 0.12));
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.35), rgba(148, 163, 184, 0.62), rgba(148, 163, 184, 0.35));
 }
 
 .thread-question-nav-marker {
   position: absolute;
-  right: 6px;
+  left: 50%;
   width: 10px;
   height: 3px;
   border: 0;
   border-radius: 3px;
   padding: 0;
-  transform: translateY(-50%);
-  background: #3f3f46;
+  transform: translate(-50%, -50%);
+  background: #94a3b8;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
-  opacity: 0.6;
+  opacity: 0.85;
 }
 
 .thread-question-nav-marker:hover,
 .thread-question-nav-marker:focus-visible {
   width: 16px;
   height: 4px;
-  background: #71717a;
+  background: #64748b;
   outline: none;
   opacity: 1;
 }
@@ -5997,25 +5994,25 @@ body {
 .thread-question-nav-marker.is-selected {
   width: 16px;
   height: 4px;
-  background: #4f7cf7;
+  background: #2563eb;
   opacity: 1;
 }
 
 .thread-question-nav-panel {
   position: absolute;
   top: 50%;
-  right: 36px;
+  right: 4px;
   width: min(380px, calc(100vw - 120px));
   max-height: min(380px, calc(100vh - 190px));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 12px;
   padding: 10px;
   overflow: auto;
-  background: rgba(30, 31, 35, 0.96);
+  background: rgba(248, 250, 252, 0.98);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 4px 18px rgba(0, 0, 0, 0.2);
-  color: #e2e8f0;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16), 0 2px 10px rgba(15, 23, 42, 0.08);
+  color: #334155;
   opacity: 0;
   transform: translate(8px, -50%) scale(0.98);
   pointer-events: none;
@@ -6038,17 +6035,14 @@ body {
 }
 
 .thread-question-nav-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px;
-  align-items: center;
-  gap: 8px;
+  display: block;
   width: 100%;
-  min-height: 38px;
+  min-height: 34px;
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 6px 8px 6px 12px;
+  padding: 7px 12px;
   background: transparent;
-  color: #a1a1aa;
+  color: #64748b;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -6057,14 +6051,14 @@ body {
 
 .thread-question-nav-row:hover,
 .thread-question-nav-row:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
-  color: #f4f4f5;
+  background: rgba(148, 163, 184, 0.16);
+  color: #334155;
   outline: none;
 }
 
 .thread-question-nav-row.is-selected {
-  background: transparent;
-  color: #4f7cf7;
+  background: rgba(37, 99, 235, 0.14);
+  color: #2563eb;
 }
 
 .thread-question-nav-row-text {
@@ -6073,24 +6067,6 @@ body {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
-}
-
-.thread-question-nav-row-mark {
-  justify-self: end;
-  width: 12px;
-  height: 3px;
-  border-radius: 3px;
-  background: #3f3f46;
-  transition: background 0.15s ease, width 0.15s ease;
-}
-
-.thread-question-nav-row:hover .thread-question-nav-row-mark {
-  background: #a1a1aa;
-}
-
-.thread-question-nav-row.is-selected .thread-question-nav-row-mark {
-  width: 16px;
-  background: #4f7cf7;
 }
 
 .thread-public-share-toolbar {
