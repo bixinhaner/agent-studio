@@ -41,7 +41,8 @@ export function BrandingSettingsView({
 
   const platformNameError = getFieldError(fieldErrors, "branding.platformName");
   const headerSubtitleError = getFieldError(fieldErrors, "branding.headerSubtitle");
-  const loginCopyError = getFieldError(fieldErrors, "branding.loginCopy");
+  const internalLoginCopyError = getFieldError(fieldErrors, "branding.internalLoginCopy");
+  const externalLoginCopyError = getFieldError(fieldErrors, "branding.externalLoginCopy");
   const logoUrlError = getFieldError(fieldErrors, "branding.logoUrl");
   const iconUrlError = getFieldError(fieldErrors, "branding.iconUrl");
   const assistantNameError = getFieldError(fieldErrors, "branding.assistantName");
@@ -210,15 +211,27 @@ export function BrandingSettingsView({
         </label>
 
         <label className="field resource-center-form-span-2">
-          <span className="field-label">登录页文案</span>
+          <span className="field-label">内部登录文案</span>
           <TextArea
             autoSize={{ minRows: 3, maxRows: 7 }}
-            value={value.loginCopy}
-            aria-invalid={Boolean(loginCopyError)}
+            value={value.internalLoginCopy}
+            aria-invalid={Boolean(internalLoginCopyError)}
             disabled={disabled}
-            onChange={(event) => onChange({ loginCopy: event.target.value })}
+            onChange={(event) => onChange({ internalLoginCopy: event.target.value })}
           />
-          {loginCopyError ? <p className="field-error">{loginCopyError}</p> : null}
+          {internalLoginCopyError ? <p className="field-error">{internalLoginCopyError}</p> : null}
+        </label>
+
+        <label className="field resource-center-form-span-2">
+          <span className="field-label">外部登录文案</span>
+          <TextArea
+            autoSize={{ minRows: 3, maxRows: 7 }}
+            value={value.externalLoginCopy}
+            aria-invalid={Boolean(externalLoginCopyError)}
+            disabled={disabled}
+            onChange={(event) => onChange({ externalLoginCopy: event.target.value })}
+          />
+          {externalLoginCopyError ? <p className="field-error">{externalLoginCopyError}</p> : null}
         </label>
 
         {assetField({

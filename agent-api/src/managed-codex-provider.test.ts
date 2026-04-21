@@ -77,7 +77,8 @@ describe("ManagedCodexProviderResolver", () => {
               branding: {
                 platformName: "Agent Studio",
                 headerSubtitle: "test",
-                loginCopy: "test",
+                internalLoginCopy: "test",
+                externalLoginCopy: "external test",
                 logoUrl: "",
                 iconUrl: "",
                 assistantName: "test assistant",
@@ -146,7 +147,8 @@ describe("resolveManagedCodexDefaults", () => {
           branding: {
             platformName: "Agent Studio",
             headerSubtitle: "test",
-            loginCopy: "test",
+            internalLoginCopy: "test",
+            externalLoginCopy: "external test",
             logoUrl: "",
             iconUrl: "",
             assistantName: "test assistant",

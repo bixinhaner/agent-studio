@@ -1,7 +1,8 @@
 export type PublicBranding = {
   platformName: string;
   headerSubtitle: string;
-  loginCopy: string;
+  internalLoginCopy: string;
+  externalLoginCopy: string;
   logoUrl: string;
   iconUrl: string;
   assistantName: string;
@@ -28,7 +29,8 @@ export type PublicBrandingResponse = {
 export const DEFAULT_BRANDING: PublicBranding = {
   platformName: "Agent Studio",
   headerSubtitle: "Enterprise Agent Platform",
-  loginCopy: "Sign in with DingTalk to continue.",
+  internalLoginCopy: "Sign in with DingTalk to continue.",
+  externalLoginCopy: "Sign in with your work email or apply for trial access.",
   logoUrl: "",
   iconUrl: "",
   assistantName: "Baicells AI Assistant",

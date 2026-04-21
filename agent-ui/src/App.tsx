@@ -19,6 +19,7 @@ const PublicSharePageLazy = lazy(() =>
 );
 
 type AppShellView = "portal" | "admin";
+type AuthEntryMode = "external" | "internal";
 
 const ADMIN_HASH_PREFIX = "#admin/";
 
@@ -50,6 +51,10 @@ function extractAccessRequestReviewId(pathname: string): string | undefined {
   const match = pathname.match(/^\/review\/access-requests\/([^/]+)\/?$/);
   const requestId = match ? decodeURIComponent(match[1] || "") : "";
   return requestId || undefined;
+}
+
+function isInternalLoginPath(pathname: string): boolean {
+  return /^\/login\/internal\/?$/.test(pathname);
 }
 
 function resolveAppShellView(hash: string, adminEligible: boolean): AppShellView {
@@ -102,7 +107,7 @@ function inviteMembershipTypeLabel(value: string | null | undefined): string {
   }
 }
 
-function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string }) {
+function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: string; mode: AuthEntryMode }) {
   const { branding } = useBranding();
   const [invite, setInvite] = useState<AuthInvite | null>(null);
   const [inviteLoading, setInviteLoading] = useState(Boolean(props.inviteToken));
@@ -155,6 +160,15 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const fallbackEmail = invite?.status === "pending" ? invite.email?.trim() || "" : "";
   const activeInviteToken = routeInvitePending;
   const resolvedEmail = email.trim() || fallbackEmail;
+  const isInviteFlow = Boolean(props.inviteToken);
+  const isInternalMode = props.mode === "internal" && !isInviteFlow;
+  const title = isInternalMode ? `${branding.platformName} Internal` : branding.platformName;
+  const eyebrow = isInviteFlow ? "Customer Invite" : isInternalMode ? "Internal Employee Sign-In" : "Customer & Partner Access";
+  const subtitle = isInviteFlow
+    ? "Use your work email to accept the invitation and enter your organization."
+    : isInternalMode
+      ? branding.internalLoginCopy
+      : branding.externalLoginCopy;
   const inviteStatusText =
     invite?.status === "pending"
       ? "Pending acceptance"
@@ -231,14 +245,15 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     <div className="auth-modern-screen">
       <div className="auth-modern-card">
         <div className="auth-modern-header">
+          <p className="auth-modern-kicker">{eyebrow}</p>
           <BrandMark
             className="auth-modern-brand-mark"
             imageClassName="auth-modern-brand-image"
             name={branding.platformName}
             logoUrl={branding.logoUrl || branding.iconUrl}
           />
-          <h1 className="auth-modern-logo">{branding.platformName}</h1>
-          <p className="auth-modern-subtitle">{branding.loginCopy}</p>
+          <h1 className="auth-modern-logo">{title}</h1>
+          <p className="auth-modern-subtitle">{subtitle}</p>
         </div>
 
         {inviteLoading ? (
@@ -254,18 +269,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         {props.auth.error && <p className="err-text" style={{margin:0,textAlign:'center'}}>{props.auth.error}</p>}
         {formError && <p className="err-text" style={{margin:0,textAlign:'center'}}>{formError}</p>}
 
-        {!codeRequested && (
-          <button
-            className="auth-modern-sso-btn"
-            onClick={() => void props.auth.startSignIn()}
-          >
-            Continue with DingTalk
-          </button>
-        )}
-
-        {!codeRequested && <div className="auth-modern-divider">OR</div>}
-
-        {!codeRequested ? (
+        {!codeRequested && !isInternalMode ? (
           <div className="auth-modern-field auth-modern-fade-enter">
             <input
               className="auth-modern-input"
@@ -289,6 +293,18 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
                 Apply for Trial Access
               </button>
             ) : null}
+          </div>
+        ) : !codeRequested ? (
+          <div className="auth-modern-field auth-modern-fade-enter">
+            <button
+              className="auth-modern-sso-btn"
+              onClick={() => void props.auth.startSignIn()}
+            >
+              Continue with DingTalk
+            </button>
+            <p className="auth-modern-hint">
+              Use DingTalk single sign-on to access the internal workspace and control console.
+            </p>
           </div>
         ) : (
           <div className="auth-modern-field auth-modern-fade-enter">
@@ -373,7 +389,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   );
 }
 
-function AppContent(props: { inviteToken?: string; reviewRequestId?: string }) {
+function AppContent(props: { inviteToken?: string; reviewRequestId?: string; authMode: AuthEntryMode }) {
   const auth = useAuth();
   const { branding } = useBranding();
   const adminEligible = useMemo(
@@ -445,7 +461,7 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string }) {
   }
 
   if (!auth.user) {
-    return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} />;
+    return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} mode={props.authMode} />;
   }
 
   if (props.reviewRequestId) {
@@ -491,6 +507,7 @@ function AppRoutes() {
   const inviteToken = extractInviteToken(pathname);
   const accessRequestToken = extractAccessRequestToken(pathname);
   const reviewRequestId = extractAccessRequestReviewId(pathname);
+  const authMode: AuthEntryMode = reviewRequestId || isInternalLoginPath(pathname) ? "internal" : "external";
 
   if (publicShareToken) {
     return (
@@ -510,7 +527,7 @@ function AppRoutes() {
 
   return (
     <AuthProvider>
-      <AppContent inviteToken={inviteToken} reviewRequestId={reviewRequestId} />
+      <AppContent inviteToken={inviteToken} reviewRequestId={reviewRequestId} authMode={authMode} />
     </AuthProvider>
   );
 }

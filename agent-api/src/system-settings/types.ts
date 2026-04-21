@@ -38,7 +38,8 @@ const systemSettingsUploadsBaseSchema = z.object({
 export const systemSettingsBrandingSchema = z.object({
   platformName: z.string().trim().min(1),
   headerSubtitle: z.string().trim().min(1),
-  loginCopy: z.string().trim().min(1),
+  internalLoginCopy: z.string().trim().min(1),
+  externalLoginCopy: z.string().trim().min(1),
   logoUrl: brandAssetRefOrEmptySchema,
   iconUrl: brandAssetRefOrEmptySchema,
   assistantName: z.string().trim().min(1).default("Baicells AI Assistant"),
@@ -161,7 +162,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   branding: {
     platformName: "Agent Studio",
     headerSubtitle: "Enterprise Agent Platform",
-    loginCopy: "Sign in with DingTalk to continue.",
+    internalLoginCopy: "Sign in with DingTalk to continue.",
+    externalLoginCopy: "Sign in with your work email or apply for trial access.",
     logoUrl: "",
     iconUrl: "",
     assistantName: "Baicells AI Assistant",
@@ -235,11 +237,32 @@ function sanitizeBehaviorPatch(value: unknown): unknown {
   return next;
 }
 
+function sanitizeBrandingPatch(value: unknown): unknown {
+  if (!isPlainObject(value)) {
+    return value;
+  }
+  const next: Record<string, unknown> = { ...value };
+  const legacyLoginCopy = typeof next.loginCopy === "string" ? next.loginCopy.trim() : "";
+  if (legacyLoginCopy) {
+    if (typeof next.internalLoginCopy !== "string" || !next.internalLoginCopy.trim()) {
+      next.internalLoginCopy = legacyLoginCopy;
+    }
+    if (typeof next.externalLoginCopy !== "string" || !next.externalLoginCopy.trim()) {
+      next.externalLoginCopy = DEFAULT_SYSTEM_SETTINGS_PAYLOAD.branding.externalLoginCopy;
+    }
+  }
+  delete next.loginCopy;
+  return next;
+}
+
 function sanitizeSystemSettingsPayloadLike(value: unknown): Record<string, unknown> {
   if (!isPlainObject(value)) {
     return {};
   }
   const next = { ...value };
+  if ("branding" in next) {
+    next.branding = sanitizeBrandingPatch(next.branding);
+  }
   if ("behavior" in next) {
     next.behavior = sanitizeBehaviorPatch(next.behavior);
   }

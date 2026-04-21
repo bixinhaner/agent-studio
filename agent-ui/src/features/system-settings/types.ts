@@ -9,7 +9,8 @@ export type SystemSettingsSection =
 export type SystemSettingsBranding = {
   platformName: string;
   headerSubtitle: string;
-  loginCopy: string;
+  internalLoginCopy: string;
+  externalLoginCopy: string;
   logoUrl: string;
   iconUrl: string;
   assistantName: string;

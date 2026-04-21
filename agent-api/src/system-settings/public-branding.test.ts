@@ -40,6 +40,8 @@ describe("resolvePublicBranding", () => {
 
     expect(response.branding.platformName).toBe("Celix Workspace");
     expect(response.branding.assistantName).toBe("Celix");
+    expect(response.branding.internalLoginCopy).toBe("Use SSO.");
+    expect(response.branding.externalLoginCopy).toBe("Sign in with your work email or apply for trial access.");
     expect(response.behavior).toEqual({
       portalWelcomeMessageDesktop: "Hello from {{assistantName}} on {{platformName}}.",
       portalWelcomeMessageMobile: "Hello from mobile.",

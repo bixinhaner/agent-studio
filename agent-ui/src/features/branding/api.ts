@@ -13,10 +13,12 @@ function asString(value: unknown): string {
 }
 
 function normalizeBranding(value: Partial<PublicBranding> | null | undefined): PublicBranding {
+  const legacyLoginCopy = asString((value as { loginCopy?: unknown } | null | undefined)?.loginCopy);
   return {
     platformName: asString(value?.platformName) || DEFAULT_BRANDING.platformName,
     headerSubtitle: asString(value?.headerSubtitle) || DEFAULT_BRANDING.headerSubtitle,
-    loginCopy: asString(value?.loginCopy) || DEFAULT_BRANDING.loginCopy,
+    internalLoginCopy: asString(value?.internalLoginCopy) || legacyLoginCopy || DEFAULT_BRANDING.internalLoginCopy,
+    externalLoginCopy: asString(value?.externalLoginCopy) || DEFAULT_BRANDING.externalLoginCopy,
     logoUrl: asString(value?.logoUrl),
     iconUrl: asString(value?.iconUrl),
     assistantName: asString(value?.assistantName) || DEFAULT_BRANDING.assistantName,
