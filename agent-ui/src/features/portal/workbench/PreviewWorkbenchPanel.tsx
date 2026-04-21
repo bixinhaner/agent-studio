@@ -642,7 +642,14 @@ function formatUpdatedAt(ms: number): string {
 }
 
 function preprocessPreviewMarkdown(text: string): string {
-  return text.replace(/<a\s+id=(?:"[^"]+"|'[^']+')[^>]*>\s*<\/a>/gi, "");
+  return text.replace(
+    /<a\s+name=(?:"([^"]+)"|'([^']+)')[^>]*>\s*<\/a>/gi,
+    (_match, doubleQuotedName: string, singleQuotedName: string) => {
+      const rawName = (doubleQuotedName || singleQuotedName || "").trim();
+      const escapedName = rawName.replace(/"/g, "&quot;");
+      return escapedName ? `<a id="${escapedName}"></a>` : "";
+    }
+  );
 }
 
 function createPreviewMarkdownHeading(tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
@@ -696,6 +703,14 @@ function deriveHeadingAnchorFromLine(text: string, targetLine: number): string {
   return selected;
 }
 
+function escapeCssIdSelector(value: string): string {
+  if (!value) return "";
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/[ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, "\\$&");
+}
+
 function PreviewMarkdown(props: {
   text: string;
   filePath: string;
@@ -731,6 +746,13 @@ function PreviewMarkdown(props: {
       });
     }
 
+    if (!target) {
+      const escapedAnchor = escapeCssIdSelector(normalizedAnchor);
+      if (escapedAnchor) {
+        target = root.querySelector<HTMLElement>(`#${escapedAnchor}`) || undefined;
+      }
+    }
+
     if (!target) return;
     root.querySelectorAll(".preview-markdown-anchor-hit").forEach((element) => {
       element.classList.remove("preview-markdown-anchor-hit");
@@ -747,8 +769,35 @@ function PreviewMarkdown(props: {
       h4: createPreviewMarkdownHeading("h4"),
       h5: createPreviewMarkdownHeading("h5"),
       h6: createPreviewMarkdownHeading("h6"),
-      a: ({ href, children, className }: { href?: string; children?: ReactNode; className?: string }) => {
-        if (!href) return <span className={className}>{children}</span>;
+      a: ({
+        href,
+        children,
+        className,
+        id,
+        name
+      }: {
+        href?: string;
+        children?: ReactNode;
+        className?: string;
+        id?: string;
+        name?: string;
+      }) => {
+        if (!href) {
+          const inlineAnchorId = normalizeMarkdownAnchor(id || name || "");
+          if (!inlineAnchorId) return <span className={className}>{children}</span>;
+          const anchorText = flattenReactNodeText(children).trim();
+          return (
+            <span
+              id={inlineAnchorId}
+              className={className}
+              data-preview-anchor={inlineAnchorId}
+              data-preview-anchor-text={anchorText || undefined}
+              aria-hidden={!anchorText}
+            >
+              {children}
+            </span>
+          );
+        }
         const linkedFile = resolveMarkdownLinkedFilePath(props.filePath, href);
         if (!linkedFile) {
           return (
