@@ -1,0 +1,7 @@
+Deployment verification:
+- npm test -- src/auth/dingtalk.test.ts passed
+- npm run build passed
+- https://celix.baicells.com/ returned 200
+- https://celix.baicells.com/api/auth/dingtalk/config returned the celix callback URI
+- https://aiagent.indonesiacentral.cloudapp.azure.com/api/auth/dingtalk/config returned the original Azure callback URI
+- agent-studio-api was restarted and remained online in PM2
