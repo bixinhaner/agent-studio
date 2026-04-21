@@ -1,0 +1,6 @@
+Cleanup scope requested by user:
+- keep AGENTS.md
+- delete previously identified non-business files (including docs)
+- remove docs/superpowers plans/specs and deployment/zendesk docs
+- remove leftover test helper artifacts and fix vite test setup reference
+- commit and push to GitHub main

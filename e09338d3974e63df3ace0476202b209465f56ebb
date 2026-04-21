@@ -1,0 +1,9 @@
+Scope
+
+- Migrate AdminShell / ResourceCenter / Monitoring with similar-feature replacement and Agent Studio branding preserved.
+
+- Fix Prisma orderBy usage for agent mode instruction source query.
+
+Validation
+
+- npm run build (agent-ui) passed.
