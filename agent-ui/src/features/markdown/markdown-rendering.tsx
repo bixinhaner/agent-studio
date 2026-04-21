@@ -1,5 +1,6 @@
 import type { CodeHeaderProps, SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import {
   isValidElement,
   useEffect,
@@ -15,6 +16,7 @@ import remarkMath from "remark-math";
 
 export const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
 export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex];
+export const PREVIEW_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, ...MARKDOWN_REHYPE_PLUGINS];
 
 type MarkdownTableProps = TableHTMLAttributes<HTMLTableElement> & {
   node?: unknown;

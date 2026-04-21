@@ -5,8 +5,8 @@ import ReactMarkdown from "react-markdown";
 import { apiBase, authHeaders, notifyAuthInvalidStatus } from "../../../lib/api";
 import {
   extractMermaidCodeFromPreChildren,
-  MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
+  PREVIEW_MARKDOWN_REHYPE_PLUGINS,
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../../markdown/markdown-rendering";
@@ -767,7 +767,7 @@ function PreviewMarkdown(props: { text: string; filePath: string; threadId: stri
   return (
     <div ref={rootRef} className="preview-markdown">
       <ReactMarkdown
-        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+        rehypePlugins={PREVIEW_MARKDOWN_REHYPE_PLUGINS}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={components as any}
       >

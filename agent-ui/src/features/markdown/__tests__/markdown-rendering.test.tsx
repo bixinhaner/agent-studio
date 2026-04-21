@@ -15,6 +15,7 @@ import {
   extractMermaidCodeFromPreChildren,
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
+  PREVIEW_MARKDOWN_REHYPE_PLUGINS,
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown-rendering";
@@ -32,6 +33,17 @@ function TestMarkdown(props: { text: string }) {
           return <pre {...rest}>{children}</pre>;
         }
       }}
+    >
+      {props.text}
+    </ReactMarkdown>
+  );
+}
+
+function TestPreviewMarkdown(props: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+      rehypePlugins={PREVIEW_MARKDOWN_REHYPE_PLUGINS}
     >
       {props.text}
     </ReactMarkdown>
@@ -120,5 +132,23 @@ describe("markdown rendering", () => {
     expect(diagram).toBeTruthy();
     expect(container.querySelector(".markdown-mermaid-block")).toBeTruthy();
     expect(container.querySelector("svg[data-mermaid-id]")).toBeTruthy();
+  });
+
+  it("renders raw html tables in preview markdown pipeline", () => {
+    const { container } = render(
+      <TestPreviewMarkdown
+        text={[
+          "<table>",
+          "  <tr><td>Product Platform</td><td>Product Name</td></tr>",
+          "  <tr><td>43X</td><td>Nova436Q</td></tr>",
+          "</table>"
+        ].join("\n")}
+      />
+    );
+
+    const table = container.querySelector("table");
+    expect(table).toBeTruthy();
+    expect(screen.getByText("Product Platform")).toBeTruthy();
+    expect(screen.getByText("Nova436Q")).toBeTruthy();
   });
 });
