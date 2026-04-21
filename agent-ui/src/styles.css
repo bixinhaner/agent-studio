@@ -7217,6 +7217,7 @@ body.public-share-mode #root {
 }
 
 .aui-assistant-action-bar-root[data-floating="true"] {
+  inset-inline-end: 0;
   border: 0 !important;
   background: transparent !important;
   border-radius: 0 !important;
