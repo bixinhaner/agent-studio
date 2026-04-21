@@ -30,6 +30,7 @@ function createFormState(request?: PublicAccessRequest | null): AccessRequestFor
 function updatePath(pathname: string): void {
   if (typeof window === "undefined") return;
   window.history.replaceState(window.history.state, document.title, pathname);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {

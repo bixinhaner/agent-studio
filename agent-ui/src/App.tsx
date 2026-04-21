@@ -68,6 +68,7 @@ function replaceLocationHash(nextHash: string): void {
     document.title,
     `${window.location.pathname}${window.location.search}${suffix}`
   );
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function replaceLocationPath(nextPathname: string): void {
@@ -78,6 +79,7 @@ function replaceLocationPath(nextPathname: string): void {
     document.title,
     `${normalizedPathname}${window.location.search}${window.location.hash}`
   );
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function formatInviteExpiry(value: string | null | undefined): string {
@@ -443,7 +445,17 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string }) {
 }
 
 function AppRoutes() {
-  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const [pathname, setPathname] = useState(() => (typeof window !== "undefined" ? window.location.pathname : "/"));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncPathname = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", syncPathname);
+    return () => {
+      window.removeEventListener("popstate", syncPathname);
+    };
+  }, []);
+
   const publicShareToken = extractPublicShareToken(pathname);
   const inviteToken = extractInviteToken(pathname);
   const accessRequestToken = extractAccessRequestToken(pathname);
