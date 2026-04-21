@@ -50,6 +50,12 @@ export type SystemSettingsBehavior = {
   welcomeSummary: string;
   usageSummary: string;
   markdown: string;
+  portalWelcomeMessageDesktop: string;
+  portalWelcomeMessageMobile: string;
+  portalWelcomeSuggestions: Array<{
+    label: string;
+    prompt: string;
+  }>;
 };
 
 export type SystemSettingsVersionRecord = {

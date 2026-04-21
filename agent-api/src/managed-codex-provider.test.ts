@@ -111,7 +111,15 @@ describe("ManagedCodexProviderResolver", () => {
               behavior: {
                 welcomeSummary: "test",
                 usageSummary: "test",
-                markdown: "test"
+                markdown: "test",
+                portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
+                portalWelcomeMessageMobile: "Hello there.",
+                portalWelcomeSuggestions: [
+                  {
+                    label: "Suggestion",
+                    prompt: "Prompt"
+                  }
+                ]
               }
             },
             createdAt: new Date().toISOString(),
@@ -174,7 +182,15 @@ describe("resolveManagedCodexDefaults", () => {
           behavior: {
             welcomeSummary: "test",
             usageSummary: "test",
-            markdown: "test"
+            markdown: "test",
+            portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
+            portalWelcomeMessageMobile: "Hello there.",
+            portalWelcomeSuggestions: [
+              {
+                label: "Suggestion",
+                prompt: "Prompt"
+              }
+            ]
           }
         },
         createdAt: new Date().toISOString(),

@@ -35,7 +35,10 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
     uploads: { ...payload.uploads },
     safety: { ...payload.safety },
     organizationDefaults: { ...payload.organizationDefaults },
-    behavior: { ...payload.behavior }
+    behavior: {
+      ...payload.behavior,
+      portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item }))
+    }
   };
 }
 
@@ -152,7 +155,14 @@ export function SystemSettingsShell() {
     setFieldErrors((current) => {
       if (pathsToClear.length === 0) return current;
       const next = { ...current };
-      for (const path of pathsToClear) delete next[path];
+      for (const path of pathsToClear) {
+        delete next[path];
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${path}.`)) {
+            delete next[key];
+          }
+        }
+      }
       return next;
     });
   }

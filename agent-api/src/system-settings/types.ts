@@ -81,7 +81,15 @@ export const systemSettingsOrganizationDefaultsSchema = z.object({
 export const systemSettingsBehaviorSchema = z.object({
   welcomeSummary: z.string().trim().min(1),
   usageSummary: z.string().trim().min(1),
-  markdown: z.string().trim().min(1)
+  markdown: z.string().trim().min(1),
+  portalWelcomeMessageDesktop: z.string().trim().min(1),
+  portalWelcomeMessageMobile: z.string().trim().min(1),
+  portalWelcomeSuggestions: z.array(
+    z.object({
+      label: z.string().trim().min(1).max(120),
+      prompt: z.string().trim().min(1).max(4000)
+    })
+  ).max(8)
 });
 
 export const systemSettingsPayloadSchema = z
@@ -123,6 +131,7 @@ export type SystemSettingsUploads = z.infer<typeof systemSettingsUploadsSchema>;
 export type SystemSettingsSafety = z.infer<typeof systemSettingsSafetySchema>;
 export type SystemSettingsOrganizationDefaults = z.infer<typeof systemSettingsOrganizationDefaultsSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
+export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
 export type SystemSettingsPayload = z.infer<typeof systemSettingsPayloadSchema>;
 export type SystemSettingsPayloadPatch = z.infer<typeof systemSettingsPayloadPatchSchema>;
 
@@ -188,7 +197,27 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   behavior: {
     welcomeSummary: "Use approved resources and modes only.",
     usageSummary: "New sessions use published platform defaults.",
-    markdown: "## Platform Behavior\n\nDetailed guidance for admins and users."
+    markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",
+    portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}. Ask about products, versions, deployment, alarms, or troubleshooting.",
+    portalWelcomeMessageMobile: "Ask about products, versions, deployment, alarms, or troubleshooting.",
+    portalWelcomeSuggestions: [
+      {
+        label: "Check product & version fit",
+        prompt: "Help me identify the correct Baicells product line, model, software branch, and version scope for this scenario. If key context is missing, ask for the minimum details needed before giving a conclusion."
+      },
+      {
+        label: "Review deployment plan",
+        prompt: "Review this Baicells deployment or configuration plan. Point out mismatches, risks, and the recommended next steps based on official product guidance."
+      },
+      {
+        label: "Analyze alarm or KPI issue",
+        prompt: "Analyze this Baicells alarm, KPI, log, or fault symptom. Explain likely causes, the recommended troubleshooting path, and what information is still needed."
+      },
+      {
+        label: "Recommend solution design",
+        prompt: "Recommend a Baicells product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
+      }
+    ]
   }
 } satisfies SystemSettingsPayload;
 
@@ -220,4 +249,9 @@ export function mergeSystemSettingsPayload(
 ): SystemSettingsPayload {
   const merged = mergePlainObjects(base, patch);
   return systemSettingsPayloadSchema.parse(merged);
+}
+
+export function normalizeSystemSettingsPayload(value: unknown): SystemSettingsPayload {
+  const patch = systemSettingsPayloadPatchSchema.parse(isPlainObject(value) ? value : {});
+  return mergeSystemSettingsPayload(createDefaultSystemSettingsPayload(), patch);
 }

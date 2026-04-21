@@ -119,7 +119,6 @@ import {
   switchWorkbenchTab,
   toggleSessionRail
 } from "./workbench/layout-state";
-import { PORTAL_STARTER_SUGGESTIONS } from "./workbench/starter-suggestions";
 import { PORTAL_ANTD_THEME } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import "./workbench/workbench.css";
@@ -771,21 +770,29 @@ const AssistantMarkdownText = makeMarkdownText({
   }
 });
 
-const DraftOnlyWelcomeSuggestions: FC = () => (
-  <div className="aui-thread-welcome-suggestions">
-    {PORTAL_STARTER_SUGGESTIONS.map((suggestion, index) => (
-      <ThreadPrimitive.Suggestion
-        key={`${suggestion.prompt}-${index}`}
-        className="aui-thread-welcome-suggestion"
-        prompt={suggestion.prompt}
-        send={false}
-        clearComposer
-      >
-        <span className="aui-thread-welcome-suggestion-text">{suggestion.text ?? suggestion.prompt}</span>
-      </ThreadPrimitive.Suggestion>
-    ))}
-  </div>
-);
+const DraftOnlyWelcomeSuggestions: FC = () => {
+  const { behavior } = useBranding();
+
+  if (behavior.portalWelcomeSuggestions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="aui-thread-welcome-suggestions">
+      {behavior.portalWelcomeSuggestions.map((suggestion, index) => (
+        <ThreadPrimitive.Suggestion
+          key={`${suggestion.label}-${index}`}
+          className="aui-thread-welcome-suggestion"
+          prompt={suggestion.prompt}
+          send={false}
+          clearComposer
+        >
+          <span className="aui-thread-welcome-suggestion-text">{suggestion.label}</span>
+        </ThreadPrimitive.Suggestion>
+      ))}
+    </div>
+  );
+};
 
 const DraftOnlyThreadWelcome: FC = () => (
   <ThreadWelcome.Root>
@@ -804,6 +811,19 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function applyPortalWelcomeTemplate(
+  template: string,
+  replacements: {
+    assistantName: string;
+    platformName: string;
+  }
+): string {
+  return template
+    .replace(/\{\{\s*assistantName\s*\}\}/gi, replacements.assistantName)
+    .replace(/\{\{\s*platformName\s*\}\}/gi, replacements.platformName)
+    .trim();
 }
 
 function shorten(text: string, max = 1000): string {
@@ -3612,7 +3632,7 @@ const AgentRuntimeAdapterProvider: FC<
 
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
   const auth = useAuth();
-  const { branding } = useBranding();
+  const { branding, behavior } = useBranding();
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
@@ -4306,9 +4326,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     : isMobile
       ? "Ask a question."
       : "Type your question directly";
-  const welcomeMessage = isMobile
-    ? "Ask about products, versions, deployment, alarms, or troubleshooting."
-    : `Hello, I'm your ${assistantDisplayName}. Ask about products, versions, deployment, alarms, or troubleshooting.`;
+  const welcomeMessageTemplate = isMobile
+    ? behavior.portalWelcomeMessageMobile
+    : behavior.portalWelcomeMessageDesktop;
+  const welcomeMessage =
+    applyPortalWelcomeTemplate(welcomeMessageTemplate, {
+      assistantName: assistantDisplayName,
+      platformName: branding.platformName.trim() || "Agent Studio"
+    }) ||
+    (isMobile
+      ? "Ask about products, versions, deployment, alarms, or troubleshooting."
+      : `Hello, I'm your ${assistantDisplayName}. Ask about products, versions, deployment, alarms, or troubleshooting.`);
+  const welcomeSuggestions = useMemo(
+    () => behavior.portalWelcomeSuggestions.map((item) => ({ text: item.label, prompt: item.prompt })),
+    [behavior.portalWelcomeSuggestions]
+  );
 
   const buildProductFeedbackContext = useCallback(() => {
     const locationSnapshot =
@@ -5415,7 +5447,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }}
               welcome={{
                 message: welcomeMessage,
-                suggestions: PORTAL_STARTER_SUGGESTIONS
+                suggestions: welcomeSuggestions
               }}
               assistantAvatar={assistantAvatar}
               components={{

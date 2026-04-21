@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 
 import { fetchPublicBranding } from "./api";
-import { DEFAULT_BRANDING, type PublicBranding } from "./types";
+import { DEFAULT_BRANDING, DEFAULT_PORTAL_BEHAVIOR, type PublicBranding, type PublicPortalBehavior } from "./types";
 
 type BrandingContextValue = {
   branding: PublicBranding;
+  behavior: PublicPortalBehavior;
   loading: boolean;
   error: string;
   reload(): Promise<void>;
@@ -28,6 +29,7 @@ function applyFavicon(iconUrl: string) {
 
 export function BrandingProvider({ children }: PropsWithChildren) {
   const [branding, setBranding] = useState<PublicBranding>(DEFAULT_BRANDING);
+  const [behavior, setBehavior] = useState<PublicPortalBehavior>(DEFAULT_PORTAL_BEHAVIOR);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -37,8 +39,10 @@ export function BrandingProvider({ children }: PropsWithChildren) {
     try {
       const response = await fetchPublicBranding();
       setBranding(response.branding);
+      setBehavior(response.behavior);
     } catch (nextError) {
       setBranding(DEFAULT_BRANDING);
+      setBehavior(DEFAULT_PORTAL_BEHAVIOR);
       setError(nextError instanceof Error ? nextError.message : "Failed to load branding");
     } finally {
       setLoading(false);
@@ -56,11 +60,12 @@ export function BrandingProvider({ children }: PropsWithChildren) {
   const value = useMemo<BrandingContextValue>(
     () => ({
       branding,
+      behavior,
       loading,
       error,
       reload
     }),
-    [branding, error, loading, reload]
+    [behavior, branding, error, loading, reload]
   );
 
   return <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>;
