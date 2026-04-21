@@ -70,6 +70,14 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
   const [successText, setSuccessText] = useState("");
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.add("access-request-route");
+    return () => {
+      document.body.classList.remove("access-request-route");
+    };
+  }, []);
+
+  useEffect(() => {
     let active = true;
     if (!props.token) {
       setLoading(false);

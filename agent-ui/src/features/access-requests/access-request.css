@@ -1,5 +1,7 @@
 .auth-access-card {
   max-width: 760px;
+  padding: 30px 28px;
+  gap: 18px;
 }
 
 .auth-access-screen {
@@ -32,7 +34,7 @@
 .auth-access-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 16px;
+  gap: 10px 14px;
 }
 
 .auth-access-form-grid .auth-modern-field > span {
@@ -41,19 +43,27 @@
   color: var(--admin-color-subtle, #666);
 }
 
+.auth-access-card .auth-modern-header {
+  gap: 6px;
+}
+
+.auth-access-card .auth-modern-subtitle {
+  max-width: 620px;
+}
+
 .auth-access-span-2 {
   grid-column: span 2;
 }
 
 .auth-access-textarea {
   height: auto;
-  min-height: 136px;
-  padding: 14px 16px;
+  min-height: 92px;
+  padding: 10px 14px;
   resize: vertical;
 }
 
 .auth-access-textarea-sm {
-  min-height: 108px;
+  min-height: 72px;
 }
 
 .auth-access-actions {

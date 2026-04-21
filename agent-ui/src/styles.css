@@ -23,6 +23,15 @@ body {
   overflow: hidden;
 }
 
+body.access-request-route {
+  overflow-y: auto;
+}
+
+body.access-request-route #root {
+  height: auto;
+  min-height: 100vh;
+}
+
 .auth-screen,
 .admin-shell {
   min-height: 100vh;
