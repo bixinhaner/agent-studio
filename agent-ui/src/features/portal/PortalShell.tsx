@@ -5651,7 +5651,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
                     <>
                       <PanelResizeHandle className="Resizer" />
-                      <Panel defaultSize="25" minSize="20" maxSize="40" className="right-drawer-panel">
+                      <Panel defaultSize="37.5" minSize="20" maxSize="40" className="right-drawer-panel">
                         <RightWorkbenchDrawer
                           open={layoutState.isRightDrawerOpen}
                           onClose={() => setLayoutState((prev) => closeWorkbenchDrawer(prev))}
