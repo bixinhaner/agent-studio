@@ -4,6 +4,7 @@ export type DingTalkConfig = {
   clientId?: string;
   clientSecret?: string;
   redirectUri?: string;
+  redirectUriAliases?: string[];
   scope?: string;
   apiBaseUrl?: string;
   alertAgentId?: string;
@@ -37,7 +38,7 @@ export type DingTalkOrganizationUser = {
 };
 
 export interface DingTalkClient {
-  exchangeCode(code: string): Promise<DingTalkUserIdentity>;
+  exchangeCode(code: string, options?: { redirectUri?: string }): Promise<DingTalkUserIdentity>;
   validateCredentials?(): Promise<void>;
   listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]>;
   listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
@@ -412,8 +413,11 @@ export function createDingTalkClient(
   let appAccessTokenGeneration = 0;
   const orgApiBaseUrl = "https://oapi.dingtalk.com";
 
-  const getResolvedConfig = () => {
-    const resolved = resolveDingTalkConfig(config);
+  const getResolvedConfig = (options?: { redirectUri?: string }) => {
+    const resolved = resolveDingTalkConfig({
+      ...config,
+      redirectUri: trimOrUndefined(options?.redirectUri) ?? config.redirectUri
+    });
     if (!resolved.ok) {
       throw new Error(`DingTalk auth is not configured: ${resolved.missing.join(", ")}`);
     }
@@ -521,13 +525,13 @@ export function createDingTalkClient(
   };
 
   return {
-    async exchangeCode(code: string): Promise<DingTalkUserIdentity> {
+    async exchangeCode(code: string, options?: { redirectUri?: string }): Promise<DingTalkUserIdentity> {
       const normalizedCode = trimOrUndefined(code);
       if (!normalizedCode) {
         throw new Error("DingTalk auth code is required");
       }
 
-      const resolved = getResolvedConfig();
+      const resolved = getResolvedConfig(options);
 
       const tokenPayload = await requestJson(
         `${resolved.config.apiBaseUrl}/v1.0/oauth2/userAccessToken`,

@@ -228,6 +228,68 @@ function resolveInviteOrganizationId(req: Request, requestedOrganizationId?: str
   return undefined;
 }
 
+function normalizeUrl(value: unknown): string | undefined {
+  const raw = trimOrUndefined(value);
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return undefined;
+    }
+    return parsed.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeHost(value: unknown): string | undefined {
+  const raw = trimOrUndefined(value);
+  if (!raw) return undefined;
+  const first = raw.split(",")[0]?.trim().toLowerCase();
+  if (!first) return undefined;
+  try {
+    return new URL(`http://${first}`).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function listDingTalkRedirectUris(config: DingTalkConfig): string[] {
+  const seen = new Set<string>();
+  const uris: string[] = [];
+  for (const value of [config.redirectUri, ...(config.redirectUriAliases ?? [])]) {
+    const normalized = normalizeUrl(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    uris.push(normalized);
+  }
+  return uris;
+}
+
+function redirectUriHost(value: string): string | undefined {
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function isAllowedDingTalkRedirectUri(config: DingTalkConfig, redirectUri?: string): string | undefined {
+  const normalized = normalizeUrl(redirectUri);
+  if (!normalized) return undefined;
+  return listDingTalkRedirectUris(config).includes(normalized) ? normalized : undefined;
+}
+
+function resolveDingTalkRedirectUriForRequest(req: Request, config: DingTalkConfig): string | undefined {
+  const redirectUris = listDingTalkRedirectUris(config);
+  const requestedHost = normalizeHost(req.headers["x-forwarded-host"]) ?? normalizeHost(req.headers.host);
+  if (requestedHost) {
+    const matched = redirectUris.find((uri) => redirectUriHost(uri) === requestedHost);
+    if (matched) return matched;
+  }
+  return redirectUris[0];
+}
+
 export function createAuthRouter(options: {
   users: UserRepositoryLike;
   cookies: SessionCookieManager;
@@ -248,8 +310,12 @@ export function createAuthRouter(options: {
 }): Router {
   const router = Router();
 
-  router.get("/dingtalk/config", (_req: Request, res: Response) => {
-    const resolved = resolveDingTalkConfig(options.dingtalkConfig);
+  router.get("/dingtalk/config", (req: Request, res: Response) => {
+    const redirectUri = resolveDingTalkRedirectUriForRequest(req, options.dingtalkConfig);
+    const resolved = resolveDingTalkConfig({
+      ...options.dingtalkConfig,
+      redirectUri
+    });
     const missing = resolved.ok ? [] : [...resolved.missing];
     if (options.sessionCookieReady === false) {
       missing.push("session_cookie_secret");
@@ -269,7 +335,7 @@ export function createAuthRouter(options: {
       return;
     }
 
-    const issued = options.oauthStates.issue();
+    const issued = options.oauthStates.issue({ redirectUri: resolved.config.redirectUri });
     res.setHeader("Set-Cookie", issued.cookie);
     res.json({
       config: {
@@ -282,7 +348,21 @@ export function createAuthRouter(options: {
 
   router.post("/dingtalk/session", async (req: Request, res: Response) => {
     try {
-      const resolved = resolveDingTalkConfig(options.dingtalkConfig);
+      const input = dingtalkSessionSchema.parse(req.body ?? {});
+      const expectedState = options.oauthStates.read(req.headers.cookie);
+      if (!expectedState || expectedState.state !== input.state || expectedState.nonce !== input.nonce) {
+        res.setHeader("Set-Cookie", options.oauthStates.clear());
+        res.status(401).json({ detail: "Invalid OAuth state" });
+        return;
+      }
+
+      const redirectUri =
+        isAllowedDingTalkRedirectUri(options.dingtalkConfig, expectedState.redirectUri) ??
+        resolveDingTalkRedirectUriForRequest(req, options.dingtalkConfig);
+      const resolved = resolveDingTalkConfig({
+        ...options.dingtalkConfig,
+        redirectUri
+      });
       const missing = resolved.ok ? [] : [...resolved.missing];
       if (options.sessionCookieReady === false) {
         missing.push("session_cookie_secret");
@@ -295,15 +375,9 @@ export function createAuthRouter(options: {
         return;
       }
 
-      const input = dingtalkSessionSchema.parse(req.body ?? {});
-      const expectedState = options.oauthStates.read(req.headers.cookie);
-      if (!expectedState || expectedState.state !== input.state || expectedState.nonce !== input.nonce) {
-        res.setHeader("Set-Cookie", options.oauthStates.clear());
-        res.status(401).json({ detail: "Invalid OAuth state" });
-        return;
-      }
-
-      const identity = await options.dingtalkClient.exchangeCode(input.code);
+      const identity = await options.dingtalkClient.exchangeCode(input.code, {
+        redirectUri: resolved.config.redirectUri
+      });
       const resolvedUser = await resolveDingTalkUser({
         users: options.users,
         identities: options.identities,

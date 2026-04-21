@@ -12,6 +12,7 @@ const schema = z.object({
   DINGTALK_CLIENT_ID: z.string().optional(),
   DINGTALK_CLIENT_SECRET: z.string().optional(),
   DINGTALK_REDIRECT_URI: z.string().optional(),
+  DINGTALK_REDIRECT_URI_ALIASES: z.string().optional(),
   DINGTALK_SCOPE: z.string().default("openid"),
   DINGTALK_ALERT_AGENT_ID: z.string().optional(),
   DINGTALK_ALERT_USER_IDS: z.string().optional(),
@@ -116,6 +117,10 @@ export const appConfig = {
     clientId: (env.DINGTALK_CLIENT_ID || "").trim(),
     clientSecret: (env.DINGTALK_CLIENT_SECRET || "").trim(),
     redirectUri: (env.DINGTALK_REDIRECT_URI || "").trim(),
+    redirectUriAliases: (env.DINGTALK_REDIRECT_URI_ALIASES || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
     scope: (env.DINGTALK_SCOPE || "").trim() || "openid",
     alertAgentId: (env.DINGTALK_ALERT_AGENT_ID || "").trim(),
     alertUserIds: (env.DINGTALK_ALERT_USER_IDS || "")

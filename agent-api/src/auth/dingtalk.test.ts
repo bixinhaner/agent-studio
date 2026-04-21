@@ -64,7 +64,8 @@ describe("createDingTalkClient", () => {
   it("retries org api calls with a fresh app access token after a 40014 error", async () => {
     let issuedTokenCount = 0;
     const unionLookupTokens: string[] = [];
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const userTokenRedirectUris: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/v1.0/oauth2/accessToken")) {
         issuedTokenCount += 1;
@@ -74,6 +75,7 @@ describe("createDingTalkClient", () => {
         });
       }
       if (url.endsWith("/v1.0/oauth2/userAccessToken")) {
+        userTokenRedirectUris.push(String(JSON.parse(String(init?.body ?? "{}")).redirectUri ?? ""));
         return jsonResponse({
           accessToken: "user-access-token"
         });
@@ -115,7 +117,9 @@ describe("createDingTalkClient", () => {
 
     const client = createDingTalkClient(TEST_CONFIG, fetchMock);
 
-    const identity = await client.exchangeCode("oauth-code");
+    const identity = await client.exchangeCode("oauth-code", {
+      redirectUri: "https://celix.baicells.com/auth/dingtalk/callback"
+    });
 
     expect(identity).toMatchObject({
       unionId: "union-1",
@@ -123,6 +127,7 @@ describe("createDingTalkClient", () => {
       displayName: "Alice",
       email: "alice@example.com"
     });
+    expect(userTokenRedirectUris).toEqual(["https://celix.baicells.com/auth/dingtalk/callback"]);
     expect(unionLookupTokens).toEqual(["app-token-1", "app-token-2"]);
   });
 });

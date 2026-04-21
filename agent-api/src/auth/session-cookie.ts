@@ -18,13 +18,14 @@ export type SessionCookieManager = {
 export type OAuthStatePayload = {
   state: string;
   nonce: string;
+  redirectUri?: string;
   issuedAt: number;
   expiresAt: number;
 };
 
 export type OAuthStateCookieManager = {
   cookieName: string;
-  issue(): { state: string; nonce: string; cookie: string };
+  issue(options?: { redirectUri?: string }): { state: string; nonce: string; redirectUri?: string; cookie: string };
   clear(): string;
   read(header: string | string[] | undefined): OAuthStatePayload | undefined;
 };
@@ -212,14 +213,16 @@ export function createOAuthStateCookieManager(
 
   return {
     cookieName,
-    issue() {
+    issue(issueOptions?: { redirectUri?: string }) {
       if (!secret) {
         throw new Error("oauth state cookie secret is not configured");
       }
       const now = Date.now();
+      const redirectUri = trimOrUndefined(issueOptions?.redirectUri);
       const payload: OAuthStatePayload = {
         state: randomUUID(),
         nonce: randomUUID(),
+        ...(redirectUri ? { redirectUri } : {}),
         issuedAt: now,
         expiresAt: now + maxAgeMs
       };
@@ -228,6 +231,7 @@ export function createOAuthStateCookieManager(
       return {
         state: payload.state,
         nonce: payload.nonce,
+        redirectUri: payload.redirectUri,
         cookie: serializeCookie(cookieName, `${encodedPayload}.${signature}`, {
           maxAgeMs,
           secure: options.secure,
@@ -246,6 +250,7 @@ export function createOAuthStateCookieManager(
       const parsed = readSignedPayload<Partial<OAuthStatePayload>>(header, cookieName, secret);
       const state = trimOrUndefined(parsed?.state);
       const nonce = trimOrUndefined(parsed?.nonce);
+      const redirectUri = trimOrUndefined(parsed?.redirectUri);
       const issuedAt = Number(parsed?.issuedAt);
       const expiresAt = Number(parsed?.expiresAt);
       if (!state || !nonce || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) {
@@ -254,7 +259,7 @@ export function createOAuthStateCookieManager(
       if (Date.now() >= expiresAt) {
         return undefined;
       }
-      return { state, nonce, issuedAt, expiresAt };
+      return { state, nonce, ...(redirectUri ? { redirectUri } : {}), issuedAt, expiresAt };
     }
   };
 }
