@@ -3031,7 +3031,7 @@ const ThreadQuestionNavigator: FC<{
       setPanelOpen(false);
       setHoveredId("");
       closeTimerRef.current = null;
-    }, 180);
+    }, 260);
   }, []);
 
   const closePanelNow = useCallback(() => {
@@ -3100,8 +3100,8 @@ const ThreadQuestionNavigator: FC<{
         block: "center"
       });
       setActiveId(messageId);
-      setPanelOpen(false);
-      setHoveredId("");
+      setHoveredId(messageId);
+      setPanelOpen(true);
     },
     [shellRef]
   );
@@ -3152,7 +3152,6 @@ const ThreadQuestionNavigator: FC<{
                 title={item.label}
               >
                 <span className="thread-question-nav-row-text">{item.label}</span>
-                <span className="thread-question-nav-row-mark" aria-hidden="true" />
               </button>
             );
           })}
