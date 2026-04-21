@@ -2,6 +2,15 @@
   max-width: 760px;
 }
 
+.auth-access-screen {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+
+.auth-access-screen .auth-access-card {
+  margin: 24px auto;
+}
+
 .auth-access-eyebrow {
   margin: 0;
   font-size: 12px;
@@ -361,6 +370,10 @@
 }
 
 @media (max-width: 900px) {
+  .auth-access-screen .auth-access-card {
+    margin: 0 auto;
+  }
+
   .auth-access-form-grid,
   .access-admin-form-grid,
   .access-admin-kv-grid {
