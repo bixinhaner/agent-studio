@@ -9,6 +9,7 @@ export type PublicAccessRequest = {
   deviceInfoText: string;
   purchaseDate?: string;
   poNumber: string;
+  snNumber?: string;
   salesContactEmail: string;
   customerNote?: string;
   reviewSummary?: string;
@@ -27,12 +28,13 @@ export type PublicAccessRequest = {
 
 export type PublicAccessRequestInput = {
   applicantEmail: string;
-  contactName?: string;
+  contactName: string;
   companyName: string;
-  countryRegion?: string;
+  countryRegion: string;
   deviceInfoText: string;
-  purchaseDate?: string | null;
+  purchaseDate: string | null;
   poNumber: string;
+  snNumber: string;
   salesContactEmail: string;
   customerNote?: string;
 };
@@ -63,6 +65,7 @@ export type AdminAccessRequestSummary = {
   countryRegion?: string;
   salesContactEmail: string;
   poNumber: string;
+  snNumber?: string;
   purchaseDate?: string;
   owner: { id: string; displayName: string; email: string } | null;
   requestedPlan: { id: string; name: string; slug: string } | null;

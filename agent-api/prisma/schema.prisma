@@ -231,6 +231,7 @@ model AccessRequest {
   deviceInfoText       String              @map("device_info_text")
   purchaseDate         DateTime?           @map("purchase_date")
   poNumber             String              @map("po_number")
+  snNumber             String?             @map("sn_number")
   salesContactEmail    String              @map("sales_contact_email")
   customerNote         String?             @map("customer_note")
   adminNote            String?             @map("admin_note")

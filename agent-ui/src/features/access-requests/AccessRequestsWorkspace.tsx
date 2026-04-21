@@ -611,9 +611,12 @@ export function AccessRequestsWorkspace() {
                     <div className="access-admin-kv-grid">
                       <div><span>公司</span><strong>{selectedRequest.companyName}</strong></div>
                       <div><span>申请邮箱</span><strong>{selectedRequest.applicantEmail}</strong></div>
+                      <div><span>联系人</span><strong>{selectedRequest.contactName ?? "—"}</strong></div>
+                      <div><span>国家 / 地区</span><strong>{selectedRequest.countryRegion ?? "—"}</strong></div>
+                      <div><span>历史 SN 号</span><strong>{selectedRequest.snNumber ?? "—"}</strong></div>
                       <div><span>销售邮箱</span><strong>{selectedRequest.salesContactEmail}</strong></div>
-                      <div><span>购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div>
-                      <div><span>PO 号</span><strong>{selectedRequest.poNumber}</strong></div>
+                      <div><span>历史购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div>
+                      <div><span>历史 PO 号</span><strong>{selectedRequest.poNumber}</strong></div>
                       <div><span>公开链接</span><strong>{selectedRequest.publicAccessUrl ?? "—"}</strong></div>
                     </div>
                     <label className="access-admin-field">

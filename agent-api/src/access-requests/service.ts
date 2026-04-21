@@ -51,12 +51,13 @@ export type AccessRequestReviewDecisionResult = {
 
 export type AccessRequestPublicFormInput = {
   applicantEmail: string;
-  contactName?: string;
+  contactName: string;
   companyName: string;
-  countryRegion?: string;
+  countryRegion: string;
   deviceInfoText: string;
-  purchaseDate?: string | null;
+  purchaseDate: string | null;
   poNumber: string;
+  snNumber: string;
   salesContactEmail: string;
   customerNote?: string;
 };
@@ -109,6 +110,7 @@ export type AdminAccessRequestSummary = {
   countryRegion?: string;
   salesContactEmail: string;
   poNumber: string;
+  snNumber?: string;
   purchaseDate?: string;
   owner: { id: string; displayName: string; email: string } | null;
   requestedPlan: { id: string; name: string; slug: string } | null;
@@ -181,6 +183,7 @@ export type PublicAccessRequestView = {
   deviceInfoText: string;
   purchaseDate?: string;
   poNumber: string;
+  snNumber?: string;
   salesContactEmail: string;
   customerNote?: string;
   reviewSummary?: string;
@@ -548,6 +551,7 @@ function requestToPublicView(
     deviceInfoText: request.deviceInfoText,
     purchaseDate: request.purchaseDate,
     poNumber: request.poNumber,
+    snNumber: request.snNumber,
     salesContactEmail: request.salesContactEmail,
     customerNote: request.customerNote,
     reviewSummary: request.reviewSummary,
@@ -670,6 +674,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       countryRegion: request.countryRegion,
       salesContactEmail: request.salesContactEmail,
       poNumber: request.poNumber,
+      snNumber: request.snNumber,
       purchaseDate: request.purchaseDate,
       owner: owner
         ? {
@@ -758,6 +763,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       countryRegion: request.countryRegion,
       salesContactEmail: request.salesContactEmail,
       poNumber: request.poNumber,
+      snNumber: request.snNumber,
       purchaseDate: request.purchaseDate,
       owner: owner
         ? {
@@ -811,11 +817,15 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
       ensureInternalSalesEmail(salesContactEmail, policy.internalEmailDomains);
 
+      const contactName = trimOrUndefined(input.contactName);
       const companyName = trimOrUndefined(input.companyName);
+      const countryRegion = trimOrUndefined(input.countryRegion);
       const deviceInfoText = trimOrUndefined(input.deviceInfoText);
+      const purchaseDate = toDateOrUndefined(input.purchaseDate);
       const poNumber = trimOrUndefined(input.poNumber);
-      if (!companyName || !deviceInfoText || !poNumber) {
-        throw new Error("Company, device info, and PO number are required");
+      const snNumber = trimOrUndefined(input.snNumber);
+      if (!contactName || !companyName || !countryRegion || !deviceInfoText || !purchaseDate || !poNumber || !snNumber) {
+        throw new Error("Contact name, company, country, purchased devices, history purchase date, history PO number, and SN number are required");
       }
 
       const rawToken = issuePublicToken();
@@ -825,12 +835,13 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         status: "submitted",
         applicantEmail,
         applicantEmailDomain: emailDomain(applicantEmail),
-        contactName: trimOrUndefined(input.contactName) ?? null,
+        contactName,
         companyName,
-        countryRegion: trimOrUndefined(input.countryRegion) ?? null,
+        countryRegion,
         deviceInfoText,
-        purchaseDate: toDateOrUndefined(input.purchaseDate),
+        purchaseDate,
         poNumber,
+        snNumber,
         salesContactEmail,
         customerNote: trimOrUndefined(input.customerNote) ?? null,
         reviewMode: "any_to_approve",
@@ -874,6 +885,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         [
           `${companyName} submitted a new access request.`,
           `Applicant: ${applicantEmail}`,
+          `SN: ${snNumber}`,
           `Sales contact: ${salesContactEmail}`,
           `PO: ${poNumber}`,
           publicLink ? `Public view: ${publicLink}` : undefined
@@ -914,17 +926,27 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const policy = await loadPolicy();
       ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
       ensureInternalSalesEmail(salesContactEmail, policy.internalEmailDomains);
+      const contactName = trimOrUndefined(input.contactName);
+      const countryRegion = trimOrUndefined(input.countryRegion);
+      const deviceInfoText = trimOrUndefined(input.deviceInfoText);
+      const purchaseDate = toDateOrUndefined(input.purchaseDate);
+      const poNumber = trimOrUndefined(input.poNumber);
+      const snNumber = trimOrUndefined(input.snNumber);
+      if (!contactName || !countryRegion || !deviceInfoText || !purchaseDate || !poNumber || !snNumber) {
+        throw new Error("Contact name, country, purchased devices, history purchase date, history PO number, and SN number are required");
+      }
 
       const updated = await options.requests.update(existing.id, {
         status: "submitted",
         applicantEmail,
         applicantEmailDomain: emailDomain(applicantEmail),
-        contactName: trimOrUndefined(input.contactName) ?? null,
+        contactName,
         companyName: trimOrUndefined(input.companyName) ?? existing.companyName,
-        countryRegion: trimOrUndefined(input.countryRegion) ?? null,
-        deviceInfoText: trimOrUndefined(input.deviceInfoText) ?? existing.deviceInfoText,
-        purchaseDate: toDateOrUndefined(input.purchaseDate) ?? null,
-        poNumber: trimOrUndefined(input.poNumber) ?? existing.poNumber,
+        countryRegion,
+        deviceInfoText,
+        purchaseDate,
+        poNumber,
+        snNumber,
         salesContactEmail,
         customerNote: trimOrUndefined(input.customerNote) ?? null,
         reviewSummary: null,
@@ -945,6 +967,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         [
           `${updated.companyName} resubmitted the access request.`,
           `Applicant: ${updated.applicantEmail}`,
+          `SN: ${updated.snNumber ?? "—"}`,
           `Sales contact: ${updated.salesContactEmail}`
         ].join("\n"),
         "access-request-admin-resubmitted"
@@ -970,7 +993,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const filtered = trimOrUndefined(input?.query)
         ? requests.filter((request) => {
             const query = input!.query!.trim().toLowerCase();
-            return [request.applicantEmail, request.companyName, request.salesContactEmail, request.poNumber]
+            return [request.applicantEmail, request.companyName, request.salesContactEmail, request.poNumber, request.snNumber]
               .join("\n")
               .toLowerCase()
               .includes(query);
@@ -1137,6 +1160,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         text: [
           `${updated.companyName} submitted an access request.`,
           `Applicant: ${updated.applicantEmail}`,
+          `SN: ${updated.snNumber ?? "—"}`,
           `Sales contact: ${updated.salesContactEmail}`,
           `PO: ${updated.poNumber}`,
           reviewUrl ? `Review in system: ${reviewUrl}` : undefined

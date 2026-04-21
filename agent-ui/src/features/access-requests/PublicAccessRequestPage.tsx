@@ -22,6 +22,7 @@ function createFormState(request?: PublicAccessRequest | null): AccessRequestFor
     deviceInfoText: request?.deviceInfoText ?? "",
     purchaseDate: request?.purchaseDate ? request.purchaseDate.slice(0, 10) : "",
     poNumber: request?.poNumber ?? "",
+    snNumber: request?.snNumber ?? "",
     salesContactEmail: request?.salesContactEmail ?? "",
     customerNote: request?.customerNote ?? ""
   };
@@ -58,6 +59,10 @@ function publicRequestStatusLabel(status: string): string {
     default:
       return status || "Unknown";
   }
+}
+
+function requiredFieldLabel(label: string): string {
+  return `${label} *`;
 }
 
 export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
@@ -118,10 +123,13 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
       request
         ? [
             ["Applicant Email", request.applicantEmail],
+            ["Contact Name", request.contactName ?? "—"],
             ["Company", request.companyName],
+            ["Country / Region", request.countryRegion ?? "—"],
+            ["History Purchase Date", formatLocalDate(request.purchaseDate)],
+            ["History PO Number", request.poNumber],
+            ["SN Number", request.snNumber ?? "—"],
             ["Baicells Sales Email", request.salesContactEmail],
-            ["PO Number", request.poNumber],
-            ["Purchase Date", formatLocalDate(request.purchaseDate)],
             ["Last Updated", formatLocalTime(request.updatedAt)],
             ["Target Organization", request.targetOrganization?.name ?? "Pending Provisioning"]
           ]
@@ -179,7 +187,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
         {!loading && editable ? (
           <div className="auth-access-form-grid">
             <label className="auth-modern-field">
-              <span>Business Email</span>
+              <span>{requiredFieldLabel("Business Email")}</span>
               <input
                 className="auth-modern-input"
                 type="email"
@@ -188,7 +196,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>Contact Name</span>
+              <span>{requiredFieldLabel("Contact Name")}</span>
               <input
                 className="auth-modern-input"
                 value={form.contactName ?? ""}
@@ -196,7 +204,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>Company</span>
+              <span>{requiredFieldLabel("Company")}</span>
               <input
                 className="auth-modern-input"
                 value={form.companyName}
@@ -204,7 +212,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>Country / Region</span>
+              <span>{requiredFieldLabel("Country / Region")}</span>
               <input
                 className="auth-modern-input"
                 value={form.countryRegion ?? ""}
@@ -212,7 +220,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>Purchase Date</span>
+              <span>{requiredFieldLabel("History Purchase Date")}</span>
               <input
                 className="auth-modern-input"
                 type="date"
@@ -221,7 +229,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>PO Number</span>
+              <span>{requiredFieldLabel("History PO Number")}</span>
               <input
                 className="auth-modern-input"
                 value={form.poNumber}
@@ -229,7 +237,15 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>Baicells Sales Email</span>
+              <span>{requiredFieldLabel("SN Number")}</span>
+              <input
+                className="auth-modern-input"
+                value={form.snNumber}
+                onChange={(event) => setForm((current) => ({ ...current, snNumber: event.target.value }))}
+              />
+            </label>
+            <label className="auth-modern-field">
+              <span>{requiredFieldLabel("Baicells Sales Email")}</span>
               <input
                 className="auth-modern-input"
                 type="email"
@@ -237,9 +253,8 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
                 onChange={(event) => setForm((current) => ({ ...current, salesContactEmail: event.target.value }))}
               />
             </label>
-            <div />
             <label className="auth-modern-field auth-access-span-2">
-              <span>Purchased Devices</span>
+              <span>{requiredFieldLabel("Purchased Devices")}</span>
               <textarea
                 className="auth-modern-input auth-access-textarea"
                 value={form.deviceInfoText}
@@ -247,7 +262,7 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field auth-access-span-2">
-              <span>Notes</span>
+              <span>Notes (Optional)</span>
               <textarea
                 className="auth-modern-input auth-access-textarea auth-access-textarea-sm"
                 value={form.customerNote ?? ""}

@@ -119,10 +119,13 @@ export function ReviewAccessRequestPage(props: ReviewAccessRequestPageProps) {
 
           <div className="access-admin-kv-grid">
             <div><span>申请邮箱</span><strong>{view.request.applicantEmail}</strong></div>
+            <div><span>联系人</span><strong>{view.request.contactName ?? "—"}</strong></div>
             <div><span>公司</span><strong>{view.request.companyName}</strong></div>
+            <div><span>国家 / 地区</span><strong>{view.request.countryRegion ?? "—"}</strong></div>
+            <div><span>历史 SN 号</span><strong>{view.request.snNumber ?? "—"}</strong></div>
             <div><span>销售邮箱</span><strong>{view.request.salesContactEmail}</strong></div>
-            <div><span>购买时间</span><strong>{formatLocalDate(view.request.purchaseDate)}</strong></div>
-            <div><span>PO 号</span><strong>{view.request.poNumber}</strong></div>
+            <div><span>历史购买时间</span><strong>{formatLocalDate(view.request.purchaseDate)}</strong></div>
+            <div><span>历史 PO 号</span><strong>{view.request.poNumber}</strong></div>
             <div><span>当前审核人</span><strong>{view.viewer.reviewerEmail}</strong></div>
           </div>
 

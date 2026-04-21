@@ -18,6 +18,7 @@ function buildRequest(overrides: Partial<AccessRequestRecord> = {}): AccessReque
     deviceInfoText: "ODU + CPE",
     purchaseDate: "2026-04-21T00:00:00.000Z",
     poNumber: "PO-123",
+    snNumber: "SN-123456",
     salesContactEmail: "sales@baicells.com",
     customerNote: "Need trial",
     adminNote: undefined,
@@ -86,8 +87,12 @@ function createServiceHarness() {
           applicantEmail: input.applicantEmail,
           applicantEmailDomain: input.applicantEmailDomain,
           companyName: input.companyName,
+          contactName: input.contactName,
+          countryRegion: input.countryRegion,
           deviceInfoText: input.deviceInfoText,
+          purchaseDate: input.purchaseDate instanceof Date ? input.purchaseDate.toISOString() : input.purchaseDate ?? undefined,
           poNumber: input.poNumber,
+          snNumber: input.snNumber,
           salesContactEmail: input.salesContactEmail,
           publicToken: input.publicToken,
           lastSubmittedAt: input.lastSubmittedAt instanceof Date ? input.lastSubmittedAt.toISOString() : undefined
@@ -258,9 +263,13 @@ describe("createAccessRequestService", () => {
     await expect(
       service.submitPublicRequest({
         applicantEmail: "trial@163.com",
+        contactName: "Alice",
         companyName: "Example Corp",
+        countryRegion: "Indonesia",
         deviceInfoText: "ODU",
+        purchaseDate: "2026-04-21",
         poNumber: "PO-1",
+        snNumber: "SN-1",
         salesContactEmail: "sales@baicells.com"
       })
     ).rejects.toThrow("business email");

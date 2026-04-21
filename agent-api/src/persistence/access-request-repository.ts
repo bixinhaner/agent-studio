@@ -11,6 +11,7 @@ export type AccessRequestRecord = {
   deviceInfoText: string;
   purchaseDate?: string;
   poNumber: string;
+  snNumber?: string;
   salesContactEmail: string;
   customerNote?: string;
   adminNote?: string;
@@ -49,6 +50,7 @@ export type CreateAccessRequestInput = {
   deviceInfoText: string;
   purchaseDate?: string | Date | null;
   poNumber: string;
+  snNumber?: string | null;
   salesContactEmail: string;
   customerNote?: string | null;
   adminNote?: string | null;
@@ -73,12 +75,13 @@ export type CreateAccessRequestInput = {
   activatedAt?: string | Date | null;
 };
 
-export type UpdateAccessRequestInput = Omit<Partial<CreateAccessRequestInput>, "applicantEmail" | "applicantEmailDomain" | "companyName" | "deviceInfoText" | "poNumber" | "salesContactEmail" | "publicToken"> & {
+export type UpdateAccessRequestInput = Omit<Partial<CreateAccessRequestInput>, "applicantEmail" | "applicantEmailDomain" | "companyName" | "deviceInfoText" | "poNumber" | "snNumber" | "salesContactEmail" | "publicToken"> & {
   applicantEmail?: string;
   applicantEmailDomain?: string;
   companyName?: string;
   deviceInfoText?: string;
   poNumber?: string;
+  snNumber?: string;
   salesContactEmail?: string;
   publicToken?: string;
 };
@@ -96,6 +99,7 @@ type AccessRequestRow = {
   deviceInfoText: string;
   purchaseDate: Date | string | null;
   poNumber: string;
+  snNumber: string | null;
   salesContactEmail: string;
   customerNote: string | null;
   adminNote: string | null;
@@ -170,6 +174,7 @@ function mapRequest(row: AccessRequestRow): AccessRequestRecord {
     deviceInfoText: row.deviceInfoText,
     purchaseDate: toIsoString(row.purchaseDate),
     poNumber: row.poNumber,
+    snNumber: trimOrUndefined(row.snNumber),
     salesContactEmail: row.salesContactEmail,
     customerNote: trimOrUndefined(row.customerNote),
     adminNote: trimOrUndefined(row.adminNote),
@@ -213,6 +218,7 @@ function buildUpdateData(input: UpdateAccessRequestInput): Record<string, unknow
     deviceInfoText: input.deviceInfoText === undefined ? undefined : input.deviceInfoText.trim(),
     purchaseDate: input.purchaseDate === undefined ? undefined : toDate(input.purchaseDate) ?? null,
     poNumber: input.poNumber === undefined ? undefined : input.poNumber.trim(),
+    snNumber: input.snNumber === undefined ? undefined : trimOrUndefined(input.snNumber ?? undefined) ?? null,
     salesContactEmail: input.salesContactEmail === undefined ? undefined : input.salesContactEmail.trim().toLowerCase(),
     customerNote:
       input.customerNote === undefined ? undefined : trimOrUndefined(input.customerNote ?? undefined) ?? null,
@@ -266,6 +272,7 @@ export class AccessRequestRepository {
         deviceInfoText: input.deviceInfoText.trim(),
         purchaseDate: toDate(input.purchaseDate) ?? null,
         poNumber: input.poNumber.trim(),
+        snNumber: trimOrUndefined(input.snNumber ?? undefined) ?? null,
         salesContactEmail: input.salesContactEmail.trim().toLowerCase(),
         customerNote: trimOrUndefined(input.customerNote ?? undefined) ?? null,
         adminNote: trimOrUndefined(input.adminNote ?? undefined) ?? null,

@@ -5,12 +5,13 @@ import type { createAccessRequestService } from "./service.js";
 
 const publicAccessRequestSchema = z.object({
   applicantEmail: z.string().trim().email("Applicant email is invalid"),
-  contactName: z.string().trim().max(120).optional(),
+  contactName: z.string().trim().min(1, "Contact name is required").max(120),
   companyName: z.string().trim().min(1, "Company name is required").max(200),
-  countryRegion: z.string().trim().max(120).optional(),
+  countryRegion: z.string().trim().min(1, "Country / region is required").max(120),
   deviceInfoText: z.string().trim().min(1, "Device info is required").max(4000),
-  purchaseDate: z.string().trim().optional(),
-  poNumber: z.string().trim().min(1, "PO number is required").max(120),
+  purchaseDate: z.string().trim().min(1, "History purchase date is required"),
+  poNumber: z.string().trim().min(1, "History PO number is required").max(120),
+  snNumber: z.string().trim().min(1, "SN number is required").max(120),
   salesContactEmail: z.string().trim().email("Sales contact email is invalid"),
   customerNote: z.string().trim().max(4000).optional()
 });
