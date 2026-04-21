@@ -109,7 +109,6 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [manualInviteToken, setManualInviteToken] = useState("");
   const [emailHint, setEmailHint] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [codeRequested, setCodeRequested] = useState(false);
@@ -154,7 +153,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
 
   const routeInvitePending = props.inviteToken && invite?.status === "pending" ? props.inviteToken : undefined;
   const fallbackEmail = invite?.status === "pending" ? invite.email?.trim() || "" : "";
-  const activeInviteToken = routeInvitePending ?? (manualInviteToken.trim() || undefined);
+  const activeInviteToken = routeInvitePending;
   const resolvedEmail = email.trim() || fallbackEmail;
   const inviteStatusText =
     invite?.status === "pending"
@@ -168,8 +167,8 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   async function handleRequestEmailCode() {
     setFormError(null);
     props.auth.clearError();
-    if (!resolvedEmail && !activeInviteToken) {
-      setFormError("Enter an email address or a valid invite code.");
+    if (!resolvedEmail) {
+      setFormError("Enter your email address.");
       return;
     }
 
@@ -228,8 +227,6 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     }
   }
 
-  const [showInviteField, setShowInviteField] = useState(false);
-
   return (
     <div className="auth-modern-screen">
       <div className="auth-modern-card">
@@ -278,18 +275,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            
-            {showInviteField && !props.inviteToken && (
-              <input
-                className="auth-modern-input"
-                style={{ marginTop: 8 }}
-                type="text"
-                placeholder="Invite token (Optional)"
-                value={manualInviteToken}
-                onChange={(e) => setManualInviteToken(e.target.value)}
-              />
-            )}
-            
+
             <button
               className="auth-modern-primary-btn"
               style={{ marginTop: 8 }}
@@ -298,15 +284,6 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             >
               {requestPending ? "Sending..." : "Continue with Email"}
             </button>
-
-            {!props.inviteToken && !showInviteField && (
-              <button 
-                className="auth-modern-dropdown-link" 
-                onClick={() => setShowInviteField(true)}
-              >
-                Have an invite code?
-              </button>
-            )}
             {!props.inviteToken ? (
               <button className="auth-modern-dropdown-link" onClick={() => replaceLocationPath("/access/apply")}>
                 Apply for Trial Access
@@ -356,7 +333,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             onClick={(event) => event.stopPropagation()}
           >
             <div className="auth-access-modal-head">
-              <h2 id="auth-access-modal-title">No email access found</h2>
+              <h2 id="auth-access-modal-title">Access Not Ready</h2>
               <button
                 type="button"
                 className="auth-access-modal-close"
@@ -367,8 +344,8 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               </button>
             </div>
             <p className="auth-access-modal-copy">
-              If this email already has access, ask your administrator to resend the invite. Otherwise, apply for trial
-              access to start the review process.
+              This email does not have active access yet. Ask your administrator to resend the invite, or apply for
+              trial access.
             </p>
             <div className="auth-access-modal-actions">
               <button
@@ -386,7 +363,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
                 className="auth-modern-primary-btn"
                 onClick={() => setAccessHelpOpen(false)}
               >
-                Stay on Sign In
+                Back to Sign In
               </button>
             </div>
           </div>
