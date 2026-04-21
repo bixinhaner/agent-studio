@@ -2,7 +2,7 @@ import {
   createDefaultSystemSettingsPayload,
   mergeSystemSettingsPayload,
   normalizeSystemSettingsPayload,
-  systemSettingsPayloadPatchSchema,
+  parseSystemSettingsPayloadPatch,
   systemSettingsVersionStatusSchema,
   type SystemSettingsPayload,
   type SystemSettingsPayloadPatch,
@@ -163,7 +163,7 @@ export class SystemSettingsRepository {
   }
 
   async saveDraft(patch: SystemSettingsPayloadPatch): Promise<SystemSettingsVersionRecord> {
-    const normalizedPatch = systemSettingsPayloadPatchSchema.parse(patch);
+    const normalizedPatch = parseSystemSettingsPayloadPatch(patch);
     return withTransaction(this.db, async (tx) => {
       let draft = await getOrCreateDraftRow(tx);
 

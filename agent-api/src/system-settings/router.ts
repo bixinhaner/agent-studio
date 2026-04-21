@@ -3,7 +3,7 @@ import multer, { MulterError } from "multer";
 import { z } from "zod";
 
 import { parseBrandingAssetKind, type BrandingAssetStorage } from "./branding-assets.js";
-import { systemSettingsPayloadPatchSchema } from "./types.js";
+import { parseSystemSettingsPayloadPatch } from "./types.js";
 import type { SystemSettingsState, SystemSettingsService } from "./service.js";
 
 type SystemSettingsRouterOptions = {
@@ -77,7 +77,7 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
       return;
     }
     try {
-      const patch = systemSettingsPayloadPatchSchema.parse(req.body ?? {});
+      const patch = parseSystemSettingsPayloadPatch(req.body ?? {});
       sendState(
         res,
         await options.service.updateDraft({

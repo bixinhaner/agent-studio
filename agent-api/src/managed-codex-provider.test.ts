@@ -109,8 +109,6 @@ describe("ManagedCodexProviderResolver", () => {
                 orgSyncIntervalMinutes: 60
               },
               behavior: {
-                welcomeSummary: "test",
-                usageSummary: "test",
                 markdown: "test",
                 portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
                 portalWelcomeMessageMobile: "Hello there.",
@@ -180,8 +178,6 @@ describe("resolveManagedCodexDefaults", () => {
             orgSyncIntervalMinutes: 60
           },
           behavior: {
-            welcomeSummary: "test",
-            usageSummary: "test",
             markdown: "test",
             portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
             portalWelcomeMessageMobile: "Hello there.",

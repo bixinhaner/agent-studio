@@ -79,8 +79,6 @@ export const systemSettingsOrganizationDefaultsSchema = z.object({
 });
 
 export const systemSettingsBehaviorSchema = z.object({
-  welcomeSummary: z.string().trim().min(1),
-  usageSummary: z.string().trim().min(1),
   markdown: z.string().trim().min(1),
   portalWelcomeMessageDesktop: z.string().trim().min(1),
   portalWelcomeMessageMobile: z.string().trim().min(1),
@@ -195,8 +193,6 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     orgSyncIntervalMinutes: 24 * 60
   },
   behavior: {
-    welcomeSummary: "Use approved resources and modes only.",
-    usageSummary: "New sessions use published platform defaults.",
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",
     portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}. Ask about products, versions, deployment, alarms, or troubleshooting.",
     portalWelcomeMessageMobile: "Ask about products, versions, deployment, alarms, or troubleshooting.",
@@ -229,6 +225,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function sanitizeBehaviorPatch(value: unknown): unknown {
+  if (!isPlainObject(value)) {
+    return value;
+  }
+  const next = { ...value };
+  delete next.welcomeSummary;
+  delete next.usageSummary;
+  return next;
+}
+
+function sanitizeSystemSettingsPayloadLike(value: unknown): Record<string, unknown> {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+  const next = { ...value };
+  if ("behavior" in next) {
+    next.behavior = sanitizeBehaviorPatch(next.behavior);
+  }
+  return next;
+}
+
 function mergePlainObjects(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(patch)) {
@@ -251,7 +268,11 @@ export function mergeSystemSettingsPayload(
   return systemSettingsPayloadSchema.parse(merged);
 }
 
+export function parseSystemSettingsPayloadPatch(value: unknown): SystemSettingsPayloadPatch {
+  return systemSettingsPayloadPatchSchema.parse(sanitizeSystemSettingsPayloadLike(value));
+}
+
 export function normalizeSystemSettingsPayload(value: unknown): SystemSettingsPayload {
-  const patch = systemSettingsPayloadPatchSchema.parse(isPlainObject(value) ? value : {});
+  const patch = parseSystemSettingsPayloadPatch(value);
   return mergeSystemSettingsPayload(createDefaultSystemSettingsPayload(), patch);
 }

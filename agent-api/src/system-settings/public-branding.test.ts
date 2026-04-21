@@ -59,7 +59,8 @@ describe("resolvePublicBranding", () => {
         platformName: "Agent Studio"
       },
       behavior: {
-        welcomeSummary: "test"
+        welcomeSummary: "legacy welcome",
+        usageSummary: "legacy usage"
       }
     });
 
@@ -72,5 +73,7 @@ describe("resolvePublicBranding", () => {
     expect(normalized.behavior.portalWelcomeSuggestions).toEqual(
       defaultPublicBehavior().portalWelcomeSuggestions
     );
+    expect("welcomeSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
+    expect("usageSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
   });
 });

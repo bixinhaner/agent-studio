@@ -1,7 +1,7 @@
 import {
   createDefaultSystemSettingsPayload,
+  normalizeSystemSettingsPayload,
   systemSettingsBrandingSchema,
-  systemSettingsBehaviorSchema,
   type SystemSettingsBranding,
   type SystemSettingsVersionRecord
 } from "./types.js";
@@ -41,11 +41,12 @@ export function defaultPublicBehavior(): PublicBrandingResponse["behavior"] {
 
 export async function resolvePublicBranding(reader: SystemSettingsBrandingReader): Promise<PublicBrandingResponse> {
   const published = await reader.getCurrentPublished().catch(() => undefined);
-  const behavior = systemSettingsBehaviorSchema.parse(
-    published?.payload.behavior ?? createDefaultSystemSettingsPayload().behavior
-  );
+  const payload = published?.payload
+    ? normalizeSystemSettingsPayload(published.payload)
+    : createDefaultSystemSettingsPayload();
+  const behavior = payload.behavior;
   return {
-    branding: systemSettingsBrandingSchema.parse(published?.payload.branding ?? defaultBranding()),
+    branding: systemSettingsBrandingSchema.parse(payload.branding ?? defaultBranding()),
     behavior: {
       portalWelcomeMessageDesktop: behavior.portalWelcomeMessageDesktop,
       portalWelcomeMessageMobile: behavior.portalWelcomeMessageMobile,

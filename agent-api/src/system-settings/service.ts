@@ -1,4 +1,4 @@
-import { systemSettingsPayloadPatchSchema, type SystemSettingsPayloadPatch, type SystemSettingsVersionRecord } from "./types.js";
+import { parseSystemSettingsPayloadPatch, type SystemSettingsPayloadPatch, type SystemSettingsVersionRecord } from "./types.js";
 
 type SystemSettingsRepositoryLike = {
   getOrCreateDraft(): Promise<SystemSettingsVersionRecord>;
@@ -107,7 +107,7 @@ export class SystemSettingsService {
     if (!actorUserId) {
       throw new Error("actorUserId is required");
     }
-    const patch = systemSettingsPayloadPatchSchema.parse(input.patch);
+    const patch = parseSystemSettingsPayloadPatch(input.patch);
     const before = await this.dependencies.repository.getOrCreateDraft();
     const updated = await this.dependencies.repository.saveDraft(patch);
 

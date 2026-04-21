@@ -46,8 +46,6 @@ export function BrandingSettingsView({
   const iconUrlError = getFieldError(fieldErrors, "branding.iconUrl");
   const assistantNameError = getFieldError(fieldErrors, "branding.assistantName");
   const assistantAvatarUrlError = getFieldError(fieldErrors, "branding.assistantAvatarUrl");
-  const welcomeSummaryError = getFieldError(fieldErrors, "behavior.welcomeSummary");
-  const usageSummaryError = getFieldError(fieldErrors, "behavior.usageSummary");
   const markdownError = getFieldError(fieldErrors, "behavior.markdown");
   const portalWelcomeMessageDesktopError = getFieldError(fieldErrors, "behavior.portalWelcomeMessageDesktop");
   const portalWelcomeMessageMobileError = getFieldError(fieldErrors, "behavior.portalWelcomeMessageMobile");
@@ -406,30 +404,6 @@ export function BrandingSettingsView({
         </div>
 
         <div className="resource-center-form-grid">
-          <label className="field">
-            <span className="field-label">欢迎摘要</span>
-            <TextArea
-              autoSize={{ minRows: 3, maxRows: 7 }}
-              value={behavior.welcomeSummary}
-              aria-invalid={Boolean(welcomeSummaryError)}
-              disabled={disabled}
-              onChange={(event) => onBehaviorChange({ welcomeSummary: event.target.value })}
-            />
-            {welcomeSummaryError ? <p className="field-error">{welcomeSummaryError}</p> : null}
-          </label>
-
-          <label className="field">
-            <span className="field-label">使用摘要</span>
-            <TextArea
-              autoSize={{ minRows: 3, maxRows: 7 }}
-              value={behavior.usageSummary}
-              aria-invalid={Boolean(usageSummaryError)}
-              disabled={disabled}
-              onChange={(event) => onBehaviorChange({ usageSummary: event.target.value })}
-            />
-            {usageSummaryError ? <p className="field-error">{usageSummaryError}</p> : null}
-          </label>
-
           <label className="field resource-center-form-span-2">
             <span className="field-label">Markdown 指南</span>
             <TextArea

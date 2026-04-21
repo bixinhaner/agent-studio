@@ -47,8 +47,6 @@ export type SystemSettingsOrganizationDefaults = {
 };
 
 export type SystemSettingsBehavior = {
-  welcomeSummary: string;
-  usageSummary: string;
   markdown: string;
   portalWelcomeMessageDesktop: string;
   portalWelcomeMessageMobile: string;
