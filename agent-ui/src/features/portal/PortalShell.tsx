@@ -275,6 +275,8 @@ type SessionGroupLabelContextValue = {
   groupHeaderByRemoteId: Record<string, string>;
 };
 
+type RunningThreadIdsContextValue = Record<string, boolean>;
+
 const DEFAULT_WORKSPACE = ".";
 
 function resolveShowProcessTracePreference(user?: AuthUser | null): boolean {
@@ -316,12 +318,14 @@ const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity;
   { value: "low", label: "Low" }
 ];
 const DEFAULT_RUNNING_STAGE_TEXT = "Getting ready to answer";
+const PORTAL_RUNNING_LEAVE_WARNING = "There are still running sessions. If you leave, you may lose visibility into their output.";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
 });
+const RunningThreadIdsContext = createContext<RunningThreadIdsContextValue>({});
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 type FeedbackCommentDraftStore = {
@@ -2085,6 +2089,25 @@ function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | und
   };
 }
 
+function isThreadRuntimeRunning(value: unknown): boolean {
+  const runtime = asRecord(value);
+  const messages = Array.isArray(runtime?.messages) ? runtime.messages : [];
+  const lastMessage = messages[messages.length - 1];
+  const message = asRecord(lastMessage);
+  const status = asRecord(message?.status);
+  return message?.role === "assistant" && status?.type === "running";
+}
+
+function areRunningThreadMapsEqual(
+  left: RunningThreadIdsContextValue,
+  right: RunningThreadIdsContextValue
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 function messageTextForSuggestions(message: ThreadMessage): string {
   return message.content
     .map((part) => {
@@ -2688,6 +2711,7 @@ const AgentAssistantMessage: FC = () => {
 const AgentThreadListItem: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
+  const runningThreadIds = useContext(RunningThreadIdsContext);
   const threadItemId = useAuiState((s) => s.threadListItem.id);
   const threadRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
@@ -2698,6 +2722,7 @@ const AgentThreadListItem: FC = () => {
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const remoteId = String(threadRemoteId || "").trim();
+  const isThreadRunning = Boolean(remoteId && runningThreadIds[remoteId]);
   const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
   const threadTitleForFilter = threadTitle.trim() || "New conversation";
 
@@ -2788,6 +2813,9 @@ const AgentThreadListItem: FC = () => {
     <>
       {!sessionSearchQuery && groupLabel ? <p className="session-rail-group-divider">{groupLabel}</p> : null}
       <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
+        <span className="thread-running-indicator-slot" aria-hidden="true">
+          {isThreadRunning ? <span className="thread-running-indicator" /> : null}
+        </span>
         {isRenaming ? (
           <div className="thread-title-edit-wrap" onClick={(event) => event.stopPropagation()}>
             <input
@@ -3675,6 +3703,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
     groupHeaderByRemoteId: {}
   });
+  const [runningThreadIds, setRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
 
   useEffect(() => {
@@ -5379,6 +5408,55 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   });
 
   useEffect(() => {
+    const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
+      | {
+          _hookManager?: { subscribe(callback: () => void): () => void };
+          threadItems?: Record<string, { remoteId?: string }>;
+          getThreadRuntimeCore(threadIdOrRemoteId: string): unknown;
+        }
+      | undefined;
+    const hookManager = threadsCore?._hookManager;
+    if (!threadsCore || !hookManager || typeof hookManager.subscribe !== "function") {
+      setRunningThreadIds((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return undefined;
+    }
+
+    const syncRunningThreadIds = () => {
+      const next: RunningThreadIdsContextValue = {};
+      for (const item of Object.values(threadsCore.threadItems || {})) {
+        const remoteId = typeof item?.remoteId === "string" ? item.remoteId.trim() : "";
+        if (!remoteId || next[remoteId]) continue;
+        try {
+          if (isThreadRuntimeRunning(threadsCore.getThreadRuntimeCore(remoteId))) {
+            next[remoteId] = true;
+          }
+        } catch {
+          // Ignore threads whose runtime is not mounted yet.
+        }
+      }
+      setRunningThreadIds((prev) => (areRunningThreadMapsEqual(prev, next) ? prev : next));
+    };
+
+    syncRunningThreadIds();
+    return hookManager.subscribe(syncRunningThreadIds);
+  }, [runtime]);
+
+  const hasRunningSessions = Object.keys(runningThreadIds).length > 0;
+
+  useEffect(() => {
+    if (!hasRunningSessions || typeof window === "undefined") return undefined;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = PORTAL_RUNNING_LEAVE_WARNING;
+      return PORTAL_RUNNING_LEAVE_WARNING;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasRunningSessions]);
+
+  useEffect(() => {
     if (portalThreadRestoreSettled) return;
     const requestedThreadId = initialLocationThreadIdRef.current.trim();
     if (!requestedThreadId) {
@@ -5569,11 +5647,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         >
                           <SessionSearchContext.Provider value={sessionSearchValue}>
                             <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
-                              <ThreadList.Items
-                                components={{
-                                  ThreadListItem: AgentThreadListItem as any
-                                }}
-                              />
+                              <RunningThreadIdsContext.Provider value={runningThreadIds}>
+                                <ThreadList.Items
+                                  components={{
+                                    ThreadListItem: AgentThreadListItem as any
+                                  }}
+                                />
+                              </RunningThreadIdsContext.Provider>
                             </SessionGroupLabelContext.Provider>
                           </SessionSearchContext.Provider>
                         </SessionRail>
@@ -5651,19 +5731,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                                 )}
                               </div>
                             }
-                          >
-                            <SessionSearchContext.Provider value={sessionSearchValue}>
-                              <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+                        >
+                          <SessionSearchContext.Provider value={sessionSearchValue}>
+                            <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
+                              <RunningThreadIdsContext.Provider value={runningThreadIds}>
                                 <ThreadList.Items
                                   components={{
                                     ThreadListItem: AgentThreadListItem as any
                                   }}
                                 />
-                              </SessionGroupLabelContext.Provider>
-                            </SessionSearchContext.Provider>
-                          </SessionRail>
-                        </ThreadList.Root>
-                      </Panel>
+                              </RunningThreadIdsContext.Provider>
+                            </SessionGroupLabelContext.Provider>
+                          </SessionSearchContext.Provider>
+                        </SessionRail>
+                      </ThreadList.Root>
+                    </Panel>
                       <PanelResizeHandle className="Resizer" />
                     </>
                   )}

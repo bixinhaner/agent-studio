@@ -432,10 +432,11 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aut
 
   const openAdmin = adminEligible
     ? () => {
-        if (typeof window !== "undefined" && !window.location.hash.startsWith(ADMIN_HASH_PREFIX)) {
-          replaceLocationHash(`${ADMIN_HASH_PREFIX}overview`);
-        }
-        setView("admin");
+        if (typeof window === "undefined") return;
+        const nextUrl = new URL(window.location.href);
+        nextUrl.hash = `${ADMIN_HASH_PREFIX}overview`;
+        const nextWindow = window.open(nextUrl.toString(), "_blank", "noopener,noreferrer");
+        nextWindow?.focus?.();
       }
     : undefined;
 
