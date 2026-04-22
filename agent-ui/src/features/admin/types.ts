@@ -139,11 +139,20 @@ export type AdminConversationTranscriptAttachment = {
   contentUrl: string | null;
 };
 
+export type AdminConversationTranscriptProcessRow = {
+  id: string;
+  kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
+  title: string;
+  detail?: string;
+  at?: string;
+};
+
 export type AdminConversationTranscriptMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
   text: string;
   attachments: AdminConversationTranscriptAttachment[];
+  processRows?: AdminConversationTranscriptProcessRow[];
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;

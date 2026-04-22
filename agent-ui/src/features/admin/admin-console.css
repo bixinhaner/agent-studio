@@ -1371,6 +1371,29 @@
   background: #2c2c2e;
 }
 
+.admin-chat-bubble-footer {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.admin-conversation-trace-btn {
+  padding-inline: 8px !important;
+  border-radius: 999px !important;
+  color: var(--admin-color-subtle) !important;
+  background: rgba(15, 23, 42, 0.04) !important;
+}
+
+.admin-conversation-trace-btn:hover {
+  color: var(--admin-color-accent) !important;
+  background: rgba(0, 102, 255, 0.08) !important;
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-trace-btn {
+  color: rgba(255, 255, 255, 0.86) !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+
 .admin-chat-meta {
   font-size: 11px;
   color: var(--admin-color-subtle);
@@ -1502,6 +1525,36 @@
   display: grid;
   gap: 10px;
   margin-top: 12px;
+}
+
+.admin-conversation-trace-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-conversation-trace-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: var(--admin-color-subtle);
+}
+
+.admin-conversation-trace-panel {
+  margin-top: 0;
+}
+
+.admin-conversation-trace-timeline {
+  max-height: min(68vh, 760px);
+}
+
+.admin-conversation-trace-detail {
+  margin: 6px 10px 10px;
+}
+
+.admin-conversation-trace-detail .conversation-audit-markdown {
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .admin-conversation-file-card {

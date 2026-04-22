@@ -108,6 +108,13 @@ type ConversationTranscriptMessage = {
     relativePath: string | null;
     contentUrl: string | null;
   }>;
+  processRows?: Array<{
+    id: string;
+    kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
+    title: string;
+    detail?: string;
+    at?: string;
+  }>;
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
@@ -242,6 +249,16 @@ type UploadedFileHint = {
 
 const UPLOADED_FILE_TAG_PATTERN = /<uploaded_file\s+([^>]+)>/gi;
 const UPLOADED_FILE_ATTR_PATTERN = /([a-zA-Z_][\w-]*)=("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s>]+)/g;
+const PROCESS_KINDS = new Set<NonNullable<ConversationTranscriptMessage["processRows"]>[number]["kind"]>([
+  "reasoning",
+  "tool",
+  "source",
+  "meta",
+  "process",
+  "done",
+  "error",
+  "debug"
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -413,6 +430,129 @@ function resolveThreadFileAbsolutePath(input: {
     throw new Error("File path is outside the thread workspace");
   }
   return candidate;
+}
+
+function normalizeProcessKind(
+  value: unknown
+): NonNullable<ConversationTranscriptMessage["processRows"]>[number]["kind"] {
+  const raw = trimOrUndefined(value) ?? "";
+  return PROCESS_KINDS.has(raw as NonNullable<ConversationTranscriptMessage["processRows"]>[number]["kind"])
+    ? (raw as NonNullable<ConversationTranscriptMessage["processRows"]>[number]["kind"])
+    : "process";
+}
+
+function sanitizeProcessTitle(value: unknown, fallback = "Process event"): string {
+  return trimOrUndefined(value) ?? fallback;
+}
+
+function stringifyProcessValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function sanitizeProcessDetail(value: unknown): string | undefined {
+  const detail = trimOrUndefined(typeof value === "string" ? value : stringifyProcessValue(value));
+  return detail || undefined;
+}
+
+function sanitizeProcessAt(value: unknown): string | undefined {
+  return trimOrUndefined(value);
+}
+
+function extractTraceBatchProcessRows(
+  part: Record<string, unknown>
+): NonNullable<ConversationTranscriptMessage["processRows"]> {
+  if (trimOrUndefined(part.type) !== "data" || trimOrUndefined(part.name) !== "codex_trace_batch") {
+    return [];
+  }
+
+  const data = asRecord(part.data);
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  return rows
+    .map((entry, index) => {
+      const row = asRecord(entry);
+      if (!row) return null;
+      return {
+        id: trimOrUndefined(row.id) ?? `process-row-${index + 1}`,
+        kind: normalizeProcessKind(row.kind),
+        title: sanitizeProcessTitle(row.title),
+        detail: sanitizeProcessDetail(row.detail),
+        at: sanitizeProcessAt(row.at)
+      };
+    })
+    .filter(Boolean) as NonNullable<ConversationTranscriptMessage["processRows"]>;
+}
+
+function extractFallbackProcessRows(
+  parts: unknown
+): NonNullable<ConversationTranscriptMessage["processRows"]> {
+  if (!Array.isArray(parts)) return [];
+  const rows: NonNullable<ConversationTranscriptMessage["processRows"]> = [];
+
+  for (const [index, entry] of parts.entries()) {
+    const part = asRecord(entry);
+    if (!part) continue;
+    const type = trimOrUndefined(part.type) ?? "";
+
+    if (type === "reasoning") {
+      const detail = sanitizeProcessDetail(part.text);
+      if (!detail) continue;
+      rows.push({
+        id: trimOrUndefined(part.id) ?? `process-row-${index + 1}`,
+        kind: "reasoning",
+        title: "Reasoning summary",
+        detail
+      });
+      continue;
+    }
+
+    if (type === "tool-call") {
+      const toolName = trimOrUndefined(part.toolName) ?? "tool";
+      const argsText = sanitizeProcessDetail(part.argsText);
+      const resultText = sanitizeProcessDetail(part.result);
+      rows.push({
+        id: trimOrUndefined(part.toolCallId) ?? `process-row-${index + 1}`,
+        kind: "tool",
+        title: `Tool call · ${toolName}`,
+        detail: [argsText, resultText].filter(Boolean).join("\n\n") || undefined
+      });
+      continue;
+    }
+
+    if (type === "data" && trimOrUndefined(part.name) === "codex_process") {
+      const data = asRecord(part.data);
+      if (!data) continue;
+      rows.push({
+        id: trimOrUndefined(part.id) ?? `process-row-${index + 1}`,
+        kind: normalizeProcessKind(data.kind),
+        title: sanitizeProcessTitle(data.title),
+        detail: sanitizeProcessDetail(data.detail),
+        at: sanitizeProcessAt(data.at)
+      });
+    }
+  }
+
+  return rows;
+}
+
+export function extractMessageProcessRows(
+  message: unknown
+): NonNullable<ConversationTranscriptMessage["processRows"]> {
+  const obj = asRecord(message);
+  const parts = Array.isArray(obj?.content) ? obj.content : [];
+  const traceRows = parts.flatMap((entry) => {
+    const part = asRecord(entry);
+    return part ? extractTraceBatchProcessRows(part) : [];
+  });
+  if (traceRows.length > 0) {
+    return traceRows;
+  }
+  return extractFallbackProcessRows(parts);
 }
 
 function summarizeText(value: string | null | undefined, limit = 180): string | null {
@@ -751,16 +891,20 @@ function attachmentPreviewText(attachments: ConversationTranscriptMessage["attac
 }
 
 function transcriptPreviewText(message: ConversationTranscriptMessage): string {
-  return trimOrUndefined(message.text) ?? attachmentPreviewText(message.attachments);
+  const processPreview = message.processRows?.[message.processRows.length - 1]?.title;
+  return trimOrUndefined(message.text) ?? attachmentPreviewText(message.attachments) ?? trimOrUndefined(processPreview) ?? "";
 }
 
 function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: number): ConversationTranscriptMessage {
   const id = extractMessageId(item.message, `message-${index + 1}`);
+  const role = extractMessageRole(item.message);
+  const processRows = role === "assistant" ? extractMessageProcessRows(item.message) : [];
   return {
     id,
-    role: extractMessageRole(item.message),
+    role,
     text: extractMessageText(item.message),
     attachments: extractMessageAttachments(threadId, item.message, id),
+    ...(processRows.length > 0 ? { processRows } : {}),
     parentId: item.parentId ?? null,
     createdAt: extractMessageCreatedAt(item.message),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)

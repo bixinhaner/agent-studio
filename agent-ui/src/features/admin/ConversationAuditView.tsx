@@ -1,4 +1,4 @@
-import { Alert, Button, Empty, Input, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs } from "antd";
+import { Alert, Button, Empty, Input, Modal, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs } from "antd";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -48,6 +48,7 @@ import type {
   AdminConversationStatusFilter,
   AdminConversationSummary,
   AdminConversationTranscriptAttachment,
+  AdminConversationTranscriptProcessRow,
   AdminConversationTranscriptMessage,
   AdminConversationUser,
   AdminProductFeedbackDetailResponse,
@@ -185,6 +186,17 @@ function attachmentKindLabel(kind: AdminConversationTranscriptAttachment["kind"]
   if (kind === "image") return "图片";
   if (kind === "document") return "文档";
   return "文件";
+}
+
+function processKindLabel(kind: AdminConversationTranscriptProcessRow["kind"]): string {
+  if (kind === "reasoning") return "思考";
+  if (kind === "tool") return "工具";
+  if (kind === "source") return "来源";
+  if (kind === "meta") return "准备";
+  if (kind === "done") return "完成";
+  if (kind === "error") return "错误";
+  if (kind === "debug") return "调试";
+  return "步骤";
 }
 
 function decodeMaybeUri(value: string): string {
@@ -432,38 +444,119 @@ function TranscriptAttachmentList(props: { attachments: AdminConversationTranscr
   );
 }
 
+function TranscriptProcessModal(props: {
+  open: boolean;
+  onClose(): void;
+  role: AdminConversationTranscriptMessage["role"];
+  createdAt: string | null;
+  processRows: AdminConversationTranscriptProcessRow[];
+}) {
+  const processRows = props.processRows;
+  return (
+    <Modal
+      open={props.open}
+      onCancel={props.onClose}
+      footer={null}
+      width={920}
+      title="助手处理过程"
+      destroyOnHidden
+    >
+      <div className="admin-conversation-trace-modal">
+        <div className="admin-conversation-trace-header">
+          <span>{roleLabel(props.role)}</span>
+          <span>{formatLocalDateTime(props.createdAt)}</span>
+          <span>{processRows.length} 条过程记录</span>
+        </div>
+        <div className="trace-panel admin-conversation-trace-panel">
+          <ol className="trace-timeline admin-conversation-trace-timeline">
+            {processRows.map((row, index) => {
+              const shouldOpen = row.kind === "error" || index === processRows.length - 1;
+              return (
+                <li key={row.id || `trace-row-${index + 1}`} className="trace-line">
+                  <span className={`trace-node trace-node-${row.kind} ${shouldOpen ? "trace-node-active" : ""}`} />
+                  <details className={`trace-card trace-step ${shouldOpen ? "trace-step-active" : ""}`} open={shouldOpen}>
+                    <summary className="trace-card-head trace-step-summary">
+                      <span className={`trace-pill trace-pill-${row.kind}`}>{processKindLabel(row.kind)}</span>
+                      <span className="trace-item-title">{row.title}</span>
+                      {row.at ? <span className="trace-item-time">{formatLocalDateTime(row.at)}</span> : null}
+                    </summary>
+                    {row.detail ? (
+                      <div className="admin-conversation-trace-detail">
+                        <ConversationAuditMarkdown text={row.detail} />
+                      </div>
+                    ) : null}
+                  </details>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
   onMount(node: HTMLElement | null): void;
 }) {
+  const [processModalOpen, setProcessModalOpen] = useState(false);
   const isUser = props.message.role === "user";
   const isAssistant = props.message.role === "assistant";
   const attachmentCount = props.message.attachments.length;
+  const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
   
   // Exclude system/tool for cleaner view unless needed
-  if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0) return null;
+  if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0) return null;
 
   return (
-    <div 
-      className={`admin-chat-bubble-container ${isUser ? 'is-user' : 'is-assistant'}`} 
-      ref={props.onMount}
-    >
-      <div className="admin-chat-meta">
-        {roleLabel(props.message.role)} • {formatLocalDateTime(props.message.createdAt)}
+    <>
+      <div
+        className={`admin-chat-bubble-container ${isUser ? 'is-user' : 'is-assistant'}`}
+        ref={props.onMount}
+      >
+        <div className="admin-chat-meta">
+          {roleLabel(props.message.role)} • {formatLocalDateTime(props.message.createdAt)}
+        </div>
+        <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
+          {props.message.text ? (
+            <ConversationAuditMarkdown text={props.message.text} />
+          ) : (
+            <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
+              {attachmentCount > 0
+                ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述`
+                : processRows.length > 0
+                  ? "本条助手回复主要包含处理过程，未输出独立正文"
+                  : "[无文本内容]"}
+            </span>
+          )}
+          <TranscriptAttachmentList attachments={props.message.attachments} />
+          {isAssistant && processRows.length > 0 ? (
+            <div className="admin-chat-bubble-footer">
+              <Button
+                type="text"
+                size="small"
+                className="admin-conversation-trace-btn"
+                onClick={() => setProcessModalOpen(true)}
+              >
+                查看过程 · {processRows.length}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        {props.message.hasRunConfig && <Tag style={{ marginTop: 4 }}>配置运行参数</Tag>}
       </div>
-      <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
-        {props.message.text ? (
-          <ConversationAuditMarkdown text={props.message.text} />
-        ) : (
-          <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
-            {attachmentCount > 0 ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述` : "[无文本内容]"}
-          </span>
-        )}
-        <TranscriptAttachmentList attachments={props.message.attachments} />
-      </div>
-      {props.message.hasRunConfig && <Tag style={{ marginTop: 4 }}>配置运行参数</Tag>}
-    </div>
+      {isAssistant && processRows.length > 0 ? (
+        <TranscriptProcessModal
+          open={processModalOpen}
+          onClose={() => setProcessModalOpen(false)}
+          role={props.message.role}
+          createdAt={props.message.createdAt}
+          processRows={processRows}
+        />
+      ) : null}
+    </>
   );
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractMessageAttachments, extractMessageText } from "./conversation-audit-router.js";
+import { extractMessageAttachments, extractMessageProcessRows, extractMessageText } from "./conversation-audit-router.js";
 
 describe("extractMessageText", () => {
   it("appends process error details when regular text content is already present", () => {
@@ -144,6 +144,79 @@ describe("extractMessageAttachments", () => {
         path: null,
         relativePath: null,
         contentUrl: null
+      }
+    ]);
+  });
+});
+
+describe("extractMessageProcessRows", () => {
+  it("prefers structured trace batch rows when present", () => {
+    const rows = extractMessageProcessRows({
+      role: "assistant",
+      content: [
+        {
+          type: "data",
+          name: "codex_trace_batch",
+          data: {
+            rows: [
+              { id: "row-1", kind: "reasoning", title: "分析需求", detail: "先确认问题范围", at: "2026-04-22T09:00:00.000Z" },
+              { id: "row-2", kind: "tool", title: "Tool call · rg", detail: "rg -n attachment", at: "2026-04-22T09:00:02.000Z" }
+            ]
+          }
+        },
+        {
+          type: "reasoning",
+          text: "这条不应覆盖 trace batch"
+        }
+      ]
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "row-1",
+        kind: "reasoning",
+        title: "分析需求",
+        detail: "先确认问题范围",
+        at: "2026-04-22T09:00:00.000Z"
+      },
+      {
+        id: "row-2",
+        kind: "tool",
+        title: "Tool call · rg",
+        detail: "rg -n attachment",
+        at: "2026-04-22T09:00:02.000Z"
+      }
+    ]);
+  });
+
+  it("falls back to reasoning, tool-call and codex_process parts", () => {
+    const rows = extractMessageProcessRows({
+      role: "assistant",
+      content: [
+        { type: "reasoning", id: "reason-1", text: "先检查管理台 transcript 数据结构" },
+        { type: "tool-call", toolCallId: "tool-1", toolName: "rg", argsText: "rg -n processRows", result: { ok: true } },
+        { type: "data", id: "proc-1", name: "codex_process", data: { kind: "done", title: "分析完成", detail: "已定位问题根因" } }
+      ]
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "reason-1",
+        kind: "reasoning",
+        title: "Reasoning summary",
+        detail: "先检查管理台 transcript 数据结构"
+      },
+      {
+        id: "tool-1",
+        kind: "tool",
+        title: "Tool call · rg",
+        detail: "rg -n processRows\n\n{\n  \"ok\": true\n}"
+      },
+      {
+        id: "proc-1",
+        kind: "done",
+        title: "分析完成",
+        detail: "已定位问题根因"
       }
     ]);
   });
