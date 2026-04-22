@@ -166,6 +166,32 @@
   cursor: not-allowed;
 }
 
+.auth-modern-accent-btn {
+  width: 100%;
+  height: 48px;
+  background: #FF4614;
+  color: #fff;
+  border: 1px solid #FF4614;
+  border-radius: 16px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.auth-modern-accent-btn:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.auth-modern-accent-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.auth-modern-accent-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .auth-modern-hint {
   font-size: 14px;
   color: var(--admin-color-subtle, #666);

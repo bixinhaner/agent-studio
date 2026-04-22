@@ -163,7 +163,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const isInviteFlow = Boolean(props.inviteToken);
   const isInternalMode = props.mode === "internal" && !isInviteFlow;
   const title = isInternalMode ? `${branding.platformName} Internal` : branding.platformName;
-  const eyebrow = isInviteFlow ? "Customer Invite" : isInternalMode ? "Internal Employee Sign-In" : "Customer & Partner Access";
+  const eyebrow = isInviteFlow ? "Customer Invite" : isInternalMode ? "Internal Employee Sign-In" : "";
   const subtitle = isInviteFlow
     ? "Use your work email to accept the invitation and enter your organization."
     : isInternalMode
@@ -245,7 +245,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
     <div className="auth-modern-screen">
       <div className="auth-modern-card">
         <div className="auth-modern-header">
-          <p className="auth-modern-kicker">{eyebrow}</p>
+          {eyebrow ? <p className="auth-modern-kicker">{eyebrow}</p> : null}
           <BrandMark
             className="auth-modern-brand-mark"
             imageClassName="auth-modern-brand-image"
@@ -281,7 +281,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             />
 
             <button
-              className="auth-modern-primary-btn"
+              className="auth-modern-accent-btn"
               style={{ marginTop: 8 }}
               disabled={requestPending}
               onClick={() => void handleRequestEmailCode()}
@@ -322,8 +322,8 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               autoFocus
             />
             <button
-              className="auth-modern-primary-btn"
-              style={{ marginTop: 12, background: '#FF4614', color: '#fff', borderColor: '#FF4614' }}
+              className="auth-modern-accent-btn"
+              style={{ marginTop: 12 }}
               disabled={verifyPending}
               onClick={() => void handleVerifyEmailCode()}
             >
