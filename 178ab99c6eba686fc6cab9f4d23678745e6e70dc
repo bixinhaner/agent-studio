@@ -1,0 +1,9 @@
+Verification:
+- npm run build passed in agent-api
+- vitest run src/managed-codex-provider.test.ts src/auth/dingtalk.test.ts passed
+- CodexRuntime sandbox probe passed for bash, python3, rg, sed, find, workspace writes, additionalDirectories writes, and blocked unauthorized sibling writes
+- Direct codex sandbox linux --full-auto probe passed
+- Production health check https://celix.baicells.com/healthz returned 200
+
+Operational note:
+- Ubuntu AppArmor profile /etc/apparmor.d/agent-studio-codex was installed outside the repository so Codex 0.122 bubblewrap sandbox can create user namespaces without using deprecated legacy Landlock.
