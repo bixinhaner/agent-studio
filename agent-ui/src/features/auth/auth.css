@@ -1,46 +1,87 @@
 .auth-modern-screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background-color: var(--admin-color-panel, #f8fafc);
+  background-color: #18110d;
   background-image:
-    radial-gradient(circle at 15% 50%, rgba(255, 70, 20, 0.08), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(0, 112, 243, 0.05), transparent 25%),
-    linear-gradient(rgba(17, 24, 39, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(17, 24, 39, 0.03) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
-  background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+    linear-gradient(102deg, rgba(18, 12, 10, 0.86) 0%, rgba(43, 26, 18, 0.58) 24%, rgba(82, 51, 35, 0.18) 44%, rgba(255, 245, 235, 0.08) 66%, rgba(255, 249, 244, 0.14) 100%),
+    radial-gradient(circle at 20% 24%, rgba(255, 192, 109, 0.26), transparent 30%),
+    radial-gradient(circle at 74% 72%, rgba(255, 109, 47, 0.18), transparent 28%),
+    radial-gradient(circle at 92% 12%, rgba(255, 255, 255, 0.18), transparent 18%),
+    url("/celix-auth-background.png");
+  background-size: auto, auto, auto, auto, cover;
+  background-position: center, center, center, center, center center;
+  background-repeat: no-repeat;
   color: var(--admin-color-text, #111827);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   position: relative;
+  isolation: isolate;
   overflow: hidden;
 }
 
+.auth-modern-screen::before,
+.auth-modern-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.auth-modern-screen::before {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    radial-gradient(circle at 78% 25%, rgba(255, 255, 255, 0.32) 0, rgba(255, 255, 255, 0.12) 2px, transparent 3px),
+    radial-gradient(circle at 86% 17%, rgba(255, 255, 255, 0.26) 0, rgba(255, 255, 255, 0.1) 2px, transparent 3px),
+    radial-gradient(circle at 89% 31%, rgba(255, 255, 255, 0.22) 0, rgba(255, 255, 255, 0.08) 2px, transparent 3px);
+  background-size: 42px 42px, 42px 42px, auto, auto, auto;
+  background-position: -1px -1px, -1px -1px, center, center, center;
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.18) 50%, rgba(0, 0, 0, 0.9) 78%, rgba(0, 0, 0, 0.95) 100%);
+  opacity: 0.16;
+}
+
+.auth-modern-screen::after {
+  background:
+    linear-gradient(180deg, rgba(11, 8, 6, 0.16) 0%, rgba(11, 8, 6, 0.02) 18%, rgba(11, 8, 6, 0.28) 100%),
+    radial-gradient(circle at 12% 50%, rgba(0, 0, 0, 0.36), transparent 44%),
+    radial-gradient(circle at 88% 50%, rgba(255, 214, 178, 0.12), transparent 24%);
+  mix-blend-mode: normal;
+}
+
+.auth-modern-screen > * {
+  position: relative;
+  z-index: 1;
+}
+
 .dark .auth-modern-screen {
-  background-color: #030712;
+  background-color: #0b0a09;
   background-image:
-    radial-gradient(circle at 15% 50%, rgba(255, 70, 20, 0.15), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(0, 112, 243, 0.08), transparent 25%),
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(102deg, rgba(8, 6, 5, 0.92) 0%, rgba(20, 14, 11, 0.84) 28%, rgba(40, 27, 22, 0.52) 48%, rgba(64, 42, 30, 0.24) 64%, rgba(255, 239, 228, 0.08) 100%),
+    radial-gradient(circle at 22% 22%, rgba(255, 162, 79, 0.18), transparent 30%),
+    radial-gradient(circle at 78% 72%, rgba(255, 109, 47, 0.18), transparent 28%),
+    url("/celix-auth-background.png");
+  background-size: auto, auto, auto, cover;
+  background-position: center, center, center, center;
   color: #f9fafb;
 }
 
 .auth-modern-card {
   width: 100%;
   max-width: 440px;
-  background: var(--admin-color-surface-solid, rgba(255, 255, 255, 0.8));
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 251, 247, 0.78) 100%);
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  border: 1px solid rgba(255, 255, 255, 0.58);
   border-radius: 24px;
   padding: 48px 40px;
   box-shadow:
-    0 20px 40px -10px rgba(0, 0, 0, 0.08),
-    0 1px 3px rgba(0,0,0,0.03),
-    inset 0 1px 1px rgba(255, 255, 255, 0.8);
+    0 32px 60px -24px rgba(0, 0, 0, 0.48),
+    0 12px 28px rgba(30, 17, 11, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -49,11 +90,11 @@
 }
 
 .dark .auth-modern-card {
-  background: rgba(17, 24, 39, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(19, 16, 14, 0.84) 0%, rgba(12, 10, 9, 0.74) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 20px 40px -10px rgba(0, 0, 0, 0.5),
-    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+    0 36px 72px -24px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .auth-modern-header {
@@ -78,12 +119,14 @@
 }
 
 .auth-modern-brand-mark {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #FF4614 0%, #FF6b42 100%);
-  box-shadow: 0 4px 12px rgba(255, 70, 20, 0.3), inset 0 1px 1px rgba(255,255,255,0.3);
-  color: #ffffff;
+  width: 136px;
+  height: 52px;
+  padding: 0 10px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  color: #111827;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -96,7 +139,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: #ffffff;
+  background: transparent;
 }
 
 .auth-modern-logo {
@@ -406,11 +449,17 @@
 @media (max-width: 768px) {
   .auth-modern-screen {
     padding: 16px;
-    background-size: 150% 150%, 150% 150%, 32px 32px, 32px 32px;
+    background-image:
+      linear-gradient(180deg, rgba(18, 12, 10, 0.52) 0%, rgba(18, 12, 10, 0.2) 18%, rgba(18, 12, 10, 0.62) 100%),
+      radial-gradient(circle at 18% 18%, rgba(255, 192, 109, 0.2), transparent 26%),
+      url("/celix-auth-background.png");
+    background-size: auto, auto, cover;
+    background-position: center, center, 60% center;
   }
   .auth-modern-card {
     padding: 32px 24px;
     border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 250, 245, 0.86) 100%);
   }
   .auth-access-modal {
     border-radius: 20px;
@@ -419,7 +468,27 @@
   .auth-modern-logo {
     font-size: 24px;
   }
+  .auth-modern-brand-mark {
+    width: 118px;
+    height: 48px;
+  }
   .auth-modern-subtitle {
     font-size: 14px;
+  }
+  .auth-modern-screen::before {
+    opacity: 0.08;
+    mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.18) 42%, rgba(0, 0, 0, 0.9) 100%);
+  }
+}
+
+@media (max-width: 520px) {
+  .auth-modern-screen {
+    background-position: center, center, 64% center;
+  }
+  .auth-modern-card {
+    padding: 28px 20px;
+    box-shadow:
+      0 24px 48px -24px rgba(0, 0, 0, 0.46),
+      0 10px 22px rgba(30, 17, 11, 0.16);
   }
 }

@@ -10,7 +10,7 @@ type BrandMarkProps = {
 
 export function getBrandInitials(name: string): string {
   const normalized = name.trim();
-  if (!normalized) return "AS";
+  if (!normalized) return "CX";
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length >= 2) {
     return words.slice(0, 2).map((word) => Array.from(word)[0]?.toUpperCase() || "").join("");

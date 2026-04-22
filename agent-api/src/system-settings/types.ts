@@ -42,7 +42,7 @@ export const systemSettingsBrandingSchema = z.object({
   externalLoginCopy: z.string().trim().min(1),
   logoUrl: brandAssetRefOrEmptySchema,
   iconUrl: brandAssetRefOrEmptySchema,
-  assistantName: z.string().trim().min(1).default("Baicells AI Assistant"),
+  assistantName: z.string().trim().min(1).default("Celix AI Assistant"),
   assistantAvatarUrl: brandAssetRefOrEmptySchema.default("")
 });
 
@@ -160,13 +160,13 @@ export type DeepPartial<T> = T extends readonly (infer U)[]
 
 export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   branding: {
-    platformName: "Agent Studio",
+    platformName: "Celix",
     headerSubtitle: "Enterprise Agent Platform",
     internalLoginCopy: "Sign in with DingTalk to continue.",
-    externalLoginCopy: "Sign in with your work email or apply for trial access.",
-    logoUrl: "",
-    iconUrl: "",
-    assistantName: "Baicells AI Assistant",
+    externalLoginCopy: "Welcome to the intelligent agent world of Celix.",
+    logoUrl: "/celix-logo.png",
+    iconUrl: "/celix-icon.png",
+    assistantName: "Celix AI Assistant",
     assistantAvatarUrl: ""
   },
   platformDefaults: {

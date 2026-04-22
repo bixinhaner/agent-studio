@@ -27,13 +27,13 @@ export type PublicBrandingResponse = {
 };
 
 export const DEFAULT_BRANDING: PublicBranding = {
-  platformName: "Agent Studio",
+  platformName: "Celix",
   headerSubtitle: "Enterprise Agent Platform",
   internalLoginCopy: "Sign in with DingTalk to continue.",
-  externalLoginCopy: "Sign in with your work email or apply for trial access.",
-  logoUrl: "",
-  iconUrl: "",
-  assistantName: "Baicells AI Assistant",
+  externalLoginCopy: "Welcome to the intelligent agent world of Celix.",
+  logoUrl: "/celix-logo.png",
+  iconUrl: "/celix-icon.png",
+  assistantName: "Celix AI Assistant",
   assistantAvatarUrl: ""
 };
 

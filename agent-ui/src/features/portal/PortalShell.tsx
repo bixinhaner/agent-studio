@@ -4332,7 +4332,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const welcomeMessage =
     applyPortalWelcomeTemplate(welcomeMessageTemplate, {
       assistantName: assistantDisplayName,
-      platformName: branding.platformName.trim() || "Agent Studio"
+      platformName: branding.platformName.trim() || "Celix"
     }) ||
     (isMobile
       ? "Ask about products, versions, deployment, alarms, or troubleshooting."
