@@ -80,6 +80,7 @@ export type AdminConversationSummary = {
     userMessageCount: number;
     assistantMessageCount: number;
     feedbackCount: number;
+    userAttachmentCount: number;
   };
   preview: {
     firstUserText: string | null;
@@ -127,10 +128,22 @@ export type AdminConversationListResponse = {
   conversations: AdminConversationSummary[];
 };
 
+export type AdminConversationTranscriptAttachment = {
+  id: string;
+  kind: "image" | "document" | "file";
+  name: string;
+  mimeType: string | null;
+  bytes: number | null;
+  path: string | null;
+  relativePath: string | null;
+  contentUrl: string | null;
+};
+
 export type AdminConversationTranscriptMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
   text: string;
+  attachments: AdminConversationTranscriptAttachment[];
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;

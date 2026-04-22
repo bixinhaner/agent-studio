@@ -1498,6 +1498,12 @@
   background: rgba(3, 7, 18, 0.72);
 }
 
+.admin-conversation-attachment-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .admin-conversation-file-card {
   display: flex;
   align-items: center;
@@ -1553,6 +1559,12 @@
   word-break: break-word;
 }
 
+.admin-conversation-file-extra {
+  font-size: 11px;
+  color: var(--admin-color-subtle);
+  word-break: break-word;
+}
+
 .admin-conversation-file-path {
   font-size: 11px;
   color: var(--admin-color-subtle);
@@ -1561,6 +1573,10 @@
 
 .admin-chat-bubble-container.is-user .admin-conversation-file-path {
   color: rgba(255, 255, 255, 0.76);
+}
+
+.admin-chat-bubble-container.is-user .admin-conversation-file-extra {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .admin-conversation-file-btn {

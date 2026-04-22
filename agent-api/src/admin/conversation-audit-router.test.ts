@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractMessageText } from "./conversation-audit-router.js";
+import { extractMessageAttachments, extractMessageText } from "./conversation-audit-router.js";
 
 describe("extractMessageText", () => {
   it("appends process error details when regular text content is already present", () => {
@@ -73,5 +73,78 @@ describe("extractMessageText", () => {
     };
 
     expect(extractMessageText(message)).toBe("");
+  });
+});
+
+describe("extractMessageAttachments", () => {
+  it("extracts uploaded attachment metadata from persisted attachment hints", () => {
+    const attachments = extractMessageAttachments(
+      "thread-123",
+      {
+        role: "user",
+        attachments: [
+          {
+            type: "document",
+            name: "report.pdf",
+            contentType: "application/pdf",
+            content: [
+              {
+                type: "text",
+                text: [
+                  '<uploaded_file name="report.pdf" path="/tmp/workspace/.uploads/171-report.pdf" relativePath="171-report.pdf" mimeType="application/pdf" bytes=2048>',
+                  "The file has been uploaded to the workspace.",
+                  "</uploaded_file>"
+                ].join("\n")
+              }
+            ]
+          }
+        ]
+      },
+      "message-1"
+    );
+
+    expect(attachments).toEqual([
+      {
+        id: "message-1-attachment-1-1",
+        kind: "document",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        bytes: 2048,
+        path: "/tmp/workspace/.uploads/171-report.pdf",
+        relativePath: "171-report.pdf",
+        contentUrl: "/api/admin/conversations/thread-123/files/content?relative_path=171-report.pdf"
+      }
+    ]);
+  });
+
+  it("falls back to attachment name when no uploaded file hint exists", () => {
+    const attachments = extractMessageAttachments(
+      "thread-123",
+      {
+        role: "user",
+        attachments: [
+          {
+            type: "image",
+            name: "diagram.png",
+            contentType: "image/png",
+            content: []
+          }
+        ]
+      },
+      "message-2"
+    );
+
+    expect(attachments).toEqual([
+      {
+        id: "message-2-attachment-1",
+        kind: "image",
+        name: "diagram.png",
+        mimeType: "image/png",
+        bytes: null,
+        path: null,
+        relativePath: null,
+        contentUrl: null
+      }
+    ]);
   });
 });

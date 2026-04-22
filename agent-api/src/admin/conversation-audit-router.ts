@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { Router, type Request, type Response } from "express";
 
 import { getDbClient } from "../db/client.js";
@@ -95,6 +98,16 @@ type ConversationTranscriptMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
   text: string;
+  attachments: Array<{
+    id: string;
+    kind: "image" | "document" | "file";
+    name: string;
+    mimeType: string | null;
+    bytes: number | null;
+    path: string | null;
+    relativePath: string | null;
+    contentUrl: string | null;
+  }>;
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
@@ -117,6 +130,7 @@ type ConversationSummary = {
     userMessageCount: number;
     assistantMessageCount: number;
     feedbackCount: number;
+    userAttachmentCount: number;
   };
   preview: {
     firstUserText: string | null;
@@ -218,6 +232,17 @@ type ProductFeedbackListResponse = {
   feedback: ProductFeedbackRecord[];
 };
 
+type UploadedFileHint = {
+  name?: string;
+  path?: string;
+  relativePath?: string;
+  mimeType?: string;
+  bytes?: number | null;
+};
+
+const UPLOADED_FILE_TAG_PATTERN = /<uploaded_file\s+([^>]+)>/gi;
+const UPLOADED_FILE_ATTR_PATTERN = /([a-zA-Z_][\w-]*)=("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s>]+)/g;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -284,6 +309,110 @@ function parseDateString(value: unknown): string | null {
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
   return null;
+}
+
+function normalizeFilePath(value: string): string {
+  return value.replace(/\\/g, "/").trim();
+}
+
+function fileNameFromPath(filePath: string): string {
+  const normalized = normalizeFilePath(filePath);
+  if (!normalized) return "";
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function decodeAttributeValue(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (value.startsWith("\"")) {
+      try {
+        const parsed = JSON.parse(value);
+        return typeof parsed === "string" ? parsed : String(parsed ?? "");
+      } catch {
+        return value.slice(1, -1);
+      }
+    }
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function parseUploadedFileHints(text: string): UploadedFileHint[] {
+  if (!text.trim()) return [];
+  const hints: UploadedFileHint[] = [];
+  UPLOADED_FILE_TAG_PATTERN.lastIndex = 0;
+  let tagMatch: RegExpExecArray | null = null;
+  while ((tagMatch = UPLOADED_FILE_TAG_PATTERN.exec(text)) !== null) {
+    const attrText = tagMatch[1] || "";
+    const hint: UploadedFileHint = {};
+    UPLOADED_FILE_ATTR_PATTERN.lastIndex = 0;
+    let attrMatch: RegExpExecArray | null = null;
+    while ((attrMatch = UPLOADED_FILE_ATTR_PATTERN.exec(attrText)) !== null) {
+      const key = (attrMatch[1] || "").trim();
+      const value = decodeAttributeValue(attrMatch[2] || "");
+      if (key === "name") hint.name = value;
+      if (key === "path") hint.path = value;
+      if (key === "relativePath") hint.relativePath = value;
+      if (key === "mimeType") hint.mimeType = value;
+      if (key === "bytes") {
+        const parsed = Number(value);
+        hint.bytes = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+      }
+    }
+    if (hint.path || hint.relativePath) hints.push(hint);
+  }
+  return hints;
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function isPathInside(parentDir: string, candidatePath: string): boolean {
+  const normalizedParent = path.resolve(parentDir);
+  const normalizedCandidate = path.resolve(candidatePath);
+  return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
+}
+
+function resolveThreadFileAbsolutePath(input: {
+  workspacePath: string;
+  uploadDir: string;
+  relativePath?: string;
+  filePath?: string;
+}): string {
+  const normalizedWorkspacePath = path.resolve(input.workspacePath);
+  const normalizedUploadDir = path.resolve(input.uploadDir);
+  const normalizedRelative = trimOrUndefined(input.relativePath);
+  if (normalizedRelative) {
+    const normalizedPosixRelative = normalizeRelativePath(normalizedRelative).replace(/^\/+/, "");
+    const relativeSegments = normalizedPosixRelative
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    if (relativeSegments.length === 0) {
+      throw new Error("Invalid relative_path");
+    }
+    const candidate = path.resolve(normalizedUploadDir, ...relativeSegments);
+    if (!isPathInside(normalizedUploadDir, candidate)) {
+      throw new Error("Attachment path is outside the allowed directory");
+    }
+    return candidate;
+  }
+
+  const normalizedFilePath = trimOrUndefined(input.filePath);
+  if (!normalizedFilePath) {
+    throw new Error("Either relative_path or path is required");
+  }
+
+  const candidate = path.isAbsolute(normalizedFilePath)
+    ? path.resolve(normalizedFilePath)
+    : path.resolve(normalizedWorkspacePath, normalizedFilePath);
+  if (!isPathInside(normalizedWorkspacePath, candidate)) {
+    throw new Error("File path is outside the thread workspace");
+  }
+  return candidate;
 }
 
 function summarizeText(value: string | null | undefined, limit = 180): string | null {
@@ -502,16 +631,136 @@ export function extractMessageText(message: unknown): string {
   return `${primaryText}\n\n${fallbackText}`;
 }
 
+function attachmentKindFromValue(value: unknown): "image" | "document" | "file" {
+  return value === "image" || value === "document" ? value : "file";
+}
+
+function buildAdminThreadFileContentUrl(
+  threadId: string,
+  input: { relativePath?: string | null; filePath?: string | null }
+): string | null {
+  const query = new URLSearchParams();
+  const relativePath = trimOrUndefined(input.relativePath ?? undefined);
+  const filePath = trimOrUndefined(input.filePath ?? undefined);
+  if (relativePath) {
+    query.set("relative_path", relativePath);
+  } else if (filePath) {
+    query.set("path", filePath);
+  } else {
+    return null;
+  }
+  return `/api/admin/conversations/${encodeURIComponent(threadId)}/files/content?${query.toString()}`;
+}
+
+function attachmentDisplayName(
+  attachmentName: string | undefined,
+  hint: UploadedFileHint | undefined,
+  index: number
+): string {
+  const hintedPath = trimOrUndefined(hint?.relativePath) ?? trimOrUndefined(hint?.path);
+  return (
+    trimOrUndefined(hint?.name) ??
+    trimOrUndefined(attachmentName) ??
+    (hintedPath ? fileNameFromPath(hintedPath) : undefined) ??
+    `Attachment ${index + 1}`
+  );
+}
+
+function dedupeTranscriptAttachments(
+  attachments: ConversationTranscriptMessage["attachments"]
+): ConversationTranscriptMessage["attachments"] {
+  const seen = new Set<string>();
+  const output: ConversationTranscriptMessage["attachments"] = [];
+  for (const attachment of attachments) {
+    const key = [
+      trimOrUndefined(attachment.relativePath ?? undefined) ?? "",
+      trimOrUndefined(attachment.path ?? undefined) ?? "",
+      attachment.name
+    ].join("::");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(attachment);
+  }
+  return output;
+}
+
+export function extractMessageAttachments(
+  threadId: string,
+  message: unknown,
+  messageId: string
+): ConversationTranscriptMessage["attachments"] {
+  const obj = asRecord(message);
+  const attachments = Array.isArray(obj?.attachments) ? obj.attachments : [];
+  const extracted = attachments.flatMap((attachment, attachmentIndex) => {
+    const attachmentObj = asRecord(attachment);
+    if (!attachmentObj) return [];
+
+    const attachmentName = trimOrUndefined(attachmentObj.name);
+    const attachmentMimeType = trimOrUndefined(attachmentObj.contentType) ?? null;
+    const attachmentKind = attachmentKindFromValue(attachmentObj.type);
+    const hints = parseUploadedFileHints(collectTextParts(attachmentObj.content).join("\n"));
+
+    if (hints.length === 0) {
+      return [{
+        id: `${messageId}-attachment-${attachmentIndex + 1}`,
+        kind: attachmentKind,
+        name: attachmentDisplayName(attachmentName, undefined, attachmentIndex),
+        mimeType: attachmentMimeType,
+        bytes: null,
+        path: null,
+        relativePath: null,
+        contentUrl: null
+      }];
+    }
+
+    return hints.map((hint, hintIndex) => {
+      const relativePath = trimOrUndefined(hint.relativePath) ?? null;
+      const filePath = trimOrUndefined(hint.path) ?? null;
+      return {
+        id: `${messageId}-attachment-${attachmentIndex + 1}-${hintIndex + 1}`,
+        kind: attachmentKind,
+        name: attachmentDisplayName(attachmentName, hint, attachmentIndex),
+        mimeType: trimOrUndefined(hint.mimeType) ?? attachmentMimeType,
+        bytes: typeof hint.bytes === "number" ? hint.bytes : null,
+        path: filePath,
+        relativePath,
+        contentUrl: buildAdminThreadFileContentUrl(threadId, {
+          relativePath,
+          filePath
+        })
+      };
+    });
+  });
+
+  return dedupeTranscriptAttachments(extracted);
+}
+
 function extractMessageCreatedAt(message: unknown): string | null {
   const obj = asRecord(message);
   return parseDateString(obj?.createdAt) ?? parseDateString(obj?.created_at);
 }
 
-function toTranscriptMessage(item: StoredMessageItem, index: number): ConversationTranscriptMessage {
+function attachmentPreviewText(attachments: ConversationTranscriptMessage["attachments"]): string {
+  if (attachments.length === 0) return "";
+  const previewNames = attachments
+    .map((item) => trimOrUndefined(item.name))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 3);
+  if (previewNames.length === 0) return `上传了 ${attachments.length} 个文件`;
+  return `上传了 ${attachments.length} 个文件：${previewNames.join("、")}${attachments.length > 3 ? " 等" : ""}`;
+}
+
+function transcriptPreviewText(message: ConversationTranscriptMessage): string {
+  return trimOrUndefined(message.text) ?? attachmentPreviewText(message.attachments);
+}
+
+function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: number): ConversationTranscriptMessage {
+  const id = extractMessageId(item.message, `message-${index + 1}`);
   return {
-    id: extractMessageId(item.message, `message-${index + 1}`),
+    id,
     role: extractMessageRole(item.message),
     text: extractMessageText(item.message),
+    attachments: extractMessageAttachments(threadId, item.message, id),
     parentId: item.parentId ?? null,
     createdAt: extractMessageCreatedAt(item.message),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
@@ -553,17 +802,19 @@ function normalizeFeedback(feedback: ThreadRecord["feedback"]): ConversationSumm
 }
 
 function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditUser | null): ConversationSummary {
-  const transcript = thread.messages.map((item, index) => toTranscriptMessage(item, index));
+  const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
   const userMessages = transcript.filter((item) => item.role === "user");
   const assistantMessages = transcript.filter((item) => item.role === "assistant");
-  const firstUserText = summarizeText(userMessages.find((item) => item.text)?.text, 180);
+  const firstUserText = summarizeText(userMessages.map((item) => transcriptPreviewText(item)).find(Boolean), 180);
   const latestText = summarizeText(
     [...transcript]
       .reverse()
-      .find((item) => item.text)?.text,
+      .map((item) => transcriptPreviewText(item))
+      .find(Boolean),
     240
   );
   const feedback = normalizeFeedback(thread.feedback);
+  const userAttachmentCount = userMessages.reduce((sum, item) => sum + item.attachments.length, 0);
 
   return {
     id: thread.id,
@@ -581,7 +832,8 @@ function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditU
       messageCount: transcript.length,
       userMessageCount: userMessages.length,
       assistantMessageCount: assistantMessages.length,
-      feedbackCount: feedback.length
+      feedbackCount: feedback.length,
+      userAttachmentCount
     },
     preview: {
       firstUserText,
@@ -1109,6 +1361,62 @@ export function createConversationAuditRouter(options: {
     }
   });
 
+  router.get("/conversations/:threadId/files/content", async (req: Request, res: Response) => {
+    try {
+      const threadId = trimOrUndefined(req.params.threadId);
+      if (!threadId) {
+        res.status(400).json({ detail: "threadId 不合法" });
+        return;
+      }
+
+      const relativePath = trimOrUndefined(req.query.relative_path);
+      const filePath = trimOrUndefined(req.query.path);
+      if (!relativePath && !filePath) {
+        res.status(400).json({ detail: "Either relative_path or path is required" });
+        return;
+      }
+
+      const repository = new ThreadRepository(getDb() as unknown as ThreadRepositoryDb);
+      const thread = await repository.get(threadId);
+      if (!thread) {
+        res.status(404).json({ detail: "thread 不存在" });
+        return;
+      }
+
+      const workspacePath = trimOrUndefined(thread.workspace);
+      if (!workspacePath) {
+        res.status(404).json({ detail: "thread workspace 不存在" });
+        return;
+      }
+
+      const absolutePath = resolveThreadFileAbsolutePath({
+        workspacePath,
+        uploadDir: path.join(workspacePath, ".uploads"),
+        relativePath,
+        filePath
+      });
+
+      const stat = await fs.stat(absolutePath).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        res.status(404).json({ detail: "文件不存在" });
+        return;
+      }
+
+      const fileName = path.basename(absolutePath);
+      const ext = path.extname(fileName);
+      const fileBuffer = await fs.readFile(absolutePath);
+
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+      res.type(ext || "application/octet-stream");
+      res.status(200).send(fileBuffer);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "读取会话附件失败";
+      res.status(400).json({ detail });
+    }
+  });
+
   router.get("/conversations/:threadId", async (req: Request, res: Response) => {
     try {
       const threadId = trimOrUndefined(req.params.threadId);
@@ -1126,7 +1434,7 @@ export function createConversationAuditRouter(options: {
       }
 
       const user = thread.userId ? normalizeUser(await db.user.findUnique({ where: { id: thread.userId } })) : null;
-      const transcript = thread.messages.map((item, index) => toTranscriptMessage(item, index));
+      const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
 
       res.json({
         conversation: buildConversationSummary(thread, user),

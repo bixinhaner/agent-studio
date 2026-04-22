@@ -6,6 +6,7 @@ import {
   HardDrive,
   MessageSquareText,
   Network,
+  Paperclip,
   RefreshCcw,
   Search,
   ThumbsDown,
@@ -46,6 +47,7 @@ import type {
   AdminConversationSort,
   AdminConversationStatusFilter,
   AdminConversationSummary,
+  AdminConversationTranscriptAttachment,
   AdminConversationTranscriptMessage,
   AdminConversationUser,
   AdminProductFeedbackDetailResponse,
@@ -90,6 +92,18 @@ function formatLocalDateTime(value: string | null | undefined): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (!Number.isFinite(bytes) || !bytes || bytes <= 0) return "未知大小";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function readConversationAuditHashState(): ConversationAuditHashState {
@@ -165,6 +179,12 @@ function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
   if (role === "assistant") return "助手";
   if (role === "tool") return "工具";
   return "系统";
+}
+
+function attachmentKindLabel(kind: AdminConversationTranscriptAttachment["kind"]): string {
+  if (kind === "image") return "图片";
+  if (kind === "document") return "文档";
+  return "文件";
 }
 
 function decodeMaybeUri(value: string): string {
@@ -387,6 +407,31 @@ function ConversationAuditMarkdown(props: { text: string; className?: string }) 
   );
 }
 
+function TranscriptAttachmentList(props: { attachments: AdminConversationTranscriptAttachment[] }) {
+  if (props.attachments.length === 0) return null;
+  return (
+    <div className="admin-conversation-attachment-list">
+      {props.attachments.map((attachment) => (
+        <div key={attachment.id} className="admin-conversation-file-card">
+          <span className="admin-conversation-file-meta">
+            <span className="admin-conversation-file-tag">{attachmentKindLabel(attachment.kind)}</span>
+            <span className="admin-conversation-file-name">{attachment.name}</span>
+            <span className="admin-conversation-file-extra">
+              {[attachment.mimeType, formatFileSize(attachment.bytes)].filter(Boolean).join(" • ")}
+            </span>
+            <span className="admin-conversation-file-path">{attachment.relativePath || attachment.path || "未记录路径"}</span>
+          </span>
+          {attachment.contentUrl ? (
+            <a className="admin-conversation-file-btn" href={attachment.contentUrl} target="_blank" rel="noreferrer">
+              打开
+            </a>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
@@ -394,9 +439,10 @@ function TranscriptMessageBubble(props: {
 }) {
   const isUser = props.message.role === "user";
   const isAssistant = props.message.role === "assistant";
+  const attachmentCount = props.message.attachments.length;
   
   // Exclude system/tool for cleaner view unless needed
-  if (!isUser && !isAssistant && !props.message.text) return null;
+  if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0) return null;
 
   return (
     <div 
@@ -410,8 +456,11 @@ function TranscriptMessageBubble(props: {
         {props.message.text ? (
           <ConversationAuditMarkdown text={props.message.text} />
         ) : (
-          <span style={{ fontStyle: 'italic', opacity: 0.7 }}>[无文本内容 / 附件]</span>
+          <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
+            {attachmentCount > 0 ? `用户上传了 ${attachmentCount} 个文件，未附带文本描述` : "[无文本内容]"}
+          </span>
         )}
+        <TranscriptAttachmentList attachments={props.message.attachments} />
       </div>
       {props.message.hasRunConfig && <Tag style={{ marginTop: 4 }}>配置运行参数</Tag>}
     </div>
@@ -483,6 +532,10 @@ function ConversationDetail(props: {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
             <MessageSquareText size={14} />
             <span>{conversation.metrics.messageCount} 条消息</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <Paperclip size={14} />
+            <span>用户上传 {conversation.metrics.userAttachmentCount} 个文件</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
             <Activity size={14} />
@@ -690,6 +743,12 @@ function ConversationWorkspace() {
                <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
                  <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
                  <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
+                 {conv.metrics.userAttachmentCount > 0 ? (
+                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                     <Paperclip size={11} />
+                     {conv.metrics.userAttachmentCount} 个文件
+                   </span>
+                 ) : null}
                  {conv.feedbackSummary.total > 0 ? (
                    <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65 }}>
                      {conv.feedbackSummary.positive} 赞 / {conv.feedbackSummary.negative} 踩
