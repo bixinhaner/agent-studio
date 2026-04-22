@@ -150,6 +150,64 @@ describe("extractMessageAttachments", () => {
 });
 
 describe("extractMessageProcessRows", () => {
+  it("includes codex commentary thought entries alongside trace rows", () => {
+    const thoughtAt = new Date("2026-04-22T09:00:00.000Z").getTime();
+    const rows = extractMessageProcessRows({
+      role: "assistant",
+      content: [
+        {
+          type: "data",
+          name: "codex_commentary",
+          data: {
+            id: "assistant-thoughts",
+            entries: [
+              {
+                id: "thought-1",
+                text: "先确认管理员现在看不到的到底是哪类过程数据",
+                lines: ["先确认管理员现在看不到的到底是哪类过程数据"],
+                last_event_at: thoughtAt,
+                status: "completed"
+              }
+            ],
+            status: "completed"
+          }
+        },
+        {
+          type: "data",
+          name: "codex_trace_batch",
+          data: {
+            rows: [
+              {
+                id: "row-1",
+                kind: "tool",
+                title: "Tool call · rg",
+                detail: "rg -n codex_commentary",
+                at: "2026-04-22T09:00:02.000Z"
+              }
+            ]
+          }
+        }
+      ]
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "thought-1",
+        kind: "reasoning",
+        title: "先确认管理员现在看不到的到底是哪类过程数据",
+        detail: "先确认管理员现在看不到的到底是哪类过程数据",
+        at: "2026-04-22T09:00:00.000Z"
+      },
+      {
+        id: "row-1",
+        kind: "tool",
+        title: "Tool call · rg",
+        detail: "rg -n codex_commentary",
+        at: "2026-04-22T09:00:02.000Z"
+      }
+    ]);
+  });
+
   it("prefers structured trace batch rows when present", () => {
     const rows = extractMessageProcessRows({
       role: "assistant",

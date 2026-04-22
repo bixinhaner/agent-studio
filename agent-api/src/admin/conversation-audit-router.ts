@@ -461,7 +461,96 @@ function sanitizeProcessDetail(value: unknown): string | undefined {
 }
 
 function sanitizeProcessAt(value: unknown): string | undefined {
-  return trimOrUndefined(value);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    const normalized = value < 1_000_000_000_000 ? value * 1000 : value;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  const raw = trimOrUndefined(value);
+  if (!raw) return undefined;
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      const normalized = raw.length <= 10 ? numeric * 1000 : numeric;
+      const parsed = new Date(normalized);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+  return raw;
+}
+
+function collectCommentaryLines(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((line) => trimOrUndefined(line))
+    .filter((line): line is string => Boolean(line));
+}
+
+function commentaryDetailFromRecord(record: Record<string, unknown>): string | undefined {
+  const text = trimOrUndefined(record.text);
+  if (text) return text;
+  const lines = collectCommentaryLines(record.lines);
+  if (lines.length === 0) return undefined;
+  return lines.join("\n\n");
+}
+
+function commentaryTitle(detail: string, fallback: string): string {
+  const condensed = detail.replace(/\s+/g, " ").trim();
+  return summarizeText(condensed, 96) ?? fallback;
+}
+
+function extractCommentaryProcessRows(
+  part: Record<string, unknown>,
+  fallbackIndex: number
+): NonNullable<ConversationTranscriptMessage["processRows"]> {
+  if (trimOrUndefined(part.type) !== "data" || trimOrUndefined(part.name) !== "codex_commentary") {
+    return [];
+  }
+
+  const data = asRecord(part.data);
+  if (!data) return [];
+
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  const rows = entries
+    .map((entry, index) => {
+      const item = asRecord(entry);
+      if (!item) return null;
+      const detail = commentaryDetailFromRecord(item);
+      if (!detail) return null;
+      return {
+        id: trimOrUndefined(item.id) ?? `commentary-${fallbackIndex + 1}-${index + 1}`,
+        kind: "reasoning" as const,
+        title: commentaryTitle(detail, `Thought ${index + 1}`),
+        detail,
+        at: sanitizeProcessAt(item.last_event_at)
+      };
+    })
+    .filter(Boolean) as NonNullable<ConversationTranscriptMessage["processRows"]>;
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  const detail = commentaryDetailFromRecord(data);
+  if (!detail) return [];
+  return [
+    {
+      id: trimOrUndefined(data.id) ?? `commentary-${fallbackIndex + 1}`,
+      kind: "reasoning",
+      title: commentaryTitle(detail, "Thought"),
+      detail,
+      at: sanitizeProcessAt(data.last_event_at)
+    }
+  ];
 }
 
 function extractTraceBatchProcessRows(
@@ -545,14 +634,39 @@ export function extractMessageProcessRows(
 ): NonNullable<ConversationTranscriptMessage["processRows"]> {
   const obj = asRecord(message);
   const parts = Array.isArray(obj?.content) ? obj.content : [];
-  const traceRows = parts.flatMap((entry) => {
+  const hasTraceBatch = parts.some((entry) => {
     const part = asRecord(entry);
-    return part ? extractTraceBatchProcessRows(part) : [];
+    return trimOrUndefined(part?.type) === "data" && trimOrUndefined(part?.name) === "codex_trace_batch";
   });
-  if (traceRows.length > 0) {
-    return traceRows;
+  const rows: NonNullable<ConversationTranscriptMessage["processRows"]> = [];
+
+  for (const [index, entry] of parts.entries()) {
+    const part = asRecord(entry);
+    if (!part) continue;
+
+    const commentaryRows = extractCommentaryProcessRows(part, index);
+    if (commentaryRows.length > 0) {
+      rows.push(...commentaryRows);
+    }
+
+    const traceRows = extractTraceBatchProcessRows(part);
+    if (traceRows.length > 0) {
+      rows.push(...traceRows);
+      continue;
+    }
+
+    if (hasTraceBatch) continue;
+    rows.push(...extractFallbackProcessRows([part]));
   }
-  return extractFallbackProcessRows(parts);
+
+  return rows.map((row, index) => ({ row, index })).sort((left, right) => {
+    const leftAt = left.row.at ? Date.parse(left.row.at) : Number.NaN;
+    const rightAt = right.row.at ? Date.parse(right.row.at) : Number.NaN;
+    if (!Number.isNaN(leftAt) && !Number.isNaN(rightAt) && leftAt !== rightAt) {
+      return leftAt - rightAt;
+    }
+    return left.index - right.index;
+  }).map((item) => item.row);
 }
 
 function summarizeText(value: string | null | undefined, limit = 180): string | null {
@@ -892,7 +1006,12 @@ function attachmentPreviewText(attachments: ConversationTranscriptMessage["attac
 
 function transcriptPreviewText(message: ConversationTranscriptMessage): string {
   const processPreview = message.processRows?.[message.processRows.length - 1]?.title;
-  return trimOrUndefined(message.text) ?? attachmentPreviewText(message.attachments) ?? trimOrUndefined(processPreview) ?? "";
+  return (
+    trimOrUndefined(message.text) ??
+    trimOrUndefined(attachmentPreviewText(message.attachments)) ??
+    trimOrUndefined(processPreview) ??
+    ""
+  );
 }
 
 function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: number): ConversationTranscriptMessage {
