@@ -162,7 +162,6 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const resolvedEmail = email.trim() || fallbackEmail;
   const isInviteFlow = Boolean(props.inviteToken);
   const isInternalMode = props.mode === "internal" && !isInviteFlow;
-  const title = isInternalMode ? `${branding.platformName} Internal` : branding.platformName;
   const eyebrow = isInviteFlow ? "Customer Invite" : isInternalMode ? "Internal Employee Sign-In" : "";
   const subtitle = isInviteFlow
     ? "Use your work email to accept the invitation and enter your organization."
@@ -252,7 +251,6 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
             name={branding.platformName}
             logoUrl={branding.logoUrl || branding.iconUrl}
           />
-          <h1 className="auth-modern-logo">{title}</h1>
           <p className="auth-modern-subtitle">{subtitle}</p>
         </div>
 

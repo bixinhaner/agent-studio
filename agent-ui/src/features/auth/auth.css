@@ -119,20 +119,50 @@
 }
 
 .auth-modern-brand-mark {
-  width: 136px;
-  height: 52px;
-  padding: 0 10px;
-  border-radius: 14px;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  width: 144px;
+  height: 56px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
   color: #111827;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   font-weight: 700;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
+  isolation: isolate;
+}
+
+.auth-modern-brand-mark::before,
+.auth-modern-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.auth-modern-brand-mark::before {
+  inset: auto 10px -4px;
+  height: 18px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 195, 112, 0.42) 0%, rgba(255, 195, 112, 0.12) 52%, transparent 78%);
+  filter: blur(10px);
+  z-index: -2;
+}
+
+.auth-modern-brand-mark::after {
+  inset: -8px -10px auto;
+  height: 38px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 100%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 240, 222, 0.1) 46%, transparent 76%);
+  filter: blur(12px);
+  opacity: 0.78;
+  z-index: -3;
 }
 
 .auth-modern-brand-image {
@@ -140,6 +170,25 @@
   height: 100%;
   object-fit: contain;
   background: transparent;
+  position: relative;
+  z-index: 1;
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.48))
+    drop-shadow(0 7px 14px rgba(61, 32, 13, 0.18));
+}
+
+.dark .auth-modern-brand-mark {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.dark .auth-modern-brand-mark::before {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 180, 92, 0.34) 0%, rgba(255, 180, 92, 0.1) 52%, transparent 78%);
+}
+
+.dark .auth-modern-brand-mark::after {
+  background: radial-gradient(circle at 50% 100%, rgba(255, 255, 255, 0.14) 0%, rgba(255, 233, 208, 0.06) 46%, transparent 76%);
 }
 
 .auth-modern-logo {
@@ -469,8 +518,8 @@
     font-size: 24px;
   }
   .auth-modern-brand-mark {
-    width: 118px;
-    height: 48px;
+    width: 126px;
+    height: 50px;
   }
   .auth-modern-subtitle {
     font-size: 14px;
