@@ -17,6 +17,7 @@ type ModelConfig = {
 };
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = "high";
+const FRONTIER_REASONING_EFFORTS: readonly ReasoningEffort[] = ["none", "low", "medium", "high", "xhigh"];
 const LEGACY_REASONING_EFFORTS: readonly ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   reasoningEfforts: LEGACY_REASONING_EFFORTS,
@@ -24,12 +25,16 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
 };
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  "gpt-5.5": {
+    reasoningEfforts: FRONTIER_REASONING_EFFORTS,
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT
+  },
   "gpt-5.4": {
-    reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+    reasoningEfforts: FRONTIER_REASONING_EFFORTS,
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT
   },
   "gpt-5.4-mini": {
-    reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+    reasoningEfforts: FRONTIER_REASONING_EFFORTS,
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT
   },
   "gpt-5.4-pro": {

@@ -10,7 +10,7 @@ import type { OrganizationRepository } from "../persistence/organization-reposit
 import type { QuotaPolicyRepository, UpsertQuotaPolicyInput } from "../persistence/quota-policy-repository.js";
 import type { ResourceAccessLogRepository } from "../persistence/resource-access-log-repository.js";
 import type { SessionRepository } from "../persistence/session-repository.js";
-import type { UsageDailyRollupRecord, UsageRollupRepository } from "../persistence/usage-rollup-repository.js";
+import type { UsageRollupRepository } from "../persistence/usage-rollup-repository.js";
 import type { UsageEventRecord, UsageEventRepository } from "../persistence/usage-event-repository.js";
 import type { UserRepositoryLike } from "../persistence/user-repository.js";
 
@@ -106,10 +106,10 @@ function aggregateRankings<T extends UsageEventRecord>(
     );
 }
 
-function buildTrends(records: UsageDailyRollupRecord[]): MonitoringTrend[] {
+function buildTrendsFromUsageEvents(records: UsageEventRecord[]): MonitoringTrend[] {
   const buckets = new Map<string, MonitoringTrend>();
   for (const record of records) {
-    const rollupDate = toDateKey(record.rollupDate);
+    const rollupDate = toDateKey(record.createdAt);
     const existing = buckets.get(rollupDate) ?? {
       rollupDate,
       requestCount: 0,
@@ -118,18 +118,14 @@ function buildTrends(records: UsageDailyRollupRecord[]): MonitoringTrend[] {
       estimatedCost: "0.000000",
       internalCost: "0.000000"
     };
-    existing.requestCount += record.requestCount;
-    existing.successCount += record.successCount;
-    existing.failureCount += record.failureCount;
+    existing.requestCount += 1;
+    existing.successCount += record.resultStatus === "success" ? 1 : 0;
+    existing.failureCount += record.resultStatus === "success" ? 0 : 1;
     existing.estimatedCost = (toNumber(existing.estimatedCost) + toNumber(record.estimatedCost)).toFixed(6);
     existing.internalCost = (toNumber(existing.internalCost) + toNumber(record.internalCost)).toFixed(6);
     buckets.set(rollupDate, existing);
   }
   return [...buckets.values()].sort((left, right) => left.rollupDate.localeCompare(right.rollupDate));
-}
-
-function isPlatformRollup(record: UsageDailyRollupRecord): boolean {
-  return record.scopeType === "platform";
 }
 
 function detailFromError(error: unknown): string {
@@ -199,18 +195,16 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/monitoring/overview", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
-      const [usageRollups, usageEvents, accessLogs, alertEvents, notificationRecords] = await Promise.all([
-        options.usageRollups.list(),
+      const [usageEvents, accessLogs, alertEvents, notificationRecords] = await Promise.all([
         options.usageEvents.list(),
         options.resourceAccessLogs.list(),
         options.alertEvents.list(),
         options.notificationRecords.list()
       ]);
-      const platformRollups = usageRollups.filter(isPlatformRollup);
-      const trends = buildTrends(platformRollups);
-      const totalRequests = trends.reduce((sum, item) => sum + item.requestCount, 0);
-      const totalEstimatedCost = platformRollups.reduce((sum, item) => sum + toNumber(item.estimatedCost), 0).toFixed(6);
-      const totalInternalCost = platformRollups.reduce((sum, item) => sum + toNumber(item.internalCost), 0).toFixed(6);
+      const trends = buildTrendsFromUsageEvents(usageEvents);
+      const totalRequests = usageEvents.length;
+      const totalEstimatedCost = usageEvents.reduce((sum, item) => sum + toNumber(item.estimatedCost), 0).toFixed(6);
+      const totalInternalCost = usageEvents.reduce((sum, item) => sum + toNumber(item.internalCost), 0).toFixed(6);
 
       res.json({
         overview: {
@@ -322,7 +316,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/monitoring/trends", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
-      res.json({ trends: buildTrends((await options.usageRollups.list()).filter(isPlatformRollup)) });
+      res.json({ trends: buildTrendsFromUsageEvents(await options.usageEvents.list()) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }

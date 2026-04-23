@@ -12,6 +12,7 @@ export const DEFAULT_MODEL = "gpt-5.4";
 export const DEFAULT_CONTEXT_LIMIT_TOKENS = 262_144;
 
 const DEFAULT_REASONING_EFFORT: ReasoningEffort = "high";
+const FRONTIER_REASONING_EFFORTS: readonly ReasoningEffort[] = ["none", "low", "medium", "high", "xhigh"];
 const LEGACY_REASONING_EFFORTS: readonly ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 const FALLBACK_MODEL_OPTION: ModelOption = {
   value: "legacy",
@@ -23,7 +24,7 @@ const FALLBACK_MODEL_OPTION: ModelOption = {
 const DEFAULT_MODEL_OPTION: ModelOption = {
   value: DEFAULT_MODEL,
   label: "GPT-5.4（推荐）",
-  reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+  reasoningEfforts: FRONTIER_REASONING_EFFORTS,
   defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
   contextLimit: DEFAULT_CONTEXT_LIMIT_TOKENS
 };
@@ -31,9 +32,16 @@ const DEFAULT_MODEL_OPTION: ModelOption = {
 export const MODEL_OPTIONS: ModelOption[] = [
   DEFAULT_MODEL_OPTION,
   {
+    value: "gpt-5.5",
+    label: "GPT-5.5",
+    reasoningEfforts: FRONTIER_REASONING_EFFORTS,
+    defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
+    contextLimit: DEFAULT_CONTEXT_LIMIT_TOKENS
+  },
+  {
     value: "gpt-5.4-mini",
     label: "GPT-5.4 Mini",
-    reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+    reasoningEfforts: FRONTIER_REASONING_EFFORTS,
     defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
     contextLimit: DEFAULT_CONTEXT_LIMIT_TOKENS
   },
