@@ -2114,7 +2114,7 @@ body.access-request-route #root {
 }
 
 .thread-running-indicator-slot {
-  flex: 0 0 12px;
+  flex: 0 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2122,9 +2122,11 @@ body.access-request-route #root {
 }
 
 .thread-running-indicator {
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid #0f766e;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #0f766e;
   border-right-color: transparent;
   border-radius: 999px;
   animation: thread-running-spin 0.8s linear infinite;

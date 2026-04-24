@@ -2091,6 +2091,10 @@ function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | und
 
 function isThreadRuntimeRunning(value: unknown): boolean {
   const runtime = asRecord(value);
+  if (runtime?.isRunning === true) return true;
+  const abortController = asRecord(runtime?.abortController);
+  const abortSignal = asRecord(abortController?.signal);
+  if (abortController && abortSignal && abortSignal.aborted !== true) return true;
   const messages = Array.isArray(runtime?.messages) ? runtime.messages : [];
   const lastMessage = messages[messages.length - 1];
   const message = asRecord(lastMessage);
@@ -2106,6 +2110,33 @@ function areRunningThreadMapsEqual(
   const rightKeys = Object.keys(right);
   if (leftKeys.length !== rightKeys.length) return false;
   return leftKeys.every((key) => left[key] === right[key]);
+}
+
+function updateRunningThreadMap(
+  current: RunningThreadIdsContextValue,
+  threadId: string,
+  isRunning: boolean
+): RunningThreadIdsContextValue {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return current;
+
+  if (isRunning) {
+    return current[normalizedThreadId] ? current : { ...current, [normalizedThreadId]: true };
+  }
+
+  if (!current[normalizedThreadId]) return current;
+  const next = { ...current };
+  delete next[normalizedThreadId];
+  return next;
+}
+
+function mergeRunningThreadMaps(
+  first: RunningThreadIdsContextValue,
+  second: RunningThreadIdsContextValue
+): RunningThreadIdsContextValue {
+  if (Object.keys(first).length === 0) return second;
+  if (Object.keys(second).length === 0) return first;
+  return { ...first, ...second };
 }
 
 function messageTextForSuggestions(message: ThreadMessage): string {
@@ -2722,7 +2753,8 @@ const AgentThreadListItem: FC = () => {
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const remoteId = String(threadRemoteId || "").trim();
-  const isThreadRunning = Boolean(remoteId && runningThreadIds[remoteId]);
+  const localId = String(threadItemId || "").trim();
+  const isThreadRunning = Boolean((remoteId && runningThreadIds[remoteId]) || (localId && runningThreadIds[localId]));
   const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
   const threadTitleForFilter = threadTitle.trim() || "New conversation";
 
@@ -3703,7 +3735,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
     groupHeaderByRemoteId: {}
   });
-  const [runningThreadIds, setRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [activeRunThreadIds, setActiveRunThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [runtimeRunningThreadIds, setRuntimeRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
 
   useEffect(() => {
@@ -3725,6 +3758,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [productFeedbackSubmitting, setProductFeedbackSubmitting] = useState(false);
   const [productFeedbackError, setProductFeedbackError] = useState("");
   const [productFeedbackSubmitted, setProductFeedbackSubmitted] = useState(false);
+  const runningThreadIds = useMemo(
+    () => mergeRunningThreadMaps(activeRunThreadIds, runtimeRunningThreadIds),
+    [activeRunThreadIds, runtimeRunningThreadIds]
+  );
 
   const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
@@ -4557,6 +4594,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!threadId) {
           throw new Error("Unable to resolve the current thread ID (the thread may still be initializing, please try again).");
         }
+        const localThreadId = String(activeLocalThreadIdRef.current || options.unstable_threadId || "").trim();
         activeRemoteThreadIdRef.current = threadId;
         const readActiveCollaboration = () => {
           const current = threadCollaborationRef.current;
@@ -4965,6 +5003,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           });
         };
 
+        setActiveRunThreadIds((prev) =>
+          updateRunningThreadMap(updateRunningThreadMap(prev, threadId, true), localThreadId, true)
+        );
         try {
           for await (const { event, data } of iterateSSE(`${apiBase()}/api/chat/stream`, {
             method: "POST",
@@ -5392,6 +5433,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             };
           }
         } finally {
+          setActiveRunThreadIds((prev) =>
+            updateRunningThreadMap(updateRunningThreadMap(prev, threadId, false), localThreadId, false)
+          );
           setStatusText("Ready");
           updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT);
         }
@@ -5417,7 +5461,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       | undefined;
     const hookManager = threadsCore?._hookManager;
     if (!threadsCore || !hookManager || typeof hookManager.subscribe !== "function") {
-      setRunningThreadIds((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      setRuntimeRunningThreadIds((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       return undefined;
     }
 
@@ -5434,7 +5478,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           // Ignore threads whose runtime is not mounted yet.
         }
       }
-      setRunningThreadIds((prev) => (areRunningThreadMapsEqual(prev, next) ? prev : next));
+      setRuntimeRunningThreadIds((prev) => (areRunningThreadMapsEqual(prev, next) ? prev : next));
     };
 
     syncRunningThreadIds();
@@ -5447,6 +5491,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     if (!hasRunningSessions || typeof window === "undefined") return undefined;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
+      // Modern browsers show their own localized unload text and ignore custom copy.
       event.returnValue = PORTAL_RUNNING_LEAVE_WARNING;
       return PORTAL_RUNNING_LEAVE_WARNING;
     };
