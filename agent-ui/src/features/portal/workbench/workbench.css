@@ -3,16 +3,16 @@
 .workbench-mobile-right-drawer,
 .portal-topbar-mobile-actions-drawer,
 .workbench-left-drawer {
-  --workbench-accent: #14c871;
-  --workbench-accent-strong: #0ea659;
+  --workbench-accent: #FF4614;
+  --workbench-accent-strong: #E63B0F;
   --workbench-border: #f0f0f0;
   --workbench-surface: #ffffff;
   --workbench-muted-text: #6b7280;
-  --workbench-bg: #f0f3f8;
+  --workbench-bg: #f7f9fa;
   --workbench-sidebar-bg: #ffffff;
-  --workbench-sidebar-hover: #f6fdf9;
-  --workbench-sidebar-active-bg: rgba(20, 200, 113, 0.06);
-  --workbench-sidebar-active-text: #14c871;
+  --workbench-sidebar-hover: #fff3f0;
+  --workbench-sidebar-active-bg: rgba(255, 70, 20, 0.08);
+  --workbench-sidebar-active-text: #FF4614;
 }
 
 body.portal-workbench-mode {
@@ -70,12 +70,13 @@ body.portal-workbench-mode {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
-  padding: 0 16px;
-  background: rgba(251, 251, 251, 0.75);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border-bottom: 1px solid var(--workbench-border);
+  height: 64px;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -238,7 +239,7 @@ button.session-rail-new-btn,
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: linear-gradient(135deg, #a8e063 0%, #30b15b 100%);
+  background: linear-gradient(135deg, #FF7B54 0%, #FF4614 100%);
   color: white;
   border-radius: 8px;
   height: 40px;
@@ -247,7 +248,7 @@ button.session-rail-new-btn,
   font-weight: 500;
   transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   font-size: 14px;
-  box-shadow: 0 4px 14px rgba(20, 200, 113, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+  box-shadow: 0 4px 14px rgba(255, 70, 20, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
   appearance: none;
   position: relative;
   overflow: hidden;
@@ -274,15 +275,15 @@ button.session-rail-new-btn::after,
 
 button.session-rail-new-btn:hover,
 .session-rail-new-btn:hover {
-  background: linear-gradient(135deg, #bcf07a 0%, #3cc76a 100%);
+  background: linear-gradient(135deg, #ff9e80 0%, #FA5C32 100%);
   color: white;
-  box-shadow: 0 6px 20px rgba(20, 200, 113, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  box-shadow: 0 6px 20px rgba(255, 70, 20, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.5);
 }
 
 button.session-rail-new-btn:active,
 .session-rail-new-btn:active {
   transform: scale(0.95);
-  box-shadow: 0 2px 8px rgba(20, 200, 113, 0.3);
+  box-shadow: 0 2px 8px rgba(255, 70, 20, 0.3);
 }
 
 .session-rail-list {
@@ -310,10 +311,13 @@ button.session-rail-new-btn:active,
 }
 
 .session-rail-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--workbench-border);
+  padding: 16px;
   background-color: var(--workbench-sidebar-bg);
   flex-shrink: 0;
+  margin: 0px 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
 }
 
 .session-rail-footer-stack {
@@ -399,8 +403,8 @@ button.session-rail-new-btn:active,
 }
 
 .aui-composer-root:focus-within {
-  border-color: #14C871;
-  box-shadow: 0 12px 36px rgba(20, 200, 113, 0.12), 0 0 0 3px rgba(20, 200, 113, 0.1);
+  border-color: #FF4614;
+  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.12), 0 0 0 3px rgba(255, 70, 20, 0.1);
 }
 
 .portal-topbar-runtime-chip {
@@ -423,7 +427,7 @@ button.session-rail-new-btn:active,
   position: relative;
 }
 .Resizer:hover, .Resizer[data-resize-handle-state="drag"] {
-  background: rgba(20, 200, 113, 0.1);
+  background: rgba(255, 70, 20, 0.1);
 }
 .Resizer::after {
   content: "";
@@ -936,8 +940,8 @@ button.session-rail-new-btn:active,
 
 .preview-markdown-anchor-hit {
   border-radius: 10px;
-  background: linear-gradient(90deg, rgba(20, 200, 113, 0.16), rgba(20, 200, 113, 0));
-  box-shadow: -10px 0 0 rgba(20, 200, 113, 0.16);
+  background: linear-gradient(90deg, rgba(255, 70, 20, 0.16), rgba(255, 70, 20, 0));
+  box-shadow: -10px 0 0 rgba(255, 70, 20, 0.16);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -1463,7 +1467,7 @@ button.session-rail-new-btn:active,
 
 .bailey-welcome-greeting b,
 .bailey-welcome-greeting span {
-  color: #14C871;
+  color: #FF4614;
   font-weight: 600;
 }
 
@@ -1500,7 +1504,7 @@ button.session-rail-new-btn:active,
 
 .bailey-suggestion-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 28px rgba(20, 200, 113, 0.1), inset 0 2px 6px rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(255, 70, 20, 0.1), inset 0 2px 6px rgba(255, 255, 255, 0.9);
   background: rgba(255, 255, 255, 0.95);
 }
 
@@ -1514,7 +1518,7 @@ button.session-rail-new-btn:active,
   flex-shrink: 0;
 }
 
-.bailey-suggestion-icon-wrap.icon-green { color: #14C871; background: rgba(20, 200, 113, 0.1); }
+.bailey-suggestion-icon-wrap.icon-green { color: #FF4614; background: rgba(255, 70, 20, 0.1); }
 .bailey-suggestion-icon-wrap.icon-blue { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
 .bailey-suggestion-icon-wrap.icon-orange { color: #f97316; background: rgba(249, 115, 22, 0.1); }
 .bailey-suggestion-icon-wrap.icon-purple { color: #a855f7; background: rgba(168, 85, 247, 0.1); }
@@ -1533,9 +1537,28 @@ button.session-rail-new-btn:active,
 .bailey-active-dot {
   width: 8px;
   height: 8px;
-  background-color: #14C871;
+  background-color: #FF4614;
   border-radius: 50%;
-  box-shadow: 0 0 6px rgba(20, 200, 113, 0.6);
+  box-shadow: 0 0 6px rgba(255, 70, 20, 0.6);
   margin-right: 8px;
   flex-shrink: 0;
+}
+
+/* Beautiful Session List Items */
+.session-rail-list > * {
+  border-radius: 10px;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  margin-bottom: 2px;
+}
+.session-rail-list > *:hover {
+  background-color: var(--workbench-sidebar-hover);
+  transform: translateX(2px);
+}
+.session-rail-list > *[data-active="true"],
+.session-rail-list > *.active {
+  background-color: var(--workbench-sidebar-active-bg);
+  color: var(--workbench-sidebar-active-text);
+  box-shadow: 0 2px 8px rgba(255, 70, 20, 0.05);
+  transform: translateX(4px);
+  font-weight: 600;
 }
