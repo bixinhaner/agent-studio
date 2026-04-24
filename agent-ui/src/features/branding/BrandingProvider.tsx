@@ -1,7 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 
 import { fetchPublicBranding } from "./api";
-import { DEFAULT_BRANDING, DEFAULT_PORTAL_BEHAVIOR, type PublicBranding, type PublicPortalBehavior } from "./types";
+import {
+  applyDocumentBranding,
+  fallbackBrandingResponse,
+  readStoredBrandingResponse,
+  writeStoredBrandingResponse
+} from "./runtime";
+import type { PublicBranding, PublicPortalBehavior } from "./types";
 
 type BrandingContextValue = {
   branding: PublicBranding;
@@ -13,23 +19,10 @@ type BrandingContextValue = {
 
 const BrandingContext = createContext<BrandingContextValue | null>(null);
 
-function applyFavicon(iconUrl: string) {
-  if (typeof document === "undefined") return;
-  const href = iconUrl.trim();
-  if (!href) return;
-
-  let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "icon";
-    document.head.appendChild(link);
-  }
-  link.href = href;
-}
-
 export function BrandingProvider({ children }: PropsWithChildren) {
-  const [branding, setBranding] = useState<PublicBranding>(DEFAULT_BRANDING);
-  const [behavior, setBehavior] = useState<PublicPortalBehavior>(DEFAULT_PORTAL_BEHAVIOR);
+  const initial = readStoredBrandingResponse() ?? fallbackBrandingResponse();
+  const [branding, setBranding] = useState<PublicBranding>(initial.branding);
+  const [behavior, setBehavior] = useState<PublicPortalBehavior>(initial.behavior);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -40,9 +33,11 @@ export function BrandingProvider({ children }: PropsWithChildren) {
       const response = await fetchPublicBranding();
       setBranding(response.branding);
       setBehavior(response.behavior);
+      writeStoredBrandingResponse(response);
     } catch (nextError) {
-      setBranding(DEFAULT_BRANDING);
-      setBehavior(DEFAULT_PORTAL_BEHAVIOR);
+      const fallback = readStoredBrandingResponse() ?? fallbackBrandingResponse();
+      setBranding(fallback.branding);
+      setBehavior(fallback.behavior);
       setError(nextError instanceof Error ? nextError.message : "Failed to load branding");
     } finally {
       setLoading(false);
@@ -54,8 +49,8 @@ export function BrandingProvider({ children }: PropsWithChildren) {
   }, [reload]);
 
   useEffect(() => {
-    applyFavicon(branding.iconUrl || branding.logoUrl);
-  }, [branding.iconUrl, branding.logoUrl]);
+    applyDocumentBranding(branding);
+  }, [branding]);
 
   const value = useMemo<BrandingContextValue>(
     () => ({

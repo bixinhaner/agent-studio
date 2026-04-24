@@ -81,6 +81,8 @@ describe("ManagedCodexProviderResolver", () => {
                 externalLoginCopy: "external test",
                 logoUrl: "",
                 iconUrl: "",
+                loginBackgroundUrl: "",
+                portalWelcomeIllustrationUrl: "",
                 assistantName: "test assistant",
                 assistantAvatarUrl: ""
               },
@@ -151,6 +153,8 @@ describe("resolveManagedCodexDefaults", () => {
             externalLoginCopy: "external test",
             logoUrl: "",
             iconUrl: "",
+            loginBackgroundUrl: "",
+            portalWelcomeIllustrationUrl: "",
             assistantName: "test assistant",
             assistantAvatarUrl: ""
           },

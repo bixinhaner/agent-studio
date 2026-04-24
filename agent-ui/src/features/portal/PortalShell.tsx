@@ -799,15 +799,37 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
   );
 };
 
-const DraftOnlyThreadWelcome: FC = () => (
-  <ThreadWelcome.Root>
-    <ThreadWelcome.Center>
-      <ThreadWelcome.Avatar />
-      <ThreadWelcome.Message />
-    </ThreadWelcome.Center>
-    <DraftOnlyWelcomeSuggestions />
-  </ThreadWelcome.Root>
-);
+const DraftOnlyThreadWelcome: FC = () => {
+  const { branding } = useBranding();
+  const portalWelcomeIllustrationUrl = branding.portalWelcomeIllustrationUrl.trim();
+
+  return (
+    <ThreadWelcome.Root>
+      <ThreadWelcome.Center
+        className={
+          portalWelcomeIllustrationUrl
+            ? "aui-thread-welcome-center portal-thread-welcome-center-with-illustration"
+            : "aui-thread-welcome-center"
+        }
+      >
+        {portalWelcomeIllustrationUrl ? (
+          <div className="portal-thread-welcome-illustration-shell">
+            <img
+              className="portal-thread-welcome-illustration"
+              src={portalWelcomeIllustrationUrl}
+              alt=""
+              loading="eager"
+            />
+          </div>
+        ) : (
+          <ThreadWelcome.Avatar />
+        )}
+        <ThreadWelcome.Message className={portalWelcomeIllustrationUrl ? "portal-thread-welcome-message" : undefined} />
+      </ThreadWelcome.Center>
+      <DraftOnlyWelcomeSuggestions />
+    </ThreadWelcome.Root>
+  );
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -4422,7 +4444,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const welcomeMessage =
     applyPortalWelcomeTemplate(welcomeMessageTemplate, {
       assistantName: assistantDisplayName,
-      platformName: branding.platformName.trim() || "Celix"
+      platformName: branding.platformName.trim() || "Agent Studio"
     }) ||
     (isMobile
       ? "Ask about products, versions, deployment, alarms, or troubleshooting."

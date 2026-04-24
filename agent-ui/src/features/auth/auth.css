@@ -1,3 +1,7 @@
+:root {
+  --auth-brand-background-image: none;
+}
+
 .auth-modern-screen {
   min-height: 100vh;
   min-height: 100dvh;
@@ -5,13 +9,13 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background-color: #18110d;
+  background-color: #f5efe8;
   background-image:
-    linear-gradient(102deg, rgba(18, 12, 10, 0.86) 0%, rgba(43, 26, 18, 0.58) 24%, rgba(82, 51, 35, 0.18) 44%, rgba(255, 245, 235, 0.08) 66%, rgba(255, 249, 244, 0.14) 100%),
-    radial-gradient(circle at 20% 24%, rgba(255, 192, 109, 0.26), transparent 30%),
-    radial-gradient(circle at 74% 72%, rgba(255, 109, 47, 0.18), transparent 28%),
-    radial-gradient(circle at 92% 12%, rgba(255, 255, 255, 0.18), transparent 18%),
-    url("/celix-auth-background.png");
+    linear-gradient(102deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 251, 247, 0.14) 28%, rgba(255, 247, 240, 0.08) 54%, rgba(255, 255, 255, 0.18) 100%),
+    radial-gradient(circle at 18% 20%, rgba(255, 214, 168, 0.2), transparent 24%),
+    radial-gradient(circle at 82% 18%, rgba(255, 255, 255, 0.24), transparent 20%),
+    radial-gradient(circle at 86% 74%, rgba(255, 226, 193, 0.16), transparent 24%),
+    var(--auth-brand-background-image, none);
   background-size: auto, auto, auto, auto, cover;
   background-position: center, center, center, center, center center;
   background-repeat: no-repeat;
@@ -32,22 +36,23 @@
 
 .auth-modern-screen::before {
   background:
-    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-    radial-gradient(circle at 78% 25%, rgba(255, 255, 255, 0.32) 0, rgba(255, 255, 255, 0.12) 2px, transparent 3px),
-    radial-gradient(circle at 86% 17%, rgba(255, 255, 255, 0.26) 0, rgba(255, 255, 255, 0.1) 2px, transparent 3px),
-    radial-gradient(circle at 89% 31%, rgba(255, 255, 255, 0.22) 0, rgba(255, 255, 255, 0.08) 2px, transparent 3px);
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 78% 25%, rgba(255, 255, 255, 0.26) 0, rgba(255, 255, 255, 0.1) 2px, transparent 3px),
+    radial-gradient(circle at 86% 17%, rgba(255, 255, 255, 0.2) 0, rgba(255, 255, 255, 0.08) 2px, transparent 3px),
+    radial-gradient(circle at 89% 31%, rgba(255, 255, 255, 0.18) 0, rgba(255, 255, 255, 0.06) 2px, transparent 3px);
   background-size: 42px 42px, 42px 42px, auto, auto, auto;
   background-position: -1px -1px, -1px -1px, center, center, center;
-  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.18) 50%, rgba(0, 0, 0, 0.9) 78%, rgba(0, 0, 0, 0.95) 100%);
-  opacity: 0.16;
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.12) 46%, rgba(0, 0, 0, 0.5) 76%, rgba(0, 0, 0, 0.7) 100%);
+  opacity: 0.12;
 }
 
 .auth-modern-screen::after {
   background:
-    linear-gradient(180deg, rgba(11, 8, 6, 0.16) 0%, rgba(11, 8, 6, 0.02) 18%, rgba(11, 8, 6, 0.28) 100%),
-    radial-gradient(circle at 12% 50%, rgba(0, 0, 0, 0.36), transparent 44%),
-    radial-gradient(circle at 88% 50%, rgba(255, 214, 178, 0.12), transparent 24%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 22%, rgba(255, 248, 241, 0.16) 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 250, 245, 0.14) 18%, rgba(255, 255, 255, 0.02) 42%, rgba(255, 255, 255, 0.06) 100%),
+    radial-gradient(circle at 14% 48%, rgba(255, 241, 223, 0.22), transparent 38%),
+    radial-gradient(circle at 92% 54%, rgba(255, 243, 225, 0.18), transparent 20%);
   mix-blend-mode: normal;
 }
 
@@ -59,12 +64,12 @@
 .dark .auth-modern-screen {
   background-color: #0b0a09;
   background-image:
-    linear-gradient(102deg, rgba(8, 6, 5, 0.92) 0%, rgba(20, 14, 11, 0.84) 28%, rgba(40, 27, 22, 0.52) 48%, rgba(64, 42, 30, 0.24) 64%, rgba(255, 239, 228, 0.08) 100%),
-    radial-gradient(circle at 22% 22%, rgba(255, 162, 79, 0.18), transparent 30%),
-    radial-gradient(circle at 78% 72%, rgba(255, 109, 47, 0.18), transparent 28%),
-    url("/celix-auth-background.png");
+    linear-gradient(96deg, rgba(8, 6, 5, 0.96) 0%, rgba(14, 10, 8, 0.9) 28%, rgba(28, 19, 15, 0.64) 50%, rgba(43, 28, 20, 0.28) 68%, rgba(255, 239, 228, 0.08) 100%),
+    radial-gradient(circle at 18% 18%, rgba(255, 162, 79, 0.14), transparent 24%),
+    radial-gradient(circle at 84% 74%, rgba(255, 109, 47, 0.14), transparent 24%),
+    var(--auth-brand-background-image, none);
   background-size: auto, auto, auto, cover;
-  background-position: center, center, center, center;
+  background-position: center, center, center, center center;
   color: #f9fafb;
 }
 
@@ -499,11 +504,11 @@
   .auth-modern-screen {
     padding: 16px;
     background-image:
-      linear-gradient(180deg, rgba(18, 12, 10, 0.52) 0%, rgba(18, 12, 10, 0.2) 18%, rgba(18, 12, 10, 0.62) 100%),
-      radial-gradient(circle at 18% 18%, rgba(255, 192, 109, 0.2), transparent 26%),
-      url("/celix-auth-background.png");
+      linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 250, 245, 0.06) 18%, rgba(255, 248, 241, 0.2) 100%),
+      radial-gradient(circle at 18% 18%, rgba(255, 214, 168, 0.18), transparent 24%),
+      var(--auth-brand-background-image, none);
     background-size: auto, auto, cover;
-    background-position: center, center, 60% center;
+    background-position: center, center, center center;
   }
   .auth-modern-card {
     padding: 32px 24px;
@@ -525,14 +530,14 @@
     font-size: 14px;
   }
   .auth-modern-screen::before {
-    opacity: 0.08;
-    mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.18) 42%, rgba(0, 0, 0, 0.9) 100%);
+    opacity: 0.06;
+    mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.12) 42%, rgba(0, 0, 0, 0.48) 100%);
   }
 }
 
 @media (max-width: 520px) {
   .auth-modern-screen {
-    background-position: center, center, 64% center;
+    background-position: center, center, center center;
   }
   .auth-modern-card {
     padding: 28px 20px;

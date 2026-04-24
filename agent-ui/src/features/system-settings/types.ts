@@ -13,6 +13,8 @@ export type SystemSettingsBranding = {
   externalLoginCopy: string;
   logoUrl: string;
   iconUrl: string;
+  loginBackgroundUrl: string;
+  portalWelcomeIllustrationUrl: string;
   assistantName: string;
   assistantAvatarUrl: string;
 };

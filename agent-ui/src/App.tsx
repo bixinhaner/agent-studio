@@ -400,10 +400,6 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aut
   });
 
   useEffect(() => {
-    document.title = branding.platformName;
-  }, [branding.platformName]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
     setView(resolveAppShellView(window.location.hash, adminEligible));
   }, [adminEligible, auth.user?.id]);

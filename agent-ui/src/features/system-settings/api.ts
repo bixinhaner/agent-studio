@@ -2,7 +2,12 @@ import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/ap
 
 import type { SystemSettingsPayload, SystemSettingsResponse } from "./types";
 
-export type BrandingAssetKind = "logo" | "icon" | "assistant-avatar";
+export type BrandingAssetKind =
+  | "logo"
+  | "icon"
+  | "assistant-avatar"
+  | "login-background"
+  | "portal-welcome-illustration";
 
 export type UploadedBrandingAsset = {
   url: string;

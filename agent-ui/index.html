@@ -3,7 +3,73 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Celix</title>
+    <title>Agent Studio</title>
+    <script>
+      (function () {
+        var storageKey = "agent-studio-public-branding";
+
+        function asString(value) {
+          return typeof value === "string" ? value.trim() : "";
+        }
+
+        function setFavicon(assetUrl) {
+          var normalized = asString(assetUrl);
+          var link = document.querySelector('link[rel~="icon"]');
+          if (!normalized) {
+            if (link) link.removeAttribute("href");
+            return;
+          }
+          if (!link) {
+            link = document.createElement("link");
+            link.rel = "icon";
+            document.head.appendChild(link);
+          }
+          link.href = normalized;
+        }
+
+        function setAuthBackground(assetUrl) {
+          var normalized = asString(assetUrl);
+          document.documentElement.style.setProperty(
+            "--auth-brand-background-image",
+            normalized ? "url(" + JSON.stringify(normalized) + ")" : "none"
+          );
+        }
+
+        function applyBranding(payload) {
+          var branding = payload && typeof payload === "object" && payload.branding && typeof payload.branding === "object"
+            ? payload.branding
+            : payload;
+          if (!branding || typeof branding !== "object") return;
+          var platformName = asString(branding.platformName) || "Agent Studio";
+          var iconUrl = asString(branding.iconUrl) || asString(branding.logoUrl);
+          var backgroundAsset =
+            asString(branding.loginBackgroundUrl) || asString(branding.logoUrl) || asString(branding.iconUrl);
+          document.title = platformName;
+          setFavicon(iconUrl);
+          setAuthBackground(backgroundAsset);
+        }
+
+        try {
+          var cached = window.localStorage.getItem(storageKey);
+          if (cached) {
+            applyBranding(JSON.parse(cached));
+          }
+        } catch (_error) {}
+
+        fetch("/public-api/branding", { credentials: "same-origin" })
+          .then(function (response) {
+            return response.ok ? response.json() : null;
+          })
+          .then(function (payload) {
+            if (!payload) return;
+            try {
+              window.localStorage.setItem(storageKey, JSON.stringify(payload));
+            } catch (_error) {}
+            applyBranding(payload);
+          })
+          .catch(function () {});
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -20,9 +20,16 @@ type BrandingSettingsViewProps = {
 const ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const MAX_PORTAL_WELCOME_SUGGESTIONS = 8;
 
-function fieldForAssetKind(kind: BrandingAssetKind): keyof Pick<SystemSettingsBranding, "logoUrl" | "iconUrl" | "assistantAvatarUrl"> {
+function fieldForAssetKind(
+  kind: BrandingAssetKind
+): keyof Pick<
+  SystemSettingsBranding,
+  "logoUrl" | "iconUrl" | "loginBackgroundUrl" | "portalWelcomeIllustrationUrl" | "assistantAvatarUrl"
+> {
   if (kind === "logo") return "logoUrl";
   if (kind === "icon") return "iconUrl";
+  if (kind === "login-background") return "loginBackgroundUrl";
+  if (kind === "portal-welcome-illustration") return "portalWelcomeIllustrationUrl";
   return "assistantAvatarUrl";
 }
 
@@ -45,6 +52,8 @@ export function BrandingSettingsView({
   const externalLoginCopyError = getFieldError(fieldErrors, "branding.externalLoginCopy");
   const logoUrlError = getFieldError(fieldErrors, "branding.logoUrl");
   const iconUrlError = getFieldError(fieldErrors, "branding.iconUrl");
+  const loginBackgroundUrlError = getFieldError(fieldErrors, "branding.loginBackgroundUrl");
+  const portalWelcomeIllustrationUrlError = getFieldError(fieldErrors, "branding.portalWelcomeIllustrationUrl");
   const assistantNameError = getFieldError(fieldErrors, "branding.assistantName");
   const assistantAvatarUrlError = getFieldError(fieldErrors, "branding.assistantAvatarUrl");
   const markdownError = getFieldError(fieldErrors, "behavior.markdown");
@@ -148,6 +157,27 @@ export function BrandingSettingsView({
     );
   }
 
+  function imagePreviewCard(input: {
+    label: string;
+    url: string;
+    emptyText: string;
+    imageClassName: string;
+  }) {
+    const src = input.url.trim();
+    return (
+      <article className="branding-preview-card">
+        <span className="branding-preview-label">{input.label}</span>
+        <div className="branding-preview-media">
+          {src ? (
+            <img className={input.imageClassName} src={src} alt="" />
+          ) : (
+            <span className="branding-preview-media-empty">{input.emptyText}</span>
+          )}
+        </div>
+      </article>
+    );
+  }
+
   return (
     <section className="resource-center-section">
       <div className="resource-center-section-header">
@@ -183,6 +213,18 @@ export function BrandingSettingsView({
             </div>
           </div>
         </article>
+        {imagePreviewCard({
+          label: "登录背景图",
+          url: value.loginBackgroundUrl,
+          emptyText: "未设置独立背景图",
+          imageClassName: "branding-preview-background-image"
+        })}
+        {imagePreviewCard({
+          label: "工作台欢迎图",
+          url: value.portalWelcomeIllustrationUrl,
+          emptyText: "未设置工作台欢迎图",
+          imageClassName: "branding-preview-illustration-image"
+        })}
       </div>
 
       {uploadErrorText ? <p className="field-error branding-upload-error">{uploadErrorText}</p> : null}
@@ -250,6 +292,24 @@ export function BrandingSettingsView({
           kind: "icon",
           placeholder: "https://... 或 /public-api/...",
           help: "用于 favicon 和小尺寸标识；建议使用方形图片。"
+        })}
+
+        {assetField({
+          label: "登录背景图",
+          value: value.loginBackgroundUrl,
+          error: loginBackgroundUrlError,
+          kind: "login-background",
+          placeholder: "https://... 或 /public-api/...",
+          help: "用于登录页背景主视觉；建议上传横向插画或宽幅图片。"
+        })}
+
+        {assetField({
+          label: "工作台欢迎图",
+          value: value.portalWelcomeIllustrationUrl,
+          error: portalWelcomeIllustrationUrlError,
+          kind: "portal-welcome-illustration",
+          placeholder: "https://... 或 /public-api/...",
+          help: "用于工作台空状态欢迎区中间主图；建议上传透明背景 PNG 或浅色插画。"
         })}
 
         <label className="field">

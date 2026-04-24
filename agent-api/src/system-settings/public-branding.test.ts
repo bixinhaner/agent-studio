@@ -17,6 +17,8 @@ describe("resolvePublicBranding", () => {
               platformName: "Celix Workspace",
               headerSubtitle: "Operations",
               loginCopy: "Use SSO.",
+              loginBackgroundUrl: "/assets/login-bg.png",
+              portalWelcomeIllustrationUrl: "/assets/portal-hero.png",
               assistantName: "Celix",
               assistantAvatarUrl: "/assets/celix.png"
             },
@@ -41,7 +43,9 @@ describe("resolvePublicBranding", () => {
     expect(response.branding.platformName).toBe("Celix Workspace");
     expect(response.branding.assistantName).toBe("Celix");
     expect(response.branding.internalLoginCopy).toBe("Use SSO.");
-    expect(response.branding.externalLoginCopy).toBe("Welcome to the intelligent agent world of Celix.");
+    expect(response.branding.externalLoginCopy).toBe("Welcome. Sign in to continue.");
+    expect(response.branding.loginBackgroundUrl).toBe("/assets/login-bg.png");
+    expect(response.branding.portalWelcomeIllustrationUrl).toBe("/assets/portal-hero.png");
     expect(response.behavior).toEqual({
       portalWelcomeMessageDesktop: "Hello from {{assistantName}} on {{platformName}}.",
       portalWelcomeMessageMobile: "Hello from mobile.",

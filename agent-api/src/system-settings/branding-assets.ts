@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export const BRANDING_ASSET_KINDS = ["logo", "icon", "assistant-avatar"] as const;
+export const BRANDING_ASSET_KINDS = [
+  "logo",
+  "icon",
+  "assistant-avatar",
+  "login-background",
+  "portal-welcome-illustration"
+] as const;
 export type BrandingAssetKind = (typeof BRANDING_ASSET_KINDS)[number];
 
 type BrandingAssetUploadFile = {
@@ -29,7 +35,7 @@ type BrandingAssetReadResult = {
   mimeType: BrandingAssetImageType["mimeType"];
 };
 
-const ASSET_FILE_PATTERN = /^(logo|icon|assistant-avatar)-[a-f0-9]{24}\.(png|jpg|webp)$/;
+const ASSET_FILE_PATTERN = /^(logo|icon|assistant-avatar|login-background|portal-welcome-illustration)-[a-f0-9]{24}\.(png|jpg|webp)$/;
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error !== null && typeof error === "object" && "code" in error;
@@ -74,7 +80,7 @@ export function parseBrandingAssetKind(value: unknown): BrandingAssetKind {
   if ((BRANDING_ASSET_KINDS as readonly string[]).includes(normalized)) {
     return normalized as BrandingAssetKind;
   }
-  throw new Error("kind must be logo, icon, or assistant-avatar");
+  throw new Error("kind must be logo, icon, assistant-avatar, login-background, or portal-welcome-illustration");
 }
 
 export class BrandingAssetStorage {

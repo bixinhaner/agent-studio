@@ -1349,6 +1349,20 @@ button.session-rail-new-btn:active,
   .thread-wrap .aui-thread-welcome-center {
     width: 100%;
   }
+  .thread-wrap .portal-thread-welcome-illustration-shell {
+    width: 100%;
+    min-height: 180px;
+    padding: 8px 10px 10px;
+    border-radius: 32px;
+  }
+  .thread-wrap .portal-thread-welcome-illustration {
+    max-height: 220px;
+    -webkit-mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 1) 58%, rgba(0, 0, 0, 0.84) 74%, rgba(0, 0, 0, 0.22) 90%, transparent 100%);
+    mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 1) 58%, rgba(0, 0, 0, 0.84) 74%, rgba(0, 0, 0, 0.22) 90%, transparent 100%);
+  }
+  .thread-wrap .portal-thread-welcome-message {
+    max-width: 100%;
+  }
   .thread-wrap .aui-thread-welcome-center > .aui-avatar-root {
     width: 112px;
     height: 112px;
