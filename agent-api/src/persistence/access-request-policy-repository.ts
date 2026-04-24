@@ -2,7 +2,7 @@ export type AccessRequestPolicyRecord = {
   id: string;
   policyKey: string;
   internalEmailDomains: string[];
-  publicEmailBlocklistExtra: string[];
+  blockedApplicantEmailDomains: string[];
   defaultTrialDays: number;
   createdAt: string;
   updatedAt: string;
@@ -10,7 +10,7 @@ export type AccessRequestPolicyRecord = {
 
 export type AccessRequestPolicyFallback = {
   internalEmailDomains: string[];
-  publicEmailBlocklistExtra: string[];
+  blockedApplicantEmailDomains: string[];
   defaultTrialDays: number;
 };
 
@@ -67,7 +67,7 @@ function mapPolicy(row: AccessRequestPolicyRow, fallback: AccessRequestPolicyFal
     id: row.id,
     policyKey: trimOrUndefined(row.policyKey) ?? "global",
     internalEmailDomains: normalizeList(row.internalEmailDomains, fallback.internalEmailDomains),
-    publicEmailBlocklistExtra: normalizeList(row.publicEmailBlocklistExtra, fallback.publicEmailBlocklistExtra),
+    blockedApplicantEmailDomains: normalizeList(row.publicEmailBlocklistExtra, fallback.blockedApplicantEmailDomains),
     defaultTrialDays: normalizeTrialDays(row.defaultTrialDays, fallback.defaultTrialDays),
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
@@ -86,7 +86,7 @@ export class AccessRequestPolicyRepository {
       data: {
         policyKey: "global",
         internalEmailDomains: normalizeList(fallback.internalEmailDomains),
-        publicEmailBlocklistExtra: normalizeList(fallback.publicEmailBlocklistExtra),
+        publicEmailBlocklistExtra: normalizeList(fallback.blockedApplicantEmailDomains),
         defaultTrialDays: normalizeTrialDays(fallback.defaultTrialDays, 14)
       }
     });
@@ -96,7 +96,7 @@ export class AccessRequestPolicyRepository {
   async update(
     input: {
       internalEmailDomains?: string[];
-      publicEmailBlocklistExtra?: string[];
+      blockedApplicantEmailDomains?: string[];
       defaultTrialDays?: number;
     },
     fallback: AccessRequestPolicyFallback
@@ -110,9 +110,9 @@ export class AccessRequestPolicyRepository {
             ? current.internalEmailDomains
             : normalizeList(input.internalEmailDomains, fallback.internalEmailDomains),
         publicEmailBlocklistExtra:
-          input.publicEmailBlocklistExtra === undefined
-            ? current.publicEmailBlocklistExtra
-            : normalizeList(input.publicEmailBlocklistExtra, fallback.publicEmailBlocklistExtra),
+          input.blockedApplicantEmailDomains === undefined
+            ? current.blockedApplicantEmailDomains
+            : normalizeList(input.blockedApplicantEmailDomains, fallback.blockedApplicantEmailDomains),
         defaultTrialDays:
           input.defaultTrialDays === undefined
             ? current.defaultTrialDays

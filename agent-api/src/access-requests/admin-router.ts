@@ -26,6 +26,7 @@ const updateRequestSchema = z.object({
 
 const policySchema = z.object({
   internalEmailDomains: z.array(z.string().trim().min(1)).min(1, "At least one internal domain is required").optional(),
+  blockedApplicantEmailDomains: z.array(z.string().trim().min(1)).optional(),
   publicEmailBlocklistExtra: z.array(z.string().trim().min(1)).optional(),
   defaultTrialDays: z.number().int().min(1).max(365).optional()
 });

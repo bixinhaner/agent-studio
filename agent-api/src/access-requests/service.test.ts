@@ -102,7 +102,26 @@ function createServiceHarness() {
     id: "policy_1",
     policyKey: "global",
     internalEmailDomains: ["baicells.com"],
-    publicEmailBlocklistExtra: [],
+    blockedApplicantEmailDomains: [
+      "126.com",
+      "163.com",
+      "aliyun.com",
+      "aol.com",
+      "foxmail.com",
+      "gmail.com",
+      "hotmail.com",
+      "icloud.com",
+      "live.com",
+      "msn.com",
+      "outlook.com",
+      "proton.me",
+      "protonmail.com",
+      "qq.com",
+      "sina.com",
+      "sohu.com",
+      "yahoo.com",
+      "ymail.com"
+    ],
     defaultTrialDays: 14,
     createdAt: "2026-04-21T00:00:00.000Z",
     updatedAt: "2026-04-21T00:00:00.000Z"
@@ -281,7 +300,7 @@ function createServiceHarness() {
         policy = {
           ...policy,
           internalEmailDomains: input.internalEmailDomains ?? policy.internalEmailDomains,
-          publicEmailBlocklistExtra: input.publicEmailBlocklistExtra ?? policy.publicEmailBlocklistExtra,
+          blockedApplicantEmailDomains: input.blockedApplicantEmailDomains ?? policy.blockedApplicantEmailDomains,
           defaultTrialDays: input.defaultTrialDays ?? policy.defaultTrialDays,
           updatedAt: "2026-04-22T00:00:00.000Z"
         };
@@ -395,11 +414,12 @@ describe("createAccessRequestService", () => {
     const initial = await service.getPolicy();
     expect(initial.defaultTrialDays).toBe(14);
     expect(initial.internalEmailDomains).toEqual(["baicells.com"]);
+    expect(initial.blockedApplicantEmailDomains).toContain("gmail.com");
 
     const updated = await service.updatePolicy(
       {
         internalEmailDomains: ["baicells.com", "baicells.net"],
-        publicEmailBlocklistExtra: ["examplemail.com"],
+        blockedApplicantEmailDomains: ["corp-mail.example", "examplemail.com"],
         defaultTrialDays: 30
       },
       { actorType: "admin", actorUserId: "admin_1", actorEmail: "admin@baicells.com" }
@@ -407,6 +427,6 @@ describe("createAccessRequestService", () => {
 
     expect(updated.defaultTrialDays).toBe(30);
     expect(updated.internalEmailDomains).toEqual(["baicells.com", "baicells.net"]);
-    expect(updated.publicEmailBlocklistExtra).toEqual(["examplemail.com"]);
+    expect(updated.blockedApplicantEmailDomains).toEqual(["corp-mail.example", "examplemail.com"]);
   });
 });

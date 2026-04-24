@@ -141,7 +141,7 @@ export type AccessRequestWorkspaceLookups = {
 
 export type AccessRequestPolicy = {
   internalEmailDomains: string[];
-  publicEmailBlocklistExtra: string[];
+  blockedApplicantEmailDomains: string[];
   defaultTrialDays: number;
   updatedAt?: string;
 };
@@ -193,6 +193,6 @@ export type ReviewerAccessRequestView = {
 
 export type AdminAccessRequestPolicyUpdateInput = {
   internalEmailDomains?: string[];
-  publicEmailBlocklistExtra?: string[];
+  blockedApplicantEmailDomains?: string[];
   defaultTrialDays?: number;
 };

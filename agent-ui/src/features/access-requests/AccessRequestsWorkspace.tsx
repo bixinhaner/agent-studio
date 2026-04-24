@@ -75,7 +75,7 @@ type ProvisionDraft = AdminAccessRequestProvisionInput;
 
 type PolicyDraft = {
   internalEmailDomainsText: string;
-  publicEmailBlocklistExtraText: string;
+  blockedApplicantEmailDomainsText: string;
   defaultTrialDays: number;
 };
 
@@ -167,7 +167,7 @@ function parsePolicyList(value: string): string[] {
 function createPolicyDraft(policy?: AccessRequestPolicy | null): PolicyDraft {
   return {
     internalEmailDomainsText: formatPolicyList(policy?.internalEmailDomains ?? []),
-    publicEmailBlocklistExtraText: formatPolicyList(policy?.publicEmailBlocklistExtra ?? []),
+    blockedApplicantEmailDomainsText: formatPolicyList(policy?.blockedApplicantEmailDomains ?? []),
     defaultTrialDays: policy?.defaultTrialDays ?? 14
   };
 }
@@ -243,7 +243,7 @@ export function AccessRequestsWorkspace() {
     try {
       const nextPolicy = await updateAdminAccessRequestPolicy({
         internalEmailDomains,
-        publicEmailBlocklistExtra: parsePolicyList(policyDraft.publicEmailBlocklistExtraText),
+        blockedApplicantEmailDomains: parsePolicyList(policyDraft.blockedApplicantEmailDomainsText),
         defaultTrialDays: Math.max(1, Number(policyDraft.defaultTrialDays || 14))
       });
       setPolicy(nextPolicy);
@@ -556,14 +556,14 @@ export function AccessRequestsWorkspace() {
             />
           </label>
           <label className="access-admin-field">
-            <span>公共邮箱黑名单补充</span>
+            <span>申请邮箱黑名单域名</span>
             <textarea
               className="access-admin-textarea access-admin-textarea-sm"
-              value={policyDraft.publicEmailBlocklistExtraText}
+              value={policyDraft.blockedApplicantEmailDomainsText}
               onChange={(event) =>
-                setPolicyDraft((current) => ({ ...current, publicEmailBlocklistExtraText: event.target.value }))
+                setPolicyDraft((current) => ({ ...current, blockedApplicantEmailDomainsText: event.target.value }))
               }
-              placeholder={"gmail.com\noutlook.com"}
+              placeholder={"126.com\n163.com\ngmail.com\noutlook.com"}
             />
           </label>
           <label className="access-admin-field">

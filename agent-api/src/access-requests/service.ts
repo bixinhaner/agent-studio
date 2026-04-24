@@ -183,7 +183,7 @@ export type AdminAccessRequestLookups = {
 
 export type AccessRequestPolicyView = {
   internalEmailDomains: string[];
-  publicEmailBlocklistExtra: string[];
+  blockedApplicantEmailDomains: string[];
   defaultTrialDays: number;
   updatedAt?: string;
 };
@@ -367,12 +367,16 @@ function buildUrl(baseUrl: string | undefined, pathname: string): string | undef
   return `${base.replace(/\/+$/, "")}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
 }
 
-function ensureBusinessEmail(email: string, extraBlockedDomains: string[]): void {
+function buildBlockedApplicantEmailDomains(extraBlockedDomains: string[]): string[] {
+  return dedupeStrings([...PUBLIC_EMAIL_DOMAINS, ...extraBlockedDomains]);
+}
+
+function ensureBusinessEmail(email: string, blockedDomains: string[]): void {
   const domain = emailDomain(email).toLowerCase();
   if (!domain) {
     throw new Error("Applicant email is invalid");
   }
-  if (PUBLIC_EMAIL_DOMAINS.has(domain) || extraBlockedDomains.includes(domain)) {
+  if (blockedDomains.includes(domain)) {
     throw new Error("Applicant email must be a business email");
   }
 }
@@ -677,7 +681,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
   async function loadPolicy(): Promise<AccessRequestPolicyView> {
     const fallback = {
       internalEmailDomains: options.accessRequestConfig.internalEmailDomains,
-      publicEmailBlocklistExtra: options.accessRequestConfig.publicEmailBlocklistExtra,
+      blockedApplicantEmailDomains: buildBlockedApplicantEmailDomains(options.accessRequestConfig.publicEmailBlocklistExtra),
       defaultTrialDays: options.accessRequestConfig.defaultTrialDays
     };
     if (!options.policies) {
@@ -686,7 +690,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     const policy = await options.policies.getOrCreate(fallback);
     return {
       internalEmailDomains: policy.internalEmailDomains,
-      publicEmailBlocklistExtra: policy.publicEmailBlocklistExtra,
+      blockedApplicantEmailDomains: policy.blockedApplicantEmailDomains,
       defaultTrialDays: policy.defaultTrialDays,
       updatedAt: policy.updatedAt
     };
@@ -921,7 +925,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     async submitPublicRequest(input: AccessRequestPublicFormInput): Promise<{ request: PublicAccessRequestView; publicToken: string }> {
       const applicantEmail = ensureEmail(input.applicantEmail, "Applicant email");
       const policy = await loadPolicy();
-      ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
+      ensureBusinessEmail(applicantEmail, policy.blockedApplicantEmailDomains);
 
       const contactName = trimOrUndefined(input.contactName);
       const companyName = trimOrUndefined(input.companyName);
@@ -1052,7 +1056,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
 
       const applicantEmail = ensureEmail(input.applicantEmail, "Applicant email");
       const policy = await loadPolicy();
-      ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
+      ensureBusinessEmail(applicantEmail, policy.blockedApplicantEmailDomains);
       const contactName = trimOrUndefined(input.contactName);
       const countryRegion = trimOrUndefined(input.countryRegion);
       const salesContact = trimOrUndefined(input.salesContactEmail);
@@ -1198,6 +1202,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     async updatePolicy(
       input: {
         internalEmailDomains?: string[];
+        blockedApplicantEmailDomains?: string[];
         publicEmailBlocklistExtra?: string[];
         defaultTrialDays?: number;
       },
@@ -1205,20 +1210,28 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     ): Promise<AccessRequestPolicyView> {
       const fallback = {
         internalEmailDomains: options.accessRequestConfig.internalEmailDomains,
-        publicEmailBlocklistExtra: options.accessRequestConfig.publicEmailBlocklistExtra,
+        blockedApplicantEmailDomains: buildBlockedApplicantEmailDomains(options.accessRequestConfig.publicEmailBlocklistExtra),
         defaultTrialDays: options.accessRequestConfig.defaultTrialDays
       };
       if (!options.policies) {
+        const blockedApplicantEmailDomains = input.blockedApplicantEmailDomains ?? input.publicEmailBlocklistExtra;
         return {
           internalEmailDomains: input.internalEmailDomains ?? fallback.internalEmailDomains,
-          publicEmailBlocklistExtra: input.publicEmailBlocklistExtra ?? fallback.publicEmailBlocklistExtra,
+          blockedApplicantEmailDomains: blockedApplicantEmailDomains ?? fallback.blockedApplicantEmailDomains,
           defaultTrialDays: input.defaultTrialDays ?? fallback.defaultTrialDays
         };
       }
-      const updated = await options.policies.update(input, fallback);
+      const updated = await options.policies.update(
+        {
+          internalEmailDomains: input.internalEmailDomains,
+          blockedApplicantEmailDomains: input.blockedApplicantEmailDomains ?? input.publicEmailBlocklistExtra,
+          defaultTrialDays: input.defaultTrialDays
+        },
+        fallback
+      );
       return {
         internalEmailDomains: updated.internalEmailDomains,
-        publicEmailBlocklistExtra: updated.publicEmailBlocklistExtra,
+        blockedApplicantEmailDomains: updated.blockedApplicantEmailDomains,
         defaultTrialDays: updated.defaultTrialDays,
         updatedAt: updated.updatedAt
       };
