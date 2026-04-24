@@ -15,6 +15,7 @@ DOMAIN="${DOMAIN:-}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
 CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
 CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
+ASSET_RETENTION_DAYS="${AGENT_STUDIO_ASSET_RETENTION_DAYS:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
 SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
@@ -36,6 +37,8 @@ Options:
                          Backend host used by Caddy reverse proxy [default: 127.0.0.1]
   --caddy-upstream-port <port>
                          Backend port used by Caddy reverse proxy [default: --api-port value]
+  --asset-retention-days <days>
+                         Days to keep old frontend assets; 0 disables pruning [default: ${ASSET_RETENTION_DAYS:-30}]
   --skip-git-pull        Rebuild current checkout without fetching or pulling
   --skip-rbac-seed       Skip built-in RBAC seed step
   --skip-caddy-reload    Skip rendering/reloading Caddy
@@ -78,6 +81,10 @@ while [[ $# -gt 0 ]]; do
       CADDY_UPSTREAM_PORT="$2"
       shift 2
       ;;
+    --asset-retention-days)
+      ASSET_RETENTION_DAYS="$2"
+      shift 2
+      ;;
     --skip-git-pull)
       SKIP_GIT_PULL=1
       shift
@@ -112,6 +119,10 @@ fi
 
 if [[ -z "$CADDY_UPSTREAM_PORT" ]]; then
   CADDY_UPSTREAM_PORT="$API_PORT"
+fi
+
+if [[ -n "$ASSET_RETENTION_DAYS" && ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  die "--asset-retention-days must be a non-negative integer"
 fi
 
 require_repo_checkout() {
@@ -302,7 +313,16 @@ build_frontend() {
   run_as_app_user_shell "cd '$APP_UI_DIR' && npm ci"
 
   log_step "Building frontend"
-  run_as_app_user_shell "cd '$APP_UI_DIR' && npm run build"
+  if [[ -n "$ASSET_RETENTION_DAYS" ]]; then
+    run_as_app_user_shell "cd '$APP_UI_DIR' && AGENT_STUDIO_ASSET_RETENTION_DAYS='$ASSET_RETENTION_DAYS' npm run build"
+  else
+    run_as_app_user_shell "cd '$APP_UI_DIR' && npm run build"
+  fi
+
+  [[ -f "$APP_UI_DIR/dist/index.html" ]] || die "frontend build did not produce dist/index.html"
+  [[ -f "$APP_UI_DIR/dist/version.json" ]] || die "frontend build did not produce dist/version.json"
+  [[ -f "$APP_UI_DIR/dist/stale-asset-reload.js" ]] || die "frontend build did not produce dist/stale-asset-reload.js"
+  [[ -d "$APP_UI_DIR/dist/assets" ]] || die "frontend build did not produce dist/assets"
 }
 
 restart_pm2() {

@@ -92,6 +92,22 @@ raise SystemExit(1)
 PY
 }
 
+normalize_postgres_cli_url() {
+  local database_url="$1"
+
+  python3 - "$database_url" <<'PY'
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import sys
+
+database_url = sys.argv[1]
+parts = urlsplit(database_url)
+filtered_query = urlencode(
+    [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "schema"]
+)
+print(urlunsplit((parts.scheme, parts.netloc, parts.path, filtered_query, parts.fragment)))
+PY
+}
+
 check_required_files() {
   [[ -d "$APP_REPO_DIR" ]] || die "repository directory does not exist: $APP_REPO_DIR"
   [[ -f "$APP_API_DIR/package.json" ]] || die "missing agent-api/package.json under $APP_API_DIR"
@@ -101,6 +117,9 @@ check_required_files() {
   [[ -f "$CADDY_CONFIG_FILE" ]] || die "missing Caddy config: $CADDY_CONFIG_FILE"
   [[ -f "$APP_API_DIR/dist/codex-runtime.js" ]] || die "missing backend build output: $APP_API_DIR/dist/codex-runtime.js"
   [[ -f "$APP_UI_DIR/dist/index.html" ]] || die "missing frontend build output: $APP_UI_DIR/dist/index.html"
+  [[ -f "$APP_UI_DIR/dist/version.json" ]] || die "missing frontend build metadata: $APP_UI_DIR/dist/version.json"
+  [[ -f "$APP_UI_DIR/dist/stale-asset-reload.js" ]] || die "missing stale asset fallback module: $APP_UI_DIR/dist/stale-asset-reload.js"
+  [[ -d "$APP_UI_DIR/dist/assets" ]] || die "missing frontend assets directory: $APP_UI_DIR/dist/assets"
   print_ok "required files are present"
 }
 
@@ -140,8 +159,10 @@ PY
 
 check_postgres() {
   [[ -n "${DATABASE_URL:-}" ]] || die "DATABASE_URL is unavailable for PostgreSQL validation"
-  psql "$DATABASE_URL" -tAc 'select 1;' >/dev/null
-  psql "$DATABASE_URL" -tAc 'select current_database(), current_user;' >/dev/null
+  local cli_database_url
+  cli_database_url="$(normalize_postgres_cli_url "$DATABASE_URL")"
+  psql "$cli_database_url" -tAc 'select 1;' >/dev/null
+  psql "$cli_database_url" -tAc 'select current_database(), current_user;' >/dev/null
   print_ok "postgresql connection is healthy"
 }
 
@@ -152,6 +173,9 @@ check_pm2() {
 
 check_caddy() {
   caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null
+  grep -Fq "handle /version.json" "$CADDY_CONFIG_FILE" || die "Caddy config is missing /version.json no-store route"
+  grep -Fq "@missing_js_asset" "$CADDY_CONFIG_FILE" || die "Caddy config is missing stale JS asset fallback route"
+  grep -Fq "handle /assets/*" "$CADDY_CONFIG_FILE" || die "Caddy config is missing explicit /assets/* route"
   print_ok "caddy configuration validates"
 }
 
