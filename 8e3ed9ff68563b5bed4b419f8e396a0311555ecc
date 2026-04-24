@@ -1,0 +1,5 @@
+Verification:
+- npm test passed: 4 files, 11 tests.
+- npm run build passed.
+- Caddy reloaded successfully.
+- Live checks confirmed version.json no-store, missing JS chunk fallback, and /healthz 200.
