@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { BuildingIcon } from "lucide-react";
 
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { fetchInvite, type AuthInvite } from "./features/auth/api";
@@ -258,8 +259,11 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
           <div className="auth-modern-invite">Loading invitation details...</div>
         ) : invite ? (
           <div className="auth-modern-invite">
-            🌟 <strong>{invite.organization.name}</strong> invited you to join
-            {inviteStatusText ? ` (${inviteStatusText})` : ""}
+            <BuildingIcon size={16} style={{ marginRight: 6 }} />
+            <span>
+              <strong>{invite.organization.name}</strong> invited you to join
+              {inviteStatusText ? ` (${inviteStatusText})` : ""}
+            </span>
           </div>
         ) : null}
 
