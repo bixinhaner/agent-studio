@@ -7,6 +7,25 @@
     reverse_proxy {$CADDY_UPSTREAM_HOST}:{$CADDY_UPSTREAM_PORT}
   }
 
+  @missing_js_asset {
+    path /assets/*.js
+    not file
+  }
+  handle @missing_js_asset {
+    rewrite * /stale-asset-reload.js
+    header Cache-Control "no-store"
+    file_server
+  }
+
+  handle /assets/* {
+    file_server
+  }
+
+  handle /version.json {
+    header Cache-Control "no-store"
+    file_server
+  }
+
   handle {
     try_files {path} /index.html
     file_server

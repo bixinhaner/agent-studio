@@ -13,6 +13,7 @@ import {
 } from "react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { isDynamicImportLoadError, reloadOnceForStaleDynamicImport } from "../../lib/stale-chunk-reload";
 
 export const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
 export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex];
@@ -136,10 +137,16 @@ export function MarkdownMermaidBlock(props: { code: string }) {
       })
       .catch((error: unknown) => {
         if (!active) return;
+        if (isDynamicImportLoadError(error) && reloadOnceForStaleDynamicImport()) return;
+
         setState({
           status: "error",
           svg: "",
-          error: error instanceof Error ? error.message : "Failed to render Mermaid diagram."
+          error: isDynamicImportLoadError(error)
+            ? "The diagram renderer could not load the current app assets. Refresh the page and try again."
+            : error instanceof Error
+              ? error.message
+              : "Failed to render Mermaid diagram."
         });
       });
 

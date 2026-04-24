@@ -6,7 +6,12 @@ import "@assistant-ui/react-ui/styles/markdown.css";
 import "katex/dist/katex.min.css";
 
 import App from "./App";
+import { installBuildVersionRefreshMonitor } from "./lib/build-version-refresh";
+import { installStaleDynamicImportReloadHandler } from "./lib/stale-chunk-reload";
 import "./styles.css";
+
+installStaleDynamicImportReloadHandler();
+installBuildVersionRefreshMonitor();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

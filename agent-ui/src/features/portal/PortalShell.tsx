@@ -77,6 +77,7 @@ import { ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
+import { reportAutoRefreshActivityState } from "../../lib/build-version-refresh";
 import {
   DEFAULT_MODEL,
   contextLimitForModel,
@@ -2197,6 +2198,32 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
       </div>
     </div>
   );
+};
+
+const BuildVersionRefreshActivityBridge: FC<{ hasRunningSessions: boolean }> = ({ hasRunningSessions }) => {
+  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const composerHasDraft = useAuiState((state) => !state.composer.isEmpty || state.composer.attachments.length > 0);
+  const uploadRunning = useAuiState((state) =>
+    state.composer.attachments.some((attachment) => attachment.status.type === "running")
+  );
+
+  useEffect(() => {
+    reportAutoRefreshActivityState({
+      hasRunningTasks: hasRunningSessions || threadRunning || uploadRunning,
+      hasUnsavedDraft: composerHasDraft
+    });
+  }, [composerHasDraft, hasRunningSessions, threadRunning, uploadRunning]);
+
+  useEffect(() => {
+    return () => {
+      reportAutoRefreshActivityState({
+        hasRunningTasks: false,
+        hasUnsavedDraft: false
+      });
+    };
+  }, []);
+
+  return null;
 };
 
 const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => <RunningMessagePlaceholder {...props} />;
@@ -5607,6 +5634,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     <AssistantRuntimeProvider runtime={runtime}>
       <ComposerActivationGuard runtime={runtime} />
       <ThreadRuntimeSubscriptionBridge runtime={runtime} />
+      <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
       <RunningStageTextContext.Provider value={runningStageText}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={PORTAL_ANTD_THEME}>
