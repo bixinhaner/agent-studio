@@ -1449,12 +1449,43 @@ button.session-rail-new-btn:active,
   flex: 1;
 }
 
-.bailey-illustration {
+.bailey-illustration-shell {
+  position: relative;
+  width: 100%;
   max-width: 600px;
-  max-height: 360px;
-  object-fit: contain;
+  height: auto;
+  max-height: 380px;
   margin-bottom: 2rem;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 底层舞台光场：制造底部氛围溶圈光晕 */
+.bailey-illustration-shell::before {
+  content: "";
+  position: absolute;
+  bottom: 0%;
+  left: 50%;
+  transform: translate(-50%, 20%);
+  width: 80%;
+  height: 60%;
+  background: radial-gradient(ellipse closest-side, rgba(255, 70, 20, 0.15) 0%, transparent 100%);
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(24px);
+}
+
+.bailey-illustration {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* 顶层白色羽化压边：径向渐变吃掉四周硬矩形边缘，使画面和底部完全融为一体 */
+  -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, black 45%, transparent 100%);
+  mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, black 45%, transparent 100%);
+  position: relative;
+  z-index: 2;
 }
 
 .bailey-welcome-greeting {

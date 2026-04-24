@@ -821,12 +821,14 @@ const DraftOnlyThreadWelcome: FC = () => {
   return (
     <div className="bailey-welcome-container">
       {portalWelcomeIllustrationUrl ? (
-        <img
-          className="bailey-illustration"
-          src={portalWelcomeIllustrationUrl}
-          alt={assistantDisplayName}
-          loading="eager"
-        />
+        <div className="bailey-illustration-shell">
+          <img
+            className="bailey-illustration"
+            src={portalWelcomeIllustrationUrl}
+            alt={assistantDisplayName}
+            loading="eager"
+          />
+        </div>
       ) : null}
       <h1 className="bailey-welcome-greeting">
         Hello, I'm <span>{assistantDisplayName}</span>.
