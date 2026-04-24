@@ -1,0 +1,4 @@
+Verification:
+- bash -n passed for deploy-agent-studio.sh and check-env.sh.
+- deploy-agent-studio.sh --help shows --asset-retention-days.
+- sudo bash scripts/check-env.sh --skip-codex-check passed, including Caddy route checks and health endpoint.
