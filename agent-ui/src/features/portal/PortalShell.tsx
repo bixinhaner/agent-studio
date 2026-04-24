@@ -57,7 +57,11 @@ import {
   ThumbsDownIcon,
   Trash2Icon,
   XIcon,
-  MoreHorizontalIcon
+  MoreHorizontalIcon,
+  PackageIcon,
+  ClipboardListIcon,
+  BotIcon,
+  ZapIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -782,52 +786,56 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
     return null;
   }
 
+  const icons = [PackageIcon, ClipboardListIcon, BotIcon, ZapIcon];
+  const classes = ["icon-green", "icon-blue", "icon-orange", "icon-purple"];
+
   return (
-    <div className="aui-thread-welcome-suggestions">
-      {behavior.portalWelcomeSuggestions.map((suggestion, index) => (
-        <ThreadPrimitive.Suggestion
-          key={`${suggestion.label}-${index}`}
-          className="aui-thread-welcome-suggestion"
-          prompt={suggestion.prompt}
-          send={false}
-          clearComposer
-        >
-          <span className="aui-thread-welcome-suggestion-text">{suggestion.label}</span>
-        </ThreadPrimitive.Suggestion>
-      ))}
+    <div className="bailey-suggestion-grid">
+      {behavior.portalWelcomeSuggestions.map((suggestion, index) => {
+        const Icon = icons[index % icons.length];
+        const iconClass = classes[index % classes.length];
+        return (
+          <ThreadPrimitive.Suggestion
+            key={`${suggestion.label}-${index}`}
+            className="bailey-suggestion-card"
+            prompt={suggestion.prompt}
+            send={false}
+            clearComposer
+          >
+            <div className={`bailey-suggestion-icon-wrap ${iconClass}`}>
+              <Icon size={20} strokeWidth={2.5} />
+            </div>
+            <span className="bailey-suggestion-text">{suggestion.label}</span>
+          </ThreadPrimitive.Suggestion>
+        );
+      })}
     </div>
   );
 };
 
 const DraftOnlyThreadWelcome: FC = () => {
-  const { branding } = useBranding();
+  const { branding, behavior } = useBranding();
   const portalWelcomeIllustrationUrl = branding.portalWelcomeIllustrationUrl.trim();
+  const assistantDisplayName = branding.assistantName.trim() || "Bailey";
 
   return (
-    <ThreadWelcome.Root>
-      <ThreadWelcome.Center
-        className={
-          portalWelcomeIllustrationUrl
-            ? "aui-thread-welcome-center portal-thread-welcome-center-with-illustration"
-            : "aui-thread-welcome-center"
-        }
-      >
-        {portalWelcomeIllustrationUrl ? (
-          <div className="portal-thread-welcome-illustration-shell">
-            <img
-              className="portal-thread-welcome-illustration"
-              src={portalWelcomeIllustrationUrl}
-              alt=""
-              loading="eager"
-            />
-          </div>
-        ) : (
-          <ThreadWelcome.Avatar />
-        )}
-        <ThreadWelcome.Message className={portalWelcomeIllustrationUrl ? "portal-thread-welcome-message" : undefined} />
-      </ThreadWelcome.Center>
+    <div className="bailey-welcome-container">
+      {portalWelcomeIllustrationUrl ? (
+        <img
+          className="bailey-illustration"
+          src={portalWelcomeIllustrationUrl}
+          alt={assistantDisplayName}
+          loading="eager"
+        />
+      ) : null}
+      <h1 className="bailey-welcome-greeting">
+        Hello, I'm <span>{assistantDisplayName}</span>.
+      </h1>
+      <p className="bailey-welcome-subtitle">
+        Ask about products, versions, deployment, alarms, or troubleshooting.
+      </p>
       <DraftOnlyWelcomeSuggestions />
-    </ThreadWelcome.Root>
+    </div>
   );
 };
 

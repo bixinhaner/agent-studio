@@ -20,7 +20,7 @@ export function SessionRail(
         {!props.collapsed ? (
           <div className="session-rail-controls">
             {props.newThreadSlot ?? (
-              <Button aria-label="New session" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
+              <Button className="session-rail-new-btn" aria-label="New session" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
                 New session
               </Button>
             )}
@@ -37,6 +37,7 @@ export function SessionRail(
         ) : (
           <Tooltip title="New session" placement="right">
             <Button
+              className="session-rail-new-btn"
               type="primary"
               icon={<Plus size={16} />}
               onClick={props.onCreateThread}
