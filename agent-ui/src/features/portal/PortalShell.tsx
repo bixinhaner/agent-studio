@@ -2092,9 +2092,6 @@ function applyStoredFeedback(message: unknown, feedback: ThreadFeedbackOut | und
 function isThreadRuntimeRunning(value: unknown): boolean {
   const runtime = asRecord(value);
   if (runtime?.isRunning === true) return true;
-  const abortController = asRecord(runtime?.abortController);
-  const abortSignal = asRecord(abortController?.signal);
-  if (abortController && abortSignal && abortSignal.aborted !== true) return true;
   const messages = Array.isArray(runtime?.messages) ? runtime.messages : [];
   const lastMessage = messages[messages.length - 1];
   const message = asRecord(lastMessage);
