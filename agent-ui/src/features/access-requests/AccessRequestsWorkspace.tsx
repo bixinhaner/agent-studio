@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import {
+  accessRequestFileUrl,
   fetchAdminAccessRequestDetail,
   fetchAdminAccessRequestWorkspace,
   patchAdminAccessRequest,
@@ -30,6 +31,7 @@ import {
 } from "./api";
 import {
   deliveryTypeLabel,
+  formatFileSize,
   formatLocalDate,
   formatLocalTime,
   membershipTypeLabel,
@@ -422,7 +424,7 @@ export function AccessRequestsWorkspace() {
         )
       },
       {
-        title: "销售邮箱",
+        title: "销售联系人",
         dataIndex: "salesContactEmail",
         width: 220
       },
@@ -614,15 +616,26 @@ export function AccessRequestsWorkspace() {
                       <div><span>联系人</span><strong>{selectedRequest.contactName ?? "—"}</strong></div>
                       <div><span>国家 / 地区</span><strong>{selectedRequest.countryRegion ?? "—"}</strong></div>
                       <div><span>历史 SN 号</span><strong>{selectedRequest.snNumber ?? "—"}</strong></div>
-                      <div><span>销售邮箱</span><strong>{selectedRequest.salesContactEmail}</strong></div>
-                      <div><span>历史购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div>
-                      <div><span>历史 PO 号</span><strong>{selectedRequest.poNumber}</strong></div>
+                      <div><span>销售联系人</span><strong>{selectedRequest.salesContactEmail}</strong></div>
+                      {selectedRequest.purchaseDate ? <div><span>历史购买时间</span><strong>{formatLocalDate(selectedRequest.purchaseDate)}</strong></div> : null}
+                      {selectedRequest.poNumber ? <div><span>历史 PO 号</span><strong>{selectedRequest.poNumber}</strong></div> : null}
                       <div><span>公开链接</span><strong>{selectedRequest.publicAccessUrl ?? "—"}</strong></div>
                     </div>
-                    <label className="access-admin-field">
-                      <span>Purchased Devices</span>
-                      <textarea readOnly value={selectedRequest.deviceInfoText} className="access-admin-textarea access-admin-textarea-readonly" />
-                    </label>
+                    <div className="access-admin-field">
+                      <span>采购凭证</span>
+                      {selectedRequest.purchaseProofAttachments.length ? (
+                        <div className="access-admin-file-list">
+                          {selectedRequest.purchaseProofAttachments.map((file) => (
+                            <a key={file.id} href={accessRequestFileUrl(file.contentUrl)} target="_blank" rel="noreferrer">
+                              {file.name}
+                              {formatFileSize(file.sizeBytes) ? ` · ${formatFileSize(file.sizeBytes)}` : ""}
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <textarea readOnly value={selectedRequest.deviceInfoText} className="access-admin-textarea access-admin-textarea-readonly" />
+                      )}
+                    </div>
                     <div className="access-admin-form-grid">
                       <label className="access-admin-field">
                         <span>Owner</span>

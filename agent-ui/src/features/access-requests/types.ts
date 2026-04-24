@@ -1,3 +1,12 @@
+export type AccessRequestAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentUrl?: string;
+  createdAt: string;
+};
+
 export type PublicAccessRequest = {
   id: string;
   status: string;
@@ -7,6 +16,7 @@ export type PublicAccessRequest = {
   companyName: string;
   countryRegion?: string;
   deviceInfoText: string;
+  purchaseProofAttachments: AccessRequestAttachment[];
   purchaseDate?: string;
   poNumber: string;
   snNumber?: string;
@@ -31,11 +41,12 @@ export type PublicAccessRequestInput = {
   contactName: string;
   companyName: string;
   countryRegion: string;
-  deviceInfoText: string;
-  purchaseDate: string | null;
-  poNumber: string;
+  deviceInfoText?: string | null;
+  purchaseDate?: string | null;
+  poNumber?: string;
   snNumber: string;
   salesContactEmail: string;
+  purchaseProofFiles?: File[];
   customerNote?: string;
 };
 
@@ -112,6 +123,7 @@ export type AccessRequestReviewer = {
 
 export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
   deviceInfoText: string;
+  purchaseProofAttachments: AccessRequestAttachment[];
   customerNote?: string;
   adminNote?: string;
   reviewSummary?: string;

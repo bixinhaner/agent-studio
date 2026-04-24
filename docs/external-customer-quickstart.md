@@ -21,11 +21,9 @@ Prepare the following information before you submit your request:
 - Contact Name
 - Your company name
 - Country / Region
-- History Purchase Date
-- History PO Number
-- One Baicells product SN Number
-- Your Baicells sales contact email
-- Purchased Devices information
+- At least one Baicells product SN Number
+- Your Baicells sales contact
+- Purchase proof files, such as a PO, purchase record screenshot/photo, invoice, or other purchase record
 
 ## Registration And First Sign-In
 
@@ -46,11 +44,9 @@ Required fields:
 - Contact Name
 - Company
 - Country / Region
-- History Purchase Date
-- History PO Number
 - SN Number
-- Baicells Sales Email
-- Purchased Devices
+- Baicells Sales Contact
+- Upload Purchase Proof
 
 Optional field:
 

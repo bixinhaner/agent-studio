@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { AuthEmailSender } from "../auth/email.js";
+import type {
+  AccessRequestAttachmentRecord,
+  AccessRequestAttachmentRepository
+} from "../persistence/access-request-attachment-repository.js";
 import type { AccessRequestEventRecord, AccessRequestEventRepository } from "../persistence/access-request-event-repository.js";
 import type { AccessRequestPolicyRepository } from "../persistence/access-request-policy-repository.js";
 import type { AccessRequestRecord, AccessRequestRepository } from "../persistence/access-request-repository.js";
@@ -11,6 +15,7 @@ import type { OrganizationRecord, OrganizationRepository } from "../persistence/
 import type { SubscriptionGrantRepository } from "../persistence/subscription-grant-repository.js";
 import type { SubscriptionPlanRecord, SubscriptionPlanRepository } from "../persistence/subscription-plan-repository.js";
 import type { AuthenticatedUser, UserRepositoryLike } from "../persistence/user-repository.js";
+import type { PurchaseProofStorage, PurchaseProofUploadFile } from "./purchase-proof-storage.js";
 
 export type AccessRequestStatus =
   | "submitted"
@@ -54,12 +59,22 @@ export type AccessRequestPublicFormInput = {
   contactName: string;
   companyName: string;
   countryRegion: string;
-  deviceInfoText: string;
-  purchaseDate: string | null;
-  poNumber: string;
+  deviceInfoText?: string | null;
+  purchaseDate?: string | null;
+  poNumber?: string | null;
   snNumber: string;
   salesContactEmail: string;
+  purchaseProofFiles?: PurchaseProofUploadFile[];
   customerNote?: string;
+};
+
+export type AccessRequestAttachmentView = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentUrl?: string;
+  createdAt: string;
 };
 
 export type AccessRequestAdminUpdateInput = {
@@ -140,6 +155,7 @@ export type AdminAccessRequestSummary = {
 
 export type AdminAccessRequestDetail = AdminAccessRequestSummary & {
   deviceInfoText: string;
+  purchaseProofAttachments: AccessRequestAttachmentView[];
   customerNote?: string;
   adminNote?: string;
   reviewSummary?: string;
@@ -181,6 +197,7 @@ export type PublicAccessRequestView = {
   companyName: string;
   countryRegion?: string;
   deviceInfoText: string;
+  purchaseProofAttachments: AccessRequestAttachmentView[];
   purchaseDate?: string;
   poNumber: string;
   snNumber?: string;
@@ -208,6 +225,8 @@ export type ReviewerAccessRequestView = {
 
 type AccessRequestServiceOptions = {
   requests: AccessRequestRepository;
+  attachments: AccessRequestAttachmentRepository;
+  purchaseProofStorage: PurchaseProofStorage;
   reviewers: AccessRequestReviewerRepository;
   events: AccessRequestEventRepository;
   users: UserRepositoryLike;
@@ -265,6 +284,11 @@ function ensureEmail(value: unknown, fieldName: string): string {
     throw new Error(`${fieldName} is invalid`);
   }
   return email;
+}
+
+function optionalEmail(value: unknown): string | undefined {
+  const email = normalizeEmail(value);
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
 }
 
 function emailDomain(email: string): string {
@@ -353,11 +377,17 @@ function ensureBusinessEmail(email: string, extraBlockedDomains: string[]): void
   }
 }
 
-function ensureInternalSalesEmail(email: string, allowedDomains: string[]): void {
+function ensureInternalReviewerEmail(email: string, allowedDomains: string[]): void {
   const domain = emailDomain(email).toLowerCase();
   if (!domain || !allowedDomains.includes(domain)) {
-    throw new Error("Sales contact email must be an internal Baicells email");
+    throw new Error("Reviewer email must be an internal Baicells email");
   }
+}
+
+function optionalInternalEmail(value: unknown, allowedDomains: string[]): string | undefined {
+  const email = optionalEmail(value);
+  if (!email) return undefined;
+  return allowedDomains.includes(emailDomain(email).toLowerCase()) ? email : undefined;
 }
 
 function maskEmail(email: string): string {
@@ -538,7 +568,8 @@ async function resolveOrganizationMap(
 
 function requestToPublicView(
   request: AccessRequestRecord,
-  organization: OrganizationRecord | null
+  organization: OrganizationRecord | null,
+  purchaseProofAttachments: AccessRequestAttachmentView[] = []
 ): PublicAccessRequestView {
   return {
     id: request.id,
@@ -549,6 +580,7 @@ function requestToPublicView(
     companyName: request.companyName,
     countryRegion: request.countryRegion,
     deviceInfoText: request.deviceInfoText,
+    purchaseProofAttachments,
     purchaseDate: request.purchaseDate,
     poNumber: request.poNumber,
     snNumber: request.snNumber,
@@ -571,7 +603,77 @@ function requestToPublicView(
   };
 }
 
+function attachmentToView(
+  attachment: AccessRequestAttachmentRecord,
+  contentUrl?: string
+): AccessRequestAttachmentView {
+  return {
+    id: attachment.id,
+    name: attachment.originalName,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    contentUrl,
+    createdAt: attachment.createdAt
+  };
+}
+
 export function createAccessRequestService(options: AccessRequestServiceOptions) {
+  async function listPurchaseProofViews(
+    request: AccessRequestRecord,
+    route: "admin" | "public" | "reviewer"
+  ): Promise<AccessRequestAttachmentView[]> {
+    const attachments = await options.attachments.listForRequest(request.id, "purchase_proof");
+    return attachments.map((attachment) => {
+      const contentUrl =
+        route === "admin"
+          ? `/api/admin/access-requests/${encodeURIComponent(request.id)}/proofs/${encodeURIComponent(attachment.id)}/content`
+          : route === "reviewer"
+            ? `/api/access-requests-review/${encodeURIComponent(request.id)}/proofs/${encodeURIComponent(attachment.id)}/content`
+            : `/public-api/access-requests/${encodeURIComponent(request.publicToken)}/proofs/${encodeURIComponent(attachment.id)}/content`;
+      return attachmentToView(attachment, contentUrl);
+    });
+  }
+
+  async function buildPublicView(
+    request: AccessRequestRecord,
+    organization: OrganizationRecord | null
+  ): Promise<PublicAccessRequestView> {
+    return requestToPublicView(request, organization, await listPurchaseProofViews(request, "public"));
+  }
+
+  async function savePurchaseProofFiles(
+    requestId: string,
+    files: PurchaseProofUploadFile[] | undefined
+  ): Promise<AccessRequestAttachmentRecord[]> {
+    const validFiles = (files ?? []).filter((file) => file.sizeBytes > 0 && file.buffer.length > 0);
+    if (!validFiles.length) return [];
+    const storedFiles = await options.purchaseProofStorage.saveFiles(requestId, validFiles);
+    return options.attachments.createMany(
+      storedFiles.map((file) => ({
+        accessRequestId: requestId,
+        kind: "purchase_proof",
+        originalName: file.originalName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        storagePath: file.storagePath
+      }))
+    );
+  }
+
+  async function readAttachmentFile(request: AccessRequestRecord, attachmentId: string): Promise<{
+    attachment: AccessRequestAttachmentRecord;
+    content: Buffer;
+  }> {
+    const attachment = await options.attachments.getById(attachmentId);
+    if (!attachment || attachment.accessRequestId !== request.id) {
+      throw new Error("Purchase proof file does not exist");
+    }
+    return {
+      attachment,
+      content: await options.purchaseProofStorage.readFile(attachment.storagePath)
+    };
+  }
+
   async function loadPolicy(): Promise<AccessRequestPolicyView> {
     const fallback = {
       internalEmailDomains: options.accessRequestConfig.internalEmailDomains,
@@ -616,12 +718,13 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
   }
 
   async function listAdminNotificationRecipients(request: AccessRequestRecord): Promise<string[]> {
-    const internalUsers = await options.findInternalUsers();
+    const [internalUsers, policy] = await Promise.all([options.findInternalUsers(), loadPolicy()]);
     const adminEmails = internalUsers
       .filter((user) => user.role === "admin" || user.role === "super_admin")
       .map((user) => user.email);
     const ownerEmail = request.ownerUserId ? internalUsers.find((user) => user.id === request.ownerUserId)?.email : undefined;
-    return dedupeStrings([...adminEmails, ownerEmail, request.salesContactEmail]);
+    const salesContactEmail = optionalInternalEmail(request.salesContactEmail, policy.internalEmailDomains);
+    return dedupeStrings([...adminEmails, ownerEmail, salesContactEmail]);
   }
 
   async function notifyAdmins(
@@ -648,14 +751,18 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
     return request;
   }
 
-  async function buildAdminDetail(request: AccessRequestRecord): Promise<AdminAccessRequestDetail> {
-    const [reviewers, events, ownerMap, orgMap, planMap, directory] = await Promise.all([
+  async function buildAdminDetail(
+    request: AccessRequestRecord,
+    attachmentRoute: "admin" | "reviewer" = "admin"
+  ): Promise<AdminAccessRequestDetail> {
+    const [reviewers, events, ownerMap, orgMap, planMap, directory, purchaseProofAttachments] = await Promise.all([
       options.reviewers.listForRequest(request.id),
       options.events.listForRequest(request.id),
       resolveRelatedUsers(options.users, [request.ownerUserId ?? "", request.targetUserId ?? ""]),
       resolveOrganizationMap(options.organizations, [request.targetOrganizationId ?? ""]),
       resolvePlanMap(options.subscriptionPlans, [request.requestedPlanId ?? "", request.approvedPlanId ?? ""]),
-      loadInternalDirectory()
+      loadInternalDirectory(),
+      listPurchaseProofViews(request, attachmentRoute)
     ]);
 
     const owner = request.ownerUserId ? ownerMap.get(request.ownerUserId) ?? null : null;
@@ -718,6 +825,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       createdAt: request.createdAt,
       updatedAt: request.updatedAt,
       deviceInfoText: request.deviceInfoText,
+      purchaseProofAttachments,
       customerNote: request.customerNote,
       adminNote: request.adminNote,
       reviewSummary: request.reviewSummary,
@@ -812,20 +920,26 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
   return {
     async submitPublicRequest(input: AccessRequestPublicFormInput): Promise<{ request: PublicAccessRequestView; publicToken: string }> {
       const applicantEmail = ensureEmail(input.applicantEmail, "Applicant email");
-      const salesContactEmail = ensureEmail(input.salesContactEmail, "Sales contact email");
       const policy = await loadPolicy();
       ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
-      ensureInternalSalesEmail(salesContactEmail, policy.internalEmailDomains);
 
       const contactName = trimOrUndefined(input.contactName);
       const companyName = trimOrUndefined(input.companyName);
       const countryRegion = trimOrUndefined(input.countryRegion);
-      const deviceInfoText = trimOrUndefined(input.deviceInfoText);
+      const salesContact = trimOrUndefined(input.salesContactEmail);
+      const purchaseProofFiles = input.purchaseProofFiles ?? [];
+      const deviceInfoText =
+        trimOrUndefined(input.deviceInfoText) ??
+        trimOrUndefined(purchaseProofFiles.map((file) => file.originalName.trim()).filter(Boolean).join("\n")) ??
+        "Uploaded purchase proof";
       const purchaseDate = toDateOrUndefined(input.purchaseDate);
-      const poNumber = trimOrUndefined(input.poNumber);
+      const poNumber = trimOrUndefined(input.poNumber) ?? "";
       const snNumber = trimOrUndefined(input.snNumber);
-      if (!contactName || !companyName || !countryRegion || !deviceInfoText || !purchaseDate || !poNumber || !snNumber) {
-        throw new Error("Contact name, company, country, purchased devices, history purchase date, history PO number, and SN number are required");
+      if (!contactName || !companyName || !countryRegion || !salesContact || !snNumber) {
+        throw new Error("Contact name, company, country, Baicells sales contact, and at least one device SN are required");
+      }
+      if (!purchaseProofFiles.length) {
+        throw new Error("Purchase proof file is required");
       }
 
       const rawToken = issuePublicToken();
@@ -839,23 +953,27 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         companyName,
         countryRegion,
         deviceInfoText,
-        purchaseDate,
+        purchaseDate: purchaseDate ?? null,
         poNumber,
         snNumber,
-        salesContactEmail,
+        salesContactEmail: salesContact,
         customerNote: trimOrUndefined(input.customerNote) ?? null,
         reviewMode: "any_to_approve",
         rejectionMode: "any_to_reject",
         publicToken: rawToken,
         lastSubmittedAt: new Date()
       });
-      await options.reviewers.replaceForRequest(request.id, [
-        {
-          reviewerEmail: salesContactEmail,
-          deliveryType: "to",
-          decision: "pending"
-        }
-      ]);
+      await savePurchaseProofFiles(request.id, purchaseProofFiles);
+      const salesContactReviewerEmail = optionalInternalEmail(salesContact, policy.internalEmailDomains);
+      if (salesContactReviewerEmail) {
+        await options.reviewers.replaceForRequest(request.id, [
+          {
+            reviewerEmail: salesContactReviewerEmail,
+            deliveryType: "to",
+            decision: "pending"
+          }
+        ]);
+      }
       await addEvent(
         request.id,
         "submitted",
@@ -886,8 +1004,8 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           `${companyName} submitted a new access request.`,
           `Applicant: ${applicantEmail}`,
           `SN: ${snNumber}`,
-          `Sales contact: ${salesContactEmail}`,
-          `PO: ${poNumber}`,
+          `Sales contact: ${salesContact}`,
+          poNumber ? `PO: ${poNumber}` : undefined,
           publicLink ? `Public view: ${publicLink}` : undefined
         ]
           .filter(Boolean)
@@ -896,7 +1014,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
 
       return {
-        request: requestToPublicView(request, null),
+        request: await buildPublicView(request, null),
         publicToken: rawToken
       };
     },
@@ -909,7 +1027,18 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const targetOrganization = request.targetOrganizationId
         ? (await options.organizations.getById(request.targetOrganizationId)) ?? null
         : null;
-      return requestToPublicView(request, targetOrganization);
+      return buildPublicView(request, targetOrganization);
+    },
+
+    async getPublicPurchaseProofFile(rawToken: string, attachmentId: string): Promise<{
+      attachment: AccessRequestAttachmentRecord;
+      content: Buffer;
+    }> {
+      const request = await options.requests.getByPublicToken(rawToken);
+      if (!request) {
+        throw new Error("Access request does not exist");
+      }
+      return readAttachmentFile(request, attachmentId);
     },
 
     async resubmitPublicRequest(rawToken: string, input: AccessRequestPublicFormInput): Promise<PublicAccessRequestView> {
@@ -922,18 +1051,27 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       }
 
       const applicantEmail = ensureEmail(input.applicantEmail, "Applicant email");
-      const salesContactEmail = ensureEmail(input.salesContactEmail, "Sales contact email");
       const policy = await loadPolicy();
       ensureBusinessEmail(applicantEmail, policy.publicEmailBlocklistExtra);
-      ensureInternalSalesEmail(salesContactEmail, policy.internalEmailDomains);
       const contactName = trimOrUndefined(input.contactName);
       const countryRegion = trimOrUndefined(input.countryRegion);
-      const deviceInfoText = trimOrUndefined(input.deviceInfoText);
+      const salesContact = trimOrUndefined(input.salesContactEmail);
+      const purchaseProofFiles = input.purchaseProofFiles ?? [];
+      const existingProofs = await options.attachments.listForRequest(existing.id, "purchase_proof");
+      const deviceInfoText =
+        trimOrUndefined(input.deviceInfoText) ??
+        (purchaseProofFiles.length
+          ? trimOrUndefined(purchaseProofFiles.map((file) => file.originalName.trim()).filter(Boolean).join("\n")) ??
+            "Uploaded purchase proof"
+          : existing.deviceInfoText);
       const purchaseDate = toDateOrUndefined(input.purchaseDate);
-      const poNumber = trimOrUndefined(input.poNumber);
+      const poNumber = trimOrUndefined(input.poNumber) ?? "";
       const snNumber = trimOrUndefined(input.snNumber);
-      if (!contactName || !countryRegion || !deviceInfoText || !purchaseDate || !poNumber || !snNumber) {
-        throw new Error("Contact name, country, purchased devices, history purchase date, history PO number, and SN number are required");
+      if (!contactName || !countryRegion || !salesContact || !snNumber) {
+        throw new Error("Contact name, country, Baicells sales contact, and at least one device SN are required");
+      }
+      if (!purchaseProofFiles.length && !existingProofs.length) {
+        throw new Error("Purchase proof file is required");
       }
 
       const updated = await options.requests.update(existing.id, {
@@ -944,15 +1082,16 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         companyName: trimOrUndefined(input.companyName) ?? existing.companyName,
         countryRegion,
         deviceInfoText,
-        purchaseDate,
+        purchaseDate: purchaseDate ?? null,
         poNumber,
         snNumber,
-        salesContactEmail,
+        salesContactEmail: salesContact,
         customerNote: trimOrUndefined(input.customerNote) ?? null,
         reviewSummary: null,
         rejectionReason: null,
         lastSubmittedAt: new Date()
       });
+      await savePurchaseProofFiles(updated.id, purchaseProofFiles);
       await options.reviewers.resetDecisions(updated.id);
       await addEvent(
         updated.id,
@@ -975,7 +1114,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const targetOrganization = updated.targetOrganizationId
         ? (await options.organizations.getById(updated.targetOrganizationId)) ?? null
         : null;
-      return requestToPublicView(updated, targetOrganization);
+      return buildPublicView(updated, targetOrganization);
     },
 
     async listAdminWorkspace(input?: { status?: string; query?: string }): Promise<{
@@ -1090,6 +1229,14 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       return buildAdminDetail(request);
     },
 
+    async getAdminPurchaseProofFile(requestId: string, attachmentId: string): Promise<{
+      attachment: AccessRequestAttachmentRecord;
+      content: Buffer;
+    }> {
+      const request = await ensureRequestExists(requestId);
+      return readAttachmentFile(request, attachmentId);
+    },
+
     async updateAdminRequest(requestId: string, input: AccessRequestAdminUpdateInput, actor: AccessRequestActor): Promise<AdminAccessRequestDetail> {
       const existing = await ensureRequestExists(requestId);
       const policy = await loadPolicy();
@@ -1097,7 +1244,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       const internalUserByEmail = new Map(internalUsers.map((user) => [user.email.toLowerCase(), user] as const));
       const reviewers = (input.reviewers ?? []).map((reviewer) => {
         const reviewerEmail = ensureEmail(reviewer.reviewerEmail, "Reviewer email");
-        ensureInternalSalesEmail(reviewerEmail, policy.internalEmailDomains);
+        ensureInternalReviewerEmail(reviewerEmail, policy.internalEmailDomains);
         const matchedUser = reviewer.reviewerUserId
           ? internalUsers.find((user) => user.id === reviewer.reviewerUserId)
           : internalUserByEmail.get(reviewerEmail);
@@ -1162,7 +1309,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           `Applicant: ${updated.applicantEmail}`,
           `SN: ${updated.snNumber ?? "—"}`,
           `Sales contact: ${updated.salesContactEmail}`,
-          `PO: ${updated.poNumber}`,
+          updated.poNumber ? `PO: ${updated.poNumber}` : undefined,
           reviewUrl ? `Review in system: ${reviewUrl}` : undefined
         ]
           .filter(Boolean)
@@ -1260,7 +1407,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
         throw new Error("You are not assigned to review this request");
       }
       return {
-        request: await buildAdminDetail(request),
+        request: await buildAdminDetail(request, "reviewer"),
         viewer: {
           reviewerId: reviewer.id,
           reviewerEmail: reviewer.reviewerEmail,
@@ -1268,6 +1415,19 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
           decision: reviewer.decision
         }
       };
+    },
+
+    async getReviewerPurchaseProofFile(requestId: string, attachmentId: string, currentUser: AuthenticatedUser): Promise<{
+      attachment: AccessRequestAttachmentRecord;
+      content: Buffer;
+    }> {
+      const request = await ensureRequestExists(requestId);
+      const reviewers = await options.reviewers.listForRequest(request.id);
+      const reviewer = reviewers.find((item) => isInternalReviewerMatch(item, currentUser));
+      if (!reviewer) {
+        throw new Error("You are not assigned to review this request");
+      }
+      return readAttachmentFile(request, attachmentId);
     },
 
     async submitReviewerDecision(
@@ -1321,7 +1481,7 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       );
       return {
         reviewer: updatedReviewer,
-        request: await buildAdminDetail(nextRequest)
+        request: await buildAdminDetail(nextRequest, "reviewer")
       };
     },
 

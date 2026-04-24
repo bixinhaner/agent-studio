@@ -86,9 +86,11 @@ import {
 import { SubscriptionGrantRepository } from "./persistence/subscription-grant-repository.js";
 import { SubscriptionPlanRepository } from "./persistence/subscription-plan-repository.js";
 import { AccessRequestRepository } from "./persistence/access-request-repository.js";
+import { AccessRequestAttachmentRepository } from "./persistence/access-request-attachment-repository.js";
 import { AccessRequestReviewerRepository } from "./persistence/access-request-reviewer-repository.js";
 import { AccessRequestEventRepository } from "./persistence/access-request-event-repository.js";
 import { AccessRequestPolicyRepository } from "./persistence/access-request-policy-repository.js";
+import { PurchaseProofStorage } from "./access-requests/purchase-proof-storage.js";
 import { UsageEventRepository, type UsageEventRepositoryDb } from "./persistence/usage-event-repository.js";
 import { UsageRollupRepository, type UsageRollupRepositoryDb } from "./persistence/usage-rollup-repository.js";
 import { OrganizationRepository, type OrganizationRepositoryDb } from "./persistence/organization-repository.js";
@@ -186,6 +188,7 @@ const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryD
 const subscriptionPlans = new SubscriptionPlanRepository(db as never);
 const subscriptionGrants = new SubscriptionGrantRepository(db as never);
 const accessRequests = new AccessRequestRepository(db as never);
+const accessRequestAttachments = new AccessRequestAttachmentRepository(db as never);
 const accessRequestReviewers = new AccessRequestReviewerRepository(db as never);
 const accessRequestEvents = new AccessRequestEventRepository(db as never);
 const accessRequestPolicies = new AccessRequestPolicyRepository(db as never);
@@ -229,8 +232,11 @@ const codexProviders = new ManagedCodexProviderResolver({
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const authEmailSender = createAuthEmailSender(appConfig.authEmail);
+const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({
   requests: accessRequests,
+  attachments: accessRequestAttachments,
+  purchaseProofStorage,
   reviewers: accessRequestReviewers,
   events: accessRequestEvents,
   users,

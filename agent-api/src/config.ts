@@ -36,6 +36,7 @@ const schema = z.object({
   ACCESS_REQUEST_INTERNAL_EMAIL_DOMAINS: z.string().optional(),
   ACCESS_REQUEST_PUBLIC_EMAIL_BLOCKLIST_EXTRA: z.string().optional(),
   ACCESS_REQUEST_DEFAULT_TRIAL_DAYS: z.string().optional(),
+  ACCESS_REQUEST_UPLOAD_ROOT: z.string().default("./temp/access-request-proofs"),
   ORG_SYNC_ENABLED: z.string().optional(),
   ORG_SYNC_INTERVAL_MINUTES: z.string().optional(),
   WORKSPACE_WHITELIST: z.string().default("."),
@@ -87,6 +88,10 @@ const brandingAssetRoot = path.isAbsolute(env.BRANDING_ASSET_ROOT)
 const knowledgeSetStorageRoot = path.isAbsolute(env.KNOWLEDGE_SET_STORAGE_ROOT)
   ? env.KNOWLEDGE_SET_STORAGE_ROOT
   : path.resolve(process.cwd(), env.KNOWLEDGE_SET_STORAGE_ROOT);
+
+const accessRequestUploadRoot = path.isAbsolute(env.ACCESS_REQUEST_UPLOAD_ROOT)
+  ? env.ACCESS_REQUEST_UPLOAD_ROOT
+  : path.resolve(process.cwd(), env.ACCESS_REQUEST_UPLOAD_ROOT);
 
 function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
@@ -166,6 +171,7 @@ export const appConfig = {
       .filter(Boolean),
     defaultTrialDays: parseInteger(env.ACCESS_REQUEST_DEFAULT_TRIAL_DAYS, 14)
   },
+  accessRequestUploadRoot,
   workspaceWhitelist: whitelist.length ? whitelist : [defaultWorkspace],
   legacyThreadOwnerId: (env.LEGACY_THREAD_OWNER_ID || "").trim(),
   threadStoreFile,

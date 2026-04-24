@@ -1,4 +1,4 @@
-import { api } from "../../lib/api";
+import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 
 import type {
   AdminAccessRequestDetail,
@@ -13,11 +13,54 @@ import type {
   ReviewerAccessRequestView
 } from "./types";
 
-export async function createPublicAccessRequest(input: PublicAccessRequestInput): Promise<PublicAccessRequestCreateResponse> {
-  return api<PublicAccessRequestCreateResponse>("/public-api/access-requests", {
-    method: "POST",
-    json: input
+function appendText(formData: FormData, key: string, value: string | null | undefined): void {
+  if (value === undefined || value === null) return;
+  formData.append(key, value);
+}
+
+function buildPublicAccessRequestFormData(input: PublicAccessRequestInput): FormData {
+  const formData = new FormData();
+  formData.append("applicantEmail", input.applicantEmail);
+  formData.append("contactName", input.contactName);
+  formData.append("companyName", input.companyName);
+  formData.append("countryRegion", input.countryRegion);
+  formData.append("snNumber", input.snNumber);
+  formData.append("salesContactEmail", input.salesContactEmail);
+  appendText(formData, "deviceInfoText", input.deviceInfoText);
+  appendText(formData, "purchaseDate", input.purchaseDate);
+  appendText(formData, "poNumber", input.poNumber);
+  appendText(formData, "customerNote", input.customerNote);
+  for (const file of input.purchaseProofFiles ?? []) {
+    formData.append("purchaseProofFiles", file, file.name);
+  }
+  return formData;
+}
+
+async function publicAccessRequestFormApi<T>(path: string, method: "POST" | "PATCH", input: PublicAccessRequestInput): Promise<T> {
+  const res = await fetch(`${apiBase()}${path}`, {
+    method,
+    credentials: "include",
+    headers: authHeaders(),
+    body: buildPublicAccessRequestFormData(input)
   });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    notifyAuthInvalidStatus(res.status);
+    const msg = (data && typeof data.detail === "string" && data.detail) || `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return data as T;
+}
+
+export function accessRequestFileUrl(contentUrl: string | undefined): string {
+  if (!contentUrl) return "#";
+  if (/^https?:\/\//i.test(contentUrl)) return contentUrl;
+  return `${apiBase()}${contentUrl.startsWith("/") ? contentUrl : `/${contentUrl}`}`;
+}
+
+export async function createPublicAccessRequest(input: PublicAccessRequestInput): Promise<PublicAccessRequestCreateResponse> {
+  return publicAccessRequestFormApi<PublicAccessRequestCreateResponse>("/public-api/access-requests", "POST", input);
 }
 
 export async function fetchPublicAccessRequest(token: string): Promise<PublicAccessRequest> {
@@ -26,10 +69,11 @@ export async function fetchPublicAccessRequest(token: string): Promise<PublicAcc
 }
 
 export async function updatePublicAccessRequest(token: string, input: PublicAccessRequestInput): Promise<PublicAccessRequest> {
-  const payload = await api<{ request: PublicAccessRequest }>(`/public-api/access-requests/${encodeURIComponent(token)}`, {
-    method: "PATCH",
-    json: input
-  });
+  const payload = await publicAccessRequestFormApi<{ request: PublicAccessRequest }>(
+    `/public-api/access-requests/${encodeURIComponent(token)}`,
+    "PATCH",
+    input
+  );
   return payload.request;
 }
 

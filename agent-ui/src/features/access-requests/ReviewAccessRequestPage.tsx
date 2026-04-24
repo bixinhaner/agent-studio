@@ -2,9 +2,10 @@ import { Alert, Button, Input, Space, Spin, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchReviewerAccessRequest, submitReviewerAccessRequestDecision } from "./api";
+import { accessRequestFileUrl, fetchReviewerAccessRequest, submitReviewerAccessRequestDecision } from "./api";
 import {
   deliveryTypeLabel,
+  formatFileSize,
   formatLocalDate,
   formatLocalTime,
   requestStatusLabel,
@@ -123,16 +124,27 @@ export function ReviewAccessRequestPage(props: ReviewAccessRequestPageProps) {
             <div><span>公司</span><strong>{view.request.companyName}</strong></div>
             <div><span>国家 / 地区</span><strong>{view.request.countryRegion ?? "—"}</strong></div>
             <div><span>历史 SN 号</span><strong>{view.request.snNumber ?? "—"}</strong></div>
-            <div><span>销售邮箱</span><strong>{view.request.salesContactEmail}</strong></div>
-            <div><span>历史购买时间</span><strong>{formatLocalDate(view.request.purchaseDate)}</strong></div>
-            <div><span>历史 PO 号</span><strong>{view.request.poNumber}</strong></div>
+            <div><span>销售联系人</span><strong>{view.request.salesContactEmail}</strong></div>
+            {view.request.purchaseDate ? <div><span>历史购买时间</span><strong>{formatLocalDate(view.request.purchaseDate)}</strong></div> : null}
+            {view.request.poNumber ? <div><span>历史 PO 号</span><strong>{view.request.poNumber}</strong></div> : null}
             <div><span>当前审核人</span><strong>{view.viewer.reviewerEmail}</strong></div>
           </div>
 
-          <label className="access-admin-field">
-            <span>Purchased Devices</span>
-            <textarea readOnly className="access-admin-textarea access-admin-textarea-readonly" value={view.request.deviceInfoText} />
-          </label>
+          <div className="access-admin-field">
+            <span>采购凭证</span>
+            {view.request.purchaseProofAttachments.length ? (
+              <div className="access-admin-file-list">
+                {view.request.purchaseProofAttachments.map((file) => (
+                  <a key={file.id} href={accessRequestFileUrl(file.contentUrl)} target="_blank" rel="noreferrer">
+                    {file.name}
+                    {formatFileSize(file.sizeBytes) ? ` · ${formatFileSize(file.sizeBytes)}` : ""}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <textarea readOnly className="access-admin-textarea access-admin-textarea-readonly" value={view.request.deviceInfoText} />
+            )}
+          </div>
 
           <Table
             rowKey="id"

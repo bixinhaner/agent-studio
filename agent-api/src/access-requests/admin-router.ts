@@ -56,6 +56,13 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+function sendAttachmentFile(res: Response, file: Awaited<ReturnType<AccessRequestService["getAdminPurchaseProofFile"]>>): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.attachment.originalName)}`);
+  res.type(file.attachment.mimeType || "application/octet-stream");
+  res.status(200).send(file.content);
+}
+
 function adminActor(req: Request) {
   return {
     actorType: "admin" as const,
@@ -98,6 +105,17 @@ export function createAdminAccessRequestRouter(service: AccessRequestService): R
   router.get("/:requestId", async (req: Request, res: Response) => {
     try {
       res.json({ request: await service.getAdminRequestDetail(String(req.params.requestId || "")) });
+    } catch (error) {
+      res.status(404).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/:requestId/proofs/:attachmentId/content", async (req: Request, res: Response) => {
+    try {
+      sendAttachmentFile(
+        res,
+        await service.getAdminPurchaseProofFile(String(req.params.requestId || ""), String(req.params.attachmentId || ""))
+      );
     } catch (error) {
       res.status(404).json({ detail: detailFromError(error) });
     }

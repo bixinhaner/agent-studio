@@ -264,6 +264,7 @@ model AccessRequest {
   updatedAt            DateTime            @updatedAt @map("updated_at")
   reviewers            AccessRequestReviewer[]
   events               AccessRequestEvent[]
+  attachments          AccessRequestAttachment[]
 
   @@index([status, createdAt])
   @@index([salesContactEmail, createdAt])
@@ -272,6 +273,21 @@ model AccessRequest {
   @@index([ownerUserId, status])
   @@index([targetOrganizationId, status])
   @@map("access_requests")
+}
+
+model AccessRequestAttachment {
+  id              String        @id @default(cuid())
+  accessRequestId String        @map("access_request_id")
+  accessRequest   AccessRequest @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  kind            String        @default("purchase_proof")
+  originalName    String        @map("original_name")
+  mimeType        String        @default("application/octet-stream") @map("mime_type")
+  sizeBytes       Int           @default(0) @map("size_bytes")
+  storagePath     String        @map("storage_path")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([accessRequestId, kind, createdAt])
+  @@map("access_request_attachments")
 }
 
 model AccessRequestPolicy {

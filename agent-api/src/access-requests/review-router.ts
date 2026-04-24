@@ -14,6 +14,13 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+function sendAttachmentFile(res: Response, file: Awaited<ReturnType<AccessRequestService["getReviewerPurchaseProofFile"]>>): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.attachment.originalName)}`);
+  res.type(file.attachment.mimeType || "application/octet-stream");
+  res.status(200).send(file.content);
+}
+
 export function createAccessRequestReviewRouter(service: AccessRequestService): Router {
   const router = Router();
 
@@ -26,6 +33,25 @@ export function createAccessRequestReviewRouter(service: AccessRequestService): 
       res.json(await service.getReviewerView(String(req.params.requestId || ""), req.currentUser));
     } catch (error) {
       res.status(403).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/:requestId/proofs/:attachmentId/content", async (req: Request, res: Response) => {
+    try {
+      if (!req.currentUser || req.currentOrganization?.type !== "internal") {
+        res.status(403).json({ detail: "Internal reviewer access is required" });
+        return;
+      }
+      sendAttachmentFile(
+        res,
+        await service.getReviewerPurchaseProofFile(
+          String(req.params.requestId || ""),
+          String(req.params.attachmentId || ""),
+          req.currentUser
+        )
+      );
+    } catch (error) {
+      res.status(404).json({ detail: detailFromError(error) });
     }
   });
 

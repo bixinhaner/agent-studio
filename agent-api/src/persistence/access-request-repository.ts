@@ -219,7 +219,7 @@ function buildUpdateData(input: UpdateAccessRequestInput): Record<string, unknow
     purchaseDate: input.purchaseDate === undefined ? undefined : toDate(input.purchaseDate) ?? null,
     poNumber: input.poNumber === undefined ? undefined : input.poNumber.trim(),
     snNumber: input.snNumber === undefined ? undefined : trimOrUndefined(input.snNumber ?? undefined) ?? null,
-    salesContactEmail: input.salesContactEmail === undefined ? undefined : input.salesContactEmail.trim().toLowerCase(),
+    salesContactEmail: input.salesContactEmail === undefined ? undefined : input.salesContactEmail.trim(),
     customerNote:
       input.customerNote === undefined ? undefined : trimOrUndefined(input.customerNote ?? undefined) ?? null,
     adminNote: input.adminNote === undefined ? undefined : trimOrUndefined(input.adminNote ?? undefined) ?? null,
@@ -273,7 +273,7 @@ export class AccessRequestRepository {
         purchaseDate: toDate(input.purchaseDate) ?? null,
         poNumber: input.poNumber.trim(),
         snNumber: trimOrUndefined(input.snNumber ?? undefined) ?? null,
-        salesContactEmail: input.salesContactEmail.trim().toLowerCase(),
+        salesContactEmail: input.salesContactEmail.trim(),
         customerNote: trimOrUndefined(input.customerNote ?? undefined) ?? null,
         adminNote: trimOrUndefined(input.adminNote ?? undefined) ?? null,
         reviewSummary: trimOrUndefined(input.reviewSummary ?? undefined) ?? null,

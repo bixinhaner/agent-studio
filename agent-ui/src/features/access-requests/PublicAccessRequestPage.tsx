@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { FileText, UploadCloud } from "lucide-react";
 
 import { BrandMark } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
-import { createPublicAccessRequest, fetchPublicAccessRequest, updatePublicAccessRequest } from "./api";
-import { formatLocalDate, formatLocalTime } from "./presentation";
+import { accessRequestFileUrl, createPublicAccessRequest, fetchPublicAccessRequest, updatePublicAccessRequest } from "./api";
+import { formatFileSize, formatLocalTime } from "./presentation";
 import type { PublicAccessRequest, PublicAccessRequestInput } from "./types";
 import "./access-request.css";
 
@@ -20,10 +21,11 @@ function createFormState(request?: PublicAccessRequest | null): AccessRequestFor
     companyName: request?.companyName ?? "",
     countryRegion: request?.countryRegion ?? "",
     deviceInfoText: request?.deviceInfoText ?? "",
-    purchaseDate: request?.purchaseDate ? request.purchaseDate.slice(0, 10) : "",
+    purchaseDate: request?.purchaseDate ? request.purchaseDate.slice(0, 10) : null,
     poNumber: request?.poNumber ?? "",
     snNumber: request?.snNumber ?? "",
     salesContactEmail: request?.salesContactEmail ?? "",
+    purchaseProofFiles: [],
     customerNote: request?.customerNote ?? ""
   };
 }
@@ -126,10 +128,8 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
             ["Contact Name", request.contactName ?? "—"],
             ["Company", request.companyName],
             ["Country / Region", request.countryRegion ?? "—"],
-            ["History Purchase Date", formatLocalDate(request.purchaseDate)],
-            ["History PO Number", request.poNumber],
             ["SN Number", request.snNumber ?? "—"],
-            ["Baicells Sales Email", request.salesContactEmail],
+            ["Baicells Sales Contact", request.salesContactEmail],
             ["Last Updated", formatLocalTime(request.updatedAt)],
             ["Target Organization", request.targetOrganization?.name ?? "Pending Provisioning"]
           ]
@@ -138,6 +138,11 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
   );
 
   async function handleSubmit() {
+    if ((form.purchaseProofFiles ?? []).length === 0 && (request?.purchaseProofAttachments?.length ?? 0) === 0) {
+      setErrorText("Purchase proof file is required.");
+      setSuccessText("");
+      return;
+    }
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -220,47 +225,67 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
               />
             </label>
             <label className="auth-modern-field">
-              <span>{requiredFieldLabel("History Purchase Date")}</span>
-              <input
-                className="auth-modern-input"
-                type="date"
-                value={form.purchaseDate ?? ""}
-                onChange={(event) => setForm((current) => ({ ...current, purchaseDate: event.target.value }))}
-              />
-            </label>
-            <label className="auth-modern-field">
-              <span>{requiredFieldLabel("History PO Number")}</span>
-              <input
-                className="auth-modern-input"
-                value={form.poNumber}
-                onChange={(event) => setForm((current) => ({ ...current, poNumber: event.target.value }))}
-              />
-            </label>
-            <label className="auth-modern-field">
               <span>{requiredFieldLabel("SN Number")}</span>
               <input
                 className="auth-modern-input"
                 value={form.snNumber}
+                placeholder="At least one device SN"
                 onChange={(event) => setForm((current) => ({ ...current, snNumber: event.target.value }))}
               />
             </label>
             <label className="auth-modern-field">
-              <span>{requiredFieldLabel("Baicells Sales Email")}</span>
+              <span>{requiredFieldLabel("Baicells Sales Contact")}</span>
               <input
                 className="auth-modern-input"
-                type="email"
                 value={form.salesContactEmail}
                 onChange={(event) => setForm((current) => ({ ...current, salesContactEmail: event.target.value }))}
               />
             </label>
-            <label className="auth-modern-field auth-access-span-2">
-              <span>{requiredFieldLabel("Purchased Devices")}</span>
-              <textarea
-                className="auth-modern-input auth-access-textarea"
-                value={form.deviceInfoText}
-                onChange={(event) => setForm((current) => ({ ...current, deviceInfoText: event.target.value }))}
-              />
-            </label>
+            <div className="auth-modern-field auth-access-span-2">
+              <span>{requiredFieldLabel("Upload Purchase Proof")}</span>
+              <label className="auth-access-upload-box" htmlFor="access-purchase-proof-files">
+                <input
+                  id="access-purchase-proof-files"
+                  className="auth-access-file-input"
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      purchaseProofFiles: Array.from(event.target.files ?? [])
+                    }))
+                  }
+                />
+                <span className="auth-access-upload-icon" aria-hidden="true">
+                  <UploadCloud size={20} />
+                </span>
+                <span className="auth-access-upload-copy">
+                  <strong>{(form.purchaseProofFiles ?? []).length > 0 ? `${form.purchaseProofFiles?.length} file(s) selected` : "Click to upload purchase proof"}</strong>
+                  <span>PO, purchase record screenshot/photo, invoice, or other purchase record</span>
+                </span>
+                <span className="auth-access-upload-action">Choose files</span>
+              </label>
+              {(form.purchaseProofFiles ?? []).length > 0 ? (
+                <div className="auth-access-file-list">
+                  {(form.purchaseProofFiles ?? []).map((file) => (
+                    <span key={`${file.name}-${file.size}`}>
+                      <FileText size={14} aria-hidden="true" />
+                      {file.name}
+                    </span>
+                  ))}
+                </div>
+              ) : request?.purchaseProofAttachments?.length ? (
+                <div className="auth-access-file-list">
+                  {request.purchaseProofAttachments.map((file) => (
+                    <a key={file.id} href={accessRequestFileUrl(file.contentUrl)} target="_blank" rel="noreferrer">
+                      <FileText size={14} aria-hidden="true" />
+                      {file.name}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <label className="auth-modern-field auth-access-span-2">
               <span>Notes (Optional)</span>
               <textarea
@@ -291,6 +316,19 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
                 </div>
               ))}
             </div>
+            {request.purchaseProofAttachments?.length ? (
+              <div className="auth-access-proof-panel">
+                <span>Purchase Proof</span>
+                <div className="auth-access-file-list">
+                  {request.purchaseProofAttachments.map((file) => (
+                    <a key={file.id} href={accessRequestFileUrl(file.contentUrl)} target="_blank" rel="noreferrer">
+                      {file.name}
+                      {formatFileSize(file.sizeBytes) ? ` · ${formatFileSize(file.sizeBytes)}` : ""}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="auth-access-actions">
               <button className="auth-modern-primary-btn auth-access-link-btn" onClick={() => updatePath("/")}>
                 Back to Sign In

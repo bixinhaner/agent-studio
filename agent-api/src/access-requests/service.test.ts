@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAccessRequestService } from "./service.js";
+import type {
+  AccessRequestAttachmentRecord,
+  CreateAccessRequestAttachmentInput
+} from "../persistence/access-request-attachment-repository.js";
 import type { AccessRequestRecord } from "../persistence/access-request-repository.js";
 import type { AccessRequestReviewerRecord } from "../persistence/access-request-reviewer-repository.js";
+import type { PurchaseProofUploadFile } from "./purchase-proof-storage.js";
 
 function buildRequest(overrides: Partial<AccessRequestRecord> = {}): AccessRequestRecord {
   return {
@@ -64,9 +69,34 @@ function buildReviewer(overrides: Partial<AccessRequestReviewerRecord> = {}): Ac
   };
 }
 
+function buildAttachment(overrides: Partial<AccessRequestAttachmentRecord> = {}): AccessRequestAttachmentRecord {
+  return {
+    id: "attachment_1",
+    accessRequestId: "request_1",
+    kind: "purchase_proof",
+    originalName: "proof.pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 4,
+    storagePath: "/tmp/proof.pdf",
+    createdAt: "2026-04-21T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function proofFile(name = "proof.pdf") {
+  const buffer = Buffer.from("proof");
+  return {
+    originalName: name,
+    mimeType: "application/pdf",
+    sizeBytes: buffer.length,
+    buffer
+  };
+}
+
 function createServiceHarness() {
   const requests = new Map<string, AccessRequestRecord>();
   const reviewers = new Map<string, AccessRequestReviewerRecord[]>();
+  const attachments = new Map<string, AccessRequestAttachmentRecord[]>();
   const emailSender = { send: vi.fn(async () => ({ delivered: true, mode: "smtp" as const })) };
   let policy = {
     id: "policy_1",
@@ -91,7 +121,7 @@ function createServiceHarness() {
           countryRegion: input.countryRegion,
           deviceInfoText: input.deviceInfoText,
           purchaseDate: input.purchaseDate instanceof Date ? input.purchaseDate.toISOString() : input.purchaseDate ?? undefined,
-          poNumber: input.poNumber,
+          poNumber: input.poNumber ?? "",
           snNumber: input.snNumber,
           salesContactEmail: input.salesContactEmail,
           publicToken: input.publicToken,
@@ -121,6 +151,40 @@ function createServiceHarness() {
         requests.set(id, next);
         return next;
       })
+    } as never,
+    attachments: {
+      createMany: vi.fn(async (items: CreateAccessRequestAttachmentInput[]) => {
+        const created = items.map((item: CreateAccessRequestAttachmentInput, index: number) =>
+          buildAttachment({
+            id: `attachment_${index + 1}`,
+            accessRequestId: item.accessRequestId,
+            kind: item.kind ?? "purchase_proof",
+            originalName: item.originalName,
+            mimeType: item.mimeType,
+            sizeBytes: item.sizeBytes,
+            storagePath: item.storagePath
+          })
+        );
+        for (const item of created) {
+          const bucket = attachments.get(item.accessRequestId) ?? [];
+          bucket.push(item);
+          attachments.set(item.accessRequestId, bucket);
+        }
+        return created;
+      }),
+      listForRequest: vi.fn(async (requestId: string) => attachments.get(requestId) ?? []),
+      getById: vi.fn(async (id: string) => [...attachments.values()].flat().find((item) => item.id === id) ?? null)
+    } as never,
+    purchaseProofStorage: {
+      saveFiles: vi.fn(async (requestId: string, files: PurchaseProofUploadFile[]) =>
+        files.map((file: PurchaseProofUploadFile) => ({
+          originalName: file.originalName,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          storagePath: `/tmp/${requestId}/${file.originalName}`
+        }))
+      ),
+      readFile: vi.fn(async () => Buffer.from("proof"))
     } as never,
     reviewers: {
       listForRequest: vi.fn(async (requestId: string) => reviewers.get(requestId) ?? []),
@@ -249,7 +313,7 @@ function createServiceHarness() {
     ])
   });
 
-  return { service, requests, reviewers, emailSender };
+  return { service, requests, reviewers, attachments, emailSender };
 }
 
 function randomId(): string {
@@ -270,9 +334,35 @@ describe("createAccessRequestService", () => {
         purchaseDate: "2026-04-21",
         poNumber: "PO-1",
         snNumber: "SN-1",
-        salesContactEmail: "sales@baicells.com"
+        salesContactEmail: "Alice Sales",
+        purchaseProofFiles: [proofFile()]
       })
     ).rejects.toThrow("business email");
+  });
+
+  it("submits a public request with proof files, no purchase date, no PO, and a non-email sales contact", async () => {
+    const { service, requests, attachments, reviewers } = createServiceHarness();
+
+    const result = await service.submitPublicRequest({
+      applicantEmail: "trial@example-corp.com",
+      contactName: "Alice",
+      companyName: "Example Corp",
+      countryRegion: "Indonesia",
+      purchaseDate: null,
+      poNumber: "",
+      snNumber: "SN-1",
+      salesContactEmail: "Alice Sales",
+      purchaseProofFiles: [proofFile("invoice.pdf")]
+    });
+
+    const created = requests.get(result.request.id);
+    expect(created?.purchaseDate).toBeUndefined();
+    expect(created?.poNumber).toBe("");
+    expect(created?.salesContactEmail).toBe("Alice Sales");
+    expect(result.request.snNumber).toBe("SN-1");
+    expect(result.request.purchaseProofAttachments).toHaveLength(1);
+    expect(attachments.get(result.request.id)?.[0]?.originalName).toBe("invoice.pdf");
+    expect(reviewers.get(result.request.id)).toBeUndefined();
   });
 
   it("promotes the request to approved_pending_provision when a required reviewer approves", async () => {

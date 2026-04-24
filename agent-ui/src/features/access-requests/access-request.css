@@ -66,6 +66,119 @@
   min-height: 72px;
 }
 
+.auth-access-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.auth-access-file-list span,
+.auth-access-file-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--admin-color-text, #111);
+  word-break: break-word;
+}
+
+.auth-access-upload-box {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 78px;
+  padding: 16px;
+  border: 1px solid rgba(255, 70, 20, 0.28);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 70, 20, 0.06), rgba(255, 70, 20, 0.02)),
+    var(--admin-color-surface-solid, #fff);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.auth-access-upload-box:hover,
+.auth-access-upload-box:focus-within {
+  border-color: rgba(255, 70, 20, 0.62);
+  box-shadow: 0 14px 34px rgba(255, 70, 20, 0.12);
+  transform: translateY(-1px);
+}
+
+.auth-access-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.auth-access-upload-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #ff4614;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(255, 70, 20, 0.22);
+}
+
+.auth-access-upload-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auth-access-upload-copy strong {
+  color: var(--admin-color-text, #111);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auth-access-upload-copy span {
+  color: var(--admin-color-subtle, #666);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.auth-access-upload-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 70, 20, 0.28);
+  border-radius: 999px;
+  color: #d9360d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.auth-access-proof-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--admin-color-border, #eaeaea);
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.auth-access-proof-panel > span {
+  color: var(--admin-color-subtle, #666);
+  font-size: 13px;
+}
+
 .auth-access-actions {
   display: flex;
   justify-content: flex-end;
@@ -245,6 +358,22 @@
   background: #f8fafc;
 }
 
+.access-admin-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--admin-color-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #f8fafc;
+}
+
+.access-admin-file-list a {
+  color: var(--admin-color-text, #111827);
+  font-size: 13px;
+  word-break: break-word;
+}
+
 .access-admin-native-input {
   height: 40px;
   border-radius: 12px;
@@ -396,6 +525,15 @@
 
   .auth-access-actions {
     flex-direction: column;
+  }
+
+  .auth-access-upload-box {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .auth-access-upload-action {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .auth-access-link-btn,
