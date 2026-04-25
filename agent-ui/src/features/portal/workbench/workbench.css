@@ -398,8 +398,95 @@ button.session-rail-new-btn:active,
   border-radius: 24px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
   background: #ffffff;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease, min-height 0.18s ease;
   margin: 0 20px 20px 20px;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-root {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  align-content: center !important;
+  box-sizing: border-box !important;
+  min-height: 46px !important;
+  padding: 6px 8px !important;
+  gap: 4px;
+  position: relative;
+  overflow: visible;
+  transform-origin: center bottom;
+}
+
+.portal-workbench-root .thread-wrap .portal-composer-wrap:not([data-multiline="true"]) .aui-composer-root {
+  height: 48px !important;
+  min-height: 48px !important;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-attachments:empty {
+  display: none !important;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-attachments:not(:empty) {
+  flex: 0 0 100%;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-input {
+  display: block;
+  align-self: center !important;
+  box-sizing: border-box !important;
+  flex: 1 1 0 !important;
+  margin: 0 !important;
+  min-height: 34px !important;
+  padding-inline: 8px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  font-size: 16px !important;
+  line-height: 22px !important;
+  overflow-y: auto;
+  transition:
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.portal-workbench-root .thread-wrap .portal-composer-wrap:not([data-multiline="true"]) .aui-composer-input {
+  height: 34px !important;
+  min-height: 34px !important;
+  max-height: 34px !important;
+  overflow: hidden !important;
+}
+
+.portal-workbench-root .thread-wrap .portal-composer-wrap[data-multiline="true"] .aui-composer-input {
+  max-height: 160px;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-attach,
+.portal-workbench-root .thread-wrap .aui-composer-send,
+.portal-workbench-root .thread-wrap .aui-composer-cancel,
+.portal-workbench-root .thread-wrap .portal-stop-btn,
+.portal-workbench-root .thread-wrap .portal-upload-send {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-self: center !important;
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  vertical-align: middle !important;
+}
+
+.portal-workbench-root .thread-wrap .aui-composer-attach > svg,
+.portal-workbench-root .thread-wrap .aui-composer-send > svg,
+.portal-workbench-root .thread-wrap .aui-composer-cancel > svg,
+.portal-workbench-root .thread-wrap .portal-stop-btn > svg,
+.portal-workbench-root .thread-wrap .portal-upload-send > svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 /* Animated focus glow — soft breathing pulse */
@@ -467,6 +554,59 @@ button.session-rail-new-btn:active,
   animation:
     composer-send-appear 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
     composer-send-glow 2.4s 0.22s ease-in-out infinite !important;
+}
+
+@keyframes composer-send-burst {
+  0% {
+    transform: translateY(0) scaleX(1) scaleY(1);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05), 0 0 0 0 rgba(255, 70, 20, 0);
+  }
+  28% {
+    transform: translateY(4px) scaleX(1.025) scaleY(0.84);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04), 0 0 0 6px rgba(255, 70, 20, 0.12);
+  }
+  62% {
+    transform: translateY(-3px) scaleX(0.992) scaleY(1.06);
+    box-shadow: 0 18px 42px rgba(255, 70, 20, 0.14), 0 0 0 2px rgba(255, 70, 20, 0.08);
+  }
+  100% {
+    transform: translateY(0) scaleX(1) scaleY(1);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05), 0 0 0 0 rgba(255, 70, 20, 0);
+  }
+}
+
+@keyframes composer-input-collapse-burst {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  34% {
+    opacity: 0.45;
+    transform: translateY(-4px) scaleY(0.74);
+  }
+  68% {
+    opacity: 0.9;
+    transform: translateY(1px) scaleY(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+.portal-composer-wrap.is-sending .aui-composer-root {
+  animation: composer-send-burst 620ms cubic-bezier(0.18, 1.2, 0.22, 1) both !important;
+}
+
+.portal-composer-wrap.is-sending .aui-composer-input {
+  animation: composer-input-collapse-burst 520ms cubic-bezier(0.18, 1, 0.22, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-composer-wrap.is-sending .aui-composer-root,
+  .portal-composer-wrap.is-sending .aui-composer-input {
+    animation: none !important;
+  }
 }
 
 /* Stop button: heartbeat pulse */

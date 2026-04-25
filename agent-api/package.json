@@ -12,7 +12,9 @@
     "test:thread-repository": "vitest run src/persistence/thread-repository.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "dev:seed": "tsx prisma/seed-dev.ts"
   },
   "dependencies": {
     "@openai/codex-sdk": "^0.124.0",

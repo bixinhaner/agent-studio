@@ -361,6 +361,14 @@ const ThreadPublicShareSelectionContext = createContext<ThreadPublicShareSelecti
   toggleTurnSelection: () => undefined
 });
 
+type MessageEntryAnimationContextValue = {
+  enteringMessageIds: Set<string>;
+};
+
+const MessageEntryAnimationContext = createContext<MessageEntryAnimationContextValue>({
+  enteringMessageIds: new Set<string>()
+});
+
 async function copyTextToClipboard(value: string): Promise<void> {
   const text = value.trim();
   if (!text) {
@@ -1483,6 +1491,8 @@ const UploadAwareComposer: FC = () => {
       : uploadBlockReason === "failed"
         ? "Retry or remove failed uploads before sending"
         : "Send message";
+  const [composerSending, setComposerSending] = useState(false);
+  const composerSendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Multiline detection for border glow expansion
   const composerWrapRef = useRef<HTMLDivElement>(null);
@@ -1492,7 +1502,7 @@ const UploadAwareComposer: FC = () => {
     const textarea = wrap.querySelector("textarea");
     if (!textarea) return;
     const update = () => {
-      wrap.dataset.multiline = String(textarea.scrollHeight > 56);
+      wrap.dataset.multiline = String(textarea.scrollHeight > 44);
     };
     const ro = new ResizeObserver(update);
     ro.observe(textarea);
@@ -1503,20 +1513,49 @@ const UploadAwareComposer: FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (composerSendingTimerRef.current !== null) {
+        clearTimeout(composerSendingTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerComposerSendAnimation = useCallback(() => {
+    if (composerSendingTimerRef.current !== null) {
+      clearTimeout(composerSendingTimerRef.current);
+      composerSendingTimerRef.current = null;
+    }
+    setComposerSending(false);
+    window.requestAnimationFrame(() => {
+      setComposerSending(true);
+      composerSendingTimerRef.current = setTimeout(() => {
+        setComposerSending(false);
+        composerSendingTimerRef.current = null;
+      }, 720);
+    });
+  }, []);
+
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
-    if (!sendBlockedByUpload) return;
-    event.preventDefault();
-    event.stopPropagation();
+    if (sendBlockedByUpload) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!sendDisabled) {
+      triggerComposerSendAnimation();
+    }
   };
 
   const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     if (sendDisabled) return;
+    triggerComposerSendAnimation();
     aui.composer().send();
   };
 
   return (
-    <div ref={composerWrapRef} className="portal-composer-wrap">
+    <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
       <Composer.Root onSubmit={preventBlockedSubmit}>
         <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
         {sendBlockedByUpload ? (
@@ -2626,17 +2665,24 @@ const ThreadPublicShareTurnCheckbox: FC = () => {
 const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: ReactNode }> = ({ tone, children }) => {
   const messageId = useAuiState((s) => s.message.id);
   const selection = useContext(ThreadPublicShareSelectionContext);
+  const entryAnimation = useContext(MessageEntryAnimationContext);
   const selectable = selection.selectionMode && Boolean(selection.leadTurnIdByMessageId[messageId]);
+  const entering = Boolean(messageId && entryAnimation.enteringMessageIds.has(messageId));
+  const className = [
+    "thread-public-share-message-shell",
+    `thread-public-share-message-shell-${tone}`,
+    selectable ? "is-selectable" : "",
+    entering ? "is-message-entering" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
-      className={
-        selectable
-          ? `thread-public-share-message-shell thread-public-share-message-shell-${tone} is-selectable`
-          : `thread-public-share-message-shell thread-public-share-message-shell-${tone}`
-      }
+      className={className}
       data-thread-message-id={messageId}
       data-thread-message-role={tone}
+      data-message-entering={entering ? "true" : undefined}
     >
       {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
       {children}
@@ -3348,6 +3394,13 @@ const ThreadPublicShareControls: FC<
 > = ({ threadId, disabled, onStatusChange, children }) => {
   const messages = useAuiState((s) => s.thread.messages);
   const threadRunning = useAuiState((s) => s.thread.isRunning);
+  const threadLoading = useAuiState((s) => s.thread.isLoading);
+  const localThreadId = useAuiState((s) => s.threadListItem.id);
+  const messageEntryThreadKeyRef = useRef("");
+  const messageEntryHydratedRef = useRef(false);
+  const knownMessageIdsRef = useRef<Set<string>>(new Set());
+  const messageEntryClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [enteringMessageIdList, setEnteringMessageIdList] = useState<string[]>([]);
   const turns = useMemo(() => groupThreadMessagesIntoPublicShareTurns(messages), [messages]);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -3366,6 +3419,67 @@ const ThreadPublicShareControls: FC<
     [turns]
   );
   const selectedTurnIdSet = useMemo(() => new Set(selectedTurnIds), [selectedTurnIds]);
+  useEffect(() => {
+    const localThreadKey = String(localThreadId || "").trim();
+    const remoteThreadKey = String(threadId || "").trim();
+    const threadKey = localThreadKey || remoteThreadKey || "draft";
+    const nextMessageIds = new Set(
+      messages.map((message) => String(message.id || "").trim()).filter(Boolean)
+    );
+    const threadChanged = messageEntryThreadKeyRef.current !== threadKey;
+
+    if (threadChanged) {
+      messageEntryThreadKeyRef.current = threadKey;
+      messageEntryHydratedRef.current = !threadLoading;
+      knownMessageIdsRef.current = nextMessageIds;
+      if (messageEntryClearTimerRef.current !== null) {
+        clearTimeout(messageEntryClearTimerRef.current);
+        messageEntryClearTimerRef.current = null;
+      }
+      setEnteringMessageIdList([]);
+      return;
+    }
+
+    if (threadLoading || !messageEntryHydratedRef.current) {
+      if (!threadLoading) {
+        messageEntryHydratedRef.current = true;
+      }
+      knownMessageIdsRef.current = nextMessageIds;
+      setEnteringMessageIdList([]);
+      return;
+    }
+
+    const enteringMessageIds: string[] = [];
+    for (const messageId of nextMessageIds) {
+      if (!knownMessageIdsRef.current.has(messageId)) {
+        enteringMessageIds.push(messageId);
+      }
+    }
+    knownMessageIdsRef.current = nextMessageIds;
+    if (enteringMessageIds.length === 0) return;
+
+    setEnteringMessageIdList((prev) => [...new Set([...prev, ...enteringMessageIds])]);
+    if (messageEntryClearTimerRef.current !== null) {
+      clearTimeout(messageEntryClearTimerRef.current);
+    }
+    messageEntryClearTimerRef.current = setTimeout(() => {
+      setEnteringMessageIdList([]);
+      messageEntryClearTimerRef.current = null;
+    }, 720);
+  }, [localThreadId, messages, threadId, threadLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (messageEntryClearTimerRef.current !== null) {
+        clearTimeout(messageEntryClearTimerRef.current);
+      }
+    };
+  }, []);
+
+  const messageEntryAnimationContext = useMemo<MessageEntryAnimationContextValue>(
+    () => ({ enteringMessageIds: new Set(enteringMessageIdList) }),
+    [enteringMessageIdList]
+  );
 
   useEffect(() => {
     setSelectionMode(false);
@@ -3456,95 +3570,97 @@ const ThreadPublicShareControls: FC<
 
   return (
     <ThreadPublicShareSelectionContext.Provider value={selectionContext}>
-      <div
-        ref={shellRef}
-        className="thread-public-share-shell"
-        data-share-selection-mode={selectionMode ? "true" : "false"}
-      >
-        {children}
-        <ThreadQuestionNavigator messages={messages} shellRef={shellRef} disabled={selectionMode} />
-        {!selectionMode && threadId && !disabled ? (
-          <div className="thread-public-share-toolbar">
-            <button
-              type="button"
-              className="thread-public-share-toolbar-btn"
-              onClick={enterSelectionMode}
-              disabled={shareActionDisabled}
-              title={threadRunning ? "Thread is running. Create a public link later." : "Create public link"}
-            >
-              <Share2Icon size={16} />
-              <span>Create public link</span>
-            </button>
-          </div>
-        ) : null}
-
-        {selectionMode ? (
-          <div className="thread-public-share-actionbar">
-            <div className="thread-public-share-actionbar-meta">
+      <MessageEntryAnimationContext.Provider value={messageEntryAnimationContext}>
+        <div
+          ref={shellRef}
+          className="thread-public-share-shell"
+          data-share-selection-mode={selectionMode ? "true" : "false"}
+        >
+          {children}
+          <ThreadQuestionNavigator messages={messages} shellRef={shellRef} disabled={selectionMode} />
+          {!selectionMode && threadId && !disabled ? (
+            <div className="thread-public-share-toolbar">
               <button
                 type="button"
-                className="thread-public-share-actionbar-link"
-                onClick={selectAllTurns}
-                disabled={submitting || selectedTurnIds.length === allTurnIds.length}
+                className="thread-public-share-toolbar-btn"
+                onClick={enterSelectionMode}
+                disabled={shareActionDisabled}
+                title={threadRunning ? "Thread is running. Create a public link later." : "Create public link"}
               >
-                Select all
-              </button>
-              <span>{selectedTurnIds.length} conversation turn selected</span>
-            </div>
-            <div className="thread-public-share-actionbar-actions">
-              <button type="button" className="thread-public-share-secondary-btn" onClick={cancelSelectionMode} disabled={submitting}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="thread-public-share-primary-btn"
-                onClick={() => setConfirmOpen(true)}
-                disabled={submitting || selectedTurnIds.length === 0}
-              >
-                Create public link
+                <Share2Icon size={16} />
+                <span>Create public link</span>
               </button>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {confirmOpen ? (
-          <div
-            className="thread-public-share-modal-mask"
-            onClick={() => {
-              if (submitting) return;
-              setConfirmOpen(false);
-            }}
-          >
-            <div className="thread-public-share-modal" onClick={(event) => event.stopPropagation()}>
-              <div className="thread-public-share-modal-head">
-                <h3>Create public link</h3>
+          {selectionMode ? (
+            <div className="thread-public-share-actionbar">
+              <div className="thread-public-share-actionbar-meta">
                 <button
                   type="button"
-                  className="thread-public-share-close-btn"
-                  onClick={() => setConfirmOpen(false)}
-                  disabled={submitting}
-                  aria-label="Close public link confirmation dialog"
+                  className="thread-public-share-actionbar-link"
+                  onClick={selectAllTurns}
+                  disabled={submitting || selectedTurnIds.length === allTurnIds.length}
                 >
-                  <XIcon size={18} />
+                  Select all
+                </button>
+                <span>{selectedTurnIds.length} conversation turn selected</span>
+              </div>
+              <div className="thread-public-share-actionbar-actions">
+                <button type="button" className="thread-public-share-secondary-btn" onClick={cancelSelectionMode} disabled={submitting}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="thread-public-share-primary-btn"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={submitting || selectedTurnIds.length === 0}
+                >
+                  Create public link
                 </button>
               </div>
-              <p className="thread-public-share-modal-copy">
-                Anyone with the link can view the conversation you&apos;ve shared. Please check for sensitive or private
-                content before continuing.
-              </p>
-              {errorText ? <p className="field-error thread-public-share-modal-error">{errorText}</p> : null}
-              <button
-                type="button"
-                className="thread-public-share-modal-primary"
-                onClick={() => void createAndCopyPublicLink()}
-                disabled={submitting || selectedTurnIds.length === 0}
-              >
-                {submitting ? "Creating..." : "Create and copy"}
-              </button>
             </div>
-          </div>
-        ) : null}
-      </div>
+          ) : null}
+
+          {confirmOpen ? (
+            <div
+              className="thread-public-share-modal-mask"
+              onClick={() => {
+                if (submitting) return;
+                setConfirmOpen(false);
+              }}
+            >
+              <div className="thread-public-share-modal" onClick={(event) => event.stopPropagation()}>
+                <div className="thread-public-share-modal-head">
+                  <h3>Create public link</h3>
+                  <button
+                    type="button"
+                    className="thread-public-share-close-btn"
+                    onClick={() => setConfirmOpen(false)}
+                    disabled={submitting}
+                    aria-label="Close public link confirmation dialog"
+                  >
+                    <XIcon size={18} />
+                  </button>
+                </div>
+                <p className="thread-public-share-modal-copy">
+                  Anyone with the link can view the conversation you&apos;ve shared. Please check for sensitive or private
+                  content before continuing.
+                </p>
+                {errorText ? <p className="field-error thread-public-share-modal-error">{errorText}</p> : null}
+                <button
+                  type="button"
+                  className="thread-public-share-modal-primary"
+                  onClick={() => void createAndCopyPublicLink()}
+                  disabled={submitting || selectedTurnIds.length === 0}
+                >
+                  {submitting ? "Creating..." : "Create and copy"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </MessageEntryAnimationContext.Provider>
     </ThreadPublicShareSelectionContext.Provider>
   );
 };

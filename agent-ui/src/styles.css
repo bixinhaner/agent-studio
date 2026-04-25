@@ -1627,9 +1627,50 @@ body.access-request-route #root {
   margin-inline: auto;
 }
 
+@keyframes thread-assistant-message-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(-22px, 28px, 0) scale(0.96);
+  }
+  58% {
+    opacity: 1;
+    transform: translate3d(4px, -4px, 0) scale(1.018);
+  }
+  82% {
+    transform: translate3d(0, 2px, 0) scale(0.996);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes thread-user-message-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(28px, 26px, 0) scale(0.96);
+  }
+  58% {
+    opacity: 1;
+    transform: translate3d(-5px, -4px, 0) scale(1.018);
+  }
+  82% {
+    transform: translate3d(0, 2px, 0) scale(0.996);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 .thread-wrap .aui-assistant-message-root {
   grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr) auto;
-  animation: aui-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.thread-wrap .thread-public-share-message-shell-assistant.is-message-entering .aui-assistant-message-root {
+  animation: thread-assistant-message-enter 680ms cubic-bezier(0.18, 1.25, 0.22, 1) both;
+  transform-origin: left bottom;
+  will-change: transform, opacity;
 }
 
 .thread-wrap .aui-assistant-message-root .aui-assistant-action-bar-root {
@@ -1668,8 +1709,20 @@ body.access-request-route #root {
 
 .thread-wrap .aui-user-message-root {
   grid-template-columns: var(--portal-thread-leading-gap) minmax(0, 1fr);
-  animation: aui-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   margin-top: 12px;
+}
+
+.thread-wrap .thread-public-share-message-shell-user.is-message-entering .aui-user-message-root {
+  animation: thread-user-message-enter 640ms cubic-bezier(0.18, 1.25, 0.22, 1) both;
+  transform-origin: right bottom;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-wrap .thread-public-share-message-shell-assistant.is-message-entering .aui-assistant-message-root,
+  .thread-wrap .thread-public-share-message-shell-user.is-message-entering .aui-user-message-root {
+    animation: none;
+  }
 }
 
 .thread-wrap .aui-user-message-attachments {

@@ -1564,7 +1564,44 @@ const uploadRawParser = express.raw({
   limit: "128mb"
 });
 
-app.use(cors());
+function isLocalDevOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return (
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1") &&
+      (parsed.protocol === "http:" || parsed.protocol === "https:")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedCorsOrigin(origin: string): boolean {
+  const appBaseUrl = appConfig.appBaseUrl.trim();
+  if (appBaseUrl) {
+    try {
+      if (new URL(origin).origin === new URL(appBaseUrl).origin) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return appConfig.sessionCookie.secure === false && isLocalDevOrigin(origin);
+}
+
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin || isAllowedCorsOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    }
+  })
+);
 app.post(
   "/api/integrations/zendesk/webhook",
   express.raw({
