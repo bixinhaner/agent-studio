@@ -1680,109 +1680,131 @@ body.access-request-route #root {
 
 .thread-wrap .aui-composer-attachments {
   flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
 }
 
+/* =============================================
+   Attachment Glass Mini-Card
+   ============================================= */
 .thread-wrap .portal-upload-attachment {
   position: relative;
-  min-width: min(360px, 100%);
-  max-width: min(460px, 100%);
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 16px;
-  padding: 10px 38px 10px 10px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+  width: 116px;
+  min-width: 116px;
+  max-width: 116px;
+  height: 96px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08),
+              inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              box-shadow 0.25s ease;
+}
+
+.thread-wrap .portal-upload-attachment:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.13),
+              inset 0 1px 0 rgba(255, 255, 255, 0.96);
+}
+
+/* Show delete button on hover */
+.thread-wrap .portal-upload-attachment:hover .portal-upload-remove {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .thread-wrap .portal-upload-attachment[data-upload-status="running"] {
-  border-color: rgba(255, 111, 31, 0.36);
-  background: linear-gradient(180deg, #fffaf4, #fff7ed);
+  border-color: rgba(255, 111, 31, 0.42);
+  background: rgba(255, 250, 244, 0.82);
 }
 
 .thread-wrap .portal-upload-attachment[data-upload-status="incomplete"] {
-  border-color: rgba(220, 38, 38, 0.34);
-  background: linear-gradient(180deg, #fff8f8, #fef2f2);
+  border-color: rgba(220, 38, 38, 0.36);
+  background: rgba(255, 248, 248, 0.82);
 }
 
-.portal-upload-attachment-main {
+/* Preview area (top portion) */
+.portal-upload-card-preview {
+  flex: 1 1 auto;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(241, 245, 249, 0.5);
 }
 
-.portal-upload-attachment-icon {
-  display: grid;
-  flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  place-items: center;
+/* Image thumbnail */
+.portal-upload-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Non-image icon bubble */
+.portal-upload-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
   border-radius: 11px;
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.90);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.10);
+  color: #64748b;
 }
 
-.portal-upload-attachment[data-upload-status="running"] .portal-upload-attachment-icon {
+.portal-upload-attachment[data-upload-status="running"] .portal-upload-card-icon {
   color: #ea580c;
-  background: rgba(251, 146, 60, 0.18);
+  background: rgba(251, 146, 60, 0.16);
 }
 
-.portal-upload-attachment[data-upload-status="incomplete"] .portal-upload-attachment-icon {
+.portal-upload-attachment[data-upload-status="incomplete"] .portal-upload-card-icon {
   color: #dc2626;
-  background: rgba(248, 113, 113, 0.18);
+  background: rgba(248, 113, 113, 0.16);
 }
 
-.portal-upload-spinner {
-  animation: portal-upload-spin 0.8s linear infinite;
+/* Loading overlay when uploading an image */
+.portal-upload-card-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 250, 244, 0.72);
+  backdrop-filter: blur(3px);
 }
 
-@keyframes portal-upload-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.portal-upload-attachment-text {
-  min-width: 0;
-  flex: 1 1 auto;
+/* Bottom info strip */
+.portal-upload-card-info {
+  flex: 0 0 auto;
+  padding: 5px 8px 6px;
+  background: rgba(255, 255, 255, 0.88);
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .portal-upload-attachment-name {
   margin: 0;
-  overflow: hidden;
-  color: #111827;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.portal-upload-attachment-status {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.portal-upload-attachment[data-upload-status="incomplete"] .portal-upload-attachment-status {
-  color: #b91c1c;
-}
-
-.portal-upload-attachment-type {
-  flex: 0 0 auto;
-  color: #64748b;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
+/* Progress bar */
 .portal-upload-progress {
-  height: 4px;
-  margin: 8px 0 0 40px;
+  height: 3px;
+  margin: 4px 0 0;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(251, 146, 60, 0.2);
@@ -1796,52 +1818,82 @@ body.access-request-route #root {
   transition: width 160ms ease;
 }
 
-.portal-upload-attachment-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 0 40px;
-  color: #991b1b;
-  font-size: 12px;
-  line-height: 1.35;
+/* Type / status badge */
+.portal-upload-status-badge {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  line-height: 1;
 }
 
-.portal-upload-retry {
-  border: 0;
-  border-radius: 999px;
-  padding: 4px 9px;
-  color: #fff;
-  background: #dc2626;
+.portal-upload-status-badge.portal-upload-status-error {
+  color: #ef4444;
+}
+
+/* Retry overlay (full-card, for failed uploads) */
+.portal-upload-retry-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(220, 38, 38, 0.14);
+  backdrop-filter: blur(2px);
+  color: #dc2626;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+  transition: background 0.18s ease;
 }
 
-.portal-upload-retry:hover {
-  background: #b91c1c;
+.portal-upload-retry-overlay:hover {
+  background: rgba(220, 38, 38, 0.26);
 }
 
+/* Delete (✕) button — hidden by default, shown on hover */
 .portal-upload-remove {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: 999px;
-  color: #64748b;
-  background: transparent;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
   cursor: pointer;
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity 0.18s ease,
+              transform 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+              background 0.15s ease;
 }
 
 .portal-upload-remove:hover {
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.08);
+  background: rgba(220, 38, 38, 0.88);
 }
 
+/* Spinner animation */
+.portal-upload-spinner {
+  animation: portal-upload-spin 0.8s linear infinite;
+}
+
+@keyframes portal-upload-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Hint text above composer */
 .portal-upload-composer-hint {
   width: 100%;
   margin: -2px 0 2px;
@@ -1850,6 +1902,7 @@ body.access-request-route #root {
   line-height: 1.4;
 }
 
+/* Disabled send */
 .portal-upload-send:disabled {
   cursor: not-allowed;
   opacity: 0.55;

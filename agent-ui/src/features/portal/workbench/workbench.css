@@ -398,13 +398,97 @@ button.session-rail-new-btn:active,
   border-radius: 24px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
   background: #ffffff;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
   margin: 0 20px 20px 20px;
 }
 
+/* Animated focus glow — soft breathing pulse */
+@keyframes composer-focus-breathe {
+  0%, 100% {
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.04),
+                0 0 0 3px rgba(255, 70, 20, 0.09),
+                0 0 18px 2px rgba(255, 70, 20, 0.05);
+  }
+  50% {
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.04),
+                0 0 0 5px rgba(255, 70, 20, 0.06),
+                0 0 36px 10px rgba(255, 70, 20, 0.08);
+  }
+}
+
+/* Expanded glow when composer is multiline */
+@keyframes composer-expand-glow {
+  0%, 100% {
+    box-shadow: 0 16px 52px rgba(255, 70, 20, 0.10),
+                0 0 0 4px rgba(255, 70, 20, 0.10),
+                0 0 44px 12px rgba(255, 70, 20, 0.06);
+    border-color: rgba(255, 70, 20, 0.60);
+  }
+  50% {
+    box-shadow: 0 24px 70px rgba(255, 70, 20, 0.16),
+                0 0 0 7px rgba(255, 70, 20, 0.06),
+                0 0 64px 24px rgba(255, 70, 20, 0.09);
+    border-color: rgba(255, 70, 20, 0.80);
+  }
+}
+
 .aui-composer-root:focus-within {
-  border-color: #FF4614;
-  box-shadow: 0 12px 36px rgba(255, 70, 20, 0.12), 0 0 0 3px rgba(255, 70, 20, 0.1);
+  border-color: rgba(255, 70, 20, 0.60);
+  animation: composer-focus-breathe 3s ease-in-out infinite;
+}
+
+.portal-composer-wrap[data-multiline="true"] .aui-composer-root:focus-within {
+  animation: composer-expand-glow 2.6s ease-in-out infinite;
+}
+
+/* Send button: appear + glow pulse when enabled */
+@keyframes composer-send-appear {
+  0%   { transform: scale(0.72) rotate(-10deg); opacity: 0; }
+  65%  { transform: scale(1.08) rotate(2deg); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes composer-send-glow {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(255, 70, 20, 0.28), 0 0 0 0 rgba(255, 70, 20, 0);
+  }
+  50% {
+    box-shadow: 0 6px 20px rgba(255, 70, 20, 0.46), 0 0 0 5px rgba(255, 70, 20, 0.07);
+  }
+}
+
+/* Applied only when button is active (not disabled) */
+.portal-upload-send:not(:disabled) {
+  animation:
+    composer-send-appear 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+    composer-send-glow 2.4s 0.22s ease-in-out infinite !important;
+}
+
+/* Stop button: heartbeat pulse */
+.portal-stop-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  height: 34px !important;
+  flex-shrink: 0 !important;
+  border: none !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, #FF4614 0%, #FF7A00 100%) !important;
+  color: #ffffff !important;
+  cursor: pointer !important;
+}
+
+@keyframes stop-heartbeat {
+  0%   { box-shadow: 0 4px 14px rgba(255, 70, 20, 0.38), 0 0 0 0   rgba(255, 70, 20, 0.42); }
+  14%  { box-shadow: 0 5px 18px rgba(255, 70, 20, 0.50), 0 0 0 7px  rgba(255, 70, 20, 0.14); }
+  30%  { box-shadow: 0 4px 14px rgba(255, 70, 20, 0.38), 0 0 0 14px rgba(255, 70, 20, 0); }
+  46%  { box-shadow: 0 5px 16px rgba(255, 70, 20, 0.44), 0 0 0 6px  rgba(255, 70, 20, 0.10); }
+  68%, 100% { box-shadow: 0 4px 14px rgba(255, 70, 20, 0.38), 0 0 0 0   rgba(255, 70, 20, 0); }
+}
+
+.portal-stop-btn {
+  animation: stop-heartbeat 1.5s ease-out infinite !important;
 }
 
 .portal-topbar-runtime-chip {

@@ -54,6 +54,7 @@ import {
   RefreshCwIcon,
   SendHorizontalIcon,
   Share2Icon,
+  SquareIcon,
   ThumbsDownIcon,
   Trash2Icon,
   XIcon,
@@ -1371,9 +1372,19 @@ const UploadAwareAttachment: FC = () => {
   const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
   const isUploading = status.type === "running";
   const isFailed = status.type === "incomplete";
-  const isReady = status.type === "requires-action" || status.type === "complete";
-  const typeLabel = attachmentTypeLabel(attachment.type);
+  const isImage = attachment.type === "image";
   const canRetry = isFailed && attachment.source !== "message" && attachment.file instanceof File;
+
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isImage || !(attachment.file instanceof File)) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(attachment.file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [isImage, attachment.file]);
 
   const retryUpload = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -1392,45 +1403,53 @@ const UploadAwareAttachment: FC = () => {
 
   return (
     <div className="portal-upload-attachment" data-upload-status={status.type}>
-      <div className="portal-upload-attachment-main">
-        <div className="portal-upload-attachment-icon" aria-hidden="true">
-          {isUploading ? (
-            <Loader2Icon className="portal-upload-spinner" size={17} />
-          ) : isFailed ? (
-            <AlertCircleIcon size={17} />
-          ) : attachment.type === "image" ? (
-            <ImageIcon size={17} />
-          ) : (
-            <FileIcon size={17} />
-          )}
-        </div>
-        <div className="portal-upload-attachment-text">
-          <p className="portal-upload-attachment-name">
-            <AttachmentPrimitive.Name />
-          </p>
-          <p className="portal-upload-attachment-status">{uploadStatusLabel(attachment)}</p>
-        </div>
-        <span className="portal-upload-attachment-type">{isReady ? typeLabel : null}</span>
+      <div className="portal-upload-card-preview">
+        {isImage && previewUrl ? (
+          <>
+            <img className="portal-upload-card-img" src={previewUrl} alt={attachment.name} />
+            {isUploading ? (
+              <div className="portal-upload-card-loading">
+                <Loader2Icon className="portal-upload-spinner" size={16} />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="portal-upload-card-icon">
+            {isUploading ? (
+              <Loader2Icon className="portal-upload-spinner" size={20} />
+            ) : isFailed ? (
+              <AlertCircleIcon size={20} />
+            ) : isImage ? (
+              <ImageIcon size={20} />
+            ) : (
+              <FileIcon size={20} />
+            )}
+          </div>
+        )}
       </div>
-      {isUploading ? (
-        <div className="portal-upload-progress" aria-label={`Uploading ${attachment.name}`}>
-          <span style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
-        </div>
-      ) : null}
-      {isFailed ? (
-        <div className="portal-upload-attachment-actions">
-          {canRetry ? (
-            <button type="button" className="portal-upload-retry" onClick={retryUpload}>
-              Retry
-            </button>
-          ) : null}
-          <span>Remove the file if you do not want to send it.</span>
-        </div>
+      <div className="portal-upload-card-info">
+        <p className="portal-upload-attachment-name">
+          <AttachmentPrimitive.Name />
+        </p>
+        {isUploading ? (
+          <div className="portal-upload-progress">
+            <span style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
+          </div>
+        ) : (
+          <span className={`portal-upload-status-badge${isFailed ? " portal-upload-status-error" : ""}`}>
+            {isFailed ? "Failed" : attachmentTypeLabel(attachment.type)}
+          </span>
+        )}
+      </div>
+      {canRetry ? (
+        <button type="button" className="portal-upload-retry-overlay" onClick={retryUpload}>
+          Retry
+        </button>
       ) : null}
       {attachment.source !== "message" ? (
         <AttachmentPrimitive.Remove asChild>
           <button type="button" className="portal-upload-remove" aria-label={`Remove ${attachment.name}`}>
-            <XIcon size={14} />
+            <XIcon size={11} />
           </button>
         </AttachmentPrimitive.Remove>
       ) : null}
@@ -1465,6 +1484,25 @@ const UploadAwareComposer: FC = () => {
         ? "Retry or remove failed uploads before sending"
         : "Send message";
 
+  // Multiline detection for border glow expansion
+  const composerWrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const wrap = composerWrapRef.current;
+    if (!wrap) return;
+    const textarea = wrap.querySelector("textarea");
+    if (!textarea) return;
+    const update = () => {
+      wrap.dataset.multiline = String(textarea.scrollHeight > 56);
+    };
+    const ro = new ResizeObserver(update);
+    ro.observe(textarea);
+    textarea.addEventListener("input", update);
+    return () => {
+      ro.disconnect();
+      textarea.removeEventListener("input", update);
+    };
+  }, []);
+
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
     if (!sendBlockedByUpload) return;
     event.preventDefault();
@@ -1478,37 +1516,41 @@ const UploadAwareComposer: FC = () => {
   };
 
   return (
-    <Composer.Root onSubmit={preventBlockedSubmit}>
-      <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
-      {sendBlockedByUpload ? (
-        <p className="portal-upload-composer-hint" role="status">
-          {uploadBlockReason === "uploading"
-            ? "Uploading attachments. You can keep typing; sending unlocks when ready."
-            : "An attachment failed to upload. Retry or remove it before sending."}
-        </p>
-      ) : null}
-      <Composer.AddAttachment />
-      <Composer.Input
-        autoFocus={!isMobileWorkbench}
-        unstable_focusOnRunStart={!isMobileWorkbench}
-        unstable_focusOnScrollToBottom={!isMobileWorkbench}
-        unstable_focusOnThreadSwitched={!isMobileWorkbench}
-      />
-      {threadRunning ? (
-        <Composer.Cancel />
-      ) : (
-        <button
-          type="submit"
-          className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
-          disabled={sendDisabled}
-          title={sendTitle}
-          aria-label={sendTitle}
-          onClick={sendCurrentMessage}
-        >
-          <SendHorizontalIcon size={17} />
-        </button>
-      )}
-    </Composer.Root>
+    <div ref={composerWrapRef} className="portal-composer-wrap">
+      <Composer.Root onSubmit={preventBlockedSubmit}>
+        <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
+        {sendBlockedByUpload ? (
+          <p className="portal-upload-composer-hint" role="status">
+            {uploadBlockReason === "uploading"
+              ? "Uploading attachments. You can keep typing; sending unlocks when ready."
+              : "An attachment failed to upload. Retry or remove it before sending."}
+          </p>
+        ) : null}
+        <Composer.AddAttachment />
+        <Composer.Input
+          autoFocus={!isMobileWorkbench}
+          unstable_focusOnRunStart={!isMobileWorkbench}
+          unstable_focusOnScrollToBottom={!isMobileWorkbench}
+          unstable_focusOnThreadSwitched={!isMobileWorkbench}
+        />
+        {threadRunning ? (
+          <Composer.Cancel className="portal-stop-btn">
+            <SquareIcon size={13} />
+          </Composer.Cancel>
+        ) : (
+          <button
+            type="submit"
+            className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+            disabled={sendDisabled}
+            title={sendTitle}
+            aria-label={sendTitle}
+            onClick={sendCurrentMessage}
+          >
+            <SendHorizontalIcon size={17} />
+          </button>
+        )}
+      </Composer.Root>
+    </div>
   );
 };
 
