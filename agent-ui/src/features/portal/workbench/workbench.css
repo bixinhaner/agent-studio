@@ -437,6 +437,11 @@ button.session-rail-new-btn:active,
   animation: composer-focus-breathe 3s ease-in-out infinite;
 }
 
+.portal-composer-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
 .portal-composer-wrap[data-multiline="true"] .aui-composer-root:focus-within {
   animation: composer-expand-glow 2.6s ease-in-out infinite;
 }
