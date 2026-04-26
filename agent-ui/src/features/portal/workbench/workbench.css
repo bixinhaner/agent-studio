@@ -13,6 +13,12 @@
   --workbench-sidebar-hover: #fff3f0;
   --workbench-sidebar-active-bg: rgba(255, 70, 20, 0.08);
   --workbench-sidebar-active-text: #FF4614;
+  --workbench-motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --workbench-motion-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --workbench-motion-ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --workbench-motion-fast: 220ms;
+  --workbench-motion-standard: 280ms;
+  --workbench-motion-slow: 720ms;
 }
 
 body.portal-workbench-mode {
@@ -173,7 +179,11 @@ body.portal-workbench-mode {
   background: transparent;
   color: var(--workbench-muted-text);
   box-shadow: none;
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition:
+    background-color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    border-color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    transform var(--workbench-motion-fast) var(--workbench-motion-ease-soft);
 }
 
 .portal-topbar-ghost-btn.ant-btn:hover {
@@ -182,14 +192,18 @@ body.portal-workbench-mode {
 }
 
 .portal-topbar-ghost-btn.ant-btn:active {
-  transform: scale(0.92);
+  transform: scale(0.98);
 }
 
 .portal-topbar-primary-btn.ant-btn {
   border-radius: 8px;
   font-weight: 500;
   background-color: var(--workbench-accent);
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition:
+    background-color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    border-color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    transform var(--workbench-motion-fast) var(--workbench-motion-ease-soft);
 }
 
 .portal-topbar-primary-btn.ant-btn:hover {
@@ -197,7 +211,7 @@ body.portal-workbench-mode {
 }
 
 .portal-topbar-primary-btn.ant-btn:active {
-  transform: scale(0.94);
+  transform: scale(0.98);
 }
 
 [data-thread-list-root],
@@ -253,7 +267,11 @@ button.session-rail-new-btn,
   border: none;
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition:
+    background var(--workbench-motion-standard) var(--workbench-motion-ease-soft),
+    box-shadow var(--workbench-motion-standard) var(--workbench-motion-ease-soft),
+    color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    transform var(--workbench-motion-fast) var(--workbench-motion-ease-soft);
   font-size: 14px;
   box-shadow: 0 4px 14px rgba(255, 70, 20, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
   appearance: none;
@@ -289,7 +307,7 @@ button.session-rail-new-btn:hover,
 
 button.session-rail-new-btn:active,
 .session-rail-new-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.985);
   box-shadow: 0 2px 8px rgba(255, 70, 20, 0.3);
 }
 
@@ -370,9 +388,9 @@ button.session-rail-new-btn:active,
   background: transparent;
   color: #111827;
   transition:
-    background-color 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
+    background-color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    color var(--workbench-motion-fast) var(--workbench-motion-ease-soft),
+    box-shadow var(--workbench-motion-fast) var(--workbench-motion-ease-soft);
 }
 
 .portal-workbench-root .session-rail-list > .agent-thread-list-item:hover {
@@ -437,7 +455,7 @@ button.session-rail-new-btn:active,
   .portal-workbench-root .session-rail-list > .agent-thread-list-item .agent-thread-item-actions {
     opacity: 0;
     pointer-events: none;
-    transition: opacity 120ms ease;
+    transition: opacity 200ms var(--workbench-motion-ease-soft);
   }
 
   .portal-workbench-root .session-rail-list > .agent-thread-list-item:hover .agent-thread-item-actions,
@@ -561,7 +579,11 @@ button.session-rail-new-btn:active,
   border-radius: 24px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
   background: #ffffff;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease, min-height 0.18s ease;
+  transition:
+    border-color 260ms var(--workbench-motion-ease-soft),
+    box-shadow 260ms var(--workbench-motion-ease-soft),
+    transform var(--workbench-motion-standard) var(--workbench-motion-ease-standard),
+    min-height var(--workbench-motion-standard) var(--workbench-motion-ease-standard);
   margin: 0 20px 20px 20px;
 }
 
@@ -606,9 +628,9 @@ button.session-rail-new-btn:active,
   line-height: 22px !important;
   overflow-y: auto;
   transition:
-    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    min-height 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    padding 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    height var(--workbench-motion-standard) var(--workbench-motion-ease-standard),
+    min-height var(--workbench-motion-standard) var(--workbench-motion-ease-standard),
+    padding var(--workbench-motion-standard) var(--workbench-motion-ease-standard);
 }
 
 .portal-workbench-root .thread-wrap .portal-composer-wrap:not([data-multiline="true"]) .aui-composer-input {
@@ -698,9 +720,14 @@ button.session-rail-new-btn:active,
 
 /* Send button: appear + glow pulse when enabled */
 @keyframes composer-send-appear {
-  0%   { transform: scale(0.72) rotate(-10deg); opacity: 0; }
-  65%  { transform: scale(1.08) rotate(2deg); }
-  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  0% {
+    transform: scale(0.88);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes composer-send-glow {
@@ -715,25 +742,25 @@ button.session-rail-new-btn:active,
 /* Applied only when button is active (not disabled) */
 .portal-upload-send:not(:disabled) {
   animation:
-    composer-send-appear 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
-    composer-send-glow 2.4s 0.22s ease-in-out infinite !important;
+    composer-send-appear 280ms var(--workbench-motion-ease-enter),
+    composer-send-glow 2.6s 280ms ease-in-out infinite !important;
 }
 
 @keyframes composer-send-burst {
   0% {
-    transform: translateY(0) scaleX(1) scaleY(1);
+    transform: translateY(0) scale(1);
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05), 0 0 0 0 rgba(255, 70, 20, 0);
   }
-  28% {
-    transform: translateY(4px) scaleX(1.025) scaleY(0.84);
+  36% {
+    transform: translateY(2px) scale(0.992);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04), 0 0 0 6px rgba(255, 70, 20, 0.12);
   }
-  62% {
-    transform: translateY(-3px) scaleX(0.992) scaleY(1.06);
-    box-shadow: 0 18px 42px rgba(255, 70, 20, 0.14), 0 0 0 2px rgba(255, 70, 20, 0.08);
+  72% {
+    transform: translateY(-1px) scale(1.004);
+    box-shadow: 0 16px 40px rgba(255, 70, 20, 0.12), 0 0 0 2px rgba(255, 70, 20, 0.08);
   }
   100% {
-    transform: translateY(0) scaleX(1) scaleY(1);
+    transform: translateY(0) scale(1);
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05), 0 0 0 0 rgba(255, 70, 20, 0);
   }
 }
@@ -743,13 +770,9 @@ button.session-rail-new-btn:active,
     opacity: 1;
     transform: translateY(0);
   }
-  34% {
-    opacity: 0.45;
-    transform: translateY(-4px) scaleY(0.74);
-  }
-  68% {
-    opacity: 0.9;
-    transform: translateY(1px) scaleY(1.03);
+  48% {
+    opacity: 0.72;
+    transform: translateY(-2px) scaleY(0.96);
   }
   100% {
     opacity: 1;
@@ -758,11 +781,11 @@ button.session-rail-new-btn:active,
 }
 
 .portal-composer-wrap.is-sending .aui-composer-root {
-  animation: composer-send-burst 620ms cubic-bezier(0.18, 1.2, 0.22, 1) both !important;
+  animation: composer-send-burst 560ms var(--workbench-motion-ease-standard) both !important;
 }
 
 .portal-composer-wrap.is-sending .aui-composer-input {
-  animation: composer-input-collapse-burst 520ms cubic-bezier(0.18, 1, 0.22, 1) both;
+  animation: composer-input-collapse-burst 420ms var(--workbench-motion-ease-standard) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1936,7 +1959,11 @@ button.session-rail-new-btn:active,
   border: 1px solid rgba(226, 232, 240, 0.58);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition:
+    background var(--workbench-motion-standard) var(--workbench-motion-ease-soft),
+    border-color var(--workbench-motion-standard) var(--workbench-motion-ease-soft),
+    box-shadow var(--workbench-motion-standard) var(--workbench-motion-ease-soft),
+    transform var(--workbench-motion-standard) var(--workbench-motion-ease-soft);
   position: relative;
 }
 
@@ -2076,7 +2103,7 @@ button.session-rail-new-btn:active,
 @keyframes aui-fade-in-up {
   0% {
     opacity: 0;
-    transform: translateY(16px);
+    transform: translateY(12px);
   }
   100% {
     opacity: 1;
@@ -2086,32 +2113,40 @@ button.session-rail-new-btn:active,
 
 /* 1. Left Session List */
 .session-rail-list > * {
-  animation: aui-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: aui-fade-in-up 420ms var(--workbench-motion-ease-enter) backwards;
 }
-.session-rail-list > *:nth-child(1) { animation-delay: 0.05s; }
-.session-rail-list > *:nth-child(2) { animation-delay: 0.08s; }
-.session-rail-list > *:nth-child(3) { animation-delay: 0.11s; }
-.session-rail-list > *:nth-child(4) { animation-delay: 0.14s; }
-.session-rail-list > *:nth-child(5) { animation-delay: 0.17s; }
-.session-rail-list > *:nth-child(6) { animation-delay: 0.20s; }
-.session-rail-list > *:nth-child(7) { animation-delay: 0.23s; }
-.session-rail-list > *:nth-child(8) { animation-delay: 0.26s; }
-.session-rail-list > *:nth-child(n+9) { animation-delay: 0.29s; }
+.session-rail-list > *:nth-child(1) { animation-delay: 35ms; }
+.session-rail-list > *:nth-child(2) { animation-delay: 60ms; }
+.session-rail-list > *:nth-child(3) { animation-delay: 85ms; }
+.session-rail-list > *:nth-child(4) { animation-delay: 110ms; }
+.session-rail-list > *:nth-child(5) { animation-delay: 135ms; }
+.session-rail-list > *:nth-child(6) { animation-delay: 160ms; }
+.session-rail-list > *:nth-child(7) { animation-delay: 185ms; }
+.session-rail-list > *:nth-child(8) { animation-delay: 210ms; }
+.session-rail-list > *:nth-child(n+9) { animation-delay: 235ms; }
 
 /* 2. Welcome Area */
 .bailey-welcome-container > * {
-  animation: aui-fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: aui-fade-in-up var(--workbench-motion-slow) var(--workbench-motion-ease-enter) backwards;
 }
-.bailey-welcome-container > *:nth-child(1) { animation-delay: 0.1s; }
-.bailey-welcome-container > *:nth-child(2) { animation-delay: 0.2s; }
-.bailey-welcome-container > *:nth-child(3) { animation-delay: 0.3s; }
-.bailey-welcome-container > *:nth-child(4) { animation-delay: 0.4s; }
+.bailey-welcome-container > *:nth-child(1) { animation-delay: 80ms; }
+.bailey-welcome-container > *:nth-child(2) { animation-delay: 180ms; }
+.bailey-welcome-container > *:nth-child(3) { animation-delay: 280ms; }
+.bailey-welcome-container > *:nth-child(4) { animation-delay: 380ms; }
 
 /* 3. Welcome Suggestion Cards staggered inner */
 .bailey-suggestion-grid > * {
-  animation: aui-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: aui-fade-in-up 560ms var(--workbench-motion-ease-enter) backwards;
 }
-.bailey-suggestion-grid > *:nth-child(1) { animation-delay: 0.45s; }
-.bailey-suggestion-grid > *:nth-child(2) { animation-delay: 0.50s; }
-.bailey-suggestion-grid > *:nth-child(3) { animation-delay: 0.55s; }
-.bailey-suggestion-grid > *:nth-child(4) { animation-delay: 0.60s; }
+.bailey-suggestion-grid > *:nth-child(1) { animation-delay: 420ms; }
+.bailey-suggestion-grid > *:nth-child(2) { animation-delay: 490ms; }
+.bailey-suggestion-grid > *:nth-child(3) { animation-delay: 560ms; }
+.bailey-suggestion-grid > *:nth-child(4) { animation-delay: 630ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .session-rail-list > *,
+  .bailey-welcome-container > *,
+  .bailey-suggestion-grid > * {
+    animation: none;
+  }
+}

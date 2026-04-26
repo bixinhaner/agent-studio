@@ -1630,14 +1630,7 @@ body.access-request-route #root {
 @keyframes thread-assistant-message-enter {
   0% {
     opacity: 0;
-    transform: translate3d(-22px, 28px, 0) scale(0.96);
-  }
-  58% {
-    opacity: 1;
-    transform: translate3d(4px, -4px, 0) scale(1.018);
-  }
-  82% {
-    transform: translate3d(0, 2px, 0) scale(0.996);
+    transform: translate3d(-10px, 16px, 0) scale(0.985);
   }
   100% {
     opacity: 1;
@@ -1648,14 +1641,7 @@ body.access-request-route #root {
 @keyframes thread-user-message-enter {
   0% {
     opacity: 0;
-    transform: translate3d(28px, 26px, 0) scale(0.96);
-  }
-  58% {
-    opacity: 1;
-    transform: translate3d(-5px, -4px, 0) scale(1.018);
-  }
-  82% {
-    transform: translate3d(0, 2px, 0) scale(0.996);
+    transform: translate3d(10px, 14px, 0) scale(0.985);
   }
   100% {
     opacity: 1;
@@ -1668,7 +1654,7 @@ body.access-request-route #root {
 }
 
 .thread-wrap .thread-public-share-message-shell-assistant.is-message-entering .aui-assistant-message-root {
-  animation: thread-assistant-message-enter 680ms cubic-bezier(0.18, 1.25, 0.22, 1) both;
+  animation: thread-assistant-message-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transform-origin: left bottom;
   will-change: transform, opacity;
 }
@@ -1676,7 +1662,11 @@ body.access-request-route #root {
 .thread-wrap .aui-assistant-message-root .aui-assistant-action-bar-root {
   opacity: 0;
   transform: translateY(4px);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    opacity 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   pointer-events: none;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
@@ -1713,7 +1703,7 @@ body.access-request-route #root {
 }
 
 .thread-wrap .thread-public-share-message-shell-user.is-message-entering .aui-user-message-root {
-  animation: thread-user-message-enter 640ms cubic-bezier(0.18, 1.25, 0.22, 1) both;
+  animation: thread-user-message-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transform-origin: right bottom;
   will-change: transform, opacity;
 }
@@ -1756,12 +1746,13 @@ body.access-request-route #root {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-              box-shadow 0.25s ease;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .thread-wrap .portal-upload-attachment:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.13),
               inset 0 1px 0 rgba(255, 255, 255, 0.96);
 }
@@ -1928,9 +1919,10 @@ body.access-request-route #root {
   cursor: pointer;
   opacity: 0;
   transform: scale(0.75);
-  transition: opacity 0.18s ease,
-              transform 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275),
-              background 0.15s ease;
+  transition:
+    opacity 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .portal-upload-remove:hover {
@@ -6378,7 +6370,11 @@ body.access-request-route #root {
   transform: translate(-50%, -50%);
   background: rgba(148, 163, 184, 0.65);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  transition:
+    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   opacity: 0.72;
 }
 
@@ -7691,7 +7687,11 @@ body.public-share-mode #root {
   border-color: transparent !important;
   color: #fff !important;
   border-radius: 999px !important;
-  transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  transition:
+    background 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
   box-shadow: 0 4px 12px rgba(255, 70, 20, 0.2) !important;
 }
 .aui-composer-send:hover:not(:disabled),
@@ -7700,12 +7700,16 @@ body.public-share-mode #root {
 }
 .aui-composer-send:active:not(:disabled),
 .aui-composer-send-btn:active:not(:disabled) {
-  transform: scale(0.92) !important;
+  transform: scale(0.98) !important;
 }
 
 .aui-thread-welcome-suggestion {
   border-radius: 20px !important;
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+  transition:
+    background 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
   border: 1px solid #f0f0f0 !important;
   background: #ffffff !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
