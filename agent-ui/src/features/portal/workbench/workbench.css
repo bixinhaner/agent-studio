@@ -215,10 +215,10 @@ body.portal-workbench-mode {
 }
 
 .session-rail-head {
-  padding: 16px 16px 10px;
+  padding: 12px 14px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -291,7 +291,7 @@ button.session-rail-new-btn:active,
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 8px 12px;
+  padding: 4px 10px 8px;
   overscroll-behavior: contain;
 }
 
@@ -311,19 +311,19 @@ button.session-rail-new-btn:active,
 }
 
 .session-rail-footer {
-  padding: 16px;
+  padding: 8px 10px;
   background-color: var(--workbench-sidebar-bg);
   flex-shrink: 0;
-  margin: 0px 10px 10px;
+  margin: 0 10px 8px;
   border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.035);
 }
 
 .session-rail-footer-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .session-rail-user-fallback {
@@ -333,11 +333,163 @@ button.session-rail-new-btn:active,
 }
 
 .session-rail-group-divider {
-  margin: 10px 8px 6px;
-  font-size: 12px;
+  margin: 8px 8px 4px;
+  font-size: 11px;
   font-weight: 600;
   color: #6b7280;
   letter-spacing: 0.02em;
+}
+
+.session-rail-search-input.ant-input-affix-wrapper {
+  min-height: 36px;
+  border-radius: 10px;
+  border-color: #dbe3ef;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.session-rail-search-input.ant-input-affix-wrapper:hover,
+.session-rail-search-input.ant-input-affix-wrapper-focused {
+  border-color: rgba(255, 70, 20, 0.35);
+  box-shadow: 0 0 0 3px rgba(255, 70, 20, 0.06);
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item {
+  height: 34px;
+  min-height: 34px;
+  margin: 0 0 2px;
+  padding: 0 3px 0 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #111827;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item:hover {
+  background-color: rgba(255, 70, 20, 0.055);
+  transform: none;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item[data-active]:not([data-portal-active="true"]) {
+  background: transparent;
+  color: #111827;
+  box-shadow: none;
+  font-weight: 400;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item[data-portal-active="true"] {
+  background-color: rgba(255, 70, 20, 0.08);
+  color: var(--workbench-sidebar-active-text);
+  box-shadow: inset 2px 0 0 var(--workbench-accent);
+  transform: none;
+  font-weight: 600;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .aui-thread-list-item-trigger {
+  height: 34px;
+  min-width: 0;
+  padding: 0 4px 0 0 !important;
+  display: flex;
+  align-items: center;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .aui-thread-list-item-title {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 34px;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .thread-running-indicator-slot {
+  flex-basis: 12px;
+  margin-left: 6px;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .thread-running-indicator {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .agent-thread-item-actions {
+  padding-right: 0;
+}
+
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .thread-item-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .portal-workbench-root .session-rail-list > .agent-thread-list-item .agent-thread-item-actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .portal-workbench-root .session-rail-list > .agent-thread-list-item:hover .agent-thread-item-actions,
+  .portal-workbench-root .session-rail-list > .agent-thread-list-item:focus-within .agent-thread-item-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-card.compact {
+  min-height: 48px;
+  margin: 0;
+  padding: 7px 8px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-stack {
+  gap: 0;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-name {
+  margin: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-meta {
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center;
+  flex-wrap: nowrap !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 16px;
+  color: #64748b;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-meta + .user-identity-meta {
+  display: none !important;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-actions {
+  gap: 6px;
+}
+
+.portal-workbench-root .session-rail-footer .user-identity-action-btn {
+  width: 28px;
+  height: 28px;
 }
 
 .portal-workbench-chat {
@@ -386,6 +538,10 @@ button.session-rail-new-btn:active,
   box-sizing: border-box;
   padding: 16px 16px 0;
   overflow-y: auto;
+}
+
+.portal-workbench-root .thread-wrap .aui-thread-viewport:has(.bailey-welcome-container) {
+  overflow: hidden;
 }
 
 .aui-thread-root {
@@ -1674,21 +1830,26 @@ button.session-rail-new-btn:active,
   align-items: center;
   justify-content: center;
   width: 100%;
-  margin-top: 40px;
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 0;
+  padding: clamp(8px, 2vh, 20px) 0 clamp(10px, 2.5vh, 24px);
+  gap: clamp(8px, 1.7vh, 18px);
+  overflow: hidden;
 }
 
 .bailey-illustration-shell {
   position: relative;
   width: 100%;
   max-width: 600px;
-  height: auto;
-  max-height: 380px;
-  margin-bottom: 2rem;
+  height: clamp(150px, 34vh, 300px);
+  max-height: min(34vh, 300px);
+  margin-bottom: 0;
   z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 1 auto;
 }
 
 /* 底层舞台光场：制造底部氛围溶圈光晕 */
@@ -1709,6 +1870,7 @@ button.session-rail-new-btn:active,
 .bailey-illustration {
   width: 100%;
   height: 100%;
+  max-height: 100%;
   object-fit: contain;
   /* 顶层白色羽化压边：径向渐变吃掉四周硬矩形边缘，使画面和底部完全融为一体 */
   -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, black 45%, transparent 100%);
@@ -1718,11 +1880,13 @@ button.session-rail-new-btn:active,
 }
 
 .bailey-welcome-greeting {
-  font-size: 36px;
+  font-size: clamp(24px, 3vw, 34px);
   font-weight: 600;
   color: #111827;
-  margin-bottom: 8px;
-  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .bailey-welcome-greeting b,
@@ -1734,25 +1898,29 @@ button.session-rail-new-btn:active,
 .bailey-welcome-subtitle {
   font-size: 15px;
   color: #6b7280;
-  margin-bottom: 40px;
+  margin: 0;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .bailey-suggestion-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 12px;
   width: 100%;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 0 20px 40px;
+  padding: 0 20px;
+  flex: 0 0 auto;
 }
 
 .bailey-suggestion-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 20px;
-  border-radius: 16px;
+  min-height: 66px;
+  padding: 13px 16px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.9);
@@ -1763,7 +1931,7 @@ button.session-rail-new-btn:active,
 }
 
 .bailey-suggestion-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
   box-shadow: 0 12px 28px rgba(255, 70, 20, 0.1), inset 0 2px 6px rgba(255, 255, 255, 0.9);
   background: rgba(255, 255, 255, 0.95);
 }
@@ -1772,8 +1940,8 @@ button.session-rail-new-btn:active,
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   flex-shrink: 0;
 }
@@ -1794,6 +1962,89 @@ button.session-rail-new-btn:active,
   overflow: hidden;
 }
 
+@media (max-height: 760px) {
+  .bailey-welcome-container {
+    gap: 10px;
+    padding-top: 6px;
+    padding-bottom: 12px;
+  }
+
+  .bailey-illustration-shell {
+    height: clamp(120px, 28vh, 230px);
+    max-height: min(28vh, 230px);
+  }
+
+  .bailey-welcome-subtitle {
+    font-size: 14px;
+  }
+
+  .bailey-suggestion-card {
+    min-height: 58px;
+    padding: 10px 12px;
+  }
+
+  .bailey-suggestion-icon-wrap {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+}
+
+@media (max-width: 900px) {
+  .bailey-welcome-container {
+    justify-content: center;
+    padding: 8px 0 10px;
+    gap: 10px;
+  }
+
+  .bailey-illustration-shell {
+    width: min(100%, 460px);
+    height: clamp(120px, 26vh, 210px);
+    max-height: min(26vh, 210px);
+  }
+
+  .bailey-welcome-greeting {
+    font-size: clamp(22px, 7vw, 30px);
+  }
+
+  .bailey-welcome-subtitle {
+    max-width: min(100%, 360px);
+    padding: 0 14px;
+  }
+
+  .bailey-suggestion-grid {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    gap: 10px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    padding: 0 14px 4px;
+    scrollbar-width: none;
+  }
+
+  .bailey-suggestion-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .bailey-suggestion-card {
+    flex: 0 0 min(78vw, 280px);
+    scroll-snap-align: center;
+  }
+}
+
+@media (max-width: 640px), (max-height: 620px) {
+  .bailey-illustration-shell {
+    height: clamp(96px, 22vh, 170px);
+    max-height: min(22vh, 170px);
+  }
+
+  .bailey-welcome-subtitle {
+    display: none;
+  }
+}
+
 .bailey-active-dot {
   width: 8px;
   height: 8px;
@@ -1804,23 +2055,9 @@ button.session-rail-new-btn:active,
   flex-shrink: 0;
 }
 
-/* Beautiful Session List Items */
-.session-rail-list > * {
+/* Compact session rows keep the consumer-style rail dense enough for long histories. */
+.session-rail-list > .agent-thread-list-item {
   border-radius: 10px;
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  margin-bottom: 2px;
-}
-.session-rail-list > *:hover {
-  background-color: var(--workbench-sidebar-hover);
-  transform: translateX(2px);
-}
-.session-rail-list > *[data-active="true"],
-.session-rail-list > *.active {
-  background-color: var(--workbench-sidebar-active-bg);
-  color: var(--workbench-sidebar-active-text);
-  box-shadow: 0 2px 8px rgba(255, 70, 20, 0.05);
-  transform: translateX(4px);
-  font-weight: 600;
 }
 
 /* =========================================

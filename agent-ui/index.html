@@ -13,7 +13,7 @@
         }
 
         function setFavicon(assetUrl) {
-          var normalized = asString(assetUrl);
+          var normalized = resolveBrandingAssetUrl(assetUrl);
           var link = document.querySelector('link[rel~="icon"]');
           if (!normalized) {
             if (link) link.removeAttribute("href");
@@ -28,11 +28,34 @@
         }
 
         function setAuthBackground(assetUrl) {
-          var normalized = asString(assetUrl);
+          var normalized = resolveBrandingAssetUrl(assetUrl);
           document.documentElement.style.setProperty(
             "--auth-brand-background-image",
             normalized ? "url(" + JSON.stringify(normalized) + ")" : "none"
           );
+        }
+
+        function apiBase() {
+          var configured = asString(window.__AGENT_STUDIO_API_BASE__);
+          if (configured) {
+            return configured.replace(/\/+$/, "");
+          }
+          if (
+            (location.hostname === "127.0.0.1" || location.hostname === "localhost") &&
+            (location.port === "5173" || location.port === "5179")
+          ) {
+            return "http://127.0.0.1:8787";
+          }
+          return "";
+        }
+
+        function resolveBrandingAssetUrl(assetUrl) {
+          var normalized = asString(assetUrl);
+          if (!normalized) return "";
+          if (/^[a-z][a-z\d+\-.]*:/i.test(normalized) || normalized.indexOf("//") === 0) return normalized;
+          if (normalized.indexOf("/public-api/branding/assets/") !== 0) return normalized;
+          var base = apiBase();
+          return base ? base + normalized : normalized;
         }
 
         function applyBranding(payload) {
@@ -56,7 +79,8 @@
           }
         } catch (_error) {}
 
-        fetch("/public-api/branding", { credentials: "same-origin" })
+        var brandingApiBase = apiBase();
+        fetch(brandingApiBase + "/public-api/branding", { credentials: brandingApiBase ? "include" : "same-origin" })
           .then(function (response) {
             return response.ok ? response.json() : null;
           })

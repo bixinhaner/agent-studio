@@ -5,6 +5,7 @@ import {
   type PublicBranding,
   type PublicBrandingResponse
 } from "./types";
+import { resolveBrandingAssetUrl } from "./asset-url";
 
 export const BRANDING_STORAGE_KEY = "agent-studio-public-branding";
 
@@ -17,7 +18,7 @@ export function fallbackBrandingResponse(): PublicBrandingResponse {
 
 function setFaviconAsset(assetUrl: string): void {
   if (typeof document === "undefined") return;
-  const normalized = assetUrl.trim();
+  const normalized = resolveBrandingAssetUrl(assetUrl);
   let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
   if (!normalized) {
     link?.removeAttribute("href");
@@ -33,7 +34,7 @@ function setFaviconAsset(assetUrl: string): void {
 
 function setAuthBackgroundAsset(assetUrl: string): void {
   if (typeof document === "undefined") return;
-  const normalized = assetUrl.trim();
+  const normalized = resolveBrandingAssetUrl(assetUrl);
   document.documentElement.style.setProperty(
     "--auth-brand-background-image",
     normalized ? `url(${JSON.stringify(normalized)})` : "none"
@@ -41,7 +42,7 @@ function setAuthBackgroundAsset(assetUrl: string): void {
 }
 
 export function getAuthBackgroundAssetUrl(branding: PublicBranding): string {
-  return branding.loginBackgroundUrl.trim() || branding.logoUrl.trim() || branding.iconUrl.trim() || "";
+  return resolveBrandingAssetUrl(branding.loginBackgroundUrl.trim());
 }
 
 export function applyDocumentBranding(branding: PublicBranding): void {

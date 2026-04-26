@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Input, Upload } from "antd";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
+import { resolveBrandingAssetUrl } from "../branding/asset-url";
 import { BrandMark, getBrandInitials } from "../branding/BrandMark";
 import type { BrandingAssetKind } from "./api";
 import type { SystemSettingsBehavior, SystemSettingsBranding, SystemSettingsFieldErrors } from "./types";
@@ -163,7 +164,7 @@ export function BrandingSettingsView({
     emptyText: string;
     imageClassName: string;
   }) {
-    const src = input.url.trim();
+    const src = resolveBrandingAssetUrl(input.url);
     return (
       <article className="branding-preview-card">
         <span className="branding-preview-label">{input.label}</span>

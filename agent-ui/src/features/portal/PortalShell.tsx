@@ -77,7 +77,7 @@ import {
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
-import { useAuiState } from "@assistant-ui/store";
+import { AuiProvider, Derived, useAuiState } from "@assistant-ui/store";
 import { ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
@@ -828,25 +828,27 @@ const DraftOnlyThreadWelcome: FC = () => {
   const assistantDisplayName = branding.assistantName.trim() || "Bailey";
 
   return (
-    <div className="bailey-welcome-container">
-      {portalWelcomeIllustrationUrl ? (
-        <div className="bailey-illustration-shell">
-          <img
-            className="bailey-illustration"
-            src={portalWelcomeIllustrationUrl}
-            alt={assistantDisplayName}
-            loading="eager"
-          />
-        </div>
-      ) : null}
-      <h1 className="bailey-welcome-greeting">
-        Hello, I'm <span>{assistantDisplayName}</span>.
-      </h1>
-      <p className="bailey-welcome-subtitle">
-        Ask about products, versions, deployment, alarms, or troubleshooting.
-      </p>
-      <DraftOnlyWelcomeSuggestions />
-    </div>
+    <ThreadPrimitive.Empty>
+      <div className="bailey-welcome-container">
+        {portalWelcomeIllustrationUrl ? (
+          <div className="bailey-illustration-shell">
+            <img
+              className="bailey-illustration"
+              src={portalWelcomeIllustrationUrl}
+              alt={assistantDisplayName}
+              loading="eager"
+            />
+          </div>
+        ) : null}
+        <h1 className="bailey-welcome-greeting">
+          Hello, I'm <span>{assistantDisplayName}</span>.
+        </h1>
+        <p className="bailey-welcome-subtitle">
+          Ask about products, versions, deployment, alarms, or troubleshooting.
+        </p>
+        <DraftOnlyWelcomeSuggestions />
+      </div>
+    </ThreadPrimitive.Empty>
   );
 };
 
@@ -1476,10 +1478,64 @@ function composerUploadBlockReason(attachments: readonly Attachment[]): "uploadi
   return hasUploading ? "uploading" : "";
 }
 
+function useComposerMultilineRef(composerText: string) {
+  const composerWrapRef = useRef<HTMLDivElement>(null);
+  const composerTextRef = useRef(composerText);
+  composerTextRef.current = composerText;
+
+  const syncMultilineState = useCallback(() => {
+    const wrap = composerWrapRef.current;
+    if (!wrap) return;
+    const textarea = wrap.querySelector("textarea");
+    if (!textarea) return;
+    const hasMultipleLines = composerTextRef.current.includes("\n") || textarea.scrollHeight > 44;
+    wrap.dataset.multiline = String(hasMultipleLines);
+  }, []);
+
+  useEffect(() => {
+    const wrap = composerWrapRef.current;
+    if (!wrap) return;
+    const textarea = wrap.querySelector("textarea");
+    if (!textarea) return;
+
+    let animationFrame: number | null = null;
+    const update = () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        syncMultilineState();
+      });
+    };
+
+    const ro = new ResizeObserver(update);
+    ro.observe(textarea);
+    textarea.addEventListener("input", update);
+    update();
+
+    return () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      ro.disconnect();
+      textarea.removeEventListener("input", update);
+    };
+  }, [syncMultilineState]);
+
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(syncMultilineState);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [composerText, syncMultilineState]);
+
+  return composerWrapRef;
+}
+
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
@@ -1493,25 +1549,7 @@ const UploadAwareComposer: FC = () => {
         : "Send message";
   const [composerSending, setComposerSending] = useState(false);
   const composerSendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Multiline detection for border glow expansion
-  const composerWrapRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const wrap = composerWrapRef.current;
-    if (!wrap) return;
-    const textarea = wrap.querySelector("textarea");
-    if (!textarea) return;
-    const update = () => {
-      wrap.dataset.multiline = String(textarea.scrollHeight > 44);
-    };
-    const ro = new ResizeObserver(update);
-    ro.observe(textarea);
-    textarea.addEventListener("input", update);
-    return () => {
-      ro.disconnect();
-      textarea.removeEventListener("input", update);
-    };
-  }, []);
+  const composerWrapRef = useComposerMultilineRef(composerText);
 
   useEffect(() => {
     return () => {
@@ -2890,6 +2928,7 @@ const AgentThreadListItem: FC = () => {
   const threadItemId = useAuiState((s) => s.threadListItem.id);
   const threadRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
+  const isAuiActiveThread = useAuiState((s) => s.threads.mainThreadId === s.threadListItem.id);
   const sessionSearchQuery = useContext(SessionSearchContext).trim().toLowerCase();
   const groupHeaderByRemoteId = useContext(SessionGroupLabelContext).groupHeaderByRemoteId;
   const [isRenaming, setIsRenaming] = useState(false);
@@ -2898,7 +2937,8 @@ const AgentThreadListItem: FC = () => {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const remoteId = String(threadRemoteId || "").trim();
   const localId = String(threadItemId || "").trim();
-  const isThreadRunning = Boolean((remoteId && runningThreadIds[remoteId]) || (localId && runningThreadIds[localId]));
+  const isThreadActive = isAuiActiveThread;
+  const isThreadRunning = remoteId ? Boolean(runningThreadIds[remoteId]) : Boolean(localId && runningThreadIds[localId]);
   const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
   const threadTitleForFilter = threadTitle.trim() || "New conversation";
 
@@ -2988,7 +3028,10 @@ const AgentThreadListItem: FC = () => {
   return (
     <>
       {!sessionSearchQuery && groupLabel ? <p className="session-rail-group-divider">{groupLabel}</p> : null}
-      <ThreadListItemPrimitive.Root className="aui-thread-list-item agent-thread-list-item">
+      <ThreadListItemPrimitive.Root
+        className="aui-thread-list-item agent-thread-list-item"
+        data-portal-active={isThreadActive ? "true" : undefined}
+      >
         <span className="thread-running-indicator-slot" aria-hidden="true">
           {isThreadRunning ? <span className="thread-running-indicator" /> : null}
         </span>
@@ -3102,6 +3145,47 @@ const AgentThreadListItem: FC = () => {
           )}
         </div>
       </ThreadListItemPrimitive.Root>
+    </>
+  );
+};
+
+const ThreadListItemByIdProvider: FC<PropsWithChildren<{ threadId: string }>> = ({ threadId, children }) => {
+  const aui = useAui({
+    threadListItem: Derived({
+      source: "threads",
+      query: { type: "id", id: threadId },
+      get: (aui) => aui.threads().item({ id: threadId })
+    })
+  });
+
+  return <AuiProvider value={aui}>{children}</AuiProvider>;
+};
+
+const StableThreadListItems: FC = () => {
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const stableThreadIds = useMemo(() => {
+    const itemById = new Map(threadItems.map((item) => [item.id, item]));
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const threadId of threadIds) {
+      if (!threadId) continue;
+      const item = itemById.get(threadId);
+      const stableIdentity = String(item?.remoteId || threadId).trim();
+      if (!stableIdentity || seen.has(stableIdentity)) continue;
+      seen.add(stableIdentity);
+      result.push(threadId);
+    }
+    return result;
+  }, [threadIds, threadItems]);
+
+  return (
+    <>
+      {stableThreadIds.map((threadId) => (
+        <ThreadListItemByIdProvider key={threadId} threadId={threadId}>
+          <AgentThreadListItem />
+        </ThreadListItemByIdProvider>
+      ))}
     </>
   );
 };
@@ -3449,6 +3533,16 @@ const ThreadPublicShareControls: FC<
       return;
     }
 
+    if (!threadRunning) {
+      knownMessageIdsRef.current = nextMessageIds;
+      if (messageEntryClearTimerRef.current !== null) {
+        clearTimeout(messageEntryClearTimerRef.current);
+        messageEntryClearTimerRef.current = null;
+      }
+      setEnteringMessageIdList((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
     const enteringMessageIds: string[] = [];
     for (const messageId of nextMessageIds) {
       if (!knownMessageIdsRef.current.has(messageId)) {
@@ -3466,7 +3560,7 @@ const ThreadPublicShareControls: FC<
       setEnteringMessageIdList([]);
       messageEntryClearTimerRef.current = null;
     }, 720);
-  }, [localThreadId, messages, threadId, threadLoading]);
+  }, [localThreadId, messages, threadId, threadLoading, threadRunning]);
 
   useEffect(() => {
     return () => {
@@ -3741,6 +3835,26 @@ const ThreadRuntimeSubscriptionBridge: FC<{ runtime: unknown }> = ({ runtime }) 
       notifySubscribers.call(threadsCore);
     });
   }, [runtime]);
+
+  return null;
+};
+
+const ActiveThreadIdentityBridge: FC<{ onChange: (identity: ThreadIdentity) => void }> = ({ onChange }) => {
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const activeThreadItem = useMemo(
+    () => threadItems.find((item) => item.id === mainThreadId) || null,
+    [mainThreadId, threadItems]
+  );
+  const activeLocalId = String(activeThreadItem?.id || mainThreadId || "").trim();
+  const activeRemoteId = String(activeThreadItem?.remoteId || "").trim();
+
+  useEffect(() => {
+    onChange({
+      remoteId: activeRemoteId || undefined,
+      localId: activeLocalId || undefined
+    });
+  }, [activeLocalId, activeRemoteId, onChange]);
 
   return null;
 };
@@ -4033,6 +4147,27 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshPortalSubscriptionStatusRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
+
+  const syncActiveThreadIdentity = useCallback((identity: ThreadIdentity) => {
+    const normalizedRemoteId = String(identity.remoteId || "").trim();
+    const normalizedLocalId = String(identity.localId || "").trim();
+
+    activeRemoteThreadIdRef.current = normalizedRemoteId;
+    activeLocalThreadIdRef.current = normalizedLocalId;
+    setActiveThreadIdentity((previous) => {
+      const next = {
+        remoteId: normalizedRemoteId || undefined,
+        localId: normalizedLocalId || undefined
+      };
+      return previous.remoteId === next.remoteId && previous.localId === next.localId ? previous : next;
+    });
+
+    if (!normalizedRemoteId) {
+      setContextUsage(null);
+      return;
+    }
+    setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
+  }, []);
 
   appliedConfigRef.current = appliedConfig;
   runtimeOptionsRef.current = runtimeOptions;
@@ -4545,26 +4680,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       unstable_Provider: ({ children }: PropsWithChildren) => (
         <AgentRuntimeAdapterProvider
           canUpload={runtimeOptions?.canUpload ?? false}
-          onThreadIdentityChange={({ remoteId, localId }) => {
-            const normalizedRemoteId = String(remoteId || "").trim();
-            activeRemoteThreadIdRef.current = normalizedRemoteId;
-            activeLocalThreadIdRef.current = String(localId || "").trim();
-            setActiveThreadIdentity({
-              remoteId: normalizedRemoteId || undefined,
-              localId: String(localId || "").trim() || undefined
-            });
-            if (!normalizedRemoteId) {
-              setContextUsage(null);
-              return;
-            }
-            setContextUsage(usageByThreadRef.current[normalizedRemoteId] ?? null);
-          }}
+          onThreadIdentityChange={syncActiveThreadIdentity}
         >
           {children}
         </AgentRuntimeAdapterProvider>
       )
     }),
-    [runtimeOptions?.canUpload]
+    [runtimeOptions?.canUpload, syncActiveThreadIdentity]
   );
 
   const canUpload = runtimeOptions?.canUpload ?? false;
@@ -5822,6 +5944,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
       <ComposerActivationGuard runtime={runtime} />
       <ThreadRuntimeSubscriptionBridge runtime={runtime} />
       <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
@@ -5908,11 +6031,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                           <SessionSearchContext.Provider value={sessionSearchValue}>
                             <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
                               <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ThreadList.Items
-                                  components={{
-                                    ThreadListItem: AgentThreadListItem as any
-                                  }}
-                                />
+                                <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+                                  <StableThreadListItems />
+                                </ActiveThreadIdContext.Provider>
                               </RunningThreadIdsContext.Provider>
                             </SessionGroupLabelContext.Provider>
                           </SessionSearchContext.Provider>
@@ -5995,11 +6116,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                           <SessionSearchContext.Provider value={sessionSearchValue}>
                             <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
                               <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ThreadList.Items
-                                  components={{
-                                    ThreadListItem: AgentThreadListItem as any
-                                  }}
-                                />
+                                <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+                                  <StableThreadListItems />
+                                </ActiveThreadIdContext.Provider>
                               </RunningThreadIdsContext.Provider>
                             </SessionGroupLabelContext.Provider>
                           </SessionSearchContext.Provider>

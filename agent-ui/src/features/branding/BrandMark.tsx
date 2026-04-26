@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 
+import { resolveBrandingAssetUrl } from "./asset-url";
+
 type BrandMarkProps = {
   name: string;
   logoUrl?: string;
@@ -19,7 +21,7 @@ export function getBrandInitials(name: string): string {
 }
 
 export function BrandMark({ name, logoUrl = "", className, imageClassName, style }: BrandMarkProps) {
-  const src = logoUrl.trim();
+  const src = resolveBrandingAssetUrl(logoUrl);
   return (
     <span className={className} style={style} aria-hidden="true">
       {src ? <img className={imageClassName} src={src} alt="" loading="eager" /> : getBrandInitials(name)}

@@ -25,13 +25,13 @@ export function SessionRail(
               </Button>
             )}
             <Input
+              className="session-rail-search-input"
               aria-label="Search sessions"
               placeholder="Search sessions..."
               prefix={<Search size={14} style={{ color: '#9ca3af' }} />}
               value={props.searchValue}
               onChange={(event) => props.onSearchChange(event.target.value)}
               allowClear
-              style={{ borderRadius: 6, backgroundColor: '#ffffff', borderColor: '#e2e8f0' }}
             />
           </div>
         ) : (

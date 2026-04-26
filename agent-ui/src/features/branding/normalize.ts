@@ -6,6 +6,7 @@ import {
   type PublicPortalBehavior,
   type PublicPortalWelcomeSuggestion
 } from "./types";
+import { resolveBrandingAssetUrl } from "./asset-url";
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -18,12 +19,12 @@ export function normalizeBranding(value: Partial<PublicBranding> | null | undefi
     headerSubtitle: asString(value?.headerSubtitle) || DEFAULT_BRANDING.headerSubtitle,
     internalLoginCopy: asString(value?.internalLoginCopy) || legacyLoginCopy || DEFAULT_BRANDING.internalLoginCopy,
     externalLoginCopy: asString(value?.externalLoginCopy) || DEFAULT_BRANDING.externalLoginCopy,
-    logoUrl: asString(value?.logoUrl),
-    iconUrl: asString(value?.iconUrl),
-    loginBackgroundUrl: asString(value?.loginBackgroundUrl),
-    portalWelcomeIllustrationUrl: asString(value?.portalWelcomeIllustrationUrl),
+    logoUrl: resolveBrandingAssetUrl(asString(value?.logoUrl)),
+    iconUrl: resolveBrandingAssetUrl(asString(value?.iconUrl)),
+    loginBackgroundUrl: resolveBrandingAssetUrl(asString(value?.loginBackgroundUrl)),
+    portalWelcomeIllustrationUrl: resolveBrandingAssetUrl(asString(value?.portalWelcomeIllustrationUrl)),
     assistantName: asString(value?.assistantName) || DEFAULT_BRANDING.assistantName,
-    assistantAvatarUrl: asString(value?.assistantAvatarUrl)
+    assistantAvatarUrl: resolveBrandingAssetUrl(asString(value?.assistantAvatarUrl))
   };
 }
 

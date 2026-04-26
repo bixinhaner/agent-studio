@@ -1,22 +1,36 @@
+body.access-request-route {
+  overflow: hidden;
+}
+
+body.access-request-route #root {
+  height: 100%;
+  min-height: 100%;
+}
+
 .auth-access-card {
-  max-width: 760px;
-  padding: 30px 28px;
-  gap: 18px;
+  max-width: min(860px, calc(100vw - 32px));
+  max-height: calc(100dvh - 28px);
+  padding: 24px 28px;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .auth-access-screen {
-  align-items: flex-start;
-  overflow-y: auto;
+  align-items: center;
+  overflow: hidden;
+  padding: 14px 20px;
 }
 
 .auth-access-screen .auth-access-card {
-  margin: 24px auto;
+  margin: 0 auto;
 }
 
 .auth-access-eyebrow {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  line-height: 1.1;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #ff4614;
@@ -34,21 +48,43 @@
 .auth-access-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 14px;
+  gap: 8px 14px;
 }
 
 .auth-access-form-grid .auth-modern-field > span {
   font-size: 12px;
+  line-height: 1.2;
   font-weight: 600;
   color: var(--admin-color-subtle, #666);
 }
 
-.auth-access-card .auth-modern-header {
+.auth-access-card .auth-modern-field {
   gap: 6px;
 }
 
+.auth-access-card .auth-modern-header {
+  gap: 5px;
+}
+
+.auth-access-card .auth-modern-brand-mark {
+  height: 40px;
+}
+
+.auth-access-card .auth-modern-logo {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
 .auth-access-card .auth-modern-subtitle {
-  max-width: 620px;
+  max-width: 740px;
+  font-size: 14px;
+  line-height: 1.42;
+}
+
+.auth-access-card .auth-modern-input {
+  height: 44px;
+  border-radius: 11px;
+  font-size: 14px;
 }
 
 .auth-access-span-2 {
@@ -57,13 +93,14 @@
 
 .auth-access-textarea {
   height: auto;
-  min-height: 92px;
-  padding: 10px 14px;
+  min-height: 64px;
+  padding: 8px 12px;
+  line-height: 1.4;
   resize: vertical;
 }
 
 .auth-access-textarea-sm {
-  min-height: 72px;
+  min-height: 52px;
 }
 
 .auth-access-file-list {
@@ -87,12 +124,12 @@
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  min-height: 78px;
-  padding: 16px;
+  min-height: 60px;
+  padding: 10px 14px;
   border: 1px solid rgba(255, 70, 20, 0.28);
-  border-radius: 14px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(255, 70, 20, 0.06), rgba(255, 70, 20, 0.02)),
     var(--admin-color-surface-solid, #fff);
@@ -123,9 +160,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: #ff4614;
   color: #fff;
   box-shadow: 0 10px 24px rgba(255, 70, 20, 0.22);
@@ -135,26 +172,26 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .auth-access-upload-copy strong {
   color: var(--admin-color-text, #111);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .auth-access-upload-copy span {
   color: var(--admin-color-subtle, #666);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.3;
 }
 
 .auth-access-upload-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 12px;
   border: 1px solid rgba(255, 70, 20, 0.28);
   border-radius: 999px;
@@ -182,8 +219,13 @@
 .auth-access-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  margin-top: 4px;
+  gap: 10px;
+  margin-top: 0;
+}
+
+.auth-access-card .auth-modern-sso-btn,
+.auth-access-card .auth-modern-primary-btn {
+  height: 44px;
 }
 
 .auth-access-link-btn {
@@ -509,6 +551,27 @@
 }
 
 @media (max-width: 900px) {
+  body.access-request-route {
+    overflow-y: auto;
+  }
+
+  body.access-request-route #root {
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .auth-access-screen {
+    align-items: flex-start;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .auth-access-card {
+    max-height: none;
+    padding: 24px 20px;
+    overflow: visible;
+  }
+
   .auth-access-screen .auth-access-card {
     margin: 0 auto;
   }
