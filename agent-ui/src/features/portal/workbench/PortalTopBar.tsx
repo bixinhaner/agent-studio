@@ -96,25 +96,26 @@ export function PortalTopBar(props: {
             />
           </Tooltip>
 
-          <div className="portal-topbar-brand" aria-label={branding.platformName}>
+          <div className="portal-topbar-brand" aria-label={branding.platformName} title={branding.platformName}>
             <BrandMark
               className="portal-topbar-brand-mark"
               imageClassName="portal-topbar-brand-image"
               name={branding.platformName}
               logoUrl={branding.logoUrl || branding.iconUrl}
             />
-            <span className="portal-topbar-brand-copy">
-              <span className="portal-topbar-brand-title">{branding.platformName}</span>
-              {isMobile ? (
-                showRuntimeSummary && props.runtimeSummary ? (
+            {isMobile ? (
+              showRuntimeSummary && props.runtimeSummary ? (
+                <span className="portal-topbar-brand-copy">
                   <span className="portal-topbar-mobile-summary" title={props.runtimeSummary}>
                     {props.runtimeSummary}
                   </span>
-                ) : null
-              ) : (
+                </span>
+              ) : null
+            ) : branding.headerSubtitle.trim() ? (
+              <span className="portal-topbar-brand-copy">
                 <span className="portal-topbar-brand-subtitle">{branding.headerSubtitle}</span>
-              )}
-            </span>
+              </span>
+            ) : null}
           </div>
         </div>
 

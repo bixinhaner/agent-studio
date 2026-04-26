@@ -70,8 +70,8 @@ body.portal-workbench-mode {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
-  padding: 0 24px;
+  height: 52px;
+  padding: 0 20px;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -87,7 +87,7 @@ body.portal-workbench-mode {
 .portal-topbar-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -95,7 +95,7 @@ body.portal-workbench-mode {
 .portal-topbar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   flex: 0 0 auto;
 }
@@ -103,17 +103,17 @@ body.portal-workbench-mode {
 .portal-topbar-brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .portal-topbar-brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--workbench-accent);
-  color: #ffffff;
-  font-size: 11px;
+  width: 58px;
+  height: 32px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--workbench-accent);
+  font-size: 12px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -122,11 +122,17 @@ body.portal-workbench-mode {
   flex: 0 0 auto;
 }
 
+.portal-topbar-brand-mark:not(:has(.portal-topbar-brand-image)) {
+  width: 32px;
+  background: var(--workbench-accent);
+  color: #ffffff;
+}
+
 .portal-topbar-brand-image {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: #ffffff;
+  background: transparent;
 }
 
 .portal-topbar-brand-copy {
@@ -147,8 +153,9 @@ body.portal-workbench-mode {
 }
 
 .portal-topbar-brand-subtitle {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--workbench-muted-text);
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1833,23 +1840,24 @@ button.session-rail-new-btn:active,
   flex: 1 1 0;
   min-height: 0;
   margin: 0;
-  padding: clamp(8px, 2vh, 20px) 0 clamp(10px, 2.5vh, 24px);
-  gap: clamp(8px, 1.7vh, 18px);
+  padding: clamp(4px, 1vh, 12px) 0 clamp(8px, 2vh, 18px);
+  gap: clamp(7px, 1.25vh, 14px);
   overflow: hidden;
 }
 
 .bailey-illustration-shell {
   position: relative;
   width: 100%;
-  max-width: 600px;
-  height: clamp(150px, 34vh, 300px);
-  max-height: min(34vh, 300px);
-  margin-bottom: 0;
+  max-width: 860px;
+  height: clamp(230px, 40vh, 380px);
+  max-height: min(40vh, 380px);
+  margin-bottom: -8px;
   z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 1 auto;
+  overflow: hidden;
 }
 
 /* 底层舞台光场：制造底部氛围溶圈光晕 */
@@ -1877,10 +1885,12 @@ button.session-rail-new-btn:active,
   mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, black 45%, transparent 100%);
   position: relative;
   z-index: 2;
+  transform: scale(1.14);
+  transform-origin: center;
 }
 
 .bailey-welcome-greeting {
-  font-size: clamp(24px, 3vw, 34px);
+  font-size: clamp(24px, 2.6vw, 32px);
   font-weight: 600;
   color: #111827;
   margin: 0;
@@ -1896,7 +1906,7 @@ button.session-rail-new-btn:active,
 }
 
 .bailey-welcome-subtitle {
-  font-size: 15px;
+  font-size: 14px;
   color: #6b7280;
   margin: 0;
   line-height: 1.45;
@@ -1906,9 +1916,9 @@ button.session-rail-new-btn:active,
 .bailey-suggestion-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  max-width: 1000px;
+  max-width: 980px;
   margin: 0 auto;
   padding: 0 20px;
   flex: 0 0 auto;
@@ -1917,14 +1927,14 @@ button.session-rail-new-btn:active,
 .bailey-suggestion-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 66px;
-  padding: 13px 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.7);
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03), inset 0 2px 6px rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.58);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   position: relative;
@@ -1932,17 +1942,17 @@ button.session-rail-new-btn:active,
 
 .bailey-suggestion-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 28px rgba(255, 70, 20, 0.1), inset 0 2px 6px rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 12px 26px rgba(255, 70, 20, 0.08);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .bailey-suggestion-icon-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   flex-shrink: 0;
 }
 
@@ -1952,7 +1962,7 @@ button.session-rail-new-btn:active,
 .bailey-suggestion-icon-wrap.icon-purple { color: #a855f7; background: rgba(168, 85, 247, 0.1); }
 
 .bailey-suggestion-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #1f2937;
   line-height: 1.4;
@@ -1964,14 +1974,14 @@ button.session-rail-new-btn:active,
 
 @media (max-height: 760px) {
   .bailey-welcome-container {
-    gap: 10px;
-    padding-top: 6px;
-    padding-bottom: 12px;
+    gap: 8px;
+    padding-top: 4px;
+    padding-bottom: 10px;
   }
 
   .bailey-illustration-shell {
-    height: clamp(120px, 28vh, 230px);
-    max-height: min(28vh, 230px);
+    height: clamp(170px, 34vh, 290px);
+    max-height: min(34vh, 290px);
   }
 
   .bailey-welcome-subtitle {
@@ -1979,8 +1989,8 @@ button.session-rail-new-btn:active,
   }
 
   .bailey-suggestion-card {
-    min-height: 58px;
-    padding: 10px 12px;
+    min-height: 52px;
+    padding: 9px 12px;
   }
 
   .bailey-suggestion-icon-wrap {
