@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Codex } from "@openai/codex-sdk";
+import { Codex } from "./patched-codex-sdk.js";
 import type { ReasoningEffort } from "./model-config.js";
 
 export type CodexStreamEvent = {
