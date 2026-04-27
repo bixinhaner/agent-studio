@@ -8,11 +8,12 @@ import {
   createAdminCustomerOrganization,
   createAdminOrganizationInvite,
   fetchAdminCustomerOrganizations,
+  fetchDepartmentTree,
   fetchAdminUsers,
   patchAdminCustomerOrganization,
   patchAdminUserLocalSettings
 } from "./api";
-import type { AdminCustomerOrganization, AdminUser } from "./types";
+import type { AdminCustomerOrganization, AdminDepartmentNode, AdminUser } from "./types";
 
 function userSource(user: AdminUser) {
   return user.source ?? {
@@ -143,10 +144,50 @@ function upsertOrganization(
   return nextOrganizations.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+function departmentDisplayLabel(department: AdminDepartmentNode): string {
+  const name = department.name.trim() || department.externalId.trim() || department.id.trim() || "未命名部门";
+  const externalId = department.externalId.trim();
+  if (!externalId || externalId === department.id.trim()) {
+    return name;
+  }
+  return `${name} (${externalId})`;
+}
+
+function buildDepartmentDisplayMap(
+  departments: AdminDepartmentNode[],
+  map = new Map<string, string>()
+): Map<string, string> {
+  for (const department of departments) {
+    const id = department.id.trim();
+    const externalId = department.externalId.trim();
+    const displayLabel = departmentDisplayLabel(department);
+    if (id) {
+      map.set(id, displayLabel);
+    }
+    if (externalId) {
+      map.set(externalId, displayLabel);
+    }
+    if (department.children.length > 0) {
+      buildDepartmentDisplayMap(department.children, map);
+    }
+  }
+  return map;
+}
+
+function resolveDepartmentLabel(
+  departmentId: string | null | undefined,
+  departmentDisplayMap: Map<string, string>
+): string {
+  const normalizedDepartmentId = departmentId?.trim();
+  if (!normalizedDepartmentId) return "未设置";
+  return departmentDisplayMap.get(normalizedDepartmentId) || normalizedDepartmentId;
+}
+
 export function UsersView() {
   const [activeTab, setActiveTab] = useState<"users" | "orgs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [organizations, setOrganizations] = useState<AdminCustomerOrganization[]>([]);
+  const [departments, setDepartments] = useState<AdminDepartmentNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
@@ -177,13 +218,15 @@ export function UsersView() {
       setLoading(true);
       setErrorText("");
       try {
-        const [userResponse, organizationResponse] = await Promise.all([
+        const [userResponse, organizationResponse, departmentResponse] = await Promise.all([
           fetchAdminUsers(),
-          fetchAdminCustomerOrganizations()
+          fetchAdminCustomerOrganizations(),
+          fetchDepartmentTree().catch(() => ({ departments: [] as AdminDepartmentNode[] }))
         ]);
         if (!active) return;
         setUsers(userResponse.users);
         setOrganizations(organizationResponse.organizations);
+        setDepartments(departmentResponse.departments);
         setInviteOrganizationId((current) => {
           if (current && organizationResponse.organizations.some((organization) => organization.id === current)) {
             return current;
@@ -208,6 +251,11 @@ export function UsersView() {
     () => organizations.find((item) => item.id === editingOrganizationId) ?? null,
     [editingOrganizationId, organizations]
   );
+  const departmentDisplayMap = useMemo(() => buildDepartmentDisplayMap(departments), [departments]);
+  const resolveDepartmentLabelFromMap = useMemo(
+    () => (departmentId: string | null | undefined) => resolveDepartmentLabel(departmentId, departmentDisplayMap),
+    [departmentDisplayMap]
+  );
 
   const filteredUsers = useMemo(() => {
     const query = filterText.trim().toLowerCase();
@@ -221,6 +269,7 @@ export function UsersView() {
         user.synced.email ?? "",
         user.synced.dingtalkUserId ?? "",
         ...user.synced.departmentIds,
+        ...user.synced.departmentIds.map((departmentId) => resolveDepartmentLabelFromMap(departmentId)),
         ...source.identities.map((identity) => `${identity.provider} ${identity.email ?? ""}`),
         ...source.organizations.map((membership) =>
           `${membership.organizationName ?? ""} ${membership.organizationSlug ?? ""} ${membership.membershipType}`
@@ -230,7 +279,7 @@ export function UsersView() {
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [filterText, users]);
+  }, [departmentDisplayMap, filterText, resolveDepartmentLabelFromMap, users]);
 
 
   function openEditor(user: AdminUser) {
@@ -405,7 +454,7 @@ export function UsersView() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ color: "var(--admin-color-text)", fontSize: 13 }}>{userOrganizationSummary(record)}</span>
           <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
-            主部门: {record.synced.primaryDepartmentId || "未设置"}
+            主部门: {resolveDepartmentLabelFromMap(record.synced.primaryDepartmentId)}
           </span>
         </div>
       )
@@ -758,7 +807,7 @@ export function UsersView() {
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">主部门</div>
-                        <strong>{user.synced.primaryDepartmentId || "未设置"}</strong>
+                        <strong>{resolveDepartmentLabelFromMap(user.synced.primaryDepartmentId)}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">最后同步</div>

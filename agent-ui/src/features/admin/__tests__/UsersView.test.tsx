@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsersView } from "../UsersView";
-import { fetchAdminCustomerOrganizations, fetchAdminUsers } from "../api";
+import { fetchAdminCustomerOrganizations, fetchAdminUsers, fetchDepartmentTree } from "../api";
 
 vi.mock("../api");
 
@@ -47,8 +47,8 @@ describe("UsersView", () => {
             displayName: "John Doe",
             email: "john@example.com",
             dingtalkUserId: "ding-001",
-            departmentIds: [],
-            primaryDepartmentId: null
+            departmentIds: ["dept-001"],
+            primaryDepartmentId: "dept-001"
           },
           local: { role: "employee", manualDisabled: false, adminNote: null },
           assignedRoles: [],
@@ -65,6 +65,24 @@ describe("UsersView", () => {
     (fetchAdminCustomerOrganizations as any).mockResolvedValue({
       organizations: []
     });
+    (fetchDepartmentTree as any).mockResolvedValue({
+      departments: [
+        {
+          id: "dept-node-1",
+          organizationId: "org_internal",
+          externalId: "dept-001",
+          name: "研发部",
+          parentDepartmentId: null,
+          sortOrder: 0,
+          status: "active",
+          lastSyncedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          memberCount: 3,
+          children: []
+        }
+      ]
+    });
   });
 
   it("renders the users list", async () => {
@@ -73,6 +91,7 @@ describe("UsersView", () => {
 
     const userRow = await screen.findByText("John Doe");
     expect(userRow).toBeTruthy();
+    expect(await screen.findByText(/主部门: 研发部/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("tab", { name: "客户组织与邀请" }));
     expect(await screen.findByRole("button", { name: "创建客户组织" })).toBeTruthy();
   });
