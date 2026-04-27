@@ -54,6 +54,7 @@ type AppAccessTokenCache = {
 const APP_ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 const APP_ACCESS_TOKEN_FALLBACK_TTL_MS = 60 * 60 * 1000;
 export const DINGTALK_ROOT_DEPARTMENT_ID = "1";
+const DINGTALK_DEPARTMENT_USER_PAGE_SIZE = 100;
 
 class DingTalkRequestError extends Error {
   readonly code?: string;
@@ -108,6 +109,21 @@ function getNumber(record: Record<string, unknown> | null, keys: string[]): numb
       if (Number.isFinite(parsed)) {
         return parsed;
       }
+    }
+  }
+  return undefined;
+}
+
+function getBoolean(record: Record<string, unknown> | null, keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
     }
   }
   return undefined;
@@ -613,11 +629,29 @@ export function createDingTalkClient(
         throw new Error("DingTalk departmentId is required");
       }
 
-      const payload = await requestOrgApi("/topapi/v2/user/list", { dept_id: departmentId });
+      const users: DingTalkOrganizationUser[] = [];
+      let cursor = 0;
+      for (;;) {
+        const payload = await requestOrgApi("/topapi/v2/user/list", {
+          dept_id: departmentId,
+          cursor,
+          size: DINGTALK_DEPARTMENT_USER_PAGE_SIZE
+        });
+        users.push(
+          ...getPayloadItems(payload, ["users", "list", "userlist"])
+            .map((item) => normalizeOrganizationUser(item))
+            .filter((item): item is DingTalkOrganizationUser => Boolean(item))
+        );
 
-      return getPayloadItems(payload, ["users", "list", "userlist"])
-        .map((item) => normalizeOrganizationUser(item))
-        .filter((item): item is DingTalkOrganizationUser => Boolean(item));
+        const result = asRecord(asRecord(payload)?.result) ?? asRecord(payload);
+        const hasMore = getBoolean(result, ["has_more", "hasMore"]) ?? false;
+        const nextCursor = getNumber(result, ["next_cursor", "nextCursor"]);
+        if (!hasMore || nextCursor === undefined || nextCursor === cursor) {
+          break;
+        }
+        cursor = nextCursor;
+      }
+      return users;
     },
     async getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null> {
       const userId = normalizeString(input.userId);

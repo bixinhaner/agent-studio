@@ -66,6 +66,70 @@ describe("createDingTalkClient", () => {
     ]);
   });
 
+  it("paginates department user list requests with cursor and size", async () => {
+    const requestedBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({
+          accessToken: "app-token",
+          expireIn: 7200
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/topapi/v2/user/list")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        requestedBodies.push(body);
+        if (body.cursor === 0) {
+          return jsonResponse({
+            errcode: 0,
+            result: {
+              has_more: "true",
+              next_cursor: 100,
+              list: [
+                {
+                  userid: "user-1",
+                  name: "Alice",
+                  dept_id_list: [66894063]
+                }
+              ]
+            }
+          });
+        }
+        return jsonResponse({
+          errcode: 0,
+          result: {
+            has_more: false,
+            list: [
+              {
+                userid: "user-2",
+                name: "Bob",
+                dept_id_list: [66894063]
+              }
+            ]
+          }
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock);
+    const users = await client.listDepartmentUsers({ departmentId: "66894063" });
+
+    expect(requestedBodies).toEqual([
+      {
+        dept_id: "66894063",
+        cursor: 0,
+        size: 100
+      },
+      {
+        dept_id: "66894063",
+        cursor: 100,
+        size: 100
+      }
+    ]);
+    expect(users.map((user) => user.userId)).toEqual(["user-1", "user-2"]);
+  });
+
   it("refreshes the cached app access token after it expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T00:00:00.000Z"));
