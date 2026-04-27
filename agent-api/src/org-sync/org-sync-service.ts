@@ -154,6 +154,8 @@ const STALE_RUNNING_JOB_SUMMARY = {
 };
 const STALE_RUNNING_JOB_AGE_MS = 15 * 60 * 1000;
 const JOB_HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const FULL_SYNC_DEPARTURE_MIN_COVERAGE = 0.8;
+const FULL_SYNC_DEPARTURE_SMALL_DIRECTORY_MAX = 10;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -183,6 +185,10 @@ function getSnapshotUserKey(user: UserSnapshot): string {
   return trimOrUndefined(user.unionId) ?? user.userId;
 }
 
+function getUserRowKey(row: UserRow): string {
+  return trimOrUndefined(row.externalId) ?? trimOrUndefined(row.dingtalkUserId) ?? row.id;
+}
+
 function addUserRowKey(target: Map<string, UserRow>, row: UserRow, key: string | null | undefined): boolean {
   const normalized = trimOrUndefined(key);
   if (!normalized || target.has(normalized)) {
@@ -198,6 +204,49 @@ function indexUserRowByStableKeys(target: Map<string, UserRow>, row: UserRow): v
   if (!addedExternalId && !addedDingTalkUserId) {
     addUserRowKey(target, row, row.id);
   }
+}
+
+function uniqueUserRows(rows: Iterable<UserRow>): UserRow[] {
+  const seen = new Set<string>();
+  const result: UserRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    result.push(row);
+  }
+  return result;
+}
+
+function isDingTalkSyncManagedUser(row: UserRow): boolean {
+  if (!row.lastSyncedAt) {
+    return false;
+  }
+  return Boolean(trimOrUndefined(row.externalId) || trimOrUndefined(row.dingtalkUserId));
+}
+
+function hasSafeFullSyncDepartureCoverage(snapshotUserCount: number, existingManagedUserCount: number): boolean {
+  if (snapshotUserCount <= 0 || existingManagedUserCount <= 0) {
+    return false;
+  }
+  if (existingManagedUserCount <= FULL_SYNC_DEPARTURE_SMALL_DIRECTORY_MAX) {
+    return true;
+  }
+  return snapshotUserCount / existingManagedUserCount >= FULL_SYNC_DEPARTURE_MIN_COVERAGE;
+}
+
+function shouldHandleMissingFullSyncUser(row: UserRow, processedUserIds: Set<string>): boolean {
+  if (processedUserIds.has(row.id)) {
+    return false;
+  }
+  return isDingTalkSyncManagedUser(row);
+}
+
+function resolveMissingFullSyncStatus(row: UserRow): { status: string; statusSource: string; syncState: string } {
+  return {
+    status: "disabled",
+    statusSource: row.manualDisabled ? "manual_disable" : "sync",
+    syncState: "departed"
+  };
 }
 
 function normalizeDepartmentPayload(department: DepartmentSnapshot) {
@@ -355,6 +404,40 @@ function compareUser(
     };
   }
   return null;
+}
+
+function compareMissingFullSyncUser(before: UserRow): UserDiff | null {
+  const status = resolveMissingFullSyncStatus(before);
+  const beforePayload = {
+    userId: before.dingtalkUserId ?? before.externalId ?? before.id,
+    unionId: before.externalId ?? null,
+    openId: before.dingtalkOpenId ?? null,
+    corpId: before.dingtalkCorpId ?? null,
+    displayName: before.displayName,
+    email: before.email,
+    status: before.status ?? "active",
+    statusSource: before.statusSource ?? "sync",
+    syncState: before.syncState ?? "active",
+    manualDisabled: Boolean(before.manualDisabled)
+  };
+  const afterPayload = {
+    ...beforePayload,
+    status: status.status,
+    statusSource: status.statusSource,
+    syncState: status.syncState
+  };
+
+  if (compareRecords(beforePayload, afterPayload)) {
+    return null;
+  }
+
+  return {
+    entityType: "user",
+    entityExternalId: getUserRowKey(before),
+    changeType: beforePayload.status !== "disabled" ? "disabled" : "updated",
+    beforePayload,
+    afterPayload
+  };
 }
 
 function compareMembership(
@@ -695,6 +778,14 @@ export class OrgSyncService {
     const diffs: SyncDiff[] = [];
     const scopedDepartmentExternalIds = new Set(snapshot.departments.map((department) => department.externalId));
     const snapshotUserKeys = new Set(snapshot.users.map((user) => getSnapshotUserKey(user)));
+    const processedUserIds = new Set<string>();
+    const uniqueUserRowsByKey = uniqueUserRows(userRowsByKey.values());
+    const canHandleMissingFullSyncUsers =
+      scopeType === "full" &&
+      hasSafeFullSyncDepartureCoverage(
+        snapshot.users.length,
+        uniqueUserRowsByKey.filter((row) => isDingTalkSyncManagedUser(row)).length
+      );
 
     for (const department of snapshot.departments) {
       const before = departmentRowsByExternalId.get(department.externalId) ?? null;
@@ -705,6 +796,9 @@ export class OrgSyncService {
     for (const user of snapshot.users) {
       const key = getSnapshotUserKey(user);
       const before = userRowsByKey.get(key) ?? userRowsByKey.get(user.userId) ?? null;
+      if (before) {
+        processedUserIds.add(before.id);
+      }
       const status = resolveUserStatus(
         user.lifecycleState,
         Boolean(before?.manualDisabled)
@@ -730,6 +824,7 @@ export class OrgSyncService {
         }
         continue;
       }
+      processedUserIds.add(beforeUser.id);
       const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: beforeUser.id } })) as MembershipRow[];
       const current = currentMemberships.map((membership) => ({
         departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
@@ -744,6 +839,31 @@ export class OrgSyncService {
       );
       const diff = compareMembership(current, target, getSnapshotUserKey(user));
       if (diff) diffs.push(diff);
+    }
+
+    if (canHandleMissingFullSyncUsers) {
+      for (const staleUser of uniqueUserRowsByKey) {
+        if (!shouldHandleMissingFullSyncUser(staleUser, processedUserIds)) {
+          continue;
+        }
+
+        const userDiff = compareMissingFullSyncUser(staleUser);
+        if (userDiff) diffs.push(userDiff);
+
+        const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: staleUser.id } })) as MembershipRow[];
+        const current = currentMemberships.map((membership) => ({
+          departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
+          isPrimary: Boolean(membership.isPrimary)
+        }));
+        const target = currentMemberships
+          .filter((membership) => membership.source !== "sync")
+          .map((membership) => ({
+            departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
+            isPrimary: Boolean(membership.isPrimary)
+          }));
+        const membershipDiff = compareMembership(current, target, getUserRowKey(staleUser));
+        if (membershipDiff) diffs.push(membershipDiff);
+      }
     }
 
     if (scopeType === "department") {
@@ -761,7 +881,7 @@ export class OrgSyncService {
       for (const staleUserId of staleScopedUserIds) {
         const staleUser = userRowsById.get(staleUserId);
         if (!staleUser) continue;
-        const staleUserKey = trimOrUndefined(staleUser.externalId) ?? trimOrUndefined(staleUser.dingtalkUserId) ?? staleUser.id;
+        const staleUserKey = getUserRowKey(staleUser);
         if (snapshotUserKeys.has(staleUserKey)) {
           continue;
         }
@@ -829,6 +949,13 @@ export class OrgSyncService {
 
     const persistedUserRowsByKey = new Map(diffData.userRowsByKey);
     const processedUserIds = new Set<string>();
+    const uniquePersistedUserRowsByKey = uniqueUserRows(persistedUserRowsByKey.values());
+    const canHandleMissingFullSyncUsers =
+      scopeType === "full" &&
+      hasSafeFullSyncDepartureCoverage(
+        snapshot.users.length,
+        uniquePersistedUserRowsByKey.filter((row) => isDingTalkSyncManagedUser(row)).length
+      );
 
     for (const user of snapshot.users) {
       const key = getSnapshotUserKey(user);
@@ -878,6 +1005,29 @@ export class OrgSyncService {
         ...(scopedDepartmentIds ? { replaceDepartmentIds: scopedDepartmentIds } : {}),
         syncedAt: now
       });
+    }
+
+    if (canHandleMissingFullSyncUsers) {
+      for (const staleUser of uniquePersistedUserRowsByKey) {
+        if (!shouldHandleMissingFullSyncUser(staleUser, processedUserIds)) {
+          continue;
+        }
+        const status = resolveMissingFullSyncStatus(staleUser);
+        await db.user.update({
+          where: { id: staleUser.id },
+          data: {
+            status: status.status,
+            statusSource: status.statusSource,
+            syncState: status.syncState,
+            lastSyncedAt: now
+          }
+        });
+        await this.dependencies.memberships.replaceSyncedMemberships({
+          userId: staleUser.id,
+          memberships: [],
+          syncedAt: now
+        });
+      }
     }
 
     if (scopedDepartmentIds?.length) {
