@@ -9,6 +9,7 @@ import {
   type FC,
   type MutableRefObject,
   type ReactNode,
+  type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type FormEvent as ReactFormEvent,
@@ -190,6 +191,11 @@ type ThreadFeedbackOut = {
 
 type ProductFeedbackType = "bug" | "feature_request" | "usability_issue" | "other";
 type ProductFeedbackSeverity = "blocking" | "high" | "medium" | "low";
+type ProductFeedbackImageDraft = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
 
 type DirectoryBrowseOut = {
   roots: string[];
@@ -283,6 +289,11 @@ type SessionGroupLabelContextValue = {
 
 type RunningThreadIdsContextValue = Record<string, boolean>;
 
+type ThreadCompletionNoticeContextValue = {
+  completedThreadIds: RunningThreadIdsContextValue;
+  clearCompletedThreadNotice: (...threadIds: Array<string | undefined | null>) => void;
+};
+
 const DEFAULT_WORKSPACE = ".";
 
 function resolveShowProcessTracePreference(user?: AuthUser | null): boolean {
@@ -312,9 +323,9 @@ const WEB_SEARCH_OPTIONS: Array<{ value: WebSearchMode; label: string }> = [
   { value: "live", label: "live (Live search)" }
 ];
 const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: ProductFeedbackType; label: string }> = [
+  { value: "usability_issue", label: "Improvement suggestion" },
   { value: "bug", label: "Bug" },
   { value: "feature_request", label: "Feature request" },
-  { value: "usability_issue", label: "Usability issue" },
   { value: "other", label: "Other" }
 ];
 const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity; label: string }> = [
@@ -323,7 +334,15 @@ const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity;
   { value: "medium", label: "Medium" },
   { value: "low", label: "Low" }
 ];
-const DEFAULT_RUNNING_STAGE_TEXT = "Getting ready to answer";
+const PRODUCT_FEEDBACK_MAX_IMAGES = 3;
+const PRODUCT_FEEDBACK_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const PRODUCT_FEEDBACK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const RUNNING_STAGE_CONNECTING_TEXT = "Connecting to the assistant";
+const RUNNING_STAGE_WORKING_TEXT = "Working on your request";
+const RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT = "Still working, waiting for the first visible update";
+const RUNNING_STAGE_CONNECTING_FALLBACK_MS = 1800;
+const RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS = 8000;
+const DEFAULT_RUNNING_STAGE_TEXT = RUNNING_STAGE_CONNECTING_TEXT;
 const PORTAL_RUNNING_LEAVE_WARNING = "There are still running sessions. If you leave, you may lose visibility into their output.";
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
@@ -332,6 +351,10 @@ const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
 });
 const RunningThreadIdsContext = createContext<RunningThreadIdsContextValue>({});
+const ThreadCompletionNoticeContext = createContext<ThreadCompletionNoticeContextValue>({
+  completedThreadIds: {},
+  clearCompletedThreadNotice: () => undefined
+});
 const ActiveThreadIdContext = createContext("");
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 type FeedbackCommentDraftStore = {
@@ -1727,6 +1750,39 @@ function formatThreadGroupLabel(value: string | undefined, referenceDate = new D
   return `${year}-${month}`;
 }
 
+function rememberThreadGroupHeader(
+  groupHeaderByRemoteId: Record<string, string>,
+  thread: Pick<ThreadOut, "id" | "external_id">,
+  groupLabel: string,
+  localThreadId?: string
+): void {
+  if (!groupLabel) return;
+  const keys = [thread.id, thread.external_id, localThreadId]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  for (const key of keys) {
+    groupHeaderByRemoteId[key] = groupLabel;
+  }
+}
+
+function resolveThreadGroupHeader(
+  groupHeaderByRemoteId: Record<string, string>,
+  remoteId: string,
+  externalId: string,
+  localId: string
+): string {
+  return groupHeaderByRemoteId[remoteId] || groupHeaderByRemoteId[externalId] || groupHeaderByRemoteId[localId] || "";
+}
+
+function clearThreadGroupHeaderLabel(groupHeaderByRemoteId: Record<string, string>, groupLabel: string): void {
+  if (!groupLabel) return;
+  for (const [key, label] of Object.entries(groupHeaderByRemoteId)) {
+    if (label === groupLabel) {
+      delete groupHeaderByRemoteId[key];
+    }
+  }
+}
+
 function timelineKindLabel(kind: TimelineRow["kind"]): string {
   if (kind === "reasoning") return "Reasoning";
   if (kind === "tool") return "Tool";
@@ -1826,13 +1882,22 @@ function messageTextForTitle(messages: readonly ThreadMessage[]): string {
   return "";
 }
 
-function guessThreadTitle(messages: readonly ThreadMessage[]): string {
-  const text = messageTextForTitle(messages)
+function guessThreadTitleFromText(value: string): string {
+  const text = value
     .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "uploaded file")
     .replace(/\s+/g, " ")
     .trim();
   if (!text) return "New conversation";
   return text.length <= 22 ? text : `${text.slice(0, 22)}...`;
+}
+
+function isPlaceholderThreadTitle(value: string | undefined): boolean {
+  const title = String(value || "").trim();
+  return !title || title === "New conversation";
+}
+
+function guessThreadTitle(messages: readonly ThreadMessage[]): string {
+  return guessThreadTitleFromText(messageTextForTitle(messages));
 }
 
 function userTextFromUnknownMessage(message: unknown): string {
@@ -2276,6 +2341,30 @@ function updateRunningThreadMap(
   if (!current[normalizedThreadId]) return current;
   const next = { ...current };
   delete next[normalizedThreadId];
+  return next;
+}
+
+function normalizeThreadIdentityKeys(...threadIds: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of threadIds) {
+    const key = String(value || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+function updateRunningThreadMapForKeys(
+  current: RunningThreadIdsContextValue,
+  threadIds: readonly string[],
+  isRunning: boolean
+): RunningThreadIdsContextValue {
+  let next = current;
+  for (const threadId of threadIds) {
+    next = updateRunningThreadMap(next, threadId, isRunning);
+  }
   return next;
 }
 
@@ -2925,8 +3014,10 @@ const AgentThreadListItem: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const runningThreadIds = useContext(RunningThreadIdsContext);
+  const { completedThreadIds, clearCompletedThreadNotice } = useContext(ThreadCompletionNoticeContext);
   const threadItemId = useAuiState((s) => s.threadListItem.id);
   const threadRemoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const threadExternalId = useAuiState((s) => s.threadListItem.externalId);
   const threadTitle = useAuiState((s) => (typeof s.threadListItem.title === "string" ? s.threadListItem.title : ""));
   const isAuiActiveThread = useAuiState((s) => s.threads.mainThreadId === s.threadListItem.id);
   const sessionSearchQuery = useContext(SessionSearchContext).trim().toLowerCase();
@@ -2936,11 +3027,20 @@ const AgentThreadListItem: FC = () => {
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const remoteId = String(threadRemoteId || "").trim();
+  const externalId = String(threadExternalId || "").trim();
   const localId = String(threadItemId || "").trim();
+  const identityKeys = useMemo(() => normalizeThreadIdentityKeys(remoteId, externalId, localId), [externalId, localId, remoteId]);
   const isThreadActive = isAuiActiveThread;
-  const isThreadRunning = remoteId ? Boolean(runningThreadIds[remoteId]) : Boolean(localId && runningThreadIds[localId]);
-  const groupLabel = remoteId ? groupHeaderByRemoteId[remoteId] || "" : "";
+  const isThreadRunning = identityKeys.some((key) => Boolean(runningThreadIds[key]));
+  const hasCompletionNotice =
+    !isThreadRunning && !isThreadActive && identityKeys.some((key) => Boolean(completedThreadIds[key]));
+  const groupLabel = resolveThreadGroupHeader(groupHeaderByRemoteId, remoteId, externalId, localId);
   const threadTitleForFilter = threadTitle.trim() || "New conversation";
+
+  useEffect(() => {
+    if (!isThreadActive || identityKeys.length === 0) return;
+    clearCompletedThreadNotice(...identityKeys);
+  }, [clearCompletedThreadNotice, completedThreadIds, identityKeys, isThreadActive]);
 
   useEffect(() => {
     setIsRenaming(false);
@@ -3033,7 +3133,11 @@ const AgentThreadListItem: FC = () => {
         data-portal-active={isThreadActive ? "true" : undefined}
       >
         <span className="thread-running-indicator-slot" aria-hidden="true">
-          {isThreadRunning ? <span className="thread-running-indicator" /> : null}
+          {isThreadRunning ? (
+            <span className="thread-running-indicator" />
+          ) : hasCompletionNotice ? (
+            <span className="thread-complete-indicator" />
+          ) : null}
         </span>
         {isRenaming ? (
           <div className="thread-title-edit-wrap" onClick={(event) => event.stopPropagation()}>
@@ -3048,7 +3152,10 @@ const AgentThreadListItem: FC = () => {
             />
           </div>
         ) : (
-          <ThreadListItemPrimitive.Trigger className="aui-thread-list-item-trigger">
+          <ThreadListItemPrimitive.Trigger
+            className="aui-thread-list-item-trigger"
+            onClick={() => clearCompletedThreadNotice(...identityKeys)}
+          >
             <p className="aui-thread-list-item-title">
               <ThreadListItemPrimitive.Title fallback="New conversation" />
             </p>
@@ -3171,9 +3278,11 @@ const StableThreadListItems: FC = () => {
     for (const threadId of threadIds) {
       if (!threadId) continue;
       const item = itemById.get(threadId);
-      const stableIdentity = String(item?.remoteId || threadId).trim();
-      if (!stableIdentity || seen.has(stableIdentity)) continue;
-      seen.add(stableIdentity);
+      const identities = [item?.externalId, item?.remoteId, threadId]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      if (identities.length === 0 || identities.some((identity) => seen.has(identity))) continue;
+      identities.forEach((identity) => seen.add(identity));
       result.push(threadId);
     }
     return result;
@@ -3868,7 +3977,7 @@ const AgentRuntimeAdapterProvider: FC<
   const aui = useAui();
   const activeRemoteId = useAuiState((s) => s.threadListItem.remoteId);
   const activeLocalId = useAuiState((s) => s.threadListItem.id);
-  const autoTitleTriggeredRemoteIdsRef = useRef<Set<string>>(new Set());
+  const autoTitleAppliedRemoteIdsRef = useRef<Set<string>>(new Set());
   const feedbackCommentDraftsRef = useRef<FeedbackCommentDraftStore>({
     commentsByMessageId: new Map<string, string>()
   });
@@ -3916,8 +4025,25 @@ const AgentRuntimeAdapterProvider: FC<
         const remoteId = init.remoteId;
         const state = aui.threadListItem().getState();
         const messageForPersistence = sanitizeMessageForPersistence(item.message);
-        const hasTitle =
-          state.remoteId === remoteId && typeof state.title === "string" && state.title.trim().length > 0;
+        const hasTitle = !isPlaceholderThreadTitle(typeof state.title === "string" ? state.title : "");
+        const firstUserText = userTextFromUnknownMessage(messageForPersistence);
+        const optimisticTitle = guessThreadTitleFromText(firstUserText);
+        const shouldGenerateTitle =
+          !hasTitle &&
+          !!firstUserText &&
+          !isPlaceholderThreadTitle(optimisticTitle) &&
+          !autoTitleAppliedRemoteIdsRef.current.has(remoteId);
+        if (shouldGenerateTitle) {
+          autoTitleAppliedRemoteIdsRef.current.add(remoteId);
+          const renameResult = (aui.threadListItem().rename as unknown as (newTitle: string) => Promise<void> | void)(
+            optimisticTitle
+          );
+          if (renameResult && typeof renameResult.catch === "function") {
+            void renameResult.catch(() => {
+              autoTitleAppliedRemoteIdsRef.current.delete(remoteId);
+            });
+          }
+        }
         await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
           method: "POST",
           json: {
@@ -3926,21 +4052,6 @@ const AgentRuntimeAdapterProvider: FC<
             run_config: item.runConfig
           }
         });
-
-        const firstUserText = userTextFromUnknownMessage(messageForPersistence);
-        const shouldGenerateTitle =
-          !hasTitle &&
-          !!firstUserText &&
-          state.remoteId === remoteId &&
-          !autoTitleTriggeredRemoteIdsRef.current.has(remoteId);
-        if (shouldGenerateTitle) {
-          autoTitleTriggeredRemoteIdsRef.current.add(remoteId);
-          Promise.resolve()
-            .then(() => aui.threadListItem().generateTitle())
-            .catch(() => {
-              autoTitleTriggeredRemoteIdsRef.current.delete(remoteId);
-            });
-        }
       }
     }),
     [aui]
@@ -4065,6 +4176,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   });
   const [activeRunThreadIds, setActiveRunThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [runtimeRunningThreadIds, setRuntimeRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
+  const [completedNoticeThreadIds, setCompletedNoticeThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [activeThreadIdentity, setActiveThreadIdentity] = useState<ThreadIdentity>({});
 
   useEffect(() => {
@@ -4079,9 +4191,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [requestedPreviewPath, setRequestedPreviewPath] = useState("");
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
   const [productFeedbackOpen, setProductFeedbackOpen] = useState(false);
-  const [productFeedbackType, setProductFeedbackType] = useState<ProductFeedbackType>("bug");
+  const [productFeedbackType, setProductFeedbackType] = useState<ProductFeedbackType>("usability_issue");
   const [productFeedbackSeverity, setProductFeedbackSeverity] = useState<ProductFeedbackSeverity>("medium");
   const [productFeedbackDescription, setProductFeedbackDescription] = useState("");
+  const [productFeedbackImages, setProductFeedbackImages] = useState<ProductFeedbackImageDraft[]>([]);
+  const [productFeedbackPreviewImage, setProductFeedbackPreviewImage] = useState<ProductFeedbackImageDraft | null>(null);
   const [productFeedbackIncludeContext, setProductFeedbackIncludeContext] = useState(true);
   const [productFeedbackSubmitting, setProductFeedbackSubmitting] = useState(false);
   const [productFeedbackError, setProductFeedbackError] = useState("");
@@ -4089,6 +4203,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const runningThreadIds = useMemo(
     () => mergeRunningThreadMaps(activeRunThreadIds, runtimeRunningThreadIds),
     [activeRunThreadIds, runtimeRunningThreadIds]
+  );
+  const clearCompletedThreadNotice = useCallback((...threadIds: Array<string | undefined | null>) => {
+    const keys = normalizeThreadIdentityKeys(...threadIds);
+    if (keys.length === 0) return;
+    setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, keys, false));
+  }, []);
+  const threadCompletionNoticeContext = useMemo<ThreadCompletionNoticeContextValue>(
+    () => ({
+      completedThreadIds: completedNoticeThreadIds,
+      clearCompletedThreadNotice
+    }),
+    [clearCompletedThreadNotice, completedNoticeThreadIds]
   );
 
   const [statusText, setStatusText] = useState("Ready");
@@ -4132,8 +4258,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
+  const runningStageFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const knowledgeSetSelectionInitializedRef = useRef(false);
+  const completedRunThreadIdsRef = useRef<Set<string>>(new Set());
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
   const threadCollaborationRef = useRef<ThreadCollaborationView | null>(null);
   const threadCollaborationLoadingRef = useRef(false);
@@ -4144,6 +4272,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     threadId: "",
     promise: null
   });
+  const productFeedbackImageInputRef = useRef<HTMLInputElement | null>(null);
+  const productFeedbackImagesRef = useRef<ProductFeedbackImageDraft[]>([]);
   const pickerRequestSeqRef = useRef(0);
   const pickerAutoJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshPortalSubscriptionStatusRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
@@ -4177,8 +4307,22 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   runningStageTextRef.current = runningStageText;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
   activeThreadIdentityRef.current = activeThreadIdentity;
+  productFeedbackImagesRef.current = productFeedbackImages;
   threadCollaborationRef.current = threadCollaboration;
   threadCollaborationLoadingRef.current = threadCollaborationLoading;
+
+  useEffect(
+    () => () => {
+      if (runningStageFallbackTimerRef.current) {
+        clearTimeout(runningStageFallbackTimerRef.current);
+        runningStageFallbackTimerRef.current = null;
+      }
+      for (const item of productFeedbackImagesRef.current) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    },
+    []
+  );
 
   const refreshPortalSubscriptionStatus = useCallback(async (options?: { silent?: boolean }) => {
     if (!props.currentUser) {
@@ -4414,10 +4558,38 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     };
   }, []);
 
-  const updateRunningStage = (next: string) => {
-    if (!next || runningStageTextRef.current === next) return;
-    runningStageTextRef.current = next;
-    setRunningStageText(next);
+  const clearRunningStageFallbackTimer = () => {
+    if (!runningStageFallbackTimerRef.current) return;
+    clearTimeout(runningStageFallbackTimerRef.current);
+    runningStageFallbackTimerRef.current = null;
+  };
+
+  const updateRunningStage = (next: string, options?: { fallback?: boolean }) => {
+    const normalized = next.trim();
+    if (!normalized) return;
+    clearRunningStageFallbackTimer();
+    if (runningStageTextRef.current !== normalized) {
+      runningStageTextRef.current = normalized;
+      setRunningStageText(normalized);
+    }
+    if (options?.fallback === false) return;
+    if (normalized === RUNNING_STAGE_CONNECTING_TEXT) {
+      runningStageFallbackTimerRef.current = setTimeout(() => {
+        runningStageFallbackTimerRef.current = null;
+        if (runningStageTextRef.current === RUNNING_STAGE_CONNECTING_TEXT) {
+          updateRunningStage(RUNNING_STAGE_WORKING_TEXT);
+        }
+      }, RUNNING_STAGE_CONNECTING_FALLBACK_MS);
+      return;
+    }
+    if (normalized === RUNNING_STAGE_WORKING_TEXT) {
+      runningStageFallbackTimerRef.current = setTimeout(() => {
+        runningStageFallbackTimerRef.current = null;
+        if (runningStageTextRef.current === RUNNING_STAGE_WORKING_TEXT) {
+          updateRunningStage(RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT, { fallback: false });
+        }
+      }, RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS);
+    }
   };
 
   const additionalDirectoriesList = useMemo(
@@ -4587,7 +4759,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         for (const thread of out.threads || []) {
           const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at);
           if (groupLabel && groupLabel !== previousGroupLabel) {
-            groupHeaderByRemoteId[thread.id] = groupLabel;
+            rememberThreadGroupHeader(groupHeaderByRemoteId, thread, groupLabel);
             previousGroupLabel = groupLabel;
           }
         }
@@ -4617,6 +4789,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         setActiveThreadIdentity({
           remoteId: created.thread.id,
           localId: threadId || undefined
+        });
+        const groupLabel = formatThreadGroupLabel(created.thread.updated_at || created.thread.created_at || new Date().toISOString());
+        setSessionGroupLabelContext((prev) => {
+          const nextGroupHeaders = { ...prev.groupHeaderByRemoteId };
+          clearThreadGroupHeaderLabel(nextGroupHeaders, groupLabel);
+          rememberThreadGroupHeader(nextGroupHeaders, created.thread, groupLabel, threadId);
+          return { groupHeaderByRemoteId: nextGroupHeaders };
         });
         return {
           remoteId: created.thread.id,
@@ -4813,12 +4992,73 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     setProductFeedbackSubmitted(false);
   }, []);
 
+  const clearProductFeedbackImages = useCallback(() => {
+    setProductFeedbackPreviewImage(null);
+    setProductFeedbackImages((prev) => {
+      for (const item of prev) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+      return [];
+    });
+    if (productFeedbackImageInputRef.current) {
+      productFeedbackImageInputRef.current.value = "";
+    }
+  }, []);
+
+  const removeProductFeedbackImage = useCallback((imageId: string) => {
+    setProductFeedbackImages((prev) => {
+      const target = prev.find((item) => item.id === imageId);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+        setProductFeedbackPreviewImage((current) => (current?.id === imageId ? null : current));
+      }
+      return prev.filter((item) => item.id !== imageId);
+    });
+  }, []);
+
+  const handleProductFeedbackImageChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length === 0) return;
+    let nextError = "";
+    setProductFeedbackImages((prev) => {
+      const next = [...prev];
+      for (const file of selectedFiles) {
+        if (next.length >= PRODUCT_FEEDBACK_MAX_IMAGES) {
+          nextError = `You can upload up to ${PRODUCT_FEEDBACK_MAX_IMAGES} screenshots.`;
+          break;
+        }
+        if (!PRODUCT_FEEDBACK_IMAGE_TYPES.has(file.type)) {
+          nextError = "Only PNG, JPG, WebP, or GIF screenshots are supported.";
+          continue;
+        }
+        if (file.size > PRODUCT_FEEDBACK_MAX_IMAGE_BYTES) {
+          nextError = `Each screenshot must be ${formatFileSize(PRODUCT_FEEDBACK_MAX_IMAGE_BYTES)} or less.`;
+          continue;
+        }
+        const id =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${file.name}-${next.length}`;
+        next.push({
+          id,
+          file,
+          previewUrl: URL.createObjectURL(file)
+        });
+      }
+      return next;
+    });
+    setProductFeedbackSubmitted(false);
+    setProductFeedbackError(nextError);
+    event.target.value = "";
+  }, []);
+
   const closeProductFeedbackModal = useCallback(() => {
     if (productFeedbackSubmitting) return;
     setProductFeedbackOpen(false);
     setProductFeedbackError("");
     setProductFeedbackSubmitted(false);
-  }, [productFeedbackSubmitting]);
+    clearProductFeedbackImages();
+  }, [clearProductFeedbackImages, productFeedbackSubmitting]);
 
   const submitProductFeedback = useCallback(async () => {
     const description = productFeedbackDescription.trim();
@@ -4826,18 +5066,40 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     setProductFeedbackSubmitting(true);
     setProductFeedbackError("");
     try {
-      await api<{ feedback: { id: string; status: string; created_at: string } }>("/api/portal/feedback", {
+      const formData = new FormData();
+      formData.set("type", productFeedbackType);
+      if (productFeedbackType === "bug") {
+        formData.set("severity", productFeedbackSeverity);
+      }
+      formData.set("description", description);
+      if (activeRemoteThreadId) {
+        formData.set("thread_id", activeRemoteThreadId);
+      }
+      if (productFeedbackIncludeContext) {
+        formData.set("context", JSON.stringify(buildProductFeedbackContext()));
+      }
+      for (const image of productFeedbackImages) {
+        formData.append("images", image.file, image.file.name);
+      }
+
+      const response = await fetch(`${apiBase()}/api/portal/feedback`, {
         method: "POST",
-        json: {
-          type: productFeedbackType,
-          ...(productFeedbackType === "bug" ? { severity: productFeedbackSeverity } : {}),
-          description,
-          ...(activeRemoteThreadId ? { thread_id: activeRemoteThreadId } : {}),
-          ...(productFeedbackIncludeContext ? { context: buildProductFeedbackContext() } : {})
-        }
+        credentials: "include",
+        headers: authHeaders(),
+        body: formData
       });
+      const responseText = await response.text();
+      const responseBody = responseText ? JSON.parse(responseText) : {};
+      if (!response.ok) {
+        notifyAuthInvalidStatus(response.status);
+        throw new Error(
+          (responseBody && typeof responseBody.detail === "string" && responseBody.detail) ||
+            `Failed to submit feedback (${response.status})`
+        );
+      }
       setProductFeedbackSubmitted(true);
       setProductFeedbackDescription("");
+      clearProductFeedbackImages();
       window.setTimeout(() => {
         setProductFeedbackOpen(false);
         setProductFeedbackSubmitted(false);
@@ -4851,10 +5113,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     activeRemoteThreadId,
     buildProductFeedbackContext,
     productFeedbackDescription,
+    productFeedbackImages,
     productFeedbackIncludeContext,
     productFeedbackSeverity,
     productFeedbackSubmitting,
-    productFeedbackType
+    productFeedbackType,
+    clearProductFeedbackImages
   ]);
 
   const requestPreviewForPath = useCallback((filePath: string) => {
@@ -4973,7 +5237,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
         setErrorText("");
         setStatusText("Generating...");
-        updateRunningStage("Getting ready to answer");
+        updateRunningStage(RUNNING_STAGE_CONNECTING_TEXT);
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -5339,9 +5603,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           });
         };
 
-        setActiveRunThreadIds((prev) =>
-          updateRunningThreadMap(updateRunningThreadMap(prev, threadId, true), localThreadId, true)
-        );
+        const runningThreadKeys = normalizeThreadIdentityKeys(threadId, localThreadId);
+        runningThreadKeys.forEach((key) => completedRunThreadIdsRef.current.delete(key));
+        setActiveRunThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, true));
+        setRuntimeRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
+        setCompletedNoticeThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
         try {
           for await (const { event, data } of iterateSSE(`${apiBase()}/api/chat/stream`, {
             method: "POST",
@@ -5431,7 +5697,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage("Starting the work");
+              updateRunningStage(RUNNING_STAGE_WORKING_TEXT);
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
@@ -5769,11 +6035,19 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             };
           }
         } finally {
-          setActiveRunThreadIds((prev) =>
-            updateRunningThreadMap(updateRunningThreadMap(prev, threadId, false), localThreadId, false)
+          runningThreadKeys.forEach((key) => completedRunThreadIdsRef.current.add(key));
+          const activeThreadKeys = normalizeThreadIdentityKeys(
+            activeThreadIdentityRef.current.remoteId,
+            activeThreadIdentityRef.current.localId
+          );
+          const completedInActiveThread = runningThreadKeys.some((key) => activeThreadKeys.includes(key));
+          setActiveRunThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
+          setRuntimeRunningThreadIds((prev) => updateRunningThreadMapForKeys(prev, runningThreadKeys, false));
+          setCompletedNoticeThreadIds((prev) =>
+            updateRunningThreadMapForKeys(prev, runningThreadKeys, !completedInActiveThread)
           );
           setStatusText("Ready");
-          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT);
+          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false });
         }
       }
     }),
@@ -5791,7 +6065,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     const threadsCore = (runtime as { _core?: { threads?: unknown } } | undefined)?._core?.threads as
       | {
           _hookManager?: { subscribe(callback: () => void): () => void };
-          threadItems?: Record<string, { remoteId?: string }>;
+          threadItems?: Record<string, { remoteId?: string; externalId?: string }>;
           getThreadRuntimeCore(threadIdOrRemoteId: string): unknown;
         }
       | undefined;
@@ -5803,12 +6077,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
     const syncRunningThreadIds = () => {
       const next: RunningThreadIdsContextValue = {};
-      for (const item of Object.values(threadsCore.threadItems || {})) {
+      for (const [localId, item] of Object.entries(threadsCore.threadItems || {})) {
         const remoteId = typeof item?.remoteId === "string" ? item.remoteId.trim() : "";
-        if (!remoteId || next[remoteId]) continue;
+        const externalId = typeof item?.externalId === "string" ? item.externalId.trim() : "";
+        const runtimeLookupId = remoteId || externalId || localId;
+        const identityKeys = normalizeThreadIdentityKeys(remoteId, externalId, localId);
+        if (!runtimeLookupId || identityKeys.some((key) => next[key] || completedRunThreadIdsRef.current.has(key))) continue;
         try {
-          if (isThreadRuntimeRunning(threadsCore.getThreadRuntimeCore(remoteId))) {
-            next[remoteId] = true;
+          if (isThreadRuntimeRunning(threadsCore.getThreadRuntimeCore(runtimeLookupId))) {
+            for (const key of identityKeys) {
+              next[key] = true;
+            }
           }
         } catch {
           // Ignore threads whose runtime is not mounted yet.
@@ -6031,9 +6310,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                           <SessionSearchContext.Provider value={sessionSearchValue}>
                             <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
                               <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-                                  <StableThreadListItems />
-                                </ActiveThreadIdContext.Provider>
+                                <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
+                                  <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+                                    <StableThreadListItems />
+                                  </ActiveThreadIdContext.Provider>
+                                </ThreadCompletionNoticeContext.Provider>
                               </RunningThreadIdsContext.Provider>
                             </SessionGroupLabelContext.Provider>
                           </SessionSearchContext.Provider>
@@ -6116,9 +6397,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                           <SessionSearchContext.Provider value={sessionSearchValue}>
                             <SessionGroupLabelContext.Provider value={sessionGroupLabelContext}>
                               <RunningThreadIdsContext.Provider value={runningThreadIds}>
-                                <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
-                                  <StableThreadListItems />
-                                </ActiveThreadIdContext.Provider>
+                                <ThreadCompletionNoticeContext.Provider value={threadCompletionNoticeContext}>
+                                  <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+                                    <StableThreadListItems />
+                                  </ActiveThreadIdContext.Provider>
+                                </ThreadCompletionNoticeContext.Provider>
                               </RunningThreadIdsContext.Provider>
                             </SessionGroupLabelContext.Provider>
                           </SessionSearchContext.Provider>
@@ -6225,6 +6508,62 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   disabled={productFeedbackSubmitting}
                 />
               </label>
+              <div className="product-feedback-field">
+                <span className="field-label">Screenshots</span>
+                <div className="product-feedback-upload-row">
+                  <button
+                    type="button"
+                    className="product-feedback-upload-button"
+                    onClick={() => productFeedbackImageInputRef.current?.click()}
+                    disabled={productFeedbackSubmitting || productFeedbackImages.length >= PRODUCT_FEEDBACK_MAX_IMAGES}
+                  >
+                    <ImageIcon size={16} />
+                    <span>Add image</span>
+                  </button>
+                  <span className="product-feedback-upload-hint">
+                    Up to {PRODUCT_FEEDBACK_MAX_IMAGES} images, {formatFileSize(PRODUCT_FEEDBACK_MAX_IMAGE_BYTES)} each.
+                  </span>
+                </div>
+                <input
+                  ref={productFeedbackImageInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  className="product-feedback-file-input"
+                  onChange={handleProductFeedbackImageChange}
+                  disabled={productFeedbackSubmitting}
+                />
+                {productFeedbackImages.length > 0 ? (
+                  <div className="product-feedback-image-list">
+                    {productFeedbackImages.map((image) => (
+                      <div key={image.id} className="product-feedback-image-item">
+                        <button
+                          type="button"
+                          className="product-feedback-image-preview-button"
+                          onClick={() => setProductFeedbackPreviewImage(image)}
+                          aria-label={`Preview ${image.file.name || "feedback screenshot"}`}
+                        >
+                          <img src={image.previewUrl} alt={image.file.name || "Feedback screenshot"} />
+                        </button>
+                        <div className="product-feedback-image-meta">
+                          <span>{image.file.name || "Screenshot"}</span>
+                          <small>{formatFileSize(image.file.size)}</small>
+                        </div>
+                        <button
+                          type="button"
+                          className="product-feedback-image-remove"
+                          title="Remove screenshot"
+                          aria-label="Remove screenshot"
+                          onClick={() => removeProductFeedbackImage(image.id)}
+                          disabled={productFeedbackSubmitting}
+                        >
+                          <XIcon size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <label className="product-feedback-context-toggle">
                 <input
                   type="checkbox"
@@ -6236,6 +6575,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               </label>
               {productFeedbackError ? <p className="product-feedback-error">{productFeedbackError}</p> : null}
               {productFeedbackSubmitted ? <p className="product-feedback-success">Feedback submitted.</p> : null}
+            </Modal>
+            <Modal
+              open={Boolean(productFeedbackPreviewImage)}
+              title={productFeedbackPreviewImage?.file.name || "Screenshot preview"}
+              className="product-feedback-preview-modal"
+              footer={null}
+              centered
+              width={900}
+              onCancel={() => setProductFeedbackPreviewImage(null)}
+              destroyOnHidden
+            >
+              {productFeedbackPreviewImage ? (
+                <img
+                  className="product-feedback-preview-image"
+                  src={productFeedbackPreviewImage.previewUrl}
+                  alt={productFeedbackPreviewImage.file.name || "Feedback screenshot preview"}
+                />
+              ) : null}
             </Modal>
 
             {!isExternalPortalUser ? (

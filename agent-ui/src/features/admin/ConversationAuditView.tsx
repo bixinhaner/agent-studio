@@ -138,9 +138,53 @@ function feedbackColor(type: AdminConversationFeedback["type"]): string {
 
 function productFeedbackTypeLabel(type: AdminProductFeedbackType): string {
   if (type === "feature_request") return "功能建议";
-  if (type === "usability_issue") return "体验问题";
+  if (type === "usability_issue") return "改进意见";
   if (type === "other") return "其他";
   return "Bug";
+}
+
+type ProductFeedbackImageAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+};
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
+
+function productFeedbackImagesFromContext(context: unknown): ProductFeedbackImageAttachment[] {
+  const root = recordFromUnknown(context);
+  const attachments = recordFromUnknown(root?.attachments);
+  const images = Array.isArray(attachments?.images) ? attachments.images : [];
+  return images
+    .map((item, index) => {
+      const obj = recordFromUnknown(item);
+      const dataUrl = typeof obj?.dataUrl === "string" ? obj.dataUrl : "";
+      if (!dataUrl.startsWith("data:image/")) return null;
+      return {
+        id: typeof obj?.id === "string" && obj.id ? obj.id : `image-${index}`,
+        name: typeof obj?.name === "string" && obj.name ? obj.name : `screenshot-${index + 1}`,
+        mimeType: typeof obj?.mimeType === "string" ? obj.mimeType : "image",
+        size: typeof obj?.size === "number" ? obj.size : 0,
+        dataUrl
+      };
+    })
+    .filter((item): item is ProductFeedbackImageAttachment => Boolean(item));
 }
 
 function productFeedbackStatusLabel(status: AdminProductFeedbackStatus): string {
@@ -166,10 +210,22 @@ function productFeedbackStatusColor(status: AdminProductFeedbackStatus): string 
   return "error";
 }
 
+function redactInlineDataUrls(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.startsWith("data:image/") ? `[image data omitted, ${formatBytes(value.length)}]` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(redactInlineDataUrls);
+  }
+  const record = recordFromUnknown(value);
+  if (!record) return value;
+  return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, redactInlineDataUrls(item)]));
+}
+
 function formatJsonBlock(value: unknown): string {
   if (value === undefined || value === null) return "无上下文";
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(redactInlineDataUrls(value), null, 2);
   } catch {
     return String(value);
   }
@@ -1039,9 +1095,9 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
 
 const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: AdminProductFeedbackTypeFilter; label: string }> = [
   { value: "all", label: "全部类型" },
+  { value: "usability_issue", label: "改进意见" },
   { value: "bug", label: "Bug" },
   { value: "feature_request", label: "功能建议" },
-  { value: "usability_issue", label: "体验问题" },
   { value: "other", label: "其他" }
 ];
 
@@ -1228,6 +1284,12 @@ function ProductFeedbackDetail(props: {
   loading: boolean;
   onStatusChange(status: AdminProductFeedbackStatus): void;
 }) {
+  const [previewImage, setPreviewImage] = useState<ProductFeedbackImageAttachment | null>(null);
+
+  useEffect(() => {
+    setPreviewImage(null);
+  }, [props.detail?.feedback.id]);
+
   if (props.loading && !props.detail) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><Spin size="large" /></div>;
   }
@@ -1240,8 +1302,10 @@ function ProductFeedbackDetail(props: {
   }
 
   const { feedback } = props.detail;
+  const imageAttachments = productFeedbackImagesFromContext(feedback.context);
 
   return (
+    <>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--admin-color-border)', background: 'var(--admin-color-surface)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
@@ -1295,6 +1359,37 @@ function ProductFeedbackDetail(props: {
           </div>
         </div>
 
+        {imageAttachments.length > 0 ? (
+          <div style={{ marginBottom: 24 }}>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>图片附件</Typography.Title>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              {imageAttachments.map((image) => (
+                <button
+                  type="button"
+                  key={image.id}
+                  onClick={() => setPreviewImage(image)}
+                  style={{ display: 'block', overflow: 'hidden', padding: 0, borderRadius: 8, border: '1px solid var(--admin-color-border)', background: '#fff', color: 'inherit', textDecoration: 'none', textAlign: 'left', cursor: 'zoom-in' }}
+                  aria-label={`放大查看 ${image.name}`}
+                >
+                  <img
+                    src={image.dataUrl}
+                    alt={image.name}
+                    style={{ display: 'block', width: '100%', aspectRatio: '16 / 10', objectFit: 'cover', background: '#f1f5f9' }}
+                  />
+                  <div style={{ display: 'grid', gap: 2, padding: '8px 10px' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 600 }}>
+                      {image.name}
+                    </span>
+                    <span style={{ color: 'var(--admin-color-subtle)', fontSize: 11 }}>
+                      {image.mimeType} · {formatBytes(image.size)}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div style={{ marginBottom: 24 }}>
           <Typography.Title level={5} style={{ fontSize: 14 }}>提交信息</Typography.Title>
           <div style={{ background: '#fff', padding: 16, borderRadius: 8, border: '1px solid var(--admin-color-border)', display: 'grid', gap: 8, fontSize: 13 }}>
@@ -1313,6 +1408,24 @@ function ProductFeedbackDetail(props: {
         </div>
       </div>
     </div>
+    <Modal
+      open={Boolean(previewImage)}
+      title={previewImage?.name || "图片预览"}
+      footer={null}
+      centered
+      width={960}
+      onCancel={() => setPreviewImage(null)}
+      destroyOnHidden
+    >
+      {previewImage ? (
+        <img
+          src={previewImage.dataUrl}
+          alt={previewImage.name}
+          style={{ display: 'block', width: '100%', maxHeight: '72vh', objectFit: 'contain', borderRadius: 8, background: '#f8fafc' }}
+        />
+      ) : null}
+    </Modal>
+    </>
   );
 }
 

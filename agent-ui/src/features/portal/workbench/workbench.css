@@ -441,6 +441,11 @@ button.session-rail-new-btn:active,
   border-width: 1.5px;
 }
 
+.portal-workbench-root .session-rail-list > .agent-thread-list-item .thread-complete-indicator {
+  width: 7px;
+  height: 7px;
+}
+
 .portal-workbench-root .session-rail-list > .agent-thread-list-item .agent-thread-item-actions {
   padding-right: 0;
 }
