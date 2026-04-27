@@ -570,7 +570,7 @@ function extractTraceBatchProcessRows(
         id: trimOrUndefined(row.id) ?? `process-row-${index + 1}`,
         kind: normalizeProcessKind(row.kind),
         title: sanitizeProcessTitle(row.title),
-        detail: sanitizeProcessDetail(row.detail),
+        detail: sanitizeProcessDetail(row.rawDetail ?? row.detail),
         at: sanitizeProcessAt(row.at)
       };
     })
@@ -613,14 +613,17 @@ function extractFallbackProcessRows(
       continue;
     }
 
-    if (type === "data" && trimOrUndefined(part.name) === "codex_process") {
+    if (
+      type === "data" &&
+      (trimOrUndefined(part.name) === "codex_process" || trimOrUndefined(part.name) === "codex_process_audit")
+    ) {
       const data = asRecord(part.data);
       if (!data) continue;
       rows.push({
         id: trimOrUndefined(part.id) ?? `process-row-${index + 1}`,
         kind: normalizeProcessKind(data.kind),
         title: sanitizeProcessTitle(data.title),
-        detail: sanitizeProcessDetail(data.detail),
+        detail: sanitizeProcessDetail(data.rawDetail ?? data.detail),
         at: sanitizeProcessAt(data.at)
       });
     }
@@ -816,14 +819,15 @@ function uniqueNonEmptyLines(lines: Array<string | null | undefined>): string[] 
 }
 
 function collectCodexProcessFallback(part: Record<string, unknown>): string[] {
-  if (trimOrUndefined(part.name) !== "codex_process") return [];
+  const name = trimOrUndefined(part.name);
+  if (name !== "codex_process" && name !== "codex_process_audit") return [];
   const payload = asRecord(part.data);
   if (!payload) return [];
   const kind = trimOrUndefined(payload.kind) ?? "";
   if (kind !== "error") return [];
   return uniqueNonEmptyLines([
     trimOrUndefined(payload.title),
-    trimOrUndefined(payload.detail)
+    trimOrUndefined(payload.rawDetail) ?? trimOrUndefined(payload.detail)
   ]);
 }
 
@@ -839,7 +843,7 @@ function collectCodexTraceBatchFallback(part: Record<string, unknown>): string[]
   return errorRows.flatMap((row) =>
     uniqueNonEmptyLines([
       trimOrUndefined(row.title),
-      trimOrUndefined(row.detail)
+      trimOrUndefined(row.rawDetail) ?? trimOrUndefined(row.detail)
     ])
   );
 }

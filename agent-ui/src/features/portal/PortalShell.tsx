@@ -232,6 +232,7 @@ type ProcessData = {
   at: string;
   title: string;
   detail?: string;
+  rawDetail?: string;
   event?: string;
   item_type?: string;
   status?: string;
@@ -262,6 +263,7 @@ type TimelineRow = {
   kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
   title: string;
   detail?: string;
+  rawDetail?: string;
   at?: string;
 };
 
@@ -914,9 +916,16 @@ function detailFromUnknown(value: unknown): string {
   }
 }
 
+const GENERIC_ASSISTANT_ERROR_NOTICE =
+  "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
+const GENERIC_PROCESS_ERROR_DETAIL =
+  "The request could not be completed. Please try again. If the issue continues, contact your workspace admin.";
+const GENERIC_TOOL_ERROR_DETAIL = "A background tool step failed. Please try again or contact your workspace admin.";
+const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step failed. Please try again or contact your workspace admin.";
+
 function formatAssistantErrorNotice(detail: string): string {
   const normalized = detail.replace(/\s+/g, " ").trim();
-  if (!normalized) return "I couldn't complete this response. Please try again.";
+  if (!normalized) return GENERIC_ASSISTANT_ERROR_NOTICE;
 
   if (/ai request limit reached|conversation limit reached/i.test(normalized)) {
     return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
@@ -934,7 +943,11 @@ function formatAssistantErrorNotice(detail: string): string {
     return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
   }
 
-  return `I couldn't complete this response. ${normalized}`;
+  return GENERIC_ASSISTANT_ERROR_NOTICE;
+}
+
+function userSafeProcessDetail(detail: string, fallback = GENERIC_PROCESS_ERROR_DETAIL): string {
+  return detail.trim() ? fallback : "";
 }
 
 function parseDirectories(raw: string): string[] | undefined {
@@ -2526,6 +2539,8 @@ const ProcessDataFallback: FC<any> = ({
 }) => {
   const requestPreview = useContext(PreviewRequestContext);
 
+  if (name === "codex_process_audit") return null;
+
   if (name === "codex_commentary") {
     const row = (data && typeof data === "object" ? data : {}) as CommentaryPartData;
     const entries: CommentaryEntryData[] = Array.isArray(row.entries)
@@ -2585,12 +2600,14 @@ const ProcessDataFallback: FC<any> = ({
           : "process";
         const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "Process event";
         const detail = typeof obj.detail === "string" ? obj.detail.trim() : "";
+        const rawDetail = typeof obj.rawDetail === "string" ? obj.rawDetail.trim() : "";
         const at = typeof obj.at === "string" ? normalizeProcessTime(obj.at) : "";
         return {
           id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : `trace-batch-${index + 1}`,
           kind,
           title,
           detail: detail || undefined,
+          rawDetail: rawDetail || undefined,
           at: at || undefined
         } satisfies TimelineRow;
       })
@@ -2704,6 +2721,15 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
     }
 
     if (type === "tool-call") {
+      if (p.isError === true) {
+        rows.push({
+          id: `timeline-${++seq}`,
+          kind: "tool",
+          title: "Tool call · Failed",
+          detail: GENERIC_TOOL_ERROR_DETAIL
+        });
+        continue;
+      }
       const toolName = typeof p.toolName === "string" ? p.toolName : "unknown";
       const argsText = typeof p.argsText === "string" ? p.argsText : detailFromUnknown(p.args);
       const resultText = p.result === undefined ? "" : detailFromUnknown(p.result);
@@ -2735,18 +2761,24 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       const kind = ["meta", "process", "done", "error", "debug"].includes(kindRaw) ? (kindRaw as TimelineRow["kind"]) : "process";
       const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Process event";
       const detail = typeof data.detail === "string" ? data.detail.trim() : "";
+      const rawDetail = typeof data.rawDetail === "string" ? data.rawDetail.trim() : "";
       const at = typeof data.at === "string" ? normalizeProcessTime(data.at) : "";
       rows.push({
         id: `timeline-${++seq}`,
         kind,
         title,
         detail: detail ? shorten(detail, 1400) : undefined,
+        rawDetail: rawDetail ? shorten(rawDetail, 1400) : undefined,
         at
       });
       continue;
     }
 
     if (type === "data" && p.name === "codex_file_change") {
+      continue;
+    }
+
+    if (type === "data" && p.name === "codex_process_audit") {
       continue;
     }
 
@@ -5549,6 +5581,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return changed;
         };
 
+        const appendAuditDataParts = (parts: any[]): boolean => {
+          if (parts.length === 0) return false;
+          let changed = false;
+          for (const part of parts) {
+            const partObj = asRecord(part);
+            if (!partObj || partObj.type !== "data") continue;
+            const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
+            if (name !== "codex_process_audit") continue;
+            orderedParts.push({
+              type: "data",
+              name,
+              data: partObj.data
+            });
+            changed = true;
+          }
+          return changed;
+        };
+
         const collapseLatestTraceBatch = (): boolean => {
           for (let i = orderedParts.length - 1; i >= 0; i -= 1) {
             const item = orderedParts[i] as Record<string, unknown>;
@@ -5630,7 +5680,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
               const assistantErrorNotice = formatAssistantErrorNotice(detail);
-              setErrorText(detail);
+              const processDetail = userSafeProcessDetail(detail);
+              setErrorText(assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage("Execution failed");
               if (assistantErrorNotice) {
@@ -5644,19 +5695,33 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     kind: "error",
                     at: new Date().toISOString(),
                     title: "Execution failed",
-                    detail: shorten(detail, 1400)
+                    detail: processDetail,
+                    rawDetail: shorten(detail, 1400)
+                  } satisfies ProcessData
+                });
+              } else {
+                updates.push({
+                  type: "data",
+                  name: "codex_process_audit",
+                  data: {
+                    kind: "error",
+                    at: new Date().toISOString(),
+                    title: "Execution failed",
+                    detail: processDetail,
+                    rawDetail: shorten(detail, 1400)
                   } satisfies ProcessData
                 });
               }
+              const auditChanged = appendAuditDataParts(updates);
               const dataPartChanged = appendDisplayDataParts(updates);
               const traceChanged = appendTraceBatch(updates);
-              if (dataPartChanged || traceChanged || textChanged) {
+              if (auditChanged || dataPartChanged || traceChanged || textChanged) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };
                 }
               }
-              throw new Error(detail);
+              throw new Error(assistantErrorNotice);
             }
 
             if (event === "done") {
@@ -5835,6 +5900,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const errMsg = typeof error?.message === "string" ? error.message : "";
               const result = item?.result;
               const toolName = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
+              const rawDetail = [
+                server ? `server: ${server}` : "",
+                tool ? `tool: ${tool}` : "",
+                errMsg ? `error: ${shorten(errMsg, 400)}` : ""
+              ]
+                .filter(Boolean)
+                .join("\n");
 
               updates.push({
                 type: "tool-call",
@@ -5852,13 +5924,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   kind: errMsg ? "error" : "process",
                   at: new Date().toISOString(),
                   title: `Tool call ${errMsg ? "Failed" : "Completed"}`,
-                  detail: [
-                    server ? `server: ${server}` : "",
-                    tool ? `tool: ${tool}` : "",
-                    errMsg ? `error: ${shorten(errMsg, 400)}` : ""
-                  ]
-                    .filter(Boolean)
-                    .join("\n"),
+                  detail: errMsg ? GENERIC_TOOL_ERROR_DETAIL : rawDetail,
+                  rawDetail: errMsg ? rawDetail : undefined,
                   event: eventType,
                   item_type: itemType
                 } satisfies ProcessData
@@ -5984,7 +6051,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   kind: "error",
                   at: new Date().toISOString(),
                   title: "Execution error",
-                  detail: shorten(message, 1200),
+                  detail: userSafeProcessDetail(message, GENERIC_EXECUTION_ERROR_DETAIL),
+                  rawDetail: shorten(message, 1200),
                   event: eventType,
                   item_type: itemType
                 } satisfies ProcessData

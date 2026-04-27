@@ -15,6 +15,52 @@ describe("extractMessageText", () => {
     expect(extractMessageText(message)).toBe("Primary answer\n\nExecution failed\n\nShould not override answer");
   });
 
+  it("uses raw process error details for admin transcript text when user-facing text is sanitized", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin." },
+        {
+          type: "data",
+          name: "codex_process",
+          data: {
+            kind: "error",
+            title: "Execution failed",
+            detail: "The request could not be completed. Please try again.",
+            rawDetail: "Codex provider failed: Azure OpenAI deployment gpt-5-prod was not found"
+          }
+        }
+      ]
+    };
+
+    expect(extractMessageText(message)).toBe(
+      "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.\n\nExecution failed\n\nCodex provider failed: Azure OpenAI deployment gpt-5-prod was not found"
+    );
+  });
+
+  it("uses hidden audit process details when process trace is disabled", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin." },
+        {
+          type: "data",
+          name: "codex_process_audit",
+          data: {
+            kind: "error",
+            title: "Execution failed",
+            detail: "The request could not be completed. Please try again.",
+            rawDetail: "Codex SDK authentication failed: invalid API key"
+          }
+        }
+      ]
+    };
+
+    expect(extractMessageText(message)).toBe(
+      "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.\n\nExecution failed\n\nCodex SDK authentication failed: invalid API key"
+    );
+  });
+
   it("falls back to codex process error details when assistant text is empty", () => {
     const message = {
       role: "assistant",
@@ -54,6 +100,30 @@ describe("extractMessageText", () => {
     };
 
     expect(extractMessageText(message)).toBe("Execution error\n\nCommand exited with code 1");
+  });
+
+  it("uses raw trace batch error details for admin transcript text", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "data",
+          name: "codex_trace_batch",
+          data: {
+            rows: [
+              {
+                kind: "error",
+                title: "Execution error",
+                detail: "A background execution step failed.",
+                rawDetail: "Codex SDK fatal error: model provider rejected the request"
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    expect(extractMessageText(message)).toBe("Execution error\n\nCodex SDK fatal error: model provider rejected the request");
   });
 
   it("does not surface non-error process events as transcript text", () => {
@@ -243,6 +313,69 @@ describe("extractMessageProcessRows", () => {
         title: "Tool call · rg",
         detail: "rg -n attachment",
         at: "2026-04-22T09:00:02.000Z"
+      }
+    ]);
+  });
+
+  it("prefers raw process row details for admin when present", () => {
+    const rows = extractMessageProcessRows({
+      role: "assistant",
+      content: [
+        {
+          type: "data",
+          name: "codex_trace_batch",
+          data: {
+            rows: [
+              {
+                id: "row-1",
+                kind: "error",
+                title: "Execution error",
+                detail: "A background execution step failed.",
+                rawDetail: "Codex provider failed: invalid API key",
+                at: "2026-04-22T09:00:00.000Z"
+              }
+            ]
+          }
+        }
+      ]
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "row-1",
+        kind: "error",
+        title: "Execution error",
+        detail: "Codex provider failed: invalid API key",
+        at: "2026-04-22T09:00:00.000Z"
+      }
+    ]);
+  });
+
+  it("extracts hidden audit process rows when process trace is disabled", () => {
+    const rows = extractMessageProcessRows({
+      role: "assistant",
+      content: [
+        {
+          type: "data",
+          name: "codex_process_audit",
+          data: {
+            kind: "error",
+            title: "Execution failed",
+            detail: "The request could not be completed. Please try again.",
+            rawDetail: "Codex SDK authentication failed: invalid API key",
+            at: "2026-04-22T09:00:00.000Z"
+          }
+        }
+      ]
+    });
+
+    expect(rows).toEqual([
+      {
+        id: "process-row-1",
+        kind: "error",
+        title: "Execution failed",
+        detail: "Codex SDK authentication failed: invalid API key",
+        at: "2026-04-22T09:00:00.000Z"
       }
     ]);
   });
