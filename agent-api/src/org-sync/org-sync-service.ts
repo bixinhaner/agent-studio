@@ -41,6 +41,9 @@ type OrgSyncDb = {
       where?: { userId?: string; departmentId?: { in: string[] } };
     }): Promise<Array<Record<string, unknown>>>;
   };
+  authIdentity?: {
+    findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
+  };
   syncJob: {
     findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
   };
@@ -110,6 +113,12 @@ type MembershipRow = {
   updatedAt: Date | string;
 };
 
+type AuthIdentityRow = {
+  userId: string;
+  provider: string;
+  providerSubject: string;
+};
+
 type DepartmentDiff = {
   entityType: "department";
   entityExternalId: string;
@@ -172,6 +181,23 @@ function getDb(repository: { [key: string]: unknown }): OrgSyncDb {
 
 function getSnapshotUserKey(user: UserSnapshot): string {
   return trimOrUndefined(user.unionId) ?? user.userId;
+}
+
+function addUserRowKey(target: Map<string, UserRow>, row: UserRow, key: string | null | undefined): boolean {
+  const normalized = trimOrUndefined(key);
+  if (!normalized || target.has(normalized)) {
+    return false;
+  }
+  target.set(normalized, row);
+  return true;
+}
+
+function indexUserRowByStableKeys(target: Map<string, UserRow>, row: UserRow): void {
+  const addedExternalId = addUserRowKey(target, row, row.externalId);
+  const addedDingTalkUserId = addUserRowKey(target, row, row.dingtalkUserId);
+  if (!addedExternalId && !addedDingTalkUserId) {
+    addUserRowKey(target, row, row.id);
+  }
 }
 
 function normalizeDepartmentPayload(department: DepartmentSnapshot) {
@@ -652,9 +678,18 @@ export class OrgSyncService {
     const userRowsByKey = new Map<string, UserRow>();
     const userRowsById = new Map<string, UserRow>();
     for (const row of userRows) {
-      const key = trimOrUndefined(row.externalId) ?? trimOrUndefined(row.dingtalkUserId) ?? row.id;
-      userRowsByKey.set(key, row);
-       userRowsById.set(row.id, row);
+      indexUserRowByStableKeys(userRowsByKey, row);
+      userRowsById.set(row.id, row);
+    }
+
+    if (typeof db.authIdentity?.findMany === "function") {
+      const authIdentityRows = (await db.authIdentity.findMany({ where: { provider: "dingtalk" } })) as AuthIdentityRow[];
+      for (const identity of authIdentityRows) {
+        if (identity.provider !== "dingtalk") continue;
+        const row = userRowsById.get(identity.userId);
+        if (!row) continue;
+        addUserRowKey(userRowsByKey, row, identity.providerSubject);
+      }
     }
 
     const diffs: SyncDiff[] = [];
@@ -820,22 +855,12 @@ export class OrgSyncService {
           where: { id: existing.id },
           data: record
         })) as UserRow;
-        const savedKey = trimOrUndefined(saved.externalId) ?? trimOrUndefined(saved.dingtalkUserId) ?? saved.id;
-        persistedUserRowsByKey.set(savedKey, saved);
-        const dingtalkUserId = trimOrUndefined(saved.dingtalkUserId);
-        if (dingtalkUserId) {
-          persistedUserRowsByKey.set(dingtalkUserId, saved);
-        }
+        indexUserRowByStableKeys(persistedUserRowsByKey, saved);
       } else {
         const saved = (await db.user.create({
           data: record
         })) as UserRow;
-        const savedKey = trimOrUndefined(saved.externalId) ?? trimOrUndefined(saved.dingtalkUserId) ?? saved.id;
-        persistedUserRowsByKey.set(savedKey, saved);
-        const dingtalkUserId = trimOrUndefined(saved.dingtalkUserId);
-        if (dingtalkUserId) {
-          persistedUserRowsByKey.set(dingtalkUserId, saved);
-        }
+        indexUserRowByStableKeys(persistedUserRowsByKey, saved);
       }
     }
 
