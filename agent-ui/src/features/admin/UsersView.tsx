@@ -183,6 +183,21 @@ function resolveDepartmentLabel(
   return departmentDisplayMap.get(normalizedDepartmentId) || normalizedDepartmentId;
 }
 
+function formatDepartmentList(
+  departmentIds: string[],
+  resolveLabel: (departmentId: string | null | undefined) => string
+): string {
+  const labels = [
+    ...new Set(
+      departmentIds
+        .map((departmentId) => resolveLabel(departmentId))
+        .map((label) => label.trim())
+        .filter(Boolean)
+    )
+  ];
+  return labels.length ? labels.join(" / ") : "未设置";
+}
+
 export function UsersView() {
   const [activeTab, setActiveTab] = useState<"users" | "orgs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -446,7 +461,7 @@ export function UsersView() {
       )
     },
     {
-      title: "组织成员关系",
+      title: "组织 / 部门",
       dataIndex: "organizations",
       key: "organizations",
       width: 260,
@@ -454,7 +469,7 @@ export function UsersView() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ color: "var(--admin-color-text)", fontSize: 13 }}>{userOrganizationSummary(record)}</span>
           <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
-            主部门: {resolveDepartmentLabelFromMap(record.synced.primaryDepartmentId)}
+            部门: {formatDepartmentList(record.synced.departmentIds, resolveDepartmentLabelFromMap)}
           </span>
         </div>
       )
@@ -806,8 +821,8 @@ export function UsersView() {
                         <strong>{userPrimaryRole(user)}</strong>
                       </div>
                       <div>
-                        <div className="admin-entity-card-subtle">主部门</div>
-                        <strong>{resolveDepartmentLabelFromMap(user.synced.primaryDepartmentId)}</strong>
+                        <div className="admin-entity-card-subtle">全部部门</div>
+                        <strong>{formatDepartmentList(user.synced.departmentIds, resolveDepartmentLabelFromMap)}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">最后同步</div>

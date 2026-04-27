@@ -283,7 +283,7 @@ const integrationCenter = createIntegrationCenterService({
   zendesk,
   accessResolver: {
     getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
-    getDepartmentIdsForUser: async (userId) => departmentMemberships.listIdsForUser(userId)
+    getDepartmentIdsForUser: async (userId) => listDepartmentSubjectIdsForUser(userId)
   }
 });
 const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
@@ -347,6 +347,17 @@ const permissionService = new PermissionService({
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean))];
+}
+
+async function listDepartmentSubjectIdsForUser(userId: string): Promise<string[]> {
+  const departmentIds = await departmentMemberships.listIdsForUser(userId);
+  const departmentRows = await Promise.all(
+    departmentIds.map((departmentId) => departments.getById(departmentId).catch(() => null))
+  );
+  return uniqueStrings([
+    ...departmentIds,
+    ...departmentRows.map((department) => department?.externalId)
+  ]);
 }
 
 async function listActiveUserIds(): Promise<string[]> {
@@ -423,7 +434,7 @@ const collaborationReadService = new ThreadCollaborationService({
   collaboration: threadCollaboration,
   inboxProjection,
   directory: {
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
     ensureUsersExist
   },
@@ -436,7 +447,7 @@ const collaborationCommentService = new ThreadCollaborationService({
   collaboration: threadCollaboration,
   inboxProjection,
   directory: {
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
     ensureUsersExist
   },
@@ -449,7 +460,7 @@ const collaborationShareService = new ThreadCollaborationService({
   collaboration: threadCollaboration,
   inboxProjection,
   directory: {
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
     ensureUsersExist
   },
@@ -462,7 +473,7 @@ const collaborationAssignService = new ThreadCollaborationService({
   collaboration: threadCollaboration,
   inboxProjection,
   directory: {
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
     ensureUsersExist
   },
@@ -475,7 +486,7 @@ const collaborationCaptureService = new ThreadCollaborationService({
   collaboration: threadCollaboration,
   inboxProjection,
   directory: {
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
     ensureUsersExist
   },
@@ -501,7 +512,7 @@ const broadcastService = new BroadcastService({
 
 const requirePermission = createRequirePermission(permissionService, {
   resourceAccessLogs,
-  listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+  listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
   securityAlerts: alertEvaluation,
   countRecentDeniedPermissionsForUser: async (userId, permissionKey) => {
     const rows = await resourceAccessLogRepository.list({
@@ -1062,7 +1073,7 @@ async function listDepartmentIdsForActor(actor: CurrentActor): Promise<string[]>
   if (!isInternalOrganizationType(actor.organizationType)) {
     return [];
   }
-  return departmentMemberships.listIdsForUser(actor.id);
+  return listDepartmentSubjectIdsForUser(actor.id);
 }
 
 function roleIdsForActor(actor: CurrentActor): string[] {
@@ -1748,7 +1759,7 @@ registerCommonApiRoutes(app, {
   }),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId),
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     productFeedback,
     subscriptionEntitlements
   }),
@@ -1756,7 +1767,7 @@ registerCommonApiRoutes(app, {
     knowledgeSets,
     storage: knowledgeSetStorage,
     policies: policyService,
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId)
   }),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
@@ -1797,7 +1808,7 @@ app.use(
       setCaptureMark: (input) => collaborationCaptureService.setCaptureMark(input)
     },
     inbox: inboxItems,
-    listDepartmentIdsForUser: (userId) => departmentMemberships.listIdsForUser(userId)
+    listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId)
   })
 );
 

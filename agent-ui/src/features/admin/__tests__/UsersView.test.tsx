@@ -47,7 +47,7 @@ describe("UsersView", () => {
             displayName: "John Doe",
             email: "john@example.com",
             dingtalkUserId: "ding-001",
-            departmentIds: ["dept-001"],
+            departmentIds: ["dept-001", "dept-002"],
             primaryDepartmentId: "dept-001"
           },
           local: { role: "employee", manualDisabled: false, adminNote: null },
@@ -80,6 +80,20 @@ describe("UsersView", () => {
           updatedAt: new Date().toISOString(),
           memberCount: 3,
           children: []
+        },
+        {
+          id: "dept-node-2",
+          organizationId: "org_internal",
+          externalId: "dept-002",
+          name: "交付部",
+          parentDepartmentId: null,
+          sortOrder: 1,
+          status: "active",
+          lastSyncedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          memberCount: 2,
+          children: []
         }
       ]
     });
@@ -91,7 +105,7 @@ describe("UsersView", () => {
 
     const userRow = await screen.findByText("John Doe");
     expect(userRow).toBeTruthy();
-    expect(await screen.findByText(/主部门: 研发部/)).toBeTruthy();
+    expect(await screen.findByText(/部门: 研发部 .* 交付部/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("tab", { name: "客户组织与邀请" }));
     expect(await screen.findByRole("button", { name: "创建客户组织" })).toBeTruthy();
   });
