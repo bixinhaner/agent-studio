@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { extractMessageAttachments, extractMessageProcessRows, extractMessageText } from "./conversation-audit-router.js";
+import {
+  extractMessageAttachments,
+  extractMessageProcessRows,
+  extractMessageText,
+  resolveConversationAudience
+} from "./conversation-audit-router.js";
+
+describe("resolveConversationAudience", () => {
+  it("classifies internal and external conversation owners", () => {
+    expect(resolveConversationAudience({ userType: "internal_employee" })).toBe("internal");
+    expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
+    expect(resolveConversationAudience(null)).toBe("unknown");
+  });
+});
 
 describe("extractMessageText", () => {
   it("appends process error details when regular text content is already present", () => {

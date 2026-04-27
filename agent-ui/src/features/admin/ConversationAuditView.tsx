@@ -41,6 +41,7 @@ import type {
   AdminApiAuditResultFilter,
   AdminApiAuditSort,
   AdminConversationDetailResponse,
+  AdminConversationAudienceFilter,
   AdminConversationFeedback,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
@@ -83,6 +84,12 @@ const FEEDBACK_OPTIONS: Array<{ value: AdminConversationFeedbackFilter; label: s
   { value: "none", label: "无反馈" }
 ];
 
+const AUDIENCE_OPTIONS: Array<{ value: AdminConversationAudienceFilter; label: string }> = [
+  { value: "all", label: "全部来源" },
+  { value: "internal", label: "内部对话" },
+  { value: "external", label: "外部客户" }
+];
+
 const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
   { value: "updated_desc", label: "最近更新" },
   { value: "created_desc", label: "最近创建" }
@@ -122,6 +129,12 @@ function readConversationAuditHashState(): ConversationAuditHashState {
 
 function displayUserLabel(user: AdminConversationUser | null): string {
   return user?.displayName || user?.email || "未关联用户";
+}
+
+function conversationAudienceLabel(audience: AdminConversationSummary["audience"]): string {
+  if (audience === "external") return "外部客户";
+  if (audience === "internal") return "内部";
+  return "未关联";
 }
 
 function conversationStatusColor(status: string): string {
@@ -787,6 +800,7 @@ function ConversationDetail(props: {
 function ConversationWorkspace() {
   const [initialHashState] = useState(readConversationAuditHashState);
   const [query, setQuery] = useState(initialHashState.query);
+  const [audienceFilter, setAudienceFilter] = useState<AdminConversationAudienceFilter>("all");
   const [statusFilter, setStatusFilter] = useState<AdminConversationStatusFilter>("all");
   const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
   const [sort, setSort] = useState<AdminConversationSort>("updated_desc");
@@ -820,11 +834,19 @@ function ConversationWorkspace() {
   useEffect(() => {
     let active = true;
     setListLoading(true);
-    fetchAdminConversationAuditList({ query: deferredQuery || undefined, status: statusFilter, feedback: feedbackFilter, sort, page, pageSize: 20 })
+    fetchAdminConversationAuditList({
+      query: deferredQuery || undefined,
+      audience: audienceFilter,
+      status: statusFilter,
+      feedback: feedbackFilter,
+      sort,
+      page,
+      pageSize: 20
+    })
       .then(res => active && setListData(res))
       .finally(() => active && setListLoading(false));
     return () => { active = false; };
-  }, [deferredQuery, statusFilter, feedbackFilter, sort, page]);
+  }, [deferredQuery, audienceFilter, statusFilter, feedbackFilter, sort, page]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -848,7 +870,17 @@ function ConversationWorkspace() {
             onChange={e => setQuery(e.target.value)}
             style={{ marginBottom: 12 }}
           />
-          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space wrap size={[8, 8]} style={{ width: '100%' }}>
+            <Select
+              size="small"
+              value={audienceFilter}
+              options={AUDIENCE_OPTIONS}
+              onChange={(value) => {
+                setAudienceFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 112 }}
+            />
             <Select
               size="small"
               value={statusFilter}
@@ -889,8 +921,9 @@ function ConversationWorkspace() {
                <div className="admin-master-preview">
                  {conv.preview.latestText || conv.preview.firstUserText || "无预览"}
                </div>
-               <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+               <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                  <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
+                 <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationAudienceLabel(conv.audience)}</span>
                  <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
                  {conv.metrics.userAttachmentCount > 0 ? (
                    <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65, display: 'inline-flex', alignItems: 'center', gap: 4 }}>

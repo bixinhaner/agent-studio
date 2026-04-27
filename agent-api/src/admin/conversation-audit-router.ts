@@ -24,6 +24,7 @@ const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
 
 type ConversationAuditUserRow = {
   id: string;
+  userType: string | null;
   displayName: string | null;
   email: string | null;
   role: string | null;
@@ -77,6 +78,7 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
 type ConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
+type ConversationAudienceFilter = "all" | "internal" | "external";
 type ConversationSort = "updated_desc" | "created_desc";
 
 type ApiAuditResultFilter = "all" | "success" | "failed";
@@ -88,11 +90,14 @@ type ProductFeedbackSort = "created_desc" | "updated_desc";
 
 type ConversationAuditUser = {
   id: string;
+  userType: string;
   displayName: string | null;
   email: string | null;
   role: string;
   status: string;
 };
+
+type ConversationAudience = "internal" | "external" | "unknown";
 
 type ConversationTranscriptMessage = {
   id: string;
@@ -123,6 +128,7 @@ type ConversationTranscriptMessage = {
 type ConversationSummary = {
   id: string;
   externalId: string | null;
+  audience: ConversationAudience;
   title: string;
   status: ThreadRecord["status"];
   model: string;
@@ -701,6 +707,10 @@ function parseFeedbackFilter(value: unknown): ConversationFeedbackFilter {
     : "all";
 }
 
+function parseAudienceFilter(value: unknown): ConversationAudienceFilter {
+  return value === "internal" || value === "external" ? value : "all";
+}
+
 function parseSort(value: unknown): ConversationSort {
   return value === "created_desc" ? value : "updated_desc";
 }
@@ -744,11 +754,18 @@ function normalizeUser(row: ConversationAuditUserRow | null | undefined): Conver
   if (!row) return null;
   return {
     id: row.id,
+    userType: trimOrUndefined(row.userType) ?? "internal_employee",
     displayName: trimOrUndefined(row.displayName) ?? null,
     email: trimOrUndefined(row.email) ?? null,
     role: trimOrUndefined(row.role) ?? "employee",
     status: trimOrUndefined(row.status) ?? "active"
   };
+}
+
+export function resolveConversationAudience(user: { userType?: string | null } | null | undefined): ConversationAudience {
+  const userType = trimOrUndefined(user?.userType ?? undefined);
+  if (!userType) return "unknown";
+  return userType === "external_user" ? "external" : "internal";
 }
 
 function extractMessageRole(message: unknown): ConversationTranscriptMessage["role"] {
@@ -1086,6 +1103,7 @@ function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditU
   return {
     id: thread.id,
     externalId: trimOrUndefined(thread.externalId) ?? null,
+    audience: resolveConversationAudience(user),
     title: conversationTitle(thread, firstUserText),
     status: thread.status,
     model: thread.model,
@@ -1196,18 +1214,25 @@ function matchesFeedbackFilter(summary: ConversationSummary, filter: Conversatio
   return true;
 }
 
+function matchesAudienceFilter(summary: ConversationSummary, filter: ConversationAudienceFilter): boolean {
+  if (filter === "all") return true;
+  return summary.audience === filter;
+}
+
 function matchesQuery(summary: ConversationSummary, query: string | undefined): boolean {
   const normalized = trimOrUndefined(query)?.toLowerCase();
   if (!normalized) return true;
   const haystack = [
     summary.id,
     summary.externalId,
+    summary.audience,
     summary.title,
     summary.model,
     summary.reasoningEffort,
     summary.workspace,
     summary.user?.displayName,
     summary.user?.email,
+    summary.user?.userType,
     summary.user?.role,
     summary.preview.firstUserText,
     summary.preview.latestText,
@@ -1514,6 +1539,7 @@ export function createConversationAuditRouter(options: {
       const query = trimOrUndefined(req.query.query);
       const status = parseStatusFilter(req.query.status);
       const feedback = parseFeedbackFilter(req.query.feedback);
+      const audience = parseAudienceFilter(req.query.audience);
       const sort = parseSort(req.query.sort);
       const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
       const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
@@ -1521,6 +1547,7 @@ export function createConversationAuditRouter(options: {
       const filtered = (await listConversationSummaries())
         .filter((item) => matchesStatusFilter(item, status))
         .filter((item) => matchesFeedbackFilter(item, feedback))
+        .filter((item) => matchesAudienceFilter(item, audience))
         .filter((item) => matchesQuery(item, query))
         .sort((left, right) => compareConversationSummary(left, right, sort));
 
@@ -1535,6 +1562,7 @@ export function createConversationAuditRouter(options: {
           query: query ?? "",
           status,
           feedback,
+          audience,
           sort
         },
         summary: buildConversationAggregateSummary(filtered),

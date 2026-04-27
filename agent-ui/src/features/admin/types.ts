@@ -33,6 +33,7 @@ export type AdminOverview = {
 
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
+export type AdminConversationAudienceFilter = "all" | "internal" | "external";
 export type AdminConversationSort = "updated_desc" | "created_desc";
 export type AdminApiAuditResultFilter = "all" | "success" | "failed";
 export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
@@ -46,6 +47,7 @@ export type AdminProductFeedbackSort = "created_desc" | "updated_desc";
 
 export type AdminConversationUser = {
   id: string;
+  userType: string;
   displayName: string | null;
   email: string | null;
   role: string;
@@ -66,6 +68,7 @@ export type AdminConversationFeedback = {
 export type AdminConversationSummary = {
   id: string;
   externalId: string | null;
+  audience: "internal" | "external" | "unknown";
   title: string;
   status: string;
   model: string;
@@ -99,6 +102,7 @@ export type AdminConversationListInput = {
   query?: string;
   status?: AdminConversationStatusFilter;
   feedback?: AdminConversationFeedbackFilter;
+  audience?: AdminConversationAudienceFilter;
   sort?: AdminConversationSort;
   page?: number;
   pageSize?: number;
@@ -109,6 +113,7 @@ export type AdminConversationListResponse = {
     query: string;
     status: AdminConversationStatusFilter;
     feedback: AdminConversationFeedbackFilter;
+    audience: AdminConversationAudienceFilter;
     sort: AdminConversationSort;
   };
   summary: {

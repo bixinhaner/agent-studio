@@ -126,6 +126,7 @@ export async function fetchAdminConversationAuditList(
   if (input.query?.trim()) params.set("query", input.query.trim());
   if (input.status) params.set("status", input.status);
   if (input.feedback) params.set("feedback", input.feedback);
+  if (input.audience) params.set("audience", input.audience);
   if (input.sort) params.set("sort", input.sort);
   if (typeof input.page === "number") params.set("page", String(input.page));
   if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
