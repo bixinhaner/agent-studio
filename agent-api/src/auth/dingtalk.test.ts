@@ -25,6 +25,47 @@ describe("createDingTalkClient", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses root department 1 by default and parses listsub result arrays", async () => {
+    const requestedDepartmentIds: unknown[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({
+          accessToken: "app-token",
+          expireIn: 7200
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/topapi/v2/department/listsub")) {
+        requestedDepartmentIds.push(JSON.parse(String(init?.body ?? "{}")).dept_id);
+        return jsonResponse({
+          errcode: 0,
+          result: [
+            {
+              dept_id: 66894063,
+              name: "Office",
+              parent_id: 1,
+              order: 10
+            }
+          ]
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock);
+    const departments = await client.listDepartments({});
+
+    expect(requestedDepartmentIds).toEqual(["1"]);
+    expect(departments).toEqual([
+      {
+        externalId: "66894063",
+        name: "Office",
+        parentExternalId: "1",
+        sortOrder: 10
+      }
+    ]);
+  });
+
   it("refreshes the cached app access token after it expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T00:00:00.000Z"));

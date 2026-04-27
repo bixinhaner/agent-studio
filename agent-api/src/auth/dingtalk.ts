@@ -53,6 +53,7 @@ type AppAccessTokenCache = {
 
 const APP_ACCESS_TOKEN_REFRESH_WINDOW_MS = 60 * 1000;
 const APP_ACCESS_TOKEN_FALLBACK_TTL_MS = 60 * 60 * 1000;
+export const DINGTALK_ROOT_DEPARTMENT_ID = "1";
 
 class DingTalkRequestError extends Error {
   readonly code?: string;
@@ -267,7 +268,11 @@ function normalizeOrganizationUser(payload: unknown): DingTalkOrganizationUser |
 
 function getPayloadItems(payload: unknown, keys: string[]): unknown[] {
   const root = asRecord(payload);
-  const result = asRecord(root?.result) ?? root;
+  const rawResult = root?.result;
+  if (Array.isArray(rawResult)) {
+    return rawResult;
+  }
+  const result = asRecord(rawResult) ?? root;
   for (const key of keys) {
     const items = asArray(result?.[key]);
     if (items.length > 0) {
@@ -595,7 +600,7 @@ export function createDingTalkClient(
       await getAppAccessToken();
     },
     async listDepartments(input: { parentId?: string | null }): Promise<DingTalkDepartment[]> {
-      const parentId = normalizeString(input.parentId) ?? "0";
+      const parentId = normalizeString(input.parentId) ?? DINGTALK_ROOT_DEPARTMENT_ID;
       const payload = await requestOrgApi("/topapi/v2/department/listsub", { dept_id: parentId });
 
       return getPayloadItems(payload, ["dept_list", "departments", "list"])

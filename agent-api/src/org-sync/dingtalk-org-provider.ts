@@ -1,7 +1,8 @@
-import type {
-  DingTalkClient,
-  DingTalkDepartment,
-  DingTalkOrganizationUser
+import {
+  DINGTALK_ROOT_DEPARTMENT_ID,
+  type DingTalkClient,
+  type DingTalkDepartment,
+  type DingTalkOrganizationUser
 } from "../auth/dingtalk.js";
 
 export type NormalizedOrgDepartment = {
@@ -155,7 +156,7 @@ export class DingTalkOrgProvider {
   constructor(private readonly client: DingTalkClient) {}
 
   async fetchFullOrganization(): Promise<NormalizedOrgSnapshot> {
-    const departments = await this.collectDepartmentTree("0");
+    const departments = await this.collectDepartmentTree(DINGTALK_ROOT_DEPARTMENT_ID);
     const departmentIds = new Set(departments.map((department) => department.externalId));
     const users = await this.collectUsersForDepartments(departments.map((department) => department.externalId));
 
@@ -166,7 +167,7 @@ export class DingTalkOrgProvider {
   }
 
   async fetchDepartmentScope(externalDepartmentId: string): Promise<NormalizedOrgSnapshot> {
-    const departments = await this.collectDepartmentTree("0");
+    const departments = await this.collectDepartmentTree(DINGTALK_ROOT_DEPARTMENT_ID);
     const subtree = this.selectDepartmentSubtree(departments, externalDepartmentId);
     const departmentIds = new Set(subtree.map((department) => department.externalId));
     const users = await this.collectUsersForDepartments(subtree.map((department) => department.externalId));
@@ -183,7 +184,7 @@ export class DingTalkOrgProvider {
       return { departments: [], users: [] };
     }
 
-    const departments = await this.collectDepartmentTree("0");
+    const departments = await this.collectDepartmentTree(DINGTALK_ROOT_DEPARTMENT_ID);
     const requestedDepartmentIds = new Set(uniqueStrings(user.departmentExternalIds));
     const linkedDepartments = departments.filter((department) => requestedDepartmentIds.has(department.externalId));
     const linkedDepartmentIds = new Set(linkedDepartments.map((department) => department.externalId));

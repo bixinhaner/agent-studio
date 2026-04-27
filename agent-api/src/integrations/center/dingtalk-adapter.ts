@@ -1,4 +1,8 @@
-import { createDingTalkClient, type DingTalkConfig } from "../../auth/dingtalk.js";
+import {
+  createDingTalkClient,
+  DINGTALK_ROOT_DEPARTMENT_ID,
+  type DingTalkConfig
+} from "../../auth/dingtalk.js";
 
 export type IntegrationValidationOutcome = {
   status: "success" | "failed";
@@ -71,7 +75,7 @@ export class DingTalkIntegrationAdapter {
       if (typeof client.validateCredentials === "function") {
         await client.validateCredentials();
       } else {
-        await client.listDepartments({ parentId: "0" });
+        await client.listDepartments({ parentId: DINGTALK_ROOT_DEPARTMENT_ID });
       }
       return {
         status: "success",
