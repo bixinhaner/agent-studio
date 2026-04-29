@@ -74,6 +74,7 @@ export type AdminConversationSummary = {
   model: string;
   reasoningEffort: string;
   workspace: string;
+  enabledSkillNames: string[];
   activeSession: boolean;
   createdAt: string;
   updatedAt: string;

@@ -6,6 +6,7 @@ import {
   HardDrive,
   MessageSquareText,
   Network,
+  Package,
   Paperclip,
   RefreshCcw,
   Search,
@@ -139,6 +140,12 @@ function conversationAudienceLabel(audience: AdminConversationSummary["audience"
 
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "processing";
+}
+
+function conversationSkillSummaryLabel(skillNames: string[]): string {
+  const [firstSkill] = skillNames;
+  if (!firstSkill) return "";
+  return skillNames.length === 1 ? firstSkill : `${firstSkill} +${skillNames.length - 1}`;
 }
 
 function feedbackLabel(type: AdminConversationFeedback["type"]): string {
@@ -908,37 +915,47 @@ function ConversationWorkspace() {
         <div className="admin-master-list">
           {listLoading ? <Spin style={{ margin: 'auto', padding: 24 }} /> : 
            listData?.conversations.length === 0 ? <Empty style={{ margin: 'auto' }} /> :
-           listData?.conversations.map(conv => (
-             <button 
-               key={conv.id}
-               className={`admin-master-item ${selectedId === conv.id ? 'active' : ''}`}
-               onClick={() => setSelectedId(conv.id)}
-             >
-               <div className="admin-master-header">
-                 <span className="admin-master-title">{conv.title}</span>
-                 <span className="admin-master-time">{formatLocalDateTime(conv.updatedAt).split(' ')[1]}</span>
-               </div>
-               <div className="admin-master-preview">
-                 {conv.preview.latestText || conv.preview.firstUserText || "无预览"}
-               </div>
-               <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                 <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
-                 <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationAudienceLabel(conv.audience)}</span>
-                 <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
-                 {conv.metrics.userAttachmentCount > 0 ? (
-                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                     <Paperclip size={11} />
-                     {conv.metrics.userAttachmentCount} 个文件
-                   </span>
-                 ) : null}
-                 {conv.feedbackSummary.total > 0 ? (
-                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65 }}>
-                     {conv.feedbackSummary.positive} 赞 / {conv.feedbackSummary.negative} 踩
-                   </span>
-                 ) : null}
-               </div>
-             </button>
-           ))}
+           listData?.conversations.map((conv) => {
+             const enabledSkillNames = conv.enabledSkillNames ?? [];
+             const skillSummaryLabel = conversationSkillSummaryLabel(enabledSkillNames);
+             return (
+               <button
+                 key={conv.id}
+                 className={`admin-master-item ${selectedId === conv.id ? 'active' : ''}`}
+                 onClick={() => setSelectedId(conv.id)}
+               >
+                 <div className="admin-master-header">
+                   <span className="admin-master-title">{conv.title}</span>
+                   <span className="admin-master-time">{formatLocalDateTime(conv.updatedAt).split(' ')[1]}</span>
+                 </div>
+                 <div className="admin-master-preview">
+                   {conv.preview.latestText || conv.preview.firstUserText || "无预览"}
+                 </div>
+                 <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                   <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
+                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationAudienceLabel(conv.audience)}</span>
+                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
+                   {skillSummaryLabel ? (
+                     <span className="conversation-master-skill">
+                       <Package size={11} />
+                       {skillSummaryLabel}
+                     </span>
+                   ) : null}
+                   {conv.metrics.userAttachmentCount > 0 ? (
+                     <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                       <Paperclip size={11} />
+                       {conv.metrics.userAttachmentCount} 个文件
+                     </span>
+                   ) : null}
+                   {conv.feedbackSummary.total > 0 ? (
+                     <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65 }}>
+                       {conv.feedbackSummary.positive} 赞 / {conv.feedbackSummary.negative} 踩
+                     </span>
+                   ) : null}
+                 </div>
+               </button>
+             );
+           })}
         </div>
         <div style={{ padding: '8px 16px', borderTop: '1px solid var(--admin-color-border)', textAlign: 'center' }}>
           <Pagination simple current={page} total={listData?.page.totalItems || 0} pageSize={20} onChange={setPage} />

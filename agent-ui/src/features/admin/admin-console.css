@@ -1178,6 +1178,21 @@
   line-height: 1.4;
 }
 
+.conversation-master-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  color: #2563eb;
+  opacity: 0.8;
+}
+
+.conversation-master-skill svg {
+  flex: 0 0 auto;
+}
+
 /* Conversation Detail Header */
 .conversation-detail-header {
   padding: 20px 24px;

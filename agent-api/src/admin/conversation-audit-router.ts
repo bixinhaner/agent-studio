@@ -134,6 +134,7 @@ type ConversationSummary = {
   model: string;
   reasoningEffort: string;
   workspace: string;
+  enabledSkillNames: string[];
   activeSession: boolean;
   createdAt: string;
   updatedAt: string;
@@ -283,6 +284,10 @@ function asStringArray(value: unknown): string[] {
     .map((item) => trimOrUndefined(item))
     .filter((item): item is string => Boolean(item));
   return [...new Set(items)];
+}
+
+export function enabledSkillNamesFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
+  return asStringArray(codexRunConfig?.enabledSkills);
 }
 
 function asBoolean(value: unknown): boolean | undefined {
@@ -1109,6 +1114,7 @@ function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditU
     model: thread.model,
     reasoningEffort: thread.reasoningEffort,
     workspace: thread.workspace,
+    enabledSkillNames: enabledSkillNamesFromRunConfig(thread.codexRunConfig),
     activeSession: Boolean(thread.sessionId),
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -1230,6 +1236,7 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
     summary.model,
     summary.reasoningEffort,
     summary.workspace,
+    ...summary.enabledSkillNames,
     summary.user?.displayName,
     summary.user?.email,
     summary.user?.userType,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  enabledSkillNamesFromRunConfig,
   extractMessageAttachments,
   extractMessageProcessRows,
   extractMessageText,
@@ -12,6 +13,21 @@ describe("resolveConversationAudience", () => {
     expect(resolveConversationAudience({ userType: "internal_employee" })).toBe("internal");
     expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
     expect(resolveConversationAudience(null)).toBe("unknown");
+  });
+});
+
+describe("enabledSkillNamesFromRunConfig", () => {
+  it("normalizes selected skill names from stored run config", () => {
+    expect(
+      enabledSkillNamesFromRunConfig({
+        enabledSkills: ["imagegen", " lab-device-access ", "", "imagegen", null]
+      })
+    ).toEqual(["imagegen", "lab-device-access"]);
+  });
+
+  it("returns an empty list when no skills were selected", () => {
+    expect(enabledSkillNamesFromRunConfig({ enabledSkills: undefined })).toEqual([]);
+    expect(enabledSkillNamesFromRunConfig(undefined)).toEqual([]);
   });
 });
 
