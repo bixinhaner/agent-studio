@@ -1,4 +1,5 @@
 import "dotenv/config";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -44,7 +45,9 @@ const schema = z.object({
   THREAD_STORE_FILE: z.string().default("./temp/agent-threads.json"),
   UPLOAD_TEMP_ROOT: z.string().default("./temp/session-uploads"),
   BRANDING_ASSET_ROOT: z.string().default("./temp/branding-assets"),
-  KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets")
+  KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets"),
+  CODEX_BASE_HOME: z.string().optional(),
+  CODEX_SESSION_HOME_ROOT: z.string().default("./temp/codex-homes")
 });
 
 const env = schema.parse(process.env);
@@ -92,6 +95,17 @@ const knowledgeSetStorageRoot = path.isAbsolute(env.KNOWLEDGE_SET_STORAGE_ROOT)
 const accessRequestUploadRoot = path.isAbsolute(env.ACCESS_REQUEST_UPLOAD_ROOT)
   ? env.ACCESS_REQUEST_UPLOAD_ROOT
   : path.resolve(process.cwd(), env.ACCESS_REQUEST_UPLOAD_ROOT);
+
+const codexBaseHomeInput = (env.CODEX_BASE_HOME || process.env.CODEX_HOME || "").trim();
+const codexBaseHome = codexBaseHomeInput
+  ? path.isAbsolute(codexBaseHomeInput)
+    ? codexBaseHomeInput
+    : path.resolve(process.cwd(), codexBaseHomeInput)
+  : path.join(os.homedir(), ".codex");
+
+const codexSessionHomeRoot = path.isAbsolute(env.CODEX_SESSION_HOME_ROOT)
+  ? env.CODEX_SESSION_HOME_ROOT
+  : path.resolve(process.cwd(), env.CODEX_SESSION_HOME_ROOT);
 
 function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
@@ -178,6 +192,10 @@ export const appConfig = {
   uploadTempRoot,
   brandingAssetRoot,
   knowledgeSetStorageRoot,
+  codex: {
+    baseHome: codexBaseHome,
+    sessionHomeRoot: codexSessionHomeRoot
+  },
   orgSync: {
     enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),
     intervalMinutes: parseInteger(env.ORG_SYNC_INTERVAL_MINUTES, 24 * 60)

@@ -12,6 +12,7 @@ import {
 import { listWorkspaceAgentsMdTemplates } from "../agent-mode/workspace-agents-md.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
+import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -59,7 +60,7 @@ type SystemSettingsReaderLike = {
 const stringListSchema = z.array(z.string().trim().min(1));
 const statusSchema = z.enum(["active", "disabled"]);
 const runtimeTypeSchema = z.enum(["codex", "claude_code"]);
-const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint"]);
+const runtimeBindingTypeSchema = z.enum(["config_fragment", "prompt_hint", "codex_skill"]);
 const instructionSourceTypeSchema = z.literal("workspace_agents_md");
 const policySubjectTypeSchema = z.enum(["role", "department", "user"]);
 const policyEffectSchema = z.enum(["allow", "deny"]);
@@ -332,6 +333,11 @@ export function createModeAdminRouter(options: {
   agentModes: AgentModeRepositoryLike;
   resourcePolicies?: ResourcePolicyRepositoryLike;
   systemSettings?: SystemSettingsReaderLike;
+  nativeCodexSkills?: {
+    list(): Promise<NativeCodexSkillRecord[]>;
+    getBaseHome(): string;
+    getSkillsRoot(): string;
+  };
 }): Router {
   const router = Router();
   let systemSettingsRepository: SystemSettingsRepository | undefined;
@@ -532,6 +538,22 @@ export function createModeAdminRouter(options: {
 
   router.get("/skill-packages", async (_req: Request, res: Response) => {
     res.json({ skillPackages: await options.skillPackages.list() });
+  });
+
+  router.get("/codex-skills", async (_req: Request, res: Response) => {
+    if (!options.nativeCodexSkills) {
+      res.json({ skills: [], codexHome: "", skillsRoot: "" });
+      return;
+    }
+    try {
+      res.json({
+        skills: await options.nativeCodexSkills.list(),
+        codexHome: options.nativeCodexSkills.getBaseHome(),
+        skillsRoot: options.nativeCodexSkills.getSkillsRoot()
+      });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
   });
 
   router.post("/skill-packages", async (req: Request, res: Response) => {

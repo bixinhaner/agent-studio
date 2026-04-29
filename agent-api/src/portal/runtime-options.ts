@@ -11,6 +11,7 @@ export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult):
       runtimeProfile: mode.runtimeProfile,
       allowDirectorySelection: mode.allowDirectorySelection,
       skillPackages: mode.skillPackages,
+      availableSkills: mode.availableSkills,
       instructionSources: mode.instructionSources
     })),
     canUpload: input.canUpload,

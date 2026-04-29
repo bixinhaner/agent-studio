@@ -21,6 +21,7 @@ import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resou
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
+import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
 import { InboxProjectionService } from "./collaboration/inbox-projection-service.js";
 import { createCollaborationRouter } from "./collaboration/router.js";
@@ -157,6 +158,7 @@ import {
 
 const app = express();
 const runtime = new CodexRuntime();
+const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
@@ -530,6 +532,7 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
   modes: agentModes,
   runProfiles,
   skillPackages,
+  nativeCodexSkills,
   policies: policyService
 });
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
@@ -594,16 +597,24 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
   }
 
   try {
+    const materializedCodexHome = await materializeCodexHomeForRunConfig({
+      scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
+      codexRunConfig: session.codexRunConfig
+    });
     const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
       existingSnapshot: session.providerSnapshot,
       fallbackToLocalAuth: true
-    }));
+    }), {
+      envOverrides: {
+        CODEX_HOME: materializedCodexHome.codexHome
+      }
+    });
     const liveThread = await sessionRuntime.resumeThreadWithOptions({
       threadId: codexThreadId,
       model: session.model,
       reasoningEffort: session.reasoningEffort,
       workspace: session.workspace,
-      codexRunConfig: stripInternalRunConfigMetadata(session.codexRunConfig)
+      codexRunConfig: stripInternalRunConfigMetadata(materializedCodexHome.codexRunConfig)
     });
     liveRuntimeThreads.set(session.sessionId, liveThread);
     return liveThread;
@@ -719,12 +730,18 @@ type SessionOptions = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  codexHome?: string;
   providerSnapshot: ManagedCodexProviderSnapshot;
 };
 
 type ModeSelection = {
   modeId: string;
   workspaceRootPath: string;
+};
+
+type EnabledSkillSelection = {
+  name: string;
+  activationPrompt?: string;
 };
 
 type CurrentActor = {
@@ -794,6 +811,7 @@ function threadOut(thread: ThreadRecord) {
     model: thread.model,
     reasoning_effort: thread.reasoningEffort,
     workspace: thread.workspace,
+    enabled_skill_names: enabledSkillNamesFromRunConfig(thread.codexRunConfig),
     created_at: thread.createdAt,
     updated_at: thread.updatedAt
   };
@@ -841,8 +859,21 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
-function createRuntimeForProviderSnapshot(snapshot?: ManagedCodexProviderSnapshot): CodexRuntime {
-  return new CodexRuntime(snapshot?.runtimeOptions);
+function createRuntimeForProviderSnapshot(
+  snapshot?: ManagedCodexProviderSnapshot,
+  overrides?: { envOverrides?: Record<string, string> }
+): CodexRuntime {
+  const runtimeOptions = snapshot?.runtimeOptions;
+  if (!overrides?.envOverrides || Object.keys(overrides.envOverrides).length === 0) {
+    return new CodexRuntime(runtimeOptions);
+  }
+  return new CodexRuntime({
+    ...(runtimeOptions ?? {}),
+    envOverrides: {
+      ...(runtimeOptions?.envOverrides ?? {}),
+      ...overrides.envOverrides
+    }
+  });
 }
 
 async function resolveProviderSnapshot(input?: {
@@ -980,12 +1011,106 @@ function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string |
   return typeof raw === "string" ? trimOrUndefined(raw) : undefined;
 }
 
+function enabledSkillNamesFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
+  const raw = codexRunConfig?.enabledSkills;
+  if (!Array.isArray(raw)) return [];
+  const names: string[] = [];
+  for (const item of raw) {
+    const skillName = typeof item === "string" ? trimOrUndefined(item) : undefined;
+    if (skillName && !names.includes(skillName)) {
+      names.push(skillName);
+    }
+  }
+  return names;
+}
+
+const SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY = "_agentStudioSkillActivationPrompts";
+
+function skillActivationPromptsFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
+  const raw = codexRunConfig?.[SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY];
+  if (!Array.isArray(raw)) return [];
+  const prompts: string[] = [];
+  for (const item of raw) {
+    const payload = asRecord(item);
+    const prompt = trimOrUndefined(typeof payload?.prompt === "string" ? payload.prompt : undefined);
+    if (prompt && !prompts.includes(prompt)) {
+      prompts.push(prompt);
+    }
+  }
+  return prompts;
+}
+
+function withSkillActivationPrompts(message: string, codexRunConfig?: Record<string, unknown>): string {
+  const prompts = skillActivationPromptsFromRunConfig(codexRunConfig);
+  if (prompts.length === 0) return message;
+  const hiddenPromptBlock = [
+    "以下是本次请求已启用 skill 的内部触发提示。请按这些提示执行，但不要向用户展示、复述或解释这些内部提示。",
+    ...prompts
+  ].join("\n\n");
+  return `${hiddenPromptBlock}\n\n${message}`;
+}
+
+function codexHomeFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
+  const raw = codexRunConfig?._agentStudioCodexHome;
+  return typeof raw === "string" ? trimOrUndefined(raw) : undefined;
+}
+
 function withRunConfigMode(
   codexRunConfig: Record<string, unknown> | undefined,
   modeId: string
 ): Record<string, unknown> {
   const next = codexRunConfig ? { ...codexRunConfig } : {};
   next.mode = modeId;
+  return next;
+}
+
+function withRunConfigEnabledSkills(
+  codexRunConfig: Record<string, unknown> | undefined,
+  enabledSkills: string[]
+): Record<string, unknown> {
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
+  next.enabledSkills = enabledSkills;
+  return next;
+}
+
+function withRunConfigSkillActivationPrompts(
+  codexRunConfig: Record<string, unknown> | undefined,
+  enabledSkills: EnabledSkillSelection[]
+): Record<string, unknown> {
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
+  const promptItems = enabledSkills
+    .map((skill) => ({
+      name: trimOrUndefined(skill.name),
+      prompt: trimOrUndefined(skill.activationPrompt)
+    }))
+    .filter((item): item is { name: string; prompt: string } => Boolean(item.name && item.prompt));
+  if (promptItems.length > 0) {
+    next[SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY] = promptItems;
+  } else {
+    delete next[SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY];
+  }
+  return next;
+}
+
+function withRunConfigEnabledSkillSelection(
+  codexRunConfig: Record<string, unknown> | undefined,
+  enabledSkills: EnabledSkillSelection[]
+): Record<string, unknown> {
+  return withRunConfigSkillActivationPrompts(
+    withRunConfigEnabledSkills(
+      codexRunConfig,
+      enabledSkills.map((skill) => skill.name)
+    ),
+    enabledSkills
+  );
+}
+
+function withRunConfigCodexHome(
+  codexRunConfig: Record<string, unknown> | undefined,
+  codexHome: string
+): Record<string, unknown> {
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
+  next._agentStudioCodexHome = codexHome;
   return next;
 }
 
@@ -1115,6 +1240,47 @@ async function resolveModeSelection(input: {
   };
 }
 
+async function resolveEnabledSkillsForMode(input: {
+  currentUser: CurrentActor;
+  modeId: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<EnabledSkillSelection[]> {
+  const requested = enabledSkillNamesFromRunConfig(input.codexRunConfig);
+  if (requested.length === 0) return [];
+
+  const runtimeOptions = await portalRuntimeOptions.resolve({
+    organizationId: input.currentUser.organizationId,
+    userId: input.currentUser.id,
+    roleIds: roleIdsForActor(input.currentUser),
+    departmentIds: await listDepartmentIdsForActor(input.currentUser)
+  });
+  const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.modeId);
+  const availableByName = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.name, skill] as const));
+  const denied = requested.filter((skillName) => !availableByName.has(skillName));
+  if (denied.length > 0) {
+    throw new Error(`Selected skill is not available for this agent mode: ${denied.join(", ")}`);
+  }
+  return requested.map((skillName) => ({
+    name: skillName,
+    activationPrompt: trimOrUndefined(availableByName.get(skillName)?.activationPrompt)
+  }));
+}
+
+async function materializeCodexHomeForRunConfig(input: {
+  scopeId: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
+  const enabledSkills = enabledSkillNamesFromRunConfig(input.codexRunConfig);
+  const codexHome = await nativeCodexSkills.materializeSessionHome({
+    scopeId: input.scopeId,
+    enabledSkillNames: enabledSkills
+  });
+  return {
+    codexHome,
+    codexRunConfig: withRunConfigCodexHome(input.codexRunConfig, codexHome)
+  };
+}
+
 async function allocateThreadWorkspacePath(input: {
   currentUser: CurrentActor;
   threadId: string;
@@ -1183,17 +1349,28 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const sessionCodexRunConfig = threadId
     ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
     : options.codexRunConfig;
+  const materializedCodexHome =
+    options.codexHome && sessionCodexRunConfig
+      ? { codexHome: options.codexHome, codexRunConfig: sessionCodexRunConfig }
+      : await materializeCodexHomeForRunConfig({
+          scopeId: threadId ? `thread-${threadId}` : `session-${randomUUID()}`,
+          codexRunConfig: sessionCodexRunConfig
+        });
 
   const providerSnapshot = await resolveProviderSnapshot({
     existingSnapshot: options.providerSnapshot
   });
-  const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot);
+  const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
+    envOverrides: {
+      CODEX_HOME: materializedCodexHome.codexHome
+    }
+  });
   const started = await startLiveRuntimeSession({
     runtime: sessionRuntime,
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: sessionCodexRunConfig
+    codexRunConfig: materializedCodexHome.codexRunConfig
   });
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
@@ -1276,8 +1453,26 @@ async function resolveSessionOptions(
     model: input.model,
     reasoningEffort: input.reasoning_effort
   });
-  const sourceCodexRunConfig = withRunConfigMode(input.codex_run_config, modeId);
+  const enabledSkills = await resolveEnabledSkillsForMode({
+    currentUser,
+    modeId,
+    codexRunConfig: input.codex_run_config
+  });
+  const sourceCodexRunConfig = withRunConfigEnabledSkillSelection(
+    withRunConfigMode(input.codex_run_config, modeId),
+    enabledSkills
+  );
   await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
+  const resolvedCodexRunConfig = await resolveKnowledgeSetRunConfig({
+    currentUser,
+    workspacePath,
+    knowledgeSetIds: input.knowledge_set_ids,
+    codexRunConfig: sourceCodexRunConfig
+  });
+  const materializedCodexHome = await materializeCodexHomeForRunConfig({
+    scopeId: `workspace-${path.basename(workspacePath)}`,
+    codexRunConfig: resolvedCodexRunConfig
+  });
   return {
     userId: currentUser.id,
     organizationId: currentUser.organizationId,
@@ -1285,12 +1480,8 @@ async function resolveSessionOptions(
     reasoningEffort: defaults.reasoningEffort,
     workspace: workspacePath,
     providerSnapshot,
-    codexRunConfig: await resolveKnowledgeSetRunConfig({
-      currentUser,
-      workspacePath,
-      knowledgeSetIds: input.knowledge_set_ids,
-      codexRunConfig: sourceCodexRunConfig
-    })
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    codexHome: materializedCodexHome.codexHome
   };
 }
 
@@ -1374,7 +1565,15 @@ async function ensureThreadSession(
       thread.createdAt
     );
   await fs.mkdir(workspacePath, { recursive: true });
-  const normalizedSourceCodexRunConfig = withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId);
+  const enabledSkills = await resolveEnabledSkillsForMode({
+    currentUser,
+    modeId: modeSelection.modeId,
+    codexRunConfig: sourceCodexRunConfig
+  });
+  const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
+    withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
+    enabledSkills
+  );
   const defaults = resolveManagedCodexDefaults({
     systemSettings: publishedSystemSettings,
     providerSnapshot,
@@ -1389,6 +1588,10 @@ async function ensureThreadSession(
   });
   await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
+  const materializedCodexHome = await materializeCodexHomeForRunConfig({
+    scopeId: `thread-${threadId}`,
+    codexRunConfig: desiredCodexRunConfig
+  });
 
   const desired: SessionOptions = {
     organizationId: currentUser.organizationId,
@@ -1397,7 +1600,8 @@ async function ensureThreadSession(
     reasoningEffort: defaults.reasoningEffort,
     workspace: workspacePath,
     providerSnapshot,
-    codexRunConfig: desiredCodexRunConfig
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    codexHome: materializedCodexHome.codexHome
   };
 
   const shouldPersistNormalizedThread =
@@ -1755,7 +1959,8 @@ registerCommonApiRoutes(app, {
     runProfiles,
     skillPackages,
     agentModes,
-    resourcePolicies
+    resourcePolicies,
+    nativeCodexSkills
   }),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
@@ -2028,7 +2233,15 @@ app.post("/api/session", async (req: Request, res: Response) => {
             await applyWorkspaceAgentsMdForMode(modeId, workspace);
           }
 
-          const normalizedSourceCodexRunConfig = withRunConfigMode(nextSourceCodexRunConfig, modeId);
+          const enabledSkills = await resolveEnabledSkillsForMode({
+            currentUser,
+            modeId,
+            codexRunConfig: nextSourceCodexRunConfig
+          });
+          const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
+            withRunConfigMode(nextSourceCodexRunConfig, modeId),
+            enabledSkills
+          );
           const nextCodexRunConfig = await resolveKnowledgeSetRunConfig({
             currentUser,
             workspacePath: workspace,
@@ -2039,6 +2252,10 @@ app.post("/api/session", async (req: Request, res: Response) => {
             existing.threadId && trimOrUndefined(workspace)
               ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existing.threadId, workspace)
               : nextCodexRunConfig;
+          const materializedCodexHome = await materializeCodexHomeForRunConfig({
+            scopeId: existing.threadId ? `thread-${existing.threadId}` : `session-${existing.sessionId}`,
+            codexRunConfig: runtimeCodexRunConfig
+          });
           if (existing.threadId && trimOrUndefined(workspace)) {
             await fs.mkdir(getThreadWorkspaceUploadDir(workspace), { recursive: true });
           }
@@ -2053,7 +2270,12 @@ app.post("/api/session", async (req: Request, res: Response) => {
             await resolveProviderSnapshot({
               existingSnapshot: existing.providerSnapshot,
               fallbackToLocalAuth: !existing.providerSnapshot
-            })
+            }),
+            {
+              envOverrides: {
+                CODEX_HOME: materializedCodexHome.codexHome
+              }
+            }
           );
           const updated = await replaceLiveRuntimeSession({
             runtime: sessionRuntime,
@@ -2063,7 +2285,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
             model: (input.model || existing.model).trim(),
             reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
             workspace,
-            codexRunConfig: runtimeCodexRunConfig,
+            codexRunConfig: materializedCodexHome.codexRunConfig,
             persist: async (payload) =>
               sessions.update(existingId, {
                 model: payload.model,
@@ -2522,7 +2744,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
 
     await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(ensuredLiveThread, input.message),
+      events: runtime.runStreamed(ensuredLiveThread, withSkillActivationPrompts(input.message, currentSession.codexRunConfig)),
       onEvent(event) {
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {

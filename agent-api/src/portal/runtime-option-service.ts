@@ -5,6 +5,7 @@ import { type PolicyService } from "../resources/policy-service.js";
 import { getDbClient } from "../db/client.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
+import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
 
 export type PortalRuntimeOptionRunProfile = {
   id: string;
@@ -26,6 +27,14 @@ export type PortalRuntimeOptionSkillPackage = {
   label: string;
 };
 
+export type PortalRuntimeOptionSkill = {
+  name: string;
+  label: string;
+  description?: string;
+  system: boolean;
+  activationPrompt?: string;
+};
+
 export type PortalRuntimeOptionMode = {
   id: string;
   label: string;
@@ -33,6 +42,7 @@ export type PortalRuntimeOptionMode = {
   runtimeProfile: PortalRuntimeOptionRunProfile;
   allowDirectorySelection: boolean;
   skillPackages: PortalRuntimeOptionSkillPackage[];
+  availableSkills: PortalRuntimeOptionSkill[];
   instructionSources: Array<{
     sourceType: string;
     sourceRef: string;
@@ -56,6 +66,7 @@ type RuntimeOptionServiceDependencies = {
   modes: ListRepository<AgentModeRecord>;
   runProfiles: ListRepository<RunProfileRecord>;
   skillPackages: ListRepository<SkillPackageRecord>;
+  nativeCodexSkills?: ListRepository<NativeCodexSkillRecord>;
   policies: PolicyService;
   systemSettings?: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
@@ -129,16 +140,63 @@ function clampWebSearchMode(webSearchMode: string, safety: SystemSettingsSafety)
   return webSearchMode;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function skillNameFromBindingPayload(value: unknown): string | undefined {
+  const payload = asRecord(value);
+  if (!payload) return undefined;
+  const skillName = payload.skillName ?? payload.name;
+  return typeof skillName === "string" ? trimOrUndefined(skillName) : undefined;
+}
+
+function skillActivationPromptFromBindingPayload(value: unknown): string | undefined {
+  const payload = asRecord(value);
+  if (!payload) return undefined;
+  const prompt = payload.activationPrompt ?? payload.defaultPrompt ?? payload.prompt;
+  return typeof prompt === "string" ? trimOrUndefined(prompt) : undefined;
+}
+
+type CodexSkillBinding = {
+  name: string;
+  activationPrompt?: string;
+};
+
+function collectCodexSkillBindings(skillPackage: SkillPackageRecord): CodexSkillBinding[] {
+  const bindings: CodexSkillBinding[] = [];
+  for (const item of skillPackage.items ?? []) {
+    for (const binding of item.runtimeBindings ?? []) {
+      if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") continue;
+      const skillName = skillNameFromBindingPayload(binding.bindingPayload);
+      if (!skillName) continue;
+      const activationPrompt = skillActivationPromptFromBindingPayload(binding.bindingPayload);
+      const existing = bindings.find((item) => item.name === skillName);
+      if (existing) {
+        existing.activationPrompt ??= activationPrompt;
+      } else {
+        bindings.push({
+          name: skillName,
+          activationPrompt
+        });
+      }
+    }
+  }
+  return bindings;
+}
+
 export class PortalRuntimeOptionService {
   private systemSettingsRepository?: SystemSettingsRepository;
 
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [modeRows, runProfileRows, skillPackageRows] = await Promise.all([
+    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows] = await Promise.all([
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
-      this.deps.skillPackages.list()
+      this.deps.skillPackages.list(),
+      this.deps.nativeCodexSkills?.list() ?? Promise.resolve([])
     ]);
 
     const activeVisibleModeRows = modeRows.filter(
@@ -157,6 +215,7 @@ export class PortalRuntimeOptionService {
 
     const runProfileMap = new Map(runProfileRows.map((runProfile) => [runProfile.id, runProfile] as const));
     const skillPackageMap = new Map(skillPackageRows.map((skillPackage) => [skillPackage.id, skillPackage] as const));
+    const nativeSkillMap = new Map(nativeSkillRows.map((skill) => [skill.name, skill] as const));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
 
     const resolvedModes = [];
@@ -185,6 +244,8 @@ export class PortalRuntimeOptionService {
       }
 
       const dependentSkillPackages = [];
+      const availableSkillNames: string[] = [];
+      const activationPromptBySkillName = new Map<string, string>();
       let valid = true;
       for (const binding of mode.skillPackages) {
         const skillPackage = skillPackageMap.get(binding.skillPackageId);
@@ -217,6 +278,15 @@ export class PortalRuntimeOptionService {
           id: skillPackage.id,
           label: skillPackage.name
         });
+
+        for (const skillBinding of collectCodexSkillBindings(skillPackage)) {
+          if (nativeSkillMap.has(skillBinding.name) && !availableSkillNames.includes(skillBinding.name)) {
+            availableSkillNames.push(skillBinding.name);
+          }
+          if (skillBinding.activationPrompt && !activationPromptBySkillName.has(skillBinding.name)) {
+            activationPromptBySkillName.set(skillBinding.name, skillBinding.activationPrompt);
+          }
+        }
       }
 
       if (!valid) {
@@ -230,6 +300,16 @@ export class PortalRuntimeOptionService {
         runtimeProfile: toRunProfileSnapshot(runProfile, safetyLimits),
         allowDirectorySelection: false,
         skillPackages: dependentSkillPackages,
+        availableSkills: availableSkillNames
+          .map((skillName) => nativeSkillMap.get(skillName))
+          .filter((skill): skill is NativeCodexSkillRecord => Boolean(skill))
+          .map((skill) => ({
+            name: skill.name,
+            label: skill.name,
+            description: trimOrUndefined(skill.description),
+            system: skill.system,
+            activationPrompt: trimOrUndefined(activationPromptBySkillName.get(skill.name))
+          })),
         instructionSources: mode.instructionSources.map((source) => ({
           sourceType: source.sourceType,
           sourceRef: source.sourceRef,

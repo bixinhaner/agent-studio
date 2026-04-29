@@ -117,6 +117,9 @@ export function stripInternalRunConfigMetadata(
   if (!input) return input;
   const next = { ...input };
   delete next._agentStudioKnowledgeSets;
+  delete next._agentStudioCodexHome;
+  delete next._agentStudioSkillActivationPrompts;
+  delete next.enabledSkills;
   return next;
 }
 
