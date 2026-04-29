@@ -34,10 +34,20 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   });
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      const snippet = text.replace(/\s+/g, " ").trim().slice(0, 120);
+      const suffix = snippet ? `: ${snippet}` : "";
+      throw new Error(`API returned a non-JSON response (${res.status})${suffix}`);
+    }
+  }
   if (!res.ok) {
     notifyAuthInvalidStatus(res.status);
-    const msg = (data && typeof data.detail === "string" && data.detail) || `Request failed (${res.status})`;
+    const detail = data && typeof data === "object" && "detail" in data ? (data as { detail?: unknown }).detail : undefined;
+    const msg = (typeof detail === "string" && detail) || `Request failed (${res.status})`;
     throw new Error(msg);
   }
   return data as T;
