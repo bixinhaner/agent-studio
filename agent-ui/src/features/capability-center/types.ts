@@ -40,8 +40,22 @@ export type ApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted"
 export type WebSearchMode = "disabled" | "cached" | "live";
 export type DirectoryScope = "workspace_only" | "descendants_only" | "authorized_workspace_and_knowledge_set";
 export type InstructionSourceType = "workspace_agents_md";
-export type RuntimeBindingType = "config_fragment" | "prompt_hint";
+export type RuntimeBindingType = "config_fragment" | "prompt_hint" | "codex_skill";
 export type RuntimeType = "codex" | "claude_code";
+
+export type NativeCodexSkillRecord = {
+  name: string;
+  description?: string;
+  sourcePath: string;
+  relativePath: string;
+  system: boolean;
+};
+
+export type NativeCodexSkillListResponse = {
+  skills: NativeCodexSkillRecord[];
+  codexHome: string;
+  skillsRoot: string;
+};
 
 export type RunProfileRecord = {
   id: string;

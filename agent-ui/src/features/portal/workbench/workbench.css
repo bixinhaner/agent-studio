@@ -594,21 +594,21 @@ button.session-rail-new-btn:active,
 
 .portal-workbench-root .thread-wrap .aui-composer-root {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
-  align-content: center !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  align-content: stretch !important;
   box-sizing: border-box !important;
-  min-height: 46px !important;
-  padding: 6px 8px !important;
-  gap: 4px;
+  min-height: 88px !important;
+  padding: 8px 10px !important;
+  gap: 6px;
   position: relative;
   overflow: visible;
   transform-origin: center bottom;
 }
 
 .portal-workbench-root .thread-wrap .portal-composer-wrap:not([data-multiline="true"]) .aui-composer-root {
-  height: 48px !important;
-  min-height: 48px !important;
+  height: auto !important;
+  min-height: 88px !important;
 }
 
 .portal-workbench-root .thread-wrap .aui-composer-attachments:empty {
@@ -623,7 +623,8 @@ button.session-rail-new-btn:active,
   display: block;
   align-self: center !important;
   box-sizing: border-box !important;
-  flex: 1 1 0 !important;
+  flex: 1 1 auto !important;
+  width: 100% !important;
   margin: 0 !important;
   min-height: 34px !important;
   padding-inline: 8px !important;
@@ -651,6 +652,7 @@ button.session-rail-new-btn:active,
 
 .portal-workbench-root .thread-wrap .aui-composer-attach,
 .portal-workbench-root .thread-wrap .aui-composer-send,
+.portal-workbench-root .thread-wrap .aui-composer-send-btn,
 .portal-workbench-root .thread-wrap .aui-composer-cancel,
 .portal-workbench-root .thread-wrap .portal-stop-btn,
 .portal-workbench-root .thread-wrap .portal-upload-send {
@@ -670,8 +672,209 @@ button.session-rail-new-btn:active,
   vertical-align: middle !important;
 }
 
+.portal-composer-input-row,
+.portal-composer-tools-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.portal-composer-input-row {
+  align-items: center;
+}
+
+.portal-composer-tools-row {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.portal-composer-tools-left {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.portal-composer-skill-trigger,
+.portal-composer-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  max-width: min(220px, 44vw);
+  height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.portal-composer-skill-trigger {
+  gap: 6px;
+  padding: 0 11px;
+}
+
+.portal-composer-skill-trigger:hover,
+.portal-composer-skill-trigger.is-active {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.portal-composer-skill-trigger-text {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.portal-composer-skill-chip {
+  gap: 6px;
+  padding: 0 9px;
+  border-color: rgba(37, 99, 235, 0.42);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.portal-composer-skill-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.portal-composer-skill-chip:hover {
+  border-color: rgba(29, 78, 216, 0.65);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu {
+  min-width: 210px;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 8px;
+  border-radius: 14px;
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.portal-composer-skill-menu-entry {
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.portal-composer-skill-menu-entry:hover {
+  background: rgba(37, 99, 235, 0.07);
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.portal-composer-skill-menu-entry.is-selected {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(20, 184, 166, 0.1));
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.24);
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu .ant-dropdown-menu-item.portal-composer-skill-menu-entry.is-selected:hover {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(20, 184, 166, 0.13));
+}
+
+.portal-composer-skill-dropdown .ant-dropdown-menu .ant-dropdown-menu-title-content {
+  min-width: 0;
+}
+
+.portal-composer-skill-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.portal-composer-skill-menu-check {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: #2563eb;
+}
+
+.portal-composer-skill-menu-glyph {
+  display: inline-flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--skill-icon-color, #2563eb);
+  background: var(--skill-icon-bg, rgba(37, 99, 235, 0.12));
+  box-shadow: inset 0 0 0 1px var(--skill-icon-border, rgba(37, 99, 235, 0.16));
+}
+
+.portal-composer-skill-menu-glyph svg {
+  display: block;
+}
+
+.portal-composer-skill-menu-glyph[data-tone="blue"] {
+  --skill-icon-color: #2563eb;
+  --skill-icon-bg: rgba(37, 99, 235, 0.12);
+  --skill-icon-border: rgba(37, 99, 235, 0.18);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="violet"] {
+  --skill-icon-color: #7c3aed;
+  --skill-icon-bg: rgba(124, 58, 237, 0.12);
+  --skill-icon-border: rgba(124, 58, 237, 0.18);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="emerald"] {
+  --skill-icon-color: #059669;
+  --skill-icon-bg: rgba(5, 150, 105, 0.12);
+  --skill-icon-border: rgba(5, 150, 105, 0.18);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="amber"] {
+  --skill-icon-color: #d97706;
+  --skill-icon-bg: rgba(217, 119, 6, 0.13);
+  --skill-icon-border: rgba(217, 119, 6, 0.2);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="rose"] {
+  --skill-icon-color: #e11d48;
+  --skill-icon-bg: rgba(225, 29, 72, 0.11);
+  --skill-icon-border: rgba(225, 29, 72, 0.17);
+}
+
+.portal-composer-skill-menu-glyph[data-tone="cyan"] {
+  --skill-icon-color: #0891b2;
+  --skill-icon-bg: rgba(8, 145, 178, 0.12);
+  --skill-icon-border: rgba(8, 145, 178, 0.18);
+}
+
+.portal-composer-skill-menu-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #111827;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.portal-composer-skill-menu-item.is-selected .portal-composer-skill-menu-title {
+  color: #1d4ed8;
+}
+
 .portal-workbench-root .thread-wrap .aui-composer-attach > svg,
 .portal-workbench-root .thread-wrap .aui-composer-send > svg,
+.portal-workbench-root .thread-wrap .aui-composer-send-btn > svg,
 .portal-workbench-root .thread-wrap .aui-composer-cancel > svg,
 .portal-workbench-root .thread-wrap .portal-stop-btn > svg,
 .portal-workbench-root .thread-wrap .portal-upload-send > svg {

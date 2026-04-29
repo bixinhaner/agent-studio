@@ -13,6 +13,7 @@ import type {
   CreateAgentModeInput,
   CreateRunProfileInput,
   CreateSkillPackageInput,
+  NativeCodexSkillListResponse,
   RunProfileListResponse,
   RunProfileResponse,
   SkillPackageItemInput,
@@ -52,6 +53,10 @@ export async function copyRunProfile(id: string, input: CopyRunProfileInput): Pr
 
 export async function fetchSkillPackages(): Promise<SkillPackageListResponse> {
   return api<SkillPackageListResponse>("/api/admin/skill-packages");
+}
+
+export async function fetchNativeCodexSkills(): Promise<NativeCodexSkillListResponse> {
+  return api<NativeCodexSkillListResponse>("/api/admin/codex-skills");
 }
 
 export async function createSkillPackage(input: CreateSkillPackageInput): Promise<SkillPackageResponse> {

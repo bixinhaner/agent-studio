@@ -22,7 +22,8 @@ const RUNTIME_TYPE_OPTIONS = [
 
 const BINDING_TYPE_OPTIONS = [
   { label: "config_fragment", value: "config_fragment" },
-  { label: "prompt_hint", value: "prompt_hint" }
+  { label: "prompt_hint", value: "prompt_hint" },
+  { label: "codex_skill", value: "codex_skill" }
 ];
 
 function cloneBinding(binding: SkillPackageRuntimeBindingInput | undefined): SkillPackageRuntimeBindingInput {

@@ -20,6 +20,13 @@ export type RuntimeModeSnapshot = {
   runtimeProfile: RuntimeProfileSnapshot;
   allowDirectorySelection: boolean;
   skillPackages: Array<{ id: string; label: string }>;
+  availableSkills: Array<{
+    name: string;
+    label: string;
+    description?: string;
+    system: boolean;
+    activationPrompt?: string;
+  }>;
   instructionSources: Array<{
     sourceType: string;
     sourceRef: string;

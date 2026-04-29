@@ -6324,6 +6324,208 @@ body.access-request-route #root {
   flex-wrap: wrap;
 }
 
+.capability-binding-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.capability-binding-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.capability-binding-header h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.96rem;
+}
+
+.capability-binding-header p {
+  margin: 0;
+  color: #64748b;
+}
+
+.capability-native-skill-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.capability-native-skill-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.capability-native-skill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.capability-native-skill-summary {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #fff;
+  color: #64748b;
+}
+
+.capability-native-skill-prompts {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.capability-native-skill-prompts-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.capability-native-skill-prompts-header h5 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  color: #111827;
+}
+
+.capability-native-skill-prompts-header p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.capability-native-skill-prompt-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.capability-native-skill-prompt-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.capability-native-skill-prompt-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #1f2937;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.capability-native-skill-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.capability-native-skill-chip {
+  border: 1px solid #c9d7ea;
+  background: #f8fbff;
+  color: #1f2937;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+}
+
+.capability-native-skill-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.capability-native-skill-row {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d6e2f3;
+  background: #fff;
+  border-radius: 12px;
+  padding: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.capability-native-skill-row:hover {
+  border-color: #4f7cff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.capability-native-skill-row.selected {
+  border-color: #4f7cff;
+  background: #f3f6ff;
+}
+
+.capability-native-skill-check {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  border: 1px solid #c9d7ea;
+  display: grid;
+  place-items: center;
+  color: #315efb;
+  font-weight: 700;
+  background: #fff;
+}
+
+.capability-native-skill-main {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.capability-native-skill-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #111827;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.capability-native-skill-description {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.capability-native-skill-path {
+  color: #94a3b8;
+  font-family: "SFMono-Regular", "Menlo", monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .capability-binding-header {
+    display: grid;
+  }
+
+  .capability-native-skill-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-native-skill-actions {
+    justify-content: flex-start;
+  }
+}
+
 .thread-public-share-shell {
   position: relative;
   min-height: 100%;

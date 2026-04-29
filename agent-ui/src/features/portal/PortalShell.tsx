@@ -80,6 +80,7 @@ import {
 } from "@assistant-ui/core";
 import { AuiProvider, Derived, useAuiState } from "@assistant-ui/store";
 import { ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
+import type { MenuProps } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
@@ -147,6 +148,7 @@ type ThreadOut = {
   model: string;
   reasoning_effort: ReasoningEffort;
   workspace: string;
+  enabled_skill_names?: string[];
   created_at: string;
   updated_at: string;
 };
@@ -226,6 +228,8 @@ type AppliedConfig = {
   webSearchMode: WebSearchMode;
   additionalDirectoriesRaw: string;
 };
+
+type RuntimeSkillOption = PortalRuntimeOptions["modes"][number]["availableSkills"][number];
 
 type ProcessData = {
   kind: "debug" | "meta" | "process" | "done" | "error";
@@ -349,6 +353,15 @@ const PORTAL_RUNNING_LEAVE_WARNING = "There are still running sessions. If you l
 const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
 const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
+const SkillComposerContext = createContext<{
+  availableSkills: RuntimeSkillOption[];
+  enabledSkillNames: string[];
+  toggleSkill: (skillName: string) => void;
+}>({
+  availableSkills: [],
+  enabledSkillNames: [],
+  toggleSkill: () => undefined
+});
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
 });
@@ -1567,6 +1580,96 @@ function useComposerMultilineRef(composerText: string) {
   return composerWrapRef;
 }
 
+function skillUsesImageIcon(skill: RuntimeSkillOption): boolean {
+  const haystack = `${skill.name} ${skill.label} ${skill.description ?? ""}`.toLowerCase();
+  return haystack.includes("image") || haystack.includes("图片") || haystack.includes("图像");
+}
+
+const SKILL_ICON_TONES = ["blue", "violet", "emerald", "amber", "rose", "cyan"] as const;
+
+function skillIconTone(skill: RuntimeSkillOption): (typeof SKILL_ICON_TONES)[number] {
+  const key = `${skill.name}:${skill.label ?? ""}:${skill.description ?? ""}`;
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) % SKILL_ICON_TONES.length;
+  }
+  return SKILL_ICON_TONES[hash] ?? "blue";
+}
+
+const SkillComposerIcon: FC<{ skill: RuntimeSkillOption; size?: number }> = ({ skill, size = 16 }) =>
+  skillUsesImageIcon(skill) ? <ImageIcon size={size} /> : <ZapIcon size={size} />;
+
+const SkillComposerControls: FC = () => {
+  const { availableSkills, enabledSkillNames, toggleSkill } = useContext(SkillComposerContext);
+  const enabledSkillSet = useMemo(() => new Set(enabledSkillNames), [enabledSkillNames]);
+  const selectedSkills = useMemo(
+    () => availableSkills.filter((skill) => enabledSkillSet.has(skill.name)),
+    [availableSkills, enabledSkillSet]
+  );
+
+  if (availableSkills.length === 0) return null;
+
+  const menuItems: MenuProps["items"] = availableSkills.map((skill) => {
+    const enabled = enabledSkillSet.has(skill.name);
+    return {
+      key: skill.name,
+      className: `portal-composer-skill-menu-entry${enabled ? " is-selected" : ""}`,
+      label: (
+        <span className={`portal-composer-skill-menu-item${enabled ? " is-selected" : ""}`}>
+          <span className="portal-composer-skill-menu-check" aria-hidden="true">
+            {enabled ? <CheckIcon size={15} strokeWidth={2.8} /> : null}
+          </span>
+          <span className="portal-composer-skill-menu-glyph" data-tone={skillIconTone(skill)} aria-hidden="true">
+            <SkillComposerIcon skill={skill} size={17} />
+          </span>
+          <span className="portal-composer-skill-menu-title">{skill.label || skill.name}</span>
+        </span>
+      )
+    };
+  });
+
+  const handleMenuClick: MenuProps["onClick"] = ({ key, domEvent }) => {
+    domEvent.preventDefault();
+    domEvent.stopPropagation();
+    toggleSkill(String(key));
+  };
+
+  return (
+    <>
+      <Dropdown
+        trigger={["click"]}
+        placement="topLeft"
+        menu={{ items: menuItems, onClick: handleMenuClick }}
+        overlayClassName="portal-composer-skill-dropdown"
+      >
+        <button
+          type="button"
+          className={`portal-composer-skill-trigger${selectedSkills.length > 0 ? " is-active" : ""}`}
+          aria-label="Choose skills"
+          title="Choose skills"
+        >
+          <PackageIcon size={16} />
+          <span className="portal-composer-skill-trigger-text">Skills</span>
+        </button>
+      </Dropdown>
+      {selectedSkills.map((skill) => (
+        <button
+          key={skill.name}
+          type="button"
+          className="portal-composer-skill-chip"
+          title={`Disable ${skill.label || skill.name}`}
+          aria-label={`Disable ${skill.label || skill.name}`}
+          onClick={() => toggleSkill(skill.name)}
+        >
+          <SkillComposerIcon skill={skill} size={16} />
+          <span>{skill.label || skill.name}</span>
+          <XIcon size={13} />
+        </button>
+      ))}
+    </>
+  );
+};
+
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
@@ -1639,29 +1742,36 @@ const UploadAwareComposer: FC = () => {
               : "An attachment failed to upload. Retry or remove it before sending."}
           </p>
         ) : null}
-        <Composer.AddAttachment />
-        <Composer.Input
-          autoFocus={!isMobileWorkbench}
-          unstable_focusOnRunStart={!isMobileWorkbench}
-          unstable_focusOnScrollToBottom={!isMobileWorkbench}
-          unstable_focusOnThreadSwitched={!isMobileWorkbench}
-        />
-        {threadRunning ? (
-          <Composer.Cancel className="portal-stop-btn">
-            <SquareIcon size={13} />
-          </Composer.Cancel>
-        ) : (
-          <button
-            type="submit"
-            className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
-            disabled={sendDisabled}
-            title={sendTitle}
-            aria-label={sendTitle}
-            onClick={sendCurrentMessage}
-          >
-            <SendHorizontalIcon size={17} />
-          </button>
-        )}
+        <div className="portal-composer-input-row">
+          <Composer.Input
+            autoFocus={!isMobileWorkbench}
+            unstable_focusOnRunStart={!isMobileWorkbench}
+            unstable_focusOnScrollToBottom={!isMobileWorkbench}
+            unstable_focusOnThreadSwitched={!isMobileWorkbench}
+          />
+        </div>
+        <div className="portal-composer-tools-row">
+          <div className="portal-composer-tools-left">
+            <Composer.AddAttachment />
+            <SkillComposerControls />
+          </div>
+          {threadRunning ? (
+            <Composer.Cancel className="portal-stop-btn">
+              <SquareIcon size={13} />
+            </Composer.Cancel>
+          ) : (
+            <button
+              type="submit"
+              className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+              disabled={sendDisabled}
+              title={sendTitle}
+              aria-label={sendTitle}
+              onClick={sendCurrentMessage}
+            >
+              <SendHorizontalIcon size={17} />
+            </button>
+          )}
+        </div>
       </Composer.Root>
     </div>
   );
@@ -1672,13 +1782,20 @@ const MobileAwareComposer: FC = () => {
 
   return (
     <Composer.Root>
-      <Composer.Input
-        autoFocus={!isMobileWorkbench}
-        unstable_focusOnRunStart={!isMobileWorkbench}
-        unstable_focusOnScrollToBottom={!isMobileWorkbench}
-        unstable_focusOnThreadSwitched={!isMobileWorkbench}
-      />
-      <Composer.Action />
+      <div className="portal-composer-input-row">
+        <Composer.Input
+          autoFocus={!isMobileWorkbench}
+          unstable_focusOnRunStart={!isMobileWorkbench}
+          unstable_focusOnScrollToBottom={!isMobileWorkbench}
+          unstable_focusOnThreadSwitched={!isMobileWorkbench}
+        />
+      </div>
+      <div className="portal-composer-tools-row">
+        <div className="portal-composer-tools-left">
+          <SkillComposerControls />
+        </div>
+        <Composer.Action />
+      </div>
     </Composer.Root>
   );
 };
@@ -1692,13 +1809,14 @@ const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label = "New sessi
   </ThreadListPrimitive.New>
 );
 
-function buildCodexRunConfig(cfg: AppliedConfig, mode: string): Record<string, unknown> {
+function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: string[]): Record<string, unknown> {
   const runConfig: Record<string, unknown> = {
     sandboxMode: cfg.sandboxMode,
     approvalPolicy: cfg.approvalPolicy,
     networkAccessEnabled: cfg.networkAccessEnabled,
     webSearchMode: cfg.webSearchMode,
-    mode
+    mode,
+    enabledSkills
   };
 
   const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
@@ -4261,6 +4379,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [portalPreferenceErrorText, setPortalPreferenceErrorText] = useState("");
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
+  const [enabledSkillNames, setEnabledSkillNames] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -4292,6 +4411,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const runningStageTextRef = useRef(runningStageText);
   const runningStageFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
+  const enabledSkillNamesRef = useRef(enabledSkillNames);
   const knowledgeSetSelectionInitializedRef = useRef(false);
   const completedRunThreadIdsRef = useRef<Set<string>>(new Set());
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
@@ -4338,6 +4458,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
+  enabledSkillNamesRef.current = enabledSkillNames;
   activeThreadIdentityRef.current = activeThreadIdentity;
   productFeedbackImagesRef.current = productFeedbackImages;
   threadCollaborationRef.current = threadCollaboration;
@@ -4537,6 +4658,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     };
   }, [activeThreadIdentity.remoteId]);
 
+  const isExternalPortalUser = props.currentUser?.userType === "external_user";
+
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
     if (!selectedMode) return;
@@ -4555,6 +4678,46 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       };
     });
   }, [runtimeMode, runtimeOptions]);
+
+  useEffect(() => {
+    if (isExternalPortalUser) {
+      setEnabledSkillNames([]);
+      return;
+    }
+    const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+    const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
+    setEnabledSkillNames((current) => current.filter((skillName) => available.has(skillName)));
+  }, [isExternalPortalUser, runtimeMode, runtimeOptions]);
+
+  useEffect(() => {
+    const threadId = String(activeThreadIdentity.remoteId || "").trim();
+    if (!threadId || isExternalPortalUser) {
+      setEnabledSkillNames([]);
+      return;
+    }
+
+    let active = true;
+    void api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`)
+      .then((response) => {
+        if (!active) return;
+        const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+        const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
+        const names = Array.isArray(response.thread.enabled_skill_names)
+          ? response.thread.enabled_skill_names.filter(
+              (name): name is string =>
+                typeof name === "string" && name.trim().length > 0 && (!selectedMode || available.has(name.trim()))
+            )
+          : [];
+        setEnabledSkillNames(Array.from(new Set(names.map((name) => name.trim()))));
+      })
+      .catch(() => {
+        // Keep the local selection if the detail refresh fails; the next run is still validated server-side.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions]);
 
   useEffect(() => {
     let active = true;
@@ -4808,6 +4971,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       async initialize(threadId: string) {
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
+        const skills = enabledSkillNamesRef.current;
         const created = await api<ThreadCreateOut>("/api/threads", {
           method: "POST",
           json: {
@@ -4815,7 +4979,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
             knowledge_set_ids: knowledgeSetIds,
-            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
+            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
           }
         });
         setActiveThreadIdentity({
@@ -4904,6 +5068,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
+  const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
+  const toggleEnabledSkill = useCallback((skillName: string) => {
+    if (isExternalPortalUser) return;
+    setEnabledSkillNames((current) =>
+      current.includes(skillName) ? current.filter((item) => item !== skillName) : [...current, skillName]
+    );
+  }, [isExternalPortalUser]);
+  const skillComposerContext = useMemo(
+    () => ({
+      availableSkills: availableModeSkills,
+      enabledSkillNames,
+      toggleSkill: toggleEnabledSkill
+    }),
+    [availableModeSkills, enabledSkillNames, toggleEnabledSkill]
+  );
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const handleKnowledgeSetChange = useCallback((ids: string[]) => {
     knowledgeSetSelectionInitializedRef.current = true;
@@ -4918,7 +5097,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const selectedModelLabel = appliedConfig.model;
   const selectedReasoningLabel = appliedConfig.reasoningEffort;
   const currentUserName = props.currentUser?.displayName || props.currentUser?.email || "Current user";
-  const isExternalPortalUser = props.currentUser?.userType === "external_user";
   const assistantDisplayName = branding.assistantName.trim() || "AI Assistant";
   const assistantAvatar = useMemo(
     () => ({
@@ -4984,7 +5162,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         approvalPolicy: appliedConfig.approvalPolicy,
         networkAccessEnabled: appliedConfig.networkAccessEnabled,
         webSearchMode: appliedConfig.webSearchMode,
-        knowledgeSetIds: selectedKnowledgeSetIdsNormalized
+        knowledgeSetIds: selectedKnowledgeSetIdsNormalized,
+        enabledSkillNames
       },
       layout: {
         sessionRailCollapsed: layoutState.isSessionRailCollapsed,
@@ -5013,6 +5192,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     props.currentUser,
     runtimeMode,
     runtimeSummaryText,
+    enabledSkillNames,
     selectedKnowledgeSetIdsNormalized,
     selectedModeLabel,
     sharedThreadReadonly
@@ -5256,13 +5436,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
+        const skills = enabledSkillNamesRef.current;
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
           method: "POST",
           json: {
             model: cfg.model,
             reasoning_effort: cfg.reasoningEffort,
             knowledge_set_ids: knowledgeSetIds,
-            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
+            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
           }
         });
         const session = ensured.session;
@@ -6291,11 +6472,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
-      <ComposerActivationGuard runtime={runtime} />
-      <ThreadRuntimeSubscriptionBridge runtime={runtime} />
-      <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
-      <RunningStageTextContext.Provider value={runningStageText}>
+      <SkillComposerContext.Provider value={skillComposerContext}>
+        <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
+        <ComposerActivationGuard runtime={runtime} />
+        <ThreadRuntimeSubscriptionBridge runtime={runtime} />
+        <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
+        <RunningStageTextContext.Provider value={runningStageText}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={PORTAL_ANTD_THEME}>
             <div className="portal-workbench-root">
@@ -6856,7 +7038,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           </div>
         ) : null}
         </MobileWorkbenchContext.Provider>
-      </RunningStageTextContext.Provider>
+        </RunningStageTextContext.Provider>
+      </SkillComposerContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
