@@ -176,7 +176,6 @@ export function PublicAccessRequestPage(props: PublicAccessRequestPageProps) {
             name={branding.platformName}
             logoUrl={branding.logoUrl || branding.iconUrl}
           />
-          <p className="auth-access-eyebrow">Apply for Trial Access</p>
           <h1 className="auth-modern-logo">{statusTitle}</h1>
           <p className="auth-modern-subtitle">{pageSubtitle}</p>
         </div>

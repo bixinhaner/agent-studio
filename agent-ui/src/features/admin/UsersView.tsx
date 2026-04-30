@@ -1,6 +1,6 @@
 import { Edit, Search, Shield } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Empty, Input, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, Button, Drawer, Empty, Input, Segmented, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { UserRoleEditor } from "../rbac/UserRoleEditor";
@@ -14,6 +14,21 @@ import {
   patchAdminUserLocalSettings
 } from "./api";
 import type { AdminCustomerOrganization, AdminDepartmentNode, AdminUser } from "./types";
+
+type UserScope = "active" | "internal" | "external" | "dingtalkOnly" | "disabled" | "all";
+type LoginFilter = "all" | "loggedIn" | "neverLoggedIn";
+type StatusFilter = "all" | "active" | "disabled" | "manualDisabled";
+
+const ALL_OWNERSHIP_FILTER = "__all__";
+
+const USER_SCOPE_OPTIONS: Array<{ value: UserScope; label: string }> = [
+  { value: "active", label: "激活用户" },
+  { value: "internal", label: "内部账号" },
+  { value: "external", label: "外部账号" },
+  { value: "dingtalkOnly", label: "仅钉钉同步" },
+  { value: "disabled", label: "已停用" },
+  { value: "all", label: "全部人员" }
+];
 
 function userSource(user: AdminUser) {
   return user.source ?? {
@@ -117,6 +132,71 @@ function userIdentitySources(user: AdminUser): string[] {
   return [...new Set(source.identities.map((identity) => providerLabel(identity.provider)).filter(Boolean))];
 }
 
+function hasUserLoggedIn(user: AdminUser): boolean {
+  return userSource(user).identities.some((identity) => Boolean(identity.lastLoginAt));
+}
+
+function loginStateLabel(user: AdminUser): string {
+  return hasUserLoggedIn(user) ? "已登录" : "从未登录";
+}
+
+function isUserDisabled(user: AdminUser): boolean {
+  return user.effective.status !== "active" || user.local.manualDisabled;
+}
+
+function isDingTalkSyncOnlyUser(user: AdminUser): boolean {
+  return userSource(user).userType === "internal_employee" && Boolean(user.synced.dingtalkUserId) && !hasUserLoggedIn(user);
+}
+
+function matchesUserScope(user: AdminUser, scope: UserScope): boolean {
+  const source = userSource(user);
+  const disabled = isUserDisabled(user);
+  const dingtalkOnly = isDingTalkSyncOnlyUser(user);
+
+  switch (scope) {
+    case "active":
+      return !disabled && !dingtalkOnly;
+    case "internal":
+      return source.userType === "internal_employee" && !disabled && !dingtalkOnly;
+    case "external":
+      return source.userType === "external_user" && !disabled;
+    case "dingtalkOnly":
+      return !disabled && dingtalkOnly;
+    case "disabled":
+      return disabled;
+    case "all":
+      return true;
+    default:
+      return true;
+  }
+}
+
+function matchesLoginFilter(user: AdminUser, loginFilter: LoginFilter): boolean {
+  if (loginFilter === "all") return true;
+  const loggedIn = hasUserLoggedIn(user);
+  return loginFilter === "loggedIn" ? loggedIn : !loggedIn;
+}
+
+function matchesStatusFilter(user: AdminUser, statusFilter: StatusFilter): boolean {
+  if (statusFilter === "all") return true;
+  if (statusFilter === "active") return !isUserDisabled(user);
+  if (statusFilter === "disabled") return isUserDisabled(user);
+  return user.local.manualDisabled;
+}
+
+function matchesOwnershipFilter(user: AdminUser, ownershipFilter: string): boolean {
+  if (ownershipFilter === ALL_OWNERSHIP_FILTER) return true;
+  if (ownershipFilter.startsWith("department:")) {
+    const departmentId = ownershipFilter.slice("department:".length);
+    return user.synced.departmentIds.includes(departmentId);
+  }
+  if (ownershipFilter.startsWith("organization:")) {
+    const organizationId = ownershipFilter.slice("organization:".length);
+    return userSource(user).organizations.some((membership) => membership.organizationId === organizationId);
+  }
+  return true;
+}
+
 function userOrganizationSummary(user: AdminUser): string {
   const source = userSource(user);
   if (!source.organizations.length) {
@@ -198,6 +278,54 @@ function formatDepartmentList(
   return labels.length ? labels.join(" / ") : "未设置";
 }
 
+function collectDepartmentFilterOptions(departments: AdminDepartmentNode[]): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = [];
+  const seen = new Set<string>();
+
+  function visit(items: AdminDepartmentNode[]) {
+    for (const department of items) {
+      const value = department.externalId.trim() || department.id.trim();
+      if (value && !seen.has(value)) {
+        seen.add(value);
+        options.push({
+          value: `department:${value}`,
+          label: `部门 · ${departmentDisplayLabel(department)}`
+        });
+      }
+      if (department.children.length > 0) {
+        visit(department.children);
+      }
+    }
+  }
+
+  visit(departments);
+  return options;
+}
+
+function collectOrganizationFilterOptions(
+  users: AdminUser[],
+  organizations: AdminCustomerOrganization[]
+): Array<{ value: string; label: string }> {
+  const options = new Map<string, string>();
+
+  for (const organization of organizations) {
+    options.set(organization.id, `组织 · ${organizationLabel(organization)}`);
+  }
+
+  for (const user of users) {
+    for (const membership of userSource(user).organizations) {
+      if (!options.has(membership.organizationId)) {
+        const name = membership.organizationName || membership.organizationSlug || membership.organizationId;
+        options.set(membership.organizationId, `组织 · ${name}`);
+      }
+    }
+  }
+
+  return Array.from(options.entries())
+    .map(([organizationId, label]) => ({ value: `organization:${organizationId}`, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export function UsersView() {
   const [activeTab, setActiveTab] = useState<"users" | "orgs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -207,6 +335,10 @@ export function UsersView() {
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
   const [filterText, setFilterText] = useState("");
+  const [userScope, setUserScope] = useState<UserScope>("active");
+  const [loginFilter, setLoginFilter] = useState<LoginFilter>("all");
+  const [ownershipFilter, setOwnershipFilter] = useState(ALL_OWNERSHIP_FILTER);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [role, setRole] = useState("employee");
   const [manualDisabled, setManualDisabled] = useState(false);
@@ -271,11 +403,46 @@ export function UsersView() {
     () => (departmentId: string | null | undefined) => resolveDepartmentLabel(departmentId, departmentDisplayMap),
     [departmentDisplayMap]
   );
+  const ownershipOptions = useMemo(
+    () => [
+      { value: ALL_OWNERSHIP_FILTER, label: "全部部门/组织" },
+      ...collectDepartmentFilterOptions(departments),
+      ...collectOrganizationFilterOptions(users, organizations)
+    ],
+    [departments, organizations, users]
+  );
+  const scopeCounts = useMemo(() => {
+    return USER_SCOPE_OPTIONS.reduce(
+      (counts, option) => {
+        counts[option.value] = users.filter((user) => matchesUserScope(user, option.value)).length;
+        return counts;
+      },
+      {} as Record<UserScope, number>
+    );
+  }, [users]);
+  const scopeOptions = useMemo(
+    () =>
+      USER_SCOPE_OPTIONS.map((option) => ({
+        value: option.value,
+        label: `${option.label} ${scopeCounts[option.value] ?? 0}`
+      })),
+    [scopeCounts]
+  );
+  const scopedUsers = useMemo(() => users.filter((user) => matchesUserScope(user, userScope)), [userScope, users]);
+
+  useEffect(() => {
+    if (ownershipFilter !== ALL_OWNERSHIP_FILTER && !ownershipOptions.some((option) => option.value === ownershipFilter)) {
+      setOwnershipFilter(ALL_OWNERSHIP_FILTER);
+    }
+  }, [ownershipFilter, ownershipOptions]);
 
   const filteredUsers = useMemo(() => {
     const query = filterText.trim().toLowerCase();
-    if (!query) return users;
-    return users.filter((user) => {
+    return scopedUsers.filter((user) => {
+      if (!matchesLoginFilter(user, loginFilter)) return false;
+      if (!matchesOwnershipFilter(user, ownershipFilter)) return false;
+      if (!matchesStatusFilter(user, statusFilter)) return false;
+      if (!query) return true;
       const source = userSource(user);
       const haystack = [
         user.id,
@@ -294,7 +461,7 @@ export function UsersView() {
         .toLowerCase();
       return haystack.includes(query);
     });
-  }, [departmentDisplayMap, filterText, resolveDepartmentLabelFromMap, users]);
+  }, [filterText, loginFilter, ownershipFilter, resolveDepartmentLabelFromMap, scopedUsers, statusFilter]);
 
 
   function openEditor(user: AdminUser) {
@@ -453,6 +620,9 @@ export function UsersView() {
             ) : (
               <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>未绑定登录源</span>
             )}
+            <Tag color={hasUserLoggedIn(record) ? "green" : "default"} style={{ borderRadius: 12, margin: 0 }}>
+              {loginStateLabel(record)}
+            </Tag>
           </Space>
           {record.synced.dingtalkUserId ? (
             <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>钉钉 ID: {record.synced.dingtalkUserId}</span>
@@ -754,24 +924,81 @@ export function UsersView() {
       >
         <div
           style={{
-            padding: isNarrowScreen ? "16px" : "16px 24px",
+            padding: isNarrowScreen ? "10px 12px" : "10px 16px",
             borderBottom: "1px solid var(--admin-color-border)",
             display: "flex",
             justifyContent: "space-between",
-            alignItems: isNarrowScreen ? "stretch" : "center",
-            gap: 12,
-            flexWrap: "wrap"
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "nowrap",
+            minHeight: 52
           }}
         >
-          <Input
-            prefix={<Search size={16} style={{ color: "var(--admin-color-subtle)" }} />}
-            placeholder="搜索姓名、邮箱、组织、钉钉 ID..."
-            value={filterText}
-            onChange={(event) => setFilterText(event.target.value)}
-            allowClear
-            style={{ width: isNarrowScreen ? "100%" : 320, borderRadius: "var(--admin-radius-full)" }}
-          />
-          <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>共 {users.length} 名用户</span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flex: "1 1 auto",
+              minWidth: 0,
+              overflowX: "auto",
+              overflowY: "hidden",
+              paddingBottom: 2
+            }}
+          >
+            <Segmented
+              size="small"
+              value={userScope}
+              onChange={(value) => setUserScope(value as UserScope)}
+              options={scopeOptions}
+              style={{ flex: "0 0 auto" }}
+            />
+            <Input
+              prefix={<Search size={15} style={{ color: "var(--admin-color-subtle)" }} />}
+              placeholder="搜索姓名/邮箱/钉钉ID..."
+              value={filterText}
+              onChange={(event) => setFilterText(event.target.value)}
+              allowClear
+              style={{ width: isNarrowScreen ? 220 : 260, flex: `0 0 ${isNarrowScreen ? 220 : 260}px`, borderRadius: "var(--admin-radius-full)" }}
+            />
+            <Select
+              size="middle"
+              value={loginFilter}
+              onChange={(value) => setLoginFilter(value as LoginFilter)}
+              options={[
+                { value: "all", label: "全部登录状态" },
+                { value: "loggedIn", label: "已登录" },
+                { value: "neverLoggedIn", label: "从未登录" }
+              ]}
+              style={{ width: 136, flex: "0 0 136px" }}
+            />
+            <Select
+              size="middle"
+              showSearch
+              value={ownershipFilter}
+              onChange={setOwnershipFilter}
+              options={ownershipOptions}
+              optionFilterProp="label"
+              style={{ width: 190, flex: "0 0 190px" }}
+            />
+            <Select
+              size="middle"
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value as StatusFilter)}
+              options={[
+                { value: "all", label: "全部状态" },
+                { value: "active", label: "正常" },
+                { value: "disabled", label: "已停用" },
+                { value: "manualDisabled", label: "手动禁用" }
+              ]}
+              style={{ width: 112, flex: "0 0 112px" }}
+            />
+          </div>
+          <Tooltip title={`当前范围 ${scopedUsers.length} 人，筛选命中 ${filteredUsers.length} 人`}>
+            <span style={{ color: "var(--admin-color-subtle)", fontSize: 13, flex: "0 0 auto", whiteSpace: "nowrap" }}>
+              {filteredUsers.length} / {scopedUsers.length}
+            </span>
+          </Tooltip>
         </div>
 
         <div style={{ flex: 1, overflow: isNarrowScreen ? "auto" : "hidden" }}>
@@ -810,7 +1037,7 @@ export function UsersView() {
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">身份源</div>
-                        <strong>{userIdentitySources(user).join(" / ") || "未绑定"}</strong>
+                        <strong>{`${userIdentitySources(user).join(" / ") || "未绑定"} · ${loginStateLabel(user)}`}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">组织成员</div>

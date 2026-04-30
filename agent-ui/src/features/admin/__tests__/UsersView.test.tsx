@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsersView } from "../UsersView";
 import { fetchAdminCustomerOrganizations, fetchAdminUsers, fetchDepartmentTree } from "../api";
@@ -20,6 +20,10 @@ beforeAll(() => {
       dispatchEvent: vi.fn()
     }))
   });
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe("UsersView", () => {
@@ -48,6 +52,40 @@ describe("UsersView", () => {
             email: "john@example.com",
             dingtalkUserId: "ding-001",
             departmentIds: ["dept-001", "dept-002"],
+            primaryDepartmentId: "dept-001"
+          },
+          local: { role: "employee", manualDisabled: false, adminNote: null },
+          assignedRoles: [],
+          primaryRole: null,
+          effective: {
+            status: "active",
+            statusSource: "sync",
+            syncState: "active",
+            lastSyncedAt: new Date().toISOString()
+          }
+        },
+        {
+          id: "2",
+          source: {
+            userType: "internal_employee",
+            primaryOrganizationId: "org_internal",
+            identities: [],
+            organizations: [
+              {
+                organizationId: "org_internal",
+                organizationSlug: "internal",
+                organizationName: "Baicells Internal",
+                organizationType: "internal",
+                membershipType: "employee",
+                status: "active"
+              }
+            ]
+          },
+          synced: {
+            displayName: "Sync Only",
+            email: "sync-only@example.com",
+            dingtalkUserId: "ding-002",
+            departmentIds: ["dept-001"],
             primaryDepartmentId: "dept-001"
           },
           local: { role: "employee", manualDisabled: false, adminNote: null },
@@ -115,5 +153,15 @@ describe("UsersView", () => {
     const searchInputs = screen.getAllByPlaceholderText(/搜索/i);
     fireEvent.change(searchInputs[0], { target: { value: "John" } });
     expect(await screen.findByText("John Doe")).toBeTruthy();
+  });
+
+  it("keeps DingTalk-only synced users out of the default active scope", async () => {
+    render(<UsersView />);
+
+    expect(await screen.findByText("John Doe")).toBeTruthy();
+    expect(screen.queryByText("Sync Only")).toBeNull();
+
+    fireEvent.click(await screen.findByText("仅钉钉同步 1"));
+    expect(await screen.findByText("Sync Only")).toBeTruthy();
   });
 });
