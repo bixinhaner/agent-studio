@@ -1,0 +1,5 @@
+Summary:
+Keep streamed process trace rows in one codex_trace_batch instead of creating repeated trace panels.
+
+Verification:
+npm run build passed in agent-ui before commit.
