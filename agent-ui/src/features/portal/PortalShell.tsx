@@ -271,6 +271,19 @@ type TimelineRow = {
   at?: string;
 };
 
+type TraceBatchPartData = {
+  batch_id: number;
+  open?: boolean;
+  active_row_id?: string;
+  rows: TimelineRow[];
+};
+
+type TraceBatchPart = {
+  type: "data";
+  name: "codex_trace_batch";
+  data: TraceBatchPartData;
+};
+
 type CommentaryEntryData = {
   id: string;
   text: string;
@@ -5466,7 +5479,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         let currentCommentaryKey = "";
         let commentarySeq = 0;
         let traceBatchSeq = 0;
+        let traceRowSeq = 0;
         let seq = 0;
+        let activeTraceBatchPart: TraceBatchPart | null = null;
         const commentaryLineBreakGapMs = 900;
 
         const processEnabled = showProcessTraceRef.current;
@@ -5714,30 +5729,34 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
         const appendTraceBatch = (parts: any[]): boolean => {
           if (parts.length === 0) return false;
-          const rows = extractTimelineRows(parts);
-          if (rows.length === 0) return false;
+          const incomingRows = extractTimelineRows(parts);
+          if (incomingRows.length === 0) return false;
           activeTextPart = null;
           activeCommentaryPart = null;
           currentCommentaryKey = "";
-          for (const part of orderedParts) {
-            const item = part as Record<string, unknown>;
-            if (item.type !== "data" || item.name !== "codex_trace_batch") continue;
-            const payload = asRecord(item.data);
-            if (!payload) continue;
-            payload.open = false;
+
+          if (!activeTraceBatchPart) {
+            traceBatchSeq += 1;
+            activeTraceBatchPart = {
+              type: "data",
+              name: "codex_trace_batch",
+              data: {
+                batch_id: traceBatchSeq,
+                open: true,
+                active_row_id: "",
+                rows: []
+              }
+            };
+            orderedParts.push(activeTraceBatchPart);
           }
-          traceBatchSeq += 1;
-          const activeRowId = rows[rows.length - 1]?.id || "";
-          orderedParts.push({
-            type: "data",
-            name: "codex_trace_batch",
-            data: {
-              batch_id: traceBatchSeq,
-              open: true,
-              active_row_id: activeRowId,
-              rows
-            }
-          });
+
+          const nextRows = incomingRows.map((row) => ({
+            ...row,
+            id: `trace-row-${++traceRowSeq}`
+          }));
+          activeTraceBatchPart.data.rows = [...activeTraceBatchPart.data.rows, ...nextRows];
+          activeTraceBatchPart.data.open = true;
+          activeTraceBatchPart.data.active_row_id = nextRows[nextRows.length - 1]?.id || activeTraceBatchPart.data.active_row_id || "";
           return true;
         };
 
