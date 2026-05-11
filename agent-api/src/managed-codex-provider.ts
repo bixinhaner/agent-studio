@@ -9,6 +9,8 @@ import type { SystemSettingsVersionRecord } from "./system-settings/types.js";
 
 export type ManagedCodexProviderKind = "chatgpt" | "openai_api" | "azure_openai";
 
+const OPENAI_COMPATIBLE_PROVIDER_ID = "agentstudio_openai_compatible";
+
 export type ManagedCodexProviderConfig = {
   providerKind: ManagedCodexProviderKind;
   baseUrl?: string;
@@ -158,7 +160,24 @@ export function createManagedCodexProviderSnapshot(input: ProviderConfigInput & 
   if (config.providerKind === "openai_api") {
     requireField(secrets.apiKey, "OpenAI API key is required");
     runtimeOptions.apiKey = secrets.apiKey;
-    runtimeOptions.baseUrl = config.baseUrl;
+    if (config.baseUrl) {
+      // Custom gateways can implement the Responses API without supporting Codex's
+      // OpenAI-only /responses/compact endpoint. A named provider keeps normal
+      // calls on the gateway while letting Codex fall back to local compaction.
+      runtimeOptions.config = {
+        model_provider: OPENAI_COMPATIBLE_PROVIDER_ID,
+        model_providers: {
+          [OPENAI_COMPATIBLE_PROVIDER_ID]: {
+            name: "Agent Studio OpenAI Compatible",
+            base_url: config.baseUrl,
+            env_key: "CODEX_API_KEY",
+            wire_api: "responses"
+          }
+        }
+      };
+    } else {
+      runtimeOptions.baseUrl = config.baseUrl;
+    }
   }
 
   if (config.providerKind === "azure_openai") {
