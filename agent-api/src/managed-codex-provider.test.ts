@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ManagedCodexProviderResolver,
   createManagedCodexProviderSnapshot,
+  normalizeManagedCodexProviderSnapshot,
   resolveManagedCodexDefaults
 } from "./managed-codex-provider.js";
 
@@ -67,6 +68,46 @@ describe("createManagedCodexProviderSnapshot", () => {
     });
     expect(snapshot.runtimeOptions.envOverrides).toEqual({
       AZURE_OPENAI_API_KEY: "azure-secret"
+    });
+  });
+});
+
+describe("normalizeManagedCodexProviderSnapshot", () => {
+  it("re-derives runtime options for legacy OpenAI-compatible snapshots", () => {
+    const snapshot = normalizeManagedCodexProviderSnapshot({
+      version: 1,
+      kind: "openai_api",
+      source: "integration",
+      integrationInstanceId: "provider-1",
+      integrationSlug: "local-codex",
+      integrationUpdatedAt: "2026-05-11T00:00:00.000Z",
+      config: {
+        providerKind: "openai_api",
+        baseUrl: "https://example.com/v1",
+        defaultModel: "gpt-5.4",
+        defaultReasoningEffort: "high"
+      },
+      secrets: {
+        apiKey: "openai-compatible-secret"
+      },
+      runtimeOptions: {
+        baseUrl: "https://example.com/v1",
+        apiKey: "openai-compatible-secret"
+      }
+    });
+
+    expect(snapshot?.runtimeOptions.baseUrl).toBeUndefined();
+    expect(snapshot?.runtimeOptions.apiKey).toBe("openai-compatible-secret");
+    expect(snapshot?.runtimeOptions.config).toEqual({
+      model_provider: "agentstudio_openai_compatible",
+      model_providers: {
+        agentstudio_openai_compatible: {
+          name: "Agent Studio OpenAI Compatible",
+          base_url: "https://example.com/v1",
+          env_key: "CODEX_API_KEY",
+          wire_api: "responses"
+        }
+      }
     });
   });
 });

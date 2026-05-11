@@ -221,35 +221,22 @@ export function normalizeManagedCodexProviderSnapshot(
 ): ManagedCodexProviderSnapshot | undefined {
   const snapshot = asRecord(value);
   if (!snapshot) return undefined;
-  const runtimeOptions = asRecord(snapshot.runtimeOptions);
   try {
-    return {
-      version: 1,
-      kind: asProviderKind(snapshot.kind) ?? "chatgpt",
-      source: snapshot.source === "integration" ? "integration" : "local_auth",
-      integrationInstanceId: asString(snapshot.integrationInstanceId),
-      integrationSlug: asString(snapshot.integrationSlug),
-      integrationUpdatedAt: asString(snapshot.integrationUpdatedAt),
-      config: normalizeManagedCodexProviderConfig({
-        config: asRecord(snapshot.config),
-        fallbackModel: appConfig.defaultModel,
-        fallbackReasoningEffort: appConfig.defaultReasoningEffort
-      }),
+    const config = normalizeManagedCodexProviderConfig({
+      config: asRecord(snapshot.config),
+      fallbackModel: appConfig.defaultModel,
+      fallbackReasoningEffort: appConfig.defaultReasoningEffort
+    });
+    return createManagedCodexProviderSnapshot({
+      config,
       secrets: {
         apiKey: asString(asRecord(snapshot.secrets)?.apiKey)
       },
-      runtimeOptions: {
-        baseUrl: asString(runtimeOptions?.baseUrl),
-        apiKey: asString(runtimeOptions?.apiKey),
-        config: asRecord(runtimeOptions?.config),
-        envOverrides: Object.fromEntries(
-          Object.entries(asRecord(runtimeOptions?.envOverrides) ?? {}).flatMap(([key, current]) => {
-            const normalized = asString(current);
-            return normalized ? [[key, normalized]] : [];
-          })
-        )
-      }
-    };
+      integrationInstanceId: asString(snapshot.integrationInstanceId),
+      integrationSlug: asString(snapshot.integrationSlug),
+      integrationUpdatedAt: asString(snapshot.integrationUpdatedAt),
+      source: snapshot.source === "integration" ? "integration" : "local_auth"
+    });
   } catch {
     return undefined;
   }
