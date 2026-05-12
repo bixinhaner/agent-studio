@@ -140,6 +140,17 @@ check_required_commands() {
   command -v psql
   command -v pm2
   command -v caddy
+  command -v soffice
+  command -v pdftoppm
+  command -v pdfinfo
+}
+
+check_document_render_runtime() {
+  soffice --version
+  pdftoppm -v 2>&1 | head -n 1
+  pdfinfo -v 2>&1 | head -n 1
+  fc-match Calibri | head -n 1
+  fc-match "Noto Sans CJK SC" | head -n 1
 }
 
 check_build_outputs() {
@@ -169,6 +180,7 @@ main() {
   try_run "pm2 logs" run_as_app_user_shell "pm2 logs '$PM2_APP_NAME' --lines 80 --nostream"
   try_run "health check" curl --fail --silent --show-error "$HEALTH_URL"
   try_run "caddy validate" caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile
+  try_run "document render runtime" check_document_render_runtime
   try_run "prisma migrate status" run_as_app_user_shell "cd '$APP_API_DIR' && npx prisma migrate status"
 
   if [[ -f "$BACKEND_ENV_FILE" ]]; then

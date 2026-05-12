@@ -471,7 +471,10 @@ ensure_system_dependencies() {
   ensure_ubuntu_apt_packages \
     sudo git curl ca-certificates build-essential python3 openssl unzip \
     gnupg debian-keyring debian-archive-keyring apt-transport-https \
-    postgresql postgresql-contrib
+    postgresql postgresql-contrib \
+    poppler-utils libreoffice-writer-nogui \
+    fonts-noto-core fonts-noto-cjk \
+    fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation2
 
   if ! command_exists caddy; then
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -492,6 +495,9 @@ ensure_system_dependencies() {
   command_exists node || die "node install failed"
   command_exists npm || die "npm install failed"
   command_exists pm2 || die "pm2 install failed"
+  command_exists soffice || die "LibreOffice soffice install failed"
+  command_exists pdftoppm || die "poppler pdftoppm install failed"
+  command_exists pdfinfo || die "poppler pdfinfo install failed"
 
   record_step_status system_dependencies complete "system dependencies are installed"
 }

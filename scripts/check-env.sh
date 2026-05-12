@@ -131,6 +131,9 @@ check_commands() {
   require_command psql
   require_command caddy
   require_command pm2
+  require_command soffice
+  require_command pdftoppm
+  require_command pdfinfo
   print_ok "required commands are available"
 }
 
