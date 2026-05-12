@@ -20,7 +20,7 @@ import { firstSectionWithFieldErrors, parseSystemSettingsValidationDetail } from
 
 const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; group: string }> = [
   { id: "branding", label: "基本设置", icon: Settings2, group: 'General' },
-  { id: "model-defaults", label: "模型默认值", icon: Box, group: 'General' },
+  { id: "model-defaults", label: "运行时默认与兜底", icon: Box, group: 'General' },
   { id: "organization-defaults", label: "组织默认值", icon: Users, group: 'General' },
   { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
   { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
