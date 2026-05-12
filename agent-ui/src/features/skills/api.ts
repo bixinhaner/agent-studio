@@ -16,6 +16,44 @@ export async function createPortalSkillDraft(input: {
   });
 }
 
+export async function createPortalSkillDraftFromThreadPath(input: {
+  threadId: string;
+  path: string;
+  prompt?: string;
+  modeId?: string;
+}): Promise<{ draft: CodexSkillDraft }> {
+  return api<{ draft: CodexSkillDraft }>("/api/portal/skill-drafts/from-thread-path", {
+    method: "POST",
+    json: {
+      thread_id: input.threadId,
+      path: input.path,
+      prompt: input.prompt,
+      mode_id: input.modeId
+    }
+  });
+}
+
+export async function installPortalSkillFromThreadPath(input: {
+  threadId: string;
+  path: string;
+  prompt?: string;
+  modeId?: string;
+}): Promise<{ skill: CodexManagedSkill }> {
+  return api<{ skill: CodexManagedSkill }>("/api/portal/codex-managed-skills/install-from-thread-path", {
+    method: "POST",
+    json: {
+      thread_id: input.threadId,
+      path: input.path,
+      prompt: input.prompt,
+      mode_id: input.modeId
+    }
+  });
+}
+
+export async function fetchPortalManagedSkills(): Promise<{ skills: CodexManagedSkill[] }> {
+  return api<{ skills: CodexManagedSkill[] }>("/api/portal/codex-managed-skills");
+}
+
 export async function fetchPortalSkillDraft(id: string): Promise<{ draft: CodexSkillDraft }> {
   return api<{ draft: CodexSkillDraft }>(`/api/portal/skill-drafts/${encodeURIComponent(id)}`);
 }
@@ -87,4 +125,14 @@ export async function publishAdminSkillDraft(input: {
 
 export async function fetchAdminManagedSkills(): Promise<{ skills: CodexManagedSkill[] }> {
   return api<{ skills: CodexManagedSkill[] }>("/api/admin/codex-managed-skills");
+}
+
+export async function updateAdminManagedSkillStatus(input: {
+  id: string;
+  status: "active" | "disabled" | "archived";
+}): Promise<{ skill: CodexManagedSkill }> {
+  return api<{ skill: CodexManagedSkill }>(`/api/admin/codex-managed-skills/${encodeURIComponent(input.id)}/status`, {
+    method: "POST",
+    json: { status: input.status }
+  });
 }

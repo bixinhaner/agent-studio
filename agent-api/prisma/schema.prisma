@@ -1061,12 +1061,15 @@ model RunProfile {
 model CodexManagedSkill {
   id                    String    @id @default(cuid())
   organizationId        String?   @map("organization_id")
+  ownerUserId           String?   @map("owner_user_id")
+  scope                 String    @default("agent_mode")
   skillName             String    @map("skill_name")
   slug                  String
   displayName           String    @map("display_name")
   description           String?
   status                String    @default("active")
   version               String    @default("1.0.0")
+  checksum              String?
   publishedPath         String    @map("published_path")
   sourceDraftId         String?   @map("source_draft_id")
   createdByUserId       String?   @map("created_by_user_id")
@@ -1082,8 +1085,10 @@ model CodexManagedSkill {
   createdAt             DateTime  @default(now()) @map("created_at")
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  @@unique([organizationId, skillName])
+  @@unique([organizationId, ownerUserId, scope, skillName])
   @@index([organizationId, status])
+  @@index([organizationId, scope, status])
+  @@index([organizationId, skillName])
   @@index([createdByUserId, createdAt])
   @@map("codex_managed_skills")
 }

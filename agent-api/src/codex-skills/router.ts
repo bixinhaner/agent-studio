@@ -9,6 +9,17 @@ const createDraftSchema = z.object({
   mode_id: z.string().trim().optional().nullable()
 });
 
+const createDraftFromThreadPathSchema = z.object({
+  thread_id: z.string().trim().min(1),
+  path: z.string().trim().min(1).max(2000),
+  prompt: z.string().trim().max(8000).optional().nullable(),
+  mode_id: z.string().trim().optional().nullable()
+});
+
+const updateManagedSkillStatusSchema = z.object({
+  status: z.enum(["active", "disabled", "archived"])
+});
+
 const reviseDraftSchema = z.object({
   instruction: z.string().trim().min(1).max(8000)
 });
@@ -59,6 +70,14 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
     }
   });
 
+  router.get("/codex-managed-skills", async (req: Request, res: Response) => {
+    try {
+      res.json({ skills: await service.listManagedSkillsForPortal(actorFromRequest(req)) });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/skill-drafts", async (req: Request, res: Response) => {
     const parsed = createDraftSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -73,6 +92,65 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
         modeId: parsed.data.mode_id || undefined
       });
       res.status(201).json({ draft });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/skill-drafts/from-thread-path", async (req: Request, res: Response) => {
+    const parsed = createDraftFromThreadPathSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const resolver = req.app.locals.resolveCodexSkillThreadPath as
+        | ((input: { req: Request; threadId: string; requestedPath: string }) => Promise<string>)
+        | undefined;
+      if (!resolver) throw new Error("Skill path resolver is not available");
+      const sourceDirectoryPath = await resolver({
+        req,
+        threadId: parsed.data.thread_id,
+        requestedPath: parsed.data.path
+      });
+      const draft = await service.createDraftFromDirectory({
+        actor: actorFromRequest(req),
+        sourceDirectoryPath,
+        requestedPrompt: parsed.data.prompt || undefined,
+        sourceThreadId: parsed.data.thread_id,
+        modeId: parsed.data.mode_id || undefined
+      });
+      res.status(201).json({ draft });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-managed-skills/install-from-thread-path", async (req: Request, res: Response) => {
+    const parsed = createDraftFromThreadPathSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const resolver = req.app.locals.resolveCodexSkillThreadPath as
+        | ((input: { req: Request; threadId: string; requestedPath: string }) => Promise<string>)
+        | undefined;
+      if (!resolver) throw new Error("Skill path resolver is not available");
+      const sourceDirectoryPath = await resolver({
+        req,
+        threadId: parsed.data.thread_id,
+        requestedPath: parsed.data.path
+      });
+      const skill = await service.installSkillFromDirectory({
+        actor: actorFromRequest(req),
+        sourceDirectoryPath,
+        sourceRelativePath: parsed.data.path,
+        requestedPrompt: parsed.data.prompt || undefined,
+        sourceThreadId: parsed.data.thread_id,
+        modeId: parsed.data.mode_id || undefined
+      });
+      res.status(201).json({ skill });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
@@ -206,6 +284,24 @@ export function createAdminCodexSkillRouter(service: CodexSkillService): Router 
   router.get("/codex-managed-skills", async (req: Request, res: Response) => {
     try {
       res.json({ skills: await service.listManagedSkills({ organizationId: req.currentOrganization?.id }) });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-managed-skills/:id/status", async (req: Request, res: Response) => {
+    const parsed = updateManagedSkillStatusSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const skill = await service.setManagedSkillStatus({
+        actor: actorFromRequest(req),
+        skillId: req.params.id,
+        status: parsed.data.status
+      });
+      res.json({ skill });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }

@@ -6,6 +6,7 @@ export type CodexSkillDraftStatus =
   | "archived";
 
 export type CodexManagedSkillStatus = "active" | "disabled" | "archived";
+export type CodexManagedSkillScope = "private" | "agent_mode" | "team" | "org";
 
 export type CodexSkillDraftRecord = {
   id: string;
@@ -39,12 +40,15 @@ export type CodexSkillDraftRecord = {
 export type CodexManagedSkillRecord = {
   id: string;
   organizationId?: string;
+  ownerUserId?: string;
+  scope: string;
   skillName: string;
   slug: string;
   displayName: string;
   description?: string;
   status: string;
   version: string;
+  checksum?: string;
   publishedPath: string;
   sourceDraftId?: string;
   createdByUserId?: string;
@@ -106,12 +110,15 @@ export type UpdateCodexSkillDraftInput = Partial<
 
 export type UpsertCodexManagedSkillInput = {
   organizationId?: string;
+  ownerUserId?: string;
+  scope?: CodexManagedSkillScope;
   skillName: string;
   slug: string;
   displayName: string;
   description?: string;
   status?: CodexManagedSkillStatus;
   version?: string;
+  checksum?: string;
   publishedPath: string;
   sourceDraftId?: string;
   createdByUserId?: string;
@@ -123,6 +130,33 @@ export type UpsertCodexManagedSkillInput = {
   publishedByUserId?: string;
   publishedByDisplayName?: string;
   metadata?: unknown;
+  publishedAt?: Date | string | null;
+};
+
+export type UpdateCodexManagedSkillInput = Partial<
+  Pick<
+    CodexManagedSkillRecord,
+    | "ownerUserId"
+    | "scope"
+    | "slug"
+    | "displayName"
+    | "description"
+    | "status"
+    | "version"
+    | "checksum"
+    | "publishedPath"
+    | "sourceDraftId"
+    | "createdByUserId"
+    | "createdByDisplayName"
+    | "createdByEmail"
+    | "lastEditedByUserId"
+    | "reviewedByUserId"
+    | "reviewedByDisplayName"
+    | "publishedByUserId"
+    | "publishedByDisplayName"
+    | "metadata"
+  >
+> & {
   publishedAt?: Date | string | null;
 };
 
@@ -158,12 +192,15 @@ type CodexSkillDraftRow = {
 type CodexManagedSkillRow = {
   id: string;
   organizationId: string | null;
+  ownerUserId: string | null;
+  scope: string | null;
   skillName: string;
   slug: string;
   displayName: string;
   description: string | null;
   status: string | null;
   version: string | null;
+  checksum: string | null;
   publishedPath: string;
   sourceDraftId: string | null;
   createdByUserId: string | null;
@@ -256,12 +293,15 @@ function mapManagedSkill(row: CodexManagedSkillRow): CodexManagedSkillRecord {
   return {
     id: row.id,
     organizationId: trimOrUndefined(row.organizationId),
+    ownerUserId: trimOrUndefined(row.ownerUserId),
+    scope: trimOrUndefined(row.scope) ?? "agent_mode",
     skillName: row.skillName,
     slug: row.slug,
     displayName: row.displayName,
     description: trimOrUndefined(row.description),
     status: trimOrUndefined(row.status) ?? "active",
     version: trimOrUndefined(row.version) ?? "1.0.0",
+    checksum: trimOrUndefined(row.checksum),
     publishedPath: row.publishedPath,
     sourceDraftId: trimOrUndefined(row.sourceDraftId),
     createdByUserId: trimOrUndefined(row.createdByUserId),
@@ -372,12 +412,21 @@ export class CodexSkillRepository {
   async listManagedSkills(input?: {
     organizationId?: string;
     status?: string;
+    scope?: string;
+    ownerUserId?: string;
+    skillName?: string;
   }): Promise<CodexManagedSkillRecord[]> {
     const where: Record<string, unknown> = {};
     const organizationId = trimOrUndefined(input?.organizationId);
     if (organizationId) where.organizationId = organizationId;
     const status = trimOrUndefined(input?.status);
     if (status) where.status = status;
+    const scope = trimOrUndefined(input?.scope);
+    if (scope) where.scope = scope;
+    const ownerUserId = trimOrUndefined(input?.ownerUserId);
+    if (ownerUserId) where.ownerUserId = ownerUserId;
+    const skillName = trimOrUndefined(input?.skillName);
+    if (skillName) where.skillName = skillName;
     const rows = await this.db.codexManagedSkill.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { updatedAt: "desc" }
@@ -394,6 +443,8 @@ export class CodexSkillRepository {
 
   async findManagedSkillByName(input: {
     organizationId?: string;
+    ownerUserId?: string;
+    scope?: string;
     skillName: string;
   }): Promise<CodexManagedSkillRecord | undefined> {
     const skillName = trimOrUndefined(input.skillName);
@@ -401,30 +452,81 @@ export class CodexSkillRepository {
     const row = await this.db.codexManagedSkill.findFirst({
       where: {
         skillName,
-        organizationId: trimOrUndefined(input.organizationId) ?? null
+        organizationId: trimOrUndefined(input.organizationId) ?? null,
+        ownerUserId: trimOrUndefined(input.ownerUserId) ?? null,
+        scope: trimOrUndefined(input.scope) ?? "agent_mode"
       }
     });
     return row ? mapManagedSkill(row) : undefined;
+  }
+
+  async updateManagedSkill(id: string, input: UpdateCodexManagedSkillInput): Promise<CodexManagedSkillRecord> {
+    const skillId = trimOrUndefined(id);
+    if (!skillId) throw new Error("managed skill 不存在");
+    const row = await this.db.codexManagedSkill.update({
+      where: { id: skillId },
+      data: {
+        ...(input.ownerUserId !== undefined ? { ownerUserId: trimOrUndefined(input.ownerUserId) ?? null } : {}),
+        ...(input.scope !== undefined ? { scope: trimOrUndefined(input.scope) ?? "agent_mode" } : {}),
+        ...(input.slug !== undefined ? { slug: input.slug } : {}),
+        ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+        ...(input.description !== undefined ? { description: trimOrUndefined(input.description) ?? null } : {}),
+        ...(input.status !== undefined ? { status: trimOrUndefined(input.status) ?? "active" } : {}),
+        ...(input.version !== undefined ? { version: trimOrUndefined(input.version) ?? "1.0.0" } : {}),
+        ...(input.checksum !== undefined ? { checksum: trimOrUndefined(input.checksum) ?? null } : {}),
+        ...(input.publishedPath !== undefined ? { publishedPath: input.publishedPath } : {}),
+        ...(input.sourceDraftId !== undefined ? { sourceDraftId: trimOrUndefined(input.sourceDraftId) ?? null } : {}),
+        ...(input.createdByUserId !== undefined ? { createdByUserId: trimOrUndefined(input.createdByUserId) ?? null } : {}),
+        ...(input.createdByDisplayName !== undefined
+          ? { createdByDisplayName: trimOrUndefined(input.createdByDisplayName) ?? null }
+          : {}),
+        ...(input.createdByEmail !== undefined ? { createdByEmail: trimOrUndefined(input.createdByEmail) ?? null } : {}),
+        ...(input.lastEditedByUserId !== undefined
+          ? { lastEditedByUserId: trimOrUndefined(input.lastEditedByUserId) ?? null }
+          : {}),
+        ...(input.reviewedByUserId !== undefined ? { reviewedByUserId: trimOrUndefined(input.reviewedByUserId) ?? null } : {}),
+        ...(input.reviewedByDisplayName !== undefined
+          ? { reviewedByDisplayName: trimOrUndefined(input.reviewedByDisplayName) ?? null }
+          : {}),
+        ...(input.publishedByUserId !== undefined
+          ? { publishedByUserId: trimOrUndefined(input.publishedByUserId) ?? null }
+          : {}),
+        ...(input.publishedByDisplayName !== undefined
+          ? { publishedByDisplayName: trimOrUndefined(input.publishedByDisplayName) ?? null }
+          : {}),
+        ...(input.metadata !== undefined ? { metadata: input.metadata ?? null } : {}),
+        ...(input.publishedAt !== undefined ? { publishedAt: input.publishedAt ? new Date(input.publishedAt) : null } : {}),
+        updatedAt: new Date()
+      }
+    });
+    return mapManagedSkill(row);
   }
 
   async upsertManagedSkill(input: UpsertCodexManagedSkillInput): Promise<CodexManagedSkillRecord> {
     const skillName = trimOrUndefined(input.skillName);
     if (!skillName) throw new Error("skillName is required");
     const organizationId = trimOrUndefined(input.organizationId);
+    const ownerUserId = trimOrUndefined(input.ownerUserId);
+    const scope = trimOrUndefined(input.scope) ?? "agent_mode";
     const existing = await this.db.codexManagedSkill.findFirst({
       where: {
         organizationId: organizationId ?? null,
+        ownerUserId: ownerUserId ?? null,
+        scope,
         skillName
       }
     });
     const data = {
       organizationId: organizationId ?? null,
+      ownerUserId: ownerUserId ?? null,
+      scope,
       skillName,
       slug: input.slug,
       displayName: input.displayName,
       description: trimOrUndefined(input.description) ?? null,
       status: trimOrUndefined(input.status) ?? "active",
       version: trimOrUndefined(input.version) ?? "1.0.0",
+      checksum: trimOrUndefined(input.checksum) ?? null,
       publishedPath: input.publishedPath,
       sourceDraftId: trimOrUndefined(input.sourceDraftId) ?? null,
       createdByUserId: trimOrUndefined(input.createdByUserId) ?? null,

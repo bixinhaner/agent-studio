@@ -21,11 +21,15 @@ export type RuntimeModeSnapshot = {
   allowDirectorySelection: boolean;
   skillPackages: Array<{ id: string; label: string }>;
   availableSkills: Array<{
+    id: string;
     name: string;
     label: string;
     description?: string;
     system: boolean;
     activationPrompt?: string;
+    managedSkillId?: string;
+    scope?: string;
+    sourcePath?: string;
   }>;
   instructionSources: Array<{
     sourceType: string;

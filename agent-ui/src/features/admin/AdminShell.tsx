@@ -248,12 +248,12 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   "skill-drafts": {
     id: "skill-drafts",
-    title: "Skill 审核",
-    description: "审核工作台沉淀的 skill 草稿，发布为新会话可用的运行能力。",
-    scope: "Skill 草稿与发布",
-    cadence: "建议随提交实时处理",
+    title: "Skill 管理",
+    description: "管理已安装 Skills，并审核需要共享发布的 skill 草稿。",
+    scope: "Skill Registry 与审核发布",
+    cadence: "建议随安装与提交实时处理",
     group: "runtime",
-    keywords: ["skill", "技能", "审核", "发布", "草稿"],
+    keywords: ["skill", "技能", "审核", "发布", "草稿", "registry"],
     icon: <ClipboardList size={18} />
   },
   integrations: {

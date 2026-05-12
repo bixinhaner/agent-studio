@@ -8096,6 +8096,21 @@ time,
   box-shadow: 0 16px 40px rgba(24, 32, 56, 0.08);
 }
 
+.assistant-file-change-skill-submit {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed rgba(37, 99, 235, 0.28);
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.assistant-file-change-skill-submit p {
+  margin: 0 0 10px;
+  color: #1e3a8a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .skill-draft-card-head {
   display: flex;
   align-items: flex-start;

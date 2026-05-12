@@ -24,6 +24,23 @@ type CreateDraftInput = {
   modeId?: string;
 };
 
+type CreateDraftFromDirectoryInput = {
+  actor: Actor;
+  sourceDirectoryPath: string;
+  requestedPrompt?: string;
+  sourceThreadId?: string;
+  modeId?: string;
+};
+
+type InstallSkillFromDirectoryInput = {
+  actor: Actor;
+  sourceDirectoryPath: string;
+  sourceRelativePath?: string;
+  requestedPrompt?: string;
+  sourceThreadId?: string;
+  modeId?: string;
+};
+
 type ReviseDraftInput = {
   actor: Actor;
   draftId: string;
@@ -197,6 +214,57 @@ async function copyDirectoryNoSymlinks(sourcePath: string, destinationPath: stri
   await fs.copyFile(sourcePath, destinationPath);
 }
 
+async function hashSkillDirectory(rootPath: string): Promise<string> {
+  const normalizedRoot = path.resolve(rootPath);
+  const hash = createHash("sha1");
+
+  const walk = async (currentPath: string) => {
+    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
+    for (const entry of entries) {
+      const entryPath = path.join(currentPath, entry.name);
+      const relativePath = path.relative(normalizedRoot, entryPath).replace(/\\/g, "/");
+      const stat = await fs.lstat(entryPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error("Skill directory cannot contain symlinks");
+      }
+      if (entry.isDirectory()) {
+        hash.update(`dir:${relativePath}\n`);
+        await walk(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      hash.update(`file:${relativePath}:${stat.size}\n`);
+      hash.update(await fs.readFile(entryPath));
+      hash.update("\n");
+    }
+  };
+
+  await walk(normalizedRoot);
+  return hash.digest("hex");
+}
+
+async function resolveSkillDirectoryPath(sourcePath: string): Promise<string> {
+  const normalized = path.resolve(sourcePath);
+  const stat = await fs.lstat(normalized).catch(() => null);
+  if (!stat) {
+    throw new Error("Skill directory does not exist");
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error("Skill directory cannot be a symlink");
+  }
+  const skillDirectory = stat.isFile() && path.basename(normalized) === "SKILL.md" ? path.dirname(normalized) : normalized;
+  const skillMdPath = path.join(skillDirectory, "SKILL.md");
+  const skillMdStat = await fs.lstat(skillMdPath).catch(() => null);
+  if (!skillMdStat || !skillMdStat.isFile()) {
+    throw new Error("Selected directory does not contain SKILL.md");
+  }
+  if (skillMdStat.isSymbolicLink()) {
+    throw new Error("SKILL.md cannot be a symlink");
+  }
+  return skillDirectory;
+}
+
 function createSkillMarkdown(input: {
   skillName: string;
   displayName: string;
@@ -289,6 +357,122 @@ export class CodexSkillService {
         generator: "agent-studio-skill-draft-v1",
         modeId: trimOrUndefined(input.modeId)
       }
+    });
+  }
+
+  async createDraftFromDirectory(input: CreateDraftFromDirectoryInput): Promise<CodexSkillDraftRecord> {
+    const sourceDirectoryPath = await resolveSkillDirectoryPath(input.sourceDirectoryPath);
+    const skillMd = await fs.readFile(path.join(sourceDirectoryPath, "SKILL.md"), "utf8");
+    const metadata = parseSkillMetadata(skillMd);
+    const sourceFolderName = path.basename(sourceDirectoryPath);
+    const skillName = metadata.name ?? sourceFolderName;
+    const displayName = metadata.name ?? sourceFolderName;
+    const description = metadata.description;
+    const requestedPrompt =
+      trimOrUndefined(input.requestedPrompt) ?? `Imported Codex skill generated with skill-creator from ${sourceFolderName}`;
+    const draftIdSeed = `${Date.now()}-${hashText(`${input.actor.id}:${sourceDirectoryPath}:${requestedPrompt}`)}`;
+    const draftPath = path.join(this.draftRoot, sanitizePathSegment(draftIdSeed, "draft"));
+
+    await fs.rm(draftPath, { recursive: true, force: true });
+    await copyDirectoryNoSymlinks(sourceDirectoryPath, draftPath);
+
+    const validation = await this.validateSkillDirectory(draftPath);
+    return this.dependencies.repository.createDraft({
+      organizationId: input.actor.organizationId,
+      createdByUserId: input.actor.id,
+      createdByDisplayName: input.actor.displayName,
+      createdByEmail: input.actor.email,
+      sourceThreadId: input.sourceThreadId,
+      requestedPrompt,
+      skillName,
+      slug: slugify(skillName),
+      displayName,
+      description,
+      status: "pending_review",
+      version: "1.0.0",
+      draftPath,
+      validation,
+      metadata: {
+        generator: "skill-creator-import-v1",
+        modeId: trimOrUndefined(input.modeId),
+        sourceDirectoryPath
+      }
+    });
+  }
+
+  async installSkillFromDirectory(input: InstallSkillFromDirectoryInput): Promise<CodexManagedSkillRecord> {
+    const sourceDirectoryPath = await resolveSkillDirectoryPath(input.sourceDirectoryPath);
+    const validation = await this.validateSkillDirectory(sourceDirectoryPath);
+    if (!validation.ok) {
+      throw new Error(`Skill 校验失败：${validation.errors.join("; ")}`);
+    }
+
+    const skillMd = await fs.readFile(path.join(sourceDirectoryPath, "SKILL.md"), "utf8");
+    const metadata = parseSkillMetadata(skillMd);
+    const sourceFolderName = path.basename(sourceDirectoryPath);
+    const skillName = trimOrUndefined(validation.metadata?.name) ?? metadata.name ?? sourceFolderName;
+    if (!skillName) throw new Error("Skill 缺少 name");
+
+    const checksum = await hashSkillDirectory(sourceDirectoryPath);
+    const existing = await this.dependencies.repository.findManagedSkillByName({
+      organizationId: input.actor.organizationId,
+      ownerUserId: input.actor.id,
+      scope: "private",
+      skillName
+    });
+    const slug = slugify(skillName);
+    const destinationPath = path.join(
+      this.publishedSkillsRoot,
+      "user",
+      sanitizePathSegment(input.actor.organizationId ?? "global", "global"),
+      sanitizePathSegment(input.actor.id, "user"),
+      slug
+    );
+    const tempPath = `${destinationPath}.tmp-${Date.now()}`;
+    await fs.rm(tempPath, { recursive: true, force: true });
+    await copyDirectoryNoSymlinks(sourceDirectoryPath, tempPath);
+    await fs.rm(destinationPath, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+    await fs.rename(tempPath, destinationPath);
+
+    const version =
+      existing && existing.checksum && existing.checksum !== checksum
+        ? bumpPatchVersion(existing.version)
+        : existing?.version || "1.0.0";
+    const publishedAt = new Date();
+    const requestedPrompt =
+      trimOrUndefined(input.requestedPrompt) ?? `Installed Codex skill generated from ${sourceFolderName}`;
+    return this.dependencies.repository.upsertManagedSkill({
+      organizationId: input.actor.organizationId,
+      ownerUserId: input.actor.id,
+      scope: "private",
+      skillName,
+      slug,
+      displayName: metadata.name ?? sourceFolderName,
+      description: validation.metadata?.description ?? metadata.description,
+      status: "active",
+      version,
+      checksum,
+      publishedPath: destinationPath,
+      createdByUserId: existing?.createdByUserId ?? input.actor.id,
+      createdByDisplayName: existing?.createdByDisplayName ?? input.actor.displayName,
+      createdByEmail: existing?.createdByEmail ?? input.actor.email,
+      lastEditedByUserId: input.actor.id,
+      publishedByUserId: input.actor.id,
+      publishedByDisplayName: input.actor.displayName,
+      metadata: {
+        ...(existing && typeof existing.metadata === "object" && existing.metadata !== null
+          ? (existing.metadata as Record<string, unknown>)
+          : {}),
+        generator: "skill-creator-install-v1",
+        requestedPrompt,
+        sourceThreadId: trimOrUndefined(input.sourceThreadId),
+        sourceDirectoryPath,
+        sourceThreadRelativePath: trimOrUndefined(input.sourceRelativePath),
+        modeId: trimOrUndefined(input.modeId),
+        installedAt: publishedAt.toISOString()
+      },
+      publishedAt
     });
   }
 
@@ -410,6 +594,32 @@ export class CodexSkillService {
     });
   }
 
+  async listManagedSkillsForPortal(actor: Actor): Promise<CodexManagedSkillRecord[]> {
+    return this.dependencies.repository.listManagedSkills({
+      organizationId: actor.organizationId,
+      ownerUserId: actor.id
+    });
+  }
+
+  async setManagedSkillStatus(input: {
+    actor: Actor;
+    skillId: string;
+    status: "active" | "disabled" | "archived";
+  }): Promise<CodexManagedSkillRecord> {
+    const current = await this.dependencies.repository.getManagedSkill(input.skillId);
+    if (!current) throw new Error("skill 不存在");
+    return this.dependencies.repository.updateManagedSkill(current.id, {
+      status: input.status,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName,
+      metadata: {
+        ...(typeof current.metadata === "object" && current.metadata !== null ? (current.metadata as Record<string, unknown>) : {}),
+        lastStatusChangedAt: new Date().toISOString(),
+        lastStatusChangedByUserId: input.actor.id
+      }
+    });
+  }
+
   async readDraftSkillMd(draftId: string): Promise<{ draft: CodexSkillDraftRecord; content: string }> {
     const draft = await this.requireDraft(draftId);
     const content = await fs.readFile(path.join(draft.draftPath, "SKILL.md"), "utf8");
@@ -494,14 +704,18 @@ export class CodexSkillService {
     await fs.rename(tempPath, destinationPath);
 
     const publishedAt = new Date();
+    const checksum = await hashSkillDirectory(draft.draftPath);
     const managedSkill = await this.dependencies.repository.upsertManagedSkill({
       organizationId: draft.organizationId,
+      ownerUserId: draft.createdByUserId,
+      scope: "agent_mode",
       skillName,
       slug,
       displayName: draft.displayName || skillName,
       description: validation.metadata?.description ?? draft.description,
       status: "active",
       version: draft.version || "1.0.0",
+      checksum,
       publishedPath: destinationPath,
       sourceDraftId: draft.id,
       createdByUserId: draft.createdByUserId,
@@ -514,7 +728,8 @@ export class CodexSkillService {
       publishedByDisplayName: input.actor.displayName,
       metadata: {
         draftId: draft.id,
-        reviewNote: trimOrUndefined(input.reviewNote)
+        reviewNote: trimOrUndefined(input.reviewNote),
+        sourceThreadId: draft.sourceThreadId
       },
       publishedAt
     });
@@ -522,6 +737,7 @@ export class CodexSkillService {
     const draftMetadata = asRecord(draft.metadata);
     const skillPackage = await this.ensureSkillPackageBinding({
       draft,
+      managedSkillId: managedSkill.id,
       skillName,
       skillDescription: validation.metadata?.description ?? draft.description,
       skillPackageId: input.skillPackageId ?? stringFromMetadata(draftMetadata, "skillPackageId"),
@@ -646,6 +862,7 @@ export class CodexSkillService {
 
   private async ensureSkillPackageBinding(input: {
     draft: CodexSkillDraftRecord;
+    managedSkillId: string;
     skillName: string;
     skillDescription?: string;
     skillPackageId?: string;
@@ -680,7 +897,8 @@ export class CodexSkillService {
         !item.runtimeBindings.some((binding) => {
           if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") return false;
           const payload = binding.bindingPayload as Record<string, unknown> | null;
-          return payload && typeof payload === "object" && payload.skillName === input.skillName;
+          if (!payload || typeof payload !== "object") return false;
+          return payload.managedSkillId === input.managedSkillId || payload.skillName === input.skillName;
         })
     );
     const nextItems = [
@@ -693,6 +911,7 @@ export class CodexSkillService {
             runtimeType: "codex",
             bindingType: "codex_skill",
             bindingPayload: {
+              managedSkillId: input.managedSkillId,
               skillName: input.skillName,
               activationPrompt
             }

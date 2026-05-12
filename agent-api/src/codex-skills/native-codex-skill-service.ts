@@ -9,6 +9,13 @@ export type NativeCodexSkillRecord = {
   system: boolean;
 };
 
+export type MaterializedCodexSkillInput = {
+  name: string;
+  sourcePath?: string;
+  relativePath?: string;
+  system?: boolean;
+};
+
 type NativeCodexSkillServiceOptions = {
   baseHome: string;
   sessionHomeRoot: string;
@@ -138,16 +145,24 @@ export class NativeCodexSkillService {
 
   async materializeSessionHome(input: {
     scopeId: string;
-    enabledSkillNames: string[];
+    enabledSkills: MaterializedCodexSkillInput[];
   }): Promise<string> {
     const scopeId = sanitizePathSegment(input.scopeId, "session");
     const sessionHome = path.join(this.sessionHomeRoot, scopeId);
     const sessionSkillsRoot = path.join(sessionHome, "skills");
     const catalog = await this.list();
     const byName = new Map(catalog.map((skill) => [skill.name, skill] as const));
-    const enabled = input.enabledSkillNames
-      .map((name) => trimOrUndefined(name))
-      .filter((name): name is string => Boolean(name));
+    const enabled: Array<{ name: string; sourcePath?: string; relativePath?: string; system: boolean }> = [];
+    for (const skill of input.enabledSkills) {
+      const name = trimOrUndefined(skill.name);
+      if (!name) continue;
+      enabled.push({
+        name,
+        sourcePath: trimOrUndefined(skill.sourcePath),
+        relativePath: trimOrUndefined(skill.relativePath),
+        system: skill.system === true
+      });
+    }
 
     await fs.mkdir(sessionHome, { recursive: true });
     await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
@@ -156,8 +171,18 @@ export class NativeCodexSkillService {
     await fs.rm(sessionSkillsRoot, { recursive: true, force: true });
     await fs.mkdir(sessionSkillsRoot, { recursive: true });
 
-    for (const skillName of enabled) {
-      const skill = byName.get(skillName);
+    for (const requestedSkill of enabled) {
+      if (requestedSkill.sourcePath) {
+        const relativePath = requestedSkill.relativePath ?? sanitizePathSegment(requestedSkill.name, "skill");
+        const visibleRelativePath = requestedSkill.system ? sanitizePathSegment(requestedSkill.name, "skill") : relativePath;
+        await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
+        if (requestedSkill.system && relativePath !== visibleRelativePath) {
+          await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, relativePath));
+        }
+        continue;
+      }
+
+      const skill = byName.get(requestedSkill.name);
       if (!skill) continue;
       const visibleRelativePath = skill.system ? sanitizePathSegment(skill.name, "skill") : skill.relativePath;
       await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
@@ -201,6 +226,7 @@ export class NativeCodexSkillService {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      if (depth === 0 && entry.name === "user") continue;
       await this.collectSkills(path.join(currentPath, entry.name), depth + 1, records);
     }
   }

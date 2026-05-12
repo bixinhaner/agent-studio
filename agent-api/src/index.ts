@@ -548,6 +548,7 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
   runProfiles,
   skillPackages,
   nativeCodexSkills,
+  managedSkills: codexSkills,
   policies: policyService
 });
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
@@ -755,7 +756,10 @@ type ModeSelection = {
 };
 
 type EnabledSkillSelection = {
+  id: string;
   name: string;
+  managedSkillId?: string;
+  sourcePath?: string;
   activationPrompt?: string;
 };
 
@@ -826,6 +830,11 @@ function threadOut(thread: ThreadRecord) {
     model: thread.model,
     reasoning_effort: thread.reasoningEffort,
     workspace: thread.workspace,
+    enabled_skills: enabledSkillSelectionsFromRunConfig(thread.codexRunConfig).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      managed_skill_id: skill.managedSkillId ?? null
+    })),
     enabled_skill_names: enabledSkillNamesFromRunConfig(thread.codexRunConfig),
     created_at: thread.createdAt,
     updated_at: thread.updatedAt
@@ -1027,16 +1036,52 @@ function modeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string |
 }
 
 function enabledSkillNamesFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
-  const raw = codexRunConfig?.enabledSkills;
-  if (!Array.isArray(raw)) return [];
   const names: string[] = [];
-  for (const item of raw) {
-    const skillName = typeof item === "string" ? trimOrUndefined(item) : undefined;
-    if (skillName && !names.includes(skillName)) {
-      names.push(skillName);
+  for (const item of enabledSkillSelectionsFromRunConfig(codexRunConfig)) {
+    if (!names.includes(item.name)) {
+      names.push(item.name);
     }
   }
   return names;
+}
+
+function enabledSkillSelectionsFromRunConfig(codexRunConfig?: Record<string, unknown>): EnabledSkillSelection[] {
+  const raw = codexRunConfig?.enabledSkills;
+  if (!Array.isArray(raw)) return [];
+  const selections: EnabledSkillSelection[] = [];
+  const ids = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const skillName = trimOrUndefined(item);
+      if (skillName && !ids.has(skillName)) {
+        ids.add(skillName);
+        selections.push({
+          id: skillName,
+          name: skillName
+        });
+      }
+      continue;
+    }
+    const payload = asRecord(item);
+    const managedSkillId =
+      payload && typeof payload.managedSkillId === "string" ? trimOrUndefined(payload.managedSkillId) : undefined;
+    const skillName =
+      (payload && typeof payload.name === "string" ? trimOrUndefined(payload.name) : undefined) ||
+      (payload && typeof payload.skillName === "string" ? trimOrUndefined(payload.skillName) : undefined);
+    const selectionId =
+      (payload && typeof payload.id === "string" ? trimOrUndefined(payload.id) : undefined) ||
+      (managedSkillId ? `managed:${managedSkillId}` : skillName);
+    const sourcePath = payload && typeof payload.sourcePath === "string" ? trimOrUndefined(payload.sourcePath) : undefined;
+    if (!selectionId || !skillName || ids.has(selectionId)) continue;
+    ids.add(selectionId);
+    selections.push({
+      id: selectionId,
+      name: skillName,
+      ...(managedSkillId ? { managedSkillId } : {}),
+      ...(sourcePath ? { sourcePath } : {})
+    });
+  }
+  return selections;
 }
 
 const SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY = "_agentStudioSkillActivationPrompts";
@@ -1081,10 +1126,15 @@ function withRunConfigMode(
 
 function withRunConfigEnabledSkills(
   codexRunConfig: Record<string, unknown> | undefined,
-  enabledSkills: string[]
+  enabledSkills: EnabledSkillSelection[]
 ): Record<string, unknown> {
   const next = codexRunConfig ? { ...codexRunConfig } : {};
-  next.enabledSkills = enabledSkills;
+  next.enabledSkills = enabledSkills.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    ...(skill.managedSkillId ? { managedSkillId: skill.managedSkillId } : {}),
+    ...(skill.sourcePath ? { sourcePath: skill.sourcePath } : {})
+  }));
   return next;
 }
 
@@ -1114,7 +1164,7 @@ function withRunConfigEnabledSkillSelection(
   return withRunConfigSkillActivationPrompts(
     withRunConfigEnabledSkills(
       codexRunConfig,
-      enabledSkills.map((skill) => skill.name)
+      enabledSkills
     ),
     enabledSkills
   );
@@ -1260,7 +1310,7 @@ async function resolveEnabledSkillsForMode(input: {
   modeId: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<EnabledSkillSelection[]> {
-  const requested = enabledSkillNamesFromRunConfig(input.codexRunConfig);
+  const requested = enabledSkillSelectionsFromRunConfig(input.codexRunConfig);
   if (requested.length === 0) return [];
 
   const runtimeOptions = await portalRuntimeOptions.resolve({
@@ -1270,25 +1320,34 @@ async function resolveEnabledSkillsForMode(input: {
     departmentIds: await listDepartmentIdsForActor(input.currentUser)
   });
   const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.modeId);
-  const availableByName = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.name, skill] as const));
-  const denied = requested.filter((skillName) => !availableByName.has(skillName));
+  const availableById = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.id, skill] as const));
+  const denied = requested.filter((skill) => !availableById.has(skill.id));
   if (denied.length > 0) {
-    throw new Error(`Selected skill is not available for this agent mode: ${denied.join(", ")}`);
+    throw new Error(`Selected skill is not available for this agent mode: ${denied.map((skill) => skill.name).join(", ")}`);
   }
-  return requested.map((skillName) => ({
-    name: skillName,
-    activationPrompt: trimOrUndefined(availableByName.get(skillName)?.activationPrompt)
-  }));
+  return requested.map((skill) => {
+    const availableSkill = availableById.get(skill.id)!;
+    return {
+      id: availableSkill.id,
+      name: availableSkill.name,
+      managedSkillId: trimOrUndefined(availableSkill.managedSkillId),
+      sourcePath: trimOrUndefined(availableSkill.sourcePath),
+      activationPrompt: trimOrUndefined(availableSkill.activationPrompt)
+    };
+  });
 }
 
 async function materializeCodexHomeForRunConfig(input: {
   scopeId: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
-  const enabledSkills = enabledSkillNamesFromRunConfig(input.codexRunConfig);
+  const enabledSkills = enabledSkillSelectionsFromRunConfig(input.codexRunConfig);
   const codexHome = await nativeCodexSkills.materializeSessionHome({
     scopeId: input.scopeId,
-    enabledSkillNames: enabledSkills
+    enabledSkills: enabledSkills.map((skill) => ({
+      name: skill.name,
+      sourcePath: skill.sourcePath
+    }))
   });
   return {
     codexHome,
@@ -1893,6 +1952,27 @@ app.get("/public-api/branding/assets/:fileName", async (req: Request, res: Respo
 });
 
 app.use("/public-api/access-requests", createPublicAccessRequestRouter(accessRequestService));
+
+app.locals.resolveCodexSkillThreadPath = async (input: {
+  req: Request;
+  threadId: string;
+  requestedPath: string;
+}): Promise<string> => {
+  const currentUser = currentActorFromRequest(input.req);
+  const thread = await threads.getOwned(input.threadId, currentUser.id, currentUser.organizationId);
+  if (!thread) {
+    throw new Error("Thread does not exist");
+  }
+  const workspacePath = trimOrUndefined(thread.workspace);
+  if (!workspacePath) {
+    throw new Error("Thread workspace does not exist");
+  }
+  return resolveThreadFileAbsolutePath({
+    workspacePath,
+    uploadDir: getThreadWorkspaceUploadDir(workspacePath),
+    filePath: input.requestedPath
+  });
+};
 
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({

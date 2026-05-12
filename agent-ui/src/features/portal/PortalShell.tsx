@@ -115,12 +115,13 @@ import {
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import {
-  createPortalSkillDraft,
   createPortalSkillDraftNewVersion,
+  fetchPortalManagedSkills,
   fetchPortalSkillDraft,
+  installPortalSkillFromThreadPath,
   revisePortalSkillDraft
 } from "../skills/api";
-import type { CodexSkillDraft } from "../skills/types";
+import type { CodexManagedSkill, CodexSkillDraft } from "../skills/types";
 import { getBrandInitials } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
 import { SessionRail } from "./workbench/SessionRail";
@@ -155,6 +156,11 @@ type ThreadOut = {
   model: string;
   reasoning_effort: ReasoningEffort;
   workspace: string;
+  enabled_skills?: Array<{
+    id: string;
+    name: string;
+    managed_skill_id?: string | null;
+  }>;
   enabled_skill_names?: string[];
   created_at: string;
   updated_at: string;
@@ -381,19 +387,25 @@ const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
 const SkillComposerContext = createContext<{
   availableSkills: RuntimeSkillOption[];
-  enabledSkillNames: string[];
-  toggleSkill: (skillName: string) => void;
+  enabledSkillIds: string[];
+  toggleSkill: (skillId: string) => void;
 }>({
   availableSkills: [],
-  enabledSkillNames: [],
+  enabledSkillIds: [],
   toggleSkill: () => undefined
 });
 const SkillDraftActionContext = createContext<{
-  openNewSessionWithSkill: (skillName: string) => Promise<void> | void;
+  openNewSessionWithSkill: (input: { skillName: string; managedSkillId?: string }) => Promise<void> | void;
   refreshRuntimeOptions: () => Promise<PortalRuntimeOptions | null>;
+  installSkillFromPath: (input: {
+    threadId: string;
+    path: string;
+    prompt?: string;
+  }) => Promise<CodexManagedSkill | null>;
 }>({
-  openNewSessionWithSkill: () => undefined,
-  refreshRuntimeOptions: async () => null
+  openNewSessionWithSkill: async () => undefined,
+  refreshRuntimeOptions: async () => null,
+  installSkillFromPath: async () => null
 });
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
@@ -1633,19 +1645,19 @@ const SkillComposerIcon: FC<{ skill: RuntimeSkillOption; size?: number }> = ({ s
   skillUsesImageIcon(skill) ? <ImageIcon size={size} /> : <ZapIcon size={size} />;
 
 const SkillComposerControls: FC = () => {
-  const { availableSkills, enabledSkillNames, toggleSkill } = useContext(SkillComposerContext);
-  const enabledSkillSet = useMemo(() => new Set(enabledSkillNames), [enabledSkillNames]);
+  const { availableSkills, enabledSkillIds, toggleSkill } = useContext(SkillComposerContext);
+  const enabledSkillSet = useMemo(() => new Set(enabledSkillIds), [enabledSkillIds]);
   const selectedSkills = useMemo(
-    () => availableSkills.filter((skill) => enabledSkillSet.has(skill.name)),
+    () => availableSkills.filter((skill) => enabledSkillSet.has(skill.id)),
     [availableSkills, enabledSkillSet]
   );
 
   if (availableSkills.length === 0) return null;
 
   const menuItems: MenuProps["items"] = availableSkills.map((skill) => {
-    const enabled = enabledSkillSet.has(skill.name);
+    const enabled = enabledSkillSet.has(skill.id);
     return {
-      key: skill.name,
+      key: skill.id,
       className: `portal-composer-skill-menu-entry${enabled ? " is-selected" : ""}`,
       label: (
         <span className={`portal-composer-skill-menu-item${enabled ? " is-selected" : ""}`}>
@@ -1687,12 +1699,12 @@ const SkillComposerControls: FC = () => {
       </Dropdown>
       {selectedSkills.map((skill) => (
         <button
-          key={skill.name}
+          key={skill.id}
           type="button"
           className="portal-composer-skill-chip"
           title={`Disable ${skill.label || skill.name}`}
           aria-label={`Disable ${skill.label || skill.name}`}
-          onClick={() => toggleSkill(skill.name)}
+          onClick={() => toggleSkill(skill.id)}
         >
           <SkillComposerIcon skill={skill} size={16} />
           <span>{skill.label || skill.name}</span>
@@ -1842,14 +1854,19 @@ const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label = "New sessi
   </ThreadListPrimitive.New>
 );
 
-function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: string[]): Record<string, unknown> {
+function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: RuntimeSkillOption[]): Record<string, unknown> {
   const runConfig: Record<string, unknown> = {
     sandboxMode: cfg.sandboxMode,
     approvalPolicy: cfg.approvalPolicy,
     networkAccessEnabled: cfg.networkAccessEnabled,
     webSearchMode: cfg.webSearchMode,
     mode,
-    enabledSkills
+    enabledSkills: enabledSkills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      ...(skill.managedSkillId ? { managedSkillId: skill.managedSkillId } : {}),
+      ...(skill.sourcePath ? { sourcePath: skill.sourcePath } : {})
+    }))
   };
 
   const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
@@ -2151,6 +2168,33 @@ function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: str
   }
 
   return out;
+}
+
+function collectSkillRootPathsFromChanges(changes: Array<{ path: string; kind: string }>): string[] {
+  const roots = new Set<string>();
+  for (const change of changes) {
+    const normalizedPath = normalizePreviewFilePath(change.path);
+    if (!normalizedPath) continue;
+    const marker = "/SKILL.md";
+    const root = normalizedPath === "SKILL.md"
+      ? "."
+      : normalizedPath.endsWith(marker)
+        ? normalizedPath.slice(0, -marker.length) || "."
+        : "";
+    if (!root) continue;
+    roots.add(root);
+  }
+  return [...roots];
+}
+
+function buildSkillCreatorReviewPrompt(prompt: string): string {
+  return `${prompt}
+
+Agent Studio skill install workflow:
+- Use the normal skill-creator workflow to create or update a standard Codex Skill directory with a valid SKILL.md.
+- Do not install or copy the skill into CODEX_HOME, ~/.codex, or any global Codex skills directory.
+- Create the generated skill inside this thread workspace, preferably under ./skill-drafts/<skill-name>.
+- When the skill files are ready, stop at the generated files. Agent Studio will offer an Install skill action that installs the skill through the backend and makes it available in new chats.`;
 }
 
 function isKnowledgeSetPreviewPath(pathname: string): boolean {
@@ -2641,12 +2685,12 @@ function isSkillCreationIntent(prompt: string): boolean {
 }
 
 function skillDraftStatusLabel(status: string | undefined): string {
-  if (status === "pending_review") return "等待审核";
-  if (status === "changes_requested") return "需要修改";
-  if (status === "published") return "已发布";
-  if (status === "rejected") return "已驳回";
-  if (status === "archived") return "已归档";
-  return status || "处理中";
+  if (status === "pending_review") return "Pending review";
+  if (status === "changes_requested") return "Changes requested";
+  if (status === "published") return "Published";
+  if (status === "rejected") return "Rejected";
+  if (status === "archived") return "Archived";
+  return status || "Processing";
 }
 
 function skillDraftStatusTone(status: string | undefined): string {
@@ -2654,6 +2698,25 @@ function skillDraftStatusTone(status: string | undefined): string {
   if (status === "rejected") return "rejected";
   if (status === "changes_requested") return "changes";
   return "pending";
+}
+
+function managedSkillStatusLabel(status: string | undefined): string {
+  if (status === "active") return "Installed";
+  if (status === "disabled") return "Disabled";
+  if (status === "archived") return "Archived";
+  return status || "Installed";
+}
+
+function managedSkillStatusTone(status: string | undefined): string {
+  if (status === "disabled") return "changes";
+  if (status === "archived") return "rejected";
+  return "published";
+}
+
+function metadataValueAsString(metadata: unknown, key: string): string {
+  const payload = asRecord(metadata);
+  const value = payload ? payload[key] : undefined;
+  return typeof value === "string" ? value.trim() : "";
 }
 
 const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = ({ data }) => {
@@ -2701,7 +2764,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
 
   const handleRevise = async () => {
     if (!draft) return;
-    const instruction = window.prompt("描述你要怎么修改这个 skill：");
+    const instruction = window.prompt("Describe how you want to revise this skill:");
     if (!instruction?.trim()) return;
     setLoading(true);
     setErrorText("");
@@ -2709,7 +2772,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       const response = await revisePortalSkillDraft(draft.id, instruction.trim());
       setDraft(response.draft);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "修改 skill 草稿失败");
+      setErrorText(error instanceof Error ? error.message : "Failed to revise the skill draft");
     } finally {
       setLoading(false);
     }
@@ -2717,12 +2780,12 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
 
   const handleUseNewSession = async () => {
     if (!skillName) return;
-    await actions.openNewSessionWithSkill(skillName);
+    await actions.openNewSessionWithSkill({ skillName });
   };
 
   const handleCreateNewVersion = async () => {
     if (!draft) return;
-    const instruction = window.prompt("描述这个 skill 新版本要怎么改：");
+    const instruction = window.prompt("Describe what should change in the next version of this skill:");
     if (!instruction?.trim()) return;
     setLoading(true);
     setErrorText("");
@@ -2730,7 +2793,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       const response = await createPortalSkillDraftNewVersion(draft.id, instruction.trim());
       setDraft(response.draft);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "创建新版本草稿失败");
+      setErrorText(error instanceof Error ? error.message : "Failed to create a new version draft");
     } finally {
       setLoading(false);
     }
@@ -2743,9 +2806,9 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       <div className="skill-draft-card-head">
         <div>
           <p className="skill-draft-eyebrow">Reusable Skill</p>
-          <h4>{draft?.displayName || skillName || "Skill 草稿"}</h4>
+          <h4>{draft?.displayName || skillName || "Skill draft"}</h4>
         </div>
-        <span className="skill-draft-status">{loading ? "刷新中" : skillDraftStatusLabel(status)}</span>
+        <span className="skill-draft-status">{loading ? "Refreshing" : skillDraftStatusLabel(status)}</span>
       </div>
       <div className="skill-draft-meta-grid">
         <div>
@@ -2753,48 +2816,52 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
           <strong>{skillName || "-"}</strong>
         </div>
         <div>
-          <span>作者</span>
-          <strong>{draft?.createdByDisplayName || draft?.createdByEmail || "你"}</strong>
+          <span>Author</span>
+          <strong>{draft?.createdByDisplayName || draft?.createdByEmail || "You"}</strong>
         </div>
         <div>
-          <span>版本</span>
+          <span>Version</span>
           <strong>{draft?.version || "1.0.0"}</strong>
         </div>
       </div>
       {draft?.description ? <p className="skill-draft-description">{draft.description}</p> : null}
-      {draft?.reviewNote ? <p className="skill-draft-note">审核意见：{draft.reviewNote}</p> : null}
+      {draft?.reviewNote ? <p className="skill-draft-note">Review note: {draft.reviewNote}</p> : null}
       {validation && (!validation.ok || validation.warnings.length > 0) ? (
         <div className="skill-draft-validation">
           {validation.errors.map((item) => (
-            <p key={`error-${item}`}>错误：{item}</p>
+            <p key={`error-${item}`}>Error: {item}</p>
           ))}
           {validation.warnings.map((item) => (
-            <p key={`warning-${item}`}>提醒：{item}</p>
+            <p key={`warning-${item}`}>Warning: {item}</p>
           ))}
         </div>
       ) : null}
       {errorText ? <p className="skill-draft-error">{errorText}</p> : null}
       <div className="skill-draft-actions">
         <button type="button" onClick={() => void loadDraft()} disabled={loading}>
-          刷新状态
+          Refresh status
         </button>
         {canRevise ? (
           <button type="button" onClick={() => void handleRevise()} disabled={loading}>
-            继续修改
+            Revise draft
           </button>
         ) : null}
         {canCreateNewVersion ? (
           <button type="button" onClick={() => void handleCreateNewVersion()} disabled={loading}>
-            修改新版本
+            Create new version
           </button>
         ) : null}
         {canUse ? (
           <button type="button" className="primary" onClick={() => void handleUseNewSession()} disabled={loading}>
-            新会话使用
+            Use in new chat
           </button>
         ) : null}
       </div>
-      {canUse ? <p className="skill-draft-footnote">发布后的 skill 只在新会话加载；后续修改会生成新草稿并重新审核。</p> : null}
+      {canUse ? (
+        <p className="skill-draft-footnote">
+          Published skills are loaded only in new chats. Future edits create a new draft for review.
+        </p>
+      ) : null}
     </section>
   );
 };
@@ -2856,6 +2923,37 @@ const ProcessDataFallback: FC<any> = ({
   data?: ProcessData | unknown;
 }) => {
   const requestPreview = useContext(PreviewRequestContext);
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const skillDraftActions = useContext(SkillDraftActionContext);
+  const [installingSkillPath, setInstallingSkillPath] = useState("");
+  const [installedSkillsByPath, setInstalledSkillsByPath] = useState<Record<string, CodexManagedSkill>>({});
+  const [skillInstallError, setSkillInstallError] = useState("");
+
+  useEffect(() => {
+    if (name !== "codex_file_change") return;
+    const threadId = activeThreadId.trim();
+    if (!threadId) return;
+    let active = true;
+    void fetchPortalManagedSkills()
+      .then((response) => {
+        if (!active) return;
+        const next: Record<string, CodexManagedSkill> = {};
+        for (const skill of response.skills || []) {
+          const sourceThreadId = metadataValueAsString(skill.metadata, "sourceThreadId");
+          const sourceDirectoryPath = normalizePreviewFilePath(
+            metadataValueAsString(skill.metadata, "sourceThreadRelativePath") ||
+              metadataValueAsString(skill.metadata, "sourceDirectoryPath")
+          );
+          if (!sourceDirectoryPath || sourceThreadId !== threadId) continue;
+          next[sourceDirectoryPath] = skill;
+        }
+        setInstalledSkillsByPath(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activeThreadId, name]);
 
   if (name === "codex_process_audit") return null;
 
@@ -2971,6 +3069,30 @@ const ProcessDataFallback: FC<any> = ({
   if (name === "codex_file_change") {
     const changes = collectCodexFileChanges(data);
     if (changes.length === 0) return null;
+    const skillRootPaths = collectSkillRootPathsFromChanges(changes);
+    const installSkillPath = async (skillPath: string) => {
+      const threadId = activeThreadId.trim();
+      if (!threadId) return;
+      setInstallingSkillPath(skillPath);
+      setSkillInstallError("");
+      try {
+        const skill = await skillDraftActions.installSkillFromPath({
+          threadId,
+          path: skillPath
+        });
+        if (skill) {
+          setInstalledSkillsByPath((current) => ({
+            ...current,
+            [skillPath]: skill
+          }));
+          await skillDraftActions.refreshRuntimeOptions();
+        }
+      } catch (error) {
+        setSkillInstallError(error instanceof Error ? error.message : "Failed to install skill");
+      } finally {
+        setInstallingSkillPath("");
+      }
+    };
     return (
       <section className="assistant-file-change-block" aria-label="File changes">
         <p className="assistant-file-change-title">Generated files</p>
@@ -2992,6 +3114,93 @@ const ProcessDataFallback: FC<any> = ({
             );
           })}
         </ul>
+        {skillRootPaths.length > 0 ? (
+          <div className="assistant-file-change-skill-submit">
+            <p>Codex Skill detected. Install it to make it available in new chats.</p>
+            {skillRootPaths.map((skillPath) => {
+              const installedSkill = installedSkillsByPath[skillPath];
+              const installLabel =
+                installingSkillPath === skillPath
+                  ? "Installing..."
+                  : installedSkill
+                    ? "Install update"
+                    : "Install skill";
+              return (
+                <div key={skillPath} style={{ display: "grid", gap: 10 }}>
+                  <div className="assistant-file-change-actions">
+                    <button
+                      type="button"
+                      className="assistant-file-change-btn"
+                      disabled={!activeThreadId || installingSkillPath === skillPath}
+                      onClick={() => void installSkillPath(skillPath)}
+                    >
+                      {installLabel}
+                    </button>
+                    <button
+                      type="button"
+                      className="assistant-file-change-btn"
+                      onClick={() => requestPreview(skillPath === "." ? "SKILL.md" : `${skillPath}/SKILL.md`)}
+                    >
+                      Preview skill
+                    </button>
+                  </div>
+                  {installedSkill ? (
+                    <section
+                      className={`skill-draft-card skill-draft-${managedSkillStatusTone(installedSkill.status)}`}
+                      aria-label="Installed skill status"
+                    >
+                      <div className="skill-draft-card-head">
+                        <div>
+                          <p className="skill-draft-eyebrow">Reusable Skill</p>
+                          <h4>{installedSkill.displayName || installedSkill.skillName}</h4>
+                        </div>
+                        <span className="skill-draft-status">{managedSkillStatusLabel(installedSkill.status)}</span>
+                      </div>
+                      <div className="skill-draft-meta-grid">
+                        <div>
+                          <span>Skill name</span>
+                          <strong>{installedSkill.skillName}</strong>
+                        </div>
+                        <div>
+                          <span>Version</span>
+                          <strong>{installedSkill.version}</strong>
+                        </div>
+                        <div>
+                          <span>Available in</span>
+                          <strong>New chats</strong>
+                        </div>
+                      </div>
+                      {installedSkill.description ? <p className="skill-draft-description">{installedSkill.description}</p> : null}
+                      <div className="skill-draft-actions">
+                        {installedSkill.status === "active" ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() =>
+                              void skillDraftActions.openNewSessionWithSkill({
+                                skillName: installedSkill.skillName,
+                                managedSkillId: installedSkill.id
+                              })
+                            }
+                          >
+                            Use in new chat
+                          </button>
+                        ) : null}
+                        <button type="button" onClick={() => void skillDraftActions.refreshRuntimeOptions()}>
+                          Refresh skills
+                        </button>
+                      </div>
+                      <p className="skill-draft-footnote">
+                        Installed skills load only when you start a new chat.
+                      </p>
+                    </section>
+                  ) : null}
+                </div>
+              );
+            })}
+            {skillInstallError ? <p className="skill-draft-error">{skillInstallError}</p> : null}
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -4587,7 +4796,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [portalPreferenceErrorText, setPortalPreferenceErrorText] = useState("");
   const [contextUsage, setContextUsage] = useState<ContextUsageSnapshot | null>(null);
   const [selectedKnowledgeSetIds, setSelectedKnowledgeSetIds] = useState<string[]>([]);
-  const [enabledSkillNames, setEnabledSkillNames] = useState<string[]>([]);
+  const [enabledSkillIds, setEnabledSkillIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<DirectoryPickerTarget>("workspace");
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -4619,7 +4828,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const runningStageTextRef = useRef(runningStageText);
   const runningStageFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
-  const enabledSkillNamesRef = useRef(enabledSkillNames);
+  const enabledSkillIdsRef = useRef(enabledSkillIds);
   const knowledgeSetSelectionInitializedRef = useRef(false);
   const completedRunThreadIdsRef = useRef<Set<string>>(new Set());
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
@@ -4666,7 +4875,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
-  enabledSkillNamesRef.current = enabledSkillNames;
+  enabledSkillIdsRef.current = enabledSkillIds;
   activeThreadIdentityRef.current = activeThreadIdentity;
   productFeedbackImagesRef.current = productFeedbackImages;
   threadCollaborationRef.current = threadCollaboration;
@@ -4890,18 +5099,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   useEffect(() => {
     if (isExternalPortalUser) {
-      setEnabledSkillNames([]);
+      setEnabledSkillIds([]);
       return;
     }
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
-    const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
-    setEnabledSkillNames((current) => current.filter((skillName) => available.has(skillName)));
+    const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.id));
+    setEnabledSkillIds((current) => current.filter((skillId) => available.has(skillId)));
   }, [isExternalPortalUser, runtimeMode, runtimeOptions]);
 
   useEffect(() => {
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
     if (!threadId || isExternalPortalUser) {
-      setEnabledSkillNames([]);
+      setEnabledSkillIds([]);
       return;
     }
 
@@ -4910,14 +5119,22 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       .then((response) => {
         if (!active) return;
         const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
-        const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
-        const names = Array.isArray(response.thread.enabled_skill_names)
-          ? response.thread.enabled_skill_names.filter(
-              (name): name is string =>
-                typeof name === "string" && name.trim().length > 0 && (!selectedMode || available.has(name.trim()))
-            )
-          : [];
-        setEnabledSkillNames(Array.from(new Set(names.map((name) => name.trim()))));
+        const availableSkills = selectedMode?.availableSkills ?? [];
+        const availableById = new Set(availableSkills.map((skill) => skill.id));
+        const ids = Array.isArray(response.thread.enabled_skills)
+          ? response.thread.enabled_skills
+              .map((skill) => (typeof skill?.id === "string" ? skill.id.trim() : ""))
+              .filter((id) => id && (!selectedMode || availableById.has(id)))
+          : Array.isArray(response.thread.enabled_skill_names)
+            ? response.thread.enabled_skill_names
+                .map((name) => {
+                  const normalized = typeof name === "string" ? name.trim() : "";
+                  if (!normalized) return "";
+                  return availableSkills.find((skill) => skill.name === normalized)?.id ?? "";
+                })
+                .filter(Boolean)
+            : [];
+        setEnabledSkillIds(Array.from(new Set(ids)));
       })
       .catch(() => {
         // Keep the local selection if the detail refresh fails; the next run is still validated server-side.
@@ -5180,7 +5397,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       async initialize(threadId: string) {
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
-        const skills = enabledSkillNamesRef.current;
+        const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
+        const selectedSkillIds = new Set(enabledSkillIdsRef.current);
+        const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
         const created = await api<ThreadCreateOut>("/api/threads", {
           method: "POST",
           json: {
@@ -5278,19 +5497,28 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
-  const toggleEnabledSkill = useCallback((skillName: string) => {
+  const toggleEnabledSkill = useCallback((skillId: string) => {
     if (isExternalPortalUser) return;
-    setEnabledSkillNames((current) =>
-      current.includes(skillName) ? current.filter((item) => item !== skillName) : [...current, skillName]
-    );
-  }, [isExternalPortalUser]);
+    setEnabledSkillIds((current) => {
+      if (current.includes(skillId)) {
+        return current.filter((item) => item !== skillId);
+      }
+      const nextSkill = availableModeSkills.find((skill) => skill.id === skillId);
+      if (!nextSkill) return current;
+      const filteredCurrent = current.filter((item) => {
+        const currentSkill = availableModeSkills.find((skill) => skill.id === item);
+        return currentSkill?.name !== nextSkill.name;
+      });
+      return [...filteredCurrent, skillId];
+    });
+  }, [availableModeSkills, isExternalPortalUser]);
   const skillComposerContext = useMemo(
     () => ({
       availableSkills: availableModeSkills,
-      enabledSkillNames,
+      enabledSkillIds,
       toggleSkill: toggleEnabledSkill
     }),
-    [availableModeSkills, enabledSkillNames, toggleEnabledSkill]
+    [availableModeSkills, enabledSkillIds, toggleEnabledSkill]
   );
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const handleKnowledgeSetChange = useCallback((ids: string[]) => {
@@ -5372,7 +5600,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         networkAccessEnabled: appliedConfig.networkAccessEnabled,
         webSearchMode: appliedConfig.webSearchMode,
         knowledgeSetIds: selectedKnowledgeSetIdsNormalized,
-        enabledSkillNames
+        enabledSkillIds
       },
       layout: {
         sessionRailCollapsed: layoutState.isSessionRailCollapsed,
@@ -5401,7 +5629,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     props.currentUser,
     runtimeMode,
     runtimeSummaryText,
-    enabledSkillNames,
+    enabledSkillIds,
     selectedKnowledgeSetIdsNormalized,
     selectedModeLabel,
     sharedThreadReadonly
@@ -5600,6 +5828,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!prompt) {
           throw new Error("No user input text detected");
         }
+        const isSkillCreationRequest = isSkillCreationIntent(prompt);
+        const runtimePrompt = isSkillCreationRequest ? buildSkillCreatorReviewPrompt(prompt) : prompt;
 
         const threadId = await resolveRunThreadId({
           unstableThreadId: String(options.unstable_threadId || "").trim(),
@@ -5643,41 +5873,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error("The current shared thread is read-only and cannot continue running.");
         }
 
-        if (isSkillCreationIntent(prompt)) {
-          setErrorText("");
-          setStatusText("Creating skill draft...");
-          updateRunningStage("Creating a reusable skill draft");
-          const response = await createPortalSkillDraft({
-            prompt,
-            threadId,
-            modeId: runtimeModeRef.current
-          });
-          const draft = response.draft;
-          yield {
-            content: [
-              {
-                type: "text",
-                text: `已创建 skill 草稿：${draft.displayName || draft.skillName || draft.id}。\n\n发布后只会在新会话中加载；当前会话不会热切换。`
-              },
-              {
-                type: "data",
-                name: "skill_draft_status",
-                data: {
-                  draftId: draft.id,
-                  status: draft.status,
-                  skillName: draft.skillName
-                }
-              }
-            ]
-          };
-          setStatusText("Ready");
-          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false });
-          return;
-        }
-
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
-        const skills = enabledSkillNamesRef.current;
+        const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
+        const selectedSkillIds = new Set(enabledSkillIdsRef.current);
+        const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
         const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
           method: "POST",
           json: {
@@ -5690,7 +5890,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const session = ensured.session;
 
         setErrorText("");
-        setStatusText("Generating...");
+        setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
         updateRunningStage(RUNNING_STAGE_CONNECTING_TEXT);
 
         let hasTextUpdate = false;
@@ -6096,7 +6296,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             body: JSON.stringify({
               session_id: session.session_id,
               thread_id: threadId,
-              message: prompt
+              message: runtimePrompt
             }),
             signal: options.abortSignal
           })) {
@@ -6599,19 +6799,37 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const skillDraftActionContext = useMemo(
     () => ({
       refreshRuntimeOptions: refreshRuntimeOptionsNow,
-      async openNewSessionWithSkill(skillName: string) {
-        const normalizedSkillName = skillName.trim();
+      async openNewSessionWithSkill(input: { skillName: string; managedSkillId?: string }) {
+        const normalizedSkillName = input.skillName.trim();
         if (!normalizedSkillName) return;
         const nextOptions = await refreshRuntimeOptionsNow();
         const selectedMode = findRuntimeMode(nextOptions, runtimeModeRef.current) ?? nextOptions?.modes[0];
-        const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
-        if (!available.has(normalizedSkillName)) {
-          setErrorText("Skill 已发布，但还未分配到当前工作台模式；请联系管理员确认 Agent Mode 绑定。");
+        const targetSkill = (selectedMode?.availableSkills ?? []).find(
+          (skill) =>
+            (input.managedSkillId && skill.managedSkillId === input.managedSkillId) || skill.name === normalizedSkillName
+        );
+        if (!targetSkill) {
+          setErrorText(
+            "The skill is installed, but it is not available in the current workbench mode yet. Ask an admin to check the mode binding."
+          );
           return;
         }
-        setEnabledSkillNames([normalizedSkillName]);
+        setEnabledSkillIds([targetSkill.id]);
         await runtime.threads.switchToNewThread();
-        setStatusText(`New session ready with ${normalizedSkillName}`);
+        setStatusText(`New chat ready with ${targetSkill.label || targetSkill.name}`);
+      },
+      async installSkillFromPath(input: { threadId: string; path: string; prompt?: string }) {
+        const threadId = input.threadId.trim();
+        const skillPath = input.path.trim();
+        if (!threadId || !skillPath) return null;
+        const response = await installPortalSkillFromThreadPath({
+          threadId,
+          path: skillPath,
+          prompt: input.prompt,
+          modeId: runtimeModeRef.current
+        });
+        setStatusText(`Skill installed: ${response.skill.displayName || response.skill.skillName || response.skill.id}`);
+        return response.skill;
       }
     }),
     [refreshRuntimeOptionsNow, runtime]

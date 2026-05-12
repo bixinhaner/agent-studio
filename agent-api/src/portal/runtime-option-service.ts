@@ -1,4 +1,5 @@
 import { type AgentModeRecord } from "../persistence/agent-mode-repository.js";
+import type { CodexManagedSkillRecord } from "../persistence/codex-skill-repository.js";
 import { type RunProfileRecord } from "../persistence/run-profile-repository.js";
 import { type SkillPackageRecord } from "../persistence/skill-package-repository.js";
 import { type PolicyService } from "../resources/policy-service.js";
@@ -28,11 +29,15 @@ export type PortalRuntimeOptionSkillPackage = {
 };
 
 export type PortalRuntimeOptionSkill = {
+  id: string;
   name: string;
   label: string;
   description?: string;
   system: boolean;
   activationPrompt?: string;
+  managedSkillId?: string;
+  scope?: string;
+  sourcePath?: string;
 };
 
 export type PortalRuntimeOptionMode = {
@@ -67,6 +72,15 @@ type RuntimeOptionServiceDependencies = {
   runProfiles: ListRepository<RunProfileRecord>;
   skillPackages: ListRepository<SkillPackageRecord>;
   nativeCodexSkills?: ListRepository<NativeCodexSkillRecord>;
+  managedSkills?: {
+    listManagedSkills(input?: {
+      organizationId?: string;
+      status?: string;
+      scope?: string;
+      ownerUserId?: string;
+      skillName?: string;
+    }): Promise<CodexManagedSkillRecord[]>;
+  };
   policies: PolicyService;
   systemSettings?: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
@@ -162,28 +176,70 @@ function skillActivationPromptFromBindingPayload(value: unknown): string | undef
 type CodexSkillBinding = {
   name: string;
   activationPrompt?: string;
+  managedSkillId?: string;
 };
+
+function selectionIdForManagedSkill(managedSkillId: string): string {
+  return `managed:${managedSkillId}`;
+}
 
 function collectCodexSkillBindings(skillPackage: SkillPackageRecord): CodexSkillBinding[] {
   const bindings: CodexSkillBinding[] = [];
   for (const item of skillPackage.items ?? []) {
     for (const binding of item.runtimeBindings ?? []) {
       if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") continue;
+      const payload = asRecord(binding.bindingPayload);
       const skillName = skillNameFromBindingPayload(binding.bindingPayload);
       if (!skillName) continue;
       const activationPrompt = skillActivationPromptFromBindingPayload(binding.bindingPayload);
-      const existing = bindings.find((item) => item.name === skillName);
+      const managedSkillId =
+        typeof payload?.managedSkillId === "string" ? trimOrUndefined(payload.managedSkillId) : undefined;
+      const existing = bindings.find(
+        (item) =>
+          (managedSkillId && item.managedSkillId === managedSkillId) ||
+          (!managedSkillId && !item.managedSkillId && item.name === skillName)
+      );
       if (existing) {
         existing.activationPrompt ??= activationPrompt;
       } else {
         bindings.push({
           name: skillName,
-          activationPrompt
+          activationPrompt,
+          managedSkillId
         });
       }
     }
   }
   return bindings;
+}
+
+function toManagedRuntimeSkill(
+  managedSkill: CodexManagedSkillRecord,
+  activationPrompt?: string
+): PortalRuntimeOptionSkill {
+  const baseLabel = managedSkill.displayName || managedSkill.skillName;
+  return {
+    id: selectionIdForManagedSkill(managedSkill.id),
+    name: managedSkill.skillName,
+    label: managedSkill.scope === "private" ? `${baseLabel} · Installed` : baseLabel,
+    description: trimOrUndefined(managedSkill.description),
+    system: false,
+    activationPrompt,
+    managedSkillId: managedSkill.id,
+    scope: managedSkill.scope,
+    sourcePath: managedSkill.publishedPath
+  };
+}
+
+function toNativeRuntimeSkill(skill: NativeCodexSkillRecord, activationPrompt?: string): PortalRuntimeOptionSkill {
+  return {
+    id: skill.name,
+    name: skill.name,
+    label: skill.name,
+    description: trimOrUndefined(skill.description),
+    system: skill.system,
+    activationPrompt
+  };
 }
 
 export class PortalRuntimeOptionService {
@@ -192,11 +248,12 @@ export class PortalRuntimeOptionService {
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows] = await Promise.all([
+    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows] = await Promise.all([
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
       this.deps.skillPackages.list(),
-      this.deps.nativeCodexSkills?.list() ?? Promise.resolve([])
+      this.deps.nativeCodexSkills?.list() ?? Promise.resolve([]),
+      this.deps.managedSkills?.listManagedSkills({ organizationId: input.organizationId }) ?? Promise.resolve([])
     ]);
 
     const activeVisibleModeRows = modeRows.filter(
@@ -216,6 +273,10 @@ export class PortalRuntimeOptionService {
     const runProfileMap = new Map(runProfileRows.map((runProfile) => [runProfile.id, runProfile] as const));
     const skillPackageMap = new Map(skillPackageRows.map((skillPackage) => [skillPackage.id, skillPackage] as const));
     const nativeSkillMap = new Map(nativeSkillRows.map((skill) => [skill.name, skill] as const));
+    const managedSkillMap = new Map(managedSkillRows.map((skill) => [skill.id, skill] as const));
+    const activePrivateSkills = managedSkillRows.filter(
+      (skill) => skill.status === "active" && skill.scope === "private" && skill.ownerUserId === input.userId
+    );
     const safetyLimits = await this.resolvePublishedSafetyLimits();
 
     const resolvedModes = [];
@@ -244,8 +305,8 @@ export class PortalRuntimeOptionService {
       }
 
       const dependentSkillPackages = [];
-      const availableSkillNames: string[] = [];
-      const activationPromptBySkillName = new Map<string, string>();
+      const availableSkills: PortalRuntimeOptionSkill[] = [];
+      const availableSkillIds = new Set<string>();
       let valid = true;
       for (const binding of mode.skillPackages) {
         const skillPackage = skillPackageMap.get(binding.skillPackageId);
@@ -280,17 +341,37 @@ export class PortalRuntimeOptionService {
         });
 
         for (const skillBinding of collectCodexSkillBindings(skillPackage)) {
-          if (nativeSkillMap.has(skillBinding.name) && !availableSkillNames.includes(skillBinding.name)) {
-            availableSkillNames.push(skillBinding.name);
+          if (skillBinding.managedSkillId) {
+            const managedSkill = managedSkillMap.get(skillBinding.managedSkillId);
+            if (!managedSkill || managedSkill.status !== "active") continue;
+            const runtimeSkill = toManagedRuntimeSkill(managedSkill, skillBinding.activationPrompt);
+            if (!availableSkillIds.has(runtimeSkill.id)) {
+              availableSkillIds.add(runtimeSkill.id);
+              availableSkills.push(runtimeSkill);
+            }
+            continue;
           }
-          if (skillBinding.activationPrompt && !activationPromptBySkillName.has(skillBinding.name)) {
-            activationPromptBySkillName.set(skillBinding.name, skillBinding.activationPrompt);
+
+          const nativeSkill = nativeSkillMap.get(skillBinding.name);
+          if (!nativeSkill) continue;
+          const runtimeSkill = toNativeRuntimeSkill(nativeSkill, skillBinding.activationPrompt);
+          if (!availableSkillIds.has(runtimeSkill.id)) {
+            availableSkillIds.add(runtimeSkill.id);
+            availableSkills.push(runtimeSkill);
           }
         }
       }
 
       if (!valid) {
         continue;
+      }
+
+      for (const privateSkill of activePrivateSkills) {
+        const runtimeSkill = toManagedRuntimeSkill(privateSkill);
+        if (!availableSkillIds.has(runtimeSkill.id)) {
+          availableSkillIds.add(runtimeSkill.id);
+          availableSkills.push(runtimeSkill);
+        }
       }
 
       resolvedModes.push({
@@ -300,16 +381,7 @@ export class PortalRuntimeOptionService {
         runtimeProfile: toRunProfileSnapshot(runProfile, safetyLimits),
         allowDirectorySelection: false,
         skillPackages: dependentSkillPackages,
-        availableSkills: availableSkillNames
-          .map((skillName) => nativeSkillMap.get(skillName))
-          .filter((skill): skill is NativeCodexSkillRecord => Boolean(skill))
-          .map((skill) => ({
-            name: skill.name,
-            label: skill.name,
-            description: trimOrUndefined(skill.description),
-            system: skill.system,
-            activationPrompt: trimOrUndefined(activationPromptBySkillName.get(skill.name))
-          })),
+        availableSkills,
         instructionSources: mode.instructionSources.map((source) => ({
           sourceType: source.sourceType,
           sourceRef: source.sourceRef,

@@ -1,23 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Input, Select, Space, Spin, Tabs, Tag, Typography } from "antd";
 
 import { fetchAgentModes, fetchSkillPackages } from "../capability-center/api";
 import type { AgentModeRecord, SkillPackageRecord } from "../capability-center/types";
 import {
+  fetchAdminManagedSkills,
   fetchAdminSkillDraftDetail,
   fetchAdminSkillDrafts,
   publishAdminSkillDraft,
   reviewAdminSkillDraft,
+  updateAdminManagedSkillStatus,
   updateAdminSkillDraftMarkdown
 } from "./api";
-import type { CodexSkillDraft } from "./types";
+import type { CodexManagedSkill, CodexSkillDraft } from "./types";
 
-const STATUS_OPTIONS = [
+const REVIEW_STATUS_OPTIONS = [
   { label: "全部状态", value: "all" },
   { label: "等待审核", value: "pending_review" },
   { label: "需要修改", value: "changes_requested" },
   { label: "已发布", value: "published" },
   { label: "已驳回", value: "rejected" }
+];
+
+const MANAGED_STATUS_OPTIONS = [
+  { label: "全部状态", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Disabled", value: "disabled" },
+  { label: "Archived", value: "archived" }
+];
+
+const MANAGED_SCOPE_OPTIONS = [
+  { label: "全部范围", value: "all" },
+  { label: "Private", value: "private" },
+  { label: "Agent Mode", value: "agent_mode" },
+  { label: "Team", value: "team" },
+  { label: "Organization", value: "org" }
 ];
 
 function formatLocalDateTime(value?: string) {
@@ -28,10 +45,11 @@ function formatLocalDateTime(value?: string) {
 }
 
 function statusTagColor(status: string) {
-  if (status === "published") return "success";
+  if (status === "published" || status === "active") return "success";
   if (status === "pending_review") return "processing";
   if (status === "changes_requested") return "warning";
-  if (status === "rejected") return "error";
+  if (status === "disabled") return "default";
+  if (status === "rejected" || status === "archived") return "error";
   return "default";
 }
 
@@ -40,10 +58,233 @@ function statusLabel(status: string) {
   if (status === "pending_review") return "等待审核";
   if (status === "changes_requested") return "需要修改";
   if (status === "rejected") return "已驳回";
+  if (status === "active") return "Active";
+  if (status === "disabled") return "Disabled";
+  if (status === "archived") return "Archived";
   return status;
 }
 
-export function SkillDraftReviewView() {
+function scopeLabel(scope?: string) {
+  if (scope === "private") return "Private";
+  if (scope === "agent_mode") return "Agent Mode";
+  if (scope === "team") return "Team";
+  if (scope === "org") return "Organization";
+  return scope || "-";
+}
+
+function actorLabel(record: {
+  createdByDisplayName?: string;
+  createdByEmail?: string;
+  createdByUserId?: string;
+}) {
+  return record.createdByDisplayName || record.createdByEmail || record.createdByUserId || "-";
+}
+
+function metadataString(metadata: unknown, key: string): string {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function ManagedSkillRegistryPanel() {
+  const [skills, setSkills] = useState<CodexManagedSkill[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [scopeFilter, setScopeFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState("");
+  const [successText, setSuccessText] = useState("");
+
+  const loadSkills = async () => {
+    setLoading(true);
+    setErrorText("");
+    try {
+      const response = await fetchAdminManagedSkills();
+      setSkills(response.skills);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "加载 Skill Registry 失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSkills();
+  }, []);
+
+  const filteredSkills = useMemo(
+    () =>
+      skills.filter((skill) => {
+        if (statusFilter !== "all" && skill.status !== statusFilter) return false;
+        if (scopeFilter !== "all" && (skill.scope || "") !== scopeFilter) return false;
+        return true;
+      }),
+    [scopeFilter, skills, statusFilter]
+  );
+
+  useEffect(() => {
+    if (filteredSkills.some((skill) => skill.id === selectedSkillId)) return;
+    setSelectedSkillId(filteredSkills[0]?.id || "");
+  }, [filteredSkills, selectedSkillId]);
+
+  const selectedSkill = filteredSkills.find((skill) => skill.id === selectedSkillId) || null;
+  const privateCount = useMemo(() => skills.filter((skill) => skill.scope === "private").length, [skills]);
+
+  const handleSetStatus = async (status: "active" | "disabled" | "archived") => {
+    if (!selectedSkill) return;
+    setSaving(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await updateAdminManagedSkillStatus({
+        id: selectedSkill.id,
+        status
+      });
+      setSkills((current) => current.map((skill) => (skill.id === response.skill.id ? response.skill : skill)));
+      setSuccessText(`Skill 状态已更新为 ${statusLabel(response.skill.status)}`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "更新 Skill 状态失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="admin-page-container" style={{ paddingTop: 0 }}>
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+
+      <div className="admin-page-header" style={{ marginTop: 4 }}>
+        <div>
+          <Typography.Title level={4} style={{ margin: 0, marginBottom: 8 }}>
+            Installed Skills
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            查看已安装到 Codex skill 目录的标准 Skills。Private skill 默认仅作者新会话可用；共享范围继续复用 Agent Mode / Skill Package 机制。
+          </Typography.Text>
+        </div>
+        <Space>
+          <Tag color={privateCount > 0 ? "processing" : "default"}>Private {privateCount}</Tag>
+          <Button onClick={() => void loadSkills()} loading={loading}>刷新</Button>
+        </Space>
+      </div>
+
+      <div className="admin-split-layout">
+        <div className="admin-split-master">
+          <div style={{ padding: 16, borderBottom: "1px solid var(--admin-color-border)", display: "grid", gap: 12 }}>
+            <Select value={statusFilter} options={MANAGED_STATUS_OPTIONS} onChange={setStatusFilter} style={{ width: "100%" }} />
+            <Select value={scopeFilter} options={MANAGED_SCOPE_OPTIONS} onChange={setScopeFilter} style={{ width: "100%" }} />
+          </div>
+          <div className="admin-master-list">
+            {loading ? (
+              <div style={{ textAlign: "center", padding: "40px 0" }}><Spin size="small" /></div>
+            ) : filteredSkills.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无已安装 Skill" />
+            ) : (
+              filteredSkills.map((skill) => (
+                <div
+                  key={skill.id}
+                  className={`admin-master-item ${selectedSkillId === skill.id ? "active" : ""}`}
+                  onClick={() => setSelectedSkillId(skill.id)}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <strong>{skill.displayName || skill.skillName}</strong>
+                    <Tag color={statusTagColor(skill.status)} style={{ margin: 0 }}>{statusLabel(skill.status)}</Tag>
+                  </div>
+                  <div style={{ marginTop: 6, color: "var(--admin-color-subtle)", fontSize: 12 }}>
+                    {skill.skillName}
+                  </div>
+                  <div style={{ marginTop: 8, color: "var(--admin-color-subtle)", fontSize: 12 }}>
+                    作者：{actorLabel(skill)} · 范围：{scopeLabel(skill.scope)}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="admin-split-detail">
+          <div style={{ height: "100%", overflow: "auto", padding: 16 }}>
+            {!selectedSkill ? (
+              <div className="resource-center-placeholder empty">
+                <h3>Skill Registry</h3>
+                <p>请选择左侧 Skill 查看详情。</p>
+              </div>
+            ) : (
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                <Card size="small" className="antd-admin-card">
+                  <div className="resource-center-section-header">
+                    <div>
+                      <h3>{selectedSkill.displayName || selectedSkill.skillName}</h3>
+                      <p>{selectedSkill.description || "未填写描述"}</p>
+                    </div>
+                    <Tag color={statusTagColor(selectedSkill.status)}>{statusLabel(selectedSkill.status)}</Tag>
+                  </div>
+                  <div className="capability-center-summary-grid">
+                    <div>
+                      <span className="field-label">作者</span>
+                      <p>{actorLabel(selectedSkill)}</p>
+                    </div>
+                    <div>
+                      <span className="field-label">范围</span>
+                      <p>{scopeLabel(selectedSkill.scope)}</p>
+                    </div>
+                    <div>
+                      <span className="field-label">版本</span>
+                      <p>{selectedSkill.version}</p>
+                    </div>
+                    <div>
+                      <span className="field-label">发布时间</span>
+                      <p>{formatLocalDateTime(selectedSkill.publishedAt)}</p>
+                    </div>
+                    <div>
+                      <span className="field-label">目录路径</span>
+                      <p style={{ wordBreak: "break-all" }}>{selectedSkill.publishedPath}</p>
+                    </div>
+                    <div>
+                      <span className="field-label">来源线程</span>
+                      <p>{metadataString(selectedSkill.metadata, "sourceThreadId") || "-"}</p>
+                    </div>
+                  </div>
+                  {selectedSkill.checksum ? (
+                    <Typography.Text type="secondary">Checksum: {selectedSkill.checksum}</Typography.Text>
+                  ) : null}
+                </Card>
+
+                <Card size="small" title="治理动作" className="antd-admin-card">
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    <Typography.Text type="secondary">
+                      Disabled 后，该 Skill 不会进入新的工作台会话 runtime options。已经启动的旧会话不会热切更新。
+                    </Typography.Text>
+                    <Space wrap>
+                      {selectedSkill.status !== "active" ? (
+                        <Button type="primary" loading={saving} onClick={() => void handleSetStatus("active")}>
+                          启用
+                        </Button>
+                      ) : (
+                        <Button loading={saving} onClick={() => void handleSetStatus("disabled")}>
+                          禁用
+                        </Button>
+                      )}
+                      {selectedSkill.status !== "archived" ? (
+                        <Button danger loading={saving} onClick={() => void handleSetStatus("archived")}>
+                          归档
+                        </Button>
+                      ) : null}
+                    </Space>
+                  </Space>
+                </Card>
+              </Space>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkillReviewQueuePanel() {
   const [drafts, setDrafts] = useState<CodexSkillDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState("");
   const [selectedDraft, setSelectedDraft] = useState<CodexSkillDraft | null>(null);
@@ -67,7 +308,9 @@ export function SkillDraftReviewView() {
     try {
       const response = await fetchAdminSkillDrafts(statusFilter);
       setDrafts(response.drafts);
-      setSelectedDraftId((current) => current || response.drafts[0]?.id || "");
+      setSelectedDraftId((current) =>
+        response.drafts.some((draft) => draft.id === current) ? current : response.drafts[0]?.id || ""
+      );
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "加载 skill 草稿失败");
     } finally {
@@ -77,7 +320,6 @@ export function SkillDraftReviewView() {
 
   useEffect(() => {
     void loadDrafts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
   useEffect(() => {
@@ -133,7 +375,7 @@ export function SkillDraftReviewView() {
 
   const validation = selectedDraft?.validation;
   const canEdit = selectedDraft && selectedDraft.status !== "published" && selectedDraft.status !== "archived";
-  const selectedDraftAuthor = selectedDraft?.createdByDisplayName || selectedDraft?.createdByEmail || selectedDraft?.createdByUserId || "-";
+  const selectedDraftAuthor = actorLabel(selectedDraft || {});
   const pendingCount = useMemo(() => drafts.filter((draft) => draft.status === "pending_review").length, [drafts]);
 
   const refreshSelected = async (nextDraft?: CodexSkillDraft) => {
@@ -218,7 +460,7 @@ export function SkillDraftReviewView() {
         skillPackageId: selectedSkillPackageId,
         agentModeIds: selectedAgentModeIds
       });
-      setSuccessText("Skill 已发布。用户需要从新会话中使用。");
+      setSuccessText(`Skill 已发布到 ${scopeLabel(response.managedSkill.scope)}。用户需要在新会话中使用。`);
       await refreshSelected(response.draft);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "发布失败");
@@ -228,13 +470,18 @@ export function SkillDraftReviewView() {
   };
 
   return (
-    <div className="admin-page-container">
-      <div className="admin-page-header">
+    <div className="admin-page-container" style={{ paddingTop: 0 }}>
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+
+      <div className="admin-page-header" style={{ marginTop: 4 }}>
         <div>
-          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
-            Skill 审核
+          <Typography.Title level={4} style={{ margin: 0, marginBottom: 8 }}>
+            Review Queue
           </Typography.Title>
-          <Typography.Text type="secondary">审核用户从工作台沉淀的可复用 Codex skill；发布后仅新会话加载。</Typography.Text>
+          <Typography.Text type="secondary">
+            审核需要提升到 Agent Mode / 组织共享范围的 Skill 草稿。发布后仍然只会在新会话里加载。
+          </Typography.Text>
         </div>
         <Space>
           <Tag color={pendingCount > 0 ? "processing" : "default"}>待审核 {pendingCount}</Tag>
@@ -242,18 +489,10 @@ export function SkillDraftReviewView() {
         </Space>
       </div>
 
-      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-      {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
-
       <div className="admin-split-layout">
         <div className="admin-split-master">
           <div style={{ padding: 16, borderBottom: "1px solid var(--admin-color-border)" }}>
-            <Select
-              value={statusFilter}
-              options={STATUS_OPTIONS}
-              onChange={setStatusFilter}
-              style={{ width: "100%" }}
-            />
+            <Select value={statusFilter} options={REVIEW_STATUS_OPTIONS} onChange={setStatusFilter} style={{ width: "100%" }} />
           </div>
           <div className="admin-master-list">
             {loading ? (
@@ -275,7 +514,7 @@ export function SkillDraftReviewView() {
                     {draft.skillName || draft.slug}
                   </div>
                   <div style={{ marginTop: 8, color: "var(--admin-color-subtle)", fontSize: 12 }}>
-                    作者：{draft.createdByDisplayName || draft.createdByEmail || draft.createdByUserId}
+                    作者：{actorLabel(draft)}
                   </div>
                 </div>
               ))
@@ -394,7 +633,7 @@ export function SkillDraftReviewView() {
                         发布 Skill
                       </Button>
                     </Space>
-                    <Typography.Text type="secondary">发布后用户需要点击状态卡的“新会话使用”，或手动新建会话后选择该 skill。</Typography.Text>
+                    <Typography.Text type="secondary">发布后用户需要新建会话，Agent Studio 才会把新的共享 Skill 装入 runtime。</Typography.Text>
                   </Space>
                 </Card>
               </Space>
@@ -402,6 +641,39 @@ export function SkillDraftReviewView() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function SkillDraftReviewView() {
+  return (
+    <div className="admin-page-container">
+      <div className="admin-page-header">
+        <div>
+          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
+            Skill 管理
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            管理用户通过 skill-creator 生成并安装的标准 Codex Skills；默认仅新会话加载。Private 安装直接进入 Registry，共享发布继续走审核队列。
+          </Typography.Text>
+        </div>
+      </div>
+
+      <Tabs
+        defaultActiveKey="registry"
+        items={[
+          {
+            key: "registry",
+            label: "Installed Skills",
+            children: <ManagedSkillRegistryPanel />
+          },
+          {
+            key: "review-queue",
+            label: "Review Queue",
+            children: <SkillReviewQueuePanel />
+          }
+        ]}
+      />
     </div>
   );
 }

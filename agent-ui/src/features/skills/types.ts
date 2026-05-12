@@ -43,19 +43,25 @@ export type CodexSkillDraft = {
 export type CodexManagedSkill = {
   id: string;
   organizationId?: string;
+  ownerUserId?: string;
+  scope: string;
   skillName: string;
   slug: string;
   displayName: string;
   description?: string;
   status: string;
   version: string;
+  checksum?: string;
   publishedPath: string;
   sourceDraftId?: string;
   createdByUserId?: string;
   createdByDisplayName?: string;
   createdByEmail?: string;
+  reviewedByUserId?: string;
+  reviewedByDisplayName?: string;
   publishedByUserId?: string;
   publishedByDisplayName?: string;
+  metadata?: unknown;
   publishedAt?: string;
   createdAt: string;
   updatedAt: string;
