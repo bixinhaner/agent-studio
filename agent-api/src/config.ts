@@ -47,7 +47,8 @@ const schema = z.object({
   BRANDING_ASSET_ROOT: z.string().default("./temp/branding-assets"),
   KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets"),
   CODEX_BASE_HOME: z.string().optional(),
-  CODEX_SESSION_HOME_ROOT: z.string().default("./temp/codex-homes")
+  CODEX_SESSION_HOME_ROOT: z.string().default("./temp/codex-homes"),
+  CODEX_SKILL_DRAFT_ROOT: z.string().default("./temp/skill-drafts")
 });
 
 const env = schema.parse(process.env);
@@ -106,6 +107,10 @@ const codexBaseHome = codexBaseHomeInput
 const codexSessionHomeRoot = path.isAbsolute(env.CODEX_SESSION_HOME_ROOT)
   ? env.CODEX_SESSION_HOME_ROOT
   : path.resolve(process.cwd(), env.CODEX_SESSION_HOME_ROOT);
+
+const codexSkillDraftRoot = path.isAbsolute(env.CODEX_SKILL_DRAFT_ROOT)
+  ? env.CODEX_SKILL_DRAFT_ROOT
+  : path.resolve(process.cwd(), env.CODEX_SKILL_DRAFT_ROOT);
 
 function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
@@ -194,7 +199,8 @@ export const appConfig = {
   knowledgeSetStorageRoot,
   codex: {
     baseHome: codexBaseHome,
-    sessionHomeRoot: codexSessionHomeRoot
+    sessionHomeRoot: codexSessionHomeRoot,
+    skillDraftRoot: codexSkillDraftRoot
   },
   orgSync: {
     enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),

@@ -7,6 +7,7 @@ export type AdminSection =
   | "users"
   | "resources"
   | "capabilities"
+  | "skill-drafts"
   | "integrations"
   | "system-settings"
   | "organization"

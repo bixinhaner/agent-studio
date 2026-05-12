@@ -1,0 +1,721 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createHash } from "node:crypto";
+
+import type { AgentModeRepository } from "../persistence/agent-mode-repository.js";
+import type {
+  CodexManagedSkillRecord,
+  CodexSkillDraftRecord,
+  CodexSkillRepository
+} from "../persistence/codex-skill-repository.js";
+import type { SkillPackageRepository, SkillPackageRecord } from "../persistence/skill-package-repository.js";
+
+type Actor = {
+  id: string;
+  displayName?: string;
+  email?: string;
+  organizationId?: string;
+};
+
+type CreateDraftInput = {
+  actor: Actor;
+  prompt: string;
+  sourceThreadId?: string;
+  modeId?: string;
+};
+
+type ReviseDraftInput = {
+  actor: Actor;
+  draftId: string;
+  instruction: string;
+};
+
+type CreateNewVersionDraftInput = {
+  actor: Actor;
+  draftId: string;
+  instruction: string;
+};
+
+type PublishDraftInput = {
+  actor: Actor;
+  draftId: string;
+  reviewNote?: string;
+  activationPrompt?: string;
+  skillPackageId?: string;
+  agentModeIds?: string[];
+};
+
+export type CodexSkillValidationResult = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  metadata?: {
+    name?: string;
+    description?: string;
+    hasScripts: boolean;
+    fileCount: number;
+    totalBytes: number;
+  };
+};
+
+type CodexSkillServiceOptions = {
+  draftRoot: string;
+  publishedSkillsRoot: string;
+};
+
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
+const SAFE_SKILL_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$/;
+const MAX_SKILL_FILE_COUNT = 80;
+const MAX_SKILL_TOTAL_BYTES = 2 * 1024 * 1024;
+const MAX_SKILL_FILE_BYTES = 512 * 1024;
+const MAX_SKILL_MD_LINES = 500;
+
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function hashText(value: string): string {
+  return createHash("sha1").update(value).digest("hex").slice(0, 8);
+}
+
+function slugify(value: string, fallback = "custom-skill"): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/['"`]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 56);
+  return normalized || `${fallback}-${hashText(value)}`;
+}
+
+function sanitizePathSegment(value: string, fallback: string): string {
+  const normalized = value
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function firstLine(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringFromMetadata(value: unknown, key: string): string | undefined {
+  const current = asRecord(value)[key];
+  return typeof current === "string" ? trimOrUndefined(current) : undefined;
+}
+
+function bumpPatchVersion(value: string | undefined): string {
+  const normalized = trimOrUndefined(value) ?? "1.0.0";
+  const match = normalized.match(/^(\d+)\.(\d+)\.(\d+)(-.+)?$/);
+  if (!match) return "1.0.1";
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+}
+
+function displayNameFromPrompt(prompt: string): string {
+  const cleaned = prompt
+    .replace(/(创建|做成|生成|制作|保存|固化|封装|复用|skill|技能|能力)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return firstLine(cleaned || prompt, 48) || "Custom Skill";
+}
+
+function skillNameFromPrompt(prompt: string): string {
+  const englishTokens = prompt
+    .toLowerCase()
+    .replace(/skill|create|creator|please|make|build|generate|保存|创建|做成|技能|能力|复用/g, " ")
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && token.length <= 24)
+    .slice(0, 5);
+  const base = englishTokens.length > 0 ? englishTokens.join("-") : `custom-skill-${hashText(prompt)}`;
+  return slugify(base, "custom-skill");
+}
+
+function yamlString(value: string): string {
+  return JSON.stringify(value.replace(/\r?\n/g, " ").trim());
+}
+
+function parseFrontmatterValue(raw: string | undefined): string | undefined {
+  const value = trimOrUndefined(raw);
+  if (!value) return undefined;
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return trimOrUndefined(value.slice(1, -1));
+  }
+  return value;
+}
+
+function parseSkillMetadata(content: string): { name?: string; description?: string } {
+  const match = content.match(FRONTMATTER_RE);
+  if (!match) return {};
+  const metadata: Record<string, string> = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const separator = line.indexOf(":");
+    if (separator <= 0) continue;
+    metadata[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+  }
+  return {
+    name: parseFrontmatterValue(metadata.name),
+    description: parseFrontmatterValue(metadata.description)
+  };
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.lstat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyDirectoryNoSymlinks(sourcePath: string, destinationPath: string): Promise<void> {
+  const stat = await fs.lstat(sourcePath);
+  if (stat.isSymbolicLink()) {
+    throw new Error("Skill draft contains symlink and cannot be published");
+  }
+  if (stat.isDirectory()) {
+    await fs.mkdir(destinationPath, { recursive: true });
+    const entries = await fs.readdir(sourcePath, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyDirectoryNoSymlinks(path.join(sourcePath, entry.name), path.join(destinationPath, entry.name));
+    }
+    return;
+  }
+  if (!stat.isFile()) return;
+  await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+  await fs.copyFile(sourcePath, destinationPath);
+}
+
+function createSkillMarkdown(input: {
+  skillName: string;
+  displayName: string;
+  description: string;
+  prompt: string;
+}): string {
+  return `---
+name: ${input.skillName}
+description: ${yamlString(input.description)}
+---
+
+# ${input.displayName}
+
+Use this skill when the user wants to repeat the workflow described below or asks to automate a similar task.
+
+## Source request
+
+${input.prompt}
+
+## Workflow
+
+1. Identify the user's concrete goal and expected output.
+2. Reuse existing project files and conventions before creating new files.
+3. Automate repetitive steps with scripts when the same operation may be repeated.
+4. Put temporary verification files in the project temp directory when a project temp directory exists.
+5. Validate the final output before responding.
+
+## Response style
+
+- Start with the result and next action.
+- Explain why important decisions were made and how they affect the user.
+- Ask only when missing information would make the output unsafe or unusable.
+`;
+}
+
+export class CodexSkillService {
+  private readonly draftRoot: string;
+  private readonly publishedSkillsRoot: string;
+
+  constructor(
+    private readonly dependencies: {
+      repository: CodexSkillRepository;
+      skillPackages: SkillPackageRepository;
+      agentModes: AgentModeRepository;
+    },
+    options: CodexSkillServiceOptions
+  ) {
+    this.draftRoot = path.resolve(options.draftRoot);
+    this.publishedSkillsRoot = path.resolve(options.publishedSkillsRoot);
+  }
+
+  async createDraft(input: CreateDraftInput): Promise<CodexSkillDraftRecord> {
+    const prompt = trimOrUndefined(input.prompt);
+    if (!prompt) throw new Error("请描述要沉淀成 skill 的流程");
+    const skillName = skillNameFromPrompt(prompt);
+    const displayName = displayNameFromPrompt(prompt);
+    const description = `Automates a reusable workflow requested by the user: ${firstLine(prompt, 120)}`;
+    const draftIdSeed = `${Date.now()}-${hashText(`${input.actor.id}:${prompt}`)}`;
+    const draftPath = path.join(this.draftRoot, sanitizePathSegment(draftIdSeed, "draft"));
+
+    await fs.mkdir(draftPath, { recursive: true });
+    await fs.writeFile(
+      path.join(draftPath, "SKILL.md"),
+      createSkillMarkdown({
+        skillName,
+        displayName,
+        description,
+        prompt
+      }),
+      "utf8"
+    );
+
+    const validation = await this.validateSkillDirectory(draftPath);
+    return this.dependencies.repository.createDraft({
+      organizationId: input.actor.organizationId,
+      createdByUserId: input.actor.id,
+      createdByDisplayName: input.actor.displayName,
+      createdByEmail: input.actor.email,
+      sourceThreadId: input.sourceThreadId,
+      requestedPrompt: prompt,
+      skillName,
+      slug: slugify(skillName),
+      displayName,
+      description,
+      status: "pending_review",
+      version: "1.0.0",
+      draftPath,
+      validation,
+      metadata: {
+        generator: "agent-studio-skill-draft-v1",
+        modeId: trimOrUndefined(input.modeId)
+      }
+    });
+  }
+
+  async reviseDraft(input: ReviseDraftInput): Promise<CodexSkillDraftRecord> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.createdByUserId !== input.actor.id) {
+      throw new Error("无权修改该 skill 草稿");
+    }
+    if (draft.status === "published" || draft.status === "archived") {
+      throw new Error("已发布或已归档的 skill 不能直接修改，请创建新版本草稿");
+    }
+    const instruction = trimOrUndefined(input.instruction);
+    if (!instruction) throw new Error("请描述要修改的内容");
+
+    const skillMdPath = path.join(draft.draftPath, "SKILL.md");
+    const current = await fs.readFile(skillMdPath, "utf8");
+    const next = `${current.trim()}\n\n## Revision request\n\n${instruction}\n`;
+    await fs.writeFile(skillMdPath, next, "utf8");
+    const validation = await this.validateSkillDirectory(draft.draftPath);
+    return this.dependencies.repository.updateDraft(draft.id, {
+      status: "pending_review",
+      validation,
+      reviewNote: "",
+      reviewedByUserId: "",
+      reviewedByDisplayName: "",
+      metadata: {
+        ...(typeof draft.metadata === "object" && draft.metadata !== null ? (draft.metadata as Record<string, unknown>) : {}),
+        lastRevisionByUserId: input.actor.id,
+        lastRevisionAt: new Date().toISOString()
+      }
+    });
+  }
+
+  async createNewVersionDraft(input: CreateNewVersionDraftInput): Promise<CodexSkillDraftRecord> {
+    const sourceDraft = await this.requireDraft(input.draftId);
+    if (sourceDraft.createdByUserId !== input.actor.id) {
+      throw new Error("无权修改该 skill");
+    }
+    if (sourceDraft.status !== "published") {
+      throw new Error("只有已发布的 skill 才需要创建新版本草稿");
+    }
+    const instruction = trimOrUndefined(input.instruction);
+    if (!instruction) throw new Error("请描述新版本要修改什么");
+
+    const sourcePath = trimOrUndefined(sourceDraft.publishedPath) ?? sourceDraft.draftPath;
+    if (!(await pathExists(sourcePath))) {
+      throw new Error("已发布 skill 文件不存在，无法创建新版本草稿");
+    }
+
+    const nextVersion = bumpPatchVersion(sourceDraft.version);
+    const draftIdSeed = `${Date.now()}-${hashText(`${input.actor.id}:${sourceDraft.id}:${instruction}`)}`;
+    const draftPath = path.join(this.draftRoot, sanitizePathSegment(draftIdSeed, "draft"));
+    await fs.rm(draftPath, { recursive: true, force: true });
+    await copyDirectoryNoSymlinks(sourcePath, draftPath);
+
+    const skillMdPath = path.join(draftPath, "SKILL.md");
+    const current = await fs.readFile(skillMdPath, "utf8");
+    await fs.writeFile(
+      skillMdPath,
+      `${current.trim()}\n\n## Requested changes for version ${nextVersion}\n\n${instruction}\n`,
+      "utf8"
+    );
+
+    const metadata = asRecord(sourceDraft.metadata);
+    const validation = await this.validateSkillDirectory(draftPath);
+    return this.dependencies.repository.createDraft({
+      organizationId: sourceDraft.organizationId ?? input.actor.organizationId,
+      createdByUserId: input.actor.id,
+      createdByDisplayName: input.actor.displayName,
+      createdByEmail: input.actor.email,
+      sourceThreadId: sourceDraft.sourceThreadId,
+      sourceManagedSkillId: stringFromMetadata(sourceDraft.metadata, "managedSkillId"),
+      requestedPrompt: instruction,
+      skillName: sourceDraft.skillName,
+      slug: sourceDraft.slug,
+      displayName: sourceDraft.displayName,
+      description: sourceDraft.description,
+      status: "pending_review",
+      version: nextVersion,
+      draftPath,
+      validation,
+      metadata: {
+        ...metadata,
+        generator: "agent-studio-skill-draft-v1",
+        revisionOfDraftId: sourceDraft.id,
+        previousVersion: sourceDraft.version,
+        sourcePublishedPath: sourceDraft.publishedPath
+      }
+    });
+  }
+
+  async getDraftForPortal(input: { actor: Actor; draftId: string }): Promise<CodexSkillDraftRecord> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.createdByUserId !== input.actor.id) {
+      throw new Error("无权查看该 skill 草稿");
+    }
+    return draft;
+  }
+
+  async listDraftsForPortal(actor: Actor): Promise<CodexSkillDraftRecord[]> {
+    return this.dependencies.repository.listDrafts({
+      organizationId: actor.organizationId,
+      createdByUserId: actor.id,
+      take: 50
+    });
+  }
+
+  async listDraftsForAdmin(input?: { organizationId?: string; status?: string }): Promise<CodexSkillDraftRecord[]> {
+    return this.dependencies.repository.listDrafts({
+      organizationId: input?.organizationId,
+      status: input?.status,
+      take: 200
+    });
+  }
+
+  async listManagedSkills(input?: { organizationId?: string }): Promise<CodexManagedSkillRecord[]> {
+    return this.dependencies.repository.listManagedSkills({
+      organizationId: input?.organizationId
+    });
+  }
+
+  async readDraftSkillMd(draftId: string): Promise<{ draft: CodexSkillDraftRecord; content: string }> {
+    const draft = await this.requireDraft(draftId);
+    const content = await fs.readFile(path.join(draft.draftPath, "SKILL.md"), "utf8");
+    return { draft, content };
+  }
+
+  async updateDraftSkillMd(input: {
+    actor: Actor;
+    draftId: string;
+    content: string;
+  }): Promise<CodexSkillDraftRecord> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.status === "published" || draft.status === "archived") {
+      throw new Error("已发布或已归档的 skill 不能直接修改");
+    }
+    await fs.writeFile(path.join(draft.draftPath, "SKILL.md"), input.content, "utf8");
+    const validation = await this.validateSkillDirectory(draft.draftPath);
+    const metadata = parseSkillMetadata(input.content);
+    return this.dependencies.repository.updateDraft(draft.id, {
+      skillName: metadata.name ?? draft.skillName,
+      slug: slugify(metadata.name ?? draft.slug),
+      displayName: metadata.name ?? draft.displayName,
+      description: metadata.description ?? draft.description,
+      status: "pending_review",
+      validation,
+      metadata: {
+        ...(typeof draft.metadata === "object" && draft.metadata !== null ? (draft.metadata as Record<string, unknown>) : {}),
+        lastEditedByUserId: input.actor.id,
+        lastEditedAt: new Date().toISOString()
+      }
+    });
+  }
+
+  async rejectDraft(input: { actor: Actor; draftId: string; reviewNote?: string }): Promise<CodexSkillDraftRecord> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.status === "published") throw new Error("已发布的 skill 草稿不能驳回");
+    return this.dependencies.repository.updateDraft(draft.id, {
+      status: "rejected",
+      reviewNote: input.reviewNote,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName
+    });
+  }
+
+  async requestChanges(input: { actor: Actor; draftId: string; reviewNote?: string }): Promise<CodexSkillDraftRecord> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.status === "published") throw new Error("已发布的 skill 草稿不能要求修改");
+    return this.dependencies.repository.updateDraft(draft.id, {
+      status: "changes_requested",
+      reviewNote: input.reviewNote,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName
+    });
+  }
+
+  async publishDraft(input: PublishDraftInput): Promise<{
+    draft: CodexSkillDraftRecord;
+    managedSkill: CodexManagedSkillRecord;
+    skillPackage?: SkillPackageRecord;
+  }> {
+    const draft = await this.requireDraft(input.draftId);
+    if (draft.status === "published") throw new Error("该 skill 草稿已经发布");
+    const validation = await this.validateSkillDirectory(draft.draftPath);
+    if (!validation.ok) {
+      await this.dependencies.repository.updateDraft(draft.id, { validation });
+      throw new Error(`Skill 校验失败：${validation.errors.join("; ")}`);
+    }
+    const skillName = validation.metadata?.name ?? draft.skillName;
+    if (!skillName) throw new Error("Skill 缺少 name");
+    const slug = slugify(skillName);
+    const destinationPath = path.join(
+      this.publishedSkillsRoot,
+      "managed",
+      sanitizePathSegment(draft.organizationId ?? "global", "global"),
+      slug
+    );
+    const tempPath = `${destinationPath}.tmp-${Date.now()}`;
+    await fs.rm(tempPath, { recursive: true, force: true });
+    await copyDirectoryNoSymlinks(draft.draftPath, tempPath);
+    await fs.rm(destinationPath, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+    await fs.rename(tempPath, destinationPath);
+
+    const publishedAt = new Date();
+    const managedSkill = await this.dependencies.repository.upsertManagedSkill({
+      organizationId: draft.organizationId,
+      skillName,
+      slug,
+      displayName: draft.displayName || skillName,
+      description: validation.metadata?.description ?? draft.description,
+      status: "active",
+      version: draft.version || "1.0.0",
+      publishedPath: destinationPath,
+      sourceDraftId: draft.id,
+      createdByUserId: draft.createdByUserId,
+      createdByDisplayName: draft.createdByDisplayName,
+      createdByEmail: draft.createdByEmail,
+      lastEditedByUserId: draft.createdByUserId,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName,
+      publishedByUserId: input.actor.id,
+      publishedByDisplayName: input.actor.displayName,
+      metadata: {
+        draftId: draft.id,
+        reviewNote: trimOrUndefined(input.reviewNote)
+      },
+      publishedAt
+    });
+
+    const draftMetadata = asRecord(draft.metadata);
+    const skillPackage = await this.ensureSkillPackageBinding({
+      draft,
+      skillName,
+      skillDescription: validation.metadata?.description ?? draft.description,
+      skillPackageId: input.skillPackageId ?? stringFromMetadata(draftMetadata, "skillPackageId"),
+      activationPrompt: input.activationPrompt
+    });
+
+    await this.ensureAgentModeBindings({
+      draft,
+      skillPackageId: skillPackage.id,
+      agentModeIds: input.agentModeIds
+    });
+
+    const updatedDraft = await this.dependencies.repository.updateDraft(draft.id, {
+      skillName,
+      slug,
+      description: validation.metadata?.description ?? draft.description,
+      status: "published",
+      validation,
+      reviewNote: input.reviewNote,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName,
+      publishedByUserId: input.actor.id,
+      publishedByDisplayName: input.actor.displayName,
+      publishedAt,
+      publishedPath: destinationPath,
+      metadata: {
+        ...draftMetadata,
+        managedSkillId: managedSkill.id,
+        skillPackageId: skillPackage.id
+      }
+    });
+
+    return {
+      draft: updatedDraft,
+      managedSkill,
+      skillPackage
+    };
+  }
+
+  async validateSkillDirectory(rootPath: string): Promise<CodexSkillValidationResult> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const normalizedRoot = path.resolve(rootPath);
+    const skillMdPath = path.join(normalizedRoot, "SKILL.md");
+    const skillMdExists = await pathExists(skillMdPath);
+    if (!skillMdExists) {
+      errors.push("缺少 SKILL.md");
+      return { ok: false, errors, warnings };
+    }
+
+    let fileCount = 0;
+    let totalBytes = 0;
+    let hasScripts = false;
+
+    const walk = async (currentPath: string) => {
+      const entries = await fs.readdir(currentPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const entryPath = path.join(currentPath, entry.name);
+        const relative = path.relative(normalizedRoot, entryPath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+          errors.push(`非法路径：${relative}`);
+          continue;
+        }
+        const stat = await fs.lstat(entryPath);
+        if (stat.isSymbolicLink()) {
+          errors.push(`禁止 symlink：${relative}`);
+          continue;
+        }
+        if (entry.isDirectory()) {
+          if (relative === "scripts" || relative.startsWith(`scripts${path.sep}`)) hasScripts = true;
+          await walk(entryPath);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        fileCount += 1;
+        totalBytes += stat.size;
+        if (stat.size > MAX_SKILL_FILE_BYTES) {
+          errors.push(`文件过大：${relative}`);
+        }
+      }
+    };
+
+    await walk(normalizedRoot);
+    if (fileCount > MAX_SKILL_FILE_COUNT) errors.push(`文件数量过多：${fileCount}`);
+    if (totalBytes > MAX_SKILL_TOTAL_BYTES) errors.push(`skill 总大小过大：${totalBytes} bytes`);
+
+    const skillMd = await fs.readFile(skillMdPath, "utf8");
+    const lines = skillMd.split(/\r?\n/);
+    if (lines.length > MAX_SKILL_MD_LINES) warnings.push(`SKILL.md 超过 ${MAX_SKILL_MD_LINES} 行，建议拆分 references`);
+    const metadata = parseSkillMetadata(skillMd);
+    if (!metadata.name) errors.push("SKILL.md frontmatter 缺少 name");
+    if (!metadata.description) errors.push("SKILL.md frontmatter 缺少 description");
+    if (metadata.name && !SAFE_SKILL_NAME_RE.test(metadata.name)) {
+      errors.push("SKILL.md name 只能包含字母、数字、点、下划线和连字符，长度 2-64");
+    }
+    if (metadata.name?.startsWith(".system") || metadata.name === "skill-creator") {
+      errors.push("禁止覆盖系统 skill");
+    }
+    if (hasScripts) {
+      warnings.push("包含 scripts 目录，发布前请确认脚本安全性");
+    }
+
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      metadata: {
+        name: metadata.name,
+        description: metadata.description,
+        hasScripts,
+        fileCount,
+        totalBytes
+      }
+    };
+  }
+
+  private async requireDraft(draftId: string): Promise<CodexSkillDraftRecord> {
+    const draft = await this.dependencies.repository.getDraft(draftId);
+    if (!draft) throw new Error("skill 草稿不存在");
+    return draft;
+  }
+
+  private async ensureSkillPackageBinding(input: {
+    draft: CodexSkillDraftRecord;
+    skillName: string;
+    skillDescription?: string;
+    skillPackageId?: string;
+    activationPrompt?: string;
+  }): Promise<SkillPackageRecord> {
+    const activationPrompt =
+      trimOrUndefined(input.activationPrompt) ??
+      `当用户需要执行 ${input.draft.displayName || input.skillName} 这类可复用流程时使用该 skill。`;
+    let skillPackage = input.skillPackageId ? await this.dependencies.skillPackages.get(input.skillPackageId) : undefined;
+    if (!skillPackage) {
+      skillPackage = await this.dependencies.skillPackages.create({
+        organizationId: input.draft.organizationId,
+        name: `${input.draft.displayName || input.skillName} Skill Package`,
+        slug: `skill-${input.draft.slug || slugify(input.skillName)}-${hashText(input.draft.id)}`,
+        description: input.skillDescription ?? input.draft.description,
+        status: "active",
+        visibleToUsers: true
+      });
+    }
+
+    const existingItems = (skillPackage.items ?? []).map((item) => ({
+      capabilityKey: item.capabilityKey,
+      description: item.description,
+      runtimeBindings: item.runtimeBindings.map((binding) => ({
+        runtimeType: binding.runtimeType,
+        bindingType: binding.bindingType,
+        bindingPayload: binding.bindingPayload
+      }))
+    }));
+    const withoutThisSkill = existingItems.filter(
+      (item) =>
+        !item.runtimeBindings.some((binding) => {
+          if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") return false;
+          const payload = binding.bindingPayload as Record<string, unknown> | null;
+          return payload && typeof payload === "object" && payload.skillName === input.skillName;
+        })
+    );
+    const nextItems = [
+      ...withoutThisSkill,
+      {
+        capabilityKey: `codex-skill:${input.skillName}`,
+        description: input.skillDescription ?? input.draft.description,
+        runtimeBindings: [
+          {
+            runtimeType: "codex",
+            bindingType: "codex_skill",
+            bindingPayload: {
+              skillName: input.skillName,
+              activationPrompt
+            }
+          }
+        ]
+      }
+    ];
+    return this.dependencies.skillPackages.replaceItems(skillPackage.id, nextItems);
+  }
+
+  private async ensureAgentModeBindings(input: {
+    draft: CodexSkillDraftRecord;
+    skillPackageId: string;
+    agentModeIds?: string[];
+  }): Promise<void> {
+    const metadata = asRecord(input.draft.metadata);
+    const metadataModeId = typeof metadata.modeId === "string" ? trimOrUndefined(metadata.modeId) : undefined;
+    const agentModeIds = Array.from(new Set([...(input.agentModeIds ?? []), ...(metadataModeId ? [metadataModeId] : [])]));
+    for (const agentModeId of agentModeIds) {
+      const mode = await this.dependencies.agentModes.get(agentModeId);
+      if (!mode) continue;
+      const nextIds = Array.from(new Set([...mode.skillPackages.map((item) => item.skillPackageId), input.skillPackageId]));
+      await this.dependencies.agentModes.replaceSkillPackages(mode.id, nextIds);
+    }
+  }
+}

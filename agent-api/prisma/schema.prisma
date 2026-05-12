@@ -1058,6 +1058,70 @@ model RunProfile {
   @@map("run_profiles")
 }
 
+model CodexManagedSkill {
+  id                    String    @id @default(cuid())
+  organizationId        String?   @map("organization_id")
+  skillName             String    @map("skill_name")
+  slug                  String
+  displayName           String    @map("display_name")
+  description           String?
+  status                String    @default("active")
+  version               String    @default("1.0.0")
+  publishedPath         String    @map("published_path")
+  sourceDraftId         String?   @map("source_draft_id")
+  createdByUserId       String?   @map("created_by_user_id")
+  createdByDisplayName  String?   @map("created_by_display_name")
+  createdByEmail        String?   @map("created_by_email")
+  lastEditedByUserId    String?   @map("last_edited_by_user_id")
+  reviewedByUserId      String?   @map("reviewed_by_user_id")
+  reviewedByDisplayName String?   @map("reviewed_by_display_name")
+  publishedByUserId     String?   @map("published_by_user_id")
+  publishedByDisplayName String?  @map("published_by_display_name")
+  metadata              Json?
+  publishedAt           DateTime? @map("published_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@unique([organizationId, skillName])
+  @@index([organizationId, status])
+  @@index([createdByUserId, createdAt])
+  @@map("codex_managed_skills")
+}
+
+model CodexSkillDraft {
+  id                    String    @id @default(cuid())
+  organizationId        String?   @map("organization_id")
+  createdByUserId       String    @map("created_by_user_id")
+  createdByDisplayName  String?   @map("created_by_display_name")
+  createdByEmail        String?   @map("created_by_email")
+  sourceThreadId        String?   @map("source_thread_id")
+  sourceManagedSkillId  String?   @map("source_managed_skill_id")
+  requestedPrompt       String    @map("requested_prompt")
+  skillName             String?   @map("skill_name")
+  slug                  String
+  displayName           String    @map("display_name")
+  description           String?
+  status                String    @default("pending_review")
+  version               String    @default("1.0.0")
+  draftPath             String    @map("draft_path")
+  publishedPath         String?   @map("published_path")
+  validation            Json?
+  reviewNote            String?   @map("review_note")
+  reviewedByUserId      String?   @map("reviewed_by_user_id")
+  reviewedByDisplayName String?   @map("reviewed_by_display_name")
+  publishedByUserId     String?   @map("published_by_user_id")
+  publishedByDisplayName String?  @map("published_by_display_name")
+  publishedAt           DateTime? @map("published_at")
+  metadata              Json?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([organizationId, status, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([skillName])
+  @@map("codex_skill_drafts")
+}
+
 model SkillPackage {
   id             String                  @id @default(cuid())
   organizationId String?                 @map("organization_id")

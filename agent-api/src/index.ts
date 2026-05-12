@@ -22,6 +22,8 @@ import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
+import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
+import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
 import { InboxProjectionService } from "./collaboration/inbox-projection-service.js";
 import { createCollaborationRouter } from "./collaboration/router.js";
@@ -119,6 +121,7 @@ import { NotificationRecordRepository, type NotificationRecordRepositoryDb } fro
 import { ResourcePolicyRepository, type ResourcePolicyRepositoryDb } from "./persistence/resource-policy-repository.js";
 import { RunProfileRepository, type RunProfileRepositoryDb } from "./persistence/run-profile-repository.js";
 import { SkillPackageRepository, type SkillPackageRepositoryDb } from "./persistence/skill-package-repository.js";
+import { CodexSkillRepository, type CodexSkillRepositoryDb } from "./persistence/codex-skill-repository.js";
 import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/agent-mode-repository.js";
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
@@ -204,6 +207,18 @@ const resourcePolicies = new ResourcePolicyRepository(db as unknown as ResourceP
 const runProfiles = new RunProfileRepository(db as unknown as RunProfileRepositoryDb);
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
+const codexSkills = new CodexSkillRepository(db as unknown as CodexSkillRepositoryDb);
+const codexSkillService = new CodexSkillService(
+  {
+    repository: codexSkills,
+    skillPackages,
+    agentModes
+  },
+  {
+    draftRoot: appConfig.codex.skillDraftRoot,
+    publishedSkillsRoot: nativeCodexSkills.getSkillsRoot()
+  }
+);
 const systemSettings = new SystemSettingsRepository(db as never);
 const codexProviders = new ManagedCodexProviderResolver({
   integrations: {
@@ -1962,6 +1977,7 @@ registerCommonApiRoutes(app, {
     resourcePolicies,
     nativeCodexSkills
   }),
+  adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
@@ -1974,6 +1990,7 @@ registerCommonApiRoutes(app, {
     policies: policyService,
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId)
   }),
+  portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk)
 });

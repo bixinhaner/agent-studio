@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BarChart3,
   Bell,
+  ClipboardList,
   Component,
   Crown,
   Database,
@@ -64,6 +65,9 @@ const ResourceCenterShellLazy = lazy(() =>
 const CapabilityCenterShellLazy = lazy(() =>
   import("../capability-center/CapabilityCenterShell").then((module) => ({ default: module.CapabilityCenterShell }))
 );
+const SkillDraftReviewViewLazy = lazy(() =>
+  import("../skills/SkillDraftReviewView").then((module) => ({ default: module.SkillDraftReviewView }))
+);
 const IntegrationCenterShellLazy = lazy(() =>
   import("../integration-center/IntegrationCenterShell").then((module) => ({ default: module.IntegrationCenterShell }))
 );
@@ -116,6 +120,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "rbac",
   "resources",
   "capabilities",
+  "skill-drafts",
   "integrations",
   "system-settings"
 ];
@@ -240,6 +245,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "runtime",
     keywords: ["能力", "mode", "skill"],
     icon: <Wrench size={18} />
+  },
+  "skill-drafts": {
+    id: "skill-drafts",
+    title: "Skill 审核",
+    description: "审核工作台沉淀的 skill 草稿，发布为新会话可用的运行能力。",
+    scope: "Skill 草稿与发布",
+    cadence: "建议随提交实时处理",
+    group: "runtime",
+    keywords: ["skill", "技能", "审核", "发布", "草稿"],
+    icon: <ClipboardList size={18} />
   },
   integrations: {
     id: "integrations",
@@ -501,6 +516,12 @@ function AdminSectionContent(props: {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <CapabilityCenterShellLazy />
+        </Suspense>
+      );
+    case "skill-drafts":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <SkillDraftReviewViewLazy />
         </Suspense>
       );
     case "integrations":

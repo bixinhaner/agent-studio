@@ -114,6 +114,13 @@ import {
 } from "../markdown/markdown-rendering";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
+import {
+  createPortalSkillDraft,
+  createPortalSkillDraftNewVersion,
+  fetchPortalSkillDraft,
+  revisePortalSkillDraft
+} from "../skills/api";
+import type { CodexSkillDraft } from "../skills/types";
 import { getBrandInitials } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
 import { SessionRail } from "./workbench/SessionRail";
@@ -302,6 +309,12 @@ type CommentaryPartData = {
   status: "streaming" | "completed";
 };
 
+type SkillDraftStatusPartData = {
+  draftId: string;
+  status?: string;
+  skillName?: string;
+};
+
 type SessionGroupLabelContextValue = {
   groupHeaderByRemoteId: Record<string, string>;
 };
@@ -374,6 +387,13 @@ const SkillComposerContext = createContext<{
   availableSkills: [],
   enabledSkillNames: [],
   toggleSkill: () => undefined
+});
+const SkillDraftActionContext = createContext<{
+  openNewSessionWithSkill: (skillName: string) => Promise<void> | void;
+  refreshRuntimeOptions: () => Promise<PortalRuntimeOptions | null>;
+}>({
+  openNewSessionWithSkill: () => undefined,
+  refreshRuntimeOptions: async () => null
 });
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
@@ -2612,6 +2632,173 @@ const BuildVersionRefreshActivityBridge: FC<{ hasRunningSessions: boolean }> = (
 
 const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => <RunningMessagePlaceholder {...props} />;
 
+function isSkillCreationIntent(prompt: string): boolean {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized) return false;
+  const hasSkillWord = /\bskill\b|技能|能力/.test(normalized);
+  const hasCreateWord = /创建|生成|做成|固化|保存|沉淀|封装|复用|create|make|build|turn.+into/.test(normalized);
+  return hasSkillWord && hasCreateWord;
+}
+
+function skillDraftStatusLabel(status: string | undefined): string {
+  if (status === "pending_review") return "等待审核";
+  if (status === "changes_requested") return "需要修改";
+  if (status === "published") return "已发布";
+  if (status === "rejected") return "已驳回";
+  if (status === "archived") return "已归档";
+  return status || "处理中";
+}
+
+function skillDraftStatusTone(status: string | undefined): string {
+  if (status === "published") return "published";
+  if (status === "rejected") return "rejected";
+  if (status === "changes_requested") return "changes";
+  return "pending";
+}
+
+const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = ({ data }) => {
+  const payload = asRecord(data) || {};
+  const draftId = typeof payload.draftId === "string" ? payload.draftId.trim() : "";
+  const [draft, setDraft] = useState<CodexSkillDraft | null>(null);
+  const [loading, setLoading] = useState(Boolean(draftId));
+  const [errorText, setErrorText] = useState("");
+  const actions = useContext(SkillDraftActionContext);
+
+  const loadDraft = useCallback(async () => {
+    if (!draftId) return;
+    setLoading(true);
+    setErrorText("");
+    try {
+      const response = await fetchPortalSkillDraft(draftId);
+      setDraft(response.draft);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Failed to refresh skill draft");
+    } finally {
+      setLoading(false);
+    }
+  }, [draftId]);
+
+  useEffect(() => {
+    void loadDraft();
+  }, [loadDraft]);
+
+  useEffect(() => {
+    if (!draftId) return undefined;
+    const terminal = draft?.status === "published" || draft?.status === "rejected" || draft?.status === "archived";
+    if (terminal) return undefined;
+    const timer = window.setInterval(() => {
+      void loadDraft();
+    }, 7000);
+    return () => window.clearInterval(timer);
+  }, [draft?.status, draftId, loadDraft]);
+
+  const status = draft?.status || (typeof payload.status === "string" ? payload.status : undefined);
+  const skillName = draft?.skillName || (typeof payload.skillName === "string" ? payload.skillName : undefined);
+  const validation = draft?.validation;
+  const canRevise = draft && draft.status !== "published" && draft.status !== "archived";
+  const canUse = draft?.status === "published" && skillName;
+  const canCreateNewVersion = draft?.status === "published";
+
+  const handleRevise = async () => {
+    if (!draft) return;
+    const instruction = window.prompt("描述你要怎么修改这个 skill：");
+    if (!instruction?.trim()) return;
+    setLoading(true);
+    setErrorText("");
+    try {
+      const response = await revisePortalSkillDraft(draft.id, instruction.trim());
+      setDraft(response.draft);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "修改 skill 草稿失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUseNewSession = async () => {
+    if (!skillName) return;
+    await actions.openNewSessionWithSkill(skillName);
+  };
+
+  const handleCreateNewVersion = async () => {
+    if (!draft) return;
+    const instruction = window.prompt("描述这个 skill 新版本要怎么改：");
+    if (!instruction?.trim()) return;
+    setLoading(true);
+    setErrorText("");
+    try {
+      const response = await createPortalSkillDraftNewVersion(draft.id, instruction.trim());
+      setDraft(response.draft);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "创建新版本草稿失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!draftId) return null;
+
+  return (
+    <section className={`skill-draft-card skill-draft-${skillDraftStatusTone(status)}`} aria-label="Skill draft status">
+      <div className="skill-draft-card-head">
+        <div>
+          <p className="skill-draft-eyebrow">Reusable Skill</p>
+          <h4>{draft?.displayName || skillName || "Skill 草稿"}</h4>
+        </div>
+        <span className="skill-draft-status">{loading ? "刷新中" : skillDraftStatusLabel(status)}</span>
+      </div>
+      <div className="skill-draft-meta-grid">
+        <div>
+          <span>Skill name</span>
+          <strong>{skillName || "-"}</strong>
+        </div>
+        <div>
+          <span>作者</span>
+          <strong>{draft?.createdByDisplayName || draft?.createdByEmail || "你"}</strong>
+        </div>
+        <div>
+          <span>版本</span>
+          <strong>{draft?.version || "1.0.0"}</strong>
+        </div>
+      </div>
+      {draft?.description ? <p className="skill-draft-description">{draft.description}</p> : null}
+      {draft?.reviewNote ? <p className="skill-draft-note">审核意见：{draft.reviewNote}</p> : null}
+      {validation && (!validation.ok || validation.warnings.length > 0) ? (
+        <div className="skill-draft-validation">
+          {validation.errors.map((item) => (
+            <p key={`error-${item}`}>错误：{item}</p>
+          ))}
+          {validation.warnings.map((item) => (
+            <p key={`warning-${item}`}>提醒：{item}</p>
+          ))}
+        </div>
+      ) : null}
+      {errorText ? <p className="skill-draft-error">{errorText}</p> : null}
+      <div className="skill-draft-actions">
+        <button type="button" onClick={() => void loadDraft()} disabled={loading}>
+          刷新状态
+        </button>
+        {canRevise ? (
+          <button type="button" onClick={() => void handleRevise()} disabled={loading}>
+            继续修改
+          </button>
+        ) : null}
+        {canCreateNewVersion ? (
+          <button type="button" onClick={() => void handleCreateNewVersion()} disabled={loading}>
+            修改新版本
+          </button>
+        ) : null}
+        {canUse ? (
+          <button type="button" className="primary" onClick={() => void handleUseNewSession()} disabled={loading}>
+            新会话使用
+          </button>
+        ) : null}
+      </div>
+      {canUse ? <p className="skill-draft-footnote">发布后的 skill 只在新会话加载；后续修改会生成新草稿并重新审核。</p> : null}
+    </section>
+  );
+};
+
 const AssistantCommentaryBlock: FC<{
   row: CommentaryPartData;
   entries: CommentaryEntryData[];
@@ -2671,6 +2858,10 @@ const ProcessDataFallback: FC<any> = ({
   const requestPreview = useContext(PreviewRequestContext);
 
   if (name === "codex_process_audit") return null;
+
+  if (name === "skill_draft_status") {
+    return <SkillDraftStatusBlock data={data} />;
+  }
 
   if (name === "codex_commentary") {
     const row = (data && typeof data === "object" ? data : {}) as CommentaryPartData;
@@ -2906,6 +3097,10 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
     }
 
     if (type === "data" && p.name === "codex_file_change") {
+      continue;
+    }
+
+    if (type === "data" && p.name === "skill_draft_status") {
       continue;
     }
 
@@ -4576,44 +4771,45 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     [collapseFinalTraceOnDone, persistPortalPreferences, showProcessTrace]
   );
 
+  const refreshRuntimeOptionsNow = useCallback(async (): Promise<PortalRuntimeOptions | null> => {
+    try {
+      const next = await api<PortalRuntimeOptions>("/api/portal/runtime-options");
+      setRuntimeOptions(next);
+      setRuntimeMode((prev) =>
+        next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || ""
+      );
+      setAppliedConfig((prev) => {
+        const nextMode = findRuntimeMode(next, next.defaults.mode || next.modes[0]?.id || "");
+        const runtimeProfile = nextMode?.runtimeProfile;
+        return {
+          ...prev,
+          model: runtimeProfile?.defaultModel || prev.model,
+          reasoningEffort: normalizeReasoningEffortForModel(
+            runtimeProfile?.defaultModel || prev.model,
+            (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort
+          ),
+          sandboxMode: (runtimeProfile?.sandboxMode as SandboxMode | undefined) || prev.sandboxMode,
+          approvalPolicy: (runtimeProfile?.approvalPolicy as ApprovalPolicy | undefined) || prev.approvalPolicy,
+          networkAccessEnabled: runtimeProfile?.networkAccessEnabled ?? prev.networkAccessEnabled,
+          webSearchMode: (runtimeProfile?.webSearchMode as WebSearchMode | undefined) || prev.webSearchMode
+        };
+      });
+      return next;
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Failed to load runtime policies");
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
-
-    async function loadRuntimeOptions() {
-      try {
-        const next = await api<PortalRuntimeOptions>("/api/portal/runtime-options");
-        if (!active) return;
-        setRuntimeOptions(next);
-        setRuntimeMode((prev) =>
-          next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || ""
-        );
-        setAppliedConfig((prev) => {
-          const nextMode = findRuntimeMode(next, next.defaults.mode || next.modes[0]?.id || "");
-          const runtimeProfile = nextMode?.runtimeProfile;
-          return {
-            ...prev,
-            model: runtimeProfile?.defaultModel || prev.model,
-            reasoningEffort: normalizeReasoningEffortForModel(
-              runtimeProfile?.defaultModel || prev.model,
-              (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort
-            ),
-            sandboxMode: (runtimeProfile?.sandboxMode as SandboxMode | undefined) || prev.sandboxMode,
-            approvalPolicy: (runtimeProfile?.approvalPolicy as ApprovalPolicy | undefined) || prev.approvalPolicy,
-            networkAccessEnabled: runtimeProfile?.networkAccessEnabled ?? prev.networkAccessEnabled,
-            webSearchMode: (runtimeProfile?.webSearchMode as WebSearchMode | undefined) || prev.webSearchMode
-          };
-        });
-      } catch (error) {
-        if (!active) return;
-        setErrorText(error instanceof Error ? error.message : "Failed to load runtime policies");
-      }
-    }
-
-    void loadRuntimeOptions();
+    void refreshRuntimeOptionsNow().then(() => {
+      if (!active) return;
+    });
     return () => {
       active = false;
     };
-  }, []);
+  }, [refreshRuntimeOptionsNow]);
 
   useEffect(() => {
     if (!props.currentUser) {
@@ -5447,6 +5643,38 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error("The current shared thread is read-only and cannot continue running.");
         }
 
+        if (isSkillCreationIntent(prompt)) {
+          setErrorText("");
+          setStatusText("Creating skill draft...");
+          updateRunningStage("Creating a reusable skill draft");
+          const response = await createPortalSkillDraft({
+            prompt,
+            threadId,
+            modeId: runtimeModeRef.current
+          });
+          const draft = response.draft;
+          yield {
+            content: [
+              {
+                type: "text",
+                text: `已创建 skill 草稿：${draft.displayName || draft.skillName || draft.id}。\n\n发布后只会在新会话中加载；当前会话不会热切换。`
+              },
+              {
+                type: "data",
+                name: "skill_draft_status",
+                data: {
+                  draftId: draft.id,
+                  status: draft.status,
+                  skillName: draft.skillName
+                }
+              }
+            ]
+          };
+          setStatusText("Ready");
+          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false });
+          return;
+        }
+
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const skills = enabledSkillNamesRef.current;
@@ -5767,7 +5995,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const partObj = asRecord(part);
             if (!partObj || partObj.type !== "data") continue;
             const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
-            if (name !== "codex_file_change") continue;
+            if (name !== "codex_file_change" && name !== "skill_draft_status") continue;
             activeTextPart = null;
             activeCommentaryPart = null;
             currentCommentaryKey = "";
@@ -6368,6 +6596,27 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     return hookManager.subscribe(syncRunningThreadIds);
   }, [runtime]);
 
+  const skillDraftActionContext = useMemo(
+    () => ({
+      refreshRuntimeOptions: refreshRuntimeOptionsNow,
+      async openNewSessionWithSkill(skillName: string) {
+        const normalizedSkillName = skillName.trim();
+        if (!normalizedSkillName) return;
+        const nextOptions = await refreshRuntimeOptionsNow();
+        const selectedMode = findRuntimeMode(nextOptions, runtimeModeRef.current) ?? nextOptions?.modes[0];
+        const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.name));
+        if (!available.has(normalizedSkillName)) {
+          setErrorText("Skill 已发布，但还未分配到当前工作台模式；请联系管理员确认 Agent Mode 绑定。");
+          return;
+        }
+        setEnabledSkillNames([normalizedSkillName]);
+        await runtime.threads.switchToNewThread();
+        setStatusText(`New session ready with ${normalizedSkillName}`);
+      }
+    }),
+    [refreshRuntimeOptionsNow, runtime]
+  );
+
   const hasRunningSessions = Object.keys(runningThreadIds).length > 0;
 
   useEffect(() => {
@@ -6492,6 +6741,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <SkillComposerContext.Provider value={skillComposerContext}>
+      <SkillDraftActionContext.Provider value={skillDraftActionContext}>
         <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
         <ComposerActivationGuard runtime={runtime} />
         <ThreadRuntimeSubscriptionBridge runtime={runtime} />
@@ -7058,6 +7308,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         ) : null}
         </MobileWorkbenchContext.Provider>
         </RunningStageTextContext.Provider>
+      </SkillDraftActionContext.Provider>
       </SkillComposerContext.Provider>
     </AssistantRuntimeProvider>
   );
