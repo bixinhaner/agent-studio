@@ -119,7 +119,8 @@ import {
   fetchPortalManagedSkills,
   fetchPortalSkillDraft,
   installPortalSkillFromThreadPath,
-  revisePortalSkillDraft
+  revisePortalSkillDraft,
+  uninstallPortalManagedSkill
 } from "../skills/api";
 import type { CodexManagedSkill, CodexSkillDraft } from "../skills/types";
 import { getBrandInitials } from "../branding/BrandMark";
@@ -402,10 +403,12 @@ const SkillDraftActionContext = createContext<{
     path: string;
     prompt?: string;
   }) => Promise<CodexManagedSkill | null>;
+  uninstallSkill: (input: { skillId: string }) => Promise<CodexManagedSkill | null>;
 }>({
   openNewSessionWithSkill: async () => undefined,
   refreshRuntimeOptions: async () => null,
-  installSkillFromPath: async () => null
+  installSkillFromPath: async () => null,
+  uninstallSkill: async () => null
 });
 const SessionGroupLabelContext = createContext<SessionGroupLabelContextValue>({
   groupHeaderByRemoteId: {}
@@ -2924,8 +2927,10 @@ const ProcessDataFallback: FC<any> = ({
 }) => {
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
+  const runningThreadIds = useContext(RunningThreadIdsContext);
   const skillDraftActions = useContext(SkillDraftActionContext);
   const [installingSkillPath, setInstallingSkillPath] = useState("");
+  const [uninstallingSkillId, setUninstallingSkillId] = useState("");
   const [installedSkillsByPath, setInstalledSkillsByPath] = useState<Record<string, CodexManagedSkill>>({});
   const [skillInstallError, setSkillInstallError] = useState("");
 
@@ -3070,6 +3075,7 @@ const ProcessDataFallback: FC<any> = ({
     const changes = collectCodexFileChanges(data);
     if (changes.length === 0) return null;
     const skillRootPaths = collectSkillRootPathsFromChanges(changes);
+    const activeThreadRunning = Boolean(activeThreadId.trim() && runningThreadIds[activeThreadId.trim()]);
     const installSkillPath = async (skillPath: string) => {
       const threadId = activeThreadId.trim();
       if (!threadId) return;
@@ -3116,22 +3122,28 @@ const ProcessDataFallback: FC<any> = ({
         </ul>
         {skillRootPaths.length > 0 ? (
           <div className="assistant-file-change-skill-submit">
-            <p>Codex Skill detected. Install it to make it available in new chats.</p>
+            <p>
+              {activeThreadRunning
+                ? "Skill files detected. Installation will be available when generation finishes."
+                : "Skill detected. Install it to make it available in new chats."}
+            </p>
             {skillRootPaths.map((skillPath) => {
               const installedSkill = installedSkillsByPath[skillPath];
               const installLabel =
                 installingSkillPath === skillPath
                   ? "Installing..."
-                  : installedSkill
-                    ? "Install update"
-                    : "Install skill";
+                  : activeThreadRunning
+                    ? "Waiting..."
+                    : installedSkill
+                      ? "Install update"
+                      : "Install skill";
               return (
                 <div key={skillPath} style={{ display: "grid", gap: 10 }}>
                   <div className="assistant-file-change-actions">
                     <button
                       type="button"
                       className="assistant-file-change-btn"
-                      disabled={!activeThreadId || installingSkillPath === skillPath}
+                      disabled={!activeThreadId || activeThreadRunning || installingSkillPath === skillPath}
                       onClick={() => void installSkillPath(skillPath)}
                     >
                       {installLabel}
@@ -3167,7 +3179,7 @@ const ProcessDataFallback: FC<any> = ({
                         </div>
                         <div>
                           <span>Available in</span>
-                          <strong>New chats</strong>
+                          <strong>{installedSkill.status === "active" ? "New chats" : "Not available"}</strong>
                         </div>
                       </div>
                       {installedSkill.description ? <p className="skill-draft-description">{installedSkill.description}</p> : null}
@@ -3184,6 +3196,35 @@ const ProcessDataFallback: FC<any> = ({
                             }
                           >
                             Use in new chat
+                          </button>
+                        ) : null}
+                        {installedSkill.scope === "private" && installedSkill.status === "active" ? (
+                          <button
+                            type="button"
+                            disabled={uninstallingSkillId === installedSkill.id}
+                            onClick={async () => {
+                              const confirmed = window.confirm(
+                                "Uninstall this skill? It will no longer be available in new chats."
+                              );
+                              if (!confirmed) return;
+                              setUninstallingSkillId(installedSkill.id);
+                              setSkillInstallError("");
+                              try {
+                                const removed = await skillDraftActions.uninstallSkill({ skillId: installedSkill.id });
+                                if (removed) {
+                                  setInstalledSkillsByPath((current) => ({
+                                    ...current,
+                                    [skillPath]: removed
+                                  }));
+                                }
+                              } catch (error) {
+                                setSkillInstallError(error instanceof Error ? error.message : "Failed to uninstall skill");
+                              } finally {
+                                setUninstallingSkillId("");
+                              }
+                            }}
+                          >
+                            {uninstallingSkillId === installedSkill.id ? "Uninstalling..." : "Uninstall"}
                           </button>
                         ) : null}
                         <button type="button" onClick={() => void skillDraftActions.refreshRuntimeOptions()}>
@@ -6830,6 +6871,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         });
         setStatusText(`Skill installed: ${response.skill.displayName || response.skill.skillName || response.skill.id}`);
         return response.skill;
+      },
+      async uninstallSkill(input: { skillId: string }) {
+        const skillId = input.skillId.trim();
+        if (!skillId) return null;
+        const response = await uninstallPortalManagedSkill({ id: skillId });
+        await refreshRuntimeOptionsNow();
+        setStatusText(`Skill uninstalled: ${response.skill.displayName || response.skill.skillName || response.skill.id}`);
+        return response.skill;
       }
     }),
     [refreshRuntimeOptionsNow, runtime]
@@ -6894,11 +6943,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>In shared view, you can read messages and attachments, but cannot continue running this thread.</span>
         </div>
       ) : null}
-      <ThreadPublicShareControls
-        threadId={activeRemoteThreadId}
-        disabled={sharedThreadReadonly}
-        onStatusChange={setStatusText}
-      >
+      <RunningThreadIdsContext.Provider value={runningThreadIds}>
+        <ThreadPublicShareControls
+          threadId={activeRemoteThreadId}
+          disabled={sharedThreadReadonly}
+          onStatusChange={setStatusText}
+        >
         <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <Thread
@@ -6942,7 +6992,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             />
           </PreviewRequestContext.Provider>
         </ActiveThreadIdContext.Provider>
-      </ThreadPublicShareControls>
+        </ThreadPublicShareControls>
+      </RunningThreadIdsContext.Provider>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">

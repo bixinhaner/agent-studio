@@ -20,6 +20,16 @@ const updateManagedSkillStatusSchema = z.object({
   status: z.enum(["active", "disabled", "archived"])
 });
 
+const shareManagedSkillSchema = z.object({
+  activation_prompt: z.string().trim().max(4000).optional().nullable(),
+  skill_package_id: z.string().trim().optional().nullable(),
+  agent_mode_ids: z.array(z.string().trim().min(1)).optional()
+});
+
+const removeManagedSkillSchema = z.object({
+  reason: z.string().trim().max(4000).optional().nullable()
+});
+
 const reviseDraftSchema = z.object({
   instruction: z.string().trim().min(1).max(8000)
 });
@@ -151,6 +161,24 @@ export function createPortalCodexSkillRouter(service: CodexSkillService): Router
         modeId: parsed.data.mode_id || undefined
       });
       res.status(201).json({ skill });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-managed-skills/:id/uninstall", async (req: Request, res: Response) => {
+    const parsed = removeManagedSkillSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const skill = await service.uninstallPrivateManagedSkill({
+        actor: actorFromRequest(req),
+        skillId: req.params.id,
+        reason: parsed.data.reason || undefined
+      });
+      res.json({ skill });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
     }
@@ -300,6 +328,44 @@ export function createAdminCodexSkillRouter(service: CodexSkillService): Router 
         actor: actorFromRequest(req),
         skillId: req.params.id,
         status: parsed.data.status
+      });
+      res.json({ skill });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-managed-skills/:id/share", async (req: Request, res: Response) => {
+    const parsed = shareManagedSkillSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const result = await service.shareManagedSkillToAgentModes({
+        actor: actorFromRequest(req),
+        skillId: req.params.id,
+        activationPrompt: parsed.data.activation_prompt || undefined,
+        skillPackageId: parsed.data.skill_package_id || undefined,
+        agentModeIds: parsed.data.agent_mode_ids
+      });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-managed-skills/:id/remove", async (req: Request, res: Response) => {
+    const parsed = removeManagedSkillSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const skill = await service.removeManagedSkillByAdmin({
+        actor: actorFromRequest(req),
+        skillId: req.params.id,
+        reason: parsed.data.reason || undefined
       });
       res.json({ skill });
     } catch (error) {

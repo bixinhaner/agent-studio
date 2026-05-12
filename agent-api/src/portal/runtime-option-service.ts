@@ -183,6 +183,10 @@ function selectionIdForManagedSkill(managedSkillId: string): string {
   return `managed:${managedSkillId}`;
 }
 
+function skillNameKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function collectCodexSkillBindings(skillPackage: SkillPackageRecord): CodexSkillBinding[] {
   const bindings: CodexSkillBinding[] = [];
   for (const item of skillPackage.items ?? []) {
@@ -221,7 +225,7 @@ function toManagedRuntimeSkill(
   return {
     id: selectionIdForManagedSkill(managedSkill.id),
     name: managedSkill.skillName,
-    label: managedSkill.scope === "private" ? `${baseLabel} · Installed` : baseLabel,
+    label: managedSkill.scope === "private" ? `${baseLabel} · Personal` : baseLabel,
     description: trimOrUndefined(managedSkill.description),
     system: false,
     activationPrompt,
@@ -277,6 +281,7 @@ export class PortalRuntimeOptionService {
     const activePrivateSkills = managedSkillRows.filter(
       (skill) => skill.status === "active" && skill.scope === "private" && skill.ownerUserId === input.userId
     );
+    const activePrivateSkillNames = new Set(activePrivateSkills.map((skill) => skillNameKey(skill.skillName)));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
 
     const resolvedModes = [];
@@ -307,6 +312,7 @@ export class PortalRuntimeOptionService {
       const dependentSkillPackages = [];
       const availableSkills: PortalRuntimeOptionSkill[] = [];
       const availableSkillIds = new Set<string>();
+      const availableSkillNames = new Set<string>();
       let valid = true;
       for (const binding of mode.skillPackages) {
         const skillPackage = skillPackageMap.get(binding.skillPackageId);
@@ -344,9 +350,14 @@ export class PortalRuntimeOptionService {
           if (skillBinding.managedSkillId) {
             const managedSkill = managedSkillMap.get(skillBinding.managedSkillId);
             if (!managedSkill || managedSkill.status !== "active") continue;
+            const nameKey = skillNameKey(managedSkill.skillName);
+            if (managedSkill.scope !== "private" && activePrivateSkillNames.has(nameKey)) {
+              continue;
+            }
             const runtimeSkill = toManagedRuntimeSkill(managedSkill, skillBinding.activationPrompt);
             if (!availableSkillIds.has(runtimeSkill.id)) {
               availableSkillIds.add(runtimeSkill.id);
+              availableSkillNames.add(nameKey);
               availableSkills.push(runtimeSkill);
             }
             continue;
@@ -357,6 +368,7 @@ export class PortalRuntimeOptionService {
           const runtimeSkill = toNativeRuntimeSkill(nativeSkill, skillBinding.activationPrompt);
           if (!availableSkillIds.has(runtimeSkill.id)) {
             availableSkillIds.add(runtimeSkill.id);
+            availableSkillNames.add(skillNameKey(runtimeSkill.name));
             availableSkills.push(runtimeSkill);
           }
         }
@@ -368,8 +380,10 @@ export class PortalRuntimeOptionService {
 
       for (const privateSkill of activePrivateSkills) {
         const runtimeSkill = toManagedRuntimeSkill(privateSkill);
-        if (!availableSkillIds.has(runtimeSkill.id)) {
+        const nameKey = skillNameKey(runtimeSkill.name);
+        if (!availableSkillIds.has(runtimeSkill.id) && !availableSkillNames.has(nameKey)) {
           availableSkillIds.add(runtimeSkill.id);
+          availableSkillNames.add(nameKey);
           availableSkills.push(runtimeSkill);
         }
       }

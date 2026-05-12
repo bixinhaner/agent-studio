@@ -62,6 +62,20 @@ type PublishDraftInput = {
   agentModeIds?: string[];
 };
 
+type ShareManagedSkillInput = {
+  actor: Actor;
+  skillId: string;
+  activationPrompt?: string;
+  skillPackageId?: string;
+  agentModeIds?: string[];
+};
+
+type RemoveManagedSkillInput = {
+  actor: Actor;
+  skillId: string;
+  reason?: string;
+};
+
 export type CodexSkillValidationResult = {
   ok: boolean;
   errors: string[];
@@ -214,6 +228,21 @@ async function copyDirectoryNoSymlinks(sourcePath: string, destinationPath: stri
   await fs.copyFile(sourcePath, destinationPath);
 }
 
+function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function managedSkillBindingMatches(binding: {
+  runtimeType: string;
+  bindingType: string;
+  bindingPayload: unknown;
+}, managedSkill: Pick<CodexManagedSkillRecord, "id" | "skillName">): boolean {
+  if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") return false;
+  const payload = asRecord(binding.bindingPayload);
+  return payload.managedSkillId === managedSkill.id || payload.skillName === managedSkill.skillName;
+}
+
 async function hashSkillDirectory(rootPath: string): Promise<string> {
   const normalizedRoot = path.resolve(rootPath);
   const hash = createHash("sha1");
@@ -242,6 +271,46 @@ async function hashSkillDirectory(rootPath: string): Promise<string> {
 
   await walk(normalizedRoot);
   return hash.digest("hex");
+}
+
+async function moveDirectoryToArchive(input: {
+  sourcePath: string;
+  activeRoot: string;
+  archiveRoot: string;
+}): Promise<string | undefined> {
+  const sourcePath = path.resolve(input.sourcePath);
+  const activeRoot = path.resolve(input.activeRoot);
+  if (!isPathInsideRoot(sourcePath, activeRoot)) {
+    throw new Error("Skill path is outside the managed skills root");
+  }
+  const stat = await fs.lstat(sourcePath).catch(() => null);
+  if (!stat) return undefined;
+  if (stat.isSymbolicLink()) {
+    throw new Error("Refusing to remove a symlinked skill directory");
+  }
+  if (!stat.isDirectory()) {
+    throw new Error("Skill path is not a directory");
+  }
+
+  const relativePath = path.relative(activeRoot, sourcePath);
+  const parentRelativePath = path.dirname(relativePath);
+  const destinationName = `${path.basename(sourcePath)}-${Date.now()}-${hashText(sourcePath)}`;
+  const destinationPath = path.join(
+    path.resolve(input.archiveRoot),
+    parentRelativePath === "." ? "" : parentRelativePath,
+    destinationName
+  );
+  await fs.rm(destinationPath, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+  try {
+    await fs.rename(sourcePath, destinationPath);
+  } catch (error) {
+    const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
+    if (code !== "EXDEV") throw error;
+    await copyDirectoryNoSymlinks(sourcePath, destinationPath);
+    await fs.rm(sourcePath, { recursive: true, force: true });
+  }
+  return destinationPath;
 }
 
 async function resolveSkillDirectoryPath(sourcePath: string): Promise<string> {
@@ -303,6 +372,7 @@ ${input.prompt}
 export class CodexSkillService {
   private readonly draftRoot: string;
   private readonly publishedSkillsRoot: string;
+  private readonly archivedSkillsRoot: string;
 
   constructor(
     private readonly dependencies: {
@@ -314,6 +384,7 @@ export class CodexSkillService {
   ) {
     this.draftRoot = path.resolve(options.draftRoot);
     this.publishedSkillsRoot = path.resolve(options.publishedSkillsRoot);
+    this.archivedSkillsRoot = path.join(path.dirname(this.publishedSkillsRoot), "skill-archive");
   }
 
   async createDraft(input: CreateDraftInput): Promise<CodexSkillDraftRecord> {
@@ -620,6 +691,224 @@ export class CodexSkillService {
     });
   }
 
+  async uninstallPrivateManagedSkill(input: RemoveManagedSkillInput): Promise<CodexManagedSkillRecord> {
+    const current = await this.dependencies.repository.getManagedSkill(input.skillId);
+    if (!current) throw new Error("skill 不存在");
+    if (current.scope !== "private") {
+      throw new Error("只有个人安装的 skill 可以由用户卸载");
+    }
+    if (current.ownerUserId !== input.actor.id) {
+      throw new Error("无权卸载该 skill");
+    }
+    if (input.actor.organizationId && current.organizationId && input.actor.organizationId !== current.organizationId) {
+      throw new Error("不能卸载其他组织的 skill");
+    }
+    return this.removeManagedSkillRecord({
+      actor: input.actor,
+      current,
+      action: "user_uninstall",
+      reason: input.reason
+    });
+  }
+
+  async removeManagedSkillByAdmin(input: RemoveManagedSkillInput): Promise<CodexManagedSkillRecord> {
+    const current = await this.dependencies.repository.getManagedSkill(input.skillId);
+    if (!current) throw new Error("skill 不存在");
+    if (input.actor.organizationId && current.organizationId && input.actor.organizationId !== current.organizationId) {
+      throw new Error("不能删除其他组织的 skill");
+    }
+    return this.removeManagedSkillRecord({
+      actor: input.actor,
+      current,
+      action: "admin_remove",
+      reason: input.reason
+    });
+  }
+
+  async shareManagedSkillToAgentModes(input: ShareManagedSkillInput): Promise<{
+    managedSkill: CodexManagedSkillRecord;
+    skillPackage: SkillPackageRecord;
+  }> {
+    const agentModeIds = Array.from(new Set((input.agentModeIds ?? []).map((id) => trimOrUndefined(id)).filter(Boolean))) as string[];
+    if (agentModeIds.length === 0) {
+      throw new Error("请选择至少一个 Agent Mode 作为共享范围");
+    }
+
+    const current = await this.dependencies.repository.getManagedSkill(input.skillId);
+    if (!current) throw new Error("skill 不存在");
+    if (input.actor.organizationId && current.organizationId && input.actor.organizationId !== current.organizationId) {
+      throw new Error("不能共享其他组织的 skill");
+    }
+    const organizationId = current.organizationId ?? input.actor.organizationId;
+    if (current.status !== "active") {
+      throw new Error("只有 Active skill 可以共享");
+    }
+
+    const sourceDirectoryPath = await resolveSkillDirectoryPath(current.publishedPath);
+    const validation = await this.validateSkillDirectory(sourceDirectoryPath);
+    if (!validation.ok) {
+      throw new Error(`Skill 校验失败：${validation.errors.join("; ")}`);
+    }
+
+    const skillMd = await fs.readFile(path.join(sourceDirectoryPath, "SKILL.md"), "utf8");
+    const metadata = parseSkillMetadata(skillMd);
+    const skillName = validation.metadata?.name ?? metadata.name ?? current.skillName;
+    if (!skillName) throw new Error("Skill 缺少 name");
+    const slug = slugify(skillName);
+    const destinationPath = path.join(
+      this.publishedSkillsRoot,
+      "managed",
+      sanitizePathSegment(organizationId ?? "global", "global"),
+      slug
+    );
+
+    if (path.resolve(sourceDirectoryPath) !== path.resolve(destinationPath)) {
+      const tempPath = `${destinationPath}.tmp-${Date.now()}`;
+      await fs.rm(tempPath, { recursive: true, force: true });
+      await copyDirectoryNoSymlinks(sourceDirectoryPath, tempPath);
+      await fs.rm(destinationPath, { recursive: true, force: true });
+      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+      await fs.rename(tempPath, destinationPath);
+    }
+
+    const checksum = await hashSkillDirectory(destinationPath);
+    const existingShared = await this.dependencies.repository.findManagedSkillByName({
+      organizationId,
+      ownerUserId: current.ownerUserId,
+      scope: "agent_mode",
+      skillName
+    });
+    const version =
+      existingShared && existingShared.checksum && existingShared.checksum !== checksum
+        ? bumpPatchVersion(existingShared.version)
+        : existingShared?.version || current.version || "1.0.0";
+    const publishedAt = new Date();
+    const currentMetadata = asRecord(current.metadata);
+    const existingMetadata = asRecord(existingShared?.metadata);
+    const managedSkill = await this.dependencies.repository.upsertManagedSkill({
+      organizationId,
+      ownerUserId: current.ownerUserId,
+      scope: "agent_mode",
+      skillName,
+      slug,
+      displayName: current.displayName || metadata.name || skillName,
+      description: validation.metadata?.description ?? metadata.description ?? current.description,
+      status: "active",
+      version,
+      checksum,
+      publishedPath: destinationPath,
+      sourceDraftId: current.sourceDraftId,
+      createdByUserId: current.createdByUserId,
+      createdByDisplayName: current.createdByDisplayName,
+      createdByEmail: current.createdByEmail,
+      lastEditedByUserId: current.lastEditedByUserId ?? current.ownerUserId,
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName,
+      publishedByUserId: input.actor.id,
+      publishedByDisplayName: input.actor.displayName,
+      metadata: {
+        ...existingMetadata,
+        ...currentMetadata,
+        generator: "skill-creator-share-v1",
+        promotedFromManagedSkillId: current.id,
+        promotedFromScope: current.scope,
+        sourceDirectoryPath,
+        sourceThreadId: stringFromMetadata(currentMetadata, "sourceThreadId")
+      },
+      publishedAt
+    });
+
+    const skillPackage = await this.ensureSkillPackageBinding({
+      organizationId: managedSkill.organizationId,
+      sourceId: managedSkill.id,
+      sourceSlug: managedSkill.slug,
+      displayName: managedSkill.displayName,
+      managedSkillId: managedSkill.id,
+      skillName,
+      skillDescription: managedSkill.description,
+      skillPackageId: input.skillPackageId,
+      activationPrompt: input.activationPrompt
+    });
+
+    await this.ensureAgentModeBindings({
+      sourceMetadata: managedSkill.metadata,
+      skillPackageId: skillPackage.id,
+      agentModeIds
+    });
+
+    return { managedSkill, skillPackage };
+  }
+
+  private async removeManagedSkillRecord(input: {
+    actor: Actor;
+    current: CodexManagedSkillRecord;
+    action: "user_uninstall" | "admin_remove";
+    reason?: string;
+  }): Promise<CodexManagedSkillRecord> {
+    if (input.current.status === "archived") {
+      return input.current;
+    }
+    const removedAt = new Date();
+    const previousMetadata = asRecord(input.current.metadata);
+    const archivedPath = await moveDirectoryToArchive({
+      sourcePath: input.current.publishedPath,
+      activeRoot: this.publishedSkillsRoot,
+      archiveRoot: this.archivedSkillsRoot
+    });
+
+    if (input.current.scope !== "private") {
+      await this.removeManagedSkillFromSkillPackages(input.current);
+    }
+
+    return this.dependencies.repository.updateManagedSkill(input.current.id, {
+      status: "archived",
+      ...(archivedPath ? { publishedPath: archivedPath } : {}),
+      reviewedByUserId: input.actor.id,
+      reviewedByDisplayName: input.actor.displayName,
+      metadata: {
+        ...previousMetadata,
+        removalAction: input.action,
+        removedAt: removedAt.toISOString(),
+        removedByUserId: input.actor.id,
+        removedByDisplayName: input.actor.displayName,
+        removalReason: trimOrUndefined(input.reason),
+        previousPublishedPath: input.current.publishedPath,
+        archivedPath
+      }
+    });
+  }
+
+  private async removeManagedSkillFromSkillPackages(managedSkill: CodexManagedSkillRecord): Promise<void> {
+    const packages = await this.dependencies.skillPackages.list();
+    for (const skillPackage of packages) {
+      let changed = false;
+      const nextItems = [];
+      for (const item of skillPackage.items) {
+        const nextBindings = item.runtimeBindings
+          .filter((binding) => !managedSkillBindingMatches(binding, managedSkill))
+          .map((binding) => ({
+            runtimeType: binding.runtimeType,
+            bindingType: binding.bindingType,
+            bindingPayload: binding.bindingPayload
+          }));
+        if (nextBindings.length !== item.runtimeBindings.length) {
+          changed = true;
+        }
+        if (nextBindings.length === 0) {
+          continue;
+        }
+        nextItems.push({
+          capabilityKey: item.capabilityKey,
+          description: item.description,
+          runtimeBindings: nextBindings
+        });
+      }
+      if (changed) {
+        await this.dependencies.skillPackages.replaceItems(skillPackage.id, nextItems);
+      }
+    }
+  }
+
   async readDraftSkillMd(draftId: string): Promise<{ draft: CodexSkillDraftRecord; content: string }> {
     const draft = await this.requireDraft(draftId);
     const content = await fs.readFile(path.join(draft.draftPath, "SKILL.md"), "utf8");
@@ -736,7 +1025,10 @@ export class CodexSkillService {
 
     const draftMetadata = asRecord(draft.metadata);
     const skillPackage = await this.ensureSkillPackageBinding({
-      draft,
+      organizationId: draft.organizationId,
+      sourceId: draft.id,
+      sourceSlug: draft.slug,
+      displayName: draft.displayName,
       managedSkillId: managedSkill.id,
       skillName,
       skillDescription: validation.metadata?.description ?? draft.description,
@@ -745,7 +1037,7 @@ export class CodexSkillService {
     });
 
     await this.ensureAgentModeBindings({
-      draft,
+      sourceMetadata: draft.metadata,
       skillPackageId: skillPackage.id,
       agentModeIds: input.agentModeIds
     });
@@ -861,7 +1153,10 @@ export class CodexSkillService {
   }
 
   private async ensureSkillPackageBinding(input: {
-    draft: CodexSkillDraftRecord;
+    organizationId?: string;
+    sourceId: string;
+    sourceSlug?: string;
+    displayName?: string;
     managedSkillId: string;
     skillName: string;
     skillDescription?: string;
@@ -870,14 +1165,14 @@ export class CodexSkillService {
   }): Promise<SkillPackageRecord> {
     const activationPrompt =
       trimOrUndefined(input.activationPrompt) ??
-      `当用户需要执行 ${input.draft.displayName || input.skillName} 这类可复用流程时使用该 skill。`;
+      `当用户需要执行 ${input.displayName || input.skillName} 这类可复用流程时使用该 skill。`;
     let skillPackage = input.skillPackageId ? await this.dependencies.skillPackages.get(input.skillPackageId) : undefined;
     if (!skillPackage) {
       skillPackage = await this.dependencies.skillPackages.create({
-        organizationId: input.draft.organizationId,
-        name: `${input.draft.displayName || input.skillName} Skill Package`,
-        slug: `skill-${input.draft.slug || slugify(input.skillName)}-${hashText(input.draft.id)}`,
-        description: input.skillDescription ?? input.draft.description,
+        organizationId: input.organizationId,
+        name: `${input.displayName || input.skillName} Skill Package`,
+        slug: `skill-${input.sourceSlug || slugify(input.skillName)}-${hashText(input.sourceId)}`,
+        description: input.skillDescription,
         status: "active",
         visibleToUsers: true
       });
@@ -905,7 +1200,7 @@ export class CodexSkillService {
       ...withoutThisSkill,
       {
         capabilityKey: `codex-skill:${input.skillName}`,
-        description: input.skillDescription ?? input.draft.description,
+        description: input.skillDescription,
         runtimeBindings: [
           {
             runtimeType: "codex",
@@ -923,11 +1218,11 @@ export class CodexSkillService {
   }
 
   private async ensureAgentModeBindings(input: {
-    draft: CodexSkillDraftRecord;
+    sourceMetadata?: unknown;
     skillPackageId: string;
     agentModeIds?: string[];
   }): Promise<void> {
-    const metadata = asRecord(input.draft.metadata);
+    const metadata = asRecord(input.sourceMetadata);
     const metadataModeId = typeof metadata.modeId === "string" ? trimOrUndefined(metadata.modeId) : undefined;
     const agentModeIds = Array.from(new Set([...(input.agentModeIds ?? []), ...(metadataModeId ? [metadataModeId] : [])]));
     for (const agentModeId of agentModeIds) {

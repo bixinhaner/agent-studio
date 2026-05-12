@@ -8,7 +8,9 @@ import {
   fetchAdminSkillDraftDetail,
   fetchAdminSkillDrafts,
   publishAdminSkillDraft,
+  removeAdminManagedSkill,
   reviewAdminSkillDraft,
+  shareAdminManagedSkill,
   updateAdminManagedSkillStatus,
   updateAdminSkillDraftMarkdown
 } from "./api";
@@ -93,8 +95,15 @@ function ManagedSkillRegistryPanel() {
   const [scopeFilter, setScopeFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
+  const [skillPackages, setSkillPackages] = useState<SkillPackageRecord[]>([]);
+  const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
+  const [selectedSkillPackageId, setSelectedSkillPackageId] = useState<string | undefined>();
+  const [selectedAgentModeIds, setSelectedAgentModeIds] = useState<string[]>([]);
+  const [activationPrompt, setActivationPrompt] = useState("");
 
   const loadSkills = async () => {
     setLoading(true);
@@ -111,6 +120,24 @@ function ManagedSkillRegistryPanel() {
 
   useEffect(() => {
     void loadSkills();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadBindings() {
+      try {
+        const [packageResponse, modeResponse] = await Promise.all([fetchSkillPackages(), fetchAgentModes()]);
+        if (!active) return;
+        setSkillPackages(packageResponse.skillPackages);
+        setAgentModes(modeResponse.agentModes);
+      } catch {
+        // Sharing remains visible; a failed binding load will surface when the admin retries.
+      }
+    }
+    void loadBindings();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filteredSkills = useMemo(
@@ -131,6 +158,16 @@ function ManagedSkillRegistryPanel() {
   const selectedSkill = filteredSkills.find((skill) => skill.id === selectedSkillId) || null;
   const privateCount = useMemo(() => skills.filter((skill) => skill.scope === "private").length, [skills]);
 
+  useEffect(() => {
+    setSelectedSkillPackageId(undefined);
+    setSelectedAgentModeIds([]);
+    setActivationPrompt(
+      selectedSkill
+        ? `当用户需要执行 ${selectedSkill.displayName || selectedSkill.skillName} 这类可复用流程时使用该 skill。`
+        : ""
+    );
+  }, [selectedSkill?.id]);
+
   const handleSetStatus = async (status: "active" | "disabled" | "archived") => {
     if (!selectedSkill) return;
     setSaving(true);
@@ -147,6 +184,66 @@ function ManagedSkillRegistryPanel() {
       setErrorText(error instanceof Error ? error.message : "更新 Skill 状态失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleShareSkill = async () => {
+    if (!selectedSkill) return;
+    if (selectedAgentModeIds.length === 0) {
+      setErrorText("请选择至少一个 Agent Mode 作为共享范围");
+      setSuccessText("");
+      return;
+    }
+    setSharing(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await shareAdminManagedSkill({
+        id: selectedSkill.id,
+        activationPrompt,
+        skillPackageId: selectedSkillPackageId,
+        agentModeIds: selectedAgentModeIds
+      });
+      setSkills((current) => {
+        const exists = current.some((skill) => skill.id === response.managedSkill.id);
+        if (exists) {
+          return current.map((skill) => (skill.id === response.managedSkill.id ? response.managedSkill : skill));
+        }
+        return [response.managedSkill, ...current];
+      });
+      setStatusFilter("all");
+      setScopeFilter("all");
+      setSelectedSkillId(response.managedSkill.id);
+      setSuccessText("Skill 已共享到 Agent Mode。用户需要新建会话后才能看到新的可用范围。");
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "共享 Skill 失败");
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleRemoveSkill = async () => {
+    if (!selectedSkill) return;
+    const confirmed = window.confirm(
+      selectedSkill.scope === "private"
+        ? "Remove this installed skill? The author will no longer see it in new chats."
+        : "Remove this shared skill? It will be unbound from Skill Packages and unavailable in new chats."
+    );
+    if (!confirmed) return;
+    setRemoving(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await removeAdminManagedSkill({
+        id: selectedSkill.id,
+        reason: "Removed from Skill Management"
+      });
+      setSkills((current) => current.map((skill) => (skill.id === response.skill.id ? response.skill : skill)));
+      setSuccessText("Skill 已移除。文件已移出加载目录，新的会话不会再加载它。");
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "移除 Skill 失败");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -256,6 +353,7 @@ function ManagedSkillRegistryPanel() {
                   <Space direction="vertical" size={12} style={{ width: "100%" }}>
                     <Typography.Text type="secondary">
                       Disabled 后，该 Skill 不会进入新的工作台会话 runtime options。已经启动的旧会话不会热切更新。
+                      移除 Skill 会同时把文件移出加载目录；共享 Skill 还会从 Skill Package 中解绑。
                     </Typography.Text>
                     <Space wrap>
                       {selectedSkill.status !== "active" ? (
@@ -272,7 +370,64 @@ function ManagedSkillRegistryPanel() {
                           归档
                         </Button>
                       ) : null}
+                      {selectedSkill.status !== "archived" ? (
+                        <Button danger loading={removing} onClick={() => void handleRemoveSkill()}>
+                          移除 Skill
+                        </Button>
+                      ) : null}
                     </Space>
+                  </Space>
+                </Card>
+
+                <Card size="small" title="共享范围" className="antd-admin-card">
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    <Typography.Text type="secondary">
+                      默认安装仅作者可用。共享会创建一份 Agent Mode 范围的受管 Skill，并复用现有 Skill Package / Agent Mode 权限机制。
+                    </Typography.Text>
+                    <label className="field">
+                      <span className="field-label">默认触发提示词</span>
+                      <Input.TextArea
+                        value={activationPrompt}
+                        rows={3}
+                        disabled={sharing || selectedSkill.status !== "active"}
+                        onChange={(event) => setActivationPrompt(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">绑定到已有 Skill Package（可选）</span>
+                      <Select
+                        allowClear
+                        value={selectedSkillPackageId}
+                        options={skillPackages.map((item) => ({ label: item.name, value: item.id }))}
+                        onChange={setSelectedSkillPackageId}
+                        placeholder="不选则自动创建"
+                        disabled={sharing || selectedSkill.status !== "active"}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">共享到 Agent Mode</span>
+                      <Select
+                        mode="multiple"
+                        value={selectedAgentModeIds}
+                        options={agentModes.map((item) => ({ label: item.name, value: item.id }))}
+                        onChange={setSelectedAgentModeIds}
+                        placeholder="选择用户在哪些 Agent Mode 中可见"
+                        disabled={sharing || selectedSkill.status !== "active"}
+                      />
+                    </label>
+                    <Space wrap>
+                      <Button
+                        type="primary"
+                        loading={sharing}
+                        disabled={selectedSkill.status !== "active" || selectedAgentModeIds.length === 0}
+                        onClick={() => void handleShareSkill()}
+                      >
+                        {selectedSkill.scope === "private" ? "共享 Skill" : "更新共享绑定"}
+                      </Button>
+                    </Space>
+                    <Typography.Text type="secondary">
+                      可见用户仍由被绑定 Agent Mode 和 Skill Package 的现有权限策略决定；已打开的旧会话不会热更新。
+                    </Typography.Text>
                   </Space>
                 </Card>
               </Space>

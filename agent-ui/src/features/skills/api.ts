@@ -54,6 +54,16 @@ export async function fetchPortalManagedSkills(): Promise<{ skills: CodexManaged
   return api<{ skills: CodexManagedSkill[] }>("/api/portal/codex-managed-skills");
 }
 
+export async function uninstallPortalManagedSkill(input: {
+  id: string;
+  reason?: string;
+}): Promise<{ skill: CodexManagedSkill }> {
+  return api<{ skill: CodexManagedSkill }>(`/api/portal/codex-managed-skills/${encodeURIComponent(input.id)}/uninstall`, {
+    method: "POST",
+    json: { reason: input.reason }
+  });
+}
+
 export async function fetchPortalSkillDraft(id: string): Promise<{ draft: CodexSkillDraft }> {
   return api<{ draft: CodexSkillDraft }>(`/api/portal/skill-drafts/${encodeURIComponent(id)}`);
 }
@@ -135,4 +145,33 @@ export async function updateAdminManagedSkillStatus(input: {
     method: "POST",
     json: { status: input.status }
   });
+}
+
+export async function removeAdminManagedSkill(input: {
+  id: string;
+  reason?: string;
+}): Promise<{ skill: CodexManagedSkill }> {
+  return api<{ skill: CodexManagedSkill }>(`/api/admin/codex-managed-skills/${encodeURIComponent(input.id)}/remove`, {
+    method: "POST",
+    json: { reason: input.reason }
+  });
+}
+
+export async function shareAdminManagedSkill(input: {
+  id: string;
+  activationPrompt?: string;
+  skillPackageId?: string;
+  agentModeIds?: string[];
+}): Promise<{ managedSkill: CodexManagedSkill; skillPackage?: unknown }> {
+  return api<{ managedSkill: CodexManagedSkill; skillPackage?: unknown }>(
+    `/api/admin/codex-managed-skills/${encodeURIComponent(input.id)}/share`,
+    {
+      method: "POST",
+      json: {
+        activation_prompt: input.activationPrompt,
+        skill_package_id: input.skillPackageId,
+        agent_mode_ids: input.agentModeIds
+      }
+    }
+  );
 }
