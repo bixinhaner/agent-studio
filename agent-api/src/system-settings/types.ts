@@ -81,6 +81,12 @@ export const systemSettingsOrganizationDefaultsSchema = z.object({
   orgSyncIntervalMinutes: positiveIntegerSchema.max(10080)
 });
 
+export const systemSettingsAnswerFeedbackSchema = z.object({
+  enabledForExternalUsers: z.boolean().default(true),
+  enabledForInternalUsers: z.boolean().default(false),
+  prompt: z.string().trim().min(1).max(160).default("Was this answer helpful?")
+});
+
 export const systemSettingsBehaviorSchema = z.object({
   markdown: z.string().trim().min(1),
   portalWelcomeMessageDesktop: z.string().trim().min(1),
@@ -90,7 +96,12 @@ export const systemSettingsBehaviorSchema = z.object({
       label: z.string().trim().min(1).max(120),
       prompt: z.string().trim().min(1).max(4000)
     })
-  ).max(8)
+  ).max(8),
+  answerFeedback: systemSettingsAnswerFeedbackSchema.default({
+    enabledForExternalUsers: true,
+    enabledForInternalUsers: false,
+    prompt: "Was this answer helpful?"
+  })
 });
 
 export const systemSettingsPayloadSchema = z
@@ -131,6 +142,7 @@ export type SystemSettingsRetention = z.infer<typeof systemSettingsRetentionSche
 export type SystemSettingsUploads = z.infer<typeof systemSettingsUploadsSchema>;
 export type SystemSettingsSafety = z.infer<typeof systemSettingsSafetySchema>;
 export type SystemSettingsOrganizationDefaults = z.infer<typeof systemSettingsOrganizationDefaultsSchema>;
+export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
 export type SystemSettingsPayload = z.infer<typeof systemSettingsPayloadSchema>;
@@ -219,7 +231,12 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
         label: "Recommend solution design",
         prompt: "Recommend a Baicells product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
       }
-    ]
+    ],
+    answerFeedback: {
+      enabledForExternalUsers: true,
+      enabledForInternalUsers: false,
+      prompt: "Was this answer helpful?"
+    }
   }
 } satisfies SystemSettingsPayload;
 

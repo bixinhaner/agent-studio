@@ -190,7 +190,12 @@ describe("ManagedCodexProviderResolver", () => {
                     label: "Suggestion",
                     prompt: "Prompt"
                   }
-                ]
+                ],
+                answerFeedback: {
+                  enabledForExternalUsers: true,
+                  enabledForInternalUsers: false,
+                  prompt: "Was this answer helpful?"
+                }
               }
             },
             createdAt: new Date().toISOString(),
@@ -262,7 +267,12 @@ describe("resolveManagedCodexDefaults", () => {
                 label: "Suggestion",
                 prompt: "Prompt"
               }
-            ]
+            ],
+            answerFeedback: {
+              enabledForExternalUsers: true,
+              enabledForInternalUsers: false,
+              prompt: "Was this answer helpful?"
+            }
           }
         },
         createdAt: new Date().toISOString(),

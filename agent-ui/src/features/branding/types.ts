@@ -20,6 +20,11 @@ export type PublicPortalBehavior = {
   portalWelcomeMessageDesktop: string;
   portalWelcomeMessageMobile: string;
   portalWelcomeSuggestions: PublicPortalWelcomeSuggestion[];
+  answerFeedback: {
+    enabledForExternalUsers: boolean;
+    enabledForInternalUsers: boolean;
+    prompt: string;
+  };
 };
 
 export type PublicBrandingResponse = {
@@ -61,5 +66,10 @@ export const DEFAULT_PORTAL_BEHAVIOR: PublicPortalBehavior = {
       label: "Recommend solution design",
       prompt: "Recommend a Baicells product or solution approach for this customer scenario, including suitable products, deployment considerations, and key constraints."
     }
-  ]
+  ],
+  answerFeedback: {
+    enabledForExternalUsers: true,
+    enabledForInternalUsers: false,
+    prompt: "Was this answer helpful?"
+  }
 };

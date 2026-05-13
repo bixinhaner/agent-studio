@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Upload } from "antd";
+import { Button, Input, Switch, Upload } from "antd";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { resolveBrandingAssetUrl } from "../branding/asset-url";
@@ -61,8 +61,10 @@ export function BrandingSettingsView({
   const portalWelcomeMessageDesktopError = getFieldError(fieldErrors, "behavior.portalWelcomeMessageDesktop");
   const portalWelcomeMessageMobileError = getFieldError(fieldErrors, "behavior.portalWelcomeMessageMobile");
   const portalWelcomeSuggestionsError = getFieldError(fieldErrors, "behavior.portalWelcomeSuggestions");
+  const answerFeedbackPromptError = getFieldError(fieldErrors, "behavior.answerFeedback.prompt");
 
   const welcomeSuggestions = behavior.portalWelcomeSuggestions;
+  const answerFeedback = behavior.answerFeedback;
 
   function welcomeSuggestionFieldError(index: number, field: "label" | "prompt") {
     return getFieldError(fieldErrors, `behavior.portalWelcomeSuggestions.${index}.${field}`);
@@ -101,6 +103,15 @@ export function BrandingSettingsView({
           prompt: ""
         }
       ]
+    });
+  }
+
+  function updateAnswerFeedback(patch: Partial<SystemSettingsBehavior["answerFeedback"]>) {
+    onBehaviorChange({
+      answerFeedback: {
+        ...answerFeedback,
+        ...patch
+      }
     });
   }
 
@@ -475,11 +486,61 @@ export function BrandingSettingsView({
               </div>
             )}
           </div>
-        </div>
+          </div>
 
-        <div className="resource-center-form-grid">
-          <label className="field resource-center-form-span-2">
-            <span className="field-label">Markdown 指南</span>
+          <div className="system-settings-subsection system-settings-subsection-cardless">
+            <div className="resource-center-section-header">
+              <div>
+                <h4>回答评价</h4>
+                <p>在每条回答后展示 Yes/No 评价入口，用于会话审计中的回答质量筛选和复盘。</p>
+              </div>
+            </div>
+
+            <div className="system-settings-toggle-grid">
+              <label className="field checkbox-field system-settings-toggle-row">
+                <Switch
+                  checked={answerFeedback.enabledForExternalUsers}
+                  disabled={disabled}
+                  onChange={(checked) => updateAnswerFeedback({ enabledForExternalUsers: checked })}
+                />
+                <span>
+                  <span className="field-label">外部用户显示</span>
+                  <span className="field-help">默认开启，客户每条回答后都能选择 Yes/No。</span>
+                </span>
+              </label>
+
+              <label className="field checkbox-field system-settings-toggle-row">
+                <Switch
+                  checked={answerFeedback.enabledForInternalUsers}
+                  disabled={disabled}
+                  onChange={(checked) => updateAnswerFeedback({ enabledForInternalUsers: checked })}
+                />
+                <span>
+                  <span className="field-label">内部用户显示</span>
+                  <span className="field-help">默认关闭，避免内部调试会话干扰客户反馈统计。</span>
+                </span>
+              </label>
+            </div>
+
+            <div className="resource-center-form-grid">
+              <label className="field resource-center-form-span-2">
+                <span className="field-label">询问文案</span>
+                <Input
+                  value={answerFeedback.prompt}
+                  aria-invalid={Boolean(answerFeedbackPromptError)}
+                  disabled={disabled}
+                  placeholder="Was this answer helpful?"
+                  onChange={(event) => updateAnswerFeedback({ prompt: event.target.value })}
+                />
+                <span className="field-help">建议保持短句，让用户不用思考即可完成评价。</span>
+                {answerFeedbackPromptError ? <p className="field-error">{answerFeedbackPromptError}</p> : null}
+              </label>
+            </div>
+          </div>
+
+          <div className="resource-center-form-grid">
+            <label className="field resource-center-form-span-2">
+              <span className="field-label">Markdown 指南</span>
             <TextArea
               autoSize={{ minRows: 5, maxRows: 12 }}
               value={behavior.markdown}

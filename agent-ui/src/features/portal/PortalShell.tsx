@@ -419,6 +419,14 @@ const ThreadCompletionNoticeContext = createContext<ThreadCompletionNoticeContex
   clearCompletedThreadNotice: () => undefined
 });
 const ActiveThreadIdContext = createContext("");
+type AnswerFeedbackUiConfig = {
+  enabled: boolean;
+  prompt: string;
+};
+const AnswerFeedbackConfigContext = createContext<AnswerFeedbackUiConfig>({
+  enabled: false,
+  prompt: "Was this answer helpful?"
+});
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 type FeedbackCommentDraftStore = {
   commentsByMessageId: Map<string, string>;
@@ -3510,7 +3518,7 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         type: "negative"
       };
     }
-    void api(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
+    void api<{ feedback: ThreadFeedbackOut }>(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
       method: "POST",
       json: {
         type: "negative",
@@ -3519,16 +3527,17 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         comment: normalizedComment
       }
     })
-      .then(() => {
+      .then((response) => {
         const metadata = message.metadata as { custom?: Record<string, unknown> };
         const previousCustom = asRecord(metadata.custom) || {};
-        const previousFeedback = asRecord(previousCustom.feedback) || {};
         metadata.custom = {
           ...previousCustom,
           feedback: {
-            ...previousFeedback,
-            type: "negative",
-            comment: normalizedComment
+            id: response.feedback.id,
+            type: response.feedback.type,
+            comment: response.feedback.comment,
+            createdAt: response.feedback.created_at,
+            updatedAt: response.feedback.updated_at
           }
         };
         aui.message().submitFeedback({ type: "negative" });
@@ -3539,7 +3548,10 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         } else {
           feedbackCommentMemory.delete(cacheKey);
         }
-        if (draftsRef?.current.skipNextSubmit?.type === "negative") {
+        if (
+          draftsRef?.current.skipNextSubmit?.messageId === messageId &&
+          draftsRef.current.skipNextSubmit.type === "negative"
+        ) {
           draftsRef.current.skipNextSubmit = undefined;
         }
       });
@@ -3586,6 +3598,113 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
   );
 };
 
+const AgentAssistantAnswerFeedback: FC = () => {
+  const aui = useAui();
+  const config = useContext(AnswerFeedbackConfigContext);
+  const draftsRef = useContext(FeedbackCommentDraftContext);
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const message = useAuiState((s) => s.message);
+  const messageId = useAuiState((s) => s.message.id);
+  const submittedType = useAuiState((s) => s.message.metadata.submittedFeedback?.type);
+  const hidden = useAuiState((s) => s.thread.isRunning || s.thread.isDisabled || s.message.role !== "assistant");
+  const [pendingType, setPendingType] = useState<"positive" | "negative" | null>(null);
+  const [errorText, setErrorText] = useState("");
+
+  useEffect(() => {
+    setPendingType(null);
+    setErrorText("");
+  }, [messageId]);
+
+  if (!config.enabled || hidden) {
+    return null;
+  }
+
+  const submitAnswerFeedback = async (type: "positive" | "negative") => {
+    const remoteId = String(activeThreadId || aui.threadListItem().getState().remoteId || "").trim();
+    if (!remoteId || !messageId || pendingType) return;
+
+    const cacheKey = feedbackCommentKey(remoteId, messageId);
+    if (type === "positive") {
+      feedbackCommentMemory.delete(cacheKey);
+      draftsRef?.current.commentsByMessageId.delete(messageId);
+    }
+    if (draftsRef) {
+      draftsRef.current.skipNextSubmit = {
+        messageId,
+        type
+      };
+    }
+
+    setPendingType(type);
+    setErrorText("");
+    try {
+      const response = await api<{ feedback: ThreadFeedbackOut }>(`/api/threads/${encodeURIComponent(remoteId)}/feedback`, {
+        method: "POST",
+        json: {
+          type,
+          message_id: messageId,
+          content_preview: messageTextForSuggestions(message as ThreadMessage)
+        }
+      });
+      const metadata = message.metadata as { custom?: Record<string, unknown> };
+      const previousCustom = asRecord(metadata.custom) || {};
+      metadata.custom = {
+        ...previousCustom,
+        feedback: {
+          id: response.feedback.id,
+          type: response.feedback.type,
+          comment: response.feedback.comment,
+          createdAt: response.feedback.created_at,
+          updatedAt: response.feedback.updated_at
+        }
+      };
+      aui.message().submitFeedback({ type });
+    } catch (error) {
+      if (
+        draftsRef?.current.skipNextSubmit?.messageId === messageId &&
+        draftsRef.current.skipNextSubmit.type === type
+      ) {
+        draftsRef.current.skipNextSubmit = undefined;
+      }
+      setErrorText(error instanceof Error ? error.message : "Feedback could not be saved. Try again.");
+    } finally {
+      setPendingType(null);
+    }
+  };
+
+  return (
+    <div className="assistant-answer-feedback" data-submitted={submittedType || undefined}>
+      <span className="assistant-answer-feedback-prompt">{config.prompt}</span>
+      <div className="assistant-answer-feedback-actions" role="group" aria-label={config.prompt}>
+        <button
+          type="button"
+          className="assistant-answer-feedback-button"
+          data-selected={submittedType === "positive" ? "true" : undefined}
+          aria-pressed={submittedType === "positive"}
+          disabled={Boolean(pendingType)}
+          onClick={() => void submitAnswerFeedback("positive")}
+        >
+          <CheckIcon size={14} strokeWidth={2.4} />
+          <span>Yes</span>
+        </button>
+        <button
+          type="button"
+          className="assistant-answer-feedback-button"
+          data-selected={submittedType === "negative" ? "true" : undefined}
+          aria-pressed={submittedType === "negative"}
+          disabled={Boolean(pendingType)}
+          onClick={() => void submitAnswerFeedback("negative")}
+        >
+          <XIcon size={14} strokeWidth={2.4} />
+          <span>No</span>
+        </button>
+      </div>
+      {submittedType ? <span className="assistant-answer-feedback-thanks">Thanks for the feedback.</span> : null}
+      {errorText ? <span className="assistant-answer-feedback-error">{errorText}</span> : null}
+    </div>
+  );
+};
+
 const AgentAssistantActionBar: FC = () => {
   return (
     <AssistantActionBar.Root hideWhenRunning autohide="not-last" autohideFloat="single-branch">
@@ -3612,6 +3731,7 @@ const AgentAssistantMessage: FC = () => {
           }}
         />
         <BranchPicker />
+        <AgentAssistantAnswerFeedback />
         <AgentAssistantActionBar />
       </AssistantMessage.Root>
     </ThreadPublicShareMessageShell>
@@ -4673,7 +4793,7 @@ const AgentRuntimeAdapterProvider: FC<
         const preview = messageTextForSuggestions(payload.message);
         const messageId = payload.message.id;
         const store = feedbackCommentDraftsRef.current;
-        if (store.skipNextSubmit?.type === payload.type) {
+        if (store.skipNextSubmit?.messageId === messageId && store.skipNextSubmit.type === payload.type) {
           store.skipNextSubmit = undefined;
           return;
         }
@@ -5609,6 +5729,23 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const welcomeSuggestions = useMemo(
     () => behavior.portalWelcomeSuggestions.map((item) => ({ text: item.label, prompt: item.prompt })),
     [behavior.portalWelcomeSuggestions]
+  );
+  const isInternalAnswerFeedbackAudience = auth.activeOrganization?.type
+    ? auth.activeOrganization.type === "internal"
+    : portalPreferenceUser?.userType === "internal_employee";
+  const answerFeedbackConfig = useMemo<AnswerFeedbackUiConfig>(
+    () => ({
+      enabled: isInternalAnswerFeedbackAudience
+        ? behavior.answerFeedback.enabledForInternalUsers
+        : behavior.answerFeedback.enabledForExternalUsers,
+      prompt: behavior.answerFeedback.prompt.trim() || "Was this answer helpful?"
+    }),
+    [
+      behavior.answerFeedback.enabledForExternalUsers,
+      behavior.answerFeedback.enabledForInternalUsers,
+      behavior.answerFeedback.prompt,
+      isInternalAnswerFeedbackAudience
+    ]
   );
 
   const buildProductFeedbackContext = useCallback(() => {
@@ -6950,6 +7087,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           onStatusChange={setStatusText}
         >
         <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
+          <AnswerFeedbackConfigContext.Provider value={answerFeedbackConfig}>
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <Thread
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
@@ -6991,6 +7129,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               userMessage={{ allowEdit: true }}
             />
           </PreviewRequestContext.Provider>
+          </AnswerFeedbackConfigContext.Provider>
         </ActiveThreadIdContext.Provider>
         </ThreadPublicShareControls>
       </RunningThreadIdsContext.Provider>

@@ -30,7 +30,12 @@ describe("resolvePublicBranding", () => {
                   label: "Check rollout readiness",
                   prompt: "Review this rollout plan and list the highest-risk gaps first."
                 }
-              ]
+              ],
+              answerFeedback: {
+                enabledForExternalUsers: false,
+                enabledForInternalUsers: true,
+                prompt: "Did this solve it?"
+              }
             }
           }),
           createdAt: new Date().toISOString(),
@@ -54,7 +59,12 @@ describe("resolvePublicBranding", () => {
           label: "Check rollout readiness",
           prompt: "Review this rollout plan and list the highest-risk gaps first."
         }
-      ]
+      ],
+      answerFeedback: {
+        enabledForExternalUsers: false,
+        enabledForInternalUsers: true,
+        prompt: "Did this solve it?"
+      }
     });
     expect(response.publishedAt).toBe("2026-04-21T11:22:33.000Z");
   });
@@ -79,6 +89,7 @@ describe("resolvePublicBranding", () => {
     expect(normalized.behavior.portalWelcomeSuggestions).toEqual(
       defaultPublicBehavior().portalWelcomeSuggestions
     );
+    expect(normalized.behavior.answerFeedback).toEqual(defaultPublicBehavior().answerFeedback);
     expect("welcomeSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
     expect("usageSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
   });

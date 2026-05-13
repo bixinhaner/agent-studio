@@ -19,6 +19,11 @@ export type PublicBrandingResponse = {
       label: string;
       prompt: string;
     }>;
+    answerFeedback: {
+      enabledForExternalUsers: boolean;
+      enabledForInternalUsers: boolean;
+      prompt: string;
+    };
   };
   publishedAt?: string;
 };
@@ -35,7 +40,8 @@ export function defaultPublicBehavior(): PublicBrandingResponse["behavior"] {
     portalWelcomeSuggestions: behavior.portalWelcomeSuggestions.map((item) => ({
       label: item.label,
       prompt: item.prompt
-    }))
+    })),
+    answerFeedback: { ...behavior.answerFeedback }
   };
 }
 
@@ -53,7 +59,8 @@ export async function resolvePublicBranding(reader: SystemSettingsBrandingReader
       portalWelcomeSuggestions: behavior.portalWelcomeSuggestions.map((item) => ({
         label: item.label,
         prompt: item.prompt
-      }))
+      })),
+      answerFeedback: { ...behavior.answerFeedback }
     },
     publishedAt: published?.publishedAt
   };

@@ -57,6 +57,11 @@ export type SystemSettingsBehavior = {
     label: string;
     prompt: string;
   }>;
+  answerFeedback: {
+    enabledForExternalUsers: boolean;
+    enabledForInternalUsers: boolean;
+    prompt: string;
+  };
 };
 
 export type SystemSettingsVersionRecord = {

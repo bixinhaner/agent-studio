@@ -37,7 +37,8 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
     organizationDefaults: { ...payload.organizationDefaults },
     behavior: {
       ...payload.behavior,
-      portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item }))
+      portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item })),
+      answerFeedback: { ...payload.behavior.answerFeedback }
     }
   };
 }

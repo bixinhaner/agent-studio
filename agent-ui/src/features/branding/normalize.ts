@@ -37,6 +37,22 @@ function normalizeWelcomeSuggestion(
   return { label, prompt };
 }
 
+function normalizeAnswerFeedback(
+  value: Partial<PublicPortalBehavior["answerFeedback"]> | null | undefined
+): PublicPortalBehavior["answerFeedback"] {
+  return {
+    enabledForExternalUsers:
+      typeof value?.enabledForExternalUsers === "boolean"
+        ? value.enabledForExternalUsers
+        : DEFAULT_PORTAL_BEHAVIOR.answerFeedback.enabledForExternalUsers,
+    enabledForInternalUsers:
+      typeof value?.enabledForInternalUsers === "boolean"
+        ? value.enabledForInternalUsers
+        : DEFAULT_PORTAL_BEHAVIOR.answerFeedback.enabledForInternalUsers,
+    prompt: asString(value?.prompt) || DEFAULT_PORTAL_BEHAVIOR.answerFeedback.prompt
+  };
+}
+
 export function normalizeBehavior(value: Partial<PublicPortalBehavior> | null | undefined): PublicPortalBehavior {
   const suggestions = Array.isArray(value?.portalWelcomeSuggestions)
     ? value.portalWelcomeSuggestions
@@ -49,7 +65,8 @@ export function normalizeBehavior(value: Partial<PublicPortalBehavior> | null | 
       asString(value?.portalWelcomeMessageDesktop) || DEFAULT_PORTAL_BEHAVIOR.portalWelcomeMessageDesktop,
     portalWelcomeMessageMobile:
       asString(value?.portalWelcomeMessageMobile) || DEFAULT_PORTAL_BEHAVIOR.portalWelcomeMessageMobile,
-    portalWelcomeSuggestions: suggestions.length ? suggestions : DEFAULT_PORTAL_BEHAVIOR.portalWelcomeSuggestions
+    portalWelcomeSuggestions: suggestions.length ? suggestions : DEFAULT_PORTAL_BEHAVIOR.portalWelcomeSuggestions,
+    answerFeedback: normalizeAnswerFeedback(value?.answerFeedback)
   };
 }
 
