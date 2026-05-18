@@ -428,6 +428,7 @@ const AnswerFeedbackConfigContext = createContext<AnswerFeedbackUiConfig>({
   prompt: "Was this answer helpful?"
 });
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
+const ExternalPortalUserContext = createContext(false);
 type FeedbackCommentDraftStore = {
   commentsByMessageId: Map<string, string>;
   skipNextSubmit?: {
@@ -2152,6 +2153,7 @@ function fileNameFromPreviewPath(filePath: string): string {
 
 function fileChangeKindLabel(kind: string): string {
   const normalized = kind.trim().toLowerCase();
+  if (normalized === "artifact" || normalized === "available" || normalized === "ready") return "Ready";
   if (!normalized || normalized === "update" || normalized === "updated") return "Updated";
   if (normalized === "create" || normalized === "created" || normalized === "add" || normalized === "added") return "Added";
   if (normalized === "delete" || normalized === "deleted" || normalized === "remove" || normalized === "removed") return "Deleted";
@@ -2159,12 +2161,21 @@ function fileChangeKindLabel(kind: string): string {
   return kind.trim() || "Change";
 }
 
-function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: string }> {
+type CodexFileChangeView = {
+  path: string;
+  kind: string;
+  canPreview?: boolean;
+  canDownload?: boolean;
+  artifactId?: string;
+  blockedReason?: string;
+};
+
+function collectCodexFileChanges(data: unknown): CodexFileChangeView[] {
   const payload = asRecord(data);
   if (!payload) return [];
   const changes = Array.isArray(payload.changes) ? payload.changes : [];
   const dedup = new Set<string>();
-  const out: Array<{ path: string; kind: string }> = [];
+  const out: CodexFileChangeView[] = [];
 
   for (const item of changes) {
     const obj = asRecord(item);
@@ -2172,16 +2183,25 @@ function collectCodexFileChanges(data: unknown): Array<{ path: string; kind: str
     const path = normalizePreviewFilePath(asString(obj.path));
     if (!path) continue;
     const kind = asString(obj.kind) || "update";
+    const previewStatus = asString(obj.preview_status ?? obj.previewStatus);
+    const downloadStatus = asString(obj.download_status ?? obj.downloadStatus);
     const key = `${kind}::${path}`;
     if (dedup.has(key)) continue;
     dedup.add(key);
-    out.push({ path, kind });
+    out.push({
+      path,
+      kind,
+      canPreview: obj.can_preview === true || obj.canPreview === true || previewStatus === "ready",
+      canDownload: obj.can_download === true || obj.canDownload === true || downloadStatus === "ready",
+      artifactId: asString(obj.artifact_id ?? obj.artifactId) || undefined,
+      blockedReason: asString(obj.blocked_reason ?? obj.blockedReason) || undefined
+    });
   }
 
   return out;
 }
 
-function collectSkillRootPathsFromChanges(changes: Array<{ path: string; kind: string }>): string[] {
+function collectSkillRootPathsFromChanges(changes: CodexFileChangeView[]): string[] {
   const roots = new Set<string>();
   for (const change of changes) {
     const normalizedPath = normalizePreviewFilePath(change.path);
@@ -2934,6 +2954,7 @@ const ProcessDataFallback: FC<any> = ({
   data?: ProcessData | unknown;
 }) => {
   const requestPreview = useContext(PreviewRequestContext);
+  const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const runningThreadIds = useContext(RunningThreadIdsContext);
   const skillDraftActions = useContext(SkillDraftActionContext);
@@ -2944,6 +2965,7 @@ const ProcessDataFallback: FC<any> = ({
 
   useEffect(() => {
     if (name !== "codex_file_change") return;
+    if (isExternalPortalUser) return;
     const threadId = activeThreadId.trim();
     if (!threadId) return;
     let active = true;
@@ -2966,7 +2988,7 @@ const ProcessDataFallback: FC<any> = ({
     return () => {
       active = false;
     };
-  }, [activeThreadId, name]);
+  }, [activeThreadId, isExternalPortalUser, name]);
 
   if (name === "codex_process_audit") return null;
 
@@ -3081,8 +3103,11 @@ const ProcessDataFallback: FC<any> = ({
 
   if (name === "codex_file_change") {
     const changes = collectCodexFileChanges(data);
-    if (changes.length === 0) return null;
-    const skillRootPaths = collectSkillRootPathsFromChanges(changes);
+    const visibleChanges = isExternalPortalUser
+      ? changes.filter((item) => item.canPreview || item.canDownload)
+      : changes;
+    if (visibleChanges.length === 0) return null;
+    const skillRootPaths = isExternalPortalUser ? [] : collectSkillRootPathsFromChanges(visibleChanges);
     const activeThreadRunning = Boolean(activeThreadId.trim() && runningThreadIds[activeThreadId.trim()]);
     const installSkillPath = async (skillPath: string) => {
       const threadId = activeThreadId.trim();
@@ -3111,8 +3136,16 @@ const ProcessDataFallback: FC<any> = ({
       <section className="assistant-file-change-block" aria-label="File changes">
         <p className="assistant-file-change-title">Generated files</p>
         <ul className="assistant-file-change-list">
-          {changes.map((item) => {
+          {visibleChanges.map((item) => {
             const label = fileChangeKindLabel(item.kind);
+            const canPreview = !isExternalPortalUser || item.canPreview;
+            const canDownload = isExternalPortalUser && item.canDownload && activeThreadId.trim();
+            const downloadHref = canDownload
+              ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
+                  path: item.path,
+                  disposition: "attachment"
+                }).toString()}`
+              : "";
             return (
               <li key={`${item.kind}-${item.path}`} className="assistant-file-change-item">
                 <div className="assistant-file-change-meta">
@@ -3120,9 +3153,16 @@ const ProcessDataFallback: FC<any> = ({
                   <span className="assistant-file-change-name">{fileNameFromPreviewPath(item.path)}</span>
                 </div>
                 <div className="assistant-file-change-actions">
-                  <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
-                    Preview
-                  </button>
+                  {canPreview ? (
+                    <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
+                      Preview
+                    </button>
+                  ) : null}
+                  {downloadHref ? (
+                    <a className="assistant-file-change-btn" href={downloadHref}>
+                      Download
+                    </a>
+                  ) : null}
                 </div>
               </li>
             );
@@ -5949,13 +5989,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   ]);
 
   const requestPreviewForPath = useCallback((filePath: string) => {
-    if (isExternalPortalUser) return;
     const normalizedPath = normalizePreviewFilePath(filePath);
     if (!normalizedPath) return;
     setRequestedPreviewPath(normalizedPath);
     setPreviewRequestNonce((value) => value + 1);
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
-  }, [isExternalPortalUser]);
+  }, []);
 
   const handleThreadLinkClickCapture = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
@@ -5983,12 +6022,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   useEffect(() => {
     if (!isExternalPortalUser) return;
     setLayoutState((prev) => {
-      if (!prev.isRightDrawerOpen && !prev.isAdvancedSettingsOpen) {
+      if (!prev.isAdvancedSettingsOpen) {
         return prev;
       }
       return {
         ...prev,
-        isRightDrawerOpen: false,
         isAdvancedSettingsOpen: false
       };
     });
@@ -6374,6 +6412,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             if (!partObj || partObj.type !== "data") continue;
             const name = typeof partObj.name === "string" ? partObj.name.trim() : "";
             if (name !== "codex_file_change" && name !== "skill_draft_status") continue;
+            if (isExternalPortalUser && name === "codex_file_change") {
+              const dataObj = asRecord(partObj.data);
+              if (dataObj?.artifact_only !== true) {
+                continue;
+              }
+            }
             activeTextPart = null;
             activeCommentaryPart = null;
             currentCommentaryKey = "";
@@ -6528,6 +6572,53 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
               }
               throw new Error(assistantErrorNotice);
+            }
+
+            if (event === "artifacts") {
+              if (!isExternalPortalUser || !payload) continue;
+              const policy = asRecord(payload.policy);
+              const previewEnabled = policy?.preview_enabled === true;
+              const downloadEnabled = policy?.download_enabled === true;
+              const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
+              const changes = artifacts
+                .map((item) => {
+                  const artifact = asRecord(item);
+                  if (!artifact) return null;
+                  const filePath = normalizePreviewFilePath(asString(artifact.relative_path));
+                  if (!filePath) return null;
+                  const canPreview = previewEnabled && asString(artifact.preview_status) === "ready";
+                  const canDownload = downloadEnabled && asString(artifact.download_status) === "ready";
+                  if (!canPreview && !canDownload) return null;
+                  return {
+                    path: filePath,
+                    kind: "ready",
+                    artifact_id: asString(artifact.id),
+                    preview_status: asString(artifact.preview_status),
+                    download_status: asString(artifact.download_status),
+                    can_preview: canPreview,
+                    can_download: canDownload,
+                    blocked_reason: asString(artifact.blocked_reason)
+                  };
+                })
+                .filter(Boolean);
+              if (changes.length === 0) continue;
+              updates.push({
+                type: "data",
+                name: "codex_file_change",
+                data: {
+                  at: new Date().toISOString(),
+                  artifact_only: true,
+                  changes
+                }
+              });
+              const dataPartChanged = appendDisplayDataParts(updates);
+              if (dataPartChanged) {
+                const content = snapshotContent();
+                if (content.length > 0) {
+                  yield { content };
+                }
+              }
+              continue;
             }
 
             if (event === "done") {
@@ -7088,6 +7179,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         >
         <ActiveThreadIdContext.Provider value={activeRemoteThreadId}>
           <AnswerFeedbackConfigContext.Provider value={answerFeedbackConfig}>
+          <ExternalPortalUserContext.Provider value={isExternalPortalUser}>
           <PreviewRequestContext.Provider value={requestPreviewForPath}>
             <Thread
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
@@ -7129,6 +7221,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               userMessage={{ allowEdit: true }}
             />
           </PreviewRequestContext.Provider>
+          </ExternalPortalUserContext.Provider>
           </AnswerFeedbackConfigContext.Provider>
         </ActiveThreadIdContext.Provider>
         </ThreadPublicShareControls>
@@ -7259,7 +7352,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                       </div>
                     </main>
 
-                    {!isExternalPortalUser && (
+                    {layoutState.isRightDrawerOpen && (!isExternalPortalUser || requestedPreviewPath) && (
                       <Drawer
                         placement="right"
                         open={layoutState.isRightDrawerOpen}
@@ -7278,7 +7371,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                               threadId={activeRemoteThreadId}
                               requestedFilePath={requestedPreviewPath}
                               requestNonce={previewRequestNonce}
-                              allowDownload={!isExternalPortalUser}
+                              allowDownload
+                              externalArtifactMode={isExternalPortalUser}
                             />
                           }
                           mobile
@@ -7351,7 +7445,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     </main>
                   </Panel>
 
-                  {!isExternalPortalUser && layoutState.isRightDrawerOpen && (
+                  {layoutState.isRightDrawerOpen && (!isExternalPortalUser || requestedPreviewPath) && (
                     <>
                       <PanelResizeHandle className="Resizer" />
                       <Panel defaultSize="37.5" minSize="20" maxSize="40" className="right-drawer-panel">
@@ -7363,7 +7457,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                               threadId={activeRemoteThreadId}
                               requestedFilePath={requestedPreviewPath}
                               requestNonce={previewRequestNonce}
-                              allowDownload={!isExternalPortalUser}
+                              allowDownload
+                              externalArtifactMode={isExternalPortalUser}
                             />
                           }
                         />

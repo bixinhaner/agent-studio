@@ -34,6 +34,20 @@ const systemSettingsUploadsBaseSchema = z.object({
   maxSingleFileBytes: positiveIntegerSchema,
   maxTotalUploadBytes: positiveIntegerSchema
 });
+const artifactExtensionSchema = z.string().trim().regex(/^\.[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/, {
+  message: "must start with a dot and contain only letters, numbers, underscores, or hyphens"
+});
+const artifactAccessOverrideSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    previewEnabled: z.boolean().optional(),
+    downloadEnabled: z.boolean().optional(),
+    autoRegisterGeneratedFiles: z.boolean().optional(),
+    maxFileBytes: positiveIntegerSchema.optional(),
+    retentionDays: positiveIntegerSchema.optional(),
+    allowedExtensions: z.array(artifactExtensionSchema).max(80).optional()
+  })
+  .strict();
 
 export const systemSettingsBrandingSchema = z.object({
   platformName: z.string().trim().min(1),
@@ -68,6 +82,32 @@ export const systemSettingsUploadsSchema = systemSettingsUploadsBaseSchema.refin
     path: ["maxTotalUploadBytes"]
   }
 );
+
+export const systemSettingsArtifactAccessRuleSchema = artifactAccessOverrideSchema
+  .extend({
+    id: z.string().trim().max(80).optional(),
+    label: z.string().trim().max(120).optional(),
+    subjectType: z.enum(["user_type", "organization", "role", "membership_type", "department", "user"]),
+    subjectId: z.string().trim().min(1).max(200)
+  })
+  .strict();
+
+export const systemSettingsArtifactAccessSchema = z
+  .object({
+    enabled: z.boolean(),
+    previewEnabled: z.boolean(),
+    downloadEnabled: z.boolean(),
+    autoRegisterGeneratedFiles: z.boolean(),
+    maxFileBytes: positiveIntegerSchema,
+    retentionDays: positiveIntegerSchema,
+    allowedExtensions: z.array(artifactExtensionSchema).min(1).max(80),
+    blockHiddenPaths: z.boolean(),
+    blockUserUploadDirectory: z.boolean(),
+    blockKnowledgeSetCopies: z.boolean(),
+    secretScanEnabled: z.boolean(),
+    rules: z.array(systemSettingsArtifactAccessRuleSchema).max(100)
+  })
+  .strict();
 
 export const systemSettingsSafetySchema = z.object({
   allowDangerFullAccess: z.boolean(),
@@ -110,6 +150,7 @@ export const systemSettingsPayloadSchema = z
     platformDefaults: systemSettingsPlatformDefaultsSchema,
     retention: systemSettingsRetentionSchema,
     uploads: systemSettingsUploadsSchema,
+    artifactAccess: systemSettingsArtifactAccessSchema,
     safety: systemSettingsSafetySchema,
     organizationDefaults: systemSettingsOrganizationDefaultsSchema,
     behavior: systemSettingsBehaviorSchema
@@ -120,6 +161,7 @@ export const systemSettingsBrandingPatchSchema = systemSettingsBrandingSchema.pa
 export const systemSettingsPlatformDefaultsPatchSchema = systemSettingsPlatformDefaultsSchema.partial();
 export const systemSettingsRetentionPatchSchema = systemSettingsRetentionSchema.partial();
 export const systemSettingsUploadsPatchSchema = systemSettingsUploadsBaseSchema.partial();
+export const systemSettingsArtifactAccessPatchSchema = systemSettingsArtifactAccessSchema.partial();
 export const systemSettingsSafetyPatchSchema = systemSettingsSafetySchema.partial();
 export const systemSettingsOrganizationDefaultsPatchSchema = systemSettingsOrganizationDefaultsSchema.partial();
 export const systemSettingsBehaviorPatchSchema = systemSettingsBehaviorSchema.partial();
@@ -130,6 +172,7 @@ export const systemSettingsPayloadPatchSchema = z
     platformDefaults: systemSettingsPlatformDefaultsPatchSchema.optional(),
     retention: systemSettingsRetentionPatchSchema.optional(),
     uploads: systemSettingsUploadsPatchSchema.optional(),
+    artifactAccess: systemSettingsArtifactAccessPatchSchema.optional(),
     safety: systemSettingsSafetyPatchSchema.optional(),
     organizationDefaults: systemSettingsOrganizationDefaultsPatchSchema.optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
@@ -140,6 +183,8 @@ export type SystemSettingsBranding = z.infer<typeof systemSettingsBrandingSchema
 export type SystemSettingsPlatformDefaults = z.infer<typeof systemSettingsPlatformDefaultsSchema>;
 export type SystemSettingsRetention = z.infer<typeof systemSettingsRetentionSchema>;
 export type SystemSettingsUploads = z.infer<typeof systemSettingsUploadsSchema>;
+export type SystemSettingsArtifactAccess = z.infer<typeof systemSettingsArtifactAccessSchema>;
+export type SystemSettingsArtifactAccessRule = z.infer<typeof systemSettingsArtifactAccessRuleSchema>;
 export type SystemSettingsSafety = z.infer<typeof systemSettingsSafetySchema>;
 export type SystemSettingsOrganizationDefaults = z.infer<typeof systemSettingsOrganizationDefaultsSchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
@@ -199,6 +244,37 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   uploads: {
     maxSingleFileBytes: 10 * 1024 * 1024,
     maxTotalUploadBytes: 50 * 1024 * 1024
+  },
+  artifactAccess: {
+    enabled: false,
+    previewEnabled: true,
+    downloadEnabled: true,
+    autoRegisterGeneratedFiles: true,
+    maxFileBytes: 25 * 1024 * 1024,
+    retentionDays: 30,
+    allowedExtensions: [
+      ".txt",
+      ".md",
+      ".markdown",
+      ".csv",
+      ".tsv",
+      ".json",
+      ".yaml",
+      ".yml",
+      ".pdf",
+      ".docx",
+      ".xlsx",
+      ".pptx",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".webp"
+    ],
+    blockHiddenPaths: true,
+    blockUserUploadDirectory: true,
+    blockKnowledgeSetCopies: true,
+    secretScanEnabled: true,
+    rules: []
   },
   safety: {
     allowDangerFullAccess: false,

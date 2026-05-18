@@ -6,6 +6,7 @@ import {
   normalizeManagedCodexProviderSnapshot,
   resolveManagedCodexDefaults
 } from "./managed-codex-provider.js";
+import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 
 describe("createManagedCodexProviderSnapshot", () => {
   it("uses a custom provider for OpenAI-compatible base URLs", () => {
@@ -171,6 +172,7 @@ describe("ManagedCodexProviderResolver", () => {
                 maxSingleFileBytes: 10,
                 maxTotalUploadBytes: 20
               },
+              artifactAccess: createDefaultSystemSettingsPayload().artifactAccess,
               safety: {
                 allowDangerFullAccess: false,
                 allowNetworkAccess: true,
@@ -248,6 +250,7 @@ describe("resolveManagedCodexDefaults", () => {
             maxSingleFileBytes: 10,
             maxTotalUploadBytes: 20
           },
+          artifactAccess: createDefaultSystemSettingsPayload().artifactAccess,
           safety: {
             allowDangerFullAccess: false,
             allowNetworkAccess: true,

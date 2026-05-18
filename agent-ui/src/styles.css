@@ -3765,6 +3765,207 @@ body.access-request-route #root {
   margin-top: 4px;
 }
 
+.artifact-access-settings {
+  display: grid;
+  gap: 24px;
+}
+
+.artifact-access-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
+  gap: 20px;
+  padding: 22px;
+  border: 1px solid #cbdbea;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6f5 100%);
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+}
+
+.artifact-access-hero-main {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.artifact-access-hero-main h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.artifact-access-hero-main p {
+  max-width: 680px;
+  margin: 0;
+  color: #475569;
+  line-height: 1.65;
+}
+
+.artifact-access-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.artifact-access-status.is-on {
+  border-color: #9bd2bb;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.artifact-access-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.artifact-access-summary-item {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.artifact-access-summary-item span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.artifact-access-summary-item strong {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.artifact-access-panel {
+  gap: 18px;
+  margin-bottom: 0;
+}
+
+.artifact-access-panel .resource-center-section-header svg {
+  color: #0f766e;
+}
+
+.artifact-access-toggle-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.artifact-extension-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 32px;
+  padding: 10px;
+  border: 1px solid #d6e2f3;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.artifact-extension-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.artifact-rule-empty {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.artifact-rule-empty strong {
+  color: #0f172a;
+}
+
+.artifact-rule-empty span {
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.artifact-rule-list {
+  display: grid;
+  gap: 12px;
+}
+
+.artifact-rule-card {
+  border: 1px solid #d6e2f3;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.artifact-rule-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.artifact-rule-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.artifact-rule-card summary span {
+  display: grid;
+  gap: 3px;
+}
+
+.artifact-rule-card summary strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.artifact-rule-card summary small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.artifact-rule-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fbff;
+}
+
+.artifact-rule-switches {
+  grid-column: span 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.artifact-rule-switches label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.artifact-rule-actions {
+  grid-column: span 3;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .system-settings-history-grid,
 .system-settings-preview-grid {
   display: grid;
@@ -5849,9 +6050,20 @@ body.access-request-route #root {
   .knowledge-set-browser-row.directory,
   .knowledge-set-browser-row.file,
   .knowledge-set-tree-file-row,
+  .artifact-access-hero,
+  .artifact-access-toggle-grid,
   .system-settings-history-grid,
   .system-settings-preview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .artifact-rule-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-rule-switches,
+  .artifact-rule-actions {
+    grid-column: span 1;
   }
 
   .resource-center-form-span-2 {

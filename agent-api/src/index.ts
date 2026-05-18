@@ -1,6 +1,6 @@
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -21,6 +21,11 @@ import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resou
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
+import {
+  resolveArtifactAccessPolicy,
+  type ArtifactAccessActor,
+  type ResolvedArtifactAccessPolicy
+} from "./artifacts/thread-artifact-policy.js";
 import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
@@ -78,6 +83,11 @@ import {
   type ThreadRepositoryDb
 } from "./persistence/thread-repository.js";
 import {
+  ThreadArtifactRepository,
+  type ThreadArtifactRecord,
+  type ThreadArtifactRepositoryDb
+} from "./persistence/thread-artifact-repository.js";
+import {
   ThreadPublicShareRepository,
   type ThreadPublicShareRepositoryDb
 } from "./persistence/thread-public-share-repository.js";
@@ -128,7 +138,7 @@ import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { createPortalRouter } from "./portal/router.js";
-import { PortalRuntimeOptionService } from "./portal/runtime-option-service.js";
+import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { AlertEvaluationService } from "./operations/alert-evaluation-service.js";
 import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
@@ -150,6 +160,7 @@ import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-se
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
+import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
 import { resolvePublicBranding } from "./system-settings/public-branding.js";
 import { initSSE, sendSSE } from "./sse.js";
@@ -186,6 +197,7 @@ const syncJobs = new SyncJobRepository(db as unknown as SyncJobRepositoryDb);
 const broadcasts = new BroadcastRepository(db as unknown as BroadcastRepositoryDb);
 const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknown as ResourceAccessLogRepositoryDb);
 const threadPublicShares = new ThreadPublicShareRepository(db as unknown as ThreadPublicShareRepositoryDb);
+const threadArtifacts = new ThreadArtifactRepository(db as unknown as ThreadArtifactRepositoryDb);
 const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepositoryDb);
 const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
 const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
@@ -739,6 +751,18 @@ const threadFileContentQuerySchema = z
     message: "Either relative_path or path is required"
   });
 
+const artifactResolveQuerySchema = z.object({
+  path: z.string().trim().min(1)
+});
+
+const artifactContentQuerySchema = z.object({
+  disposition: z.enum(["inline", "attachment"]).optional()
+});
+
+const artifactPathContentQuerySchema = artifactResolveQuerySchema.extend({
+  disposition: z.enum(["inline", "attachment"]).optional()
+});
+
 type SessionOptions = {
   userId: string;
   organizationId: string;
@@ -753,6 +777,7 @@ type SessionOptions = {
 type ModeSelection = {
   modeId: string;
   workspaceRootPath: string;
+  runtimeProfile: PortalRuntimeOptionRunProfile;
 };
 
 type EnabledSkillSelection = {
@@ -765,6 +790,7 @@ type EnabledSkillSelection = {
 
 type CurrentActor = {
   id: string;
+  userType?: string;
   role?: string;
   organizationId: string;
   organizationSlug?: string;
@@ -1124,6 +1150,30 @@ function withRunConfigMode(
   return next;
 }
 
+function isExternalActor(actor: CurrentActor): boolean {
+  return actor.userType === "external_user" || actor.organizationType === "customer";
+}
+
+function withExternalRunProfileBoundaries(
+  codexRunConfig: Record<string, unknown> | undefined,
+  currentUser: CurrentActor,
+  runtimeProfile: PortalRuntimeOptionRunProfile
+): Record<string, unknown> | undefined {
+  if (!isExternalActor(currentUser)) {
+    return codexRunConfig;
+  }
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
+  delete next.additionalDirectories;
+  delete next.outputSchemaFile;
+  delete next._agentStudioKnowledgeSets;
+  delete next._agentStudioCodexHome;
+  next.sandboxMode = runtimeProfile.sandboxMode;
+  next.approvalPolicy = runtimeProfile.approvalPolicy;
+  next.networkAccessEnabled = runtimeProfile.networkAccessEnabled;
+  next.webSearchMode = runtimeProfile.webSearchMode;
+  return next;
+}
+
 function withRunConfigEnabledSkills(
   codexRunConfig: Record<string, unknown> | undefined,
   enabledSkills: EnabledSkillSelection[]
@@ -1251,6 +1301,7 @@ function currentActorFromRequest(req: Request): CurrentActor {
   }
   return {
     id: req.currentUser.id,
+    userType: req.currentUser.userType,
     role: req.currentUser.role,
     organizationId: req.currentOrganization.id,
     organizationSlug: req.currentOrganization.slug,
@@ -1301,7 +1352,8 @@ async function resolveModeSelection(input: {
 
   return {
     modeId: selectedMode.id,
-    workspaceRootPath: await resolveEffectiveSessionWorkspaceRootPath()
+    workspaceRootPath: await resolveEffectiveSessionWorkspaceRootPath(),
+    runtimeProfile: selectedMode.runtimeProfile
   };
 }
 
@@ -1515,7 +1567,8 @@ async function resolveSessionOptions(
   },
   currentUser: CurrentActor,
   workspacePath: string,
-  modeId: string
+  modeId: string,
+  runtimeProfile: PortalRuntimeOptionRunProfile
 ): Promise<SessionOptions> {
   const [providerSnapshot, publishedSystemSettings] = await Promise.all([
     resolveProviderSnapshot({ existingSnapshot: input.providerSnapshot }),
@@ -1532,9 +1585,13 @@ async function resolveSessionOptions(
     modeId,
     codexRunConfig: input.codex_run_config
   });
-  const sourceCodexRunConfig = withRunConfigEnabledSkillSelection(
-    withRunConfigMode(input.codex_run_config, modeId),
-    enabledSkills
+  const sourceCodexRunConfig = withExternalRunProfileBoundaries(
+    withRunConfigEnabledSkillSelection(
+      withRunConfigMode(input.codex_run_config, modeId),
+      enabledSkills
+    ),
+    currentUser,
+    runtimeProfile
   );
   await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
   const resolvedCodexRunConfig = await resolveKnowledgeSetRunConfig({
@@ -1644,9 +1701,13 @@ async function ensureThreadSession(
     modeId: modeSelection.modeId,
     codexRunConfig: sourceCodexRunConfig
   });
-  const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
-    withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
-    enabledSkills
+  const normalizedSourceCodexRunConfig = withExternalRunProfileBoundaries(
+    withRunConfigEnabledSkillSelection(
+      withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
+      enabledSkills
+    ),
+    currentUser,
+    modeSelection.runtimeProfile
   );
   const defaults = resolveManagedCodexDefaults({
     systemSettings: publishedSystemSettings,
@@ -1825,6 +1886,440 @@ function resolveThreadFileAbsolutePath(input: {
     throw new Error("File path is outside the thread workspace");
   }
   return candidate;
+}
+
+type RuntimeFileChange = {
+  path: string;
+  kind: string;
+};
+
+const ARTIFACT_TEXT_SCAN_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".markdown",
+  ".csv",
+  ".tsv",
+  ".json",
+  ".jsonl",
+  ".yaml",
+  ".yml",
+  ".xml",
+  ".html",
+  ".htm",
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".css",
+  ".scss",
+  ".py",
+  ".sh",
+  ".log",
+  ".sql",
+  ".env"
+]);
+
+const ARTIFACT_MIME_BY_EXTENSION: Record<string, string> = {
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".markdown": "text/markdown",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values",
+  ".json": "application/json",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+  ".pdf": "application/pdf",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp"
+};
+
+function normalizeArtifactRelativePath(value: string): string {
+  return normalizeRelativePath(value).replace(/^\/+/, "").trim();
+}
+
+function resolveWorkspaceFilePath(input: { workspacePath: string; filePath: string }): { absolutePath: string; relativePath: string } {
+  const workspacePath = path.resolve(input.workspacePath);
+  const requestedPath = trimOrUndefined(input.filePath);
+  if (!requestedPath) {
+    throw new Error("File path is required");
+  }
+  const absolutePath = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(workspacePath, requestedPath);
+  if (!isPathInside(workspacePath, absolutePath)) {
+    throw new Error("File path is outside the thread workspace");
+  }
+  const relativePath = normalizeArtifactRelativePath(path.relative(workspacePath, absolutePath));
+  if (!relativePath) {
+    throw new Error("File path is not a file inside the thread workspace");
+  }
+  return { absolutePath, relativePath };
+}
+
+function extensionForArtifact(fileNameOrPath: string): string {
+  return path.extname(fileNameOrPath).trim().toLowerCase();
+}
+
+function mimeTypeForArtifactPath(fileNameOrPath: string): string {
+  return ARTIFACT_MIME_BY_EXTENSION[extensionForArtifact(fileNameOrPath)] ?? "application/octet-stream";
+}
+
+function artifactOut(artifact: ThreadArtifactRecord) {
+  return {
+    id: artifact.id,
+    source: artifact.source,
+    relative_path: artifact.relativePath,
+    display_name: artifact.displayName,
+    mime_type: artifact.mimeType ?? null,
+    size_bytes: artifact.sizeBytes ?? null,
+    checksum: artifact.checksum ?? null,
+    preview_status: artifact.previewStatus,
+    download_status: artifact.downloadStatus,
+    blocked_reason: artifact.blockedReason ?? null,
+    expires_at: artifact.expiresAt ?? null,
+    created_at: artifact.createdAt,
+    updated_at: artifact.updatedAt
+  };
+}
+
+function artifactPolicyOut(policy: ResolvedArtifactAccessPolicy) {
+  return {
+    enabled: policy.enabled,
+    preview_enabled: policy.previewEnabled,
+    download_enabled: policy.downloadEnabled,
+    auto_register_generated_files: policy.autoRegisterGeneratedFiles,
+    max_file_bytes: policy.maxFileBytes,
+    retention_days: policy.retentionDays,
+    allowed_extensions: policy.allowedExtensions
+  };
+}
+
+function artifactActorFromCurrentActor(actor: CurrentActor, departmentIds: string[] = []): ArtifactAccessActor {
+  return {
+    id: actor.id,
+    userType: actor.userType,
+    role: actor.role,
+    organizationId: actor.organizationId,
+    membershipType: actor.membershipType,
+    departmentIds
+  };
+}
+
+async function resolveArtifactPolicyForActor(actor: CurrentActor): Promise<ResolvedArtifactAccessPolicy> {
+  const [publishedSettings, departmentIds] = await Promise.all([
+    systemSettings.getCurrentPublished(),
+    listDepartmentIdsForActor(actor)
+  ]);
+  return resolveArtifactAccessPolicy(
+    publishedSettings?.payload.artifactAccess ?? createDefaultSystemSettingsPayload().artifactAccess,
+    artifactActorFromCurrentActor(actor, departmentIds)
+  );
+}
+
+function extractRuntimeFileChanges(event: { type?: string; raw?: unknown }): RuntimeFileChange[] {
+  if (event.type !== "item.completed") return [];
+  const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  if (!item || item.type !== "file_change") return [];
+  const changes = Array.isArray(item.changes) ? item.changes : [];
+  const out: RuntimeFileChange[] = [];
+  const seen = new Set<string>();
+  for (const change of changes) {
+    const payload = asRecord(change);
+    if (!payload) continue;
+    const filePath = typeof payload.path === "string" ? payload.path.trim() : "";
+    if (!filePath) continue;
+    const kind = typeof payload.kind === "string" && payload.kind.trim() ? payload.kind.trim() : "update";
+    const key = `${kind}::${filePath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ path: filePath, kind });
+  }
+  return out;
+}
+
+function shouldSkipArtifactChange(change: RuntimeFileChange): boolean {
+  const kind = change.kind.trim().toLowerCase();
+  return kind === "delete" || kind === "deleted" || kind === "remove" || kind === "removed";
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + Math.max(1, Math.floor(days)));
+  return next;
+}
+
+function detectBlockedArtifactPath(relativePath: string, policy: ResolvedArtifactAccessPolicy): string | undefined {
+  const normalized = normalizeArtifactRelativePath(relativePath);
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length === 0) return "File path is empty";
+  if (policy.blockUserUploadDirectory && segments[0] === ".uploads") {
+    return "User-uploaded source files are not published as downloadable artifacts";
+  }
+  if (policy.blockHiddenPaths && segments.some((segment) => segment.startsWith("."))) {
+    return "Hidden paths are blocked by artifact policy";
+  }
+  const extension = extensionForArtifact(normalized);
+  if (!extension || !policy.allowedExtensions.includes(extension)) {
+    return "File type is not allowed by artifact policy";
+  }
+  return undefined;
+}
+
+function detectSecretLikeContent(buffer: Buffer): string | undefined {
+  const text = buffer.toString("utf8");
+  const patterns: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i, reason: "Private key content was detected" },
+    { pattern: /\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{16,}/i, reason: "Secret-like credential content was detected" },
+    { pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/, reason: "API key-like content was detected" }
+  ];
+  for (const item of patterns) {
+    if (item.pattern.test(text)) return item.reason;
+  }
+  return undefined;
+}
+
+async function checksumExistsInKnowledgeSets(checksum: string): Promise<boolean> {
+  const normalizedChecksum = trimOrUndefined(checksum);
+  if (!normalizedChecksum) return false;
+  const sets = await knowledgeSets.list();
+  for (const knowledgeSet of sets) {
+    if (trimOrUndefined(knowledgeSet.status) !== "active" || trimOrUndefined(knowledgeSet.sourceType) !== "managed_upload") {
+      continue;
+    }
+    const items = await knowledgeSets.listItems(knowledgeSet.id);
+    for (const item of items) {
+      const payload = asRecord(item);
+      const itemChecksum = typeof payload?.checksum === "string" ? payload.checksum.trim() : "";
+      if (itemChecksum && itemChecksum === normalizedChecksum) return true;
+    }
+  }
+  return false;
+}
+
+async function registerGeneratedArtifactsForSession(input: {
+  currentUser: CurrentActor;
+  session: SessionRecord;
+  changes: RuntimeFileChange[];
+}): Promise<ThreadArtifactRecord[]> {
+  const threadId = trimOrUndefined(input.session.threadId);
+  const workspacePath = trimOrUndefined(input.session.workspace);
+  if (!threadId || !workspacePath || input.changes.length === 0) return [];
+
+  const policy = await resolveArtifactPolicyForActor(input.currentUser);
+  if (!policy.enabled || !policy.autoRegisterGeneratedFiles) return [];
+
+  const thread = await threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId);
+  if (!thread) return [];
+
+  const registered: ThreadArtifactRecord[] = [];
+  const seen = new Set<string>();
+  for (const change of input.changes) {
+    if (shouldSkipArtifactChange(change)) continue;
+
+    let resolved: { absolutePath: string; relativePath: string };
+    try {
+      resolved = resolveWorkspaceFilePath({ workspacePath, filePath: change.path });
+    } catch {
+      continue;
+    }
+    if (seen.has(resolved.relativePath)) continue;
+    seen.add(resolved.relativePath);
+
+    const stat = await fs.stat(resolved.absolutePath).catch(() => null);
+    if (!stat || !stat.isFile()) continue;
+
+    let blockedReason = detectBlockedArtifactPath(resolved.relativePath, policy);
+    if (!blockedReason && stat.size > policy.maxFileBytes) {
+      blockedReason = "File is larger than the artifact size limit";
+    }
+
+    let fileBuffer: Buffer | undefined;
+    let checksum: string | undefined;
+    if (!blockedReason || policy.blockKnowledgeSetCopies) {
+      fileBuffer = await fs.readFile(resolved.absolutePath);
+      checksum = createHash("sha256").update(fileBuffer).digest("hex");
+    }
+    const extension = extensionForArtifact(resolved.relativePath);
+
+    if (!blockedReason && policy.blockKnowledgeSetCopies && checksum && await checksumExistsInKnowledgeSets(checksum)) {
+      blockedReason = "File matches a managed knowledge-set source file";
+    }
+
+    if (
+      !blockedReason &&
+      policy.secretScanEnabled &&
+      fileBuffer &&
+      ARTIFACT_TEXT_SCAN_EXTENSIONS.has(extension) &&
+      fileBuffer.length <= 2 * 1024 * 1024
+    ) {
+      blockedReason = detectSecretLikeContent(fileBuffer);
+    }
+
+    const status = blockedReason ? "blocked" : "ready";
+    registered.push(
+      await threadArtifacts.upsertForThreadPath({
+        organizationId: thread.organizationId ?? input.currentUser.organizationId,
+        threadId,
+        userId: thread.userId ?? input.currentUser.id,
+        source: "assistant_generated",
+        relativePath: resolved.relativePath,
+        displayName: path.basename(resolved.relativePath),
+        mimeType: mimeTypeForArtifactPath(resolved.relativePath),
+        sizeBytes: stat.size,
+        checksum,
+        previewStatus: status,
+        downloadStatus: status,
+        blockedReason,
+        metadata: {
+          changeKind: change.kind,
+          originalPath: change.path
+        },
+        expiresAt: addDays(new Date(), policy.retentionDays)
+      })
+    );
+  }
+
+  return registered;
+}
+
+async function sendThreadArtifactContent(input: {
+  currentUser: CurrentActor;
+  threadId: string;
+  artifactId?: string;
+  filePath?: string;
+  disposition?: "inline" | "attachment";
+  res: Response;
+}): Promise<void> {
+  const threadId = trimOrUndefined(input.threadId);
+  const artifactId = trimOrUndefined(input.artifactId);
+  const filePath = trimOrUndefined(input.filePath);
+  const actionType = input.disposition === "attachment" ? "download" : "preview";
+  const resourceIdForLog = artifactId ?? filePath ?? "unknown";
+
+  const recordAccess = async (resourceId: string, resultStatus: string, metadata?: unknown) => {
+    await resourceAccessLogs.record({
+      organizationId: input.currentUser.organizationId,
+      userId: input.currentUser.id,
+      threadId,
+      resourceType: "thread_artifact",
+      resourceId,
+      actionType: `artifact.${actionType}`,
+      resultStatus,
+      metadata
+    });
+  };
+
+  if (!threadId || (!artifactId && !filePath)) {
+    input.res.status(400).json({ detail: "threadId and artifact reference are required" });
+    return;
+  }
+
+  const [thread, policy] = await Promise.all([
+    threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
+    resolveArtifactPolicyForActor(input.currentUser)
+  ]);
+  if (!thread) {
+    input.res.status(404).json({ detail: "Thread does not exist" });
+    return;
+  }
+  if (!policy.enabled) {
+    await recordAccess(resourceIdForLog, "denied", { reason: "artifact_access_disabled" });
+    input.res.status(403).json({ detail: "Artifact access is disabled" });
+    return;
+  }
+  if (actionType === "preview" && !policy.previewEnabled) {
+    await recordAccess(resourceIdForLog, "denied", { reason: "artifact_preview_disabled" });
+    input.res.status(403).json({ detail: "Artifact preview is disabled" });
+    return;
+  }
+  if (actionType === "download" && !policy.downloadEnabled) {
+    await recordAccess(resourceIdForLog, "denied", { reason: "artifact_download_disabled" });
+    input.res.status(403).json({ detail: "Artifact download is disabled" });
+    return;
+  }
+
+  const workspacePath = trimOrUndefined(thread.workspace);
+  if (!workspacePath) {
+    input.res.status(404).json({ detail: "Thread workspace does not exist" });
+    return;
+  }
+
+  let artifact: ThreadArtifactRecord | undefined;
+  if (artifactId) {
+    artifact = await threadArtifacts.getForThread(threadId, artifactId);
+  } else if (filePath) {
+    const resolvedForLookup = resolveWorkspaceFilePath({ workspacePath, filePath });
+    artifact = await threadArtifacts.getByThreadPath(threadId, resolvedForLookup.relativePath);
+  }
+
+  if (!artifact) {
+    input.res.status(404).json({ detail: "Artifact does not exist" });
+    return;
+  }
+
+  const status = actionType === "download" ? artifact.downloadStatus : artifact.previewStatus;
+  if (status !== "ready") {
+    await recordAccess(artifact.id, "denied", { reason: artifact.blockedReason ?? "artifact_blocked" });
+    input.res.status(403).json({ detail: artifact.blockedReason || "Artifact is blocked by policy" });
+    return;
+  }
+  if (artifact.expiresAt) {
+    const expiresAt = new Date(artifact.expiresAt);
+    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
+      await recordAccess(artifact.id, "denied", { reason: "artifact_expired" });
+      input.res.status(410).json({ detail: "Artifact has expired" });
+      return;
+    }
+  }
+
+  const resolved = resolveWorkspaceFilePath({ workspacePath, filePath: artifact.relativePath });
+  if (resolved.relativePath !== artifact.relativePath) {
+    await recordAccess(artifact.id, "denied", { reason: "artifact_path_mismatch" });
+    input.res.status(403).json({ detail: "Artifact path is invalid" });
+    return;
+  }
+
+  const stat = await fs.stat(resolved.absolutePath).catch(() => null);
+  if (!stat || !stat.isFile()) {
+    input.res.status(404).json({ detail: "Artifact file does not exist" });
+    return;
+  }
+
+  const currentPolicyBlockReason =
+    detectBlockedArtifactPath(artifact.relativePath, policy) ||
+    (stat.size > policy.maxFileBytes ? "File is larger than the artifact size limit" : undefined);
+  if (currentPolicyBlockReason) {
+    await recordAccess(artifact.id, "denied", { reason: currentPolicyBlockReason });
+    input.res.status(403).json({ detail: currentPolicyBlockReason });
+    return;
+  }
+
+  const fileName = artifact.displayName || path.basename(resolved.absolutePath);
+  const fileBuffer = await fs.readFile(resolved.absolutePath);
+  if (artifact.checksum) {
+    const currentChecksum = createHash("sha256").update(fileBuffer).digest("hex");
+    if (currentChecksum !== artifact.checksum) {
+      await recordAccess(artifact.id, "denied", { reason: "artifact_checksum_mismatch" });
+      input.res.status(409).json({ detail: "Artifact file changed after approval" });
+      return;
+    }
+  }
+
+  await recordAccess(artifact.id, "success", { disposition: actionType });
+  input.res.setHeader("Cache-Control", "private, max-age=60");
+  input.res.setHeader("X-Content-Type-Options", "nosniff");
+  input.res.setHeader(
+    "Content-Disposition",
+    `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+  );
+  input.res.type(artifact.mimeType || path.extname(fileName) || "application/octet-stream");
+  input.res.status(200).send(fileBuffer);
 }
 
 function findWhitelistRoot(candidate: string): string | undefined {
@@ -2234,6 +2729,11 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
       return;
     }
 
+    if (isExternalActor(currentUser)) {
+      res.status(403).json({ detail: "External users can only preview or download approved artifacts" });
+      return;
+    }
+
     const workspacePath = trimOrUndefined(thread.workspace);
     if (!workspacePath) {
       res.status(404).json({ detail: "Thread workspace does not exist" });
@@ -2269,6 +2769,115 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
   }
 });
 
+app.get("/api/threads/:threadId/artifacts", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    if (!threadId) {
+      res.status(400).json({ detail: "threadId is required" });
+      return;
+    }
+
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+
+    const policy = await resolveArtifactPolicyForActor(currentUser);
+    const artifacts = policy.enabled ? await threadArtifacts.listForThread(threadId) : [];
+    res.json({
+      policy: artifactPolicyOut(policy),
+      artifacts: artifacts.map(artifactOut)
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to list artifacts";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/artifacts/resolve", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const query = artifactResolveQuerySchema.parse({
+      path: typeof req.query.path === "string" ? req.query.path : ""
+    });
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+
+    const policy = await resolveArtifactPolicyForActor(currentUser);
+    if (!policy.enabled) {
+      res.status(403).json({ detail: "Artifact access is disabled" });
+      return;
+    }
+
+    const workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      res.status(404).json({ detail: "Thread workspace does not exist" });
+      return;
+    }
+    const resolved = resolveWorkspaceFilePath({ workspacePath, filePath: query.path });
+    const artifact = await threadArtifacts.getByThreadPath(threadId, resolved.relativePath);
+    if (!artifact) {
+      res.status(404).json({ detail: "This file has not been approved as an artifact" });
+      return;
+    }
+    res.json({
+      policy: artifactPolicyOut(policy),
+      artifact: artifactOut(artifact)
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to resolve artifact";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/artifacts/content", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const query = artifactPathContentQuerySchema.parse({
+      path: typeof req.query.path === "string" ? req.query.path : "",
+      disposition: typeof req.query.disposition === "string" ? req.query.disposition : undefined
+    });
+    await sendThreadArtifactContent({
+      currentUser,
+      threadId,
+      filePath: query.path,
+      disposition: query.disposition,
+      res
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read artifact";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/artifacts/:artifactId/content", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const artifactId = String(req.params.artifactId || "").trim();
+    const query = artifactContentQuerySchema.parse({
+      disposition: typeof req.query.disposition === "string" ? req.query.disposition : undefined
+    });
+    await sendThreadArtifactContent({
+      currentUser,
+      threadId,
+      artifactId,
+      disposition: query.disposition,
+      res
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read artifact";
+    res.status(400).json({ detail });
+  }
+});
+
 app.post("/api/session", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
@@ -2288,12 +2897,14 @@ app.post("/api/session", async (req: Request, res: Response) => {
 
           let workspace = existing.workspace;
           let modeId = modeHint;
+          let runtimeProfile: PortalRuntimeOptionRunProfile | undefined;
           if (existing.threadId) {
             const selection = await resolveModeSelection({
               currentUser,
               modeHint
             });
             modeId = selection.modeId;
+            runtimeProfile = selection.runtimeProfile;
             const ownedThread = await threads.getOwned(existing.threadId, currentUser.id, currentUser.organizationId);
             workspace =
               trimOrUndefined(ownedThread?.workspace) ||
@@ -2316,14 +2927,16 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
+            runtimeProfile = allocated.runtimeProfile;
           }
 
-          if (!modeId) {
+          if (!modeId || !runtimeProfile) {
             const fallback = await resolveModeSelection({
               currentUser,
               modeHint: undefined
             });
             modeId = fallback.modeId;
+            runtimeProfile = fallback.runtimeProfile;
           }
 
           if (modeId && workspace) {
@@ -2335,9 +2948,13 @@ app.post("/api/session", async (req: Request, res: Response) => {
             modeId,
             codexRunConfig: nextSourceCodexRunConfig
           });
-          const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
-            withRunConfigMode(nextSourceCodexRunConfig, modeId),
-            enabledSkills
+          const normalizedSourceCodexRunConfig = withExternalRunProfileBoundaries(
+            withRunConfigEnabledSkillSelection(
+              withRunConfigMode(nextSourceCodexRunConfig, modeId),
+              enabledSkills
+            ),
+            currentUser,
+            runtimeProfile
           );
           const nextCodexRunConfig = await resolveKnowledgeSetRunConfig({
             currentUser,
@@ -2416,7 +3033,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
       },
       currentUser,
       allocated.workspacePath,
-      allocated.modeId
+      allocated.modeId,
+      allocated.runtimeProfile
     );
     await assertChatAllowsNewSession({
       currentUser,
@@ -2528,7 +3146,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       },
       currentUser,
       allocated.workspacePath,
-      allocated.modeId
+      allocated.modeId,
+      allocated.runtimeProfile
     );
     await assertChatAllowsNewSession({
       currentUser,
@@ -2840,9 +3459,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       started_at: new Date().toISOString()
     });
 
+    const runtimeFileChanges: RuntimeFileChange[] = [];
     await streamRuntimeCompletionWithBestEffortUsage({
       events: runtime.runStreamed(ensuredLiveThread, withSkillActivationPrompts(input.message, currentSession.codexRunConfig)),
       onEvent(event) {
+        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
@@ -2852,6 +3473,28 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sendSSE(res, "codex", event);
       },
       async onDone(payload) {
+        try {
+          const artifacts = await registerGeneratedArtifactsForSession({
+            currentUser,
+            session: currentSession,
+            changes: runtimeFileChanges
+          });
+          if (artifacts.length > 0) {
+            const policy = await resolveArtifactPolicyForActor(currentUser);
+            sendSSE(res, "artifacts", {
+              policy: artifactPolicyOut(policy),
+              artifacts: artifacts.map(artifactOut)
+            });
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.warn("artifact registration failed", {
+            sessionId: currentSession.sessionId,
+            threadId: currentSession.threadId,
+            detail
+          });
+          sendSSE(res, "artifact_warning", { detail: "Generated files could not be registered for external preview" });
+        }
         sendSSE(res, "done", {
           session_id: currentSession.sessionId,
           answer: payload.answer,

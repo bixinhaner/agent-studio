@@ -47,6 +47,7 @@ export function sectionForFieldPath(path: string): SystemSettingsSection {
   if (path.startsWith("branding.") || path.startsWith("behavior.")) return "branding";
   if (path.startsWith("platformDefaults.")) return "model-defaults";
   if (path.startsWith("retention.") || path.startsWith("uploads.")) return "retention-upload";
+  if (path.startsWith("artifactAccess.")) return "artifact-access";
   if (path.startsWith("safety.")) return "safety";
   if (path.startsWith("organizationDefaults.")) return "organization-defaults";
   return "publish-history";

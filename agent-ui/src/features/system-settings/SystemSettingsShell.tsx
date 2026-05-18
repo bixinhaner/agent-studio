@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
-import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send } from "lucide-react";
+import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2 } from "lucide-react";
 
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
+import { ArtifactAccessSettingsView } from "./ArtifactAccessSettingsView";
 import { BrandingSettingsView } from "./BrandingSettingsView";
 import { ModelDefaultsView } from "./ModelDefaultsView";
 import { OrganizationDefaultsView } from "./OrganizationDefaultsView";
@@ -23,6 +24,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; gro
   { id: "model-defaults", label: "运行时默认与兜底", icon: Box, group: 'General' },
   { id: "organization-defaults", label: "组织默认值", icon: Users, group: 'General' },
   { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
+  { id: "artifact-access", label: "外部文件访问", icon: FileCheck2, group: 'Security & Data' },
   { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
   { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
 ];
@@ -33,6 +35,14 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
     platformDefaults: { ...payload.platformDefaults },
     retention: { ...payload.retention },
     uploads: { ...payload.uploads },
+    artifactAccess: {
+      ...payload.artifactAccess,
+      allowedExtensions: [...payload.artifactAccess.allowedExtensions],
+      rules: payload.artifactAccess.rules.map((rule) => ({
+        ...rule,
+        allowedExtensions: rule.allowedExtensions ? [...rule.allowedExtensions] : undefined
+      }))
+    },
     safety: { ...payload.safety },
     organizationDefaults: { ...payload.organizationDefaults },
     behavior: {
@@ -184,6 +194,10 @@ export function SystemSettingsShell() {
     updateDraft(c => ({ ...c, payload: { ...c.payload, uploads: { ...c.payload.uploads, ...patch } } }), fieldPaths("uploads", patch));
   }
 
+  function updateDraftArtifactAccess(patch: Partial<SystemSettingsPayload["artifactAccess"]>) {
+    updateDraft(c => ({ ...c, payload: { ...c.payload, artifactAccess: { ...c.payload.artifactAccess, ...patch } } }), fieldPaths("artifactAccess", patch));
+  }
+
   function updateDraftSafety(patch: Partial<SystemSettingsPayload["safety"]>) {
     updateDraft(c => ({ ...c, payload: { ...c.payload, safety: { ...c.payload.safety, ...patch } } }), fieldPaths("safety", patch));
   }
@@ -283,6 +297,7 @@ export function SystemSettingsShell() {
     isPayloadSectionChanged(draftPayload.branding, publishedPayload?.branding),
     isPayloadSectionChanged(draftPayload.platformDefaults, publishedPayload?.platformDefaults),
     isPayloadSectionChanged({ retention: draftPayload.retention, uploads: draftPayload.uploads }, publishedPayload ? { retention: publishedPayload.retention, uploads: publishedPayload.uploads } : null),
+    isPayloadSectionChanged(draftPayload.artifactAccess, publishedPayload?.artifactAccess),
     isPayloadSectionChanged(draftPayload.safety, publishedPayload?.safety),
     isPayloadSectionChanged(draftPayload.organizationDefaults, publishedPayload?.organizationDefaults),
     isPayloadSectionChanged(draftPayload.behavior, publishedPayload?.behavior)
@@ -361,6 +376,9 @@ export function SystemSettingsShell() {
           )}
           {section === "retention-upload" && (
             <RetentionUploadView retention={draftPayload.retention} uploads={draftPayload.uploads} fieldErrors={fieldErrors} disabled={saving || publishing} onRetentionChange={updateDraftRetention} onUploadsChange={updateDraftUploads} />
+          )}
+          {section === "artifact-access" && (
+            <ArtifactAccessSettingsView value={draftPayload.artifactAccess} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftArtifactAccess} />
           )}
           {section === "safety" && (
             <SafetySettingsView value={draftPayload.safety} disabled={saving || publishing} onChange={updateDraftSafety} />

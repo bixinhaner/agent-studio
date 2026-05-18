@@ -29,16 +29,21 @@ type PptxSlidePreview = {
   lines: string[];
 };
 
+type PreviewContentBase = {
+  objectUrl: string;
+  downloadUrl?: string;
+};
+
 type PreviewContent =
-  | { kind: "image"; objectUrl: string }
-  | { kind: "pdf"; objectUrl: string }
-  | { kind: "html"; html: string; objectUrl: string }
-  | { kind: "text"; text: string; objectUrl: string }
-  | { kind: "markdown"; text: string; objectUrl: string; filePath: string }
-  | { kind: "docx"; html: string; objectUrl: string }
-  | { kind: "xlsx"; sheets: XlsxSheetPreview[]; objectUrl: string }
-  | { kind: "pptx"; slides: PptxSlidePreview[]; objectUrl: string }
-  | { kind: "unsupported"; objectUrl: string; reason: string };
+  | ({ kind: "image" } & PreviewContentBase)
+  | ({ kind: "pdf" } & PreviewContentBase)
+  | ({ kind: "html"; html: string } & PreviewContentBase)
+  | ({ kind: "text"; text: string } & PreviewContentBase)
+  | ({ kind: "markdown"; text: string; filePath: string } & PreviewContentBase)
+  | ({ kind: "docx"; html: string } & PreviewContentBase)
+  | ({ kind: "xlsx"; sheets: XlsxSheetPreview[] } & PreviewContentBase)
+  | ({ kind: "pptx"; slides: PptxSlidePreview[] } & PreviewContentBase)
+  | ({ kind: "unsupported"; reason: string } & PreviewContentBase);
 
 type PreviewState =
   | { status: "idle" }
@@ -51,6 +56,22 @@ type UploadedFileHint = {
   path?: string;
   relativePath?: string;
   mimeType?: string;
+};
+
+type ThreadArtifactApiRecord = {
+  id: string;
+  relative_path: string;
+  display_name: string;
+  mime_type: string | null;
+  preview_status: string;
+  download_status: string;
+  blocked_reason: string | null;
+};
+
+type ThreadArtifactPolicyApiRecord = {
+  enabled: boolean;
+  preview_enabled: boolean;
+  download_enabled: boolean;
 };
 
 const TEXT_LIKE_EXTENSIONS = new Set([
@@ -440,14 +461,20 @@ function isKnowledgeSetFilePath(filePath: string): boolean {
   return normalized.includes("/data/knowledge-sets/");
 }
 
-function buildPreviewFileContentUrl(threadId: string, filePath: string): string | null {
+function buildPreviewFileContentUrl(threadId: string, filePath: string, options?: { artifactMode?: boolean; disposition?: "inline" | "attachment" }): string | null {
   const normalizedPath = splitPreviewTarget(filePath).filePath;
   if (!normalizedPath) return null;
   const query = new URLSearchParams({ path: normalizedPath });
+  if (options?.disposition) {
+    query.set("disposition", options.disposition);
+  }
   if (isKnowledgeSetFilePath(normalizedPath)) {
     return `${apiBase()}/api/portal/resources/files/content?${query.toString()}`;
   }
   if (!threadId.trim()) return null;
+  if (options?.artifactMode) {
+    return `${apiBase()}/api/threads/${encodeURIComponent(threadId.trim())}/artifacts/content?${query.toString()}`;
+  }
   return `${apiBase()}/api/threads/${encodeURIComponent(threadId.trim())}/files/content?${query.toString()}`;
 }
 
@@ -466,7 +493,10 @@ function resolveMarkdownLinkedFilePath(baseFilePath: string, rawTarget: string):
     try {
       const parsed = new URL(target, window.location.href);
       if (parsed.origin !== window.location.origin) return null;
-      if (parsed.pathname === "/api/portal/resources/files/content" || /^\/api\/threads\/[^/]+\/files\/content$/.test(parsed.pathname)) {
+      if (
+        parsed.pathname === "/api/portal/resources/files/content" ||
+        /^\/api\/threads\/[^/]+\/(?:files|artifacts)\/content$/.test(parsed.pathname)
+      ) {
         const filePath = normalizeFilePath(safeDecodeURIComponent(parsed.searchParams.get("path") || ""));
         if (!filePath) return null;
         return {
@@ -511,6 +541,89 @@ async function fetchThreadFileBlob(threadId: string, filePath: string): Promise<
     notifyAuthInvalidStatus(response.status);
     const text = await response.text();
     let detail = `Failed to read file (${response.status})`;
+    if (text) {
+      try {
+        const payload = JSON.parse(text) as { detail?: string };
+        if (typeof payload.detail === "string" && payload.detail.trim()) {
+          detail = payload.detail.trim();
+        }
+      } catch {
+        // ignore non-json response body
+      }
+    }
+    throw new Error(detail);
+  }
+  return response;
+}
+
+async function resolveThreadArtifact(threadId: string, filePath: string): Promise<{
+  artifact: ThreadArtifactApiRecord;
+  policy: ThreadArtifactPolicyApiRecord;
+}> {
+  const query = new URLSearchParams({ path: filePath });
+  const response = await fetch(
+    `${apiBase()}/api/threads/${encodeURIComponent(threadId)}/artifacts/resolve?${query.toString()}`,
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...authHeaders()
+      }
+    }
+  );
+  const text = await response.text();
+  let payload: Record<string, unknown> = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+  }
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    const detail =
+      payload && typeof payload.detail === "string" && payload.detail.trim()
+        ? payload.detail.trim()
+        : `Failed to resolve artifact (${response.status})`;
+    throw new Error(detail);
+  }
+  const artifact = asRecord((payload as Record<string, unknown>).artifact) || {};
+  const policy = asRecord((payload as Record<string, unknown>).policy) || {};
+  return {
+    artifact: {
+      id: asString(artifact.id),
+      relative_path: asString(artifact.relative_path),
+      display_name: asString(artifact.display_name),
+      mime_type: asString(artifact.mime_type) || null,
+      preview_status: asString(artifact.preview_status),
+      download_status: asString(artifact.download_status),
+      blocked_reason: asString(artifact.blocked_reason) || null
+    },
+    policy: {
+      enabled: policy.enabled === true,
+      preview_enabled: policy.preview_enabled === true,
+      download_enabled: policy.download_enabled === true
+    }
+  };
+}
+
+async function fetchThreadArtifactFileBlob(threadId: string, filePath: string, disposition: "inline" | "attachment" = "inline"): Promise<Response> {
+  const query = new URLSearchParams({ path: filePath, disposition });
+  const response = await fetch(
+    `${apiBase()}/api/threads/${encodeURIComponent(threadId)}/artifacts/content?${query.toString()}`,
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        ...authHeaders()
+      }
+    }
+  );
+  if (!response.ok) {
+    notifyAuthInvalidStatus(response.status);
+    const text = await response.text();
+    let detail = `Failed to read artifact (${response.status})`;
     if (text) {
       try {
         const payload = JSON.parse(text) as { detail?: string };
@@ -715,6 +828,7 @@ function PreviewMarkdown(props: {
   text: string;
   filePath: string;
   threadId: string;
+  artifactMode?: boolean;
   anchor: string;
   jumpToken: number;
   onNavigate(target: { filePath: string; anchor: string }): void;
@@ -806,7 +920,9 @@ function PreviewMarkdown(props: {
             </a>
           );
         }
-        const fileUrl = buildPreviewFileContentUrl(props.threadId, linkedFile.filePath);
+        const fileUrl = buildPreviewFileContentUrl(props.threadId, linkedFile.filePath, {
+          artifactMode: props.artifactMode
+        });
         const resolvedHref = fileUrl
           ? linkedFile.anchor
             ? `${fileUrl}#${encodeURIComponent(linkedFile.anchor)}`
@@ -829,7 +945,9 @@ function PreviewMarkdown(props: {
       },
       img: ({ src, alt, title, className }: { src?: string; alt?: string; title?: string; className?: string }) => {
         const linkedFile = src ? resolveMarkdownLinkedFilePath(props.filePath, src) : null;
-        const imageUrl = linkedFile ? buildPreviewFileContentUrl(props.threadId, linkedFile.filePath) : src || "";
+        const imageUrl = linkedFile
+          ? buildPreviewFileContentUrl(props.threadId, linkedFile.filePath, { artifactMode: props.artifactMode })
+          : src || "";
         if (!imageUrl) return null;
         return <img className={className} src={imageUrl} alt={alt || title || "Document image"} title={title} loading="lazy" />;
       },
@@ -840,7 +958,7 @@ function PreviewMarkdown(props: {
       },
       table: MarkdownTable
     }),
-    [props.filePath, props.onNavigate, props.threadId]
+    [props.artifactMode, props.filePath, props.onNavigate, props.threadId]
   );
 
   return (
@@ -901,6 +1019,7 @@ export function PreviewWorkbenchPanel(props: {
   requestedFilePath?: string;
   requestNonce?: number;
   allowDownload?: boolean;
+  externalArtifactMode?: boolean;
 }) {
   const requestedTarget = useMemo(
     () => splitPreviewTarget(asString(props.requestedFilePath)),
@@ -1002,12 +1121,40 @@ export function PreviewWorkbenchPanel(props: {
       }
       setPreview({ status: "loading" });
       try {
-        const response = isKnowledgeSetFile
-          ? await fetchPortalResourceFileBlob(filePath)
-          : await fetchThreadFileBlob(props.threadId, filePath);
+        let response: Response;
+        let fileForKind = activeFileForKind;
+        let downloadUrl = "";
+        if (isKnowledgeSetFile) {
+          response = await fetchPortalResourceFileBlob(filePath);
+        } else if (props.externalArtifactMode) {
+          const resolved = await resolveThreadArtifact(props.threadId, filePath);
+          if (resolved.artifact.preview_status !== "ready") {
+            throw new Error(resolved.artifact.blocked_reason || "Artifact preview is blocked by policy");
+          }
+          fileForKind = {
+            ...fileForKind,
+            filePath: resolved.artifact.relative_path || fileForKind.filePath,
+            displayName: resolved.artifact.display_name || fileForKind.displayName,
+            mimeType: resolved.artifact.mime_type || fileForKind.mimeType
+          };
+          if (resolved.policy.download_enabled && resolved.artifact.download_status === "ready") {
+            downloadUrl =
+              buildPreviewFileContentUrl(props.threadId, fileForKind.filePath, {
+                artifactMode: true,
+                disposition: "attachment"
+              }) || "";
+          }
+          response = await fetchThreadArtifactFileBlob(props.threadId, filePath);
+        } else {
+          response = await fetchThreadFileBlob(props.threadId, filePath);
+        }
         const blob = await response.blob();
         createdObjectUrl = URL.createObjectURL(blob);
-        const kind = resolvePreviewKind(activeFileForKind, response.headers.get("content-type") || blob.type || "");
+        const kind = resolvePreviewKind(fileForKind, response.headers.get("content-type") || blob.type || "");
+        const contentBase = () => ({
+          objectUrl: createdObjectUrl,
+          ...(downloadUrl ? { downloadUrl } : {})
+        });
 
         if (kind === "image") {
           if (!cancelled) {
@@ -1015,7 +1162,7 @@ export function PreviewWorkbenchPanel(props: {
               status: "ready",
               content: {
                 kind: "image",
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1029,7 +1176,7 @@ export function PreviewWorkbenchPanel(props: {
               status: "ready",
               content: {
                 kind: "pdf",
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1045,7 +1192,7 @@ export function PreviewWorkbenchPanel(props: {
               content: {
                 kind: "html",
                 html,
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1063,13 +1210,13 @@ export function PreviewWorkbenchPanel(props: {
                 ? {
                     kind: "markdown",
                     text,
-                    objectUrl: createdObjectUrl,
+                    ...contentBase(),
                     filePath
                   }
                 : {
                     kind: "text",
                     text,
-                    objectUrl: createdObjectUrl
+                    ...contentBase()
                   }
             });
             createdObjectUrl = "";
@@ -1085,7 +1232,7 @@ export function PreviewWorkbenchPanel(props: {
               content: {
                 kind: "docx",
                 html,
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1101,7 +1248,7 @@ export function PreviewWorkbenchPanel(props: {
               content: {
                 kind: "xlsx",
                 sheets,
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1117,7 +1264,7 @@ export function PreviewWorkbenchPanel(props: {
               content: {
                 kind: "pptx",
                 slides,
-                objectUrl: createdObjectUrl
+                ...contentBase()
               }
             });
             createdObjectUrl = "";
@@ -1130,7 +1277,7 @@ export function PreviewWorkbenchPanel(props: {
             status: "ready",
             content: {
               kind: "unsupported",
-              objectUrl: createdObjectUrl,
+              ...contentBase(),
               reason: "This file format cannot be rendered in the built-in preview."
             }
           });
@@ -1153,10 +1300,11 @@ export function PreviewWorkbenchPanel(props: {
       cancelled = true;
       releaseObjectUrl();
     };
-  }, [activeFileForKind, activeFilePath, props.threadId]);
+  }, [activeFileForKind, activeFilePath, props.externalArtifactMode, props.threadId]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
   const previewKind = activePreview?.kind ?? (activeFile ? preview.status : "idle");
+  const downloadHref = activePreview?.downloadUrl || (!props.externalArtifactMode ? activePreview?.objectUrl : "");
 
   return (
     <div className="preview-workbench-shell">
@@ -1179,9 +1327,9 @@ export function PreviewWorkbenchPanel(props: {
                   </button>
                 ) : null}
               </div>
-              {props.allowDownload && activePreview ? (
+              {props.allowDownload && activePreview && downloadHref ? (
                 <div className="preview-viewer-actions">
-                  <a href={activePreview.objectUrl} download={activeFile.displayName}>
+                  <a href={downloadHref} download={!activePreview.downloadUrl ? activeFile.displayName : undefined}>
                     Download
                   </a>
                 </div>
@@ -1224,6 +1372,7 @@ export function PreviewWorkbenchPanel(props: {
                   text={activePreview.text}
                   filePath={activePreview.filePath}
                   threadId={props.threadId}
+                  artifactMode={props.externalArtifactMode}
                   anchor={selectedAnchor}
                   jumpToken={anchorJumpToken}
                   onNavigate={navigatePreviewTarget}

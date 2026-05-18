@@ -2,6 +2,7 @@ export type SystemSettingsSection =
   | "branding"
   | "model-defaults"
   | "retention-upload"
+  | "artifact-access"
   | "safety"
   | "organization-defaults"
   | "publish-history";
@@ -35,6 +36,35 @@ export type SystemSettingsRetention = {
 export type SystemSettingsUploads = {
   maxSingleFileBytes: number;
   maxTotalUploadBytes: number;
+};
+
+export type SystemSettingsArtifactAccessRule = {
+  id?: string;
+  label?: string;
+  subjectType: "user_type" | "organization" | "role" | "membership_type" | "department" | "user";
+  subjectId: string;
+  enabled?: boolean;
+  previewEnabled?: boolean;
+  downloadEnabled?: boolean;
+  autoRegisterGeneratedFiles?: boolean;
+  maxFileBytes?: number;
+  retentionDays?: number;
+  allowedExtensions?: string[];
+};
+
+export type SystemSettingsArtifactAccess = {
+  enabled: boolean;
+  previewEnabled: boolean;
+  downloadEnabled: boolean;
+  autoRegisterGeneratedFiles: boolean;
+  maxFileBytes: number;
+  retentionDays: number;
+  allowedExtensions: string[];
+  blockHiddenPaths: boolean;
+  blockUserUploadDirectory: boolean;
+  blockKnowledgeSetCopies: boolean;
+  secretScanEnabled: boolean;
+  rules: SystemSettingsArtifactAccessRule[];
 };
 
 export type SystemSettingsSafety = {
@@ -83,6 +113,7 @@ export type SystemSettingsPayload = {
   platformDefaults: SystemSettingsPlatformDefaults;
   retention: SystemSettingsRetention;
   uploads: SystemSettingsUploads;
+  artifactAccess: SystemSettingsArtifactAccess;
   safety: SystemSettingsSafety;
   organizationDefaults: SystemSettingsOrganizationDefaults;
   behavior: SystemSettingsBehavior;

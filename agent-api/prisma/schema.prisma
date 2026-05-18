@@ -590,6 +590,7 @@ model Thread {
   updatedAt       DateTime          @updatedAt @map("updated_at")
   user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   messages        Message[]
+  artifacts       ThreadArtifact[]
   runtimeSessions RuntimeSession[]
   shares          ThreadShare[]
   comments        ThreadComment[]
@@ -604,6 +605,35 @@ model Thread {
   @@index([organizationId, userId, createdAt])
   @@index([userId])
   @@map("threads")
+}
+
+model ThreadArtifact {
+  id             String    @id @default(cuid())
+  organizationId String?   @map("organization_id")
+  threadId       String    @map("thread_id")
+  userId         String?   @map("user_id")
+  source         String
+  relativePath   String    @map("relative_path")
+  displayName    String    @map("display_name")
+  mimeType       String?   @map("mime_type")
+  sizeBytes      BigInt?   @map("size_bytes")
+  checksum       String?
+  previewStatus  String    @default("ready") @map("preview_status")
+  downloadStatus String    @default("ready") @map("download_status")
+  blockedReason  String?   @map("blocked_reason")
+  metadata       Json?
+  expiresAt      DateTime? @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  thread         Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, relativePath])
+  @@index([organizationId, threadId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([userId, createdAt])
+  @@index([previewStatus, downloadStatus])
+  @@map("thread_artifacts")
 }
 
 model ProductFeedback {

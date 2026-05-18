@@ -1717,6 +1717,9 @@ button.session-rail-new-btn:active,
 }
 
 .assistant-file-change-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #eaeaea;
   border-radius: 6px;
   padding: 4px 11px;
@@ -1724,6 +1727,7 @@ button.session-rail-new-btn:active,
   color: var(--workbench-accent-strong);
   background: #ffffff;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .assistant-file-change-btn:hover {
