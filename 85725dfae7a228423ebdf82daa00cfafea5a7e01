@@ -1,0 +1,11 @@
+实现内容：
+- 新增线程 artifact 表、仓储和策略解析，外部用户只能访问白名单 artifact。
+- 新增 artifact 自动登记、扩展名/大小/隐藏路径/.uploads/知识库复制/疑似密钥检查。
+- 新增后台“外部文件访问”配置页，支持开关、文件类型、安全拦截和用户群覆盖规则。
+- Portal 外部用户只显示可预览或可下载的 artifact 文件卡片。
+
+验证：
+- npm --prefix agent-api run prisma:generate
+- npm --prefix agent-api run build
+- npm --prefix agent-api test -- src/managed-codex-provider.test.ts
+- npm --prefix agent-ui run build
