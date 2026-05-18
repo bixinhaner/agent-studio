@@ -89,7 +89,8 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
 export async function handleZendeskWebhookRequest(
   service: ZendeskIntegrationService,
   req: Request,
-  res: Response
+  res: Response,
+  instanceId?: string
 ) {
   try {
     const rawBody =
@@ -98,7 +99,7 @@ export async function handleZendeskWebhookRequest(
         : typeof req.body === "string"
           ? req.body
           : "";
-    const result = await service.handleWebhook(rawBody, req.headers);
+    const result = await service.handleWebhook(rawBody, req.headers, instanceId);
     res.status(202).json(result);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Zendesk webhook 处理失败";

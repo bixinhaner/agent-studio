@@ -920,6 +920,8 @@ model IntegrationInstance {
   secret            IntegrationInstanceSecret?
   validations       IntegrationValidationRun[]
   bindings          IntegrationBindingRecord[]
+  zendeskRuns       ZendeskRun[]
+  zendeskTicketBindings ZendeskTicketBinding[]
 
   @@unique([type, slug])
   @@index([type])
@@ -993,6 +995,51 @@ model IntegrationConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("integration_configs")
+}
+
+model ZendeskRun {
+  id                    String               @id @default(cuid())
+  integrationInstanceId String?              @map("integration_instance_id")
+  scopeKey              String               @default("legacy") @map("scope_key")
+  ticketId              String               @map("ticket_id")
+  source                String
+  status                String
+  detail                String
+  decision              String?
+  commentId             Int?                 @map("comment_id")
+  requesterCommentId    Int?                 @map("requester_comment_id")
+  ticketSubject         String?              @map("ticket_subject")
+  error                 String?
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  integrationInstance   IntegrationInstance? @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([integrationInstanceId, createdAt])
+  @@index([scopeKey, createdAt])
+  @@index([ticketId, createdAt])
+  @@index([status, createdAt])
+  @@map("zendesk_runs")
+}
+
+model ZendeskTicketBinding {
+  id                                String               @id @default(cuid())
+  integrationInstanceId             String?              @map("integration_instance_id")
+  scopeKey                          String               @default("legacy") @map("scope_key")
+  ticketId                          String               @map("ticket_id")
+  lastProcessedRequesterCommentId   Int?                 @map("last_processed_requester_comment_id")
+  lastAction                        String?              @map("last_action")
+  lastRunAt                         DateTime?            @map("last_run_at")
+  lastRunId                         String?              @map("last_run_id")
+  createdAt                         DateTime             @default(now()) @map("created_at")
+  updatedAt                         DateTime             @updatedAt @map("updated_at")
+
+  integrationInstance               IntegrationInstance? @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([integrationInstanceId, ticketId])
+  @@index([ticketId])
+  @@unique([scopeKey, ticketId])
+  @@map("zendesk_ticket_bindings")
 }
 
 model Workspace {

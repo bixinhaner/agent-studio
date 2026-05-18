@@ -56,6 +56,7 @@ export type ZendeskRunRecord = {
 
 export type ZendeskSetupGuide = {
   webhookUrl: string;
+  legacyWebhookUrl?: string;
   payloadExample: string;
   triggers: Array<{
     name: string;

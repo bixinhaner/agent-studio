@@ -83,7 +83,7 @@ function defaultSettings(): ZendeskIntegrationSettings {
     zendeskEmail: "",
     zendeskApiToken: "",
     webhookSigningSecret: "",
-    responseMode: "public_reply",
+    responseMode: "internal_note",
     fallbackMode: "internal_note",
     autoStatus: "pending",
     excludedTags: [],
@@ -109,9 +109,13 @@ export function redactZendeskSettings(settings: ZendeskIntegrationSettings): Zen
   };
 }
 
-export function computeWebhookUrl(settings: ZendeskIntegrationSettings): string {
+export function computeWebhookUrl(settings: ZendeskIntegrationSettings, instanceId?: string): string {
   if (!settings.publicBaseUrl) return "";
-  return `${settings.publicBaseUrl}/api/integrations/zendesk/webhook`;
+  const normalizedInstanceId = typeof instanceId === "string" ? instanceId.trim() : "";
+  if (!normalizedInstanceId) {
+    return `${settings.publicBaseUrl}/api/integrations/zendesk/webhook`;
+  }
+  return `${settings.publicBaseUrl}/api/integrations/zendesk/${encodeURIComponent(normalizedInstanceId)}/webhook`;
 }
 
 export function findZendeskReadinessGaps(settings: ZendeskIntegrationSettings): string[] {

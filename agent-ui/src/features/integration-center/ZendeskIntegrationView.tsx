@@ -12,8 +12,8 @@ import "../zendesk/zendesk.css";
 type ZendeskTab = "basic" | "operations" | "bindings" | "policies" | "history";
 
 const TABS: Array<{ id: ZendeskTab; label: string }> = [
-  { id: "basic", label: "基本信息" },
-  { id: "operations", label: "Webhook / 运行" },
+  { id: "basic", label: "统一配置" },
+  { id: "operations", label: "上线与运行" },
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" },
   { id: "history", label: "验证与历史" }
@@ -26,21 +26,20 @@ const STATUS_OPTIONS = [
 ];
 
 const RESPONSE_MODE_OPTIONS = [
-  { label: "public_reply", value: "public_reply" },
-  { label: "internal_note", value: "internal_note" }
+  { label: "先写内部备注", value: "internal_note" },
+  { label: "允许公开回复", value: "public_reply" }
 ];
 
 const FALLBACK_MODE_OPTIONS = [
-  { label: "internal_note", value: "internal_note" },
-  { label: "public_reply", value: "public_reply" },
-  { label: "disabled", value: "disabled" }
+  { label: "不确定时写内部备注", value: "internal_note" },
+  { label: "不确定时跳过", value: "skip" }
 ];
 
 const AUTO_STATUS_OPTIONS = [
-  { label: "pending", value: "pending" },
-  { label: "open", value: "open" },
-  { label: "hold", value: "hold" },
-  { label: "solved", value: "solved" }
+  { label: "保持不变", value: "unchanged" },
+  { label: "等待客户回复 pending", value: "pending" },
+  { label: "保持处理 open", value: "open" },
+  { label: "内部等待 hold", value: "hold" }
 ];
 
 const REASONING_OPTIONS = [
@@ -71,6 +70,10 @@ const WEB_SEARCH_OPTIONS = [
   { label: "live", value: "live" }
 ];
 
+const RESPONSE_MODE_VALUES = new Set(RESPONSE_MODE_OPTIONS.map((item) => item.value));
+const FALLBACK_MODE_VALUES = new Set(FALLBACK_MODE_OPTIONS.map((item) => item.value));
+const AUTO_STATUS_VALUES = new Set(AUTO_STATUS_OPTIONS.map((item) => item.value));
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -87,6 +90,10 @@ function asListText(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean).join(", ") : "";
 }
 
+function normalizeOption(value: string, allowed: Set<string>, fallback: string) {
+  return allowed.has(value) ? value : fallback;
+}
+
 function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
   return {
     enabled: asBoolean(detail.config.enabled),
@@ -95,9 +102,9 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     zendeskEmail: asString(detail.config.zendeskEmail),
     zendeskApiTokenDraft: "",
     webhookSigningSecretDraft: "",
-    responseMode: asString(detail.config.responseMode) || "public_reply",
-    fallbackMode: asString(detail.config.fallbackMode) || "internal_note",
-    autoStatus: asString(detail.config.autoStatus) || "pending",
+    responseMode: normalizeOption(asString(detail.config.responseMode), RESPONSE_MODE_VALUES, "internal_note"),
+    fallbackMode: normalizeOption(asString(detail.config.fallbackMode), FALLBACK_MODE_VALUES, "internal_note"),
+    autoStatus: normalizeOption(asString(detail.config.autoStatus), AUTO_STATUS_VALUES, "pending"),
     excludedTagsRaw: asListText(detail.config.excludedTags),
     workspace: asString(detail.config.workspace),
     model: asString(detail.config.model),
@@ -105,7 +112,7 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     sandboxMode: asString(detail.config.sandboxMode) || "workspace-write",
     approvalPolicy: asString(detail.config.approvalPolicy) || "never",
     networkAccessEnabled: asBoolean(detail.config.networkAccessEnabled),
-    webSearchMode: asString(detail.config.webSearchMode) || "live",
+    webSearchMode: asString(detail.config.webSearchMode) || "disabled",
     additionalDirectoriesRaw: asListText(detail.config.additionalDirectories),
     maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12),
     systemPrompt: asString(detail.config.systemPrompt)
@@ -293,6 +300,30 @@ export function ZendeskIntegrationView(props: {
     }
   }
 
+  const zendeskSetup = props.detail.zendesk?.setup;
+  const launchChecks = [
+    {
+      label: "实例启用",
+      ok: draft.enabled && status === "active",
+      detail: draft.enabled && status === "active" ? "Webhook 会接收并处理工单" : "把实例状态设为 active，并打开启用集成"
+    },
+    {
+      label: "连接验证",
+      ok: Boolean(props.detail.config.lastValidatedAt),
+      detail: props.detail.config.lastValidatedAt ? "Zendesk API token 可用" : "先点验证实例，确认账号和 token 可用"
+    },
+    {
+      label: "Webhook 地址",
+      ok: Boolean(zendeskSetup?.webhookUrl),
+      detail: zendeskSetup?.webhookUrl ? "复制实例专属地址到 Zendesk" : "填写 Public Base URL 后保存"
+    },
+    {
+      label: "上线策略",
+      ok: draft.responseMode === "internal_note",
+      detail: draft.responseMode === "internal_note" ? "当前为内部备注试运行" : "当前允许公开回复，请确认知识库覆盖后再上线"
+    }
+  ];
+
   return (
     <section className="resource-center-detail-stack">
       <Card className="resource-center-section capability-center-summary antd-admin-card" size="small">
@@ -318,6 +349,18 @@ export function ZendeskIntegrationView(props: {
 
         {activeTab === "basic" ? (
           <>
+            <div className="zendesk-config-hero">
+              <div>
+                <strong>Zendesk 自动回复配置入口</strong>
+                <p>
+                  建议先用内部备注试运行。确认回复质量稳定后，再把 Response Mode 改为允许公开回复。
+                </p>
+              </div>
+              <Tag color={draft.responseMode === "internal_note" ? "processing" : "warning"}>
+                {draft.responseMode === "internal_note" ? "内部试运行" : "公开回复模式"}
+              </Tag>
+            </div>
+
             <Collapse
               size="small"
               defaultActiveKey={["identity", "connection", "runtime", "advanced"]}
@@ -587,6 +630,18 @@ export function ZendeskIntegrationView(props: {
 
         {activeTab === "operations" ? (
           <>
+            <div className="zendesk-launch-checklist" aria-label="Zendesk 上线检查">
+              {launchChecks.map((item) => (
+                <div key={item.label} className={item.ok ? "zendesk-check-item zendesk-check-ok" : "zendesk-check-item"}>
+                  <span className="zendesk-check-dot" aria-hidden="true" />
+                  <div>
+                    <strong>{item.label}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <div className="zendesk-summary-grid">
               <div>
                 <strong>启用状态</strong>
@@ -614,24 +669,36 @@ export function ZendeskIntegrationView(props: {
             ) : null}
 
             <div className="zendesk-section">
-              <h4>Webhook Setup</h4>
+              <h4>Zendesk 侧配置</h4>
               <div className="zendesk-inline-actions">
-                <Button onClick={() => void copyText(props.detail.zendesk?.setup.webhookUrl || "", "Webhook URL")}>
-                  复制 Webhook URL
+                <Button onClick={() => void copyText(zendeskSetup?.webhookUrl || "", "Webhook URL")}>
+                  复制实例 Webhook URL
                 </Button>
-                <Button onClick={() => void copyText(props.detail.zendesk?.setup.payloadExample || "", "Payload 示例")}>
+                <Button onClick={() => void copyText(zendeskSetup?.payloadExample || "", "Payload 示例")}>
                   复制 Payload
                 </Button>
               </div>
               <label className="field">
-                <span className="field-label">Webhook URL</span>
-                <Input readOnly value={props.detail.zendesk?.setup.webhookUrl || ""} />
+                <span className="field-label">实例专属 Webhook URL</span>
+                <Input readOnly value={zendeskSetup?.webhookUrl || ""} />
               </label>
+              {zendeskSetup?.legacyWebhookUrl ? (
+                <label className="field">
+                  <span className="field-label">兼容旧地址</span>
+                  <Input readOnly value={zendeskSetup.legacyWebhookUrl} />
+                </label>
+              ) : null}
               <div className="zendesk-code-block">
-                <pre>{props.detail.zendesk?.setup.payloadExample || ""}</pre>
+                <pre>{zendeskSetup?.payloadExample || ""}</pre>
               </div>
+              <ol className="zendesk-setup-steps">
+                <li>在 Zendesk Admin Center 创建 Webhook，Endpoint URL 粘贴上面的实例专属地址。</li>
+                <li>Webhook Signing Secret 填这里配置的 Webhook Secret，HTTP method 选 POST。</li>
+                <li>创建两个 Trigger：新工单创建、客户追加公开评论；Action 选择 Notify active webhook。</li>
+                <li>Payload 使用上面的 JSON，只保留 ticket_id 也可以。</li>
+              </ol>
               <div className="zendesk-trigger-list">
-                {(props.detail.zendesk?.setup.triggers || []).map((item) => (
+                {(zendeskSetup?.triggers || []).map((item) => (
                   <div key={item.name} className="zendesk-trigger-card">
                     <strong>{item.name}</strong>
                     <p>{item.description}</p>

@@ -2409,6 +2409,16 @@ app.use(
   })
 );
 app.post(
+  "/api/integrations/zendesk/:instanceId/webhook",
+  express.raw({
+    type: () => true,
+    limit: "1mb"
+  }),
+  async (req: Request, res: Response) => {
+    await handleZendeskWebhookRequest(zendesk, req, res, req.params.instanceId);
+  }
+);
+app.post(
   "/api/integrations/zendesk/webhook",
   express.raw({
     type: () => true,

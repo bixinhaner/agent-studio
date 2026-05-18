@@ -1,50 +1,100 @@
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { readJsonFile, writeJsonFile, WriteQueue } from "./storage.js";
+import { getDbClient } from "../../db/client.js";
 import type { ZendeskRunRecord, ZendeskRunStatus } from "./types.js";
 
-type PersistedRuns = {
-  runs: ZendeskRunRecord[];
+type ZendeskRunRow = {
+  id: string;
+  integrationInstanceId: string | null;
+  scopeKey: string;
+  ticketId: string;
+  source: string;
+  status: string;
+  detail: string;
+  decision: string | null;
+  commentId: number | null;
+  requesterCommentId: number | null;
+  ticketSubject: string | null;
+  error: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 };
 
-const MAX_RUNS = 200;
+type ZendeskRunTable = {
+  findMany(args: {
+    where?: Record<string, unknown>;
+    orderBy?: { createdAt?: "asc" | "desc" };
+    take?: number;
+  }): Promise<ZendeskRunRow[]>;
+  create(args: { data: Record<string, unknown> }): Promise<ZendeskRunRow>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<ZendeskRunRow>;
+};
+
+export type ZendeskRunStoreDb = {
+  zendeskRun: ZendeskRunTable;
+};
+
+function trimOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+export function zendeskScopeKey(instanceId?: string): string {
+  return trimOrUndefined(instanceId) ?? "legacy";
+}
+
+function toIsoString(value: Date | string | null | undefined): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function mapRun(row: ZendeskRunRow): ZendeskRunRecord {
+  return {
+    id: row.id,
+    instanceId: trimOrUndefined(row.integrationInstanceId ?? undefined),
+    ticketId: row.ticketId,
+    source: row.source === "manual" ? "manual" : "webhook",
+    status: row.status as ZendeskRunStatus,
+    detail: row.detail,
+    createdAt: toIsoString(row.createdAt),
+    updatedAt: toIsoString(row.updatedAt),
+    decision:
+      row.decision === "public_reply" || row.decision === "internal_note" || row.decision === "handoff"
+        ? row.decision
+        : undefined,
+    commentId: typeof row.commentId === "number" ? row.commentId : undefined,
+    requesterCommentId: typeof row.requesterCommentId === "number" ? row.requesterCommentId : undefined,
+    ticketSubject: trimOrUndefined(row.ticketSubject ?? undefined),
+    error: trimOrUndefined(row.error ?? undefined)
+  };
+}
 
 export class ZendeskRunStore {
-  private readonly filePath: string;
-  private readonly queue = new WriteQueue();
-  private cache: ZendeskRunRecord[] = [];
-  private loaded = false;
-
-  constructor(rootDir = path.resolve(process.cwd(), "temp", "zendesk")) {
-    this.filePath = path.join(rootDir, "runs.json");
-  }
-
-  private async ensureLoaded(): Promise<void> {
-    if (this.loaded) return;
-    const loaded = await readJsonFile<PersistedRuns>(this.filePath, { runs: [] });
-    this.cache = Array.isArray(loaded.runs) ? loaded.runs : [];
-    this.loaded = true;
-  }
+  constructor(private readonly db = getDbClient() as unknown as ZendeskRunStoreDb) {}
 
   async list(limit = 50): Promise<ZendeskRunRecord[]> {
-    await this.ensureLoaded();
-    return this.cache.slice(0, Math.max(1, Math.min(200, limit)));
+    const safeLimit = Math.max(1, Math.min(200, limit));
+    const rows = await this.db.zendeskRun.findMany({
+      orderBy: { createdAt: "desc" },
+      take: safeLimit
+    });
+    return rows.map(mapRun);
   }
 
   async listForInstance(limit = 50, instanceId?: string): Promise<ZendeskRunRecord[]> {
-    await this.ensureLoaded();
     const safeLimit = Math.max(1, Math.min(200, limit));
-    const normalizedInstanceId = typeof instanceId === "string" ? instanceId.trim() : "";
-    if (!normalizedInstanceId) {
-      return this.cache.slice(0, safeLimit);
-    }
-    return this.cache
-      .filter((item) => {
-        const itemInstanceId = typeof item.instanceId === "string" ? item.instanceId.trim() : "";
-        return itemInstanceId === normalizedInstanceId || !itemInstanceId;
-      })
-      .slice(0, safeLimit);
+    const scopeKey = zendeskScopeKey(instanceId);
+    const rows = await this.db.zendeskRun.findMany({
+      where: trimOrUndefined(instanceId) ? { scopeKey } : undefined,
+      orderBy: { createdAt: "desc" },
+      take: safeLimit
+    });
+    return rows.map(mapRun);
   }
 
   async create(input: {
@@ -55,43 +105,50 @@ export class ZendeskRunStore {
     detail: string;
     ticketSubject?: string;
   }): Promise<ZendeskRunRecord> {
-    await this.ensureLoaded();
-    const now = new Date().toISOString();
-    const record: ZendeskRunRecord = {
-      id: randomUUID(),
-      instanceId: typeof input.instanceId === "string" && input.instanceId.trim() ? input.instanceId.trim() : undefined,
-      ticketId: input.ticketId,
-      source: input.source,
-      status: input.status,
-      detail: input.detail,
-      ticketSubject: input.ticketSubject,
-      createdAt: now,
-      updatedAt: now
-    };
-    this.cache = [record, ...this.cache].slice(0, MAX_RUNS);
-    await this.persist();
-    return record;
+    const instanceId = trimOrUndefined(input.instanceId);
+    const row = await this.db.zendeskRun.create({
+      data: {
+        id: randomUUID(),
+        integrationInstanceId: instanceId ?? null,
+        scopeKey: zendeskScopeKey(instanceId),
+        ticketId: input.ticketId,
+        source: input.source,
+        status: input.status,
+        detail: input.detail,
+        ticketSubject: trimOrUndefined(input.ticketSubject) ?? null
+      }
+    });
+    return mapRun(row);
   }
 
   async update(
     runId: string,
     patch: Partial<Omit<ZendeskRunRecord, "id" | "ticketId" | "source" | "createdAt">>
   ): Promise<ZendeskRunRecord | undefined> {
-    await this.ensureLoaded();
-    const index = this.cache.findIndex((item) => item.id === runId);
-    if (index < 0) return undefined;
-    const current = this.cache[index];
-    const next: ZendeskRunRecord = {
-      ...current,
-      ...patch,
-      updatedAt: new Date().toISOString()
-    };
-    this.cache[index] = next;
-    await this.persist();
-    return next;
-  }
-
-  private async persist(): Promise<void> {
-    await this.queue.run(async () => writeJsonFile(this.filePath, { runs: this.cache.slice(0, MAX_RUNS) }));
+    const id = trimOrUndefined(runId);
+    if (!id) return undefined;
+    try {
+      const row = await this.db.zendeskRun.update({
+        where: { id },
+        data: {
+          ...(patch.instanceId !== undefined
+            ? {
+                integrationInstanceId: trimOrUndefined(patch.instanceId) ?? null,
+                scopeKey: zendeskScopeKey(patch.instanceId)
+              }
+            : {}),
+          ...(patch.status !== undefined ? { status: patch.status } : {}),
+          ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
+          ...(patch.decision !== undefined ? { decision: patch.decision ?? null } : {}),
+          ...(patch.commentId !== undefined ? { commentId: patch.commentId ?? null } : {}),
+          ...(patch.requesterCommentId !== undefined ? { requesterCommentId: patch.requesterCommentId ?? null } : {}),
+          ...(patch.ticketSubject !== undefined ? { ticketSubject: trimOrUndefined(patch.ticketSubject) ?? null } : {}),
+          ...(patch.error !== undefined ? { error: trimOrUndefined(patch.error) ?? null } : {})
+        }
+      });
+      return mapRun(row);
+    } catch {
+      return undefined;
+    }
   }
 }

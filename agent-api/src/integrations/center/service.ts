@@ -291,6 +291,13 @@ function normalizeConfigValue(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function mergeSecretState(existing: unknown, patch: unknown): Record<string, unknown> {
+  return {
+    ...normalizeConfigValue(existing),
+    ...normalizeConfigValue(patch)
+  };
+}
+
 function assertConfigIsSafe(config: unknown): Record<string, unknown> {
   const normalized = normalizeConfigValue(config);
   const secretLikeKeys = collectSecretLikeConfigKeys(normalized);
@@ -383,6 +390,7 @@ function mapZendeskOverview(overview: ZendeskOverview): NonNullable<IntegrationD
     missing: [...overview.missing],
     setup: {
       webhookUrl: overview.setup.webhookUrl,
+      legacyWebhookUrl: overview.setup.legacyWebhookUrl,
       payloadExample: overview.setup.payloadExample,
       triggers: overview.setup.triggers.map((item) => ({
         name: item.name,
@@ -723,18 +731,22 @@ export function createIntegrationCenterService(options: {
           }
         });
       } else {
+        const existing = await db.integrationInstanceSecret.findUnique({
+          where: { integrationInstanceId: instanceId }
+        });
+        const nextSecretState = mergeSecretState(existing?.secretState, payload.secretState);
         await db.integrationInstanceSecret.upsert({
           where: { integrationInstanceId: instanceId },
           create: {
             integrationInstanceId: instanceId,
-            hasSecrets: true,
-            secretState: payload.secretState,
+            hasSecrets: Object.keys(nextSecretState).length > 0,
+            secretState: nextSecretState,
             rotatedAt: new Date(),
             rotatedByUserId: currentUserId
           },
           update: {
-            hasSecrets: true,
-            secretState: payload.secretState,
+            hasSecrets: Object.keys(nextSecretState).length > 0,
+            secretState: nextSecretState,
             rotatedAt: new Date(),
             rotatedByUserId: currentUserId
           }

@@ -70,6 +70,7 @@ export type ZendeskPublicSettings = Omit<
 
 export type ZendeskBindingRecord = {
   ticketId: string;
+  instanceId?: string;
   lastProcessedRequesterCommentId?: number;
   lastAction?: ZendeskDecisionType | "skip" | "error";
   lastRunAt?: string;
@@ -96,6 +97,7 @@ export type ZendeskRunRecord = {
 
 export type ZendeskSetupGuide = {
   webhookUrl: string;
+  legacyWebhookUrl?: string;
   payloadExample: string;
   triggers: Array<{
     name: string;

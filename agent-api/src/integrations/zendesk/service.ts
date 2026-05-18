@@ -148,9 +148,10 @@ function resolveAction(settings: ZendeskIntegrationSettings, decision: ZendeskAg
   };
 }
 
-function buildSetupGuide(settings: ZendeskIntegrationSettings): ZendeskSetupGuide {
+function buildSetupGuide(settings: ZendeskIntegrationSettings, instanceId?: string): ZendeskSetupGuide {
   return {
-    webhookUrl: computeWebhookUrl(settings),
+    webhookUrl: computeWebhookUrl(settings, instanceId),
+    legacyWebhookUrl: instanceId ? computeWebhookUrl(settings) : undefined,
     payloadExample: JSON.stringify(
       {
         ticket_id: "{{ticket.id}}",
@@ -224,7 +225,7 @@ export class ZendeskIntegrationService {
       settings: redactZendeskSettings(settings),
       ready: missing.length === 0,
       missing,
-      setup: buildSetupGuide(settings),
+      setup: buildSetupGuide(settings, instanceId),
       runs: await this.runStore.listForInstance(50, instanceId)
     };
   }
@@ -263,37 +264,63 @@ export class ZendeskIntegrationService {
     };
   }
 
-  async handleWebhook(rawBody: string, headers: IncomingHttpHeaders): Promise<{ accepted: true; result: ProcessTicketResult }> {
-    const settings = await this.settingsStore.get();
+  async handleWebhook(
+    rawBody: string,
+    headers: IncomingHttpHeaders,
+    instanceId?: string
+  ): Promise<{ accepted: true; result: ProcessTicketResult }> {
+    const settings = await this.loadSettings(instanceId);
     if (!settings.enabled) {
       throw new Error("Zendesk 自动答复未启用");
     }
     this.verifyWebhookSignature(headers, rawBody, settings.webhookSigningSecret);
     const payload = safeParseJson(rawBody);
     const ticketId = sanitizeTicketId((payload as { ticket_id?: string | number }).ticket_id || "");
-    const result = await this.enqueue(ticketId, () => this.processTicket(ticketId, "webhook", settings));
-    return { accepted: true, result };
+    const run = await this.runStore.create({
+      instanceId,
+      ticketId,
+      source: "webhook",
+      status: "received",
+      detail: "已接收 Zendesk webhook，后台处理中"
+    });
+    void this.enqueue(instanceId, ticketId, () => this.processTicket(ticketId, "webhook", settings, instanceId, run.id))
+      .catch((error) => {
+        console.error("[zendesk] background webhook run failed", error);
+      });
+    return {
+      accepted: true,
+      result: {
+        status: "received",
+        detail: "已接收 Zendesk webhook，后台处理中",
+        runId: run.id
+      }
+    };
   }
 
   async runTicket(ticketIdInput: string | number, instanceId?: string): Promise<ProcessTicketResult> {
     const ticketId = sanitizeTicketId(ticketIdInput);
-    return await this.enqueue(ticketId, async () => {
+    return await this.enqueue(instanceId, ticketId, async () => {
       const settings = await this.loadSettings(instanceId);
       return await this.processTicket(ticketId, "manual", settings, instanceId);
     });
   }
 
-  private async enqueue(ticketId: string, task: () => Promise<ProcessTicketResult>): Promise<ProcessTicketResult> {
-    const previous = this.queues.get(ticketId) || Promise.resolve();
+  private async enqueue(
+    instanceId: string | undefined,
+    ticketId: string,
+    task: () => Promise<ProcessTicketResult>
+  ): Promise<ProcessTicketResult> {
+    const key = `${instanceId?.trim() || "legacy"}:${ticketId}`;
+    const previous = this.queues.get(key) || Promise.resolve();
     const next = previous
       .catch(() => undefined)
       .then(task)
       .finally(() => {
-        if (this.queues.get(ticketId) === next) {
-          this.queues.delete(ticketId);
+        if (this.queues.get(key) === next) {
+          this.queues.delete(key);
         }
       });
-    this.queues.set(ticketId, next);
+    this.queues.set(key, next);
     return await next;
   }
 
@@ -301,25 +328,30 @@ export class ZendeskIntegrationService {
     ticketId: string,
     source: "webhook" | "manual",
     settings: ZendeskIntegrationSettings,
-    instanceId?: string
+    instanceId?: string,
+    existingRunId?: string
   ): Promise<ProcessTicketResult> {
-    const missing = findZendeskReadinessGaps(settings).filter((item) => item !== "public_base_url");
-    if (missing.length > 0) {
-      throw new Error(`Zendesk 配置不完整: ${missing.join(", ")}`);
-    }
-
-    const run = await this.runStore.create({
-      instanceId,
-      ticketId,
-      source,
-      status: "received",
-      detail: source === "manual" ? "手动触发处理中" : "收到 Zendesk webhook"
-    });
+    const runId =
+      existingRunId ||
+      (
+        await this.runStore.create({
+          instanceId,
+          ticketId,
+          source,
+          status: "received",
+          detail: source === "manual" ? "手动触发处理中" : "收到 Zendesk webhook"
+        })
+      ).id;
 
     try {
+      const missing = findZendeskReadinessGaps(settings).filter((item) => item !== "public_base_url");
+      if (missing.length > 0) {
+        throw new Error(`Zendesk 配置不完整: ${missing.join(", ")}`);
+      }
+
       const client = new ZendeskClient(settings);
       const context = await client.getTicketContext(ticketId, settings.maxCommentHistory);
-      await this.runStore.update(run.id, {
+      await this.runStore.update(runId, {
         ticketSubject: context.ticket.subject,
         detail: `已读取工单 #${ticketId} 上下文`
       });
@@ -328,16 +360,16 @@ export class ZendeskIntegrationService {
         await this.bindingStore.upsert(ticketId, {
           lastAction: "skip",
           lastRunAt: new Date().toISOString(),
-          lastRunId: run.id
-        });
-        await this.runStore.update(run.id, {
+          lastRunId: runId
+        }, instanceId);
+        await this.runStore.update(runId, {
           status: "skipped",
           detail: "命中排除标签，已跳过"
         });
         return {
           status: "skipped",
           detail: "命中排除标签，已跳过",
-          runId: run.id
+          runId
         };
       }
 
@@ -346,25 +378,25 @@ export class ZendeskIntegrationService {
         await this.bindingStore.upsert(ticketId, {
           lastAction: "skip",
           lastRunAt: new Date().toISOString(),
-          lastRunId: run.id
-        });
-        await this.runStore.update(run.id, {
+          lastRunId: runId
+        }, instanceId);
+        await this.runStore.update(runId, {
           status: "skipped",
           detail: "未找到可处理的客户公开评论"
         });
         return {
           status: "skipped",
           detail: "未找到可处理的客户公开评论",
-          runId: run.id
+          runId
         };
       }
 
-      const binding = await this.bindingStore.get(ticketId);
+      const binding = await this.bindingStore.get(ticketId, instanceId);
       if (
         binding?.lastProcessedRequesterCommentId &&
         binding.lastProcessedRequesterCommentId >= requesterComment.id
       ) {
-        await this.runStore.update(run.id, {
+        await this.runStore.update(runId, {
           status: "skipped",
           detail: `请求者评论 ${requesterComment.id} 已处理，跳过重复执行`,
           requesterCommentId: requesterComment.id
@@ -372,12 +404,12 @@ export class ZendeskIntegrationService {
         return {
           status: "skipped",
           detail: "重复 webhook，已跳过",
-          runId: run.id,
+          runId,
           requesterCommentId: requesterComment.id
         };
       }
 
-      await this.runStore.update(run.id, {
+      await this.runStore.update(runId, {
         status: "processing",
         detail: "正在调用 agent 生成答复",
         requesterCommentId: requesterComment.id
@@ -392,9 +424,9 @@ export class ZendeskIntegrationService {
           lastProcessedRequesterCommentId: requesterComment.id,
           lastAction: "skip",
           lastRunAt: new Date().toISOString(),
-          lastRunId: run.id
-        });
-        await this.runStore.update(run.id, {
+          lastRunId: runId
+        }, instanceId);
+        await this.runStore.update(runId, {
           status: action.status,
           detail: action.detail,
           decision: action.decision,
@@ -403,7 +435,7 @@ export class ZendeskIntegrationService {
         return {
           status: action.status,
           detail: action.detail,
-          runId: run.id,
+          runId,
           requesterCommentId: requesterComment.id,
           decision: action.decision
         };
@@ -414,9 +446,9 @@ export class ZendeskIntegrationService {
         lastProcessedRequesterCommentId: requesterComment.id,
         lastAction: action.decision,
         lastRunAt: new Date().toISOString(),
-        lastRunId: run.id
-      });
-      await this.runStore.update(run.id, {
+        lastRunId: runId
+      }, instanceId);
+      await this.runStore.update(runId, {
         status: action.status,
         detail: action.detail,
         decision: action.decision,
@@ -427,7 +459,7 @@ export class ZendeskIntegrationService {
       return {
         status: action.status,
         detail: action.detail,
-        runId: run.id,
+        runId,
         commentId: commentResult.commentId,
         requesterCommentId: requesterComment.id,
         decision: action.decision
@@ -437,9 +469,9 @@ export class ZendeskIntegrationService {
       await this.bindingStore.upsert(ticketId, {
         lastAction: "error",
         lastRunAt: new Date().toISOString(),
-        lastRunId: run.id
-      });
-      await this.runStore.update(run.id, {
+        lastRunId: runId
+      }, instanceId);
+      await this.runStore.update(runId, {
         status: "failed",
         detail: "执行失败",
         error: detail
