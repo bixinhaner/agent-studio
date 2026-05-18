@@ -1,0 +1,12 @@
+Zendesk 自动回复功能归档
+
+- 新增实例级 Zendesk webhook，支持签名校验和异步后台处理
+- 新增运行日志与工单幂等绑定持久化，避免重复 webhook 重复回复
+- 管理端统一配置入口，增加上线检查、Webhook/Payload 复制、手动测试和日志查看
+- 补充 Zendesk service、持久化和集成中心密钥合并测试
+
+验证：
+- npx prisma validate
+- agent-api npm run test
+- agent-api npm run build
+- agent-ui npm run build
