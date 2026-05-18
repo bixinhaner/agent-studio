@@ -1,6 +1,22 @@
 export type ApiInit = RequestInit & { json?: unknown };
 export const AUTH_INVALID_EVENT = "agent-auth-invalid";
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+  readonly code?: string;
+  readonly reasonCode?: string;
+
+  constructor(input: { message: string; status: number; detail: string; code?: string; reasonCode?: string }) {
+    super(input.message);
+    this.name = "ApiError";
+    this.status = input.status;
+    this.detail = input.detail;
+    this.code = input.code;
+    this.reasonCode = input.reasonCode;
+  }
+}
+
 export function notifyAuthInvalidStatus(status: number) {
   if (typeof window !== "undefined" && status === 401) {
     window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { status } }));
@@ -47,8 +63,17 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
   if (!res.ok) {
     notifyAuthInvalidStatus(res.status);
     const detail = data && typeof data === "object" && "detail" in data ? (data as { detail?: unknown }).detail : undefined;
+    const code = data && typeof data === "object" && "code" in data ? (data as { code?: unknown }).code : undefined;
+    const reasonCode =
+      data && typeof data === "object" && "reason_code" in data ? (data as { reason_code?: unknown }).reason_code : undefined;
     const msg = (typeof detail === "string" && detail) || `Request failed (${res.status})`;
-    throw new Error(msg);
+    throw new ApiError({
+      message: msg,
+      status: res.status,
+      detail: msg,
+      code: typeof code === "string" && code.trim() ? code.trim() : undefined,
+      reasonCode: typeof reasonCode === "string" && reasonCode.trim() ? reasonCode.trim() : undefined
+    });
   }
   return data as T;
 }

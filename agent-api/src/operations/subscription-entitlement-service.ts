@@ -71,10 +71,14 @@ export type PortalSubscriptionStatus = {
 
 export class ChatAccessDeniedError extends Error {
   readonly statusCode = 403;
+  readonly code: string;
+  readonly reasonCode: string | null;
 
-  constructor(message: string) {
+  constructor(message: string, reasonCode?: string | null, code?: string) {
     super(message);
     this.name = "ChatAccessDeniedError";
+    this.reasonCode = reasonCode ?? null;
+    this.code = code || accessDeniedCodeForReason(reasonCode);
   }
 }
 
@@ -219,6 +223,17 @@ function daysUntil(from: Date, to: Date): number {
 
 function formatAiRequestCount(value: number): string {
   return value === 1 ? "1 AI request" : `${value} AI requests`;
+}
+
+function accessDeniedCodeForReason(reasonCode: string | null | undefined): string {
+  const normalized = (reasonCode || "").trim().toLowerCase();
+  if (normalized.includes("turn_limit_exceeded")) return "AI_REQUEST_LIMIT_REACHED";
+  if (normalized.includes("token_limit_exceeded")) return "AI_TOKEN_LIMIT_REACHED";
+  if (normalized.includes("subscription_required")) return "SUBSCRIPTION_REQUIRED";
+  if (normalized.includes("subscription_expired")) return "SUBSCRIPTION_EXPIRED";
+  if (normalized.includes("subscription_paused")) return "SUBSCRIPTION_PAUSED";
+  if (normalized.includes("subscription_not_started")) return "SUBSCRIPTION_NOT_STARTED";
+  return "CHAT_ACCESS_DENIED";
 }
 
 function selectPortalEvaluation(input: {
@@ -776,6 +791,6 @@ export class SubscriptionEntitlementService {
       });
     }
 
-    throw new ChatAccessDeniedError(this.buildPortalDeniedMessage(decision));
+    throw new ChatAccessDeniedError(this.buildPortalDeniedMessage(decision), decision.reasonCode);
   }
 }

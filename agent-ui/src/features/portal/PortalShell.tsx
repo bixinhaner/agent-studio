@@ -83,7 +83,7 @@ import { ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
 import type { MenuProps } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
-import { api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
+import { ApiError, api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
 import { reportAutoRefreshActivityState } from "../../lib/build-version-refresh";
 import {
   DEFAULT_MODEL,
@@ -429,6 +429,15 @@ const AnswerFeedbackConfigContext = createContext<AnswerFeedbackUiConfig>({
 });
 const PreviewRequestContext = createContext<(filePath: string) => void>(() => undefined);
 const ExternalPortalUserContext = createContext(false);
+const PortalSubscriptionAccessContext = createContext<{
+  status: PortalSubscriptionStatus | null;
+  loading: boolean;
+  errorText: string;
+}>({
+  status: null,
+  loading: false,
+  errorText: ""
+});
 type FeedbackCommentDraftStore = {
   commentsByMessageId: Map<string, string>;
   skipNextSubmit?: {
@@ -986,6 +995,17 @@ function detailFromUnknown(value: unknown): string {
   }
 }
 
+function detailFromError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return error.detail || error.message || fallback;
+  if (error instanceof Error) return error.message || fallback;
+  const detail = detailFromUnknown(error).trim();
+  return detail || fallback;
+}
+
+function errorCodeFromUnknown(error: unknown): string | undefined {
+  return error instanceof ApiError ? error.code || error.reasonCode : undefined;
+}
+
 const GENERIC_ASSISTANT_ERROR_NOTICE =
   "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_PROCESS_ERROR_DETAIL =
@@ -993,8 +1013,24 @@ const GENERIC_PROCESS_ERROR_DETAIL =
 const GENERIC_TOOL_ERROR_DETAIL = "A background tool step failed. Please try again or contact your workspace admin.";
 const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step failed. Please try again or contact your workspace admin.";
 
-function formatAssistantErrorNotice(detail: string): string {
+function formatAssistantErrorNotice(detail: string, code?: string): string {
+  const normalizedCode = (code || "").trim().toUpperCase();
   const normalized = detail.replace(/\s+/g, " ").trim();
+  if (normalizedCode === "AI_REQUEST_LIMIT_REACHED" || normalizedCode.endsWith("_TURN_LIMIT_EXCEEDED")) {
+    return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
+  }
+  if (normalizedCode === "SUBSCRIPTION_REQUIRED" || normalizedCode === "EXTERNAL_SUBSCRIPTION_REQUIRED") {
+    return "Access is not enabled yet. Please contact your workspace admin to enable a plan.";
+  }
+  if (normalizedCode === "SUBSCRIPTION_EXPIRED" || normalizedCode.endsWith("_SUBSCRIPTION_EXPIRED")) {
+    return "Your access has ended. Please contact your workspace admin to renew it.";
+  }
+  if (normalizedCode === "SUBSCRIPTION_PAUSED" || normalizedCode.endsWith("_SUBSCRIPTION_PAUSED")) {
+    return "Access is paused. Please contact your workspace admin to resume it.";
+  }
+  if (normalizedCode === "AI_TOKEN_LIMIT_REACHED" || normalizedCode.endsWith("_TOKEN_LIMIT_EXCEEDED")) {
+    return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
+  }
   if (!normalized) return GENERIC_ASSISTANT_ERROR_NOTICE;
 
   if (/ai request limit reached|conversation limit reached/i.test(normalized)) {
@@ -1014,6 +1050,39 @@ function formatAssistantErrorNotice(detail: string): string {
   }
 
   return GENERIC_ASSISTANT_ERROR_NOTICE;
+}
+
+function formatAssistantErrorNoticeFromError(error: unknown, fallback: string): string {
+  return formatAssistantErrorNotice(detailFromError(error, fallback), errorCodeFromUnknown(error));
+}
+
+function formatUserLocalDateTime(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(parsed);
+}
+
+function isSubscriptionAccessBlocked(status: PortalSubscriptionStatus | null | undefined): status is PortalSubscriptionStatus {
+  return status?.accessState === "blocked";
+}
+
+function buildSubscriptionResetLine(status: PortalSubscriptionStatus): string {
+  const resetAt = formatUserLocalDateTime(status.cycleEndsAt);
+  return resetAt ? `Next reset: ${resetAt}.` : "";
+}
+
+function buildSubscriptionAccessNotice(status: PortalSubscriptionStatus | null | undefined): string {
+  if (!status) return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
+  const title = status.title ? (/[.!?。！？]$/.test(status.title) ? status.title : `${status.title}.`) : "";
+  return [title, status.detail, buildSubscriptionResetLine(status), status.actionLabel]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 function userSafeProcessDetail(detail: string, fallback = GENERIC_PROCESS_ERROR_DETAIL): string {
@@ -1730,15 +1799,18 @@ const SkillComposerControls: FC = () => {
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
+  const accessBlock = useSubscriptionAccessBlock();
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
   const sendBlockedByUpload = uploadBlockReason !== "";
-  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload;
+  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload || accessBlock.blocked;
   const sendTitle =
-    uploadBlockReason === "uploading"
+    accessBlock.blocked
+      ? accessBlock.notice
+      : uploadBlockReason === "uploading"
       ? "Wait for attachments to finish uploading"
       : uploadBlockReason === "failed"
         ? "Retry or remove failed uploads before sending"
@@ -1771,7 +1843,7 @@ const UploadAwareComposer: FC = () => {
   }, []);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
-    if (sendBlockedByUpload) {
+    if (sendBlockedByUpload || accessBlock.blocked) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -1792,7 +1864,11 @@ const UploadAwareComposer: FC = () => {
     <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
       <Composer.Root onSubmit={preventBlockedSubmit}>
         <Composer.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
-        {sendBlockedByUpload ? (
+        {accessBlock.blocked ? (
+          <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
+            {accessBlock.notice}
+          </p>
+        ) : sendBlockedByUpload ? (
           <p className="portal-upload-composer-hint" role="status">
             {uploadBlockReason === "uploading"
               ? "Uploading attachments. You can keep typing; sending unlocks when ready."
@@ -1835,25 +1911,69 @@ const UploadAwareComposer: FC = () => {
 };
 
 const MobileAwareComposer: FC = () => {
+  const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
+  const accessBlock = useSubscriptionAccessBlock();
+  const threadRunning = useAuiState((state) => state.thread.isRunning);
+  const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
+  const composerEmpty = useAuiState((state) => state.composer.isEmpty);
+  const composerEditing = useAuiState((state) => state.composer.isEditing);
+  const sendDisabled = threadRunning || !composerEditing || composerEmpty || accessBlock.blocked;
+  const sendTitle = accessBlock.blocked ? accessBlock.notice : "Send message";
+  const composerWrapRef = useComposerMultilineRef(composerText);
+
+  const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    if (accessBlock.blocked) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const sendCurrentMessage = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (sendDisabled) return;
+    aui.composer().send();
+  };
 
   return (
-    <Composer.Root>
-      <div className="portal-composer-input-row">
-        <Composer.Input
-          autoFocus={!isMobileWorkbench}
-          unstable_focusOnRunStart={!isMobileWorkbench}
-          unstable_focusOnScrollToBottom={!isMobileWorkbench}
-          unstable_focusOnThreadSwitched={!isMobileWorkbench}
-        />
-      </div>
-      <div className="portal-composer-tools-row">
-        <div className="portal-composer-tools-left">
-          <SkillComposerControls />
+    <div ref={composerWrapRef} className="portal-composer-wrap">
+      <Composer.Root onSubmit={preventBlockedSubmit}>
+        {accessBlock.blocked ? (
+          <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
+            {accessBlock.notice}
+          </p>
+        ) : null}
+        <div className="portal-composer-input-row">
+          <Composer.Input
+            autoFocus={!isMobileWorkbench}
+            unstable_focusOnRunStart={!isMobileWorkbench}
+            unstable_focusOnScrollToBottom={!isMobileWorkbench}
+            unstable_focusOnThreadSwitched={!isMobileWorkbench}
+          />
         </div>
-        <Composer.Action />
-      </div>
-    </Composer.Root>
+        <div className="portal-composer-tools-row">
+          <div className="portal-composer-tools-left">
+            <SkillComposerControls />
+          </div>
+          {threadRunning ? (
+            <Composer.Cancel className="portal-stop-btn">
+              <SquareIcon size={13} />
+            </Composer.Cancel>
+          ) : (
+            <button
+              type="submit"
+              className="aui-button aui-button-primary aui-button-icon aui-composer-send portal-upload-send"
+              disabled={sendDisabled}
+              title={sendTitle}
+              aria-label={sendTitle}
+              onClick={sendCurrentMessage}
+            >
+              <SendHorizontalIcon size={17} />
+            </button>
+          )}
+        </div>
+      </Composer.Root>
+    </div>
   );
 };
 
@@ -2653,6 +2773,56 @@ const SourcePart: FC<any> = ({ url, title }) => {
   );
 };
 
+function useSubscriptionAccessBlock() {
+  const access = useContext(PortalSubscriptionAccessContext);
+  const blocked = isSubscriptionAccessBlocked(access.status);
+  return {
+    blocked,
+    status: access.status,
+    notice: blocked ? buildSubscriptionAccessNotice(access.status) : ""
+  };
+}
+
+const AssistantErrorNoticeCard: FC<{ notice: string; rawDetail?: string }> = ({ notice, rawDetail }) => (
+  <div className="assistant-error-card" role="alert" aria-live="polite">
+    <div className="assistant-error-card-head">
+      <AlertCircleIcon size={16} aria-hidden="true" />
+      <span>Request could not be completed</span>
+    </div>
+    <p>{notice || GENERIC_ASSISTANT_ERROR_NOTICE}</p>
+    {rawDetail && rawDetail !== notice ? <span className="assistant-error-card-detail">{shorten(rawDetail, 260)}</span> : null}
+  </div>
+);
+
+const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus }> = ({ status }) => (
+  <div className="thread-access-banner" role="alert" aria-live="polite">
+    <div className="thread-access-banner-head">
+      <AlertCircleIcon size={18} aria-hidden="true" />
+      <strong>{status.title || "AI request limit reached"}</strong>
+    </div>
+    <p>{status.detail || "You can keep reading earlier chats, but new AI requests are blocked for now."}</p>
+    {status.cycleEndsAt || status.actionLabel ? (
+      <p className="thread-access-banner-meta">
+        {[buildSubscriptionResetLine(status), status.actionLabel].filter(Boolean).join(" ")}
+      </p>
+    ) : null}
+  </div>
+);
+
+const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
+  const normalized = message.trim();
+  if (!normalized) return null;
+  return (
+    <div className="thread-access-banner thread-access-banner-secondary" role="alert" aria-live="polite">
+      <div className="thread-access-banner-head">
+        <AlertCircleIcon size={18} aria-hidden="true" />
+        <strong>Request could not be sent</strong>
+      </div>
+      <p>{normalized}</p>
+    </div>
+  );
+};
+
 const HiddenToolFallback: FC<any> = () => null;
 
 const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
@@ -2705,7 +2875,14 @@ const BuildVersionRefreshActivityBridge: FC<{ hasRunningSessions: boolean }> = (
   return null;
 };
 
-const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => <RunningMessagePlaceholder {...props} />;
+const AssistantMessageEmpty: FC<EmptyMessagePartProps> = (props) => {
+  if (props.status.type === "incomplete" && (props.status.reason === "error" || props.status.error !== undefined)) {
+    const detail = detailFromUnknown(props.status.error);
+    const notice = formatAssistantErrorNotice(detail);
+    return <AssistantErrorNoticeCard notice={notice} rawDetail={detail} />;
+  }
+  return <RunningMessagePlaceholder {...props} />;
+};
 
 function isSkillCreationIntent(prompt: string): boolean {
   const normalized = prompt.trim().toLowerCase();
@@ -5601,16 +5778,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
         const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
-        const created = await api<ThreadCreateOut>("/api/threads", {
-          method: "POST",
-          json: {
-            external_id: threadId,
-            model: cfg.model,
-            reasoning_effort: cfg.reasoningEffort,
-            knowledge_set_ids: knowledgeSetIds,
-            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
-          }
-        });
+        let created: ThreadCreateOut;
+        try {
+          created = await api<ThreadCreateOut>("/api/threads", {
+            method: "POST",
+            json: {
+              external_id: threadId,
+              model: cfg.model,
+              reasoning_effort: cfg.reasoningEffort,
+              knowledge_set_ids: knowledgeSetIds,
+              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
+            }
+          });
+        } catch (error) {
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to create thread");
+          setErrorText(notice);
+          void refreshPortalSubscriptionStatusRef.current({ silent: true });
+          throw new Error(notice);
+        }
         setActiveThreadIdentity({
           remoteId: created.thread.id,
           localId: threadId || undefined
@@ -6094,15 +6279,24 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
         const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
-        const ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
-          method: "POST",
-          json: {
-            model: cfg.model,
-            reasoning_effort: cfg.reasoningEffort,
-            knowledge_set_ids: knowledgeSetIds,
-            codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
-          }
-        });
+        let ensured: ThreadSessionOut;
+        try {
+          ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
+            method: "POST",
+            json: {
+              model: cfg.model,
+              reasoning_effort: cfg.reasoningEffort,
+              knowledge_set_ids: knowledgeSetIds,
+              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
+            }
+          });
+        } catch (error) {
+          const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session");
+          setErrorText(notice);
+          void refreshPortalSubscriptionStatusRef.current({ silent: true });
+          updateRunningStage("Execution failed");
+          throw new Error(notice);
+        }
         const session = ensured.session;
 
         setErrorText("");
@@ -6529,7 +6723,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             if (event === "error") {
               const detail =
                 (payload && typeof payload.detail === "string" ? payload.detail : "") || "Request failed";
-              const assistantErrorNotice = formatAssistantErrorNotice(detail);
+              const errorCode =
+                (payload && typeof payload.code === "string" ? payload.code : "") ||
+                (payload && typeof payload.reason_code === "string" ? payload.reason_code : "");
+              const assistantErrorNotice = formatAssistantErrorNotice(detail, errorCode);
               const processDetail = userSafeProcessDetail(detail);
               setErrorText(assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
@@ -7159,6 +7356,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     replacePortalThreadIdInLocation(activeRemoteThreadId);
   }, [activeRemoteThreadId, portalThreadRestoreSettled]);
 
+  const subscriptionAccessContextValue = useMemo(
+    () => ({
+      status: subscriptionStatus,
+      loading: subscriptionStatusLoading,
+      errorText: subscriptionStatusError
+    }),
+    [subscriptionStatus, subscriptionStatusError, subscriptionStatusLoading]
+  );
+  const blockedSubscriptionStatus = isSubscriptionAccessBlocked(subscriptionStatus) ? subscriptionStatus : null;
+  const externalInlineErrorText = isExternalPortalUser && !blockedSubscriptionStatus ? errorText : "";
+
   const threadContent = (
     <div
       className={sharedThreadReadonly ? "thread-dropzone thread-dropzone-readonly" : "thread-dropzone"}
@@ -7171,6 +7379,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>In shared view, you can read messages and attachments, but cannot continue running this thread.</span>
         </div>
       ) : null}
+      {blockedSubscriptionStatus ? (
+        <PortalAccessBlockedBanner status={blockedSubscriptionStatus} />
+      ) : (
+        <PortalInlineErrorBanner message={externalInlineErrorText} />
+      )}
       <RunningThreadIdsContext.Provider value={runningThreadIds}>
         <ThreadPublicShareControls
           threadId={activeRemoteThreadId}
@@ -7241,6 +7454,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <PortalSubscriptionAccessContext.Provider value={subscriptionAccessContextValue}>
       <SkillComposerContext.Provider value={skillComposerContext}>
       <SkillDraftActionContext.Provider value={skillDraftActionContext}>
         <ActiveThreadIdentityBridge onChange={syncActiveThreadIdentity} />
@@ -7813,6 +8027,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </RunningStageTextContext.Provider>
       </SkillDraftActionContext.Provider>
       </SkillComposerContext.Provider>
+      </PortalSubscriptionAccessContext.Provider>
     </AssistantRuntimeProvider>
   );
 }

@@ -806,6 +806,28 @@ function statusCodeForSessionAccessError(error: unknown): number {
   return detail === QUOTA_ACCESS_DENIED_MESSAGE ? 403 : 400;
 }
 
+function payloadForSessionAccessError(error: unknown, fallbackDetail: string): {
+  detail: string;
+  code?: string;
+  reason_code?: string;
+} {
+  const detail = error instanceof Error ? error.message : fallbackDetail;
+  if (isChatAccessDeniedError(error)) {
+    return {
+      detail,
+      code: error.code,
+      reason_code: error.reasonCode ?? undefined
+    };
+  }
+  if (detail === QUOTA_ACCESS_DENIED_MESSAGE) {
+    return {
+      detail,
+      code: "QUOTA_LIMIT_REACHED"
+    };
+  }
+  return { detail };
+}
+
 function stableJson(value: unknown): string {
   try {
     return JSON.stringify(value ?? null, (_key, currentValue) => {
@@ -3044,8 +3066,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
     const created = await createSession(sessionOptions);
     res.json(sessionOut(created));
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to create session";
-    res.status(statusCodeForSessionAccessError(error)).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to create session"));
   }
 });
 
@@ -3173,8 +3194,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
       session: sessionOut(session)
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to create thread";
-    res.status(statusCodeForSessionAccessError(error)).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to create thread"));
   }
 });
 
@@ -3253,8 +3273,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const session = await ensureThreadSession(currentUser, threadId, input);
     res.json({ session: sessionOut(session) });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to ensure thread session";
-    res.status(statusCodeForSessionAccessError(error)).json({ detail });
+    res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to ensure thread session"));
   }
 });
 
@@ -3532,8 +3551,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Chat stream failed";
-    sendSSE(res, "error", { detail });
+    sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
   } finally {
     clearInterval(heartbeat);
     res.end();

@@ -1947,6 +1947,11 @@ body.access-request-route #root {
   line-height: 1.4;
 }
 
+.portal-access-composer-hint {
+  color: #991b1b;
+  font-weight: 600;
+}
+
 /* Disabled send */
 .portal-upload-send:disabled {
   cursor: not-allowed;
@@ -1985,6 +1990,42 @@ body.access-request-route #root {
   width: fit-content;
 }
 
+.thread-access-banner {
+  width: min(100%, var(--portal-thread-message-max-width));
+  margin: 0 auto 14px;
+  border: 1px solid rgba(220, 38, 38, 0.26);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 247, 237, 0.92));
+  color: #7f1d1d;
+  box-shadow: 0 14px 36px rgba(127, 29, 29, 0.08);
+}
+
+.thread-access-banner-secondary {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92));
+  color: #78350f;
+}
+
+.thread-access-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.thread-access-banner p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.thread-access-banner-meta {
+  margin-top: 6px !important;
+  color: rgba(127, 29, 29, 0.78);
+  font-weight: 600;
+}
+
 .assistant-running-card {
   margin: 2px 0 0;
   width: min(420px, 100%);
@@ -1996,6 +2037,40 @@ body.access-request-route #root {
   background-size: 300% 300%;
   animation: magic-border-flow 6s ease-in-out infinite;
   box-shadow: 0 12px 36px rgba(255, 70, 20, 0.08);
+}
+
+.assistant-error-card {
+  margin: 2px 0 0;
+  width: min(520px, 100%);
+  border: 1px solid rgba(220, 38, 38, 0.26);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 247, 237, 0.92));
+  color: #7f1d1d;
+  box-shadow: 0 12px 32px rgba(127, 29, 29, 0.08);
+}
+
+.assistant-error-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.assistant-error-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.assistant-error-card-detail {
+  display: block;
+  margin-top: 6px;
+  color: rgba(127, 29, 29, 0.72);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 @keyframes magic-border-flow {
