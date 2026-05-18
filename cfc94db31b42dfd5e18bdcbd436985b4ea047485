@@ -1,0 +1,9 @@
+修复内容：
+- 外部用户额度耗尽时，在聊天区和 Composer 显示明确提示，并禁用发送。
+- 修复 assistant-ui 空内容 incomplete 消息只显示空气泡的问题，改为展示错误卡片。
+- 后端为订阅拒绝补充稳定错误码，前端优先按 code/reason_code 识别。
+
+验证：
+- agent-ui: npm run build
+- agent-api: npm run build
+- agent-api: npm run test -- src/operations/subscription-entitlement-service.test.ts
