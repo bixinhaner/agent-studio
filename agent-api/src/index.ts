@@ -2174,6 +2174,17 @@ async function ensureDingTalkBotThreadSession(input: {
     });
   }
 
+  const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desired.baseCodexRunConfig, input.thread.id, workspacePath);
+  const materializedCodexHome = await materializeCodexHomeForRunConfig({
+    scopeId: `thread-${input.thread.id}`,
+    codexRunConfig: desiredCodexRunConfig
+  });
+  const desiredSession: SessionOptions = {
+    ...desired,
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    codexHome: materializedCodexHome.codexHome
+  };
+
   const active = input.thread.sessionId ? await sessions.get(input.thread.sessionId) : undefined;
   const hasLiveRuntime = active
     ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
@@ -2181,17 +2192,17 @@ async function ensureDingTalkBotThreadSession(input: {
   const changed =
     !active ||
     !hasLiveRuntime ||
-    active.model !== desired.model ||
-    active.reasoningEffort !== desired.reasoningEffort ||
-    active.workspace !== desired.workspace ||
-    stableJson(active.codexRunConfig) !== stableJson(desired.codexRunConfig);
+    active.model !== desiredSession.model ||
+    active.reasoningEffort !== desiredSession.reasoningEffort ||
+    active.workspace !== desiredSession.workspace ||
+    stableJson(active.codexRunConfig) !== stableJson(desiredSession.codexRunConfig);
   if (!changed && active) {
     return active;
   }
 
   await assertChatAllowsNewSession({
     currentUser: input.currentUser,
-    model: desired.model,
+    model: desiredSession.model,
     featureType: "chat"
   });
 
@@ -2199,7 +2210,7 @@ async function ensureDingTalkBotThreadSession(input: {
     await sessions.remove(active.sessionId);
     liveRuntimeThreads.delete(active.sessionId);
   }
-  return createSession(desired, input.thread.id);
+  return createSession(desiredSession, input.thread.id);
 }
 
 async function dingtalkMessageAlreadyProcessed(threadId: string, messageId: string): Promise<boolean> {
