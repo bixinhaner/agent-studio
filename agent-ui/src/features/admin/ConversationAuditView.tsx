@@ -691,41 +691,44 @@ function ConversationDetail(props: {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Detail Header */}
       <div className="conversation-detail-header">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px 0' }}>{conversation.title}</h2>
-            <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>
+        <div className="conversation-detail-topline">
+          <div className="conversation-detail-title-block">
+            <h2 className="conversation-detail-title" title={conversation.title}>{conversation.title}</h2>
+            <div className="conversation-detail-subtitle">
               {conversationChannelTargetLabel(conversation)} • {formatLocalDateTime(conversation.createdAt)}
             </div>
           </div>
-          <Space>
+          <div className="conversation-detail-tags">
             {conversation.channel ? <Tag color="cyan">{conversation.channel.label}</Tag> : null}
+            {conversation.enabledSkillNames.map((skillName) => (
+              <Tag key={skillName} color="blue">{skillName}</Tag>
+            ))}
             <Tag color={conversationStatusColor(conversation.status)}>
               {conversation.status === "archived" ? "已归档" : "活跃会话"}
             </Tag>
             <Tag>{conversation.model}</Tag>
-          </Space>
+          </div>
         </div>
         
         <div className="conversation-detail-metrics">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+          <div className="conversation-detail-metric">
             <MessageSquareText size={14} />
             <span>{conversation.metrics.messageCount} 条消息</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+          <div className="conversation-detail-metric">
             <Paperclip size={14} />
             <span>用户上传 {conversation.metrics.userAttachmentCount} 个文件</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+          <div className="conversation-detail-metric">
             <Activity size={14} />
             <span>{conversation.feedbackSummary.positive} 赞 / {conversation.feedbackSummary.negative} 踩</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+          <div className="conversation-detail-metric conversation-detail-workspace" title={conversation.workspace || "无关联工作区"}>
             <HardDrive size={14} />
             <span>{conversation.workspace || "无关联工作区"}</span>
           </div>
           {conversation.channel ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+            <div className="conversation-detail-metric">
               <Network size={14} />
               <span>{conversation.channel.integrationName || conversation.channel.botName || conversation.channel.type}</span>
             </div>
@@ -982,10 +985,12 @@ function ConversationWorkspace() {
                  <div className="admin-master-preview">
                    {conv.preview.latestText || conv.preview.firstUserText || "无预览"}
                  </div>
-                 <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                 <div className="conversation-master-meta">
                    <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
-                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationAudienceLabel(conv.audience)}</span>
-                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationChannelTargetLabel(conv)}</span>
+                   <span className="conversation-master-meta-text">{conversationAudienceLabel(conv.audience)}</span>
+                   <span className="conversation-master-meta-text conversation-master-target" title={conversationChannelTargetLabel(conv)}>
+                     {conversationChannelTargetLabel(conv)}
+                   </span>
                    {conv.channel ? (
                      <span className="conversation-master-channel">
                        <Network size={11} />
@@ -999,13 +1004,13 @@ function ConversationWorkspace() {
                      </span>
                    ) : null}
                    {conv.metrics.userAttachmentCount > 0 ? (
-                     <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                     <span className="conversation-master-meta-chip">
                        <Paperclip size={11} />
                        {conv.metrics.userAttachmentCount} 个文件
                      </span>
                    ) : null}
                    {conv.feedbackSummary.total > 0 ? (
-                     <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.85 : 0.65 }}>
+                     <span className="conversation-master-meta-text">
                        {conv.feedbackSummary.positive} 赞 / {conv.feedbackSummary.negative} 踩
                      </span>
                    ) : null}
