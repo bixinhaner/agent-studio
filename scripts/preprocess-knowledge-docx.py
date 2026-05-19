@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 
 try:
     from PIL import Image
@@ -57,7 +58,7 @@ except ImportError:  # pragma: no cover - optional dependency in some environmen
 
 FORMAT_VERSION = 3
 CONVERTER_VERSION = "1.2.1"
-SUPPORTED_SOURCE_EXTENSIONS = (".docx", ".txt", ".xlsx", ".pdf", ".pptx", ".xls", ".doc")
+SUPPORTED_SOURCE_EXTENSIONS = (".docx", ".txt", ".html", ".htm", ".xlsx", ".pdf", ".pptx", ".xls", ".doc")
 DEFAULT_INCLUDE_GLOBS = [f"**/*{suffix}" for suffix in SUPPORTED_SOURCE_EXTENSIONS] + [f"*{suffix}" for suffix in SUPPORTED_SOURCE_EXTENSIONS]
 DEFAULT_EXCLUDE_GLOBS = ["**/~$*", "~$*", "**/.~*", ".~*", "**/.DS_Store", ".DS_Store"]
 DEFAULT_UNSUPPORTED_ANNOTATION_IMAGE_SUFFIXES = {".emf", ".wmf"}
@@ -410,6 +411,61 @@ def clean_legacy_doc_markdown(markdown: str) -> str:
     cleaned = "\n".join(cleaned_lines)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() + "\n"
     return cleaned
+
+
+def legacy_markdown_has_garbage(markdown: str) -> bool:
+    sample = markdown[:4000]
+    suspicious_chars = set("ˇ˚ﬂ⁄ƒ∆≈◊˝€‹›ﬁ‡‰Œœ±")
+    suspicious = sum(1 for char in sample if char in suspicious_chars or 0xE000 <= ord(char) <= 0xF8FF)
+    return suspicious >= 40
+
+
+def is_legacy_readable_char(char: str) -> bool:
+    codepoint = ord(char)
+    return (
+        char.isspace()
+        or 0x20 <= codepoint <= 0x7E
+        or 0x00A0 <= codepoint <= 0x024F
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0x3000 <= codepoint <= 0x303F
+        or 0xFF00 <= codepoint <= 0xFFEF
+        or char in "，。、《》？；：‘’“”！（）【】—…·￥©®"
+    )
+
+
+def is_legacy_garbage_line(line: str) -> bool:
+    compact = re.sub(r"\s+", "", line)
+    if len(compact) < 24:
+        return False
+    readable = sum(1 for char in compact if is_legacy_readable_char(char))
+    return readable / max(len(compact), 1) < 0.68
+
+
+def extract_legacy_doc_utf16le_text(source_path: Path) -> str:
+    raw = source_path.read_bytes().decode("utf-16le", errors="ignore")
+    raw = raw.replace("\x00", "").replace("\r", "\n")
+    start_positions = [raw.find(marker) for marker in ("引言", "目录", "1. ", "1 ", "概述", "Introduction") if raw.find(marker) >= 0]
+    if start_positions:
+        raw = raw[min(start_positions):]
+    raw = re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f]", "\n", raw)
+
+    lines: list[str] = []
+    previous_blank = False
+    for raw_line in raw.splitlines():
+        line = clean_text(raw_line)
+        if not line:
+            if not previous_blank:
+                lines.append("")
+            previous_blank = True
+            continue
+        previous_blank = False
+        if is_legacy_garbage_line(line):
+            continue
+        lines.append(line)
+
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
 
 def parse_docproperty_name(instruction: str) -> str:
@@ -2034,6 +2090,217 @@ class TxtMarkdownConverter:
         return links
 
 
+class HtmlMarkdownParser(HTMLParser):
+    BLOCK_TAGS = {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "div",
+        "dl",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "header",
+        "hr",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+    SKIP_TAGS = {"script", "style", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.title_parts: list[str] = []
+        self.headings: list[dict[str, object]] = []
+        self.external_links: list[dict[str, str]] = []
+        self._seen_links: set[tuple[str, str]] = set()
+        self._skip_depth = 0
+        self._in_title = False
+        self._heading_level: int | None = None
+        self._heading_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attr_map = {name.lower(): value or "" for name, value in attrs}
+        if tag in self.SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if tag == "title":
+            self._in_title = True
+            return
+        if self._skip_depth:
+            return
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            self._ensure_blank_line()
+            self._heading_level = int(tag[1])
+            self._heading_parts = []
+            self.parts.append("#" * self._heading_level + " ")
+            return
+        if tag == "br":
+            self.parts.append("\n")
+            return
+        if tag == "li":
+            self._ensure_line_start()
+            self.parts.append("- ")
+            return
+        if tag == "a":
+            href = clean_text(attr_map.get("href", ""))
+            if href.startswith(("http://", "https://")):
+                text = clean_text(attr_map.get("title", "") or href)
+                key = (text, href)
+                if key not in self._seen_links:
+                    self._seen_links.add(key)
+                    self.external_links.append({"text": text, "url": href})
+            return
+        if tag == "img":
+            alt = clean_text(attr_map.get("alt", "") or attr_map.get("title", "") or attr_map.get("src", ""))
+            if alt:
+                self._ensure_line_start()
+                self.parts.append(f"[Image: {alt}]")
+            return
+        if tag in self.BLOCK_TAGS:
+            self._ensure_blank_line()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self.SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if tag == "title":
+            self._in_title = False
+            return
+        if self._skip_depth:
+            return
+        if self._heading_level is not None and tag == f"h{self._heading_level}":
+            text = clean_text("".join(self._heading_parts))
+            if text:
+                self.headings.append({"level": self._heading_level, "number": None, "text": text, "full_text": text})
+            self.parts.append("\n\n")
+            self._heading_level = None
+            self._heading_parts = []
+            return
+        if tag in self.BLOCK_TAGS or tag == "li":
+            self._ensure_blank_line()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = clean_text(data)
+        if not text:
+            return
+        if self._in_title:
+            self.title_parts.append(text)
+            return
+        if self.parts and not self.parts[-1].endswith(("\n", " ", "(", "[", ":", "：", "/")):
+            self.parts.append(" ")
+        self.parts.append(text)
+        if self._heading_level is not None:
+            self._heading_parts.append(text)
+
+    def markdown(self) -> str:
+        text = "".join(self.parts)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def title(self) -> str:
+        return clean_text(" ".join(self.title_parts))
+
+    def _ensure_line_start(self) -> None:
+        if self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+
+    def _ensure_blank_line(self) -> None:
+        if not self.parts:
+            return
+        current = "".join(self.parts[-2:])
+        if current.endswith("\n\n"):
+            return
+        if current.endswith("\n"):
+            self.parts.append("\n")
+        else:
+            self.parts.append("\n\n")
+
+
+class HtmlMarkdownConverter:
+    def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
+        self.source_root = source_root
+        self.source_path = source_path
+        self.output_dir = output_dir
+        self.media_dir = output_dir / "media"
+        self.warnings: list[str] = []
+
+    def convert(self) -> dict[str, object]:
+        if self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
+
+        raw_html = self._read_html()
+        parser = HtmlMarkdownParser()
+        parser.feed(raw_html)
+        parser.close()
+
+        title = parser.title() or filename_title(self.source_path)
+        body_markdown = parser.markdown()
+        markdown = f"# {title}\n\n{body_markdown}\n" if body_markdown else f"# {title}\n"
+        doc_path = self.output_dir / "doc.md"
+        meta_path = self.output_dir / "meta.json"
+        doc_path.write_text(markdown, encoding="utf-8")
+
+        stats = default_stats()
+        stats["paragraphs"] = len([part for part in re.split(r"\n\s*\n", body_markdown) if clean_text(part)])
+        stats["headings"] = 1 + len(parser.headings)
+        feature_flags = default_feature_flags()
+        title_resolution = build_title_resolution(
+            self.source_path,
+            content_title=title,
+            core_title=title,
+            source="html-title" if parser.title() else "filename",
+        )
+        metadata = build_basic_metadata(
+            source_root=self.source_root,
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            markdown=markdown,
+            title_resolution=title_resolution,
+            stats=stats,
+            feature_flags=feature_flags,
+            warnings=self.warnings,
+            headings=[{"level": 1, "number": None, "text": title, "full_text": title}, *parser.headings],
+            external_links=parser.external_links,
+        )
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        return metadata
+
+    def _read_html(self) -> str:
+        last_error: Exception | None = None
+        for encoding in ("utf-8", "utf-8-sig", "gb18030", "latin-1"):
+            try:
+                text = self.source_path.read_text(encoding=encoding)
+                if encoding != "utf-8":
+                    self.warnings.append(f"decoded html file using fallback encoding: {encoding}")
+                return normalize_text(text)
+            except UnicodeDecodeError as exc:
+                last_error = exc
+        raise RuntimeError(f"unable to decode html file: {last_error}") from last_error
+
+
 class XlsxMarkdownConverter:
     def __init__(self, source_root: Path, source_path: Path, output_dir: Path) -> None:
         self.source_root = source_root
@@ -2885,20 +3152,43 @@ class DocMarkdownConverter:
 
         doc_path = self.output_dir / "doc.md"
         markdown = clean_legacy_doc_markdown(doc_path.read_text(encoding="utf-8"))
+
+        fallback_text = extract_legacy_doc_utf16le_text(self.source_path)
+        if legacy_markdown_has_garbage(markdown) and len(fallback_text) > 500:
+            title = filename_title(self.source_path)
+            markdown = f"# {title}\n\n{fallback_text.rstrip()}\n"
+            stats = default_stats()
+            stats["paragraphs"] = len([part for part in re.split(r"\n\s*\n", fallback_text) if clean_text(part)])
+            stats["headings"] = 1
+            stats["line_count"] = len(fallback_text.splitlines())
+            metadata = build_basic_metadata(
+                source_root=self.source_root,
+                source_path=self.source_path,
+                output_dir=self.output_dir,
+                markdown=markdown,
+                title_resolution=build_title_resolution(self.source_path),
+                stats=stats,
+                feature_flags=default_feature_flags(),
+                warnings=["textutil output looked garbled; extracted readable UTF-16LE text from legacy .doc"],
+                headings=[{"level": 1, "number": None, "text": title, "full_text": title}],
+                document_properties={"converted_from": "legacy-doc-utf16le-fallback"},
+            )
+        else:
+            source_stat = self.source_path.stat()
+            metadata["source_format"] = "doc"
+            metadata["source_name"] = self.source_path.name
+            metadata["source_relative_path"] = self.source_path.relative_to(self.source_root).as_posix()
+            metadata["source_sha256"] = sha256_file(self.source_path)
+            metadata["source_size_bytes"] = source_stat.st_size
+            metadata["source_mtime_ns"] = source_stat.st_mtime_ns
+            metadata["document_properties"] = dict(metadata.get("document_properties") or {})
+            metadata["document_properties"]["converted_from"] = "legacy-doc-via-textutil"
+            text_chars, word_count = markdown_text_metrics(markdown)
+            metadata["stats"] = dict(metadata.get("stats") or {})
+            metadata["stats"]["text_chars"] = text_chars
+            metadata["stats"]["word_count_approx"] = word_count
+
         doc_path.write_text(markdown, encoding="utf-8")
-        source_stat = self.source_path.stat()
-        metadata["source_format"] = "doc"
-        metadata["source_name"] = self.source_path.name
-        metadata["source_relative_path"] = self.source_path.relative_to(self.source_root).as_posix()
-        metadata["source_sha256"] = sha256_file(self.source_path)
-        metadata["source_size_bytes"] = source_stat.st_size
-        metadata["source_mtime_ns"] = source_stat.st_mtime_ns
-        metadata["document_properties"] = dict(metadata.get("document_properties") or {})
-        metadata["document_properties"]["converted_from"] = "legacy-doc-via-textutil"
-        text_chars, word_count = markdown_text_metrics(markdown)
-        metadata["stats"] = dict(metadata.get("stats") or {})
-        metadata["stats"]["text_chars"] = text_chars
-        metadata["stats"]["word_count_approx"] = word_count
         meta_path = self.output_dir / "meta.json"
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         return metadata
@@ -3356,6 +3646,27 @@ def validate_output_dir(output_dir: Path) -> list[str]:
     return errors
 
 
+def cleanup_markdown_output(output_dir: Path) -> None:
+    doc_path = output_dir / "doc.md"
+    if not doc_path.exists():
+        return
+
+    markdown = doc_path.read_text(encoding="utf-8")
+    cleaned = TABLE_IMAGE_ANNOTATION_PLACEHOLDER_PATTERN.sub("", markdown)
+    anchor_ids = set(re.findall(r'<a id="([^"]+)"></a>', cleaned))
+
+    def unlink_missing_anchor(match: re.Match[str]) -> str:
+        label = match.group(1)
+        target = match.group(2)
+        if target in anchor_ids:
+            return match.group(0)
+        return label
+
+    cleaned = re.sub(r"\[([^\]\n]+)\]\(#([^)]+)\)", unlink_missing_anchor, cleaned)
+    if cleaned != markdown:
+        doc_path.write_text(cleaned, encoding="utf-8")
+
+
 def build_output_dir(output_root: Path, source_root: Path, source_path: Path) -> Path:
     relative = source_path.relative_to(source_root)
     return output_root / relative.with_suffix("")
@@ -3367,6 +3678,8 @@ def build_converter(source_root: Path, source_path: Path, output_dir: Path):
         return DocxMarkdownConverter(source_root, source_path, output_dir)
     if source_format == ".txt":
         return TxtMarkdownConverter(source_root, source_path, output_dir)
+    if source_format in {".html", ".htm"}:
+        return HtmlMarkdownConverter(source_root, source_path, output_dir)
     if source_format == ".xlsx":
         return XlsxMarkdownConverter(source_root, source_path, output_dir)
     if source_format == ".pdf":
@@ -3402,6 +3715,7 @@ def process_document(task: DocumentTask) -> dict[str, object]:
 
     if should_skip_conversion(task.source_path, output_dir, task.force, task.image_annotation):
         meta = load_existing_meta(output_dir) or {}
+        cleanup_markdown_output(output_dir)
         validation_errors = validate_output_dir(output_dir)
         return {
             "source_relative_path": relative,
@@ -3429,6 +3743,7 @@ def process_document(task: DocumentTask) -> dict[str, object]:
             workspace_root=PROJECT_ROOT,
             annotation_cache=task.image_annotation_cache,
         )
+    cleanup_markdown_output(output_dir)
     validation_errors = validate_output_dir(output_dir)
     return {
         "source_relative_path": relative,
