@@ -74,6 +74,7 @@ type ManagedClient = {
 const DEFAULT_BUSY_MESSAGE = "上一条消息还在处理中，请稍后再发。";
 const DEFAULT_ERROR_MESSAGE = "这条消息处理失败，请稍后重试。";
 const MAX_DINGTALK_TEXT_LENGTH = 4800;
+const MAX_DINGTALK_MARKDOWN_TITLE_LENGTH = 64;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -132,6 +133,43 @@ function truncateDingTalkText(value: string): string {
   const text = value.trim();
   if (text.length <= MAX_DINGTALK_TEXT_LENGTH) return text;
   return `${text.slice(0, MAX_DINGTALK_TEXT_LENGTH - 20).trimEnd()}\n\n[内容过长，已截断]`;
+}
+
+function dingtalkMarkdownTitle(text: string, fallback: string): string {
+  const firstLine =
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? fallback;
+  const normalized = firstLine
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^[#>*\-\d.\s]+/, "")
+    .replace(/[*_`~]/g, "")
+    .trim();
+  const title = normalized || fallback || "机器人回复";
+  return title.length <= MAX_DINGTALK_MARKDOWN_TITLE_LENGTH
+    ? title
+    : `${title.slice(0, MAX_DINGTALK_MARKDOWN_TITLE_LENGTH - 1).trimEnd()}…`;
+}
+
+function dingtalkMarkdownPayload(content: string, title: string): Record<string, unknown> {
+  return {
+    msgtype: "markdown",
+    markdown: {
+      title,
+      text: content
+    }
+  };
+}
+
+function dingtalkTextPayload(content: string): Record<string, unknown> {
+  return {
+    msgtype: "text",
+    text: {
+      content
+    }
+  };
 }
 
 function statusFromManaged(item: ManagedClient): DingTalkBotClientStatus {
@@ -400,21 +438,23 @@ export class DingTalkBotStreamService {
     }
     const text = truncateDingTalkText(content);
     if (!text) return;
-    const response = await (this.dependencies.fetchImpl ?? fetch)(webhook, {
+    const markdownResponse = await this.postReply(webhook, dingtalkMarkdownPayload(text, dingtalkMarkdownTitle(text, managed.instance.name)));
+    if (!markdownResponse.ok) {
+      const textResponse = await this.postReply(webhook, dingtalkTextPayload(text));
+      if (!textResponse.ok) {
+        throw new Error(`DingTalk sessionWebhook reply failed (${markdownResponse.status}, fallback ${textResponse.status})`);
+      }
+    }
+    managed.lastReplyAt = new Date().toISOString();
+  }
+
+  private async postReply(webhook: string, payload: Record<string, unknown>): Promise<Response> {
+    return await (this.dependencies.fetchImpl ?? fetch)(webhook, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        msgtype: "text",
-        text: {
-          content: text
-        }
-      })
+      body: JSON.stringify(payload)
     });
-    if (!response.ok) {
-      throw new Error(`DingTalk sessionWebhook reply failed (${response.status})`);
-    }
-    managed.lastReplyAt = new Date().toISOString();
   }
 }

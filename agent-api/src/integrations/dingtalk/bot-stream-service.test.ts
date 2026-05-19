@@ -139,11 +139,11 @@ describe("DingTalkBotStreamService", () => {
       status: "replied" as const,
       replyText: "你好，我在。"
     }));
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response("{}", { status: 200 }));
     const service = new DingTalkBotStreamService({
       listInstances: async () => [TEST_INSTANCE],
       handleMessage,
-      fetchImpl: fetchMock
+      fetchImpl: fetchMock as typeof fetch
     });
 
     await service.refresh();
@@ -162,12 +162,51 @@ describe("DingTalkBotStreamService", () => {
     ]);
     await vi.waitFor(() => expect(handleMessage).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      msgtype: "markdown",
+      markdown: {
+        title: "你好，我在。",
+        text: "你好，我在。"
+      }
+    });
     expect(handleMessage.mock.calls[0]?.[0]).toMatchObject({
       instance: { id: "instance-1" },
       text: "你好",
       robotMessage: {
         msgId: "ding-message-1",
         conversationId: "conversation-1"
+      }
+    });
+
+    service.stop();
+  });
+
+  it("falls back to text when markdown replies are rejected", async () => {
+    const fetchMock = vi
+      .fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response("{}", { status: 200 }))
+      .mockResolvedValueOnce(new Response("bad markdown", { status: 400 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    const service = new DingTalkBotStreamService({
+      listInstances: async () => [TEST_INSTANCE],
+      handleMessage: async () => ({
+        status: "replied",
+        replyText: "**加粗回复**"
+      }),
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    await service.refresh();
+
+    streamMock.MockDWClient.instances[0].emitCallback(streamMock.TOPIC_ROBOT, robotDownstream());
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      msgtype: "markdown"
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      msgtype: "text",
+      text: {
+        content: "**加粗回复**"
       }
     });
 

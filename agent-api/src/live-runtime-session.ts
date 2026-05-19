@@ -38,6 +38,14 @@ function toTokenCount(value: unknown): number | undefined {
   return Math.round(numeric);
 }
 
+function completedAgentMessageText(event: RuntimeStreamEvent): string | undefined {
+  const raw = asRecord(event.raw);
+  if (raw?.type !== "item.completed") return undefined;
+  const item = asRecord(raw.item);
+  if (item?.type !== "agent_message") return undefined;
+  return typeof item.text === "string" ? item.text : "";
+}
+
 export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsageSnapshot | undefined {
   const event = asRecord(value);
   if (!event) return undefined;
@@ -69,7 +77,8 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   recordUsage?(usage: RuntimeUsageSnapshot): Promise<void>;
   onTelemetryError?(error: unknown): void;
 }): Promise<void> {
-  let answer = "";
+  let fallbackAnswer = "";
+  let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
 
   for await (const event of input.events) {
@@ -77,13 +86,19 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
     if (usage) {
       latestUsage = usage;
     }
-    if (event.delta) answer += event.delta;
-    else if (event.text) answer += event.text;
+    const completedAgentText = completedAgentMessageText(event);
+    if (completedAgentText !== undefined) {
+      finalAgentAnswer = completedAgentText;
+    } else if (event.delta) {
+      fallbackAnswer += event.delta;
+    } else if (event.text) {
+      fallbackAnswer += event.text;
+    }
     input.onEvent(event);
   }
 
   await input.onDone({
-    answer,
+    answer: finalAgentAnswer ?? fallbackAnswer,
     usage: latestUsage
   });
 
