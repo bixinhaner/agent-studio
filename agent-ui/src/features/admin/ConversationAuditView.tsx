@@ -630,7 +630,6 @@ function TranscriptMessageBubble(props: {
             </div>
           ) : null}
         </div>
-        {props.message.hasRunConfig && <Tag style={{ marginTop: 4 }}>配置运行参数</Tag>}
       </div>
       {isAssistant && processRows.length > 0 ? (
         <TranscriptProcessModal
