@@ -271,10 +271,10 @@ export class DingTalkBotStreamService {
         keepAlive: true,
         ua: `agent-studio/${instance.slug}`
       });
-      client.config.subscriptions = [{ type: "EVENT", topic: TOPIC_ROBOT }];
-      client.registerAllEventListener((downstream) => {
+      client.config.subscriptions = [];
+      client.registerCallbackListener(TOPIC_ROBOT, (downstream) => {
+        this.ackCallback(client, managed, downstream);
         this.onDownstream(managed, downstream);
-        return { status: EventAck.SUCCESS };
       });
       managed.client = client;
       await client.connect();
@@ -288,6 +288,21 @@ export class DingTalkBotStreamService {
       managed.lastError = error instanceof Error ? error.message : String(error);
       this.dependencies.logger?.warn("failed to start DingTalk bot stream client", {
         instanceId: instance.id,
+        detail: managed.lastError
+      });
+    }
+  }
+
+  private ackCallback(client: DWClient, managed: ManagedClient, downstream: DWClientDownStream): void {
+    try {
+      client.socketCallBackResponse(downstream.headers.messageId, {
+        status: EventAck.SUCCESS
+      });
+    } catch (error) {
+      managed.lastError = error instanceof Error ? error.message : String(error);
+      this.dependencies.logger?.warn("failed to ack DingTalk bot callback", {
+        instanceId: managed.instance.id,
+        messageId: downstream.headers.messageId,
         detail: managed.lastError
       });
     }
@@ -315,6 +330,14 @@ export class DingTalkBotStreamService {
       managed.lastError = "收到无法识别的钉钉机器人消息";
       return;
     }
+    this.dependencies.logger?.info("DingTalk bot callback received", {
+      instanceId: managed.instance.id,
+      slug: managed.instance.slug,
+      msgId: robotMessage.msgId,
+      conversationId: robotMessage.conversationId,
+      conversationType: robotMessage.conversationType,
+      msgtype: robotMessage.msgtype
+    });
 
     const text = robotTextContent(robotMessage);
     if (!text || robotMessage.msgtype !== "text") {
