@@ -69,6 +69,7 @@ import {
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
+import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
 import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
   ThreadCollaborationRepository,
@@ -4025,22 +4026,42 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const deleteMode = resolveThreadDeleteMode({
+      query: req.query as Record<string, unknown>,
+      role: currentUser.role
+    });
+    if (deleteMode.mode === "forbidden") {
+      res.status(403).json({ detail: deleteMode.detail });
+      return;
+    }
+
+    const thread =
+      deleteMode.mode === "hard"
+        ? await threads.get(threadId, currentUser.organizationId)
+        : await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
+
     if (thread.sessionId) {
       await sessions.remove(thread.sessionId);
       liveRuntimeThreads.delete(thread.sessionId);
     }
+
+    if (deleteMode.mode === "archive") {
+      const updated = thread.status === "archived" ? thread : await threads.update(threadId, { status: "archived" });
+      res.json({ ok: true, mode: "archived", thread: threadOut(updated) });
+      return;
+    }
+
     const workspacePath = trimOrUndefined(thread.workspace);
     await threads.delete(threadId);
     if (workspacePath) {
       await fs.rm(workspacePath, { recursive: true, force: true });
     }
     await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });
-    res.json({ ok: true });
+    res.json({ ok: true, mode: "deleted" });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to delete thread";
     res.status(400).json({ detail });

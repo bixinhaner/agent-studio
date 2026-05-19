@@ -140,6 +140,12 @@ export async function fetchAdminConversationAuditDetail(
   return api<AdminConversationDetailResponse>(`/api/admin/conversations/${encodeURIComponent(conversationId)}`);
 }
 
+export async function hardDeleteAdminConversation(conversationId: string): Promise<{ ok: true; mode: "deleted" }> {
+  return api<{ ok: true; mode: "deleted" }>(`/api/threads/${encodeURIComponent(conversationId)}?hard=true`, {
+    method: "DELETE"
+  });
+}
+
 export async function fetchAdminApiAuditList(
   input: AdminApiAuditListInput = {}
 ): Promise<AdminApiAuditListResponse> {

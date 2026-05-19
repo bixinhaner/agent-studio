@@ -1304,6 +1304,10 @@
   text-overflow: ellipsis;
 }
 
+.conversation-detail-hard-delete {
+  flex: 0 0 auto;
+}
+
 .conversation-detail-metrics {
   display: flex;
   gap: 24px;

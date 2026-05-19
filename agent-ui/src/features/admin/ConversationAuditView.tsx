@@ -12,6 +12,7 @@ import {
   Search,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   UserRound
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -19,6 +20,8 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { UrlTransform } from "react-markdown";
 
 import { formatUsdAmount } from "../../lib/formatters";
+import { openWarningConfirm } from "../../lib/warning-modal";
+import { useAuth } from "../auth/AuthProvider";
 import {
   extractMermaidCodeFromPreChildren,
   MARKDOWN_REHYPE_PLUGINS,
@@ -33,6 +36,7 @@ import {
   fetchAdminConversationAuditList,
   fetchAdminProductFeedbackDetail,
   fetchAdminProductFeedbackList,
+  hardDeleteAdminConversation,
   updateAdminProductFeedbackStatus
 } from "./api";
 import type {
@@ -74,7 +78,7 @@ type ConversationAuditHashState = {
 
 const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
-  { value: "regular", label: "活跃线程" },
+  { value: "regular", label: "正常会话" },
   { value: "archived", label: "已归档" }
 ];
 
@@ -928,6 +932,9 @@ function ConversationDetail(props: {
   detail: AdminConversationDetailResponse | null;
   loading: boolean;
   errorText: string;
+  canHardDelete: boolean;
+  hardDeleting: boolean;
+  onHardDelete: (conversationId: string) => void;
 }) {
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const [feedbackExpanded, setFeedbackExpanded] = useState(false);
@@ -983,9 +990,22 @@ function ConversationDetail(props: {
               <Tag key={skillName} color="blue">{skillName}</Tag>
             ))}
             <Tag color={conversationStatusColor(conversation.status)}>
-              {conversation.status === "archived" ? "已归档" : "活跃会话"}
+              {conversation.status === "archived" ? "已归档" : "正常会话"}
             </Tag>
             <Tag>{conversation.model}</Tag>
+            {props.canHardDelete ? (
+              <Button
+                danger
+                type="text"
+                size="small"
+                className="conversation-detail-hard-delete"
+                icon={<Trash2 size={14} />}
+                loading={props.hardDeleting}
+                title="永久删除会话"
+                aria-label="永久删除会话"
+                onClick={() => props.onHardDelete(conversation.id)}
+              />
+            ) : null}
           </div>
         </div>
         
@@ -1140,6 +1160,8 @@ function ConversationDetail(props: {
 }
 
 function ConversationWorkspace() {
+  const auth = useAuth();
+  const canHardDeleteConversation = auth.user?.role === "super_admin";
   const [initialHashState] = useState(readConversationAuditHashState);
   const [query, setQuery] = useState(initialHashState.query);
   const [audienceFilter, setAudienceFilter] = useState<AdminConversationAudienceFilter>("all");
@@ -1147,6 +1169,7 @@ function ConversationWorkspace() {
   const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
   const [sort, setSort] = useState<AdminConversationSort>("updated_desc");
   const [page, setPage] = useState(1);
+  const [listRefreshToken, setListRefreshToken] = useState(0);
   
   const [listLoading, setListLoading] = useState(true);
   const [listData, setListData] = useState<AdminConversationListResponse | null>(null);
@@ -1154,6 +1177,7 @@ function ConversationWorkspace() {
   const [selectedId, setSelectedId] = useState(initialHashState.conversationId);
   const [detailData, setDetailData] = useState<AdminConversationDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [hardDeletingId, setHardDeletingId] = useState("");
 
   const deferredQuery = useDeferredValue(query.trim());
 
@@ -1188,7 +1212,7 @@ function ConversationWorkspace() {
       .then(res => active && setListData(res))
       .finally(() => active && setListLoading(false));
     return () => { active = false; };
-  }, [deferredQuery, audienceFilter, statusFilter, feedbackFilter, sort, page]);
+  }, [deferredQuery, audienceFilter, statusFilter, feedbackFilter, sort, page, listRefreshToken]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -1199,6 +1223,35 @@ function ConversationWorkspace() {
       .finally(() => active && setDetailLoading(false));
     return () => { active = false; };
   }, [selectedId]);
+
+  const handleHardDeleteConversation = async (conversationId: string) => {
+    const confirmed = await openWarningConfirm({
+      title: "永久删除会话",
+      content: "将永久删除该会话、消息、附件和工作区文件，删除后管理后台也无法查看。",
+      description: "此操作不可恢复，只建议用于合规清理或误建测试数据。",
+      okText: "永久删除",
+      dangerLevel: "danger"
+    });
+    if (!confirmed) return;
+
+    setHardDeletingId(conversationId);
+    try {
+      await hardDeleteAdminConversation(conversationId);
+      if (selectedId === conversationId) {
+        setSelectedId("");
+        setDetailData(null);
+      }
+      setListRefreshToken((value) => value + 1);
+    } catch (error) {
+      Modal.error({
+        title: "永久删除失败",
+        content: error instanceof Error ? error.message : "请稍后重试",
+        centered: true
+      });
+    } finally {
+      setHardDeletingId("");
+    }
+  };
 
   return (
     <div className="admin-split-layout">
@@ -1307,7 +1360,16 @@ function ConversationWorkspace() {
 
       {/* Detail View */}
       <div className="admin-split-detail">
-        <ConversationDetail detail={detailData} loading={detailLoading} errorText="" />
+        <ConversationDetail
+          detail={detailData}
+          loading={detailLoading}
+          errorText=""
+          canHardDelete={canHardDeleteConversation}
+          hardDeleting={hardDeletingId === detailData?.conversation.id}
+          onHardDelete={(conversationId) => {
+            void handleHardDeleteConversation(conversationId);
+          }}
+        />
       </div>
     </div>
   );
