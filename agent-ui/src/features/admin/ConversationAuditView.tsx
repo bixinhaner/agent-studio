@@ -15,7 +15,8 @@ import {
   UserRound
 } from "lucide-react";
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import type { UrlTransform } from "react-markdown";
 
 import { formatUsdAmount } from "../../lib/formatters";
 import {
@@ -318,14 +319,83 @@ function isHttpUrl(value: string | undefined): value is string {
   return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
 
+function isProtocolRelativeUrl(value: string | undefined): value is string {
+  return typeof value === "string" && /^\/\//.test(value.trim());
+}
+
+function isAllowedInlineImageDataUrl(value: string): boolean {
+  return /^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,[a-z0-9+/=\s]+$/i.test(value.trim());
+}
+
+function isAllowedBlobImageUrl(value: string): boolean {
+  return /^blob:/i.test(value.trim());
+}
+
 const RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN =
-  /(!\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/portal\/resources\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+  /(!\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/(?:portal\/resources|admin\/conversations\/[^/]+|threads\/[^/]+)\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
 const RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN =
-  /(!?\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/portal\/resources\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:md|markdown|txt|json|pdf|html|htm|xml|ya?ml|png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+  /(!?\[[^\]\n]*\]\()(?!(?:<|https?:|data:|blob:|\/api\/(?:portal\/resources|admin\/conversations\/[^/]+|threads\/[^/]+)\/files\/content))(\/usr\/local\/agent-studio\/data\/knowledge-sets\/Docs\/.*?\.(?:md|markdown|txt|json|pdf|html|htm|xml|ya?ml|png|jpe?g|gif|webp|bmp|svg|avif))(\))/giu;
+
+const CONVERSATION_AUDIT_FILE_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "csv",
+  "doc",
+  "docx",
+  "gif",
+  "htm",
+  "html",
+  "jpeg",
+  "jpg",
+  "json",
+  "md",
+  "markdown",
+  "pdf",
+  "png",
+  "ppt",
+  "pptx",
+  "svg",
+  "txt",
+  "webp",
+  "xls",
+  "xlsx",
+  "xml",
+  "yaml",
+  "yml"
+]);
+
+type ConversationAuditMarkdownContext = {
+  threadId?: string;
+  workspace?: string | null;
+};
+
+type ConversationAuditFileTarget = {
+  contentUrl: string;
+  filePath: string;
+};
 
 function adminKnowledgeSetFileUrl(filePath: string): string {
   const query = new URLSearchParams({ path: normalizeKnowledgeSetPath(filePath) });
   return `/api/portal/resources/files/content?${query.toString()}`;
+}
+
+function adminThreadFileContentUrl(
+  threadId: string,
+  input: { relativePath?: string | null; filePath?: string | null }
+): string | null {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return null;
+  const query = new URLSearchParams();
+  const relativePath = typeof input.relativePath === "string" ? input.relativePath.trim() : "";
+  const filePath = typeof input.filePath === "string" ? input.filePath.trim() : "";
+  if (relativePath) {
+    query.set("relative_path", normalizeKnowledgeSetPath(relativePath));
+  } else if (filePath) {
+    query.set("path", normalizeKnowledgeSetPath(filePath));
+  } else {
+    return null;
+  }
+  return `/api/admin/conversations/${encodeURIComponent(normalizedThreadId)}/files/content?${query.toString()}`;
 }
 
 function preprocessConversationAuditMarkdown(text: string): string {
@@ -337,6 +407,152 @@ function preprocessConversationAuditMarkdown(text: string): string {
       return `${prefix}<${destination}>${suffix}`;
     });
 }
+
+function normalizeMarkdownDestination(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.startsWith("<") && trimmed.endsWith(">") && trimmed.length > 1 ? trimmed.slice(1, -1).trim() : trimmed;
+}
+
+function fileExtensionFromTarget(value: string): string {
+  const target = normalizeMarkdownDestination(value).split("#", 1)[0].split("?", 1)[0].trim().toLowerCase();
+  const slashIndex = Math.max(target.lastIndexOf("/"), target.lastIndexOf("\\"));
+  const fileName = target.slice(slashIndex + 1);
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex + 1);
+}
+
+function hasKnownFileExtension(value: string): boolean {
+  return CONVERSATION_AUDIT_FILE_EXTENSIONS.has(fileExtensionFromTarget(value));
+}
+
+function isLikelyBareExternalUrl(value: string): boolean {
+  const normalized = normalizeMarkdownDestination(value);
+  if (!normalized || normalized.startsWith("#")) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(normalized)) return false;
+  if (/[\\\s]/.test(normalized)) return false;
+  if (normalized.startsWith("/") || normalized.startsWith(".")) return false;
+  return /^(?:www\.|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#].*)?$/i.test(normalized);
+}
+
+function normalizeConversationAuditLinkHref(href: string): string {
+  const normalized = normalizeMarkdownDestination(href);
+  if (!normalized) return "";
+  if (/^(?:javascript|data|blob):/i.test(normalized)) return "";
+  if (isProtocolRelativeUrl(normalized)) return `https:${normalized}`;
+  if (/^(?:https?|mailto|tel):/i.test(normalized)) return normalized;
+  if (isLikelyBareExternalUrl(normalized) && !hasKnownFileExtension(normalized)) return `https://${normalized}`;
+  return normalized;
+}
+
+function isPathInsideBrowser(parentPath: string, candidatePath: string): boolean {
+  const parent = normalizeKnowledgeSetPath(parentPath).replace(/\/+$/g, "");
+  const candidate = normalizeKnowledgeSetPath(candidatePath);
+  if (!parent || !candidate) return false;
+  return candidate === parent || candidate.startsWith(`${parent}/`);
+}
+
+function isLikelyRelativeFileTarget(value: string): boolean {
+  const normalized = normalizeMarkdownDestination(value);
+  if (!normalized || normalized.startsWith("#")) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(normalized)) return false;
+  if (isLikelyBareExternalUrl(normalized) && !hasKnownFileExtension(normalized)) return false;
+  if (normalized.startsWith("/")) return hasKnownFileExtension(normalized);
+  return hasKnownFileExtension(normalized) || normalized.includes("/") || normalized.includes("\\");
+}
+
+function fileTargetFromContentEndpoint(
+  href: string,
+  context: ConversationAuditMarkdownContext
+): ConversationAuditFileTarget | null {
+  try {
+    const parsed = new URL(normalizeMarkdownDestination(href), window.location.href);
+    if (parsed.origin !== window.location.origin) return null;
+
+    if (parsed.pathname === "/api/portal/resources/files/content") {
+      const filePath = normalizeKnowledgeSetPath(parsed.searchParams.get("path") || "");
+      return filePath ? { filePath, contentUrl: adminKnowledgeSetFileUrl(filePath) } : null;
+    }
+
+    const adminThreadMatch = parsed.pathname.match(/^\/api\/admin\/conversations\/([^/]+)\/files\/content$/);
+    if (adminThreadMatch) {
+      const relativePath = normalizeKnowledgeSetPath(parsed.searchParams.get("relative_path") || "");
+      const filePath = normalizeKnowledgeSetPath(parsed.searchParams.get("path") || relativePath);
+      return filePath ? { filePath, contentUrl: `${parsed.pathname}${parsed.search}${parsed.hash}` } : null;
+    }
+
+    const portalThreadMatch = parsed.pathname.match(/^\/api\/threads\/([^/]+)\/files\/content$/);
+    if (portalThreadMatch) {
+      const threadId = context.threadId?.trim() || decodeURIComponent(portalThreadMatch[1] || "");
+      const relativePath = normalizeKnowledgeSetPath(parsed.searchParams.get("relative_path") || "");
+      const filePath = normalizeKnowledgeSetPath(parsed.searchParams.get("path") || "");
+      const contentUrl = adminThreadFileContentUrl(threadId, { relativePath, filePath });
+      const displayPath = filePath || relativePath;
+      return contentUrl && displayPath ? { filePath: displayPath, contentUrl: `${contentUrl}${parsed.hash}` } : null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolveConversationAuditFileTarget(
+  href: string,
+  context: ConversationAuditMarkdownContext
+): ConversationAuditFileTarget | null {
+  const normalized = normalizeMarkdownDestination(href);
+  if (!normalized || normalized.startsWith("#")) return null;
+
+  const contentEndpointTarget = fileTargetFromContentEndpoint(normalized, context);
+  if (contentEndpointTarget) return contentEndpointTarget;
+
+  const knowledgeSetFilePath = resolveKnowledgeSetFilePathFromHref(normalized);
+  if (knowledgeSetFilePath) {
+    return {
+      filePath: knowledgeSetFilePath,
+      contentUrl: adminKnowledgeSetFileUrl(knowledgeSetFilePath)
+    };
+  }
+
+  const threadId = context.threadId?.trim() || "";
+  if (!threadId) return null;
+
+  const workspace = typeof context.workspace === "string" ? context.workspace.trim() : "";
+  if (workspace && isPathInsideBrowser(workspace, normalized)) {
+    const contentUrl = adminThreadFileContentUrl(threadId, { filePath: normalized });
+    return contentUrl ? { filePath: normalized, contentUrl } : null;
+  }
+
+  if (isLikelyRelativeFileTarget(normalized)) {
+    const contentUrl = adminThreadFileContentUrl(threadId, { filePath: normalized });
+    return contentUrl ? { filePath: normalized, contentUrl } : null;
+  }
+
+  return null;
+}
+
+function resolveConversationAuditImageSrc(
+  src: string,
+  context: ConversationAuditMarkdownContext
+): string {
+  const normalized = normalizeMarkdownDestination(src);
+  if (!normalized) return "";
+  const fileTarget = resolveConversationAuditFileTarget(normalized, context);
+  if (fileTarget) return fileTarget.contentUrl;
+  if (isAllowedInlineImageDataUrl(normalized) || isAllowedBlobImageUrl(normalized)) return normalized;
+  if (isProtocolRelativeUrl(normalized)) return `https:${normalized}`;
+  if (isHttpUrl(normalized)) return normalized;
+  return "";
+}
+
+export const conversationAuditMarkdownUrlTransform: UrlTransform = (url, key) => {
+  const normalized = normalizeMarkdownDestination(url);
+  if (key === "src" && (isAllowedInlineImageDataUrl(normalized) || isAllowedBlobImageUrl(normalized))) {
+    return normalized;
+  }
+  return defaultUrlTransform(url);
+};
 
 function resolveKnowledgeSetFilePathFromHref(href: string): string | null {
   const rawHref = href.trim();
@@ -360,22 +576,24 @@ function ConversationAuditMarkdownLink(props: {
   href?: string;
   className?: string;
   children?: ReactNode;
+  threadId?: string;
+  workspace?: string | null;
   [key: string]: unknown;
 }) {
-  const { href, className, children, ...rest } = props;
-  const filePath = typeof href === "string" ? resolveKnowledgeSetFilePathFromHref(href) : null;
-  if (filePath) {
-    const displayName = flattenNodeText(children).trim() || fileNameFromPath(filePath);
+  const { href, className, children, threadId, workspace, ...rest } = props;
+  const fileTarget = typeof href === "string" ? resolveConversationAuditFileTarget(href, { threadId, workspace }) : null;
+  if (fileTarget) {
+    const displayName = flattenNodeText(children).trim() || fileNameFromPath(fileTarget.filePath);
     return (
       <span className="admin-conversation-file-card" role="group" aria-label={`File ${displayName}`}>
         <span className="admin-conversation-file-meta">
           <span className="admin-conversation-file-tag">File</span>
           <span className="admin-conversation-file-name">{displayName}</span>
-          <span className="admin-conversation-file-path">{filePath}</span>
+          <span className="admin-conversation-file-path">{fileTarget.filePath}</span>
         </span>
         <a
           className="admin-conversation-file-btn"
-          href={adminKnowledgeSetFileUrl(filePath)}
+          href={fileTarget.contentUrl}
           target="_blank"
           rel="noreferrer"
         >
@@ -385,7 +603,7 @@ function ConversationAuditMarkdownLink(props: {
     );
   }
 
-  const resolvedHref = typeof href === "string" ? href : "";
+  const resolvedHref = typeof href === "string" ? normalizeConversationAuditLinkHref(href) : "";
   if (!resolvedHref) return <span className={className}>{children}</span>;
   return (
     <a className={className} href={resolvedHref} target="_blank" rel="noreferrer" {...rest}>
@@ -399,17 +617,14 @@ function ConversationAuditMarkdownImage(props: {
   alt?: string;
   className?: string;
   title?: string;
+  threadId?: string;
+  workspace?: string | null;
   [key: string]: unknown;
 }) {
-  const { src, alt, className, title, ...rest } = props;
+  const { src, alt, className, title, threadId, workspace, ...rest } = props;
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const normalizedSrc = typeof src === "string" ? src.trim() : "";
-  const knowledgeSetFilePath = normalizedSrc ? resolveKnowledgeSetFilePathFromHref(normalizedSrc) : null;
-  const resolvedSrc = knowledgeSetFilePath
-    ? adminKnowledgeSetFileUrl(knowledgeSetFilePath)
-    : normalizedSrc.startsWith("/api/portal/resources/files/content") || isHttpUrl(normalizedSrc)
-      ? normalizedSrc
-      : "";
+  const normalizedSrc = typeof src === "string" ? normalizeMarkdownDestination(src) : "";
+  const resolvedSrc = normalizedSrc ? resolveConversationAuditImageSrc(normalizedSrc, { threadId, workspace }) : "";
   const caption = typeof alt === "string" ? alt.trim() : "";
   const imageTitle = typeof title === "string" ? title.trim() : "";
   const ariaLabel = caption || imageTitle || "Open image detail";
@@ -424,7 +639,11 @@ function ConversationAuditMarkdownImage(props: {
   }, [lightboxOpen]);
 
   if (!resolvedSrc) {
-    return <span className="admin-conversation-image-missing">{caption || "Image unavailable"}</span>;
+    return (
+      <span className="admin-conversation-image-missing" title={normalizedSrc || undefined}>
+        {caption || "Image unavailable"}
+      </span>
+    );
   }
 
   return (
@@ -480,13 +699,19 @@ function ConversationAuditMarkdownImage(props: {
   );
 }
 
-function ConversationAuditMarkdown(props: { text: string; className?: string }) {
+export function ConversationAuditMarkdown(props: {
+  text: string;
+  className?: string;
+  threadId?: string;
+  workspace?: string | null;
+}) {
   const processedText = useMemo(() => preprocessConversationAuditMarkdown(props.text), [props.text]);
   return (
     <div className={props.className ? `conversation-audit-markdown ${props.className}` : "conversation-audit-markdown"}>
       <ReactMarkdown
         rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        urlTransform={conversationAuditMarkdownUrlTransform}
         components={{
           pre: ({ children, ...rest }) => {
             const mermaidCode = extractMermaidCodeFromPreChildren(children);
@@ -494,8 +719,28 @@ function ConversationAuditMarkdown(props: { text: string; className?: string }) 
             return <pre {...rest}>{children}</pre>;
           },
           table: MarkdownTable as never,
-          a: ConversationAuditMarkdownLink as never,
-          img: ConversationAuditMarkdownImage as never
+          a: ({ href, className, children, ...rest }) => (
+            <ConversationAuditMarkdownLink
+              href={href}
+              className={className}
+              threadId={props.threadId}
+              workspace={props.workspace}
+              {...rest}
+            >
+              {children}
+            </ConversationAuditMarkdownLink>
+          ),
+          img: ({ src, alt, className, title, ...rest }) => (
+            <ConversationAuditMarkdownImage
+              src={src}
+              alt={alt}
+              className={className}
+              title={title}
+              threadId={props.threadId}
+              workspace={props.workspace}
+              {...rest}
+            />
+          )
         }}
       >
         {processedText}
@@ -504,27 +749,52 @@ function ConversationAuditMarkdown(props: { text: string; className?: string }) 
   );
 }
 
-function TranscriptAttachmentList(props: { attachments: AdminConversationTranscriptAttachment[] }) {
+function TranscriptAttachmentList(props: {
+  attachments: AdminConversationTranscriptAttachment[];
+  threadId: string;
+  workspace: string | null;
+}) {
   if (props.attachments.length === 0) return null;
   return (
     <div className="admin-conversation-attachment-list">
-      {props.attachments.map((attachment) => (
-        <div key={attachment.id} className="admin-conversation-file-card">
-          <span className="admin-conversation-file-meta">
-            <span className="admin-conversation-file-tag">{attachmentKindLabel(attachment.kind)}</span>
-            <span className="admin-conversation-file-name">{attachment.name}</span>
-            <span className="admin-conversation-file-extra">
-              {[attachment.mimeType, formatFileSize(attachment.bytes)].filter(Boolean).join(" • ")}
+      {props.attachments.map((attachment) => {
+        const contentUrl =
+          attachment.contentUrl ??
+          adminThreadFileContentUrl(props.threadId, {
+            relativePath: attachment.relativePath,
+            filePath: attachment.path
+          });
+        if (attachment.kind === "image" && contentUrl) {
+          return (
+            <div key={attachment.id} className="admin-conversation-image-attachment">
+              <ConversationAuditMarkdownImage
+                src={contentUrl}
+                alt={attachment.name}
+                title={[attachment.mimeType, formatFileSize(attachment.bytes)].filter(Boolean).join(" • ")}
+                threadId={props.threadId}
+                workspace={props.workspace}
+              />
+            </div>
+          );
+        }
+        return (
+          <div key={attachment.id} className="admin-conversation-file-card">
+            <span className="admin-conversation-file-meta">
+              <span className="admin-conversation-file-tag">{attachmentKindLabel(attachment.kind)}</span>
+              <span className="admin-conversation-file-name">{attachment.name}</span>
+              <span className="admin-conversation-file-extra">
+                {[attachment.mimeType, formatFileSize(attachment.bytes)].filter(Boolean).join(" • ")}
+              </span>
+              <span className="admin-conversation-file-path">{attachment.relativePath || attachment.path || "未记录路径"}</span>
             </span>
-            <span className="admin-conversation-file-path">{attachment.relativePath || attachment.path || "未记录路径"}</span>
-          </span>
-          {attachment.contentUrl ? (
-            <a className="admin-conversation-file-btn" href={attachment.contentUrl} target="_blank" rel="noreferrer">
-              打开
-            </a>
-          ) : null}
-        </div>
-      ))}
+            {contentUrl ? (
+              <a className="admin-conversation-file-btn" href={contentUrl} target="_blank" rel="noreferrer">
+                打开
+              </a>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -535,6 +805,8 @@ function TranscriptProcessModal(props: {
   role: AdminConversationTranscriptMessage["role"];
   createdAt: string | null;
   processRows: AdminConversationTranscriptProcessRow[];
+  threadId: string;
+  workspace: string | null;
 }) {
   const processRows = props.processRows;
   return (
@@ -567,7 +839,7 @@ function TranscriptProcessModal(props: {
                     </summary>
                     {row.detail ? (
                       <div className="admin-conversation-trace-detail">
-                        <ConversationAuditMarkdown text={row.detail} />
+                        <ConversationAuditMarkdown text={row.detail} threadId={props.threadId} workspace={props.workspace} />
                       </div>
                     ) : null}
                   </details>
@@ -584,6 +856,8 @@ function TranscriptProcessModal(props: {
 function TranscriptMessageBubble(props: {
   message: AdminConversationTranscriptMessage;
   highlighted: boolean;
+  threadId: string;
+  workspace: string | null;
   onMount(node: HTMLElement | null): void;
 }) {
   const [processModalOpen, setProcessModalOpen] = useState(false);
@@ -606,7 +880,7 @@ function TranscriptMessageBubble(props: {
         </div>
         <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
           {props.message.text ? (
-            <ConversationAuditMarkdown text={props.message.text} />
+            <ConversationAuditMarkdown text={props.message.text} threadId={props.threadId} workspace={props.workspace} />
           ) : (
             <span style={{ fontStyle: 'italic', opacity: 0.7 }}>
               {attachmentCount > 0
@@ -616,7 +890,11 @@ function TranscriptMessageBubble(props: {
                   : "[无文本内容]"}
             </span>
           )}
-          <TranscriptAttachmentList attachments={props.message.attachments} />
+          <TranscriptAttachmentList
+            attachments={props.message.attachments}
+            threadId={props.threadId}
+            workspace={props.workspace}
+          />
           {isAssistant && processRows.length > 0 ? (
             <div className="admin-chat-bubble-footer">
               <Button
@@ -638,6 +916,8 @@ function TranscriptMessageBubble(props: {
           role={props.message.role}
           createdAt={props.message.createdAt}
           processRows={processRows}
+          threadId={props.threadId}
+          workspace={props.workspace}
         />
       ) : null}
     </>
@@ -842,6 +1122,8 @@ function ConversationDetail(props: {
               key={msg.id} 
               message={msg} 
               highlighted={highlightedMessageId === msg.id} 
+              threadId={conversation.id}
+              workspace={conversation.workspace || null}
               onMount={(node) => {
                 if (node) {
                   messageRefs.current.set(msg.id, node);
