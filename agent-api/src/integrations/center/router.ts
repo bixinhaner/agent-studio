@@ -28,6 +28,11 @@ function isForbiddenError(error: unknown): boolean {
 type IntegrationCenterRouterOptions = {
   service: IntegrationCenterService;
   requirePermission: (permissionKey: string) => RequestHandler;
+  dingtalkBot?: {
+    getStatus(instanceId?: string): unknown;
+    restart(instanceId?: string): Promise<unknown>;
+    listRecentConversations(instanceId: string, take?: number): Promise<unknown>;
+  };
 };
 
 export function createIntegrationCenterRouter(options: IntegrationCenterRouterOptions): Router {
@@ -124,6 +129,51 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
           instanceId: req.params.instanceId
         })
       );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/integrations/:instanceId/dingtalk-bot/status", requireRead, async (req: Request, res: Response) => {
+    try {
+      if (!options.dingtalkBot) {
+        res.status(503).json({ detail: "DingTalk bot stream service is not available" });
+        return;
+      }
+      await options.service.getInstanceDetail({ currentUserId: req.currentUser!.id, instanceId: req.params.instanceId });
+      res.json({ statuses: options.dingtalkBot.getStatus(req.params.instanceId) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/integrations/:instanceId/dingtalk-bot/restart", requireWrite, async (req: Request, res: Response) => {
+    try {
+      if (!options.dingtalkBot) {
+        res.status(503).json({ detail: "DingTalk bot stream service is not available" });
+        return;
+      }
+      await options.service.getInstanceDetail({ currentUserId: req.currentUser!.id, instanceId: req.params.instanceId });
+      res.json({ statuses: await options.dingtalkBot.restart(req.params.instanceId) });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/integrations/:instanceId/dingtalk-bot/conversations", requireRead, async (req: Request, res: Response) => {
+    try {
+      if (!options.dingtalkBot) {
+        res.status(503).json({ detail: "DingTalk bot stream service is not available" });
+        return;
+      }
+      await options.service.getInstanceDetail({ currentUserId: req.currentUser!.id, instanceId: req.params.instanceId });
+      const take = Number(req.query.take);
+      res.json({
+        items: await options.dingtalkBot.listRecentConversations(
+          req.params.instanceId,
+          Number.isFinite(take) ? Math.trunc(take) : undefined
+        )
+      });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
     }

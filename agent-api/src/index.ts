@@ -92,6 +92,11 @@ import {
   type ThreadPublicShareRepositoryDb
 } from "./persistence/thread-public-share-repository.js";
 import { ThreadShareRepository, type ThreadShareRepositoryDb } from "./persistence/thread-share-repository.js";
+import {
+  ExternalConversationBindingRepository,
+  type ExternalConversationBindingRecord,
+  type ExternalConversationBindingRepositoryDb
+} from "./persistence/external-conversation-binding-repository.js";
 import { InboxItemRepository, type InboxItemRepositoryDb } from "./persistence/inbox-item-repository.js";
 import {
   SubscriptionDenialLogRepository
@@ -137,6 +142,13 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
+import { DINGTALK_BOT_CHANNEL, isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./integrations/dingtalk/bot-config.js";
+import {
+  DingTalkBotStreamService,
+  type DingTalkBotHandleResult,
+  type DingTalkBotIncomingMessage,
+  type DingTalkBotInstance
+} from "./integrations/dingtalk/bot-stream-service.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
@@ -199,6 +211,7 @@ const resourceAccessLogRepository = new ResourceAccessLogRepository(db as unknow
 const threadPublicShares = new ThreadPublicShareRepository(db as unknown as ThreadPublicShareRepositoryDb);
 const threadArtifacts = new ThreadArtifactRepository(db as unknown as ThreadArtifactRepositoryDb);
 const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepositoryDb);
+const externalConversationBindings = new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb);
 const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
 const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
 const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryDb);
@@ -341,6 +354,51 @@ const managedRouterRuntime = {
     yield* runtime.runStreamed(thread, message);
   }
 };
+async function listDingTalkBotStreamInstances(): Promise<DingTalkBotInstance[]> {
+  const rows = await db.integrationInstance.findMany({
+    where: {
+      type: "dingtalk",
+      status: "active"
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const [configRows, secretRows] = await Promise.all([
+    db.integrationInstanceConfig.findMany({
+      where: { integrationInstanceId: { in: ids } }
+    }),
+    db.integrationInstanceSecret.findMany({
+      where: { integrationInstanceId: { in: ids } }
+    })
+  ]);
+  const configById = new Map(configRows.map((row) => [row.integrationInstanceId, asRecord(row.config) ?? {}] as const));
+  const secretById = new Map(secretRows.map((row) => [row.integrationInstanceId, asRecord(row.secretState) ?? {}] as const));
+  return rows
+    .map((row) => {
+      const config = configById.get(row.id) ?? {};
+      const secret = secretById.get(row.id) ?? {};
+      const clientId = asString(config.clientId);
+      const clientSecret = asString(secret.clientSecret);
+      const robot = normalizeDingTalkBotConfig(config);
+      return {
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        status: row.status,
+        organizationId: row.organizationId,
+        clientId: clientId ?? "",
+        clientSecret: clientSecret ?? "",
+        robot
+      };
+    })
+    .filter((instance) => instance.robot.enabled);
+}
+const dingtalkBotStream = new DingTalkBotStreamService({
+  listInstances: listDingTalkBotStreamInstances,
+  handleMessage: handleDingTalkBotMessage,
+  logger: console
+});
 const notificationDispatch = new NotificationDispatchService({
   notifications: notificationRecords,
   dingtalk: ({ message }) => {
@@ -1810,6 +1868,650 @@ async function ensureThreadSession(
   return createSession(desired, threadId);
 }
 
+type DingTalkBotActor = {
+  currentUser: CurrentActor;
+  displayName?: string;
+  dingtalkUserId?: string;
+  dingtalkUnionId?: string;
+};
+
+type DingTalkBotSessionOptions = SessionOptions & {
+  baseCodexRunConfig?: Record<string, unknown>;
+};
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? trimOrUndefined(value) : undefined;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of value) {
+    const normalized = asString(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    items.push(normalized);
+  }
+  return items;
+}
+
+function mergeAdditionalDirectoriesForBot(
+  codexRunConfig: Record<string, unknown>,
+  additionalDirectories: string[]
+): Record<string, unknown> {
+  if (!additionalDirectories.length) return codexRunConfig;
+  const next = { ...codexRunConfig };
+  const current = asStringArray(next.additionalDirectories);
+  const seen = new Set(current);
+  for (const directory of additionalDirectories) {
+    const normalized = trimOrUndefined(directory);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    current.push(normalized);
+  }
+  next.additionalDirectories = current;
+  return next;
+}
+
+function dingtalkMessageCreatedAt(value: unknown): Date {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const milliseconds = numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+    const parsed = new Date(milliseconds);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
+function dingtalkConversationScope(conversationType: string | undefined): "single" | "group" {
+  return conversationType === "1" ? "single" : "group";
+}
+
+function dingtalkConversationKey(input: {
+  instanceId: string;
+  conversationType?: string;
+  conversationId: string;
+  agentModeId: string;
+}): string {
+  return [
+    DINGTALK_BOT_CHANNEL,
+    input.instanceId,
+    dingtalkConversationScope(input.conversationType),
+    input.conversationId,
+    input.agentModeId
+  ].join(":");
+}
+
+function dingtalkThreadExternalId(externalConversationKey: string): string {
+  return `${externalConversationKey}:thread:${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+function dingtalkMessage(input: {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt?: Date;
+  metadata?: Record<string, unknown>;
+}) {
+  return {
+    id: input.id,
+    role: input.role,
+    content: [
+      {
+        type: "text",
+        text: input.text
+      }
+    ],
+    createdAt: (input.createdAt ?? new Date()).toISOString(),
+    ...(input.metadata ? { metadata: input.metadata } : {})
+  };
+}
+
+function dingtalkRuntimePrompt(input: {
+  text: string;
+  scope: "single" | "group";
+  senderNick?: string;
+  senderStaffId?: string;
+  conversationId: string;
+}): string {
+  const senderLabel = [input.senderNick, input.senderStaffId ? `ID: ${input.senderStaffId}` : ""].filter(Boolean).join(" / ");
+  if (input.scope === "group") {
+    return [
+      "这条消息来自钉钉群聊中的 @ 机器人对话。",
+      senderLabel ? `发言人：${senderLabel}` : undefined,
+      `群会话 ID：${input.conversationId}`,
+      "请直接回复这位发言人的最新问题。",
+      "",
+      input.text
+    ]
+      .filter((line) => line !== undefined)
+      .join("\n");
+  }
+  return [
+    "这条消息来自钉钉单聊机器人。",
+    senderLabel ? `用户：${senderLabel}` : undefined,
+    "",
+    input.text
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
+function dingtalkConversationTitle(input: {
+  scope: "single" | "group";
+  senderNick?: string;
+  conversationId: string;
+}): string {
+  const label = trimOrUndefined(input.senderNick) ?? input.conversationId;
+  return input.scope === "single" ? `钉钉单聊 - ${label}` : `钉钉群聊 - ${label}`;
+}
+
+async function findUserByDingTalkUserId(dingtalkUserId?: string): Promise<Awaited<ReturnType<UserRepository["getById"]>>> {
+  const normalized = trimOrUndefined(dingtalkUserId);
+  if (!normalized) return undefined;
+  const row = await (db as unknown as {
+    user: {
+      findFirst(args: {
+        where: { dingtalkUserId?: string; status?: string };
+        orderBy?: { createdAt?: "asc" | "desc" };
+      }): Promise<{ id: string } | null>;
+    };
+  }).user.findFirst({
+    where: { dingtalkUserId: normalized, status: "active" },
+    orderBy: { createdAt: "asc" }
+  });
+  return row?.id ? users.getById(row.id) : undefined;
+}
+
+async function resolveDingTalkBotActor(input: DingTalkBotIncomingMessage): Promise<DingTalkBotActor | undefined> {
+  const senderStaffId = trimOrUndefined(input.robotMessage.senderStaffId);
+  let user = await findUserByDingTalkUserId(senderStaffId);
+  let dingtalkUnionId = trimOrUndefined(user?.externalId);
+
+  if (!user && input.instance.robot.autoSyncUsers && senderStaffId) {
+    const profile = await createDingTalkClient({
+      clientId: input.instance.clientId,
+      clientSecret: input.instance.clientSecret
+    }).getUser({ userId: senderStaffId });
+    if (profile?.unionId) {
+      user = await users.upsertFromDingTalk({
+        unionId: profile.unionId,
+        userId: profile.userId,
+        openId: profile.openId,
+        corpId: profile.corpId,
+        email: profile.email,
+        displayName: profile.displayName
+      });
+      dingtalkUnionId = profile.unionId;
+    }
+  }
+
+  if (!user || user.status !== "active") {
+    return undefined;
+  }
+
+  const memberships = await organizationMemberships.listActiveForUser(user.id);
+  const preferredMembership =
+    memberships.find((item) => item.organizationId === user.primaryOrganizationId) ||
+    memberships.find((item) => item.organizationId === input.instance.organizationId) ||
+    memberships[0];
+  const organization =
+    preferredMembership?.organization ||
+    (user.primaryOrganizationId ? await organizations.getById(user.primaryOrganizationId) : undefined) ||
+    (input.instance.organizationId ? await organizations.getById(input.instance.organizationId) : undefined);
+  if (!organization) {
+    return undefined;
+  }
+
+  return {
+    currentUser: {
+      id: user.id,
+      userType: user.userType,
+      role: user.role,
+      organizationId: organization.id,
+      organizationSlug: organization.slug,
+      organizationType: organization.type,
+      membershipType: preferredMembership?.membershipType
+    },
+    displayName: trimOrUndefined(user.displayName) ?? trimOrUndefined(input.robotMessage.senderNick),
+    dingtalkUserId: senderStaffId,
+    dingtalkUnionId
+  };
+}
+
+async function resolveDingTalkBotSessionOptions(input: {
+  currentUser: CurrentActor;
+  instance: DingTalkBotInstance;
+  workspacePath: string;
+}): Promise<DingTalkBotSessionOptions> {
+  const agentModeId = trimOrUndefined(input.instance.robot.agentModeId);
+  if (!agentModeId) {
+    throw new Error("DingTalk bot is not bound to an Agent Mode");
+  }
+  const agentMode = await agentModes.get(agentModeId);
+  if (!agentMode || trimOrUndefined(agentMode.status) !== "active") {
+    throw new Error("DingTalk bot Agent Mode does not exist or is disabled");
+  }
+  const runProfile = await runProfiles.get(agentMode.runProfileId);
+  if (!runProfile || trimOrUndefined(runProfile.status) !== "active") {
+    throw new Error("DingTalk bot Run Profile does not exist or is disabled");
+  }
+
+  const selectedModel = normalizeModel(runProfile.defaultModel || appConfig.defaultModel);
+  const selectedReasoningEffort = normalizeReasoningEffortForModel(
+    selectedModel,
+    (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) || appConfig.defaultReasoningEffort
+  );
+  const knowledgeSetIds = input.instance.robot.knowledgeSetIds;
+  const knowledgeSetMap = new Map(
+    (await knowledgeSets.list())
+      .filter((item) => trimOrUndefined(item.status) === "active" && trimOrUndefined(item.sourceType) === "managed_upload")
+      .map((item) => [item.id, item] as const)
+  );
+  const mountPaths = knowledgeSetIds.map((knowledgeSetId) => {
+    const knowledgeSet = knowledgeSetMap.get(knowledgeSetId);
+    if (!knowledgeSet) {
+      throw new Error("DingTalk bot knowledge set does not exist or is disabled");
+    }
+    return knowledgeSetStorage.resolveReadableMountPath(trimOrUndefined(knowledgeSet.storageKey) ?? knowledgeSet.id);
+  });
+  await applyWorkspaceAgentsMdForMode(agentModeId, input.workspacePath);
+  const baseCodexRunConfig = mergeAdditionalDirectoriesForBot(
+    {
+      sandboxMode: runProfile.sandboxMode,
+      approvalPolicy: runProfile.approvalPolicy,
+      networkAccessEnabled: runProfile.networkAccessEnabled,
+      webSearchMode: runProfile.webSearchMode,
+      mode: agentModeId
+    },
+    mountPaths
+  );
+  return {
+    userId: input.currentUser.id,
+    organizationId: input.currentUser.organizationId,
+    model: selectedModel,
+    reasoningEffort: selectedReasoningEffort,
+    workspace: input.workspacePath,
+    providerSnapshot: await resolveProviderSnapshot(),
+    codexRunConfig: baseCodexRunConfig,
+    baseCodexRunConfig
+  };
+}
+
+async function ensureDingTalkBotThreadSession(input: {
+  currentUser: CurrentActor;
+  thread: ThreadRecord;
+  instance: DingTalkBotInstance;
+}): Promise<SessionRecord> {
+  const workspacePath =
+    trimOrUndefined(input.thread.workspace) ||
+    buildThreadWorkspacePath(
+      await resolveEffectiveSessionWorkspaceRootPath(),
+      input.currentUser.organizationSlug ?? input.currentUser.organizationId,
+      input.currentUser.id,
+      input.thread.id,
+      input.thread.createdAt
+    );
+  await fs.mkdir(workspacePath, { recursive: true });
+  const desired = await resolveDingTalkBotSessionOptions({
+    currentUser: input.currentUser,
+    instance: input.instance,
+    workspacePath
+  });
+
+  const shouldPersistThread =
+    input.thread.model !== desired.model ||
+    input.thread.reasoningEffort !== desired.reasoningEffort ||
+    input.thread.workspace !== desired.workspace ||
+    stableJson(input.thread.codexRunConfig) !== stableJson(desired.baseCodexRunConfig);
+  if (shouldPersistThread) {
+    await threads.update(input.thread.id, {
+      model: desired.model,
+      reasoningEffort: desired.reasoningEffort,
+      workspace: desired.workspace,
+      codexRunConfig: desired.baseCodexRunConfig
+    });
+  }
+
+  const active = input.thread.sessionId ? await sessions.get(input.thread.sessionId) : undefined;
+  const hasLiveRuntime = active
+    ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
+    : false;
+  const changed =
+    !active ||
+    !hasLiveRuntime ||
+    active.model !== desired.model ||
+    active.reasoningEffort !== desired.reasoningEffort ||
+    active.workspace !== desired.workspace ||
+    stableJson(active.codexRunConfig) !== stableJson(desired.codexRunConfig);
+  if (!changed && active) {
+    return active;
+  }
+
+  await assertChatAllowsNewSession({
+    currentUser: input.currentUser,
+    model: desired.model,
+    featureType: "chat"
+  });
+
+  if (active?.sessionId) {
+    await sessions.remove(active.sessionId);
+    liveRuntimeThreads.delete(active.sessionId);
+  }
+  return createSession(desired, input.thread.id);
+}
+
+async function dingtalkMessageAlreadyProcessed(threadId: string, messageId: string): Promise<boolean> {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  const normalizedMessageId = trimOrUndefined(messageId);
+  if (!normalizedThreadId || !normalizedMessageId) return false;
+  const row = await (db as unknown as {
+    message: {
+      findFirst(args: {
+        where: { threadId: string; externalId: string };
+        orderBy?: { createdAt?: "asc" | "desc" };
+      }): Promise<{ id: string } | null>;
+    };
+  }).message.findFirst({
+    where: { threadId: normalizedThreadId, externalId: normalizedMessageId },
+    orderBy: { createdAt: "asc" }
+  });
+  return Boolean(row);
+}
+
+async function createDingTalkBotThread(input: {
+  currentUser: CurrentActor;
+  instance: DingTalkBotInstance;
+  externalConversationKey: string;
+  title: string;
+}): Promise<ThreadRecord> {
+  const threadId = randomUUID().replace(/-/g, "");
+  const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
+  const workspacePath = buildThreadWorkspacePath(
+    workspaceRoot,
+    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
+    input.currentUser.id,
+    threadId
+  );
+  await fs.mkdir(workspacePath, { recursive: true });
+  const options = await resolveDingTalkBotSessionOptions({
+    currentUser: input.currentUser,
+    instance: input.instance,
+    workspacePath
+  });
+  const thread = await threads.create({
+    id: threadId,
+    organizationId: input.currentUser.organizationId,
+    userId: input.currentUser.id,
+    title: input.title,
+    externalId: dingtalkThreadExternalId(input.externalConversationKey),
+    model: options.model,
+    reasoningEffort: options.reasoningEffort,
+    workspace: options.workspace,
+    codexRunConfig: options.baseCodexRunConfig
+  });
+  await createSession(options, thread.id);
+  return (await threads.get(thread.id, input.currentUser.organizationId)) ?? thread;
+}
+
+async function upsertDingTalkBinding(input: {
+  binding?: ExternalConversationBindingRecord;
+  thread: ThreadRecord;
+  actor: DingTalkBotActor;
+  instance: DingTalkBotInstance;
+  externalConversationKey: string;
+  scope: "single" | "group";
+  lastExternalMessageId?: string;
+  messageAt: Date;
+  robotMessage: DingTalkBotIncomingMessage["robotMessage"];
+}): Promise<ExternalConversationBindingRecord> {
+  return externalConversationBindings.upsert({
+    organizationId: input.actor.currentUser.organizationId,
+    integrationInstanceId: input.instance.id,
+    threadId: input.thread.id,
+    userId: input.actor.currentUser.id,
+    channel: DINGTALK_BOT_CHANNEL,
+    externalConversationKey: input.externalConversationKey,
+    externalConversationId: input.robotMessage.conversationId,
+    conversationType: input.scope,
+    agentModeId: input.instance.robot.agentModeId,
+    externalUserId: input.actor.dingtalkUserId ?? input.robotMessage.senderStaffId,
+    externalUnionId: input.actor.dingtalkUnionId,
+    externalUserName: input.actor.displayName ?? input.robotMessage.senderNick,
+    externalGroupId: input.scope === "group" ? input.robotMessage.conversationId : null,
+    externalGroupName: input.scope === "group" ? input.robotMessage.conversationId : null,
+    botId: trimOrUndefined(input.robotMessage.robotCode) ?? trimOrUndefined(input.robotMessage.chatbotUserId),
+    botName: input.instance.name,
+    lastExternalMessageId: input.lastExternalMessageId,
+    lastMessageAt: input.messageAt,
+    metadata: {
+      conversationTypeRaw: input.robotMessage.conversationType,
+      senderCorpId: trimOrUndefined(input.robotMessage.senderCorpId),
+      chatbotCorpId: trimOrUndefined(input.robotMessage.chatbotCorpId),
+      integrationSlug: input.instance.slug
+    }
+  });
+}
+
+async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Promise<DingTalkBotHandleResult> {
+  const agentModeId = trimOrUndefined(input.instance.robot.agentModeId);
+  if (!agentModeId) {
+    return { status: "failed", replyText: input.instance.robot.errorMessage, detail: "missing agentModeId" };
+  }
+  const actor = await resolveDingTalkBotActor(input);
+  if (!actor) {
+    return {
+      status: "ignored",
+      replyText: input.instance.robot.unauthorizedMessage,
+      detail: "DingTalk user is not mapped to an active Agent Studio user"
+    };
+  }
+
+  const scope = dingtalkConversationScope(input.robotMessage.conversationType);
+  const messageAt = dingtalkMessageCreatedAt(input.robotMessage.createAt);
+  const externalConversationKey = dingtalkConversationKey({
+    instanceId: input.instance.id,
+    conversationType: input.robotMessage.conversationType,
+    conversationId: input.robotMessage.conversationId,
+    agentModeId
+  });
+  let binding = await externalConversationBindings.getByExternalConversationKey(externalConversationKey);
+  let thread = binding ? await threads.get(binding.threadId, actor.currentUser.organizationId) : undefined;
+
+  const title = dingtalkConversationTitle({
+    scope,
+    senderNick: input.robotMessage.senderNick,
+    conversationId: input.robotMessage.conversationId
+  });
+
+  if (isDingTalkResetCommand(input.text, input.instance.robot)) {
+    thread = await createDingTalkBotThread({
+      currentUser: actor.currentUser,
+      instance: input.instance,
+      externalConversationKey,
+      title
+    });
+    await upsertDingTalkBinding({
+      binding,
+      thread,
+      actor,
+      instance: input.instance,
+      externalConversationKey,
+      scope,
+      lastExternalMessageId: input.robotMessage.msgId,
+      messageAt,
+      robotMessage: input.robotMessage
+    });
+    return {
+      status: "replied",
+      replyText: input.instance.robot.resetConfirmationMessage
+    };
+  }
+
+  if (!thread) {
+    thread = await createDingTalkBotThread({
+      currentUser: actor.currentUser,
+      instance: input.instance,
+      externalConversationKey,
+      title
+    });
+    binding = await upsertDingTalkBinding({
+      binding,
+      thread,
+      actor,
+      instance: input.instance,
+      externalConversationKey,
+      scope,
+      messageAt,
+      robotMessage: input.robotMessage
+    });
+  }
+
+  if (await dingtalkMessageAlreadyProcessed(thread.id, input.robotMessage.msgId)) {
+    return {
+      status: "ignored",
+      detail: "duplicate DingTalk message"
+    };
+  }
+
+  const session = await ensureDingTalkBotThreadSession({
+    currentUser: actor.currentUser,
+    thread,
+    instance: input.instance
+  });
+  let liveThread = liveRuntimeThreads.get(session.sessionId);
+  if (!liveThread) {
+    liveThread = await restoreLiveRuntimeThread(session);
+  }
+  if (!liveThread) {
+    throw new Error("DingTalk bot runtime session is not available");
+  }
+
+  const userMessage = dingtalkMessage({
+    id: input.robotMessage.msgId,
+    role: "user",
+    text: input.text,
+    createdAt: messageAt,
+    metadata: {
+      channel: DINGTALK_BOT_CHANNEL,
+      conversationType: scope,
+      senderNick: input.robotMessage.senderNick,
+      senderStaffId: input.robotMessage.senderStaffId,
+      integrationInstanceId: input.instance.id,
+      externalConversationKey
+    }
+  });
+  await threads.appendMessage(thread.id, {
+    parentId: thread.headId ?? null,
+    message: userMessage,
+    runConfig: {
+      channel: DINGTALK_BOT_CHANNEL,
+      integrationInstanceId: input.instance.id,
+      externalConversationKey,
+      conversationType: scope
+    }
+  });
+
+  let currentSession = session;
+  const runtimePrompt = dingtalkRuntimePrompt({
+    text: input.text,
+    scope,
+    senderNick: input.robotMessage.senderNick,
+    senderStaffId: input.robotMessage.senderStaffId,
+    conversationId: input.robotMessage.conversationId
+  });
+
+  let answerText = "";
+  await streamRuntimeCompletionWithBestEffortUsage({
+    events: runtime.runStreamed(liveThread, withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig)),
+    onEvent(event) {
+      const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+      if (codexThreadId) {
+        void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+          currentSession = updated;
+        });
+      }
+    },
+    async onDone(payload) {
+      answerText = payload.answer.trim() || "已完成处理，但没有生成可发送的文本回复。";
+      await threads.appendMessage(thread!.id, {
+        parentId: input.robotMessage.msgId,
+        message: dingtalkMessage({
+          id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
+          role: "assistant",
+          text: answerText,
+          metadata: {
+            channel: DINGTALK_BOT_CHANNEL,
+            integrationInstanceId: input.instance.id,
+            externalConversationKey,
+            conversationType: scope
+          }
+        }),
+        runConfig: {
+          channel: DINGTALK_BOT_CHANNEL,
+          integrationInstanceId: input.instance.id,
+          externalConversationKey,
+          conversationType: scope
+        }
+      });
+    },
+    async recordUsage(usage) {
+      const departmentIdSnapshot =
+        trimOrUndefined(actor.currentUser.organizationType) === "internal"
+          ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
+          : undefined;
+      await usageIngestion.record({
+        organizationId: actor.currentUser.organizationId,
+        userId: actor.currentUser.id,
+        departmentIdSnapshot,
+        threadId: thread!.id,
+        sessionId: currentSession.sessionId,
+        model: currentSession.model,
+        featureType: "chat",
+        inputTokens: usage.inputTokens,
+        cachedInputTokens: usage.cachedInputTokens,
+        outputTokens: usage.outputTokens,
+        resultStatus: "success",
+        metadata: {
+          source: DINGTALK_BOT_CHANNEL,
+          integrationInstanceId: input.instance.id,
+          integrationSlug: input.instance.slug,
+          agentModeId,
+          conversationType: scope,
+          externalConversationKey,
+          externalConversationId: input.robotMessage.conversationId,
+          externalMessageId: input.robotMessage.msgId
+        }
+      });
+    },
+    onTelemetryError(error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn("DingTalk bot usage telemetry ingestion failed", {
+        threadId: thread?.id,
+        detail
+      });
+    }
+  });
+
+  await externalConversationBindings.touch({
+    externalConversationKey,
+    lastExternalMessageId: input.robotMessage.msgId,
+    lastMessageAt: messageAt,
+    metadata: {
+      conversationTypeRaw: input.robotMessage.conversationType,
+      senderCorpId: trimOrUndefined(input.robotMessage.senderCorpId),
+      chatbotCorpId: trimOrUndefined(input.robotMessage.chatbotCorpId),
+      integrationSlug: input.instance.slug
+    }
+  });
+
+  return {
+    status: "replied",
+    replyText: answerText
+  };
+}
+
 function summarizeText(text: string, limit = 120): string {
   const value = text.trim();
   if (!value) return "";
@@ -2553,7 +3255,12 @@ registerCommonApiRoutes(app, {
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
-    requirePermission
+    requirePermission,
+    dingtalkBot: {
+      getStatus: (instanceId) => dingtalkBotStream.getStatuses(instanceId),
+      restart: (instanceId) => dingtalkBotStream.restart(instanceId),
+      listRecentConversations: (instanceId, take) => externalConversationBindings.listRecentForIntegration(instanceId, take)
+    }
   }),
   monitoringAdminRouter: createMonitoringRouter({
     requirePermission,
@@ -3594,6 +4301,7 @@ async function bootstrap() {
     );
   }
   orgSyncScheduler.start();
+  dingtalkBotStream.start();
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);

@@ -50,6 +50,7 @@ model User {
   threadFollowersAdded ThreadFollower[]     @relation("ThreadFollowerAddedBy")
   threadPublicSharesCreated ThreadPublicShare[] @relation("ThreadPublicShareCreatedBy")
   threadPublicSharesRevoked ThreadPublicShare[] @relation("ThreadPublicShareRevokedBy")
+  externalConversationBindings ExternalConversationBinding[]
   inboxItems         InboxItem[]
   inboxItemsAsActor   InboxItem[]           @relation("InboxItemSourceActor")
   broadcastMessagesCreated BroadcastMessage[] @relation("BroadcastMessageCreatedBy")
@@ -597,6 +598,7 @@ model Thread {
   assignment      ThreadAssignment?
   followers       ThreadFollower[]
   publicShares    ThreadPublicShare[]
+  externalConversationBindings ExternalConversationBinding[]
   inboxItems      InboxItem[]
   knowledgeCaptureMark KnowledgeCaptureMark?
   productFeedback ProductFeedback[] @relation("ProductFeedbackThread")
@@ -922,6 +924,7 @@ model IntegrationInstance {
   bindings          IntegrationBindingRecord[]
   zendeskRuns       ZendeskRun[]
   zendeskTicketBindings ZendeskTicketBinding[]
+  externalConversationBindings ExternalConversationBinding[]
 
   @@unique([type, slug])
   @@index([type])
@@ -986,6 +989,42 @@ model IntegrationBindingRecord {
 
   @@index([integrationInstanceId, createdAt])
   @@map("integration_binding_records")
+}
+
+model ExternalConversationBinding {
+  id                       String              @id @default(cuid())
+  organizationId           String?             @map("organization_id")
+  integrationInstanceId    String              @map("integration_instance_id")
+  threadId                 String              @map("thread_id")
+  userId                   String?             @map("user_id")
+  channel                  String
+  externalConversationKey  String              @unique @map("external_conversation_key")
+  externalConversationId   String              @map("external_conversation_id")
+  conversationType         String              @map("conversation_type")
+  agentModeId              String?             @map("agent_mode_id")
+  externalUserId           String?             @map("external_user_id")
+  externalUnionId          String?             @map("external_union_id")
+  externalUserName         String?             @map("external_user_name")
+  externalGroupId          String?             @map("external_group_id")
+  externalGroupName        String?             @map("external_group_name")
+  botId                    String?             @map("bot_id")
+  botName                  String?             @map("bot_name")
+  lastExternalMessageId    String?             @map("last_external_message_id")
+  lastMessageAt            DateTime?           @map("last_message_at")
+  metadata                 Json?
+  createdAt                DateTime            @default(now()) @map("created_at")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+
+  integrationInstance      IntegrationInstance @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
+  thread                   Thread              @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user                     User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, channel, updatedAt])
+  @@index([integrationInstanceId, updatedAt])
+  @@index([threadId])
+  @@index([userId, updatedAt])
+  @@index([channel, externalConversationId])
+  @@map("external_conversation_bindings")
 }
 
 model IntegrationConfig {

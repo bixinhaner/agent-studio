@@ -3,7 +3,7 @@ import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types";
 export type IntegrationType = 'dingtalk' | 'zendesk' | 'openai_codex' | 'openai_compatible_api';
 export type IntegrationCenterTab = IntegrationType;
 export type IntegrationStatus = 'draft' | 'active' | 'disabled' | 'error' | string;
-export type IntegrationSectionTab = 'basic' | 'config' | 'history' | 'bindings' | 'policies';
+export type IntegrationSectionTab = 'basic' | 'config' | 'bot' | 'history' | 'bindings' | 'policies';
 
 export type IntegrationListItem = {
   id: string;
@@ -133,10 +133,77 @@ export type DingTalkConfigInput = {
   apiBaseUrl?: string;
   alertAgentId?: string;
   alertUserIds?: string[];
+  robot?: DingTalkBotConfigInput;
 };
 
 export type DingTalkSecretInput = {
   clientSecret?: string;
+};
+
+export type DingTalkBotConfigInput = {
+  enabled?: boolean;
+  receiveMode?: 'stream';
+  agentModeId?: string;
+  knowledgeSetIds?: string[];
+  singleChatEnabled?: boolean;
+  groupChatEnabled?: boolean;
+  groupReplyMode?: 'mention_only';
+  autoSyncUsers?: boolean;
+  resetCommands?: string[];
+  unauthorizedMessage?: string;
+  busyMessage?: string;
+  resetConfirmationMessage?: string;
+  unsupportedMessage?: string;
+  errorMessage?: string;
+};
+
+export type DingTalkBotStatusRecord = {
+  instanceId: string;
+  slug: string;
+  name: string;
+  enabled: boolean;
+  configured: boolean;
+  connected: boolean;
+  registered: boolean;
+  startedAt?: string;
+  lastEventAt?: string;
+  lastReplyAt?: string;
+  lastError?: string;
+  processedCount: number;
+  ignoredCount: number;
+};
+
+export type DingTalkBotStatusResponse = {
+  statuses: DingTalkBotStatusRecord[];
+};
+
+export type DingTalkBotConversationRecord = {
+  id: string;
+  organizationId?: string;
+  integrationInstanceId: string;
+  threadId: string;
+  userId?: string;
+  channel: string;
+  externalConversationKey: string;
+  externalConversationId: string;
+  conversationType: string;
+  agentModeId?: string;
+  externalUserId?: string;
+  externalUnionId?: string;
+  externalUserName?: string;
+  externalGroupId?: string;
+  externalGroupName?: string;
+  botId?: string;
+  botName?: string;
+  lastExternalMessageId?: string;
+  lastMessageAt?: string;
+  metadata?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DingTalkBotConversationsResponse = {
+  items: DingTalkBotConversationRecord[];
 };
 
 export type ZendeskConfigInput = {

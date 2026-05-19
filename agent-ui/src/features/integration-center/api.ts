@@ -2,6 +2,8 @@ import { api } from "../../lib/api";
 
 import type {
   CreateIntegrationInstanceInput,
+  DingTalkBotConversationsResponse,
+  DingTalkBotStatusResponse,
   ExternalApiUsageResponse,
   IntegrationBindingsResponse,
   IntegrationBindingInput,
@@ -58,6 +60,26 @@ export async function runZendeskIntegrationTicket(
     method: "POST",
     json: { ticket_id: ticketId }
   });
+}
+
+export async function fetchDingTalkBotStatus(instanceId: string): Promise<DingTalkBotStatusResponse> {
+  return api<DingTalkBotStatusResponse>(`${integrationPath(instanceId)}/dingtalk-bot/status`);
+}
+
+export async function restartDingTalkBot(instanceId: string): Promise<DingTalkBotStatusResponse> {
+  return api<DingTalkBotStatusResponse>(`${integrationPath(instanceId)}/dingtalk-bot/restart`, {
+    method: "POST"
+  });
+}
+
+export async function fetchDingTalkBotConversations(
+  instanceId: string,
+  params?: { take?: number }
+): Promise<DingTalkBotConversationsResponse> {
+  const search = new URLSearchParams();
+  if (params?.take) search.set("take", String(params.take));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return api<DingTalkBotConversationsResponse>(`${integrationPath(instanceId)}/dingtalk-bot/conversations${suffix}`);
 }
 
 export async function fetchExternalApiUsage(

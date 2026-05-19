@@ -5112,6 +5112,21 @@ body.access-request-route #root {
   grid-column: span 2;
 }
 
+.integration-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.integration-field-span-2 {
+  grid-column: span 2;
+}
+
+.integration-checkbox-row {
+  display: flex;
+  align-items: center;
+}
+
 .resource-center-actions {
   display: flex;
   justify-content: flex-start;
@@ -6118,6 +6133,7 @@ body.access-request-route #root {
   .resource-center-body,
   .resource-center-hero,
   .resource-center-form-grid,
+  .integration-form-grid,
   .resource-policy-fields,
   .knowledge-set-upload-grid,
   .knowledge-set-summary-grid,
@@ -6141,7 +6157,8 @@ body.access-request-route #root {
     grid-column: span 1;
   }
 
-  .resource-center-form-span-2 {
+  .resource-center-form-span-2,
+  .integration-field-span-2 {
     grid-column: auto;
   }
 

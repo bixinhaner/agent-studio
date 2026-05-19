@@ -3,6 +3,7 @@ import {
   DINGTALK_ROOT_DEPARTMENT_ID,
   type DingTalkConfig
 } from "../../auth/dingtalk.js";
+import { normalizeDingTalkBotConfig } from "../dingtalk/bot-config.js";
 
 export type IntegrationValidationOutcome = {
   status: "success" | "failed";
@@ -69,6 +70,11 @@ export class DingTalkIntegrationAdapter {
 
   async validate(input: Record<string, unknown>): Promise<IntegrationValidationOutcome> {
     const payload = normalizePayload(asRecord(input) ?? {});
+    const robot = normalizeDingTalkBotConfig(input);
+    const missingRobotConfig: string[] = [];
+    if (robot.enabled && !robot.agentModeId) {
+      missingRobotConfig.push("robot.agentModeId");
+    }
 
     try {
       const client = this.clientFactory(payload);
@@ -78,10 +84,17 @@ export class DingTalkIntegrationAdapter {
         await client.listDepartments({ parentId: DINGTALK_ROOT_DEPARTMENT_ID });
       }
       return {
-        status: "success",
-        summary: "DingTalk credential validation succeeded",
+        status: missingRobotConfig.length > 0 ? "failed" : "success",
+        summary: missingRobotConfig.length > 0 ? "DingTalk bot configuration is incomplete" : "DingTalk credential validation succeeded",
         detail: {
-          validated: "credentials"
+          validated: "credentials",
+          robot: {
+            enabled: robot.enabled,
+            receiveMode: robot.receiveMode,
+            agentModeId: robot.agentModeId,
+            knowledgeSetCount: robot.knowledgeSetIds.length,
+            missing: missingRobotConfig
+          }
         }
       };
     } catch (error) {

@@ -18,6 +18,11 @@ import {
   type ProductFeedbackStatus,
   type ProductFeedbackType
 } from "../persistence/product-feedback-repository.js";
+import {
+  ExternalConversationBindingRepository,
+  type ExternalConversationBindingRecord,
+  type ExternalConversationBindingRepositoryDb
+} from "../persistence/external-conversation-binding-repository.js";
 
 const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
@@ -74,6 +79,7 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
       };
     }): Promise<IntegrationInstanceAuditRow[]>;
   };
+  externalConversationBinding: ExternalConversationBindingRepositoryDb["externalConversationBinding"];
 };
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
@@ -98,6 +104,26 @@ type ConversationAuditUser = {
 };
 
 type ConversationAudience = "internal" | "external" | "unknown";
+
+type ConversationChannelSummary = {
+  type: string;
+  label: string;
+  integrationInstanceId: string | null;
+  integrationName: string | null;
+  conversationType: string | null;
+  externalConversationId: string | null;
+  externalConversationKey: string | null;
+  externalUserId: string | null;
+  externalUnionId: string | null;
+  externalUserName: string | null;
+  externalGroupId: string | null;
+  externalGroupName: string | null;
+  botId: string | null;
+  botName: string | null;
+  agentModeId: string | null;
+  lastExternalMessageId: string | null;
+  lastMessageAt: string | null;
+};
 
 type ConversationTranscriptMessage = {
   id: string;
@@ -139,6 +165,7 @@ type ConversationSummary = {
   createdAt: string;
   updatedAt: string;
   user: ConversationAuditUser | null;
+  channel: ConversationChannelSummary | null;
   metrics: {
     messageCount: number;
     userMessageCount: number;
@@ -1090,7 +1117,45 @@ function normalizeFeedback(feedback: ThreadRecord["feedback"]): ConversationSumm
     }));
 }
 
-function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditUser | null): ConversationSummary {
+function buildConversationChannelSummary(
+  binding: ExternalConversationBindingRecord | undefined,
+  integrationMap: Map<string, IntegrationInstanceAuditRow>
+): ConversationChannelSummary | null {
+  if (!binding) return null;
+  const integration = integrationMap.get(binding.integrationInstanceId);
+  const type = trimOrUndefined(binding.channel) ?? "external";
+  const label =
+    type === "dingtalk_bot"
+      ? binding.conversationType === "group"
+        ? "钉钉群聊"
+        : "钉钉单聊"
+      : type;
+  return {
+    type,
+    label,
+    integrationInstanceId: binding.integrationInstanceId,
+    integrationName: integration?.name ?? binding.botName ?? null,
+    conversationType: trimOrUndefined(binding.conversationType) ?? null,
+    externalConversationId: trimOrUndefined(binding.externalConversationId) ?? null,
+    externalConversationKey: trimOrUndefined(binding.externalConversationKey) ?? null,
+    externalUserId: trimOrUndefined(binding.externalUserId) ?? null,
+    externalUnionId: trimOrUndefined(binding.externalUnionId) ?? null,
+    externalUserName: trimOrUndefined(binding.externalUserName) ?? null,
+    externalGroupId: trimOrUndefined(binding.externalGroupId) ?? null,
+    externalGroupName: trimOrUndefined(binding.externalGroupName) ?? null,
+    botId: trimOrUndefined(binding.botId) ?? null,
+    botName: trimOrUndefined(binding.botName) ?? integration?.name ?? null,
+    agentModeId: trimOrUndefined(binding.agentModeId) ?? null,
+    lastExternalMessageId: trimOrUndefined(binding.lastExternalMessageId) ?? null,
+    lastMessageAt: trimOrUndefined(binding.lastMessageAt) ?? null
+  };
+}
+
+function buildConversationSummary(
+  thread: ThreadRecord,
+  user: ConversationAuditUser | null,
+  channel: ConversationChannelSummary | null = null
+): ConversationSummary {
   const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
   const userMessages = transcript.filter((item) => item.role === "user");
   const assistantMessages = transcript.filter((item) => item.role === "assistant");
@@ -1119,6 +1184,7 @@ function buildConversationSummary(thread: ThreadRecord, user: ConversationAuditU
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     user,
+    channel,
     metrics: {
       messageCount: transcript.length,
       userMessageCount: userMessages.length,
@@ -1236,6 +1302,20 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
     summary.model,
     summary.reasoningEffort,
     summary.workspace,
+    summary.channel?.type,
+    summary.channel?.label,
+    summary.channel?.integrationName,
+    summary.channel?.conversationType,
+    summary.channel?.externalConversationId,
+    summary.channel?.externalConversationKey,
+    summary.channel?.externalUserId,
+    summary.channel?.externalUnionId,
+    summary.channel?.externalUserName,
+    summary.channel?.externalGroupId,
+    summary.channel?.externalGroupName,
+    summary.channel?.botId,
+    summary.channel?.botName,
+    summary.channel?.agentModeId,
     ...summary.enabledSkillNames,
     summary.user?.displayName,
     summary.user?.email,
@@ -1423,9 +1503,29 @@ export function createConversationAuditRouter(options: {
   async function listConversationSummaries(): Promise<ConversationSummary[]> {
     const db = getDb();
     const repository = new ThreadRepository(db as unknown as ThreadRepositoryDb);
-    const [threads, users] = await Promise.all([repository.list(undefined, true), db.user.findMany({ orderBy: { createdAt: "asc" } })]);
+    const [threads, users, integrations] = await Promise.all([
+      repository.list(undefined, true),
+      db.user.findMany({ orderBy: { createdAt: "asc" } }),
+      db.integrationInstance.findMany()
+    ]);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
-    return threads.map((thread) => buildConversationSummary(thread, userMap.get(thread.userId ?? "") ?? null));
+    const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
+    const bindings = await new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds(
+      threads.map((thread) => thread.id)
+    );
+    const bindingByThreadId = new Map<string, ExternalConversationBindingRecord>();
+    for (const binding of bindings) {
+      if (!bindingByThreadId.has(binding.threadId)) {
+        bindingByThreadId.set(binding.threadId, binding);
+      }
+    }
+    return threads.map((thread) =>
+      buildConversationSummary(
+        thread,
+        userMap.get(thread.userId ?? "") ?? null,
+        buildConversationChannelSummary(bindingByThreadId.get(thread.id), integrationMap)
+      )
+    );
   }
 
   async function listApiAuditRecords(): Promise<ApiAuditRecord[]> {
@@ -1736,10 +1836,13 @@ export function createConversationAuditRouter(options: {
       }
 
       const user = thread.userId ? normalizeUser(await db.user.findUnique({ where: { id: thread.userId } })) : null;
+      const [binding] = await new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds([thread.id]);
+      const integrationRows = binding ? await db.integrationInstance.findMany() : [];
+      const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
       const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
 
       res.json({
-        conversation: buildConversationSummary(thread, user),
+        conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap)),
         transcript: {
           messageCount: transcript.length,
           messages: transcript

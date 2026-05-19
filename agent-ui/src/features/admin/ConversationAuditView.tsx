@@ -138,6 +138,15 @@ function conversationAudienceLabel(audience: AdminConversationSummary["audience"
   return "未关联";
 }
 
+function conversationChannelTargetLabel(conversation: AdminConversationSummary): string {
+  const channel = conversation.channel;
+  if (!channel) return displayUserLabel(conversation.user);
+  if (channel.conversationType === "group") {
+    return channel.externalGroupName || channel.externalGroupId || channel.externalConversationId || "钉钉群聊";
+  }
+  return channel.externalUserName || channel.externalUserId || channel.externalConversationId || "钉钉单聊";
+}
+
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "processing";
 }
@@ -686,10 +695,11 @@ function ConversationDetail(props: {
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 4px 0' }}>{conversation.title}</h2>
             <div style={{ color: 'var(--admin-color-subtle)', fontSize: 13 }}>
-              {displayUserLabel(conversation.user)} • {formatLocalDateTime(conversation.createdAt)}
+              {conversationChannelTargetLabel(conversation)} • {formatLocalDateTime(conversation.createdAt)}
             </div>
           </div>
           <Space>
+            {conversation.channel ? <Tag color="cyan">{conversation.channel.label}</Tag> : null}
             <Tag color={conversationStatusColor(conversation.status)}>
               {conversation.status === "archived" ? "已归档" : "活跃会话"}
             </Tag>
@@ -714,7 +724,48 @@ function ConversationDetail(props: {
             <HardDrive size={14} />
             <span>{conversation.workspace || "无关联工作区"}</span>
           </div>
+          {conversation.channel ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--admin-color-subtle)' }}>
+              <Network size={14} />
+              <span>{conversation.channel.integrationName || conversation.channel.botName || conversation.channel.type}</span>
+            </div>
+          ) : null}
         </div>
+
+        {conversation.channel ? (
+          <div className="conversation-channel-section">
+            <div className="conversation-channel-title-row">
+              <span className="conversation-channel-title">机器人渠道</span>
+              <Tag color="cyan">{conversation.channel.conversationType === "group" ? "群聊" : "单聊"}</Tag>
+            </div>
+            <div className="conversation-channel-grid">
+              <div>
+                <span className="field-label">钉钉用户</span>
+                <p>{conversation.channel.externalUserName || conversation.channel.externalUserId || "-"}</p>
+              </div>
+              <div>
+                <span className="field-label">会话</span>
+                <p>{conversation.channel.externalGroupName || conversation.channel.externalConversationId || "-"}</p>
+              </div>
+              <div>
+                <span className="field-label">机器人</span>
+                <p>{conversation.channel.botName || conversation.channel.integrationName || "-"}</p>
+              </div>
+              <div>
+                <span className="field-label">Agent Mode</span>
+                <p>{conversation.channel.agentModeId || "-"}</p>
+              </div>
+              <div>
+                <span className="field-label">外部消息</span>
+                <p>{conversation.channel.lastExternalMessageId || "-"}</p>
+              </div>
+              <div>
+                <span className="field-label">最近消息时间</span>
+                <p>{formatLocalDateTime(conversation.channel.lastMessageAt || conversation.updatedAt)}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {conversation.feedback.length > 0 ? (
           <div className="conversation-feedback-section">
@@ -934,7 +985,13 @@ function ConversationWorkspace() {
                  <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                    <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
                    <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationAudienceLabel(conv.audience)}</span>
-                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{displayUserLabel(conv.user)}</span>
+                   <span style={{ fontSize: 11, opacity: selectedId === conv.id ? 0.8 : 0.5 }}>{conversationChannelTargetLabel(conv)}</span>
+                   {conv.channel ? (
+                     <span className="conversation-master-channel">
+                       <Network size={11} />
+                       {conv.channel.label}
+                     </span>
+                   ) : null}
                    {skillSummaryLabel ? (
                      <span className="conversation-master-skill">
                        <Package size={11} />

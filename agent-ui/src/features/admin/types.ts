@@ -66,6 +66,26 @@ export type AdminConversationFeedback = {
   updatedAt: string | null;
 };
 
+export type AdminConversationChannelSummary = {
+  type: string;
+  label: string;
+  integrationInstanceId: string | null;
+  integrationName: string | null;
+  conversationType: string | null;
+  externalConversationId: string | null;
+  externalConversationKey: string | null;
+  externalUserId: string | null;
+  externalUnionId: string | null;
+  externalUserName: string | null;
+  externalGroupId: string | null;
+  externalGroupName: string | null;
+  botId: string | null;
+  botName: string | null;
+  agentModeId: string | null;
+  lastExternalMessageId: string | null;
+  lastMessageAt: string | null;
+};
+
 export type AdminConversationSummary = {
   id: string;
   externalId: string | null;
@@ -80,6 +100,7 @@ export type AdminConversationSummary = {
   createdAt: string;
   updatedAt: string;
   user: AdminConversationUser | null;
+  channel: AdminConversationChannelSummary | null;
   metrics: {
     messageCount: number;
     userMessageCount: number;

@@ -1178,18 +1178,27 @@
   line-height: 1.4;
 }
 
-.conversation-master-skill {
+.conversation-master-skill,
+.conversation-master-channel {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
   font-size: 11px;
-  color: #2563eb;
   opacity: 0.8;
 }
 
-.conversation-master-skill svg {
+.conversation-master-skill {
+  color: #2563eb;
+}
+
+.conversation-master-channel {
+  color: #0891b2;
+}
+
+.conversation-master-skill svg,
+.conversation-master-channel svg {
   flex: 0 0 auto;
 }
 
@@ -1204,6 +1213,42 @@
   display: flex;
   gap: 24px;
   flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.conversation-channel-section {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 12px;
+  background: rgba(8, 145, 178, 0.06);
+  display: grid;
+  gap: 10px;
+}
+
+.conversation-channel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.conversation-channel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-color-text);
+}
+
+.conversation-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.conversation-channel-grid p {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-color-text);
   font-size: 13px;
 }
 
@@ -2317,6 +2362,10 @@
     border-bottom: 1px solid var(--admin-color-border);
   }
 
+  .conversation-channel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-settings-content {
     min-height: 420px;
   }
@@ -2333,7 +2382,8 @@
 
   .admin-page-summary-grid,
   .admin-overview-hero-metrics,
-  .admin-entity-card-grid {
+  .admin-entity-card-grid,
+  .conversation-channel-grid {
     grid-template-columns: 1fr;
   }
 

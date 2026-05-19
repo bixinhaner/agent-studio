@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+
+import { isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./bot-config.js";
+
+describe("normalizeDingTalkBotConfig", () => {
+  it("uses safe defaults when robot config is missing", () => {
+    const config = normalizeDingTalkBotConfig({});
+
+    expect(config.enabled).toBe(false);
+    expect(config.receiveMode).toBe("stream");
+    expect(config.singleChatEnabled).toBe(true);
+    expect(config.groupChatEnabled).toBe(true);
+    expect(config.autoSyncUsers).toBe(true);
+    expect(config.resetCommands).toContain("新对话");
+  });
+
+  it("normalizes configured scope, mode, knowledge sets, and reply text", () => {
+    const config = normalizeDingTalkBotConfig({
+      robot: {
+        enabled: true,
+        agentModeId: " mode-1 ",
+        knowledgeSetIds: ["ks-1", "ks-1", "", " ks-2 "],
+        singleChatEnabled: false,
+        groupChatEnabled: true,
+        autoSyncUsers: false,
+        resetCommands: [" Restart ", "restart", "/new"],
+        errorMessage: "自定义错误"
+      }
+    });
+
+    expect(config.enabled).toBe(true);
+    expect(config.agentModeId).toBe("mode-1");
+    expect(config.knowledgeSetIds).toEqual(["ks-1", "ks-2"]);
+    expect(config.singleChatEnabled).toBe(false);
+    expect(config.groupChatEnabled).toBe(true);
+    expect(config.autoSyncUsers).toBe(false);
+    expect(config.resetCommands).toEqual(["Restart", "restart", "/new"]);
+    expect(config.errorMessage).toBe("自定义错误");
+  });
+});
+
+describe("isDingTalkResetCommand", () => {
+  it("matches reset commands case-insensitively after trimming", () => {
+    const config = normalizeDingTalkBotConfig({
+      robot: {
+        resetCommands: ["RESET", "/new"]
+      }
+    });
+
+    expect(isDingTalkResetCommand(" reset ", config)).toBe(true);
+    expect(isDingTalkResetCommand("/NEW", config)).toBe(true);
+    expect(isDingTalkResetCommand("继续对话", config)).toBe(false);
+  });
+});
