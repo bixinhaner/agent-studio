@@ -314,7 +314,19 @@ function asStringArray(value: unknown): string[] {
 }
 
 export function enabledSkillNamesFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
-  return asStringArray(codexRunConfig?.enabledSkills);
+  const raw = codexRunConfig?.enabledSkills;
+  if (!Array.isArray(raw)) return [];
+  const names: string[] = [];
+  for (const item of raw) {
+    const name =
+      typeof item === "string"
+        ? trimOrUndefined(item)
+        : trimOrUndefined((asRecord(item)?.name ?? asRecord(item)?.skillName) as unknown);
+    if (name && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  return names;
 }
 
 function asBoolean(value: unknown): boolean | undefined {

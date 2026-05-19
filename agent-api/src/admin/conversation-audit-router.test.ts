@@ -25,6 +25,19 @@ describe("enabledSkillNamesFromRunConfig", () => {
     ).toEqual(["imagegen", "lab-device-access"]);
   });
 
+  it("normalizes selected skill names from structured run config entries", () => {
+    expect(
+      enabledSkillNamesFromRunConfig({
+        enabledSkills: [
+          { id: "managed:skill-1", name: "knowledge-base-builder", managedSkillId: "skill-1" },
+          { id: "native-skill", skillName: "browser" },
+          { id: "empty-name", name: " " },
+          { id: "duplicate", name: "knowledge-base-builder" }
+        ]
+      })
+    ).toEqual(["knowledge-base-builder", "browser"]);
+  });
+
   it("returns an empty list when no skills were selected", () => {
     expect(enabledSkillNamesFromRunConfig({ enabledSkills: undefined })).toEqual([]);
     expect(enabledSkillNamesFromRunConfig(undefined)).toEqual([]);
