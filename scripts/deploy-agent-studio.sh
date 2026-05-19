@@ -16,6 +16,7 @@ CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
 CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
 CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
 ASSET_RETENTION_DAYS="${AGENT_STUDIO_ASSET_RETENTION_DAYS:-}"
+FRONTEND_BUILD_NODE_OPTIONS="${FRONTEND_BUILD_NODE_OPTIONS:---max-old-space-size=3072}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
 SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
@@ -39,6 +40,8 @@ Options:
                          Backend port used by Caddy reverse proxy [default: --api-port value]
   --asset-retention-days <days>
                          Days to keep old frontend assets; 0 disables pruning [default: ${ASSET_RETENTION_DAYS:-30}]
+  --frontend-node-options <value>
+                         NODE_OPTIONS used for frontend build [default: $FRONTEND_BUILD_NODE_OPTIONS]
   --skip-git-pull        Rebuild current checkout without fetching or pulling
   --skip-rbac-seed       Skip built-in RBAC seed step
   --skip-caddy-reload    Skip rendering/reloading Caddy
@@ -85,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       ASSET_RETENTION_DAYS="$2"
       shift 2
       ;;
+    --frontend-node-options)
+      FRONTEND_BUILD_NODE_OPTIONS="$2"
+      shift 2
+      ;;
     --skip-git-pull)
       SKIP_GIT_PULL=1
       shift
@@ -124,6 +131,10 @@ fi
 if [[ -n "$ASSET_RETENTION_DAYS" && ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   die "--asset-retention-days must be a non-negative integer"
 fi
+
+shell_quote() {
+  printf '%q' "$1"
+}
 
 require_repo_checkout() {
   [[ -d "$APP_REPO_DIR" ]] || die "repository directory does not exist: $APP_REPO_DIR"
@@ -266,9 +277,37 @@ git_update() {
   run_as_app_user_shell "cd '$APP_REPO_DIR' && git fetch '$GIT_REMOTE' && git checkout '$GIT_REF' && git pull --ff-only '$GIT_REMOTE' '$GIT_REF'"
 }
 
+sanitize_frontend_env() {
+  if ! grep -Eq '^[[:space:]]*NODE_ENV[[:space:]]*=' "$FRONTEND_ENV_FILE"; then
+    return 0
+  fi
+
+  log_info "Removing unsupported NODE_ENV from frontend env file: $FRONTEND_ENV_FILE"
+  python3 - "$FRONTEND_ENV_FILE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+rendered = []
+changed = False
+
+for raw_line in path.read_text().splitlines():
+    stripped = raw_line.strip()
+    if stripped and not stripped.startswith("#") and "=" in raw_line:
+        key = raw_line.split("=", 1)[0].strip()
+        if key == "NODE_ENV":
+            changed = True
+            continue
+    rendered.append(raw_line)
+
+if changed:
+    path.write_text("\n".join(rendered).rstrip() + "\n")
+PY
+}
+
 build_backend() {
   log_step "Installing backend dependencies"
-  run_as_app_user_shell "cd '$APP_API_DIR' && npm ci"
+  run_as_app_user_shell "cd '$APP_API_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
 
   log_step "Generating Prisma client"
   run_as_app_user_shell "cd '$APP_API_DIR' && npm run prisma:generate"
@@ -310,13 +349,18 @@ EOF"
 
 build_frontend() {
   log_step "Installing frontend dependencies"
-  run_as_app_user_shell "cd '$APP_UI_DIR' && npm ci"
+  run_as_app_user_shell "cd '$APP_UI_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
 
   log_step "Building frontend"
+  sanitize_frontend_env
+  local frontend_node_options
+  frontend_node_options="$(shell_quote "$FRONTEND_BUILD_NODE_OPTIONS")"
   if [[ -n "$ASSET_RETENTION_DAYS" ]]; then
-    run_as_app_user_shell "cd '$APP_UI_DIR' && AGENT_STUDIO_ASSET_RETENTION_DAYS='$ASSET_RETENTION_DAYS' npm run build"
+    local asset_retention_days
+    asset_retention_days="$(shell_quote "$ASSET_RETENTION_DAYS")"
+    run_as_app_user_shell "cd '$APP_UI_DIR' && unset NODE_ENV && NODE_OPTIONS=$frontend_node_options AGENT_STUDIO_ASSET_RETENTION_DAYS=$asset_retention_days npm run build"
   else
-    run_as_app_user_shell "cd '$APP_UI_DIR' && npm run build"
+    run_as_app_user_shell "cd '$APP_UI_DIR' && unset NODE_ENV && NODE_OPTIONS=$frontend_node_options npm run build"
   fi
 
   [[ -f "$APP_UI_DIR/dist/index.html" ]] || die "frontend build did not produce dist/index.html"

@@ -264,7 +264,6 @@ configure_debug_env() {
   write_env_key_value "$debug_backend_env_file" DINGTALK_REDIRECT_URI "https://$DEBUG_DOMAIN:$DEBUG_HTTPS_PORT/auth/dingtalk/callback"
   write_env_key_value "$debug_backend_env_file" ORG_SYNC_ENABLED "false"
 
-  write_env_key_value "$debug_frontend_env_file" NODE_ENV "production"
   write_env_key_value "$debug_frontend_env_file" VITE_AGENT_API_BASE ""
   write_env_key_value "$debug_frontend_env_file" VITE_AGENT_API_TOKEN ""
 
