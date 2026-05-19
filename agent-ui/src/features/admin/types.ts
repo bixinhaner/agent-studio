@@ -86,6 +86,13 @@ export type AdminConversationChannelSummary = {
   lastMessageAt: string | null;
 };
 
+export type AdminConversationAgentModeSummary = {
+  id: string;
+  name: string | null;
+  slug: string | null;
+  status: string | null;
+};
+
 export type AdminConversationSummary = {
   id: string;
   externalId: string | null;
@@ -101,6 +108,7 @@ export type AdminConversationSummary = {
   updatedAt: string;
   user: AdminConversationUser | null;
   channel: AdminConversationChannelSummary | null;
+  agentMode: AdminConversationAgentModeSummary | null;
   metrics: {
     messageCount: number;
     userMessageCount: number;

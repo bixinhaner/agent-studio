@@ -51,6 +51,7 @@ import type {
   AdminConversationFeedback,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
+  AdminConversationAgentModeSummary,
   AdminConversationSort,
   AdminConversationStatusFilter,
   AdminConversationSummary,
@@ -154,6 +155,21 @@ function conversationChannelTargetLabel(conversation: AdminConversationSummary):
 
 function conversationStatusColor(status: string): string {
   return status === "archived" ? "default" : "processing";
+}
+
+function conversationAgentModeLabel(agentMode: AdminConversationAgentModeSummary | null | undefined): string {
+  if (!agentMode) return "";
+  return agentMode.name || agentMode.slug || agentMode.id;
+}
+
+function conversationAgentModeTitle(agentMode: AdminConversationAgentModeSummary | null | undefined): string {
+  if (!agentMode) return "";
+  const parts = [
+    `智能体：${conversationAgentModeLabel(agentMode)}`,
+    agentMode.slug ? `Slug：${agentMode.slug}` : "",
+    `ID：${agentMode.id}`
+  ].filter(Boolean);
+  return parts.join("\n");
 }
 
 function conversationSkillSummaryLabel(skillNames: string[]): string {
@@ -966,6 +982,7 @@ function ConversationDetail(props: {
     (latestFeedback?.type === "negative" ? "未填写反馈备注" : latestFeedback ? "用户标记这条回答有帮助" : "")
   ).trim();
   const latestFeedbackPreview = latestFeedbackText.length > 72 ? `${latestFeedbackText.slice(0, 71)}…` : latestFeedbackText;
+  const agentModeLabel = conversationAgentModeLabel(conversation.agentMode);
 
   const focusFeedbackMessage = (messageId: string | null) => {
     if (!messageId) return;
@@ -986,6 +1003,11 @@ function ConversationDetail(props: {
           </div>
           <div className="conversation-detail-tags">
             {conversation.channel ? <Tag color="cyan">{conversation.channel.label}</Tag> : null}
+            {agentModeLabel ? (
+              <Tag color="geekblue" title={conversationAgentModeTitle(conversation.agentMode)}>
+                智能体：{agentModeLabel}
+              </Tag>
+            ) : null}
             {conversation.enabledSkillNames.map((skillName) => (
               <Tag key={skillName} color="blue">{skillName}</Tag>
             ))}
@@ -1055,7 +1077,9 @@ function ConversationDetail(props: {
               </div>
               <div>
                 <span className="field-label">Agent Mode</span>
-                <p>{conversation.channel.agentModeId || "-"}</p>
+                <p title={conversationAgentModeTitle(conversation.agentMode) || conversation.channel.agentModeId || ""}>
+                  {agentModeLabel || conversation.channel.agentModeId || "-"}
+                </p>
               </div>
               <div>
                 <span className="field-label">外部消息</span>

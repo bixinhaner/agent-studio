@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentModeIdFromRunConfig,
   enabledSkillNamesFromRunConfig,
   extractMessageAttachments,
   extractMessageProcessRows,
@@ -41,6 +42,17 @@ describe("enabledSkillNamesFromRunConfig", () => {
   it("returns an empty list when no skills were selected", () => {
     expect(enabledSkillNamesFromRunConfig({ enabledSkills: undefined })).toEqual([]);
     expect(enabledSkillNamesFromRunConfig(undefined)).toEqual([]);
+  });
+});
+
+describe("agentModeIdFromRunConfig", () => {
+  it("uses the stored runtime mode as the conversation agent mode id", () => {
+    expect(agentModeIdFromRunConfig({ mode: " agent-mode-1 " })).toBe("agent-mode-1");
+  });
+
+  it("falls back to legacy agentModeId values", () => {
+    expect(agentModeIdFromRunConfig({ agentModeId: "legacy-mode" })).toBe("legacy-mode");
+    expect(agentModeIdFromRunConfig({ mode: "", agentModeId: "fallback-mode" })).toBe("fallback-mode");
   });
 });
 

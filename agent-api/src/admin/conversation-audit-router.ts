@@ -59,6 +59,13 @@ type IntegrationInstanceAuditRow = {
   status: string;
 };
 
+type AgentModeAuditRow = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string | null;
+};
+
 type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
   user: {
     findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<ConversationAuditUserRow[]>;
@@ -78,6 +85,9 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
         type?: string;
       };
     }): Promise<IntegrationInstanceAuditRow[]>;
+  };
+  agentMode: {
+    findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<AgentModeAuditRow[]>;
   };
   externalConversationBinding: ExternalConversationBindingRepositoryDb["externalConversationBinding"];
 };
@@ -125,6 +135,13 @@ type ConversationChannelSummary = {
   lastMessageAt: string | null;
 };
 
+type ConversationAgentModeSummary = {
+  id: string;
+  name: string | null;
+  slug: string | null;
+  status: string | null;
+};
+
 type ConversationTranscriptMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";
@@ -166,6 +183,7 @@ type ConversationSummary = {
   updatedAt: string;
   user: ConversationAuditUser | null;
   channel: ConversationChannelSummary | null;
+  agentMode: ConversationAgentModeSummary | null;
   metrics: {
     messageCount: number;
     userMessageCount: number;
@@ -327,6 +345,10 @@ export function enabledSkillNamesFromRunConfig(codexRunConfig?: Record<string, u
     }
   }
   return names;
+}
+
+export function agentModeIdFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
+  return trimOrUndefined(codexRunConfig?.mode) ?? trimOrUndefined(codexRunConfig?.agentModeId);
 }
 
 function asBoolean(value: unknown): boolean | undefined {
@@ -1163,10 +1185,25 @@ function buildConversationChannelSummary(
   };
 }
 
+function buildConversationAgentModeSummary(
+  agentModeId: string | undefined,
+  agentModeMap: Map<string, AgentModeAuditRow>
+): ConversationAgentModeSummary | null {
+  if (!agentModeId) return null;
+  const agentMode = agentModeMap.get(agentModeId);
+  return {
+    id: agentModeId,
+    name: trimOrUndefined(agentMode?.name) ?? null,
+    slug: trimOrUndefined(agentMode?.slug) ?? null,
+    status: trimOrUndefined(agentMode?.status) ?? null
+  };
+}
+
 function buildConversationSummary(
   thread: ThreadRecord,
   user: ConversationAuditUser | null,
-  channel: ConversationChannelSummary | null = null
+  channel: ConversationChannelSummary | null = null,
+  agentModeMap: Map<string, AgentModeAuditRow> = new Map()
 ): ConversationSummary {
   const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
   const userMessages = transcript.filter((item) => item.role === "user");
@@ -1181,6 +1218,7 @@ function buildConversationSummary(
   );
   const feedback = normalizeFeedback(thread.feedback);
   const userAttachmentCount = userMessages.reduce((sum, item) => sum + item.attachments.length, 0);
+  const agentModeId = agentModeIdFromRunConfig(thread.codexRunConfig) ?? (channel?.agentModeId ?? undefined);
 
   return {
     id: thread.id,
@@ -1197,6 +1235,7 @@ function buildConversationSummary(
     updatedAt: thread.updatedAt,
     user,
     channel,
+    agentMode: buildConversationAgentModeSummary(agentModeId, agentModeMap),
     metrics: {
       messageCount: transcript.length,
       userMessageCount: userMessages.length,
@@ -1328,6 +1367,9 @@ function matchesQuery(summary: ConversationSummary, query: string | undefined): 
     summary.channel?.botId,
     summary.channel?.botName,
     summary.channel?.agentModeId,
+    summary.agentMode?.id,
+    summary.agentMode?.name,
+    summary.agentMode?.slug,
     ...summary.enabledSkillNames,
     summary.user?.displayName,
     summary.user?.email,
@@ -1515,13 +1557,15 @@ export function createConversationAuditRouter(options: {
   async function listConversationSummaries(): Promise<ConversationSummary[]> {
     const db = getDb();
     const repository = new ThreadRepository(db as unknown as ThreadRepositoryDb);
-    const [threads, users, integrations] = await Promise.all([
+    const [threads, users, integrations, agentModes] = await Promise.all([
       repository.list(undefined, true),
       db.user.findMany({ orderBy: { createdAt: "asc" } }),
-      db.integrationInstance.findMany()
+      db.integrationInstance.findMany(),
+      db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
     ]);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
+    const agentModeMap = new Map(agentModes.map((item) => [item.id, item] as const));
     const bindings = await new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds(
       threads.map((thread) => thread.id)
     );
@@ -1535,7 +1579,8 @@ export function createConversationAuditRouter(options: {
       buildConversationSummary(
         thread,
         userMap.get(thread.userId ?? "") ?? null,
-        buildConversationChannelSummary(bindingByThreadId.get(thread.id), integrationMap)
+        buildConversationChannelSummary(bindingByThreadId.get(thread.id), integrationMap),
+        agentModeMap
       )
     );
   }
@@ -1847,14 +1892,20 @@ export function createConversationAuditRouter(options: {
         return;
       }
 
-      const user = thread.userId ? normalizeUser(await db.user.findUnique({ where: { id: thread.userId } })) : null;
-      const [binding] = await new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds([thread.id]);
-      const integrationRows = binding ? await db.integrationInstance.findMany() : [];
+      const [userRow, bindings, integrationRows, agentModeRows] = await Promise.all([
+        thread.userId ? db.user.findUnique({ where: { id: thread.userId } }) : Promise.resolve(null),
+        new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds([thread.id]),
+        db.integrationInstance.findMany(),
+        db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
+      ]);
+      const user = normalizeUser(userRow);
+      const [binding] = bindings;
       const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
+      const agentModeMap = new Map(agentModeRows.map((item) => [item.id, item] as const));
       const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
 
       res.json({
-        conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap)),
+        conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap), agentModeMap),
         transcript: {
           messageCount: transcript.length,
           messages: transcript
