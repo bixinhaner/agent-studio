@@ -313,7 +313,6 @@ export class PortalRuntimeOptionService {
       const availableSkills: PortalRuntimeOptionSkill[] = [];
       const availableSkillIds = new Set<string>();
       const availableSkillNames = new Set<string>();
-      let valid = true;
       for (const binding of mode.skillPackages) {
         const skillPackage = skillPackageMap.get(binding.skillPackageId);
         if (
@@ -322,8 +321,7 @@ export class PortalRuntimeOptionService {
           !skillPackage.visibleToUsers ||
           !matchesOrganization(skillPackage.organizationId, input.organizationId)
         ) {
-          valid = false;
-          break;
+          continue;
         }
 
         const authorizedSkillPackageIds = new Set(
@@ -337,8 +335,7 @@ export class PortalRuntimeOptionService {
           })
         );
         if (!authorizedSkillPackageIds.has(skillPackage.id)) {
-          valid = false;
-          break;
+          continue;
         }
 
         dependentSkillPackages.push({
@@ -372,10 +369,6 @@ export class PortalRuntimeOptionService {
             availableSkills.push(runtimeSkill);
           }
         }
-      }
-
-      if (!valid) {
-        continue;
       }
 
       for (const privateSkill of activePrivateSkills) {
