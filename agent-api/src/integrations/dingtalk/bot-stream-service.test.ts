@@ -75,15 +75,20 @@ const TEST_INSTANCE: DingTalkBotInstance = {
   status: "active",
   clientId: "client-id",
   clientSecret: "client-secret",
+  apiBaseUrl: "https://api.dingtalk.test",
   robot: {
     enabled: true,
     receiveMode: "stream",
+    replyMode: "markdown",
     agentModeId: "agent-mode-1",
     knowledgeSetIds: [],
     singleChatEnabled: true,
     groupChatEnabled: true,
     groupReplyMode: "mention_only",
     autoSyncUsers: true,
+    streamingCardContentKey: "content",
+    streamingCardUpdateIntervalMs: 700,
+    streamingCardMinUpdateChars: 24,
     resetCommands: ["新对话"],
     unauthorizedMessage: "无权限",
     busyMessage: "处理中",
@@ -208,6 +213,81 @@ describe("DingTalkBotStreamService", () => {
       text: {
         content: "**加粗回复**"
       }
+    });
+
+    service.stop();
+  });
+
+  it("creates and streams AI cards when card streaming is configured", async () => {
+    const instance: DingTalkBotInstance = {
+      ...TEST_INSTANCE,
+      robot: {
+        ...TEST_INSTANCE.robot,
+        replyMode: "ai_card_stream",
+        streamingCardTemplateId: "template-1.schema",
+        streamingCardContentKey: "content",
+        streamingCardUpdateIntervalMs: 250,
+        streamingCardMinUpdateChars: 1
+      }
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return new Response(JSON.stringify({ accessToken: "app-token", expireIn: 7200 }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const service = new DingTalkBotStreamService({
+      listInstances: async () => [instance],
+      handleMessage: async (input) => {
+        const card = await input.reply.createStreamingCard({
+          initialData: {
+            question: input.text
+          }
+        });
+        await card.update("正在生成");
+        await card.finish("最终回答");
+        return {
+          status: "replied"
+        };
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    await service.refresh();
+
+    streamMock.MockDWClient.instances[0].emitCallback(streamMock.TOPIC_ROBOT, robotDownstream());
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://api.dingtalk.test/v1.0/oauth2/accessToken");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe("https://api.dingtalk.test/v1.0/card/instances/createAndDeliver");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      cardTemplateId: "template-1.schema",
+      callbackType: "STREAM",
+      openSpaceId: "dtv1.card//IM_ROBOT.staff-1",
+      cardData: {
+        cardParamMap: {
+          content: "",
+          question: "你好"
+        }
+      }
+    });
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      "x-acs-dingtalk-access-token": "app-token"
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      key: "content",
+      content: "正在生成",
+      isFull: true,
+      isFinalize: false,
+      isError: false
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toMatchObject({
+      key: "content",
+      content: "最终回答",
+      isFull: true,
+      isFinalize: true,
+      isError: false
     });
 
     service.stop();

@@ -24,6 +24,17 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+function asNumber(value: unknown, fallback: number, options: { min: number; max: number }): number {
+  const parsed =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(options.max, Math.max(options.min, Math.round(parsed)));
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -41,15 +52,21 @@ export function normalizeDingTalkBotConfig(input: unknown): DingTalkBotRuntimeCo
   const root = asRecord(input);
   const robot = asRecord(root?.robot) ?? {};
   const resetCommands = asStringArray(robot.resetCommands);
+  const replyMode = trimOrUndefined(robot.replyMode) === "ai_card_stream" ? "ai_card_stream" : "markdown";
   return {
     enabled: asBoolean(robot.enabled, false),
     receiveMode: "stream",
+    replyMode,
     agentModeId: trimOrUndefined(robot.agentModeId),
     knowledgeSetIds: asStringArray(robot.knowledgeSetIds),
     singleChatEnabled: asBoolean(robot.singleChatEnabled, true),
     groupChatEnabled: asBoolean(robot.groupChatEnabled, true),
     groupReplyMode: "mention_only",
     autoSyncUsers: asBoolean(robot.autoSyncUsers, true),
+    streamingCardTemplateId: trimOrUndefined(robot.streamingCardTemplateId),
+    streamingCardContentKey: trimOrUndefined(robot.streamingCardContentKey) ?? "content",
+    streamingCardUpdateIntervalMs: asNumber(robot.streamingCardUpdateIntervalMs, 700, { min: 250, max: 10_000 }),
+    streamingCardMinUpdateChars: asNumber(robot.streamingCardMinUpdateChars, 24, { min: 1, max: 1000 }),
     resetCommands: resetCommands.length > 0 ? resetCommands : DEFAULT_RESET_COMMANDS,
     unauthorizedMessage:
       trimOrUndefined(robot.unauthorizedMessage) ??

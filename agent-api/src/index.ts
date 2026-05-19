@@ -147,7 +147,8 @@ import {
   DingTalkBotStreamService,
   type DingTalkBotHandleResult,
   type DingTalkBotIncomingMessage,
-  type DingTalkBotInstance
+  type DingTalkBotInstance,
+  type DingTalkBotStreamingCardReply
 } from "./integrations/dingtalk/bot-stream-service.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
@@ -380,6 +381,7 @@ async function listDingTalkBotStreamInstances(): Promise<DingTalkBotInstance[]> 
       const secret = secretById.get(row.id) ?? {};
       const clientId = asString(config.clientId);
       const clientSecret = asString(secret.clientSecret);
+      const apiBaseUrl = asString(config.apiBaseUrl) ?? "https://api.dingtalk.com";
       const robot = normalizeDingTalkBotConfig(config);
       return {
         id: row.id,
@@ -389,6 +391,7 @@ async function listDingTalkBotStreamInstances(): Promise<DingTalkBotInstance[]> 
         organizationId: row.organizationId,
         clientId: clientId ?? "",
         clientSecret: clientSecret ?? "",
+        apiBaseUrl,
         robot
       };
     })
@@ -669,6 +672,17 @@ function extractCodexThreadIdFromRuntimeEvent(event: { type?: string; raw?: unkn
   const raw = asRecord(event.raw);
   const threadId = typeof raw?.thread_id === "string" ? raw.thread_id.trim() : "";
   return threadId || undefined;
+}
+
+function appendRuntimeAnswerPreview(
+  current: string,
+  event: { delta?: string; text?: string; raw?: unknown }
+): string {
+  const raw = asRecord(event.raw);
+  if (raw?.type === "item.completed") return current;
+  if (event.delta) return current + event.delta;
+  if (event.text && !current) return event.text;
+  return current;
 }
 
 async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRuntimeThread | undefined> {
@@ -2032,7 +2046,8 @@ async function resolveDingTalkBotActor(input: DingTalkBotIncomingMessage): Promi
   if (!user && input.instance.robot.autoSyncUsers && senderStaffId) {
     const profile = await createDingTalkClient({
       clientId: input.instance.clientId,
-      clientSecret: input.instance.clientSecret
+      clientSecret: input.instance.clientSecret,
+      apiBaseUrl: input.instance.apiBaseUrl
     }).getUser({ userId: senderStaffId });
     if (profile?.unionId) {
       user = await users.upsertFromDingTalk({
@@ -2399,6 +2414,25 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     throw new Error("DingTalk bot runtime session is not available");
   }
 
+  let streamingCardReply: DingTalkBotStreamingCardReply | undefined;
+  if (input.instance.robot.replyMode === "ai_card_stream" && input.instance.robot.streamingCardTemplateId) {
+    try {
+      streamingCardReply = await input.reply.createStreamingCard({
+        initialData: {
+          question: input.text,
+          senderNick: trimOrUndefined(input.robotMessage.senderNick) ?? "",
+          conversationType: scope
+        }
+      });
+    } catch (error) {
+      console.warn("DingTalk AI card reply creation failed; falling back to markdown reply", {
+        instanceId: input.instance.id,
+        msgId: input.robotMessage.msgId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   const userMessage = dingtalkMessage({
     id: input.robotMessage.msgId,
     role: "user",
@@ -2425,6 +2459,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   });
 
   let currentSession = session;
+  let streamedAnswerPreview = "";
   const runtimePrompt = dingtalkRuntimePrompt({
     text: input.text,
     scope,
@@ -2434,76 +2469,95 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   });
 
   let answerText = "";
-  await streamRuntimeCompletionWithBestEffortUsage({
-    events: runtime.runStreamed(liveThread, withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig)),
-    onEvent(event) {
-      const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
-      if (codexThreadId) {
-        void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
-          currentSession = updated;
-        });
-      }
-    },
-    async onDone(payload) {
-      answerText = payload.answer.trim() || "已完成处理，但没有生成可发送的文本回复。";
-      await threads.appendMessage(thread!.id, {
-        parentId: input.robotMessage.msgId,
-        message: dingtalkMessage({
-          id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
-          role: "assistant",
-          text: answerText,
-          metadata: {
+  let streamingCardFinalized = false;
+  try {
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: runtime.runStreamed(liveThread, withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig)),
+      onEvent(event) {
+        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+        if (codexThreadId) {
+          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+            currentSession = updated;
+          });
+        }
+        if (streamingCardReply) {
+          const nextPreview = appendRuntimeAnswerPreview(streamedAnswerPreview, event);
+          if (nextPreview !== streamedAnswerPreview) {
+            streamedAnswerPreview = nextPreview;
+            void streamingCardReply.update(streamedAnswerPreview);
+          }
+        }
+      },
+      async onDone(payload) {
+        answerText = payload.answer.trim() || "已完成处理，但没有生成可发送的文本回复。";
+        if (streamingCardReply) {
+          await streamingCardReply.finish(answerText);
+          streamingCardFinalized = true;
+        }
+        await threads.appendMessage(thread!.id, {
+          parentId: input.robotMessage.msgId,
+          message: dingtalkMessage({
+            id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
+            role: "assistant",
+            text: answerText,
+            metadata: {
+              channel: DINGTALK_BOT_CHANNEL,
+              integrationInstanceId: input.instance.id,
+              externalConversationKey,
+              conversationType: scope
+            }
+          }),
+          runConfig: {
             channel: DINGTALK_BOT_CHANNEL,
             integrationInstanceId: input.instance.id,
             externalConversationKey,
             conversationType: scope
           }
-        }),
-        runConfig: {
-          channel: DINGTALK_BOT_CHANNEL,
-          integrationInstanceId: input.instance.id,
-          externalConversationKey,
-          conversationType: scope
-        }
-      });
-    },
-    async recordUsage(usage) {
-      const departmentIdSnapshot =
-        trimOrUndefined(actor.currentUser.organizationType) === "internal"
-          ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
-          : undefined;
-      await usageIngestion.record({
-        organizationId: actor.currentUser.organizationId,
-        userId: actor.currentUser.id,
-        departmentIdSnapshot,
-        threadId: thread!.id,
-        sessionId: currentSession.sessionId,
-        model: currentSession.model,
-        featureType: "chat",
-        inputTokens: usage.inputTokens,
-        cachedInputTokens: usage.cachedInputTokens,
-        outputTokens: usage.outputTokens,
-        resultStatus: "success",
-        metadata: {
-          source: DINGTALK_BOT_CHANNEL,
-          integrationInstanceId: input.instance.id,
-          integrationSlug: input.instance.slug,
-          agentModeId,
-          conversationType: scope,
-          externalConversationKey,
-          externalConversationId: input.robotMessage.conversationId,
-          externalMessageId: input.robotMessage.msgId
-        }
-      });
-    },
-    onTelemetryError(error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      console.warn("DingTalk bot usage telemetry ingestion failed", {
-        threadId: thread?.id,
-        detail
-      });
+        });
+      },
+      async recordUsage(usage) {
+        const departmentIdSnapshot =
+          trimOrUndefined(actor.currentUser.organizationType) === "internal"
+            ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
+            : undefined;
+        await usageIngestion.record({
+          organizationId: actor.currentUser.organizationId,
+          userId: actor.currentUser.id,
+          departmentIdSnapshot,
+          threadId: thread!.id,
+          sessionId: currentSession.sessionId,
+          model: currentSession.model,
+          featureType: "chat",
+          inputTokens: usage.inputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          outputTokens: usage.outputTokens,
+          resultStatus: "success",
+          metadata: {
+            source: DINGTALK_BOT_CHANNEL,
+            integrationInstanceId: input.instance.id,
+            integrationSlug: input.instance.slug,
+            agentModeId,
+            conversationType: scope,
+            externalConversationKey,
+            externalConversationId: input.robotMessage.conversationId,
+            externalMessageId: input.robotMessage.msgId
+          }
+        });
+      },
+      onTelemetryError(error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn("DingTalk bot usage telemetry ingestion failed", {
+          threadId: thread?.id,
+          detail
+        });
+      }
+    });
+  } catch (error) {
+    if (streamingCardReply) {
+      await streamingCardReply.fail(input.instance.robot.errorMessage || "这条消息处理失败，请稍后重试。").catch(() => undefined);
     }
-  });
+    throw error;
+  }
 
   await externalConversationBindings.touch({
     externalConversationKey,
@@ -2519,7 +2573,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
 
   return {
     status: "replied",
-    replyText: answerText
+    replyText: streamingCardFinalized ? undefined : answerText
   };
 }
 

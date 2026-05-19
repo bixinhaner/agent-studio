@@ -143,12 +143,17 @@ export type DingTalkSecretInput = {
 export type DingTalkBotConfigInput = {
   enabled?: boolean;
   receiveMode?: 'stream';
+  replyMode?: 'markdown' | 'ai_card_stream';
   agentModeId?: string;
   knowledgeSetIds?: string[];
   singleChatEnabled?: boolean;
   groupChatEnabled?: boolean;
   groupReplyMode?: 'mention_only';
   autoSyncUsers?: boolean;
+  streamingCardTemplateId?: string;
+  streamingCardContentKey?: string;
+  streamingCardUpdateIntervalMs?: number;
+  streamingCardMinUpdateChars?: number;
   resetCommands?: string[];
   unauthorizedMessage?: string;
   busyMessage?: string;

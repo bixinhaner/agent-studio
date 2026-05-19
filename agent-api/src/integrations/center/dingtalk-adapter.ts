@@ -75,6 +75,9 @@ export class DingTalkIntegrationAdapter {
     if (robot.enabled && !robot.agentModeId) {
       missingRobotConfig.push("robot.agentModeId");
     }
+    if (robot.enabled && robot.replyMode === "ai_card_stream" && !robot.streamingCardTemplateId) {
+      missingRobotConfig.push("robot.streamingCardTemplateId");
+    }
 
     try {
       const client = this.clientFactory(payload);
@@ -91,8 +94,10 @@ export class DingTalkIntegrationAdapter {
           robot: {
             enabled: robot.enabled,
             receiveMode: robot.receiveMode,
+            replyMode: robot.replyMode,
             agentModeId: robot.agentModeId,
             knowledgeSetCount: robot.knowledgeSetIds.length,
+            streamingCardTemplateId: robot.streamingCardTemplateId,
             missing: missingRobotConfig
           }
         }

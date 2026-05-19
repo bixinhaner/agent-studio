@@ -8,9 +8,13 @@ describe("normalizeDingTalkBotConfig", () => {
 
     expect(config.enabled).toBe(false);
     expect(config.receiveMode).toBe("stream");
+    expect(config.replyMode).toBe("markdown");
     expect(config.singleChatEnabled).toBe(true);
     expect(config.groupChatEnabled).toBe(true);
     expect(config.autoSyncUsers).toBe(true);
+    expect(config.streamingCardContentKey).toBe("content");
+    expect(config.streamingCardUpdateIntervalMs).toBe(700);
+    expect(config.streamingCardMinUpdateChars).toBe(24);
     expect(config.resetCommands).toContain("新对话");
   });
 
@@ -18,22 +22,32 @@ describe("normalizeDingTalkBotConfig", () => {
     const config = normalizeDingTalkBotConfig({
       robot: {
         enabled: true,
+        replyMode: "ai_card_stream",
         agentModeId: " mode-1 ",
         knowledgeSetIds: ["ks-1", "ks-1", "", " ks-2 "],
         singleChatEnabled: false,
         groupChatEnabled: true,
         autoSyncUsers: false,
+        streamingCardTemplateId: " template.schema ",
+        streamingCardContentKey: " answer ",
+        streamingCardUpdateIntervalMs: "500",
+        streamingCardMinUpdateChars: "12",
         resetCommands: [" Restart ", "restart", "/new"],
         errorMessage: "自定义错误"
       }
     });
 
     expect(config.enabled).toBe(true);
+    expect(config.replyMode).toBe("ai_card_stream");
     expect(config.agentModeId).toBe("mode-1");
     expect(config.knowledgeSetIds).toEqual(["ks-1", "ks-2"]);
     expect(config.singleChatEnabled).toBe(false);
     expect(config.groupChatEnabled).toBe(true);
     expect(config.autoSyncUsers).toBe(false);
+    expect(config.streamingCardTemplateId).toBe("template.schema");
+    expect(config.streamingCardContentKey).toBe("answer");
+    expect(config.streamingCardUpdateIntervalMs).toBe(500);
+    expect(config.streamingCardMinUpdateChars).toBe(12);
     expect(config.resetCommands).toEqual(["Restart", "restart", "/new"]);
     expect(config.errorMessage).toBe("自定义错误");
   });

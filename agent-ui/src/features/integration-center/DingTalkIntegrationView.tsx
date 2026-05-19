@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Checkbox, Empty, Input, Segmented, Select, Space, Spin, Switch, Tag } from "antd";
+import { Alert, Button, Card, Checkbox, Empty, Input, InputNumber, Segmented, Select, Space, Spin, Switch, Tag } from "antd";
 import { Bot, MessageCircle, RefreshCcw } from "lucide-react";
 
 import { fetchAgentModes } from "../capability-center/api";
@@ -46,12 +46,17 @@ const STATUS_OPTIONS = [
 const DEFAULT_BOT_CONFIG: Required<DingTalkBotConfigInput> = {
   enabled: false,
   receiveMode: "stream",
+  replyMode: "markdown",
   agentModeId: "",
   knowledgeSetIds: [],
   singleChatEnabled: true,
   groupChatEnabled: true,
   groupReplyMode: "mention_only",
   autoSyncUsers: true,
+  streamingCardTemplateId: "",
+  streamingCardContentKey: "content",
+  streamingCardUpdateIntervalMs: 700,
+  streamingCardMinUpdateChars: 24,
   resetCommands: ["新对话", "重置", "reset", "/reset"],
   unauthorizedMessage: "当前钉钉账号还没有关联到 Agent Studio 用户，请联系管理员同步组织通讯录。",
   busyMessage: "上一条消息还在处理中，请稍后再发。",
@@ -82,6 +87,17 @@ function asBoolean(value: unknown, fallback: boolean) {
   return fallback;
 }
 
+function asNumber(value: unknown, fallback: number, min: number, max: number) {
+  const parsed =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
 function asStringArray(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
   const seen = new Set<string>();
@@ -101,12 +117,27 @@ function readBotConfig(value: unknown): Required<DingTalkBotConfigInput> {
   return {
     enabled: asBoolean(robot.enabled, DEFAULT_BOT_CONFIG.enabled),
     receiveMode: "stream",
+    replyMode: asString(robot.replyMode) === "ai_card_stream" ? "ai_card_stream" : "markdown",
     agentModeId: asString(robot.agentModeId),
     knowledgeSetIds: asStringArray(robot.knowledgeSetIds),
     singleChatEnabled: asBoolean(robot.singleChatEnabled, DEFAULT_BOT_CONFIG.singleChatEnabled),
     groupChatEnabled: asBoolean(robot.groupChatEnabled, DEFAULT_BOT_CONFIG.groupChatEnabled),
     groupReplyMode: "mention_only",
     autoSyncUsers: asBoolean(robot.autoSyncUsers, DEFAULT_BOT_CONFIG.autoSyncUsers),
+    streamingCardTemplateId: asString(robot.streamingCardTemplateId),
+    streamingCardContentKey: asString(robot.streamingCardContentKey) || DEFAULT_BOT_CONFIG.streamingCardContentKey,
+    streamingCardUpdateIntervalMs: asNumber(
+      robot.streamingCardUpdateIntervalMs,
+      DEFAULT_BOT_CONFIG.streamingCardUpdateIntervalMs,
+      250,
+      10_000
+    ),
+    streamingCardMinUpdateChars: asNumber(
+      robot.streamingCardMinUpdateChars,
+      DEFAULT_BOT_CONFIG.streamingCardMinUpdateChars,
+      1,
+      1000
+    ),
     resetCommands: resetCommands.length > 0 ? resetCommands : DEFAULT_BOT_CONFIG.resetCommands,
     unauthorizedMessage: asString(robot.unauthorizedMessage) || DEFAULT_BOT_CONFIG.unauthorizedMessage,
     busyMessage: asString(robot.busyMessage) || DEFAULT_BOT_CONFIG.busyMessage,
@@ -138,12 +169,17 @@ function buildBotConfig(draft: Required<DingTalkBotConfigInput>): DingTalkBotCon
   return {
     enabled: draft.enabled,
     receiveMode: "stream",
+    replyMode: draft.replyMode,
     agentModeId: draft.agentModeId.trim(),
     knowledgeSetIds: asStringArray(draft.knowledgeSetIds),
     singleChatEnabled: draft.singleChatEnabled,
     groupChatEnabled: draft.groupChatEnabled,
     groupReplyMode: "mention_only",
     autoSyncUsers: draft.autoSyncUsers,
+    streamingCardTemplateId: draft.streamingCardTemplateId.trim(),
+    streamingCardContentKey: draft.streamingCardContentKey.trim() || "content",
+    streamingCardUpdateIntervalMs: asNumber(draft.streamingCardUpdateIntervalMs, 700, 250, 10_000),
+    streamingCardMinUpdateChars: asNumber(draft.streamingCardMinUpdateChars, 24, 1, 1000),
     resetCommands: asStringArray(draft.resetCommands),
     unauthorizedMessage: draft.unauthorizedMessage.trim(),
     busyMessage: draft.busyMessage.trim(),
@@ -298,6 +334,11 @@ export function DingTalkIntegrationView(props: {
       setActiveTab("bot");
       return;
     }
+    if (robotDraft.enabled && robotDraft.replyMode === "ai_card_stream" && !robotDraft.streamingCardTemplateId.trim()) {
+      setErrorText("启用 AI 卡片流式回复前需要填写卡片模板 ID");
+      setActiveTab("bot");
+      return;
+    }
 
     setSaving(true);
     setErrorText("");
@@ -379,7 +420,12 @@ export function DingTalkIntegrationView(props: {
     );
   }
 
-  const botConfigured = Boolean(configDraft.clientId?.trim() && detail.secretState.hasSecrets && robotDraft.agentModeId.trim());
+  const botConfigured = Boolean(
+    configDraft.clientId?.trim() &&
+      detail.secretState.hasSecrets &&
+      robotDraft.agentModeId.trim() &&
+      (robotDraft.replyMode !== "ai_card_stream" || robotDraft.streamingCardTemplateId.trim())
+  );
 
   return (
     <section className="resource-center-section integration-detail-shell antd-admin-card">
@@ -554,6 +600,78 @@ export function DingTalkIntegrationView(props: {
               onChange={(value) => setRobotDraft((current) => ({ ...current, knowledgeSetIds: value }))}
             />
           </label>
+          <label className="field integration-field-span-2">
+            <span className="field-label">回复模式</span>
+            <Segmented
+              value={robotDraft.replyMode}
+              options={[
+                { label: "Markdown", value: "markdown" },
+                { label: "AI 卡片流式", value: "ai_card_stream" }
+              ]}
+              onChange={(value) =>
+                setRobotDraft((current) => ({
+                  ...current,
+                  replyMode: value === "ai_card_stream" ? "ai_card_stream" : "markdown"
+                }))
+              }
+            />
+          </label>
+          {robotDraft.replyMode === "ai_card_stream" ? (
+            <>
+              <label className="field">
+                <span className="field-label">AI 卡片模板 ID</span>
+                <Input
+                  value={robotDraft.streamingCardTemplateId}
+                  placeholder="例如：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.schema"
+                  onChange={(event) => setRobotDraft((current) => ({ ...current, streamingCardTemplateId: event.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">流式内容变量 Key</span>
+                <Input
+                  value={robotDraft.streamingCardContentKey}
+                  onChange={(event) => setRobotDraft((current) => ({ ...current, streamingCardContentKey: event.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">更新间隔 ms</span>
+                <InputNumber
+                  min={250}
+                  max={10000}
+                  step={100}
+                  value={robotDraft.streamingCardUpdateIntervalMs}
+                  style={{ width: "100%" }}
+                  onChange={(value) =>
+                    setRobotDraft((current) => ({
+                      ...current,
+                      streamingCardUpdateIntervalMs: typeof value === "number" ? value : DEFAULT_BOT_CONFIG.streamingCardUpdateIntervalMs
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">最小更新字符数</span>
+                <InputNumber
+                  min={1}
+                  max={1000}
+                  value={robotDraft.streamingCardMinUpdateChars}
+                  style={{ width: "100%" }}
+                  onChange={(value) =>
+                    setRobotDraft((current) => ({
+                      ...current,
+                      streamingCardMinUpdateChars: typeof value === "number" ? value : DEFAULT_BOT_CONFIG.streamingCardMinUpdateChars
+                    }))
+                  }
+                />
+              </label>
+              <Alert
+                type="info"
+                showIcon
+                className="admin-alert-inline integration-field-span-2"
+                message="卡片模板需要在钉钉卡片平台创建并发布，模板里应包含一个流式 Markdown 变量，默认变量名为 content。未投放成功时会自动回退为普通 Markdown 回复。"
+              />
+            </>
+          ) : null}
           <div className="field integration-field-span-2">
             <span className="field-label">会话范围</span>
             <Space wrap>
