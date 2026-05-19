@@ -1,0 +1,3 @@
+为什么：钉钉机器人分支用 base codexRunConfig 与已物化的 active session 配置比较，导致每轮都误判配置变化并重建 Codex session，模型无法看到上一轮上下文。
+
+对用户的影响：钉钉单聊和群聊后续会复用同一个 Codex session，类似 Web Portal 通过 codexThreadId 自然延续上下文，不需要把历史手动拼进提示词。
