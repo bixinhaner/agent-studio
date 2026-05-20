@@ -4,6 +4,10 @@ import type { IncomingHttpHeaders } from "node:http";
 import path from "node:path";
 
 import { CodexRuntime } from "../../codex-runtime.js";
+import {
+  extractRuntimeUsageFromStreamEvent,
+  type RuntimeUsageSnapshot
+} from "../../live-runtime-session.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
 import { ZendeskBindingStore } from "./binding-store.js";
 import {
@@ -79,6 +83,21 @@ type ZendeskConversationAuditAction = {
   status: ZendeskRunStatus;
   detail: string;
   decision: ZendeskAgentDecision["decision"];
+};
+
+type ZendeskUsageTelemetryInput = {
+  usage: RuntimeUsageSnapshot;
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+  runtime: Omit<ZendeskAgentRuntimeOptions, "runtime">;
+  codexThreadId?: string;
+  auditThreadId?: string;
+  externalConversationKey?: string;
 };
 
 type ZendeskConversationAuditState = {
@@ -645,6 +664,7 @@ export class ZendeskIntegrationService {
         source: "webhook" | "manual";
       }) => Promise<ZendeskAgentRuntimeOptions>;
       conversationAudit?: ZendeskConversationAuditSync;
+      recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
     private readonly bindingStore = new ZendeskBindingStore(),
@@ -1182,13 +1202,53 @@ export class ZendeskIntegrationService {
       )
     );
     let output = "";
+    let latestUsage: RuntimeUsageSnapshot | undefined;
     for await (const event of runtime.runStreamed(thread, prompt)) {
       observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
+      latestUsage = extractRuntimeUsageFromStreamEvent(event) || latestUsage;
       collectRuntimeProcessRow(event, processRows);
       if (event.delta) output += event.delta;
       else if (!output && event.text) output += event.text;
     }
     processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
+
+    if (latestUsage && this.dependencies.recordUsage) {
+      try {
+        await this.dependencies.recordUsage({
+          usage: latestUsage,
+          settings,
+          context: preparedContext,
+          requesterComment,
+          instanceId: run.instanceId,
+          ticketId: run.ticketId,
+          runId: run.runId,
+          source: run.source,
+          runtime: publicRuntimeOptions,
+          codexThreadId: observedCodexThreadId,
+          auditThreadId: audit?.threadId,
+          externalConversationKey: audit?.externalConversationKey
+        });
+        processRows.push(
+          zendeskProcessRow(
+            "done",
+            "Recorded usage telemetry",
+            [
+              `input_tokens: ${latestUsage.inputTokens}`,
+              `cached_input_tokens: ${latestUsage.cachedInputTokens}`,
+              `output_tokens: ${latestUsage.outputTokens}`
+            ].join("\n")
+          )
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn("[zendesk] usage telemetry ingestion failed", {
+          ticketId: run.ticketId,
+          instanceId: run.instanceId,
+          detail
+        });
+        processRows.push(zendeskProcessRow("error", "Usage telemetry failed", detail));
+      }
+    }
 
     await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
       codexThreadId: observedCodexThreadId,

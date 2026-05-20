@@ -277,8 +277,19 @@ describe("ZendeskIntegrationService", () => {
             reasons: ["test"]
           })
         };
+        yield {
+          type: "turn.completed",
+          raw: {
+            usage: {
+              input_tokens: 1200,
+              cached_input_tokens: 300,
+              output_tokens: 180
+            }
+          }
+        };
       })
     };
+    const recordUsage = vi.fn(async (_input: unknown) => undefined);
 
     const settingsStore = {
       get: vi.fn(async () => ({ ...baseSettings, zendeskBaseUrl: "https://example.zendesk.com", zendeskEmail: "agent@example.com", zendeskApiToken: "token" })),
@@ -358,7 +369,8 @@ describe("ZendeskIntegrationService", () => {
             }
           ]
         })),
-        conversationAudit
+        conversationAudit,
+        recordUsage
       },
       settingsStore as never,
       bindingStore as unknown as ZendeskBindingStore,
@@ -412,6 +424,22 @@ describe("ZendeskIntegrationService", () => {
         },
         codexThreadId: "codex-thread-1"
       });
+      expect(recordUsage).toHaveBeenCalledTimes(2);
+      expect(recordUsage.mock.calls[0]?.[0]).toMatchObject({
+        instanceId: "zendesk-1",
+        ticketId: "123",
+        runId: "run-1",
+        auditThreadId: "audit-thread-1",
+        externalConversationKey: "zendesk:zendesk-1:ticket:123:mode-1",
+        runtime: {
+          model: "gpt-5.5"
+        },
+        usage: {
+          inputTokens: 1200,
+          cachedInputTokens: 300,
+          outputTokens: 180
+        }
+      });
       const firstAuditAfterRun = conversationAudit.afterAgentRun.mock.calls[0]?.[0] as
         | { action?: { body?: string } }
         | undefined;
@@ -431,6 +459,7 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ title: "Model reasoning summary" }),
           expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),
           expect.objectContaining({ title: "Command execution completed" }),
+          expect.objectContaining({ title: "Recorded usage telemetry" }),
           expect.objectContaining({ title: "Wrote Zendesk internal note" })
         ])
       );

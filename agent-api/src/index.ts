@@ -320,12 +320,57 @@ const accessRequestService = createAccessRequestService({
   }
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+const usageIngestion = new UsageIngestionService({
+  usageEvents: usageEventRepository,
+  costProfiles
+});
 const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
   resolveAgentRuntime: resolveZendeskAgentRuntimeOptions,
   conversationAudit: {
     beforeAgentRun: syncZendeskConversationBeforeAgentRun,
     afterAgentRun: syncZendeskConversationAfterAgentRun
+  },
+  async recordUsage(input) {
+    const integration = input.instanceId
+      ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })
+      : null;
+    const integrationSlug =
+      typeof integration?.slug === "string" && integration.slug.trim()
+        ? integration.slug.trim()
+        : input.instanceId || "legacy";
+    await usageIngestion.record({
+      organizationId: integration?.organizationId ?? undefined,
+      userId: `zendesk-bot:${input.instanceId || "legacy"}`,
+      threadId: input.auditThreadId,
+      sessionId: `zendesk:${input.instanceId || "legacy"}:ticket:${input.ticketId}`,
+      model: input.runtime.model,
+      featureType: "chat",
+      inputTokens: input.usage.inputTokens,
+      cachedInputTokens: input.usage.cachedInputTokens,
+      outputTokens: input.usage.outputTokens,
+      resultStatus: "success",
+      metadata: Object.fromEntries(
+        Object.entries({
+          source: ZENDESK_CHANNEL,
+          actorName: "Zendesk 自动回复",
+          integrationInstanceId: input.instanceId,
+          integrationSlug,
+          ticketId: input.ticketId,
+          ticketSubject: input.context.ticket.subject,
+          requesterId: input.context.ticket.requesterId,
+          requesterName: input.context.ticket.requester?.name,
+          requesterEmail: input.context.ticket.requester?.email,
+          requesterOrganization: input.context.ticket.requester?.organizationName,
+          requesterCountryRegion: input.context.ticket.requester?.countryRegion,
+          requesterCommentId: input.requesterComment.id,
+          runId: input.runId,
+          triggerSource: input.source,
+          codexThreadId: input.codexThreadId,
+          externalConversationKey: input.externalConversationKey
+        }).filter(([, value]) => value !== undefined)
+      )
+    });
   }
 });
 const brandingAssetStorage = new BrandingAssetStorage(appConfig.brandingAssetRoot);
@@ -342,10 +387,6 @@ const integrationCenter = createIntegrationCenterService({
   }
 });
 const resourceAccessLogs = new ResourceAccessLogService(resourceAccessLogRepository);
-const usageIngestion = new UsageIngestionService({
-  usageEvents: usageEventRepository,
-  costProfiles
-});
 const subscriptionEntitlements = new SubscriptionEntitlementService({
   grants: subscriptionGrants,
   plans: subscriptionPlans,

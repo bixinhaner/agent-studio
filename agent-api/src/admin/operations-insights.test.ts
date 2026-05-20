@@ -183,4 +183,81 @@ describe("buildOperationsInsights", () => {
       totalTokens: 340
     });
   });
+
+  it("labels Zendesk usage as a first-class operations analytics source", () => {
+    const usageEvents = [
+      makeUsageEvent({
+        id: "evt-zendesk-1",
+        organizationId: "org-z",
+        userId: "zendesk-bot:zendesk-1",
+        threadId: "thread-zendesk-45268",
+        sessionId: "zendesk:zendesk-1:ticket:45268",
+        model: "gpt-5.5",
+        featureType: "chat",
+        inputTokens: 1000,
+        cachedInputTokens: 200,
+        outputTokens: 300,
+        estimatedCost: "0.750000",
+        internalCost: "1.500000",
+        metadata: {
+          source: "zendesk",
+          actorName: "Zendesk 自动回复",
+          integrationSlug: "zendesk-main",
+          ticketId: "45268",
+          runId: "run-zendesk-1"
+        },
+        createdAt: "2026-04-15T06:00:00.000Z"
+      })
+    ];
+
+    const response = buildOperationsInsights({
+      usageEvents,
+      sessionsById: new Map(),
+      organizationsById: new Map([
+        ["org-z", { id: "org-z", slug: "zeta", name: "Zeta Support", type: "customer", status: "active", createdAt: "", updatedAt: "" }]
+      ]),
+      usersById: new Map(),
+      departmentsById: new Map(),
+      filters: {
+        days: 30,
+        timeZone: "Asia/Shanghai",
+        sessionPage: 1,
+        sessionPageSize: 20
+      },
+      now: new Date("2026-04-16T00:00:00.000Z")
+    });
+
+    expect(response.summary.totalSessions).toBe(1);
+    expect(response.summary.totalUsers).toBe(1);
+    expect(response.breakdowns.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "zendesk",
+          label: "Zendesk 自动回复",
+          requestCount: 1
+        })
+      ])
+    );
+    expect(response.breakdowns.paths).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "zendesk:zendesk-main",
+          label: "Zendesk 自动回复 · zendesk-main",
+          totalTokens: 1500
+        })
+      ])
+    );
+    expect(response.users[0]).toMatchObject({
+      userId: "zendesk-bot:zendesk-1",
+      userName: "Zendesk 自动回复",
+      organizationName: "Zeta Support"
+    });
+    expect(response.sessions.items[0]).toMatchObject({
+      sessionId: "zendesk:zendesk-1:ticket:45268",
+      threadId: "thread-zendesk-45268",
+      userName: "Zendesk 自动回复",
+      pathLabel: "Zendesk 自动回复 · zendesk-main",
+      totalTokens: 1500
+    });
+  });
 });

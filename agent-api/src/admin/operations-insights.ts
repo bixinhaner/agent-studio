@@ -455,6 +455,9 @@ function entryFromEvent(record: UsageEventRecord): LabeledEntity {
   if (source === "chat_stream") {
     return { key: "chat_stream", label: "AI 助手工作台" };
   }
+  if (source === "zendesk") {
+    return { key: "zendesk", label: "Zendesk 自动回复" };
+  }
   if (source === "openai_compatible_api" || record.featureType === "external_openai_api") {
     return { key: "external_openai_api", label: "外部 OpenAI API" };
   }
@@ -467,6 +470,13 @@ function entryFromEvent(record: UsageEventRecord): LabeledEntity {
 function pathFromEvent(record: UsageEventRecord): LabeledEntity {
   const metadata = asRecord(record.metadata);
   const source = trimOrUndefined(typeof metadata?.source === "string" ? metadata.source : undefined);
+  if (source === "zendesk") {
+    const slug = trimOrUndefined(typeof metadata?.integrationSlug === "string" ? metadata.integrationSlug : undefined);
+    return {
+      key: slug ? `zendesk:${slug}` : "zendesk",
+      label: slug ? `Zendesk 自动回复 · ${slug}` : "Zendesk 自动回复"
+    };
+  }
   if (source === "openai_compatible_api" || record.featureType === "external_openai_api") {
     const slug = trimOrUndefined(typeof metadata?.integrationSlug === "string" ? metadata.integrationSlug : undefined);
     return {
@@ -537,6 +547,9 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
     const user = userId ? input.usersById.get(userId) : undefined;
     const departmentId = trimOrUndefined(record.departmentIdSnapshot);
     const department = departmentId ? input.departmentsById.get(departmentId) ?? undefined : undefined;
+    const metadata = asRecord(record.metadata);
+    const source = trimOrUndefined(typeof metadata?.source === "string" ? metadata.source : undefined);
+    const actorName = trimOrUndefined(typeof metadata?.actorName === "string" ? metadata.actorName : undefined);
     const entry = entryFromEvent(record);
     const path = pathFromSession(session) ?? pathFromEvent(record);
     const totalTokens = record.inputTokens + record.cachedInputTokens + record.outputTokens;
@@ -551,7 +564,7 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
       organizationSlug: organization?.slug,
       organizationType: organization?.type,
       userId,
-      userName: fallbackUserName(userId, user),
+      userName: source === "zendesk" ? actorName ?? "Zendesk 自动回复" : fallbackUserName(userId, user),
       userEmail: trimOrUndefined(user?.email),
       departmentId,
       departmentName: department?.name ?? departmentId,
