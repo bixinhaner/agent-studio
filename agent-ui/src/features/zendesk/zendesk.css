@@ -142,6 +142,13 @@
   line-height: 1.5;
 }
 
+.zendesk-prompt-template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .zendesk-trigger-list {
   display: grid;
   gap: 10px;

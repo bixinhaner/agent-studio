@@ -60,6 +60,49 @@ const DEFAULT_ATTACHMENT_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ];
 
+const DEFAULT_ZENDESK_CHANNEL_PROMPT = [
+  "You are an automated support agent connected to Zendesk.",
+  "Use the current workspace, attached files, mounted knowledge sets, scripts, and documents as the source of truth. Do not invent unknown facts.",
+  "If the ticket context is insufficient for a reliable customer-facing answer, choose internal_note or handoff instead of forcing a public reply.",
+  "Public replies must be concise, accurate, actionable, and written in the language of the customer's latest message whenever possible.",
+  "Do not claim that a human action was completed, and do not pretend to have performed an operation that cannot be verified from the context.",
+  "Return JSON only. Do not include any extra prose outside the JSON object."
+].join("\n");
+
+const ZENDESK_CORE_PROTOCOL_PROMPT = [
+  "Use the Zendesk ticket context to decide the next action.",
+  "The model must return one JSON object with decision, body, internalNote, confidence, and reasons.",
+  "Allowed decisions are public_reply, internal_note, and handoff.",
+  "The public body must never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details.",
+  "Downloaded attachments are referenced by local_path and may be read when relevant.",
+  "The service parses this JSON and writes either a Zendesk public reply, an internal note, a handoff note, or skips the ticket."
+].join("\n");
+
+const AGENT_MODE_PROMPT_TEMPLATE = [
+  "You are a Baicells technical support agent assisting the support team with Zendesk tickets.",
+  "",
+  "Goals:",
+  "- Decide whether the customer can receive a safe public reply.",
+  "- When a public reply is safe, provide a concise, accurate, and actionable answer.",
+  "- When information is missing, the request requires verification, or the answer would create a commitment, recommend an internal note or human handoff.",
+  "",
+  "Response principles:",
+  "- Use the language of the customer's latest message whenever possible.",
+  "- Do not reveal internal systems, local paths, logs, implementation details, or AI workflow.",
+  "- Do not invent device status, shipment status, account changes, SLA promises, refunds, or completed operations.",
+  "- If screenshots, logs, PDFs, spreadsheets, or other attachments are available, inspect them before making a decision.",
+  "",
+  "Support boundaries:",
+  "- You may explain common CPE, base station, network connectivity, configuration, and troubleshooting steps.",
+  "- You may use mounted knowledge sets for product procedures, parameters, and support articles.",
+  "- You must not promise contract changes, refunds, shipping actions, account permission changes, or remote operations unless the context explicitly proves they have already been completed.",
+  "",
+  "Internal note guidance:",
+  "- List missing information that the support team should ask for.",
+  "- Explain why human verification is needed when you recommend handoff.",
+  "- Include practical next steps for device, SIM, coverage, configuration, or platform-side investigation when relevant."
+].join("\n");
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -98,6 +141,18 @@ function normalizeOption(value: string, allowed: Set<string>, fallback: string) 
   return allowed.has(value) ? value : fallback;
 }
 
+function normalizeZendeskChannelPrompt(value: unknown) {
+  const prompt = asString(value).trim();
+  const isLegacyDefault =
+    prompt.charCodeAt(0) === 0x4f60 &&
+    prompt.includes("Zendesk") &&
+    prompt.includes("internal_note") &&
+    prompt.includes("handoff") &&
+    prompt.includes("JSON");
+  if (!prompt || isLegacyDefault) return DEFAULT_ZENDESK_CHANNEL_PROMPT;
+  return prompt;
+}
+
 function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
   return {
     enabled: asBoolean(detail.config.enabled),
@@ -120,7 +175,8 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
       Array.isArray(detail.config.allowedAttachmentMimeTypes)
         ? detail.config.allowedAttachmentMimeTypes
         : DEFAULT_ATTACHMENT_MIME_TYPES
-    )
+    ),
+    systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
 
@@ -259,7 +315,8 @@ export function ZendeskIntegrationView(props: {
           attachmentReadingEnabled: draft.attachmentReadingEnabled,
           maxAttachmentCount: Math.max(1, Math.min(20, Number(draft.maxAttachmentCount) || 5)),
           maxAttachmentBytes: Math.max(1, Math.min(50, Number(draft.maxAttachmentSizeMb) || 10)) * 1024 * 1024,
-          allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw)
+          allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw),
+          systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
           draft.zendeskApiTokenDraft.trim() || draft.webhookSigningSecretDraft.trim()
@@ -553,6 +610,46 @@ export function ZendeskIntegrationView(props: {
                           资料集会作为只读参考目录挂载给本次 Zendesk 回复任务。
                         </span>
                       </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "prompts",
+                  label: "提示词",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">Channel Prompt</span>
+                        <Input.TextArea
+                          rows={8}
+                          value={draft.systemPrompt}
+                          disabled={saving}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, systemPrompt: event.target.value }))
+                          }
+                        />
+                        <span className="field-help">
+                          这里只写 Zendesk 通道约束，业务角色、处理边界和客服口吻放到 Agent Mode。
+                        </span>
+                      </label>
+                      <div className="field resource-center-form-span-2">
+                        <span className="field-label">Core Protocol</span>
+                        <div className="zendesk-code-block">
+                          <pre>{ZENDESK_CORE_PROTOCOL_PROMPT}</pre>
+                        </div>
+                        <span className="field-help">核心 JSON 协议由系统强制追加，展示给管理员核对，不建议改成自由配置。</span>
+                      </div>
+                      <div className="field resource-center-form-span-2">
+                        <div className="zendesk-prompt-template-head">
+                          <span className="field-label">Agent Mode Prompt Template</span>
+                          <Button size="small" onClick={() => void copyText(AGENT_MODE_PROMPT_TEMPLATE, "Agent Mode Prompt Template")}>
+                            复制
+                          </Button>
+                        </div>
+                        <div className="zendesk-code-block">
+                          <pre>{AGENT_MODE_PROMPT_TEMPLATE}</pre>
+                        </div>
+                      </div>
                     </div>
                   )
                 },

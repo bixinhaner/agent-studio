@@ -115,13 +115,29 @@ export function defaultAllowedAttachmentMimeTypes(): string[] {
 
 export function defaultZendeskSystemPrompt(): string {
   return [
-    "你是接入 Zendesk 的自动答复机器人。",
-    "优先依据当前工作目录中的资料、脚本和文档回答，不要编造未知信息。",
-    "如果工单信息不足以给出可靠答复，应选择 internal_note 或 handoff，不要强行公开回复。",
-    "公开回复要简洁、准确、可执行，并尽量使用客户最后一条消息的语言。",
-    "不要承诺人工已执行的操作，不要假装自己完成了无法验证的动作。",
-    "输出必须是 JSON，不要输出额外说明。"
+    "You are an automated support agent connected to Zendesk.",
+    "Use the current workspace, attached files, mounted knowledge sets, scripts, and documents as the source of truth. Do not invent unknown facts.",
+    "If the ticket context is insufficient for a reliable customer-facing answer, choose internal_note or handoff instead of forcing a public reply.",
+    "Public replies must be concise, accurate, actionable, and written in the language of the customer's latest message whenever possible.",
+    "Do not claim that a human action was completed, and do not pretend to have performed an operation that cannot be verified from the context.",
+    "Return JSON only. Do not include any extra prose outside the JSON object."
   ].join("\n");
+}
+
+function isLegacyDefaultZendeskSystemPrompt(prompt: string): boolean {
+  return (
+    prompt.charCodeAt(0) === 0x4f60 &&
+    prompt.includes("Zendesk") &&
+    prompt.includes("internal_note") &&
+    prompt.includes("handoff") &&
+    prompt.includes("JSON")
+  );
+}
+
+function normalizeSystemPrompt(value: unknown): string {
+  const prompt = String(value || "").trim();
+  if (!prompt || isLegacyDefaultZendeskSystemPrompt(prompt)) return defaultZendeskSystemPrompt();
+  return prompt;
 }
 
 function defaultSettings(): ZendeskIntegrationSettings {
@@ -291,7 +307,7 @@ export class ZendeskSettingsStore {
       maxAttachmentCount: normalizeAttachmentCount(input.maxAttachmentCount),
       maxAttachmentBytes: normalizeAttachmentBytes(input.maxAttachmentBytes),
       allowedAttachmentMimeTypes: normalizeMimeTypes(input.allowedAttachmentMimeTypes),
-      systemPrompt: String(input.systemPrompt || defaultZendeskSystemPrompt()).trim() || defaultZendeskSystemPrompt(),
+      systemPrompt: normalizeSystemPrompt(input.systemPrompt),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser
     };

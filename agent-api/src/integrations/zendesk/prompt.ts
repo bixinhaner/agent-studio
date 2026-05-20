@@ -57,27 +57,27 @@ export function buildZendeskAgentPrompt(
   const instructions = [
     settings.systemPrompt,
     "",
-    "请基于以下 Zendesk 工单上下文完成判断。",
-    `优先回复模式: ${settings.responseMode}`,
-    `兜底模式: ${settings.fallbackMode}`,
+    "Use the following Zendesk ticket context to decide the next action.",
+    `Preferred response mode: ${settings.responseMode}`,
+    `Fallback mode: ${settings.fallbackMode}`,
     "",
-    "返回 JSON，格式必须为：",
+    "Return JSON in exactly this shape:",
     "{",
     '  "decision": "public_reply" | "internal_note" | "handoff",',
-    '  "body": "给客户的公开回复；如果不是公开回复，也可以为空字符串",',
-    '  "internalNote": "给内部客服的说明；如果没有可为空字符串",',
+    '  "body": "Customer-facing public reply. Leave it empty when the decision is not public_reply.",',
+    '  "internalNote": "Internal support note. Leave it empty when there is nothing to add.",',
     '  "confidence": 0.0,',
-    '  "reasons": ["简短原因1", "简短原因2"]',
+    '  "reasons": ["Short reason 1", "Short reason 2"]',
     "}",
     "",
-    "规则：",
-    "1. 如果资料不足、存在高风险承诺、或需要人工核实，选择 handoff 或 internal_note。",
-    "2. public_reply 的 body 应简洁，避免营销口吻，避免提及你在“看工单系统”。",
-    "3. internalNote 可以包含建议回复、缺失信息、人工处理建议。",
-    "4. 如果 customer 使用中文，优先中文回复；否则尽量沿用客户最新消息语言。",
-    "5. 如果评论包含 attachments 且 status 为 downloaded，请在需要时读取 local_path 指向的本地文件；图片和截图也按附件理解。",
-    "6. 不要在公开回复中暴露本地路径、内部目录、manifest 路径或系统实现细节。",
-    "7. 除 JSON 外不要输出任何额外文本。"
+    "Rules:",
+    "1. Choose handoff or internal_note when the available context is insufficient, the answer would create a high-risk commitment, or human verification is required.",
+    "2. The body for public_reply must be concise and useful. Do not use marketing language, and do not mention that you are looking at a ticketing system.",
+    "3. internalNote may include a suggested reply, missing information, risk notes, and recommended next steps for the support team.",
+    "4. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
+    "5. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
+    "6. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply.",
+    "7. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
   ];
 
   const ticketContext = [
@@ -155,37 +155,37 @@ export function parseZendeskAgentDecision(text: string): ZendeskAgentDecision {
     body: "",
     internalNote: trimBlock(text),
     confidence: undefined,
-    reasons: ["模型未按 JSON 输出，已降级为内部备注"]
+    reasons: ["The model did not return valid JSON, so the output was downgraded to an internal note."]
   };
 }
 
 export function buildInternalNoteFromDecision(decision: ZendeskAgentDecision): string {
   const lines: string[] = [];
   if (decision.decision === "handoff") {
-    lines.push("AI 建议转人工处理。");
+    lines.push("AI recommends human handoff.");
   } else if (decision.decision === "internal_note") {
-    lines.push("AI 生成了内部备注。");
+    lines.push("AI generated an internal note.");
   } else {
-    lines.push("AI 建议以下公开回复，当前配置为内部备注模式。");
+    lines.push("AI suggested the following public reply, but the current configuration records it as an internal note.");
   }
 
   if (decision.confidence !== undefined) {
-    lines.push(`置信度: ${Math.round(decision.confidence * 100)}%`);
+    lines.push(`Confidence: ${Math.round(decision.confidence * 100)}%`);
   }
 
   if (decision.reasons && decision.reasons.length > 0) {
-    lines.push(`原因: ${decision.reasons.join("；")}`);
+    lines.push(`Reasons: ${decision.reasons.join("; ")}`);
   }
 
   if (decision.body) {
     lines.push("");
-    lines.push("建议公开回复:");
+    lines.push("Suggested public reply:");
     lines.push(decision.body);
   }
 
   if (decision.internalNote) {
     lines.push("");
-    lines.push("内部说明:");
+    lines.push("Internal note:");
     lines.push(decision.internalNote);
   }
 

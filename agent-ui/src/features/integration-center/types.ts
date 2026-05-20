@@ -381,6 +381,7 @@ export type ZendeskConfigDraft = {
   maxAttachmentCount: number;
   maxAttachmentSizeMb: number;
   allowedAttachmentMimeTypesRaw: string;
+  systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;
   excludedTagsRaw: string;
