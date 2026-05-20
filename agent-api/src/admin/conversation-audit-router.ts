@@ -23,6 +23,7 @@ import {
   type ExternalConversationBindingRecord,
   type ExternalConversationBindingRepositoryDb
 } from "../persistence/external-conversation-binding-repository.js";
+import { usageTotalTokens } from "../operations/usage-metrics.js";
 
 const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
@@ -1317,7 +1318,7 @@ function buildApiAuditRecord(
       inputTokens: row.inputTokens,
       cachedInputTokens: row.cachedInputTokens,
       outputTokens: row.outputTokens,
-      totalTokens: row.inputTokens + row.cachedInputTokens + row.outputTokens,
+      totalTokens: usageTotalTokens(row.inputTokens, row.outputTokens),
       estimatedCost: formatDecimal(row.estimatedCost),
       internalCost: formatDecimal(row.internalCost),
       outputChars: Math.max(0, Math.trunc(toNumber(metadata?.outputChars))),

@@ -152,7 +152,7 @@ describe("buildOperationsInsights", () => {
     expect(response.summary.totalOrganizations).toBe(2);
     expect(response.summary.totalUsers).toBe(1);
     expect(response.summary.totalRequests).toBe(3);
-    expect(response.summary.totalTokens).toBe(480);
+    expect(response.summary.totalTokens).toBe(440);
     expect(response.summary.internalCost).toBe("5.100000");
 
     expect(response.breakdowns.paths[0]?.label).toBe("AI 助手工作台 · 管理台集成 · Azure OpenAI · azure-openai");
@@ -180,7 +180,7 @@ describe("buildOperationsInsights", () => {
       userName: "Alice",
       pathLabel: "AI 助手工作台 · 管理台集成 · Azure OpenAI · azure-openai",
       requestCount: 2,
-      totalTokens: 340
+      totalTokens: 300
     });
   });
 
@@ -243,7 +243,7 @@ describe("buildOperationsInsights", () => {
         expect.objectContaining({
           key: "zendesk:zendesk-main",
           label: "Zendesk 自动回复 · zendesk-main",
-          totalTokens: 1500
+          totalTokens: 1300
         })
       ])
     );
@@ -257,7 +257,7 @@ describe("buildOperationsInsights", () => {
       threadId: "thread-zendesk-45268",
       userName: "Zendesk 自动回复",
       pathLabel: "Zendesk 自动回复 · zendesk-main",
-      totalTokens: 1500
+      totalTokens: 1300
     });
   });
 });

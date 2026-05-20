@@ -3,6 +3,7 @@ import type { OrganizationRecord } from "../persistence/organization-repository.
 import type { SessionRecord } from "../persistence/session-repository.js";
 import type { AuthenticatedUser } from "../persistence/user-repository.js";
 import type { UsageEventRecord } from "../persistence/usage-event-repository.js";
+import { usageCacheShare, usageTotalTokens } from "../operations/usage-metrics.js";
 
 export type OperationsInsightsFilters = {
   days: number;
@@ -552,7 +553,7 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
     const actorName = trimOrUndefined(typeof metadata?.actorName === "string" ? metadata.actorName : undefined);
     const entry = entryFromEvent(record);
     const path = pathFromSession(session) ?? pathFromEvent(record);
-    const totalTokens = record.inputTokens + record.cachedInputTokens + record.outputTokens;
+    const totalTokens = usageTotalTokens(record.inputTokens, record.outputTokens);
 
     const item: NormalizedEvent = {
       id: record.id,
@@ -832,7 +833,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
     }
   }
 
-  const totalTokens = inputTokens + cachedInputTokens + outputTokens;
+  const totalTokens = usageTotalTokens(inputTokens, outputTokens);
   const totalSessions = sessionBuckets.size;
   const totalUsers = userBuckets.size;
   const totalOrganizations = organizationBuckets.size;
@@ -905,11 +906,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       internalCost: formatDecimal(bucket.internalCost),
       avgTokensPerSession: formatAverage(bucket.sessionIds.size ? bucket.totalTokens / bucket.sessionIds.size : 0),
       avgInternalCostPerSession: formatDecimal(bucket.sessionIds.size ? bucket.internalCost / bucket.sessionIds.size : 0),
-      cacheShare: formatRatio(
-        bucket.inputTokens + bucket.cachedInputTokens > 0
-          ? bucket.cachedInputTokens / (bucket.inputTokens + bucket.cachedInputTokens)
-          : 0
-      ),
+      cacheShare: formatRatio(usageCacheShare(bucket.inputTokens, bucket.cachedInputTokens)),
       topModel: dominantLabel(bucket.modelCounts),
       topPath: dominantLabel(bucket.pathCounts),
       lastActiveAt: bucket.lastActiveAt
@@ -935,11 +932,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       internalCost: formatDecimal(bucket.internalCost),
       avgTokensPerSession: formatAverage(bucket.sessionIds.size ? bucket.totalTokens / bucket.sessionIds.size : 0),
       avgInternalCostPerSession: formatDecimal(bucket.sessionIds.size ? bucket.internalCost / bucket.sessionIds.size : 0),
-      cacheShare: formatRatio(
-        bucket.inputTokens + bucket.cachedInputTokens > 0
-          ? bucket.cachedInputTokens / (bucket.inputTokens + bucket.cachedInputTokens)
-          : 0
-      ),
+      cacheShare: formatRatio(usageCacheShare(bucket.inputTokens, bucket.cachedInputTokens)),
       topModel: dominantLabel(bucket.modelCounts),
       topPath: dominantLabel(bucket.pathCounts),
       lastActiveAt: bucket.lastActiveAt
@@ -972,11 +965,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       estimatedCost: formatDecimal(bucket.estimatedCost),
       internalCost: formatDecimal(bucket.internalCost),
       avgTokensPerRequest: formatAverage(bucket.requestCount ? bucket.totalTokens / bucket.requestCount : 0),
-      cacheShare: formatRatio(
-        bucket.inputTokens + bucket.cachedInputTokens > 0
-          ? bucket.cachedInputTokens / (bucket.inputTokens + bucket.cachedInputTokens)
-          : 0
-      ),
+      cacheShare: formatRatio(usageCacheShare(bucket.inputTokens, bucket.cachedInputTokens)),
       firstActiveAt: bucket.firstActiveAt,
       lastActiveAt: bucket.lastActiveAt
     }))
@@ -1043,7 +1032,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       avgTokensPerSession: formatAverage(totalSessions ? totalTokens / totalSessions : 0),
       avgInternalCostPerSession: formatDecimal(totalSessions ? internalCost / totalSessions : 0),
       avgTokensPerRequest: formatAverage(summaryRequestCount ? totalTokens / summaryRequestCount : 0),
-      cacheShare: formatRatio(inputTokens + cachedInputTokens > 0 ? cachedInputTokens / (inputTokens + cachedInputTokens) : 0)
+      cacheShare: formatRatio(usageCacheShare(inputTokens, cachedInputTokens))
     },
     trends,
     breakdowns: {

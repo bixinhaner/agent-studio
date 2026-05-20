@@ -59,7 +59,7 @@ describe("UsageIngestionService", () => {
       outputTokens: 1_000_000
     });
 
-    expect(createdInput?.estimatedCost).toBe("17.750000");
-    expect(createdInput?.internalCost).toBe("21.300000");
+    expect(createdInput?.estimatedCost).toBe("15.250000");
+    expect(createdInput?.internalCost).toBe("18.300000");
   });
 });

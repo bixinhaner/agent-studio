@@ -9,6 +9,7 @@ import type {
   SubscriptionPrincipalType
 } from "../persistence/subscription-grant-repository.js";
 import type { SubscriptionPlanRecord, SubscriptionPlanRepository } from "../persistence/subscription-plan-repository.js";
+import { usageTotalTokens } from "./usage-metrics.js";
 
 type PrincipalLabel = "当前账号" | "所属组织";
 
@@ -598,10 +599,7 @@ export class SubscriptionEntitlementService {
       to: cycleEndsAt
     });
     const usedCompletedTurns = usageEvents.length;
-    const usedTokens = usageEvents.reduce(
-      (sum, item) => sum + item.inputTokens + item.cachedInputTokens + item.outputTokens,
-      0
-    );
+    const usedTokens = usageEvents.reduce((sum, item) => sum + usageTotalTokens(item.inputTokens, item.outputTokens), 0);
 
     const usage: SubscriptionGrantUsage = {
       cycleStartsAt: toIsoString(cycleStartsAt),

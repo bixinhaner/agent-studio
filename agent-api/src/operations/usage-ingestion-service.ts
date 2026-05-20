@@ -7,6 +7,7 @@ import type {
   UsageEventRecord,
   UsageEventRepository
 } from "../persistence/usage-event-repository.js";
+import { billableUncachedInputTokens } from "./usage-metrics.js";
 
 export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "internalCost" | "resultStatus"> & {
   resultStatus?: string;
@@ -50,9 +51,10 @@ function calculateEstimatedCost(input: {
   const cachedInputTokenPrice = pricePerToken(parseDecimal(input.profile.cachedInputTokenPrice));
   const outputTokenPrice = pricePerToken(parseDecimal(input.profile.outputTokenPrice));
   const internalCostMultiplier = parseDecimal(input.profile.internalCostMultiplier, 1);
+  const uncachedInputTokens = billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens);
 
   const estimated =
-    input.inputTokens * inputTokenPrice +
+    uncachedInputTokens * inputTokenPrice +
     input.cachedInputTokens * cachedInputTokenPrice +
     input.outputTokens * outputTokenPrice;
   const internal = estimated * internalCostMultiplier;

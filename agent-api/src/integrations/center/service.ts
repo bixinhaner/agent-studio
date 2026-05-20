@@ -1,5 +1,6 @@
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb, type IntegrationValidationRecord } from "../../persistence/integration-instance-repository.js";
 import type { UsageEventRecord, UsageEventRepository } from "../../persistence/usage-event-repository.js";
+import { usageTotalTokens } from "../../operations/usage-metrics.js";
 import {
   createEmptyPolicySummary,
   collectSecretLikeConfigKeys,
@@ -599,7 +600,7 @@ export function createIntegrationCenterService(options: {
       bucket.requestCount += 1;
       if (record.resultStatus === "success") bucket.successCount += 1;
       else bucket.failureCount += 1;
-      bucket.totalTokens += record.inputTokens + record.cachedInputTokens + record.outputTokens;
+      bucket.totalTokens += usageTotalTokens(record.inputTokens, record.outputTokens);
       bucket.estimatedCost += toNumber(record.estimatedCost);
       bucket.internalCost += toNumber(record.internalCost);
       buckets.set(key, bucket);
@@ -1017,7 +1018,7 @@ export function createIntegrationCenterService(options: {
       for (const record of relevantEvents) {
         const metadata = asRecord(record.metadata);
         const deliveryStatus = deliveryStatusFromUsage(record);
-        const totalTokens = record.inputTokens + record.cachedInputTokens + record.outputTokens;
+        const totalTokens = usageTotalTokens(record.inputTokens, record.outputTokens);
         const trend = trends.get(toDayKey(record.createdAt));
         if (trend) {
           trend.requestCount += 1;
@@ -1088,7 +1089,7 @@ export function createIntegrationCenterService(options: {
           inputTokens: record.inputTokens,
           cachedInputTokens: record.cachedInputTokens,
           outputTokens: record.outputTokens,
-          totalTokens: record.inputTokens + record.cachedInputTokens + record.outputTokens,
+          totalTokens: usageTotalTokens(record.inputTokens, record.outputTokens),
           estimatedCost: record.estimatedCost,
           internalCost: record.internalCost,
           resultStatus: record.resultStatus,
@@ -1113,7 +1114,7 @@ export function createIntegrationCenterService(options: {
       });
 
       const totalRequests = relevantEvents.length;
-      const totalTokens = totalInputTokens + totalCachedInputTokens + totalOutputTokens;
+      const totalTokens = usageTotalTokens(totalInputTokens, totalOutputTokens);
 
       return {
         summary: {

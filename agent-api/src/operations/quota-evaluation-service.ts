@@ -1,5 +1,6 @@
 import { QuotaPolicyRepository, type QuotaPolicyMetricType, type QuotaPolicyRecord } from "../persistence/quota-policy-repository.js";
 import { UsageRollupRepository, type UsageDailyRollupRecord } from "../persistence/usage-rollup-repository.js";
+import { usageTotalTokens } from "./usage-metrics.js";
 
 export type QuotaDecision = "allow" | "soft_block";
 
@@ -138,7 +139,7 @@ function summarizeMetric(metricType: QuotaPolicyMetricType, rows: UsageDailyRoll
     case "request_count":
       return rows.reduce((sum, row) => sum + row.requestCount, 0);
     case "total_tokens":
-      return rows.reduce((sum, row) => sum + row.inputTokens + row.cachedInputTokens + row.outputTokens, 0);
+      return rows.reduce((sum, row) => sum + usageTotalTokens(row.inputTokens, row.outputTokens), 0);
     case "estimated_cost":
       return rows.reduce((sum, row) => sum + Number(row.estimatedCost), 0);
     case "internal_cost":
