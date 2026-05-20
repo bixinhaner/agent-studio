@@ -154,6 +154,7 @@ describe("buildOperationsInsights", () => {
     expect(response.summary.totalRequests).toBe(3);
     expect(response.summary.totalTokens).toBe(440);
     expect(response.summary.internalCost).toBe("5.100000");
+    expect(response.summary.avgInternalCostPerRequest).toBe("1.700000");
 
     expect(response.breakdowns.paths[0]?.label).toBe("AI 助手工作台 · 管理台集成 · Azure OpenAI · azure-openai");
     expect(response.breakdowns.entries.map((item) => item.label)).toContain("外部 OpenAI API");

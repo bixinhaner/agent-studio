@@ -753,13 +753,13 @@ export function OperationsAnalyticsView() {
             <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有调用的组织" />
             <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有调用的用户" />
             <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="至少提交过一个问题" />
-            <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`平均 ${data.summary.avgRequestsPerSession} 次/会话`} />
-            <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`平均 ${data.summary.avgTokensPerSession} /会话`} />
+            <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`每会话 ${data.summary.avgRequestsPerSession} 次`} />
+            <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
             <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="按模型单价折算" />
             <MetricItem
               label="内部价值"
               value={formatUsdAmount(data.summary.internalCost)}
-              meta={`平均 ${formatUsdAmount(data.summary.avgInternalCostPerSession)} /会话`}
+              meta={`平均 ${formatUsdAmount(data.summary.avgInternalCostPerRequest)} /问题`}
             />
             <MetricItem label="缓存占比" value={formatPercent(data.summary.cacheShare)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
           </section>

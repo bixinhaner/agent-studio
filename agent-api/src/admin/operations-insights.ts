@@ -50,6 +50,7 @@ export type OperationsInsightsSummary = {
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
   avgTokensPerRequest: number;
+  avgInternalCostPerRequest: string;
   cacheShare: number;
 };
 
@@ -1032,6 +1033,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       avgTokensPerSession: formatAverage(totalSessions ? totalTokens / totalSessions : 0),
       avgInternalCostPerSession: formatDecimal(totalSessions ? internalCost / totalSessions : 0),
       avgTokensPerRequest: formatAverage(summaryRequestCount ? totalTokens / summaryRequestCount : 0),
+      avgInternalCostPerRequest: formatDecimal(summaryRequestCount ? internalCost / summaryRequestCount : 0),
       cacheShare: formatRatio(usageCacheShare(inputTokens, cachedInputTokens))
     },
     trends,

@@ -67,6 +67,7 @@ export type OperationsInsightsSummary = {
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
   avgTokensPerRequest: number;
+  avgInternalCostPerRequest: string;
   cacheShare: number;
 };
 
