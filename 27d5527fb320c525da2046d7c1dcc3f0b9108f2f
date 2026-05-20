@@ -1,0 +1,18 @@
+Zendesk 大评论 ID 溢出修复归档
+
+问题：
+- Zendesk comment ID 可能超过 PostgreSQL INT4 范围，例如 49391447872404
+- 手动执行已成功写入 Zendesk 内部备注，但本地 zendesk_ticket_bindings upsert 记录幂等状态时报错
+
+修复：
+- 将 zendesk_runs.comment_id、zendesk_runs.requester_comment_id、zendesk_ticket_bindings.last_processed_requester_comment_id 改为 BIGINT
+- 代码写库前转换为 BigInt，读出后转换为前端可用 number
+- 增加大 ID 持久化测试
+
+验证：
+- npx prisma validate
+- npm run prisma:generate
+- npm run prisma:migrate:deploy
+- npm run build
+- npm run test
+- 本地数据库 BigInt 回环写读验证通过
