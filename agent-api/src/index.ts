@@ -2263,6 +2263,59 @@ function zendeskAuditInputSnapshot(input: {
     .trim();
 }
 
+function zendeskRequesterMessageText(input: {
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  ticketId: string;
+}): string {
+  const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
+  const attachmentLines =
+    preparedComment.attachments.length > 0
+      ? [
+          "",
+          `附件：${preparedComment.attachments.length} 个`,
+          ...preparedComment.attachments.map((attachment) => `- ${attachment.fileName}${attachment.contentType ? ` (${attachment.contentType})` : ""}`)
+        ]
+      : [];
+  return [
+    `Zendesk Ticket #${input.ticketId}`,
+    input.context.ticket.subject ? `主题：${input.context.ticket.subject}` : undefined,
+    zendeskRequesterDisplay(input.context) ? `请求者：${zendeskRequesterDisplay(input.context)}` : undefined,
+    "",
+    "本次触发的客户评论",
+    preparedComment.createdAt ? `时间：${preparedComment.createdAt}` : undefined,
+    `评论 ID：${preparedComment.id}`,
+    "",
+    shortenZendeskAuditText(preparedComment.body, 2400) || (preparedComment.attachments.length > 0 ? "客户上传了附件。" : "(empty)"),
+    ...attachmentLines
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+    .trim();
+}
+
+function zendeskInputSnapshotProcessRow(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  ticketId: string;
+  runId: string;
+}): {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  at: string;
+} {
+  return {
+    id: `zendesk-input-snapshot-${input.runId}`,
+    kind: "meta",
+    title: "AI 输入上下文快照",
+    detail: zendeskAuditInputSnapshot(input),
+    at: new Date().toISOString()
+  };
+}
+
 function zendeskTraceBatchPart(
   rows: Array<{
     id?: string;
@@ -2416,7 +2469,7 @@ async function syncZendeskConversationBeforeAgentRun(input: {
   const ensured = await ensureZendeskAuditThread(input);
   const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
   const userMessageId = `zendesk-requester-${preparedComment.id}`;
-  const userText = zendeskAuditInputSnapshot(input);
+  const userText = zendeskRequesterMessageText(input);
 
   const updated = await threads.appendMessage(ensured.thread.id, {
     parentId: ensured.thread.headId ?? null,
@@ -2548,7 +2601,12 @@ async function syncZendeskConversationAfterAgentRun(input: {
     }));
   if (!audit?.threadId) return;
 
-  const tracePart = zendeskTraceBatchPart(input.processRows);
+  const inputSnapshotRow = zendeskInputSnapshotProcessRow(input);
+  const processRows = [
+    inputSnapshotRow,
+    ...(input.processRows ?? []).filter((row) => row.id !== inputSnapshotRow.id && row.title !== inputSnapshotRow.title)
+  ];
+  const tracePart = zendeskTraceBatchPart(processRows);
   await threads.appendMessage(audit.threadId, {
     parentId: audit.userMessageId ?? null,
     message: zendeskMessage({
