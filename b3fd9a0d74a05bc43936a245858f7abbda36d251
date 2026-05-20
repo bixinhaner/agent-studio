@@ -1,0 +1,5 @@
+将 Zendesk 自动回复提示词改为英文。
+
+范围：后端默认 Channel Prompt、强制 JSON 协议、降级内部备注文案；管理后台新增可编辑 Channel Prompt、只读 Core Protocol、可复制 Agent Mode Prompt Template。
+
+验证：agent-api npm run build；agent-ui npm run build；agent-api npm run test；git diff --check。
