@@ -147,9 +147,17 @@ require_repo_checkout() {
 
 render_pm2_ecosystem() {
   [[ -f "$pm2_template_path" ]] || die "missing PM2 template: $pm2_template_path"
-  ensure_dir "$(dirname "$PM2_ECOSYSTEM_FILE")"
+  local pm2_ecosystem_dir
+  pm2_ecosystem_dir="$(dirname "$PM2_ECOSYSTEM_FILE")"
+  if is_app_user; then
+    ensure_dir "$pm2_ecosystem_dir"
+  else
+    run_as_root mkdir -p "$pm2_ecosystem_dir"
+  fi
 
-  python3 - "$pm2_template_path" "$PM2_ECOSYSTEM_FILE" "$PM2_APP_NAME" "$APP_API_DIR" "$API_HOST" "$API_PORT" <<'PY'
+  local rendered_ecosystem
+  rendered_ecosystem="$(mktemp)"
+  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_APP_NAME" "$APP_API_DIR" "$API_HOST" "$API_PORT" <<'PY'
 from pathlib import Path
 import sys
 
@@ -165,7 +173,12 @@ rendered = (
 destination.write_text(rendered)
 PY
 
-  apply_app_user_ownership "$PM2_ECOSYSTEM_FILE" || true
+  if is_app_user; then
+    install -m 644 "$rendered_ecosystem" "$PM2_ECOSYSTEM_FILE"
+  else
+    run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$rendered_ecosystem" "$PM2_ECOSYSTEM_FILE"
+  fi
+  rm -f "$rendered_ecosystem"
 }
 
 render_caddy_config() {
