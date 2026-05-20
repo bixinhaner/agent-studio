@@ -55,6 +55,10 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         webSearchMode: input.web_search_mode,
         additionalDirectories: normalizeStringArray(input.additional_directories),
         maxCommentHistory: input.max_comment_history,
+        attachmentReadingEnabled: input.attachment_reading_enabled,
+        maxAttachmentCount: input.max_attachment_count,
+        maxAttachmentBytes: input.max_attachment_bytes,
+        allowedAttachmentMimeTypes: normalizeStringArray(input.allowed_attachment_mime_types),
         systemPrompt: input.system_prompt
       };
       const overview = instanceId ? await service.updateSettings(patch, instanceId) : await service.updateSettings(patch);

@@ -13,7 +13,8 @@ function formatComment(comment: ZendeskCommentPayload, requesterId?: number): st
   const author = comment.authorId === requesterId ? "requester" : `user:${comment.authorId || "unknown"}`;
   const visibility = comment.public ? "public" : "internal";
   const createdAt = comment.createdAt || "";
-  return [
+  const attachments = comment.attachments ?? [];
+  const lines = [
     `- comment_id: ${comment.id}`,
     `  author: ${author}`,
     `  visibility: ${visibility}`,
@@ -22,7 +23,26 @@ function formatComment(comment: ZendeskCommentPayload, requesterId?: number): st
     ...trimBlock(comment.body || "")
       .split("\n")
       .map((line) => `    ${line}`)
-  ].join("\n");
+  ];
+
+  if (attachments.length > 0) {
+    lines.push("  attachments:");
+    for (const attachment of attachments) {
+      lines.push(`    - file_name: ${attachment.fileName}`);
+      lines.push(`      content_type: ${attachment.contentType || ""}`);
+      lines.push(`      size_bytes: ${attachment.size ?? ""}`);
+      lines.push(`      inline: ${attachment.inline ? "true" : "false"}`);
+      lines.push(`      status: ${attachment.downloadStatus || "metadata_only"}`);
+      if (attachment.relativePath) {
+        lines.push(`      local_path: ${attachment.relativePath}`);
+      }
+      if (attachment.downloadReason) {
+        lines.push(`      reason: ${attachment.downloadReason}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
 }
 
 export function buildZendeskAgentPrompt(
@@ -55,7 +75,9 @@ export function buildZendeskAgentPrompt(
     "2. public_reply 的 body 应简洁，避免营销口吻，避免提及你在“看工单系统”。",
     "3. internalNote 可以包含建议回复、缺失信息、人工处理建议。",
     "4. 如果 customer 使用中文，优先中文回复；否则尽量沿用客户最新消息语言。",
-    "5. 除 JSON 外不要输出任何额外文本。"
+    "5. 如果评论包含 attachments 且 status 为 downloaded，请在需要时读取 local_path 指向的本地文件；图片和截图也按附件理解。",
+    "6. 不要在公开回复中暴露本地路径、内部目录、manifest 路径或系统实现细节。",
+    "7. 除 JSON 外不要输出任何额外文本。"
   ];
 
   const ticketContext = [

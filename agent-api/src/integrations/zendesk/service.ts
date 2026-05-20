@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import fs from "node:fs/promises";
 import type { IncomingHttpHeaders } from "node:http";
+import path from "node:path";
 
 import { CodexRuntime } from "../../codex-runtime.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
@@ -18,6 +20,7 @@ import {
 import { ZendeskRunStore } from "./run-store.js";
 import type {
   ZendeskAgentDecision,
+  ZendeskBindingRecord,
   ZendeskIntegrationSettings,
   ZendeskOverview,
   ZendeskSetupGuide,
@@ -66,6 +69,25 @@ type ZendeskAgentRuntimeOptions = {
   codexRunConfig?: Record<string, unknown>;
 };
 
+type ZendeskRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
+
+type ZendeskRuntimeLike = {
+  startThreadWithOptions(options: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<ZendeskRuntimeThread>;
+  resumeThreadWithOptions(options: {
+    threadId: string;
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<ZendeskRuntimeThread>;
+  runStreamed(thread: ZendeskRuntimeThread, message: string): AsyncGenerator<{ type: string; delta?: string; text?: string; raw?: unknown }>;
+};
+
 function sanitizeTicketId(value: string | number): string {
   const normalized = String(value || "").trim();
   if (!normalized) throw new Error("ticket_id 不能为空");
@@ -95,7 +117,78 @@ function normalizeMultilineBody(input: string): string {
 function selectLatestRequesterComment(context: ZendeskTicketContext) {
   const requesterId = context.ticket.requesterId;
   if (!requesterId) return undefined;
-  return context.comments.find((item) => item.public && item.authorId === requesterId && item.body.trim());
+  return context.comments.find(
+    (item) => item.public && item.authorId === requesterId && (item.body.trim() || (item.attachments?.length ?? 0) > 0)
+  );
+}
+
+function trimOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function extractCodexThreadIdFromThread(thread: unknown): string | undefined {
+  if (!thread || typeof thread !== "object") return undefined;
+  return trimOrUndefined((thread as { id?: unknown }).id);
+}
+
+function extractCodexThreadIdFromEvent(event: { type?: string; raw?: unknown }): string | undefined {
+  if (event.type !== "thread.started") return undefined;
+  const raw = event.raw && typeof event.raw === "object" ? (event.raw as Record<string, unknown>) : undefined;
+  return trimOrUndefined(raw?.thread_id);
+}
+
+function sanitizePathSegment(value: string | number | undefined, fallback: string): string {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function sanitizeFileName(value: string, fallback: string): string {
+  const normalized = value
+    .trim()
+    .replace(/[\\/:\0]+/g, "-")
+    .replace(/^\.+/, "")
+    .slice(0, 160);
+  return normalized || fallback;
+}
+
+function isMimeAllowed(contentType: string | undefined, allowed: string[]): boolean {
+  const normalized = String(contentType || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+  return allowed.some((item) => {
+    const pattern = item.trim().toLowerCase();
+    if (!pattern) return false;
+    if (pattern === "*/*" || pattern === normalized) return true;
+    if (pattern.endsWith("/*")) {
+      return normalized.startsWith(`${pattern.slice(0, -1)}`);
+    }
+    return false;
+  });
+}
+
+function attachmentDisplaySize(bytes: number | undefined): string {
+  if (!Number.isFinite(bytes)) return "";
+  const value = Number(bytes);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function cloneContext(context: ZendeskTicketContext): ZendeskTicketContext {
+  return {
+    ticket: { ...context.ticket, tags: [...context.ticket.tags] },
+    comments: context.comments.map((comment) => ({
+      ...comment,
+      attachments: (comment.attachments ?? []).map((attachment) => ({ ...attachment }))
+    }))
+  };
 }
 
 type ResolvedAction =
@@ -431,7 +524,7 @@ export class ZendeskIntegrationService {
         requesterCommentId: requesterComment.id
       });
 
-      const answerText = await this.runAgent(context, settings, {
+      const answerText = await this.runAgent(context, settings, client, binding, {
         instanceId,
         ticketId,
         runId,
@@ -504,6 +597,8 @@ export class ZendeskIntegrationService {
   private async runAgent(
     context: ZendeskTicketContext,
     settings: ZendeskIntegrationSettings,
+    client: ZendeskClient,
+    binding: ZendeskBindingRecord | undefined,
     run: {
       instanceId?: string;
       ticketId: string;
@@ -525,20 +620,205 @@ export class ZendeskIntegrationService {
           workspace: settings.workspace,
           codexRunConfig: buildRunConfig(settings)
         };
-    const runtime = runtimeOptions.runtime || (this.dependencies.resolveRuntime ? await this.dependencies.resolveRuntime() : new CodexRuntime());
-    const thread = await runtime.startThreadWithOptions({
-      model: runtimeOptions.model,
-      reasoningEffort: runtimeOptions.reasoningEffort,
-      workspace: runtimeOptions.workspace,
-      codexRunConfig: runtimeOptions.codexRunConfig
+    const runtime = (runtimeOptions.runtime ||
+      (this.dependencies.resolveRuntime ? await this.dependencies.resolveRuntime() : new CodexRuntime())) as ZendeskRuntimeLike;
+    const preparedContext = await this.prepareContextAttachments(context, settings, client, runtimeOptions.workspace, run.runId);
+    let observedCodexThreadId = trimOrUndefined(binding?.codexThreadId);
+    let thread: ZendeskRuntimeThread | undefined;
+
+    if (observedCodexThreadId) {
+      try {
+        thread = await runtime.resumeThreadWithOptions({
+          threadId: observedCodexThreadId,
+          model: runtimeOptions.model,
+          reasoningEffort: runtimeOptions.reasoningEffort,
+          workspace: runtimeOptions.workspace,
+          codexRunConfig: runtimeOptions.codexRunConfig
+        });
+      } catch (error) {
+        console.warn("[zendesk] failed to resume codex thread, starting a new one", {
+          ticketId: run.ticketId,
+          instanceId: run.instanceId,
+          codexThreadId: observedCodexThreadId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+        observedCodexThreadId = undefined;
+      }
+    }
+
+    if (!thread) {
+      thread = await runtime.startThreadWithOptions({
+        model: runtimeOptions.model,
+        reasoningEffort: runtimeOptions.reasoningEffort,
+        workspace: runtimeOptions.workspace,
+        codexRunConfig: runtimeOptions.codexRunConfig
+      });
+      observedCodexThreadId = extractCodexThreadIdFromThread(thread) || observedCodexThreadId;
+    }
+
+    await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
+      codexThreadId: observedCodexThreadId,
+      workspacePath: runtimeOptions.workspace,
+      runId: run.runId
     });
-    const prompt = buildZendeskAgentPrompt(context, settings);
+
+    const prompt = buildZendeskAgentPrompt(preparedContext, settings);
     let output = "";
     for await (const event of runtime.runStreamed(thread, prompt)) {
+      observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
       if (event.delta) output += event.delta;
       else if (!output && event.text) output += event.text;
     }
+
+    await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
+      codexThreadId: observedCodexThreadId,
+      workspacePath: runtimeOptions.workspace,
+      runId: run.runId
+    });
     return output.trim();
+  }
+
+  private async rememberRuntimeBinding(
+    ticketId: string,
+    instanceId: string | undefined,
+    input: {
+      codexThreadId?: string;
+      workspacePath?: string;
+      runId: string;
+    }
+  ): Promise<void> {
+    if (!trimOrUndefined(input.codexThreadId) && !trimOrUndefined(input.workspacePath)) return;
+    await this.bindingStore.upsert(
+      ticketId,
+      {
+        codexThreadId: trimOrUndefined(input.codexThreadId),
+        workspacePath: trimOrUndefined(input.workspacePath),
+        lastRunId: input.runId
+      },
+      instanceId
+    );
+  }
+
+  private async prepareContextAttachments(
+    context: ZendeskTicketContext,
+    settings: ZendeskIntegrationSettings,
+    client: ZendeskClient,
+    workspacePath: string,
+    runId: string
+  ): Promise<ZendeskTicketContext> {
+    const next = cloneContext(context);
+    if (!settings.attachmentReadingEnabled) {
+      for (const comment of next.comments) {
+        comment.attachments = comment.attachments.map((attachment) => ({
+          ...attachment,
+          downloadStatus: "skipped",
+          downloadReason: "后台未启用附件读取"
+        }));
+      }
+      return next;
+    }
+
+    const allowed = settings.allowedAttachmentMimeTypes;
+    const baseDir = path.join(workspacePath, ".zendesk", "attachments", `run-${sanitizePathSegment(runId, "run")}`);
+    await fs.mkdir(baseDir, { recursive: true });
+
+    let downloadedOrSelected = 0;
+    for (const comment of next.comments.slice(0, settings.maxCommentHistory)) {
+      if (comment.attachments.length === 0) continue;
+      const commentDir = path.join(baseDir, `comment-${sanitizePathSegment(comment.id, "comment")}`);
+      let index = 0;
+      for (const attachment of comment.attachments) {
+        index += 1;
+        if (downloadedOrSelected >= settings.maxAttachmentCount) {
+          attachment.downloadStatus = "skipped";
+          attachment.downloadReason = "超过本次最大附件数量";
+          continue;
+        }
+
+        const metadataContentType = attachment.contentType;
+        if (metadataContentType && !isMimeAllowed(metadataContentType, allowed)) {
+          attachment.downloadStatus = "skipped";
+          attachment.downloadReason = `附件类型不在白名单: ${metadataContentType}`;
+          continue;
+        }
+
+        if (attachment.size !== undefined && attachment.size > settings.maxAttachmentBytes) {
+          attachment.downloadStatus = "skipped";
+          attachment.downloadReason = `附件大小超过限制: ${attachmentDisplaySize(attachment.size)}`;
+          continue;
+        }
+
+        const url = attachment.contentUrl || attachment.mappedContentUrl;
+        if (!url) {
+          attachment.downloadStatus = "skipped";
+          attachment.downloadReason = "附件缺少可下载地址";
+          continue;
+        }
+
+        downloadedOrSelected += 1;
+        try {
+          const result = await client.downloadAttachment({
+            url,
+            maxBytes: settings.maxAttachmentBytes
+          });
+          const resolvedContentType = result.contentType || metadataContentType;
+          if (!isMimeAllowed(resolvedContentType, allowed)) {
+            attachment.downloadStatus = "skipped";
+            attachment.downloadReason = `附件类型不在白名单: ${resolvedContentType || "unknown"}`;
+            continue;
+          }
+
+          await fs.mkdir(commentDir, { recursive: true });
+          const fileName = `${String(index).padStart(2, "0")}-${sanitizeFileName(attachment.fileName, "attachment")}`;
+          const filePath = path.join(commentDir, fileName);
+          await fs.writeFile(filePath, result.content);
+          attachment.contentType = resolvedContentType;
+          attachment.size = result.content.byteLength;
+          attachment.localPath = filePath;
+          attachment.relativePath = path.relative(workspacePath, filePath);
+          attachment.downloadStatus = "downloaded";
+        } catch (error) {
+          attachment.downloadStatus = "failed";
+          attachment.downloadReason = error instanceof Error ? error.message : "附件下载失败";
+        }
+      }
+    }
+
+    await this.writeAttachmentManifest(next, baseDir);
+    return next;
+  }
+
+  private async writeAttachmentManifest(
+    context: ZendeskTicketContext,
+    baseDir: string
+  ): Promise<void> {
+    const attachments = context.comments.flatMap((comment) =>
+      comment.attachments.map((attachment) => ({
+        commentId: comment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        inline: attachment.inline,
+        status: attachment.downloadStatus,
+        reason: attachment.downloadReason,
+        path: attachment.relativePath
+      }))
+    );
+    if (attachments.length === 0) return;
+    const manifestPath = path.join(baseDir, "manifest.json");
+    await fs.writeFile(
+      manifestPath,
+      JSON.stringify(
+        {
+          ticketId: context.ticket.id,
+          generatedAt: new Date().toISOString(),
+          attachments
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
   }
 
   private async addCommentWithRetry(

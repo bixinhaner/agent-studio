@@ -13,6 +13,8 @@ type ZendeskTicketBindingRow = {
   lastAction: string | null;
   lastRunAt: Date | string | null;
   lastRunId: string | null;
+  codexThreadId: string | null;
+  workspacePath: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -84,6 +86,8 @@ function mapBinding(row: ZendeskTicketBindingRow): ZendeskBindingRecord {
         : undefined,
     lastRunAt: toIsoString(row.lastRunAt),
     lastRunId: trimOrUndefined(row.lastRunId ?? undefined),
+    codexThreadId: trimOrUndefined(row.codexThreadId ?? undefined),
+    workspacePath: trimOrUndefined(row.workspacePath ?? undefined),
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString(),
     updatedAt: toIsoString(row.updatedAt) ?? new Date().toISOString()
   };
@@ -131,7 +135,9 @@ export class ZendeskBindingStore {
         lastProcessedRequesterCommentId: toBigIntOrNull(patch.lastProcessedRequesterCommentId),
         lastAction: trimOrUndefined(patch.lastAction) ?? null,
         lastRunAt: toDate(patch.lastRunAt),
-        lastRunId: trimOrUndefined(patch.lastRunId) ?? null
+        lastRunId: trimOrUndefined(patch.lastRunId) ?? null,
+        codexThreadId: trimOrUndefined(patch.codexThreadId) ?? null,
+        workspacePath: trimOrUndefined(patch.workspacePath) ?? null
       },
       update: {
         integrationInstanceId: normalizedInstanceId ?? null,
@@ -141,7 +147,9 @@ export class ZendeskBindingStore {
             : toBigIntOrNull(patch.lastProcessedRequesterCommentId),
         lastAction: trimOrUndefined(patch.lastAction) ?? undefined,
         lastRunAt: patch.lastRunAt === undefined ? undefined : toDate(patch.lastRunAt),
-        lastRunId: patch.lastRunId === undefined ? undefined : trimOrUndefined(patch.lastRunId) ?? null
+        lastRunId: patch.lastRunId === undefined ? undefined : trimOrUndefined(patch.lastRunId) ?? null,
+        codexThreadId: patch.codexThreadId === undefined ? undefined : trimOrUndefined(patch.codexThreadId) ?? null,
+        workspacePath: patch.workspacePath === undefined ? undefined : trimOrUndefined(patch.workspacePath) ?? null
       }
     });
     return mapBinding(row);

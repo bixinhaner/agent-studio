@@ -49,6 +49,16 @@ const AUTO_STATUS_OPTIONS = [
 const RESPONSE_MODE_VALUES = new Set(RESPONSE_MODE_OPTIONS.map((item) => item.value));
 const FALLBACK_MODE_VALUES = new Set(FALLBACK_MODE_OPTIONS.map((item) => item.value));
 const AUTO_STATUS_VALUES = new Set(AUTO_STATUS_OPTIONS.map((item) => item.value));
+const DEFAULT_ATTACHMENT_MIME_TYPES = [
+  "image/*",
+  "text/*",
+  "application/json",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+];
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
@@ -60,6 +70,11 @@ function asBoolean(value: unknown) {
 
 function asNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function bytesToMb(value: unknown, fallbackMb: number) {
+  const bytes = asNumber(value, fallbackMb * 1024 * 1024);
+  return Math.max(1, Math.round(bytes / 1024 / 1024));
 }
 
 function asListText(value: unknown) {
@@ -97,7 +112,15 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     excludedTagsRaw: asListText(detail.config.excludedTags),
     agentModeId: asString(detail.config.agentModeId),
     knowledgeSetIds: asStringArray(detail.config.knowledgeSetIds),
-    maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12)
+    maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12),
+    attachmentReadingEnabled: detail.config.attachmentReadingEnabled !== false,
+    maxAttachmentCount: Math.max(1, Math.min(20, asNumber(detail.config.maxAttachmentCount, 5))),
+    maxAttachmentSizeMb: Math.max(1, Math.min(50, bytesToMb(detail.config.maxAttachmentBytes, 10))),
+    allowedAttachmentMimeTypesRaw: asListText(
+      Array.isArray(detail.config.allowedAttachmentMimeTypes)
+        ? detail.config.allowedAttachmentMimeTypes
+        : DEFAULT_ATTACHMENT_MIME_TYPES
+    )
   };
 }
 
@@ -232,7 +255,11 @@ export function ZendeskIntegrationView(props: {
           excludedTags: parseList(draft.excludedTagsRaw),
           agentModeId: draft.agentModeId.trim(),
           knowledgeSetIds: asStringArray(draft.knowledgeSetIds),
-          maxCommentHistory: Math.max(1, Math.min(50, Number(draft.maxCommentHistory) || 12))
+          maxCommentHistory: Math.max(1, Math.min(50, Number(draft.maxCommentHistory) || 12)),
+          attachmentReadingEnabled: draft.attachmentReadingEnabled,
+          maxAttachmentCount: Math.max(1, Math.min(20, Number(draft.maxAttachmentCount) || 5)),
+          maxAttachmentBytes: Math.max(1, Math.min(50, Number(draft.maxAttachmentSizeMb) || 10)) * 1024 * 1024,
+          allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw)
         },
         secretState:
           draft.zendeskApiTokenDraft.trim() || draft.webhookSigningSecretDraft.trim()
@@ -389,7 +416,7 @@ export function ZendeskIntegrationView(props: {
 
             <Collapse
               size="small"
-              defaultActiveKey={["identity", "connection", "runtime", "advanced"]}
+              defaultActiveKey={["identity", "connection", "runtime", "context", "advanced"]}
               items={[
                 {
                   key: "identity",
@@ -526,6 +553,14 @@ export function ZendeskIntegrationView(props: {
                           资料集会作为只读参考目录挂载给本次 Zendesk 回复任务。
                         </span>
                       </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "context",
+                  label: "上下文与附件",
+                  children: (
+                    <div className="resource-center-form-grid">
                       <label className="field">
                         <span className="field-label">最大评论历史</span>
                         <InputNumber
@@ -538,6 +573,58 @@ export function ZendeskIntegrationView(props: {
                           }
                           style={{ width: "100%" }}
                         />
+                        <span className="field-help">每次回复都会重新读取这些 Zendesk 评论，作为同一 ticket 的最新事实上下文。</span>
+                      </label>
+                      <label className="field checkbox-field resource-center-toggle-row">
+                        <Switch
+                          checked={draft.attachmentReadingEnabled}
+                          disabled={saving}
+                          checkedChildren="读取"
+                          unCheckedChildren="关闭"
+                          onChange={(checked) =>
+                            setDraft((current) => ({ ...current, attachmentReadingEnabled: checked }))
+                          }
+                        />
+                        <span className="field-label">读取图片和附件</span>
+                        <span className="field-help">客户上传的截图、PDF、表格和文本文件会下载到该 ticket 的工作区供 Agent 参考。</span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">最多附件数</span>
+                        <InputNumber
+                          min={1}
+                          max={20}
+                          value={Number(draft.maxAttachmentCount) || 5}
+                          disabled={saving || !draft.attachmentReadingEnabled}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, maxAttachmentCount: Number(value) || 5 }))
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">单文件上限 MB</span>
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          value={Number(draft.maxAttachmentSizeMb) || 10}
+                          disabled={saving || !draft.attachmentReadingEnabled}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, maxAttachmentSizeMb: Number(value) || 10 }))
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">允许的附件类型</span>
+                        <Input.TextArea
+                          rows={3}
+                          value={draft.allowedAttachmentMimeTypesRaw}
+                          disabled={saving || !draft.attachmentReadingEnabled}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, allowedAttachmentMimeTypesRaw: event.target.value }))
+                          }
+                        />
+                        <span className="field-help">支持一行一个或逗号分隔，例如 image/*、application/pdf、text/*。</span>
                       </label>
                     </div>
                   )

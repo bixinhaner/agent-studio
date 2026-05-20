@@ -1070,12 +1070,15 @@ model ZendeskTicketBinding {
   lastAction                        String?              @map("last_action")
   lastRunAt                         DateTime?            @map("last_run_at")
   lastRunId                         String?              @map("last_run_id")
+  codexThreadId                     String?              @map("codex_thread_id")
+  workspacePath                     String?              @map("workspace_path")
   createdAt                         DateTime             @default(now()) @map("created_at")
   updatedAt                         DateTime             @updatedAt @map("updated_at")
 
   integrationInstance               IntegrationInstance? @relation(fields: [integrationInstanceId], references: [id], onDelete: Cascade)
 
   @@index([integrationInstanceId, ticketId])
+  @@index([codexThreadId])
   @@index([ticketId])
   @@unique([scopeKey, ticketId])
   @@map("zendesk_ticket_bindings")

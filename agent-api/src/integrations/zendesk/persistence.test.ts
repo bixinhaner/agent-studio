@@ -68,6 +68,8 @@ describe("Zendesk persistence stores", () => {
       lastAction: args.create.lastAction as string,
       lastRunAt: args.create.lastRunAt as Date,
       lastRunId: args.create.lastRunId as string,
+      codexThreadId: args.create.codexThreadId as string | null,
+      workspacePath: args.create.workspacePath as string | null,
       createdAt: "2026-05-18T10:00:00.000Z",
       updatedAt: "2026-05-18T10:00:00.000Z"
     }));
@@ -84,7 +86,9 @@ describe("Zendesk persistence stores", () => {
         lastProcessedRequesterCommentId: zendeskCommentId,
         lastAction: "public_reply",
         lastRunAt: "2026-05-18T10:00:00.000Z",
-        lastRunId: "run-1"
+        lastRunId: "run-1",
+        codexThreadId: "thread-1",
+        workspacePath: "/tmp/zendesk/ticket-123"
       },
       "inst-1"
     );
@@ -97,6 +101,8 @@ describe("Zendesk persistence stores", () => {
     });
     expect(upsert.mock.calls[0]?.[0].create.lastProcessedRequesterCommentId).toBe(BigInt(zendeskCommentId));
     expect(upsert.mock.calls[0]?.[0].update.lastProcessedRequesterCommentId).toBe(BigInt(zendeskCommentId));
+    expect(upsert.mock.calls[0]?.[0].create.codexThreadId).toBe("thread-1");
+    expect(upsert.mock.calls[0]?.[0].update.workspacePath).toBe("/tmp/zendesk/ticket-123");
   });
 
   it("stores Zendesk run comment ids as bigint values", async () => {

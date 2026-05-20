@@ -61,6 +61,32 @@ function normalizeIdList(value: string[] | undefined): string[] {
   return result;
 }
 
+function normalizeMimeTypes(value: string[] | undefined): string[] {
+  const defaults = defaultAllowedAttachmentMimeTypes();
+  if (!Array.isArray(value)) return defaults;
+  const result: string[] = [];
+  for (const item of value) {
+    const normalized = String(item || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized || result.includes(normalized)) continue;
+    result.push(normalized);
+  }
+  return result.length > 0 ? result : defaults;
+}
+
+function normalizeAttachmentBytes(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 10 * 1024 * 1024;
+  return Math.max(1024, Math.min(50 * 1024 * 1024, Math.floor(numeric)));
+}
+
+function normalizeAttachmentCount(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 5;
+  return Math.max(1, Math.min(20, Math.floor(numeric)));
+}
+
 function uniqueLowercaseTags(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
@@ -72,6 +98,19 @@ function uniqueLowercaseTags(value: string[] | undefined): string[] {
     if (!result.includes(normalized)) result.push(normalized);
   }
   return result;
+}
+
+export function defaultAllowedAttachmentMimeTypes(): string[] {
+  return [
+    "image/*",
+    "text/*",
+    "application/json",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ];
 }
 
 export function defaultZendeskSystemPrompt(): string {
@@ -109,6 +148,10 @@ function defaultSettings(): ZendeskIntegrationSettings {
     webSearchMode: "disabled",
     additionalDirectories: [],
     maxCommentHistory: 12,
+    attachmentReadingEnabled: true,
+    maxAttachmentCount: 5,
+    maxAttachmentBytes: 10 * 1024 * 1024,
+    allowedAttachmentMimeTypes: defaultAllowedAttachmentMimeTypes(),
     systemPrompt: defaultZendeskSystemPrompt()
   };
 }
@@ -244,6 +287,10 @@ export class ZendeskSettingsStore {
       reasoningEffort: normalizeReasoningEffortForModel(model, input.reasoningEffort),
       additionalDirectories: normalizeDirectories(input.additionalDirectories),
       maxCommentHistory: Math.max(1, Math.min(50, Number(input.maxCommentHistory) || 12)),
+      attachmentReadingEnabled: input.attachmentReadingEnabled !== false,
+      maxAttachmentCount: normalizeAttachmentCount(input.maxAttachmentCount),
+      maxAttachmentBytes: normalizeAttachmentBytes(input.maxAttachmentBytes),
+      allowedAttachmentMimeTypes: normalizeMimeTypes(input.allowedAttachmentMimeTypes),
       systemPrompt: String(input.systemPrompt || defaultZendeskSystemPrompt()).trim() || defaultZendeskSystemPrompt(),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser

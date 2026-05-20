@@ -57,6 +57,10 @@ export type ZendeskIntegrationSettings = {
   webSearchMode: WebSearchMode;
   additionalDirectories: string[];
   maxCommentHistory: number;
+  attachmentReadingEnabled: boolean;
+  maxAttachmentCount: number;
+  maxAttachmentBytes: number;
+  allowedAttachmentMimeTypes: string[];
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
@@ -77,6 +81,8 @@ export type ZendeskBindingRecord = {
   lastAction?: ZendeskDecisionType | "skip" | "error";
   lastRunAt?: string;
   lastRunId?: string;
+  codexThreadId?: string;
+  workspacePath?: string;
   updatedAt: string;
   createdAt: string;
 };
@@ -133,6 +139,21 @@ export type ZendeskCommentPayload = {
   body: string;
   public: boolean;
   createdAt?: string;
+  attachments: ZendeskAttachmentPayload[];
+};
+
+export type ZendeskAttachmentPayload = {
+  id?: number;
+  fileName: string;
+  contentType?: string;
+  size?: number;
+  contentUrl?: string;
+  mappedContentUrl?: string;
+  inline?: boolean;
+  localPath?: string;
+  relativePath?: string;
+  downloadStatus?: "downloaded" | "skipped" | "failed";
+  downloadReason?: string;
 };
 
 export type ZendeskTicketContext = {
@@ -173,6 +194,10 @@ export const zendeskSettingsUpdateSchema = z.object({
   web_search_mode: z.enum(WEB_SEARCH_MODE_VALUES).optional(),
   additional_directories: optionalStringArraySchema,
   max_comment_history: z.number().int().min(1).max(50).optional(),
+  attachment_reading_enabled: z.boolean().optional(),
+  max_attachment_count: z.number().int().min(1).max(20).optional(),
+  max_attachment_bytes: z.number().int().min(1024).max(50 * 1024 * 1024).optional(),
+  allowed_attachment_mime_types: optionalStringArraySchema,
   system_prompt: optionalStringSchema
 });
 

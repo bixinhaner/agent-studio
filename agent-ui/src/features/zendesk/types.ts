@@ -15,6 +15,10 @@ export type ZendeskPublicSettings = {
   agentModeId: string;
   knowledgeSetIds: string[];
   maxCommentHistory: number;
+  attachmentReadingEnabled: boolean;
+  maxAttachmentCount: number;
+  maxAttachmentBytes: number;
+  allowedAttachmentMimeTypes: string[];
   lastValidatedAt?: string;
   lastValidatedUser?: {
     id: number;
@@ -75,4 +79,8 @@ export type ZendeskSettingsUpdate = {
   agent_mode_id: string;
   knowledge_set_ids: string[];
   max_comment_history: number;
+  attachment_reading_enabled: boolean;
+  max_attachment_count: number;
+  max_attachment_bytes: number;
+  allowed_attachment_mime_types: string[];
 };

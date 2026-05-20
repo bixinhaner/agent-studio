@@ -1,5 +1,6 @@
 import type {
   ZendeskAutoStatus,
+  ZendeskAttachmentPayload,
   ZendeskCommentPayload,
   ZendeskIntegrationSettings,
   ZendeskTicketContext,
@@ -36,8 +37,19 @@ type ZendeskCommentsEnvelope = {
     body?: string;
     public?: boolean;
     created_at?: string;
+    attachments?: Array<{
+      id?: number;
+      file_name?: string;
+      content_type?: string;
+      size?: number;
+      content_url?: string;
+      mapped_content_url?: string;
+      inline?: boolean;
+    }>;
   }>;
 };
+
+type ZendeskRawComment = NonNullable<ZendeskCommentsEnvelope["comments"]>[number];
 
 type ZendeskUpdatedTicketEnvelope = {
   audit?: {
@@ -75,6 +87,59 @@ function normalizeTicket(ticket: ZendeskTicketEnvelope["ticket"]): ZendeskTicket
   };
 }
 
+function normalizeAttachmentUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:") return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeAttachmentFileName(item: {
+  file_name?: string;
+  content_url?: string;
+  mapped_content_url?: string;
+}): string {
+  const direct = String(item.file_name || "").trim();
+  if (direct) return direct;
+  const url = normalizeAttachmentUrl(item.content_url) || normalizeAttachmentUrl(item.mapped_content_url);
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      const last = parsed.pathname.split("/").filter(Boolean).pop();
+      if (last) return decodeURIComponent(last).trim() || "attachment";
+    } catch {
+      // fall through
+    }
+  }
+  return "attachment";
+}
+
+function normalizeAttachments(value: ZendeskRawComment["attachments"]): ZendeskAttachmentPayload[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const contentUrl = normalizeAttachmentUrl(item?.content_url);
+      const mappedContentUrl = normalizeAttachmentUrl(item?.mapped_content_url);
+      const size = Number(item?.size);
+      return {
+        id: typeof item?.id === "number" ? item.id : undefined,
+        fileName: normalizeAttachmentFileName(item || {}),
+        contentType: typeof item?.content_type === "string" ? item.content_type.trim().toLowerCase() : undefined,
+        size: Number.isFinite(size) && size >= 0 ? size : undefined,
+        contentUrl,
+        mappedContentUrl,
+        inline: Boolean(item?.inline)
+      };
+    })
+    .filter((item) => item.contentUrl || item.mappedContentUrl);
+}
+
 function normalizeComments(comments: ZendeskCommentsEnvelope["comments"]): ZendeskCommentPayload[] {
   return Array.isArray(comments)
     ? comments
@@ -83,7 +148,8 @@ function normalizeComments(comments: ZendeskCommentsEnvelope["comments"]): Zende
           authorId: typeof item?.author_id === "number" ? item.author_id : undefined,
           body: typeof item?.body === "string" ? item.body : "",
           public: Boolean(item?.public),
-          createdAt: typeof item?.created_at === "string" ? item.created_at : undefined
+          createdAt: typeof item?.created_at === "string" ? item.created_at : undefined,
+          attachments: normalizeAttachments(item?.attachments)
         }))
         .filter((item) => item.id > 0)
         .sort((a, b) => {
@@ -158,6 +224,34 @@ export class ZendeskClient {
     };
   }
 
+  async downloadAttachment(input: {
+    url: string;
+    maxBytes: number;
+  }): Promise<{ content: Buffer; contentType?: string }> {
+    const headers = new Headers();
+    headers.set("Accept", "*/*");
+    headers.set("Authorization", buildAuthHeader(this.settings.zendeskEmail, this.settings.zendeskApiToken));
+
+    const parsed = new URL(input.url);
+    if (parsed.protocol !== "https:") {
+      throw new Error("附件地址必须是 HTTPS");
+    }
+
+    const res = await fetch(parsed.toString(), { headers });
+    if (!res.ok) {
+      throw new ZendeskApiError(`Zendesk 附件下载失败(${res.status})`, res.status);
+    }
+
+    const contentLength = Number(res.headers.get("content-length") || "");
+    if (Number.isFinite(contentLength) && contentLength > input.maxBytes) {
+      throw new Error("附件超过大小限制");
+    }
+
+    const content = await readResponseBody(res, input.maxBytes);
+    const contentType = res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || undefined;
+    return { content, contentType };
+  }
+
   private async listComments(ticketId: string, maxComments: number): Promise<ZendeskCommentPayload[]> {
     const limit = Math.max(1, Math.min(50, maxComments));
     const cursorPath = `/api/v2/tickets/${encodeURIComponent(ticketId)}/comments.json?sort=-created_at&page[size]=${limit}`;
@@ -201,6 +295,31 @@ export class ZendeskClient {
     }
     return payload as T;
   }
+}
+
+async function readResponseBody(res: Response, maxBytes: number): Promise<Buffer> {
+  if (!res.body) {
+    const content = Buffer.from(await res.arrayBuffer());
+    if (content.byteLength > maxBytes) {
+      throw new Error("附件超过大小限制");
+    }
+    return content;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = Buffer.from(value);
+    received += chunk.byteLength;
+    if (received > maxBytes) {
+      throw new Error("附件超过大小限制");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 function safeJsonParse(input: string): unknown {

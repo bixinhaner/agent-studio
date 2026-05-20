@@ -1931,13 +1931,13 @@ function mergeAdditionalDirectoriesForBot(
   return next;
 }
 
-function buildZendeskRunWorkspacePath(rootPath: string, instanceId: string | undefined, ticketId: string, runId: string): string {
+function buildZendeskTicketWorkspacePath(rootPath: string, instanceId: string | undefined, ticketId: string): string {
   return path.join(
     rootPath,
     "zendesk",
     sanitizePathSegment(instanceId || "legacy", "instance"),
-    formatSessionDateSegment(),
-    `ticket-${sanitizePathSegment(ticketId, "ticket")}-${sanitizePathSegment(runId, "run")}`
+    "tickets",
+    `ticket-${sanitizePathSegment(ticketId, "ticket")}`
   );
 }
 
@@ -1989,7 +1989,7 @@ async function resolveZendeskAgentRuntimeOptions(input: {
   });
 
   const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
-  const workspacePath = buildZendeskRunWorkspacePath(workspaceRoot, input.instanceId, input.ticketId, input.runId);
+  const workspacePath = buildZendeskTicketWorkspacePath(workspaceRoot, input.instanceId, input.ticketId);
   await fs.mkdir(workspacePath, { recursive: true });
   await applyWorkspaceAgentsMdForMode(agentModeId, workspacePath);
 

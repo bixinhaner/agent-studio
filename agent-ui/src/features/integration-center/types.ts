@@ -231,6 +231,10 @@ export type ZendeskConfigInput = {
   webSearchMode?: string;
   additionalDirectories?: string[];
   maxCommentHistory?: number;
+  attachmentReadingEnabled?: boolean;
+  maxAttachmentCount?: number;
+  maxAttachmentBytes?: number;
+  allowedAttachmentMimeTypes?: string[];
   systemPrompt?: string;
 };
 
@@ -373,6 +377,10 @@ export type ZendeskConfigDraft = {
   agentModeId: string;
   knowledgeSetIds: string[];
   maxCommentHistory: number;
+  attachmentReadingEnabled: boolean;
+  maxAttachmentCount: number;
+  maxAttachmentSizeMb: number;
+  allowedAttachmentMimeTypesRaw: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;
   excludedTagsRaw: string;
