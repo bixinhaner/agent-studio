@@ -139,7 +139,7 @@ function SortableHeader<Key extends string>(props: {
 
 function MetricItem(props: { label: string; value: string; meta: string }) {
   return (
-    <article className="ops-analytics-metric-item">
+    <article className="ops-analytics-metric-item" title={`${props.label}: ${props.value} - ${props.meta}`}>
       <span className="ops-analytics-metric-label">{props.label}</span>
       <strong className="ops-analytics-metric-value" title={props.value}>{props.value}</strong>
       <span className="ops-analytics-metric-meta">{props.meta}</span>
@@ -657,106 +657,98 @@ export function OperationsAnalyticsView() {
 
   return (
     <div className="admin-page-container ops-analytics-page">
-      <section className="ops-analytics-filterbar">
-        <label className="field">
-          <span className="field-label">时间窗口</span>
-          <Select
-            size="small"
-            value={days}
-            options={DAY_OPTIONS}
-            onChange={(value) => {
-              setDays(value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">组织</span>
-          <Select
-            size="small"
-            allowClear
-            placeholder="全部组织"
-            value={organizationId}
-            options={data?.options.organizations ?? []}
-            onChange={(value) => {
-              setOrganizationId(value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">模型</span>
-          <Select
-            size="small"
-            allowClear
-            placeholder="全部模型"
-            value={model}
-            options={data?.options.models ?? []}
-            onChange={(value) => {
-              setModel(value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">路径</span>
-          <Select
-            size="small"
-            allowClear
-            placeholder="全部路径"
-            value={path}
-            options={data?.options.paths ?? []}
-            onChange={(value) => {
-              setPath(value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">入口</span>
-          <Select
-            size="small"
-            allowClear
-            placeholder="全部入口"
-            value={entry}
-            options={data?.options.entries ?? []}
-            onChange={(value) => {
-              setEntry(value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <label className="field ops-analytics-search">
-          <span className="field-label">搜索</span>
-          <Input
-            size="small"
-            prefix={<Search size={14} />}
-            value={query}
-            placeholder="搜索用户 / 组织 / session / 线程 / 路径"
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setSessionPage(1);
-            }}
-          />
-        </label>
-        <div className="field ops-analytics-refresh">
-          <span className="field-label">刷新</span>
-          <Button size="small" icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((current) => current + 1)}>
-            重新拉取
-          </Button>
-        </div>
-      </section>
+      <div className="ops-analytics-sticky-head">
+        <section className="ops-analytics-filterbar">
+          <label className="field">
+            <span className="field-label">时间窗口</span>
+            <Select
+              size="small"
+              value={days}
+              options={DAY_OPTIONS}
+              onChange={(value) => {
+                setDays(value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">组织</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="全部组织"
+              value={organizationId}
+              options={data?.options.organizations ?? []}
+              onChange={(value) => {
+                setOrganizationId(value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">模型</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="全部模型"
+              value={model}
+              options={data?.options.models ?? []}
+              onChange={(value) => {
+                setModel(value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">路径</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="全部路径"
+              value={path}
+              options={data?.options.paths ?? []}
+              onChange={(value) => {
+                setPath(value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">入口</span>
+            <Select
+              size="small"
+              allowClear
+              placeholder="全部入口"
+              value={entry}
+              options={data?.options.entries ?? []}
+              onChange={(value) => {
+                setEntry(value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <label className="field ops-analytics-search">
+            <span className="field-label">搜索</span>
+            <Input
+              size="small"
+              prefix={<Search size={14} />}
+              value={query}
+              placeholder="搜索用户 / 组织 / session / 线程 / 路径"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSessionPage(1);
+              }}
+            />
+          </label>
+          <div className="field ops-analytics-refresh">
+            <span className="field-label">刷新</span>
+            <Button size="small" icon={<RefreshCcw size={14} />} onClick={() => setRefreshToken((current) => current + 1)}>
+              重新拉取
+            </Button>
+          </div>
+        </section>
 
-      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
-
-      {loading && !data ? (
-        <div className="ops-analytics-loading">
-          <Spin size="large" />
-        </div>
-      ) : null}
-
-      {data ? (
-        <>
+        {data ? (
           <section className="ops-analytics-kpi-strip" aria-label="运营关键指标">
             <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有调用的组织" />
             <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有调用的用户" />
@@ -771,7 +763,19 @@ export function OperationsAnalyticsView() {
             />
             <MetricItem label="缓存占比" value={formatPercent(data.summary.cacheShare)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
           </section>
+        ) : null}
+      </div>
 
+      {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+
+      {loading && !data ? (
+        <div className="ops-analytics-loading">
+          <Spin size="large" />
+        </div>
+      ) : null}
+
+      {data ? (
+        <>
           <section className="ops-analytics-context-strip">
             <div className="ops-analytics-context-block">
               <span className="ops-analytics-context-label">统计窗口</span>
