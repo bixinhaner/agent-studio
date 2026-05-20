@@ -1,0 +1,14 @@
+生产部署 PM2 配置权限修复归档
+
+问题：
+- 生产机 /usr/local/agent-studio 归 agentstudio 用户所有
+- SSH 登录用户 azureuser 虽有免密 sudo，但部署脚本直接用当前用户写 pm2-ecosystem.config.cjs
+- 导致 Zendesk 大评论 ID 修复部署到前端构建完成后，在渲染 PM2 配置阶段 PermissionError 退出
+
+修复：
+- 渲染 PM2 配置先写入临时文件
+- 非应用用户执行时使用 sudo install 写入目标文件，并设置 agentstudio:agentstudio 归属
+- 应用用户执行时保持普通 install 写入路径
+
+验证：
+- bash -n scripts/deploy-agent-studio.sh
