@@ -50,6 +50,17 @@ function normalizeDirectories(value: string[] | undefined): string[] {
   return result;
 }
 
+function normalizeIdList(value: string[] | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) {
+    const trimmed = String(item || "").trim();
+    if (!trimmed || result.includes(trimmed)) continue;
+    result.push(trimmed);
+  }
+  return result;
+}
+
 function uniqueLowercaseTags(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
@@ -87,6 +98,8 @@ function defaultSettings(): ZendeskIntegrationSettings {
     fallbackMode: "internal_note",
     autoStatus: "pending",
     excludedTags: [],
+    agentModeId: "",
+    knowledgeSetIds: [],
     workspace: appConfig.defaultWorkspace,
     model,
     reasoningEffort: normalizeReasoningEffortForModel(model, appConfig.defaultReasoningEffort),
@@ -125,8 +138,7 @@ export function findZendeskReadinessGaps(settings: ZendeskIntegrationSettings): 
   if (!settings.zendeskEmail) missing.push("zendesk_email");
   if (!settings.zendeskApiToken) missing.push("zendesk_api_token");
   if (!settings.webhookSigningSecret) missing.push("webhook_signing_secret");
-  if (!settings.workspace) missing.push("workspace");
-  if (!settings.model) missing.push("model");
+  if (!settings.agentModeId) missing.push("agent_mode_id");
   return missing;
 }
 
@@ -225,6 +237,8 @@ export class ZendeskSettingsStore {
       zendeskApiToken: String(input.zendeskApiToken || "").trim(),
       webhookSigningSecret: String(input.webhookSigningSecret || "").trim(),
       excludedTags: uniqueLowercaseTags(input.excludedTags),
+      agentModeId: String(input.agentModeId || "").trim(),
+      knowledgeSetIds: normalizeIdList(input.knowledgeSetIds),
       workspace,
       model,
       reasoningEffort: normalizeReasoningEffortForModel(model, input.reasoningEffort),

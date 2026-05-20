@@ -46,6 +46,8 @@ export type ZendeskIntegrationSettings = {
   fallbackMode: ZendeskFallbackMode;
   autoStatus: ZendeskAutoStatus;
   excludedTags: string[];
+  agentModeId: string;
+  knowledgeSetIds: string[];
   workspace: string;
   model: string;
   reasoningEffort: ReasoningEffort;
@@ -160,6 +162,8 @@ export const zendeskSettingsUpdateSchema = z.object({
   fallback_mode: z.enum(ZENDESK_FALLBACK_MODES).optional(),
   auto_status: z.enum(ZENDESK_AUTO_STATUS_VALUES).optional(),
   excluded_tags: optionalStringArraySchema,
+  agent_mode_id: optionalStringSchema,
+  knowledge_set_ids: optionalStringArraySchema,
   workspace: optionalStringSchema,
   model: optionalStringSchema,
   reasoning_effort: z.enum(REASONING_EFFORT_VALUES).optional(),

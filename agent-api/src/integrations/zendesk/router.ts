@@ -44,6 +44,8 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         fallbackMode: input.fallback_mode,
         autoStatus: input.auto_status,
         excludedTags: normalizeStringArray(input.excluded_tags),
+        agentModeId: input.agent_mode_id,
+        knowledgeSetIds: normalizeStringArray(input.knowledge_set_ids),
         workspace: input.workspace,
         model: input.model,
         reasoningEffort: input.reasoning_effort,

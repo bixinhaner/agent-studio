@@ -220,6 +220,8 @@ export type ZendeskConfigInput = {
   fallbackMode?: string;
   autoStatus?: string;
   excludedTags?: string[];
+  agentModeId?: string;
+  knowledgeSetIds?: string[];
   workspace?: string;
   model?: string;
   reasoningEffort?: string;
@@ -368,17 +370,10 @@ export type ZendeskConfigDraft = {
   responseMode: string;
   fallbackMode: string;
   autoStatus: string;
-  workspace: string;
-  model: string;
-  reasoningEffort: string;
-  sandboxMode: string;
-  approvalPolicy: string;
-  networkAccessEnabled: boolean;
-  webSearchMode: string;
+  agentModeId: string;
+  knowledgeSetIds: string[];
   maxCommentHistory: number;
-  systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;
   excludedTagsRaw: string;
-  additionalDirectoriesRaw: string;
 };

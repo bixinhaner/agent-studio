@@ -60,6 +60,7 @@ import {
 import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
 import { BroadcastRepository, type BroadcastRepositoryDb } from "./persistence/broadcast-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
+import type { ZendeskIntegrationSettings } from "./integrations/zendesk/types.js";
 import {
   ensureThreadUploadInRunConfig,
   replaceLiveRuntimeSession,
@@ -313,10 +314,11 @@ const accessRequestService = createAccessRequestService({
       }));
   }
 });
-const zendesk = new ZendeskIntegrationService({
-  resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot())
-});
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+const zendesk = new ZendeskIntegrationService({
+  resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
+  resolveAgentRuntime: resolveZendeskAgentRuntimeOptions
+});
 const brandingAssetStorage = new BrandingAssetStorage(appConfig.brandingAssetRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
@@ -1927,6 +1929,86 @@ function mergeAdditionalDirectoriesForBot(
   }
   next.additionalDirectories = current;
   return next;
+}
+
+function buildZendeskRunWorkspacePath(rootPath: string, instanceId: string | undefined, ticketId: string, runId: string): string {
+  return path.join(
+    rootPath,
+    "zendesk",
+    sanitizePathSegment(instanceId || "legacy", "instance"),
+    formatSessionDateSegment(),
+    `ticket-${sanitizePathSegment(ticketId, "ticket")}-${sanitizePathSegment(runId, "run")}`
+  );
+}
+
+async function resolveZendeskAgentRuntimeOptions(input: {
+  settings: ZendeskIntegrationSettings;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+}): Promise<{
+  runtime: CodexRuntime;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  workspace: string;
+  codexRunConfig?: Record<string, unknown>;
+}> {
+  const agentModeId = trimOrUndefined(input.settings.agentModeId);
+  if (!agentModeId) {
+    throw new Error("Zendesk 集成未绑定 Agent Mode");
+  }
+
+  const agentMode = await agentModes.get(agentModeId);
+  if (!agentMode || trimOrUndefined(agentMode.status) !== "active") {
+    throw new Error("Zendesk 集成绑定的 Agent Mode 不存在或未启用");
+  }
+
+  const runProfile = await runProfiles.get(agentMode.runProfileId);
+  if (!runProfile || trimOrUndefined(runProfile.status) !== "active") {
+    throw new Error("Zendesk 集成绑定的 Agent Mode 对应 Run Profile 不存在或未启用");
+  }
+
+  const selectedModel = normalizeModel(runProfile.defaultModel || appConfig.defaultModel);
+  const selectedReasoningEffort = normalizeReasoningEffortForModel(
+    selectedModel,
+    (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) || appConfig.defaultReasoningEffort
+  );
+  const knowledgeSetIds = asStringArray(input.settings.knowledgeSetIds);
+  const knowledgeSetMap = new Map(
+    (await knowledgeSets.list())
+      .filter((item) => trimOrUndefined(item.status) === "active" && trimOrUndefined(item.sourceType) === "managed_upload")
+      .map((item) => [item.id, item] as const)
+  );
+  const mountPaths = knowledgeSetIds.map((knowledgeSetId) => {
+    const knowledgeSet = knowledgeSetMap.get(knowledgeSetId);
+    if (!knowledgeSet) {
+      throw new Error("Zendesk 集成绑定的资料集不存在或未启用");
+    }
+    return knowledgeSetStorage.resolveReadableMountPath(trimOrUndefined(knowledgeSet.storageKey) ?? knowledgeSet.id);
+  });
+
+  const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
+  const workspacePath = buildZendeskRunWorkspacePath(workspaceRoot, input.instanceId, input.ticketId, input.runId);
+  await fs.mkdir(workspacePath, { recursive: true });
+  await applyWorkspaceAgentsMdForMode(agentModeId, workspacePath);
+
+  return {
+    runtime: createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
+    model: selectedModel,
+    reasoningEffort: selectedReasoningEffort,
+    workspace: workspacePath,
+    codexRunConfig: mergeAdditionalDirectoriesForBot(
+      {
+        sandboxMode: runProfile.sandboxMode,
+        approvalPolicy: runProfile.approvalPolicy,
+        networkAccessEnabled: runProfile.networkAccessEnabled,
+        webSearchMode: runProfile.webSearchMode,
+        mode: agentModeId
+      },
+      mountPaths
+    )
+  };
 }
 
 function dingtalkMessageCreatedAt(value: unknown): Date {

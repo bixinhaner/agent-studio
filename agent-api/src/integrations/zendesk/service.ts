@@ -24,6 +24,7 @@ import type {
   ZendeskTicketContext,
   ZendeskRunStatus
 } from "./types.js";
+import type { ReasoningEffort } from "../../model-config.js";
 
 type ZendeskSettingsStoreBridge = {
   get(): Promise<ZendeskIntegrationSettings>;
@@ -55,6 +56,14 @@ type ProcessTicketResult = {
   commentId?: number;
   requesterCommentId?: number;
   decision?: ZendeskAgentDecision["decision"];
+};
+
+type ZendeskAgentRuntimeOptions = {
+  runtime?: CodexRuntime;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  workspace: string;
+  codexRunConfig?: Record<string, unknown>;
 };
 
 function sanitizeTicketId(value: string | number): string {
@@ -190,6 +199,13 @@ export class ZendeskIntegrationService {
   constructor(
     private readonly dependencies: {
       resolveRuntime?: () => Promise<CodexRuntime>;
+      resolveAgentRuntime?: (input: {
+        settings: ZendeskIntegrationSettings;
+        instanceId?: string;
+        ticketId: string;
+        runId: string;
+        source: "webhook" | "manual";
+      }) => Promise<ZendeskAgentRuntimeOptions>;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
     private readonly bindingStore = new ZendeskBindingStore(),
@@ -244,7 +260,7 @@ export class ZendeskIntegrationService {
   async validateConnection(instanceId?: string): Promise<{ ok: true; overview: ZendeskOverview }> {
     const settings = await this.loadSettings(instanceId);
     const missing = findZendeskReadinessGaps(settings).filter(
-      (item) => !["public_base_url", "workspace", "model"].includes(item)
+      (item) => !["public_base_url", "agent_mode_id"].includes(item)
     );
     if (missing.length > 0) {
       throw new Error(`Zendesk 配置不完整: ${missing.join(", ")}`);
@@ -415,7 +431,12 @@ export class ZendeskIntegrationService {
         requesterCommentId: requesterComment.id
       });
 
-      const answerText = await this.runAgent(context, settings);
+      const answerText = await this.runAgent(context, settings, {
+        instanceId,
+        ticketId,
+        runId,
+        source
+      });
       const decision = parseZendeskAgentDecision(answerText);
       const action = resolveAction(settings, decision);
 
@@ -480,15 +501,36 @@ export class ZendeskIntegrationService {
     }
   }
 
-  private async runAgent(context: ZendeskTicketContext, settings: ZendeskIntegrationSettings): Promise<string> {
-    const runtime = this.dependencies.resolveRuntime
-      ? await this.dependencies.resolveRuntime()
-      : new CodexRuntime();
+  private async runAgent(
+    context: ZendeskTicketContext,
+    settings: ZendeskIntegrationSettings,
+    run: {
+      instanceId?: string;
+      ticketId: string;
+      runId: string;
+      source: "webhook" | "manual";
+    }
+  ): Promise<string> {
+    const runtimeOptions = this.dependencies.resolveAgentRuntime
+      ? await this.dependencies.resolveAgentRuntime({
+          settings,
+          instanceId: run.instanceId,
+          ticketId: run.ticketId,
+          runId: run.runId,
+          source: run.source
+        })
+      : {
+          model: settings.model,
+          reasoningEffort: settings.reasoningEffort,
+          workspace: settings.workspace,
+          codexRunConfig: buildRunConfig(settings)
+        };
+    const runtime = runtimeOptions.runtime || (this.dependencies.resolveRuntime ? await this.dependencies.resolveRuntime() : new CodexRuntime());
     const thread = await runtime.startThreadWithOptions({
-      model: settings.model,
-      reasoningEffort: settings.reasoningEffort,
-      workspace: settings.workspace,
-      codexRunConfig: buildRunConfig(settings)
+      model: runtimeOptions.model,
+      reasoningEffort: runtimeOptions.reasoningEffort,
+      workspace: runtimeOptions.workspace,
+      codexRunConfig: runtimeOptions.codexRunConfig
     });
     const prompt = buildZendeskAgentPrompt(context, settings);
     let output = "";

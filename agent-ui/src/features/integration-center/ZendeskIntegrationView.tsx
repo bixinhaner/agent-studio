@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Collapse, Input, InputNumber, Segmented, Select, Space, Switch, Tag } from "antd";
 
+import { fetchAgentModes } from "../capability-center/api";
+import type { AgentModeRecord } from "../capability-center/types";
+import { fetchKnowledgeSets } from "../resources-center/api";
+import type { KnowledgeSetRecord } from "../resources-center/types";
 import { fetchIntegrationDetail, runZendeskIntegrationTicket, updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
@@ -42,34 +46,6 @@ const AUTO_STATUS_OPTIONS = [
   { label: "内部等待 hold", value: "hold" }
 ];
 
-const REASONING_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" }
-];
-
-const SANDBOX_OPTIONS = [
-  { label: "read-only", value: "read-only" },
-  { label: "workspace-write", value: "workspace-write" },
-  { label: "danger-full-access", value: "danger-full-access" }
-];
-
-const APPROVAL_OPTIONS = [
-  { label: "never", value: "never" },
-  { label: "on-request", value: "on-request" },
-  { label: "on-failure", value: "on-failure" },
-  { label: "untrusted", value: "untrusted" }
-];
-
-const WEB_SEARCH_OPTIONS = [
-  { label: "disabled", value: "disabled" },
-  { label: "cached", value: "cached" },
-  { label: "live", value: "live" }
-];
-
 const RESPONSE_MODE_VALUES = new Set(RESPONSE_MODE_OPTIONS.map((item) => item.value));
 const FALLBACK_MODE_VALUES = new Set(FALLBACK_MODE_OPTIONS.map((item) => item.value));
 const AUTO_STATUS_VALUES = new Set(AUTO_STATUS_OPTIONS.map((item) => item.value));
@@ -90,6 +66,19 @@ function asListText(value: unknown) {
   return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean).join(", ") : "";
 }
 
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of value) {
+    const normalized = typeof item === "string" ? item.trim() : "";
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    items.push(normalized);
+  }
+  return items;
+}
+
 function normalizeOption(value: string, allowed: Set<string>, fallback: string) {
   return allowed.has(value) ? value : fallback;
 }
@@ -106,16 +95,9 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     fallbackMode: normalizeOption(asString(detail.config.fallbackMode), FALLBACK_MODE_VALUES, "internal_note"),
     autoStatus: normalizeOption(asString(detail.config.autoStatus), AUTO_STATUS_VALUES, "pending"),
     excludedTagsRaw: asListText(detail.config.excludedTags),
-    workspace: asString(detail.config.workspace),
-    model: asString(detail.config.model),
-    reasoningEffort: asString(detail.config.reasoningEffort),
-    sandboxMode: asString(detail.config.sandboxMode) || "workspace-write",
-    approvalPolicy: asString(detail.config.approvalPolicy) || "never",
-    networkAccessEnabled: asBoolean(detail.config.networkAccessEnabled),
-    webSearchMode: asString(detail.config.webSearchMode) || "disabled",
-    additionalDirectoriesRaw: asListText(detail.config.additionalDirectories),
-    maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12),
-    systemPrompt: asString(detail.config.systemPrompt)
+    agentModeId: asString(detail.config.agentModeId),
+    knowledgeSetIds: asStringArray(detail.config.knowledgeSetIds),
+    maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12)
   };
 }
 
@@ -171,6 +153,10 @@ export function ZendeskIntegrationView(props: {
   const [manualTicketId, setManualTicketId] = useState("");
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [optionsErrorText, setOptionsErrorText] = useState("");
+  const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
+  const [knowledgeSets, setKnowledgeSets] = useState<KnowledgeSetRecord[]>([]);
 
   useEffect(() => {
     setName(props.detail.instance.name);
@@ -185,7 +171,48 @@ export function ZendeskIntegrationView(props: {
     setSuccessText("");
   }, [props.detail.instance.id]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadOptions() {
+      setOptionsLoading(true);
+      setOptionsErrorText("");
+      try {
+        const [modeResponse, knowledgeSetResponse] = await Promise.all([fetchAgentModes(), fetchKnowledgeSets()]);
+        if (!active) return;
+        setAgentModes(modeResponse.agentModes.filter((item) => item.status === "active"));
+        setKnowledgeSets(
+          knowledgeSetResponse.knowledgeSets.filter((item) => item.status === "active" && item.sourceType === "managed_upload")
+        );
+      } catch (error) {
+        if (active) setOptionsErrorText(error instanceof Error ? error.message : "加载 Agent Mode/资料集列表失败");
+      } finally {
+        if (active) setOptionsLoading(false);
+      }
+    }
+
+    void loadOptions();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const agentModeOptions = useMemo(
+    () => agentModes.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
+    [agentModes]
+  );
+  const knowledgeSetOptions = useMemo(
+    () => knowledgeSets.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
+    [knowledgeSets]
+  );
+
   async function handleSave() {
+    if (draft.enabled && !draft.agentModeId.trim()) {
+      setErrorText("启用 Zendesk 自动回复前需要绑定 Agent Mode");
+      setSuccessText("");
+      setActiveTab("basic");
+      return;
+    }
+
     setSaving(true);
     setErrorText("");
     setSuccessText("");
@@ -203,16 +230,9 @@ export function ZendeskIntegrationView(props: {
           fallbackMode: draft.fallbackMode.trim(),
           autoStatus: draft.autoStatus.trim(),
           excludedTags: parseList(draft.excludedTagsRaw),
-          workspace: draft.workspace.trim(),
-          model: draft.model.trim(),
-          reasoningEffort: draft.reasoningEffort.trim(),
-          sandboxMode: draft.sandboxMode.trim(),
-          approvalPolicy: draft.approvalPolicy.trim(),
-          networkAccessEnabled: draft.networkAccessEnabled,
-          webSearchMode: draft.webSearchMode.trim(),
-          additionalDirectories: parseList(draft.additionalDirectoriesRaw),
-          maxCommentHistory: Math.max(1, Math.min(50, Number(draft.maxCommentHistory) || 12)),
-          systemPrompt: draft.systemPrompt.trim()
+          agentModeId: draft.agentModeId.trim(),
+          knowledgeSetIds: asStringArray(draft.knowledgeSetIds),
+          maxCommentHistory: Math.max(1, Math.min(50, Number(draft.maxCommentHistory) || 12))
         },
         secretState:
           draft.zendeskApiTokenDraft.trim() || draft.webhookSigningSecretDraft.trim()
@@ -318,6 +338,11 @@ export function ZendeskIntegrationView(props: {
       detail: zendeskSetup?.webhookUrl ? "复制实例专属地址到 Zendesk" : "填写 Public Base URL 后保存"
     },
     {
+      label: "智能体绑定",
+      ok: Boolean(draft.agentModeId),
+      detail: draft.agentModeId ? "已绑定 Agent Mode 和可选资料集" : "先选择一个 Agent Mode，运行参数将从该智能体继承"
+    },
+    {
       label: "上线策略",
       ok: draft.responseMode === "internal_note",
       detail: draft.responseMode === "internal_note" ? "当前为内部备注试运行" : "当前允许公开回复，请确认知识库覆盖后再上线"
@@ -330,7 +355,7 @@ export function ZendeskIntegrationView(props: {
         <div className="resource-center-section-header">
           <div>
             <h3>{props.detail.instance.name}</h3>
-            <p>管理 Zendesk 站点、Webhook、模型与运行参数。</p>
+            <p>管理 Zendesk 站点、Webhook、Agent Mode、资料集和回复策略。</p>
           </div>
           <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
@@ -346,6 +371,7 @@ export function ZendeskIntegrationView(props: {
 
         {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
         {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+        {optionsErrorText ? <Alert type="warning" showIcon className="admin-alert-inline" message={optionsErrorText} /> : null}
 
         {activeTab === "basic" ? (
           <>
@@ -466,7 +492,59 @@ export function ZendeskIntegrationView(props: {
                 },
                 {
                   key: "runtime",
-                  label: "运行参数",
+                  label: "智能体与资料集",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">绑定 Agent Mode</span>
+                        <Select
+                          showSearch
+                          value={draft.agentModeId || undefined}
+                          options={optionsWithCurrent(agentModeOptions, draft.agentModeId)}
+                          loading={optionsLoading}
+                          optionFilterProp="label"
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, agentModeId: value }))}
+                        />
+                        <span className="field-help">
+                          Zendesk 运行时会继承该 Agent Mode 的 Run Profile、指令和技能配置。
+                        </span>
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">绑定资料集</span>
+                        <Select
+                          mode="multiple"
+                          showSearch
+                          value={draft.knowledgeSetIds}
+                          options={knowledgeSetOptions}
+                          loading={optionsLoading}
+                          optionFilterProp="label"
+                          disabled={saving}
+                          onChange={(value) => setDraft((current) => ({ ...current, knowledgeSetIds: value }))}
+                        />
+                        <span className="field-help">
+                          资料集会作为只读参考目录挂载给本次 Zendesk 回复任务。
+                        </span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">最大评论历史</span>
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          value={Number(draft.maxCommentHistory) || 12}
+                          disabled={saving}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, maxCommentHistory: Number(value) || 12 }))
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "advanced",
+                  label: "回复策略",
                   children: (
                     <div className="resource-center-form-grid">
                       <label className="field">
@@ -496,89 +574,6 @@ export function ZendeskIntegrationView(props: {
                           onChange={(value) => setDraft((current) => ({ ...current, autoStatus: value }))}
                         />
                       </label>
-                      <label className="field">
-                        <span className="field-label">Workspace</span>
-                        <Input
-                          value={draft.workspace}
-                          disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, workspace: event.target.value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Model</span>
-                        <Input
-                          value={draft.model}
-                          disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Reasoning Effort</span>
-                        <Select
-                          value={draft.reasoningEffort}
-                          options={optionsWithCurrent(REASONING_OPTIONS, draft.reasoningEffort)}
-                          disabled={saving}
-                          onChange={(value) => setDraft((current) => ({ ...current, reasoningEffort: value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Sandbox Mode</span>
-                        <Select
-                          value={draft.sandboxMode}
-                          options={optionsWithCurrent(SANDBOX_OPTIONS, draft.sandboxMode)}
-                          disabled={saving}
-                          onChange={(value) => setDraft((current) => ({ ...current, sandboxMode: value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Approval Policy</span>
-                        <Select
-                          value={draft.approvalPolicy}
-                          options={optionsWithCurrent(APPROVAL_OPTIONS, draft.approvalPolicy)}
-                          disabled={saving}
-                          onChange={(value) => setDraft((current) => ({ ...current, approvalPolicy: value }))}
-                        />
-                      </label>
-                      <label className="field">
-                        <span className="field-label">Web Search Mode</span>
-                        <Select
-                          value={draft.webSearchMode}
-                          options={optionsWithCurrent(WEB_SEARCH_OPTIONS, draft.webSearchMode)}
-                          disabled={saving}
-                          onChange={(value) => setDraft((current) => ({ ...current, webSearchMode: value }))}
-                        />
-                      </label>
-                      <label className="field checkbox-field resource-center-toggle-row">
-                        <Switch
-                          checked={draft.networkAccessEnabled}
-                          disabled={saving}
-                          checkedChildren="联网"
-                          unCheckedChildren="离线"
-                          onChange={(checked) => setDraft((current) => ({ ...current, networkAccessEnabled: checked }))}
-                        />
-                        <span className="field-label">允许联网</span>
-                      </label>
-                      <label className="field">
-                        <span className="field-label">最大评论历史</span>
-                        <InputNumber
-                          min={1}
-                          max={50}
-                          value={Number(draft.maxCommentHistory) || 12}
-                          disabled={saving}
-                          onChange={(value) =>
-                            setDraft((current) => ({ ...current, maxCommentHistory: Number(value) || 12 }))
-                          }
-                          style={{ width: "100%" }}
-                        />
-                      </label>
-                    </div>
-                  )
-                },
-                {
-                  key: "advanced",
-                  label: "高级配置",
-                  children: (
-                    <div className="resource-center-form-grid">
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">排除标签</span>
                         <Input.TextArea
@@ -586,27 +581,6 @@ export function ZendeskIntegrationView(props: {
                           value={draft.excludedTagsRaw}
                           disabled={saving}
                           onChange={(event) => setDraft((current) => ({ ...current, excludedTagsRaw: event.target.value }))}
-                        />
-                      </label>
-                      <label className="field resource-center-form-span-2">
-                        <span className="field-label">附加目录</span>
-                        <Input.TextArea
-                          rows={2}
-                          value={draft.additionalDirectoriesRaw}
-                          disabled={saving}
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, additionalDirectoriesRaw: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label className="field resource-center-form-span-2">
-                        <span className="field-label">System Prompt</span>
-                        <Input.TextArea
-                          className="integration-center-large-textarea"
-                          rows={8}
-                          value={draft.systemPrompt}
-                          disabled={saving}
-                          onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))}
                         />
                       </label>
                     </div>
@@ -656,6 +630,14 @@ export function ZendeskIntegrationView(props: {
                       : "尚未验证"
                     : "暂无运维数据"}
                 </p>
+              </div>
+              <div>
+                <strong>Agent Mode</strong>
+                <p>{draft.agentModeId ? agentModeOptions.find((item) => item.value === draft.agentModeId)?.label || draft.agentModeId : "未绑定"}</p>
+              </div>
+              <div>
+                <strong>资料集</strong>
+                <p>{draft.knowledgeSetIds.length ? `${draft.knowledgeSetIds.length} 个` : "未绑定"}</p>
               </div>
             </div>
 

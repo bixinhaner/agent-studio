@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ZendeskBindingStore } from "./binding-store.js";
 import { ZendeskRunStore } from "./run-store.js";
 import { ZendeskIntegrationService } from "./service.js";
+import { findZendeskReadinessGaps } from "./settings-store.js";
 import type { ZendeskIntegrationSettings } from "./types.js";
 
 const baseSettings: ZendeskIntegrationSettings = {
@@ -17,6 +18,8 @@ const baseSettings: ZendeskIntegrationSettings = {
   fallbackMode: "internal_note",
   autoStatus: "pending",
   excludedTags: [],
+  agentModeId: "mode-1",
+  knowledgeSetIds: [],
   workspace: "/tmp",
   model: "gpt-5.5",
   reasoningEffort: "high",
@@ -34,6 +37,13 @@ function signBody(body: string, timestamp: string, secret: string) {
 }
 
 describe("ZendeskIntegrationService", () => {
+  it("requires an Agent Mode binding for production readiness", () => {
+    expect(findZendeskReadinessGaps({ ...baseSettings, agentModeId: "" })).toContain("agent_mode_id");
+    expect(findZendeskReadinessGaps(baseSettings)).not.toContain("agent_mode_id");
+    expect(findZendeskReadinessGaps({ ...baseSettings, workspace: "", model: "" })).not.toContain("workspace");
+    expect(findZendeskReadinessGaps({ ...baseSettings, workspace: "", model: "" })).not.toContain("model");
+  });
+
   it("accepts instance-scoped webhooks and returns before the background run finishes", async () => {
     const body = JSON.stringify({ ticket_id: "123" });
     const timestamp = new Date().toISOString();
