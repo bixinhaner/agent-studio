@@ -1,0 +1,24 @@
+Zendesk 绑定智能体和资料集功能归档
+
+目标：
+- Zendesk 自动回复不再单独维护 model、reasoningEffort、workspace、sandbox、approval、systemPrompt 等运行参数
+- 改为像 DingTalk 机器人一样绑定 Agent Mode 和资料集，让用户维护一套智能体配置
+
+后端改动：
+- Zendesk 配置新增 agentModeId 和 knowledgeSetIds
+- 就绪检查要求绑定 Agent Mode
+- 自动回复运行时读取 Agent Mode 对应 Run Profile
+- 自动回复运行时挂载所选 managed_upload 资料集
+- 为每次 Zendesk ticket 处理创建独立运行工作目录
+
+前端改动：
+- Zendesk 管理页保留统一配置入口
+- 新增 Agent Mode 和资料集选择器
+- 移除 Zendesk 页面独立模型、工作目录、沙箱、审批、联网、System Prompt 配置项
+- 上线检查增加智能体绑定状态
+
+验证：
+- agent-api npm run build
+- agent-ui npm run build
+- agent-api npm run test，23 个测试文件 80 个用例通过
+- git diff --check
