@@ -54,6 +54,7 @@ describe("Zendesk persistence stores", () => {
   });
 
   it("uses instance and ticket as the Zendesk idempotency key", async () => {
+    const zendeskCommentId = 49391447872404;
     const upsert = vi.fn(async (args: {
       where: { scopeKey_ticketId: { scopeKey: string; ticketId: string } };
       create: Record<string, unknown>;
@@ -63,7 +64,7 @@ describe("Zendesk persistence stores", () => {
       integrationInstanceId: args.create.integrationInstanceId as string,
       scopeKey: args.create.scopeKey as string,
       ticketId: args.create.ticketId as string,
-      lastProcessedRequesterCommentId: args.create.lastProcessedRequesterCommentId as number,
+      lastProcessedRequesterCommentId: args.create.lastProcessedRequesterCommentId as bigint,
       lastAction: args.create.lastAction as string,
       lastRunAt: args.create.lastRunAt as Date,
       lastRunId: args.create.lastRunId as string,
@@ -80,7 +81,7 @@ describe("Zendesk persistence stores", () => {
     await store.upsert(
       "123",
       {
-        lastProcessedRequesterCommentId: 456,
+        lastProcessedRequesterCommentId: zendeskCommentId,
         lastAction: "public_reply",
         lastRunAt: "2026-05-18T10:00:00.000Z",
         lastRunId: "run-1"
@@ -94,5 +95,48 @@ describe("Zendesk persistence stores", () => {
         ticketId: "123"
       }
     });
+    expect(upsert.mock.calls[0]?.[0].create.lastProcessedRequesterCommentId).toBe(BigInt(zendeskCommentId));
+    expect(upsert.mock.calls[0]?.[0].update.lastProcessedRequesterCommentId).toBe(BigInt(zendeskCommentId));
+  });
+
+  it("stores Zendesk run comment ids as bigint values", async () => {
+    const zendeskCommentId = 49391447872404;
+    const update = vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+      id: args.where.id,
+      integrationInstanceId: "inst-1",
+      scopeKey: "inst-1",
+      ticketId: "123",
+      source: "manual",
+      status: args.data.status as string,
+      detail: args.data.detail as string,
+      decision: null,
+      commentId: args.data.commentId as bigint,
+      requesterCommentId: args.data.requesterCommentId as bigint,
+      ticketSubject: null,
+      error: null,
+      createdAt: "2026-05-18T10:00:00.000Z",
+      updatedAt: "2026-05-18T10:00:00.000Z"
+    }));
+    const store = new ZendeskRunStore({
+      zendeskRun: {
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        findMany: vi.fn(async () => []),
+        update
+      }
+    });
+
+    const record = await store.update("run-1", {
+      status: "noted",
+      detail: "已记录内部备注",
+      commentId: zendeskCommentId,
+      requesterCommentId: zendeskCommentId
+    });
+
+    expect(update.mock.calls[0]?.[0].data.commentId).toBe(BigInt(zendeskCommentId));
+    expect(update.mock.calls[0]?.[0].data.requesterCommentId).toBe(BigInt(zendeskCommentId));
+    expect(record?.commentId).toBe(zendeskCommentId);
+    expect(record?.requesterCommentId).toBe(zendeskCommentId);
   });
 });

@@ -1045,8 +1045,8 @@ model ZendeskRun {
   status                String
   detail                String
   decision              String?
-  commentId             Int?                 @map("comment_id")
-  requesterCommentId    Int?                 @map("requester_comment_id")
+  commentId             BigInt?              @map("comment_id")
+  requesterCommentId    BigInt?              @map("requester_comment_id")
   ticketSubject         String?              @map("ticket_subject")
   error                 String?
   createdAt             DateTime             @default(now()) @map("created_at")
@@ -1066,7 +1066,7 @@ model ZendeskTicketBinding {
   integrationInstanceId             String?              @map("integration_instance_id")
   scopeKey                          String               @default("legacy") @map("scope_key")
   ticketId                          String               @map("ticket_id")
-  lastProcessedRequesterCommentId   Int?                 @map("last_processed_requester_comment_id")
+  lastProcessedRequesterCommentId   BigInt?              @map("last_processed_requester_comment_id")
   lastAction                        String?              @map("last_action")
   lastRunAt                         DateTime?            @map("last_run_at")
   lastRunId                         String?              @map("last_run_id")

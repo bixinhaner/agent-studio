@@ -12,8 +12,8 @@ type ZendeskRunRow = {
   status: string;
   detail: string;
   decision: string | null;
-  commentId: number | null;
-  requesterCommentId: number | null;
+  commentId: number | bigint | string | null;
+  requesterCommentId: number | bigint | string | null;
   ticketSubject: string | null;
   error: string | null;
   createdAt: Date | string;
@@ -53,6 +53,23 @@ function toIsoString(value: Date | string | null | undefined): string {
   return new Date().toISOString();
 }
 
+function toBigIntOrNull(value: number | null | undefined): bigint | null {
+  return typeof value === "number" && Number.isFinite(value) ? BigInt(value) : null;
+}
+
+function toSafeNumber(value: number | bigint | string | null | undefined): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) ? numeric : undefined;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) ? numeric : undefined;
+  }
+  return undefined;
+}
+
 function mapRun(row: ZendeskRunRow): ZendeskRunRecord {
   return {
     id: row.id,
@@ -67,8 +84,8 @@ function mapRun(row: ZendeskRunRow): ZendeskRunRecord {
       row.decision === "public_reply" || row.decision === "internal_note" || row.decision === "handoff"
         ? row.decision
         : undefined,
-    commentId: typeof row.commentId === "number" ? row.commentId : undefined,
-    requesterCommentId: typeof row.requesterCommentId === "number" ? row.requesterCommentId : undefined,
+    commentId: toSafeNumber(row.commentId),
+    requesterCommentId: toSafeNumber(row.requesterCommentId),
     ticketSubject: trimOrUndefined(row.ticketSubject ?? undefined),
     error: trimOrUndefined(row.error ?? undefined)
   };
@@ -140,8 +157,8 @@ export class ZendeskRunStore {
           ...(patch.status !== undefined ? { status: patch.status } : {}),
           ...(patch.detail !== undefined ? { detail: patch.detail } : {}),
           ...(patch.decision !== undefined ? { decision: patch.decision ?? null } : {}),
-          ...(patch.commentId !== undefined ? { commentId: patch.commentId ?? null } : {}),
-          ...(patch.requesterCommentId !== undefined ? { requesterCommentId: patch.requesterCommentId ?? null } : {}),
+          ...(patch.commentId !== undefined ? { commentId: toBigIntOrNull(patch.commentId) } : {}),
+          ...(patch.requesterCommentId !== undefined ? { requesterCommentId: toBigIntOrNull(patch.requesterCommentId) } : {}),
           ...(patch.ticketSubject !== undefined ? { ticketSubject: trimOrUndefined(patch.ticketSubject) ?? null } : {}),
           ...(patch.error !== undefined ? { error: trimOrUndefined(patch.error) ?? null } : {})
         }

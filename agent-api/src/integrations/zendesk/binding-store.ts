@@ -9,7 +9,7 @@ type ZendeskTicketBindingRow = {
   integrationInstanceId: string | null;
   scopeKey: string;
   ticketId: string;
-  lastProcessedRequesterCommentId: number | null;
+  lastProcessedRequesterCommentId: number | bigint | string | null;
   lastAction: string | null;
   lastRunAt: Date | string | null;
   lastRunId: string | null;
@@ -52,12 +52,28 @@ function toDate(value: string | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function toBigIntOrNull(value: number | null | undefined): bigint | null {
+  return typeof value === "number" && Number.isFinite(value) ? BigInt(value) : null;
+}
+
+function toSafeNumber(value: number | bigint | string | null | undefined): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) ? numeric : undefined;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    return Number.isSafeInteger(numeric) ? numeric : undefined;
+  }
+  return undefined;
+}
+
 function mapBinding(row: ZendeskTicketBindingRow): ZendeskBindingRecord {
   return {
     ticketId: row.ticketId,
     instanceId: trimOrUndefined(row.integrationInstanceId ?? undefined),
-    lastProcessedRequesterCommentId:
-      typeof row.lastProcessedRequesterCommentId === "number" ? row.lastProcessedRequesterCommentId : undefined,
+    lastProcessedRequesterCommentId: toSafeNumber(row.lastProcessedRequesterCommentId),
     lastAction:
       row.lastAction === "public_reply" ||
       row.lastAction === "internal_note" ||
@@ -112,14 +128,17 @@ export class ZendeskBindingStore {
         integrationInstanceId: normalizedInstanceId ?? null,
         scopeKey,
         ticketId: key,
-        lastProcessedRequesterCommentId: patch.lastProcessedRequesterCommentId ?? null,
+        lastProcessedRequesterCommentId: toBigIntOrNull(patch.lastProcessedRequesterCommentId),
         lastAction: trimOrUndefined(patch.lastAction) ?? null,
         lastRunAt: toDate(patch.lastRunAt),
         lastRunId: trimOrUndefined(patch.lastRunId) ?? null
       },
       update: {
         integrationInstanceId: normalizedInstanceId ?? null,
-        lastProcessedRequesterCommentId: patch.lastProcessedRequesterCommentId,
+        lastProcessedRequesterCommentId:
+          patch.lastProcessedRequesterCommentId === undefined
+            ? undefined
+            : toBigIntOrNull(patch.lastProcessedRequesterCommentId),
         lastAction: trimOrUndefined(patch.lastAction) ?? undefined,
         lastRunAt: patch.lastRunAt === undefined ? undefined : toDate(patch.lastRunAt),
         lastRunId: patch.lastRunId === undefined ? undefined : trimOrUndefined(patch.lastRunId) ?? null
