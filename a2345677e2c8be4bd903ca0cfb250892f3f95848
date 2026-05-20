@@ -1,0 +1,5 @@
+实现 Zendesk 工单同步到后台对话记录。
+
+范围：复用现有 ThreadRecord 与 external_conversation_bindings；客户评论写入 user 消息，AI 处理结果写入 assistant 消息；附件支持后台预览；后台渠道展示为 Zendesk 工单。
+
+验证：agent-api npm run build；agent-api npm run test；agent-ui npm run build；git diff --check。
