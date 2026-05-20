@@ -16,6 +16,7 @@ export type ZendeskPublicSettings = {
   knowledgeSetIds: string[];
   maxCommentHistory: number;
   attachmentReadingEnabled: boolean;
+  attachmentTypeRestrictionEnabled: boolean;
   maxAttachmentCount: number;
   maxAttachmentBytes: number;
   allowedAttachmentMimeTypes: string[];
@@ -80,6 +81,7 @@ export type ZendeskSettingsUpdate = {
   knowledge_set_ids: string[];
   max_comment_history: number;
   attachment_reading_enabled: boolean;
+  attachment_type_restriction_enabled: boolean;
   max_attachment_count: number;
   max_attachment_bytes: number;
   allowed_attachment_mime_types: string[];

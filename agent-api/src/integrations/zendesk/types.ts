@@ -58,6 +58,7 @@ export type ZendeskIntegrationSettings = {
   additionalDirectories: string[];
   maxCommentHistory: number;
   attachmentReadingEnabled: boolean;
+  attachmentTypeRestrictionEnabled: boolean;
   maxAttachmentCount: number;
   maxAttachmentBytes: number;
   allowedAttachmentMimeTypes: string[];
@@ -208,7 +209,8 @@ export const zendeskSettingsUpdateSchema = z.object({
   additional_directories: optionalStringArraySchema,
   max_comment_history: z.number().int().min(1).max(50).optional(),
   attachment_reading_enabled: z.boolean().optional(),
-  max_attachment_count: z.number().int().min(1).max(20).optional(),
+  attachment_type_restriction_enabled: z.boolean().optional(),
+  max_attachment_count: z.number().int().min(1).max(100).optional(),
   max_attachment_bytes: z.number().int().min(1024).max(50 * 1024 * 1024).optional(),
   allowed_attachment_mime_types: optionalStringArraySchema,
   system_prompt: optionalStringSchema

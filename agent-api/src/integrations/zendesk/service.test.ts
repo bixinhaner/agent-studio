@@ -32,6 +32,7 @@ const baseSettings: ZendeskIntegrationSettings = {
   additionalDirectories: [],
   maxCommentHistory: 12,
   attachmentReadingEnabled: true,
+  attachmentTypeRestrictionEnabled: true,
   maxAttachmentCount: 5,
   maxAttachmentBytes: 10 * 1024 * 1024,
   allowedAttachmentMimeTypes: ["image/*", "application/pdf", "text/*"],
@@ -166,30 +167,40 @@ describe("ZendeskIntegrationService", () => {
         );
       }
       if (url.includes("/api/v2/tickets/123/comments.json")) {
+        const firstRequesterComment = {
+          id: 101,
+          author_id: 9001,
+          body: "Please check the screenshot.",
+          public: true,
+          created_at: "2026-05-20T02:01:00Z",
+          attachments: [
+            {
+              id: 7788,
+              file_name: "signal screenshot.png",
+              content_type: "image/png",
+              size: 7,
+              content_url: "https://example.zendesk.com/attachments/token/signal.png",
+              inline: true
+            }
+          ]
+        };
+        const comments =
+          nextRequesterCommentId === 101
+            ? [firstRequesterComment]
+            : [
+                {
+                  id: 102,
+                  author_id: 9001,
+                  body: "Any update?",
+                  public: true,
+                  created_at: "2026-05-20T02:03:00Z",
+                  attachments: []
+                },
+                firstRequesterComment
+              ];
         return new Response(
           JSON.stringify({
-            comments: [
-              {
-                id: nextRequesterCommentId,
-                author_id: 9001,
-                body: nextRequesterCommentId === 101 ? "Please check the screenshot." : "Any update?",
-                public: true,
-                created_at: "2026-05-20T02:01:00Z",
-                attachments:
-                  nextRequesterCommentId === 101
-                    ? [
-                        {
-                          id: 7788,
-                          file_name: "signal screenshot.png",
-                          content_type: "image/png",
-                          size: 7,
-                          content_url: "https://example.zendesk.com/attachments/token/signal.png",
-                          inline: true
-                        }
-                      ]
-                    : []
-              }
-            ]
+            comments
           }),
           { status: 200, headers: { "content-type": "application/json" } }
         );
@@ -362,14 +373,20 @@ describe("ZendeskIntegrationService", () => {
       });
       expect(prompts[0]).toContain("attachments:");
       expect(prompts[0]).toContain("requester_email: requester@example.com");
-      expect(prompts[0]).toContain("local_path: .zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png");
+      expect(prompts[0]).toContain(
+        "local_path: .zendesk/attachments/cache/example.zendesk.com/ticket-123/comment-101/att-7788-signal screenshot.png"
+      );
+      expect(prompts[1]).toContain("reason: 复用 ticket 附件缓存");
       expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.ticket.requester).toMatchObject({
         name: "Ramen Support User",
         email: "requester@example.com"
       });
       expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.comments[0]?.attachments[0]?.relativePath).toBe(
-        ".zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png"
+        ".zendesk/attachments/cache/example.zendesk.com/ticket-123/comment-101/att-7788-signal screenshot.png"
       );
+      expect(
+        fetchMock.mock.calls.filter(([input]) => String(input) === "https://example.zendesk.com/attachments/token/signal.png")
+      ).toHaveLength(1);
       expect(conversationAudit.afterAgentRun.mock.calls[0]?.[0]).toMatchObject({
         audit: {
           threadId: "audit-thread-1",
@@ -402,7 +419,18 @@ describe("ZendeskIntegrationService", () => {
         ])
       );
       await expect(
-        fs.stat(path.join(tempRoot, ".zendesk", "attachments", "run-run-1", "comment-101", "01-signal screenshot.png"))
+        fs.stat(
+          path.join(
+            tempRoot,
+            ".zendesk",
+            "attachments",
+            "cache",
+            "example.zendesk.com",
+            "ticket-123",
+            "comment-101",
+            "att-7788-signal screenshot.png"
+          )
+        )
       ).resolves.toBeTruthy();
       expect(runUpdates.some((item) => item.patch.status === "noted")).toBe(true);
     } finally {

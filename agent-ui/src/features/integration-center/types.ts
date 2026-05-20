@@ -232,6 +232,7 @@ export type ZendeskConfigInput = {
   additionalDirectories?: string[];
   maxCommentHistory?: number;
   attachmentReadingEnabled?: boolean;
+  attachmentTypeRestrictionEnabled?: boolean;
   maxAttachmentCount?: number;
   maxAttachmentBytes?: number;
   allowedAttachmentMimeTypes?: string[];
@@ -378,6 +379,7 @@ export type ZendeskConfigDraft = {
   knowledgeSetIds: string[];
   maxCommentHistory: number;
   attachmentReadingEnabled: boolean;
+  attachmentTypeRestrictionEnabled: boolean;
   maxAttachmentCount: number;
   maxAttachmentSizeMb: number;
   allowedAttachmentMimeTypesRaw: string;

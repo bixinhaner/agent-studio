@@ -84,7 +84,7 @@ function normalizeAttachmentBytes(value: unknown): number {
 function normalizeAttachmentCount(value: unknown): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 5;
-  return Math.max(1, Math.min(20, Math.floor(numeric)));
+  return Math.max(1, Math.min(100, Math.floor(numeric)));
 }
 
 function uniqueLowercaseTags(value: string[] | undefined): string[] {
@@ -165,6 +165,7 @@ function defaultSettings(): ZendeskIntegrationSettings {
     additionalDirectories: [],
     maxCommentHistory: 12,
     attachmentReadingEnabled: true,
+    attachmentTypeRestrictionEnabled: true,
     maxAttachmentCount: 5,
     maxAttachmentBytes: 10 * 1024 * 1024,
     allowedAttachmentMimeTypes: defaultAllowedAttachmentMimeTypes(),
@@ -304,6 +305,7 @@ export class ZendeskSettingsStore {
       additionalDirectories: normalizeDirectories(input.additionalDirectories),
       maxCommentHistory: Math.max(1, Math.min(50, Number(input.maxCommentHistory) || 12)),
       attachmentReadingEnabled: input.attachmentReadingEnabled !== false,
+      attachmentTypeRestrictionEnabled: input.attachmentTypeRestrictionEnabled !== false,
       maxAttachmentCount: normalizeAttachmentCount(input.maxAttachmentCount),
       maxAttachmentBytes: normalizeAttachmentBytes(input.maxAttachmentBytes),
       allowedAttachmentMimeTypes: normalizeMimeTypes(input.allowedAttachmentMimeTypes),

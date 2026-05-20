@@ -169,7 +169,8 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     knowledgeSetIds: asStringArray(detail.config.knowledgeSetIds),
     maxCommentHistory: asNumber(detail.config.maxCommentHistory, 12),
     attachmentReadingEnabled: detail.config.attachmentReadingEnabled !== false,
-    maxAttachmentCount: Math.max(1, Math.min(20, asNumber(detail.config.maxAttachmentCount, 5))),
+    attachmentTypeRestrictionEnabled: detail.config.attachmentTypeRestrictionEnabled !== false,
+    maxAttachmentCount: Math.max(1, Math.min(100, asNumber(detail.config.maxAttachmentCount, 5))),
     maxAttachmentSizeMb: Math.max(1, Math.min(50, bytesToMb(detail.config.maxAttachmentBytes, 10))),
     allowedAttachmentMimeTypesRaw: asListText(
       Array.isArray(detail.config.allowedAttachmentMimeTypes)
@@ -313,7 +314,8 @@ export function ZendeskIntegrationView(props: {
           knowledgeSetIds: asStringArray(draft.knowledgeSetIds),
           maxCommentHistory: Math.max(1, Math.min(50, Number(draft.maxCommentHistory) || 12)),
           attachmentReadingEnabled: draft.attachmentReadingEnabled,
-          maxAttachmentCount: Math.max(1, Math.min(20, Number(draft.maxAttachmentCount) || 5)),
+          attachmentTypeRestrictionEnabled: draft.attachmentTypeRestrictionEnabled,
+          maxAttachmentCount: Math.max(1, Math.min(100, Number(draft.maxAttachmentCount) || 5)),
           maxAttachmentBytes: Math.max(1, Math.min(50, Number(draft.maxAttachmentSizeMb) || 10)) * 1024 * 1024,
           allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw),
           systemPrompt: draft.systemPrompt.trim()
@@ -689,7 +691,7 @@ export function ZendeskIntegrationView(props: {
                         <span className="field-label">最多附件数</span>
                         <InputNumber
                           min={1}
-                          max={20}
+                          max={100}
                           value={Number(draft.maxAttachmentCount) || 5}
                           disabled={saving || !draft.attachmentReadingEnabled}
                           onChange={(value) =>
@@ -697,6 +699,7 @@ export function ZendeskIntegrationView(props: {
                           }
                           style={{ width: "100%" }}
                         />
+                        <span className="field-help">同一次处理最多传给 Agent 的附件数量。新触发的客户评论会优先占用名额。</span>
                       </label>
                       <label className="field">
                         <span className="field-label">单文件上限 MB</span>
@@ -711,17 +714,34 @@ export function ZendeskIntegrationView(props: {
                           style={{ width: "100%" }}
                         />
                       </label>
+                      <label className="field checkbox-field resource-center-toggle-row resource-center-form-span-2">
+                        <Switch
+                          checked={draft.attachmentTypeRestrictionEnabled}
+                          disabled={saving || !draft.attachmentReadingEnabled}
+                          checkedChildren="限制"
+                          unCheckedChildren="不限"
+                          onChange={(checked) =>
+                            setDraft((current) => ({ ...current, attachmentTypeRestrictionEnabled: checked }))
+                          }
+                        />
+                        <span className="field-label">限制附件类型</span>
+                        <span className="field-help">
+                          关闭后所有 MIME 类型都会尝试下载；仍受最多附件数和单文件大小限制。
+                        </span>
+                      </label>
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">允许的附件类型</span>
                         <Input.TextArea
                           rows={3}
                           value={draft.allowedAttachmentMimeTypesRaw}
-                          disabled={saving || !draft.attachmentReadingEnabled}
+                          disabled={saving || !draft.attachmentReadingEnabled || !draft.attachmentTypeRestrictionEnabled}
                           onChange={(event) =>
                             setDraft((current) => ({ ...current, allowedAttachmentMimeTypesRaw: event.target.value }))
                           }
                         />
-                        <span className="field-help">支持一行一个或逗号分隔，例如 image/*、application/pdf、text/*。</span>
+                        <span className="field-help">
+                          开启类型限制时生效；支持一行一个或逗号分隔，例如 image/*、application/pdf、text/*。
+                        </span>
                       </label>
                     </div>
                   )

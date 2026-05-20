@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import type { IncomingHttpHeaders } from "node:http";
 import path from "node:path";
@@ -417,7 +417,12 @@ function sanitizeFileName(value: string, fallback: string): string {
   return normalized || fallback;
 }
 
-function isMimeAllowed(contentType: string | undefined, allowed: string[]): boolean {
+function hasWildcardMime(allowed: string[]): boolean {
+  return allowed.some((item) => item.trim().toLowerCase() === "*/*");
+}
+
+function isMimeAllowed(contentType: string | undefined, allowed: string[], restrictionEnabled = true): boolean {
+  if (!restrictionEnabled || hasWildcardMime(allowed)) return true;
   const normalized = String(contentType || "")
     .split(";")[0]
     .trim()
@@ -432,6 +437,83 @@ function isMimeAllowed(contentType: string | undefined, allowed: string[]): bool
     }
     return false;
   });
+}
+
+function zendeskHostSegment(settings: ZendeskIntegrationSettings): string {
+  try {
+    return sanitizePathSegment(new URL(settings.zendeskBaseUrl).hostname, "zendesk");
+  } catch {
+    return "zendesk";
+  }
+}
+
+function attachmentIdentity(input: {
+  attachment: ZendeskCommentPayload["attachments"][number];
+  index: number;
+}): string {
+  if (input.attachment.id !== undefined) {
+    return `att-${sanitizePathSegment(input.attachment.id, "attachment")}`;
+  }
+  const hash = createHash("sha256")
+    .update(
+      [
+        input.attachment.contentUrl || "",
+        input.attachment.mappedContentUrl || "",
+        input.attachment.fileName || "",
+        input.attachment.contentType || "",
+        input.attachment.size ?? "",
+        input.index
+      ].join("\n")
+    )
+    .digest("hex")
+    .slice(0, 16);
+  return `url-${hash}`;
+}
+
+function attachmentCachePath(input: {
+  workspacePath: string;
+  settings: ZendeskIntegrationSettings;
+  ticketId: string | number;
+  commentId: string | number;
+  attachment: ZendeskCommentPayload["attachments"][number];
+  index: number;
+}): string {
+  const cacheDir = path.join(
+    input.workspacePath,
+    ".zendesk",
+    "attachments",
+    "cache",
+    zendeskHostSegment(input.settings),
+    `ticket-${sanitizePathSegment(input.ticketId, "ticket")}`,
+    `comment-${sanitizePathSegment(input.commentId, "comment")}`
+  );
+  const fileName = `${attachmentIdentity(input)}-${sanitizeFileName(input.attachment.fileName, "attachment")}`;
+  return path.join(cacheDir, fileName);
+}
+
+async function cachedAttachmentSize(
+  filePath: string,
+  attachment: ZendeskCommentPayload["attachments"][number],
+  maxBytes: number
+): Promise<number | undefined> {
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) return undefined;
+    if (attachment.size !== undefined && stat.size !== attachment.size) return undefined;
+    return stat.size;
+  } catch {
+    return undefined;
+  }
+}
+
+function orderCommentsForAttachmentDownload(
+  comments: ZendeskTicketContext["comments"],
+  preferredCommentId?: number
+): ZendeskTicketContext["comments"] {
+  if (!preferredCommentId) return comments;
+  const preferred = comments.filter((comment) => comment.id === preferredCommentId);
+  if (preferred.length === 0) return comments;
+  return [...preferred, ...comments.filter((comment) => comment.id !== preferredCommentId)];
 }
 
 function attachmentDisplaySize(bytes: number | undefined): string {
@@ -996,7 +1078,14 @@ export class ZendeskIntegrationService {
           .join("\n")
       )
     );
-    const preparedContext = await this.prepareContextAttachments(context, settings, client, runtimeOptions.workspace, run.runId);
+    const preparedContext = await this.prepareContextAttachments(
+      context,
+      settings,
+      client,
+      runtimeOptions.workspace,
+      run.runId,
+      requesterComment.id
+    );
     processRows.push(zendeskProcessRow("process", "Prepared Zendesk attachments", summarizePreparedAttachments(preparedContext)));
     const audit = await this.syncConversationBeforeAgentRun({
       settings,
@@ -1144,7 +1233,8 @@ export class ZendeskIntegrationService {
     settings: ZendeskIntegrationSettings,
     client: ZendeskClient,
     workspacePath: string,
-    runId: string
+    runId: string,
+    preferredCommentId?: number
   ): Promise<ZendeskTicketContext> {
     const next = cloneContext(context);
     if (!settings.attachmentReadingEnabled) {
@@ -1159,13 +1249,13 @@ export class ZendeskIntegrationService {
     }
 
     const allowed = settings.allowedAttachmentMimeTypes;
+    const restrictTypes = settings.attachmentTypeRestrictionEnabled;
     const baseDir = path.join(workspacePath, ".zendesk", "attachments", `run-${sanitizePathSegment(runId, "run")}`);
     await fs.mkdir(baseDir, { recursive: true });
 
     let downloadedOrSelected = 0;
-    for (const comment of next.comments.slice(0, settings.maxCommentHistory)) {
+    for (const comment of orderCommentsForAttachmentDownload(next.comments.slice(0, settings.maxCommentHistory), preferredCommentId)) {
       if (comment.attachments.length === 0) continue;
-      const commentDir = path.join(baseDir, `comment-${sanitizePathSegment(comment.id, "comment")}`);
       let index = 0;
       for (const attachment of comment.attachments) {
         index += 1;
@@ -1176,7 +1266,7 @@ export class ZendeskIntegrationService {
         }
 
         const metadataContentType = attachment.contentType;
-        if (metadataContentType && !isMimeAllowed(metadataContentType, allowed)) {
+        if (metadataContentType && !isMimeAllowed(metadataContentType, allowed, restrictTypes)) {
           attachment.downloadStatus = "skipped";
           attachment.downloadReason = `附件类型不在白名单: ${metadataContentType}`;
           continue;
@@ -1195,27 +1285,46 @@ export class ZendeskIntegrationService {
           continue;
         }
 
+        const cachePath = attachmentCachePath({
+          workspacePath,
+          settings,
+          ticketId: context.ticket.id,
+          commentId: comment.id,
+          attachment,
+          index
+        });
+        const cacheCanBeTrusted = isMimeAllowed(metadataContentType, allowed, restrictTypes);
+        const cachedSize = cacheCanBeTrusted
+          ? await cachedAttachmentSize(cachePath, attachment, settings.maxAttachmentBytes)
+          : undefined;
         downloadedOrSelected += 1;
+        if (cachedSize !== undefined) {
+          attachment.size = cachedSize;
+          attachment.localPath = cachePath;
+          attachment.relativePath = path.relative(workspacePath, cachePath);
+          attachment.downloadStatus = "downloaded";
+          attachment.downloadReason = "复用 ticket 附件缓存";
+          continue;
+        }
+
         try {
           const result = await client.downloadAttachment({
             url,
             maxBytes: settings.maxAttachmentBytes
           });
           const resolvedContentType = result.contentType || metadataContentType;
-          if (!isMimeAllowed(resolvedContentType, allowed)) {
+          if (!isMimeAllowed(resolvedContentType, allowed, restrictTypes)) {
             attachment.downloadStatus = "skipped";
             attachment.downloadReason = `附件类型不在白名单: ${resolvedContentType || "unknown"}`;
             continue;
           }
 
-          await fs.mkdir(commentDir, { recursive: true });
-          const fileName = `${String(index).padStart(2, "0")}-${sanitizeFileName(attachment.fileName, "attachment")}`;
-          const filePath = path.join(commentDir, fileName);
-          await fs.writeFile(filePath, result.content);
+          await fs.mkdir(path.dirname(cachePath), { recursive: true });
+          await fs.writeFile(cachePath, result.content);
           attachment.contentType = resolvedContentType;
           attachment.size = result.content.byteLength;
-          attachment.localPath = filePath;
-          attachment.relativePath = path.relative(workspacePath, filePath);
+          attachment.localPath = cachePath;
+          attachment.relativePath = path.relative(workspacePath, cachePath);
           attachment.downloadStatus = "downloaded";
         } catch (error) {
           attachment.downloadStatus = "failed";

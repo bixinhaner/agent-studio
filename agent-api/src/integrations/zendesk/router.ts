@@ -56,6 +56,7 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         additionalDirectories: normalizeStringArray(input.additional_directories),
         maxCommentHistory: input.max_comment_history,
         attachmentReadingEnabled: input.attachment_reading_enabled,
+        attachmentTypeRestrictionEnabled: input.attachment_type_restriction_enabled,
         maxAttachmentCount: input.max_attachment_count,
         maxAttachmentBytes: input.max_attachment_bytes,
         allowedAttachmentMimeTypes: normalizeStringArray(input.allowed_attachment_mime_types),
