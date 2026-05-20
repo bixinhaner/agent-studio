@@ -85,6 +85,15 @@ type ZendeskConversationAuditState = {
   externalConversationKey?: string;
 };
 
+type ZendeskAuditProcessRow = {
+  id?: string;
+  kind: "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
+  title: string;
+  detail?: string;
+  rawDetail?: string;
+  at?: string;
+};
+
 type ZendeskConversationAuditSync = {
   beforeAgentRun(input: {
     settings: ZendeskIntegrationSettings;
@@ -113,6 +122,7 @@ type ZendeskConversationAuditSync = {
     action: ZendeskConversationAuditAction;
     commentId?: number;
     codexThreadId?: string;
+    processRows?: ZendeskAuditProcessRow[];
   }): Promise<void>;
 };
 
@@ -141,6 +151,7 @@ type ZendeskAgentRunResult = {
   runtimeOptions: Omit<ZendeskAgentRuntimeOptions, "runtime">;
   audit?: ZendeskConversationAuditState;
   codexThreadId?: string;
+  processRows: ZendeskAuditProcessRow[];
 };
 
 function sanitizeTicketId(value: string | number): string {
@@ -181,6 +192,201 @@ function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function shortenText(value: string, max = 1600): string {
+  const normalized = value.trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function detailFromUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function zendeskProcessRow(
+  kind: ZendeskAuditProcessRow["kind"],
+  title: string,
+  detail?: string,
+  rawDetail?: string
+): ZendeskAuditProcessRow {
+  return {
+    id: `zendesk-process-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    title,
+    ...(trimOrUndefined(detail) ? { detail: trimOrUndefined(detail) } : {}),
+    ...(trimOrUndefined(rawDetail) ? { rawDetail: trimOrUndefined(rawDetail) } : {}),
+    at: new Date().toISOString()
+  };
+}
+
+function requesterDisplay(context: ZendeskTicketContext): string {
+  const requester = context.ticket.requester;
+  const id = context.ticket.requesterId;
+  const name = trimOrUndefined(requester?.name);
+  const email = trimOrUndefined(requester?.email);
+  const label = name && email ? `${name} <${email}>` : name || email || (id ? `Requester #${id}` : "unknown");
+  return id ? `${label} (ID ${id})` : label;
+}
+
+function zendeskTicketReadDetail(context: ZendeskTicketContext, maxCommentHistory: number): string {
+  const publicCount = context.comments.filter((item) => item.public).length;
+  const requesterCount = context.comments.filter((item) => item.public && item.authorId === context.ticket.requesterId).length;
+  return [
+    `Ticket: #${context.ticket.id}`,
+    `Subject: ${context.ticket.subject || "(empty)"}`,
+    `Requester: ${requesterDisplay(context)}`,
+    `Status: ${context.ticket.status || "(empty)"}`,
+    `Priority: ${context.ticket.priority || "(empty)"}`,
+    `Loaded comments: ${context.comments.length}/${maxCommentHistory}`,
+    `Public comments: ${publicCount}`,
+    `Requester public comments: ${requesterCount}`
+  ].join("\n");
+}
+
+function summarizePreparedAttachments(context: ZendeskTicketContext): string {
+  const attachments = context.comments.flatMap((comment) =>
+    comment.attachments.map((attachment) => ({
+      commentId: comment.id,
+      attachment
+    }))
+  );
+  if (attachments.length === 0) return "No Zendesk attachments in the selected comment history.";
+  return attachments
+    .slice(0, 30)
+    .map(({ commentId, attachment }) => {
+      const status = attachment.downloadStatus || "metadata_only";
+      const bits = [
+        `comment ${commentId}`,
+        attachment.fileName,
+        attachment.contentType,
+        attachment.size !== undefined ? `${attachment.size} bytes` : undefined,
+        status,
+        attachment.relativePath ? `path=${attachment.relativePath}` : undefined,
+        attachment.downloadReason ? `reason=${attachment.downloadReason}` : undefined
+      ].filter(Boolean);
+      return `- ${bits.join(" | ")}`;
+    })
+    .join("\n");
+}
+
+function collectRuntimeProcessRow(
+  event: { type: string; delta?: string; text?: string; raw?: unknown },
+  processRows: ZendeskAuditProcessRow[]
+): void {
+  if (processRows.length >= 120) return;
+  const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  const eventType = event.type;
+  const itemType = trimOrUndefined(item?.type) ?? "";
+  if (!item || !itemType || eventType !== "item.completed") return;
+
+  if (itemType === "reasoning") {
+    const reasoningText = trimOrUndefined(item.text) ?? trimOrUndefined(event.text);
+    if (reasoningText) {
+      processRows.push(zendeskProcessRow("reasoning", "Model reasoning summary", shortenText(reasoningText, 1800)));
+    }
+    return;
+  }
+
+  if (itemType === "command_execution") {
+    const command = trimOrUndefined(item.command) ?? "";
+    const output = trimOrUndefined(item.aggregated_output) ?? "";
+    const status = trimOrUndefined(item.status);
+    const exitCode = typeof item.exit_code === "number" ? item.exit_code : undefined;
+    processRows.push(
+      zendeskProcessRow(
+        "tool",
+        "Command execution completed",
+        [
+          command ? `$ ${command}` : "",
+          status ? `status=${status}` : "",
+          exitCode !== undefined ? `exit_code=${exitCode}` : "",
+          output ? `output:\n${shortenText(output, 1200)}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
+    );
+    return;
+  }
+
+  if (itemType === "mcp_tool_call") {
+    const server = trimOrUndefined(item.server) ?? "";
+    const tool = trimOrUndefined(item.tool) ?? "";
+    const error = asRecord(item.error);
+    const errMsg = trimOrUndefined(error?.message);
+    processRows.push(
+      zendeskProcessRow(
+        errMsg ? "error" : "tool",
+        `Tool call ${errMsg ? "failed" : "completed"}`,
+        [
+          server ? `server: ${server}` : "",
+          tool ? `tool: ${tool}` : "",
+          errMsg ? `error: ${shortenText(errMsg, 600)}` : "",
+          item.result !== undefined ? `result:\n${shortenText(detailFromUnknown(item.result), 1200)}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
+    );
+    return;
+  }
+
+  if (itemType === "web_search") {
+    const query = trimOrUndefined(item.query);
+    processRows.push(zendeskProcessRow("tool", "Web search completed", query));
+    return;
+  }
+
+  if (itemType === "todo_list") {
+    const items = Array.isArray(item.items) ? item.items : [];
+    const detail = items
+      .slice(0, 20)
+      .map((entry) => {
+        const obj = asRecord(entry);
+        if (!obj) return "";
+        const text = trimOrUndefined(obj.text);
+        if (!text) return "";
+        return `${obj.completed ? "[x]" : "[ ]"} ${text}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+    processRows.push(zendeskProcessRow("process", "Execution plan updated", detail));
+    return;
+  }
+
+  if (itemType === "file_change") {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    const detail = changes
+      .slice(0, 30)
+      .map((entry) => {
+        const obj = asRecord(entry);
+        const filePath = trimOrUndefined(obj?.path);
+        if (!filePath) return "";
+        const kind = trimOrUndefined(obj?.kind) ?? "update";
+        return `${kind}: ${filePath}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+    processRows.push(zendeskProcessRow("process", "File changes produced", detail));
+    return;
+  }
+
+  if (itemType === "error") {
+    const message = trimOrUndefined(item.message) ?? detailFromUnknown(item);
+    processRows.push(zendeskProcessRow("error", "Execution error", shortenText(message, 1200)));
+  }
 }
 
 function extractCodexThreadIdFromThread(thread: unknown): string | undefined {
@@ -516,6 +722,9 @@ export class ZendeskIntegrationService {
 
       const client = new ZendeskClient(settings);
       const context = await client.getTicketContext(ticketId, settings.maxCommentHistory);
+      const processRows: ZendeskAuditProcessRow[] = [
+        zendeskProcessRow("meta", "Read Zendesk ticket", zendeskTicketReadDetail(context, settings.maxCommentHistory))
+      ];
       await this.runStore.update(runId, {
         ticketSubject: context.ticket.subject,
         detail: `已读取工单 #${ticketId} 上下文`
@@ -579,15 +788,44 @@ export class ZendeskIntegrationService {
         detail: "正在调用 agent 生成答复",
         requesterCommentId: requesterComment.id
       });
+      processRows.push(
+        zendeskProcessRow(
+          "meta",
+          "Selected requester comment",
+          [
+            `comment_id: ${requesterComment.id}`,
+            `created_at: ${requesterComment.createdAt || ""}`,
+            `attachments: ${requesterComment.attachments.length}`,
+            requesterComment.body ? `body:\n${shortenText(requesterComment.body, 1200)}` : ""
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
 
       const agentRun = await this.runAgent(context, settings, client, binding, requesterComment, {
         instanceId,
         ticketId,
         runId,
-        source
+        source,
+        processRows
       });
       const decision = parseZendeskAgentDecision(agentRun.answerText);
       const action = resolveAction(settings, decision);
+      agentRun.processRows.push(
+        zendeskProcessRow(
+          "process",
+          "Agent decision parsed",
+          [
+            `decision: ${decision.decision}`,
+            decision.confidence !== undefined ? `confidence: ${Math.round(decision.confidence * 100)}%` : "",
+            decision.publicReplyPreview ? `publicReplyPreview:\n${shortenText(decision.publicReplyPreview, 1200)}` : "",
+            decision.reasons?.length ? `reasons: ${decision.reasons.join("; ")}` : ""
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
 
       if (action.mode === "skip") {
         await this.syncConversationAfterAgentRun({
@@ -604,7 +842,11 @@ export class ZendeskIntegrationService {
           answerText: agentRun.answerText,
           decision,
           action,
-          codexThreadId: agentRun.codexThreadId
+          codexThreadId: agentRun.codexThreadId,
+          processRows: [
+            ...agentRun.processRows,
+            zendeskProcessRow("done", "Skipped Zendesk write", action.detail)
+          ]
         });
         await this.bindingStore.upsert(ticketId, {
           lastProcessedRequesterCommentId: requesterComment.id,
@@ -628,6 +870,19 @@ export class ZendeskIntegrationService {
       }
 
       const commentResult = await this.addCommentWithRetry(client, context, action, settings);
+      agentRun.processRows.push(
+        zendeskProcessRow(
+          action.publicReply ? "done" : "process",
+          action.publicReply ? "Wrote Zendesk public reply" : "Wrote Zendesk internal note",
+          [
+            action.detail,
+            commentResult.commentId ? `zendesk_comment_id: ${commentResult.commentId}` : "",
+            action.body ? `body:\n${shortenText(action.body, 1800)}` : ""
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
       await this.syncConversationAfterAgentRun({
         settings,
         context: agentRun.preparedContext,
@@ -643,7 +898,8 @@ export class ZendeskIntegrationService {
         decision,
         action,
         commentId: commentResult.commentId,
-        codexThreadId: agentRun.codexThreadId
+        codexThreadId: agentRun.codexThreadId,
+        processRows: agentRun.processRows
       });
       await this.bindingStore.upsert(ticketId, {
         lastProcessedRequesterCommentId: requesterComment.id,
@@ -694,8 +950,10 @@ export class ZendeskIntegrationService {
       ticketId: string;
       runId: string;
       source: "webhook" | "manual";
+      processRows?: ZendeskAuditProcessRow[];
     }
   ): Promise<ZendeskAgentRunResult> {
+    const processRows = [...(run.processRows ?? [])];
     const runtimeOptions = this.dependencies.resolveAgentRuntime
       ? await this.dependencies.resolveAgentRuntime({
           settings,
@@ -718,7 +976,22 @@ export class ZendeskIntegrationService {
       workspace: runtimeOptions.workspace,
       codexRunConfig: runtimeOptions.codexRunConfig
     };
+    processRows.push(
+      zendeskProcessRow(
+        "meta",
+        "Resolved Agent Mode runtime",
+        [
+          `model: ${runtimeOptions.model}`,
+          `reasoningEffort: ${runtimeOptions.reasoningEffort}`,
+          `workspace: ${runtimeOptions.workspace}`,
+          runtimeOptions.codexRunConfig ? `runConfig:\n${shortenText(detailFromUnknown(runtimeOptions.codexRunConfig), 1200)}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
+    );
     const preparedContext = await this.prepareContextAttachments(context, settings, client, runtimeOptions.workspace, run.runId);
+    processRows.push(zendeskProcessRow("process", "Prepared Zendesk attachments", summarizePreparedAttachments(preparedContext)));
     const audit = await this.syncConversationBeforeAgentRun({
       settings,
       context: preparedContext,
@@ -749,6 +1022,9 @@ export class ZendeskIntegrationService {
           codexThreadId: observedCodexThreadId,
           detail: error instanceof Error ? error.message : String(error)
         });
+        processRows.push(
+          zendeskProcessRow("error", "Failed to resume Codex thread", `thread_id: ${observedCodexThreadId}\n${error instanceof Error ? error.message : String(error)}`)
+        );
         observedCodexThreadId = undefined;
       }
     }
@@ -761,6 +1037,9 @@ export class ZendeskIntegrationService {
         codexRunConfig: runtimeOptions.codexRunConfig
       });
       observedCodexThreadId = extractCodexThreadIdFromThread(thread) || observedCodexThreadId;
+      processRows.push(zendeskProcessRow("meta", "Started Codex thread", observedCodexThreadId ? `thread_id: ${observedCodexThreadId}` : undefined));
+    } else {
+      processRows.push(zendeskProcessRow("meta", "Resumed Codex thread", `thread_id: ${observedCodexThreadId}`));
     }
 
     await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
@@ -770,12 +1049,21 @@ export class ZendeskIntegrationService {
     });
 
     const prompt = buildZendeskAgentPrompt(preparedContext, settings);
+    processRows.push(
+      zendeskProcessRow(
+        "process",
+        "Called agent",
+        [`prompt_chars: ${prompt.length}`, `comment_history: ${preparedContext.comments.length}`].join("\n")
+      )
+    );
     let output = "";
     for await (const event of runtime.runStreamed(thread, prompt)) {
       observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
+      collectRuntimeProcessRow(event, processRows);
       if (event.delta) output += event.delta;
       else if (!output && event.text) output += event.text;
     }
+    processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
 
     await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
       codexThreadId: observedCodexThreadId,
@@ -787,7 +1075,8 @@ export class ZendeskIntegrationService {
       preparedContext,
       runtimeOptions: publicRuntimeOptions,
       audit,
-      codexThreadId: observedCodexThreadId
+      codexThreadId: observedCodexThreadId,
+      processRows
     };
   }
 

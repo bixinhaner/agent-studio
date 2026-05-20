@@ -194,6 +194,19 @@ describe("ZendeskIntegrationService", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 9001,
+              name: "Ramen Support User",
+              email: "requester@example.com",
+              role: "end-user"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
       if (url === "https://example.zendesk.com/attachments/token/signal.png") {
         return new Response("pngdata", {
           status: 200,
@@ -219,10 +232,34 @@ describe("ZendeskIntegrationService", () => {
       runStreamed: vi.fn(async function* (_thread: unknown, message: string) {
         prompts.push(message);
         yield {
+          type: "item.completed",
+          raw: {
+            item: {
+              id: "reasoning-1",
+              type: "reasoning",
+              text: "Checked the Zendesk ticket context and reviewed the available attachment metadata."
+            }
+          }
+        };
+        yield {
+          type: "item.completed",
+          raw: {
+            item: {
+              id: "cmd-1",
+              type: "command_execution",
+              command: "ls .zendesk/attachments",
+              aggregated_output: "run-run-1",
+              status: "completed",
+              exit_code: 0
+            }
+          }
+        };
+        yield {
           type: "message",
           text: JSON.stringify({
             decision: "internal_note",
             body: "",
+            publicReplyPreview: "We are reviewing the screenshot and will confirm the next configuration step.",
             internalNote: "Attachment checked.",
             confidence: 0.8,
             reasons: ["test"]
@@ -275,7 +312,13 @@ describe("ZendeskIntegrationService", () => {
       listForInstance: vi.fn(async () => [])
     };
     const conversationAudit = {
-      beforeAgentRun: vi.fn(async (input: { context: { comments: Array<{ attachments: Array<{ relativePath?: string }> }> }; runId: string }) => ({
+      beforeAgentRun: vi.fn(async (input: {
+        context: {
+          ticket: { requester?: { name?: string; email?: string } };
+          comments: Array<{ attachments: Array<{ relativePath?: string }> }>;
+        };
+        runId: string;
+      }) => ({
         threadId: "audit-thread-1",
         userMessageId: `audit-user-${input.runId}`,
         externalConversationKey: "zendesk:zendesk-1:ticket:123:mode-1"
@@ -317,7 +360,12 @@ describe("ZendeskIntegrationService", () => {
         lastProcessedRequesterCommentId: 102
       });
       expect(prompts[0]).toContain("attachments:");
+      expect(prompts[0]).toContain("requester_email: requester@example.com");
       expect(prompts[0]).toContain("local_path: .zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png");
+      expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.ticket.requester).toMatchObject({
+        name: "Ramen Support User",
+        email: "requester@example.com"
+      });
       expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.comments[0]?.attachments[0]?.relativePath).toBe(
         ".zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png"
       );
@@ -331,6 +379,26 @@ describe("ZendeskIntegrationService", () => {
         },
         codexThreadId: "codex-thread-1"
       });
+      const firstAuditAfterRun = conversationAudit.afterAgentRun.mock.calls[0]?.[0] as
+        | { action?: { body?: string } }
+        | undefined;
+      expect(firstAuditAfterRun?.action?.body).toContain("Public reply preview (not sent):");
+      const allProcessRows = conversationAudit.afterAgentRun.mock.calls.flatMap((call) => {
+        const value = call[0] as { processRows?: Array<{ title?: string }> };
+        return value.processRows ?? [];
+      });
+      expect(allProcessRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ title: "Read Zendesk ticket" }),
+          expect.objectContaining({ title: "Prepared Zendesk attachments" }),
+          expect.objectContaining({ title: "Started Codex thread" }),
+          expect.objectContaining({ title: "Resumed Codex thread" }),
+          expect.objectContaining({ title: "Called agent" }),
+          expect.objectContaining({ title: "Model reasoning summary" }),
+          expect.objectContaining({ title: "Command execution completed" }),
+          expect.objectContaining({ title: "Wrote Zendesk internal note" })
+        ])
+      );
       await expect(
         fs.stat(path.join(tempRoot, ".zendesk", "attachments", "run-run-1", "comment-101", "01-signal screenshot.png"))
       ).resolves.toBeTruthy();

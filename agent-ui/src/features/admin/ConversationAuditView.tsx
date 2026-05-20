@@ -322,7 +322,7 @@ function attachmentKindLabel(kind: AdminConversationTranscriptAttachment["kind"]
 }
 
 function processKindLabel(kind: AdminConversationTranscriptProcessRow["kind"]): string {
-  if (kind === "reasoning") return "思考";
+  if (kind === "reasoning") return "思考摘要";
   if (kind === "tool") return "工具";
   if (kind === "source") return "来源";
   if (kind === "meta") return "准备";

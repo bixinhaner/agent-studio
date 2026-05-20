@@ -2106,6 +2106,7 @@ function zendeskMessage(input: {
   createdAt?: string | Date;
   metadata?: Record<string, unknown>;
   attachments?: ZendeskCommentPayload["attachments"];
+  contentParts?: Array<Record<string, unknown>>;
 }) {
   const createdAtText = input.createdAt instanceof Date ? undefined : trimOrUndefined(input.createdAt);
   const parsedCreatedAt =
@@ -2143,7 +2144,8 @@ function zendeskMessage(input: {
       {
         type: "text",
         text: input.text
-      }
+      },
+      ...(input.contentParts ?? [])
     ],
     ...(attachments.length > 0 ? { attachments } : {}),
     createdAt,
@@ -2156,6 +2158,139 @@ function latestPreparedZendeskComment(
   requesterComment: ZendeskCommentPayload
 ): ZendeskCommentPayload {
   return context.comments.find((item) => item.id === requesterComment.id) ?? requesterComment;
+}
+
+function trimZendeskAuditText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function shortenZendeskAuditText(value: unknown, max = 1800): string {
+  const text = trimZendeskAuditText(value) ?? "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function zendeskRequesterDisplay(context: ZendeskTicketContext): string | undefined {
+  const requester = context.ticket.requester;
+  const id = context.ticket.requesterId;
+  const name = trimZendeskAuditText(requester?.name);
+  const email = trimZendeskAuditText(requester?.email);
+  const label = name && email ? `${name} <${email}>` : name || email || (id ? `Requester #${id}` : undefined);
+  if (!label) return undefined;
+  return id ? `${label} (ID ${id})` : label;
+}
+
+function zendeskExternalUserName(context: ZendeskTicketContext): string | undefined {
+  const requester = context.ticket.requester;
+  const id = context.ticket.requesterId;
+  const name = trimZendeskAuditText(requester?.name);
+  const email = trimZendeskAuditText(requester?.email);
+  if (name && email) return `${name} <${email}>`;
+  return name || email || (id ? `Requester #${id}` : undefined);
+}
+
+function zendeskAttachmentAuditLines(comment: ZendeskCommentPayload): string[] {
+  if (comment.attachments.length === 0) return [];
+  return comment.attachments.map((attachment) => {
+    const bits = [
+      attachment.fileName,
+      attachment.contentType,
+      attachment.size !== undefined ? `${attachment.size} bytes` : undefined,
+      attachment.downloadStatus ? `status=${attachment.downloadStatus}` : undefined,
+      attachment.relativePath ? `path=${attachment.relativePath}` : undefined,
+      attachment.downloadReason ? `reason=${attachment.downloadReason}` : undefined
+    ].filter(Boolean);
+    return `  - ${bits.join(" | ")}`;
+  });
+}
+
+function zendeskCommentAuditBlock(
+  comment: ZendeskCommentPayload,
+  requesterId?: number
+): string {
+  const author = comment.authorId === requesterId ? "requester" : `user:${comment.authorId || "unknown"}`;
+  const visibility = comment.public ? "public" : "internal";
+  const lines = [
+    `- comment_id: ${comment.id}`,
+    `  author: ${author}`,
+    `  visibility: ${visibility}`,
+    comment.createdAt ? `  created_at: ${comment.createdAt}` : undefined,
+    `  body: ${shortenZendeskAuditText(comment.body, 1200) || "(empty)"}`,
+    ...zendeskAttachmentAuditLines(comment)
+  ];
+  return lines.filter((line) => line !== undefined).join("\n");
+}
+
+function zendeskAuditInputSnapshot(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  ticketId: string;
+}): string {
+  const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
+  const recentComments = input.context.comments.slice(0, input.settings.maxCommentHistory);
+  const attachmentCount = recentComments.reduce((sum, comment) => sum + comment.attachments.length, 0);
+  return [
+    `Zendesk Ticket #${input.ticketId}`,
+    input.context.ticket.subject ? `主题：${input.context.ticket.subject}` : undefined,
+    zendeskRequesterDisplay(input.context) ? `请求者：${zendeskRequesterDisplay(input.context)}` : undefined,
+    "",
+    "AI 输入上下文快照",
+    "",
+    "工单字段",
+    `- 状态：${input.context.ticket.status || "未设置"}`,
+    `- 优先级：${input.context.ticket.priority || "未设置"}`,
+    `- 更新时间：${input.context.ticket.updatedAt || "未知"}`,
+    `- 标签：${input.context.ticket.tags.length > 0 ? input.context.ticket.tags.join(", ") : "无"}`,
+    `- 最近评论：${recentComments.length}/${input.settings.maxCommentHistory}`,
+    `- 附件：${attachmentCount}`,
+    "",
+    "工单描述",
+    shortenZendeskAuditText(input.context.ticket.description, 1600) || "(empty)",
+    "",
+    "本次触发的客户评论",
+    zendeskCommentAuditBlock(preparedComment, input.context.ticket.requesterId),
+    "",
+    "最近评论上下文",
+    recentComments.length > 0
+      ? recentComments.map((comment) => zendeskCommentAuditBlock(comment, input.context.ticket.requesterId)).join("\n")
+      : "(none)"
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+    .trim();
+}
+
+function zendeskTraceBatchPart(
+  rows: Array<{
+    id?: string;
+    kind?: string;
+    title?: string;
+    detail?: string;
+    rawDetail?: string;
+    at?: string;
+  }> | undefined
+): Record<string, unknown> | undefined {
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  return {
+    type: "data",
+    name: "codex_trace_batch",
+    data: {
+      batch_id: 1,
+      open: false,
+      active_row_id: "",
+      rows: rows.map((row, index) => ({
+        id: trimZendeskAuditText(row.id) ?? `zendesk-process-row-${index + 1}`,
+        kind: trimZendeskAuditText(row.kind) ?? "process",
+        title: trimZendeskAuditText(row.title) ?? "Zendesk process",
+        detail: trimZendeskAuditText(row.detail),
+        rawDetail: trimZendeskAuditText(row.rawDetail),
+        at: trimZendeskAuditText(row.at)
+      }))
+    }
+  };
 }
 
 async function ensureZendeskAuditThread(input: {
@@ -2238,7 +2373,7 @@ async function ensureZendeskAuditThread(input: {
     conversationType: "ticket",
     agentModeId,
     externalUserId: input.context.ticket.requesterId ? String(input.context.ticket.requesterId) : undefined,
-    externalUserName: input.context.ticket.requesterId ? `Requester #${input.context.ticket.requesterId}` : undefined,
+    externalUserName: zendeskExternalUserName(input.context),
     botName: integration.name,
     lastExternalMessageId: String(preparedComment.id),
     lastMessageAt: Number.isNaN(messageAt.getTime()) ? new Date() : messageAt,
@@ -2247,6 +2382,9 @@ async function ensureZendeskAuditThread(input: {
       ticketId: input.ticketId,
       ticketSubject: input.context.ticket.subject,
       ticketStatus: input.context.ticket.status,
+      requesterId: input.context.ticket.requesterId,
+      requesterName: input.context.ticket.requester?.name,
+      requesterEmail: input.context.ticket.requester?.email,
       ticketUrl: input.settings.zendeskBaseUrl
         ? `${input.settings.zendeskBaseUrl}/agent/tickets/${encodeURIComponent(input.ticketId)}`
         : undefined
@@ -2278,15 +2416,7 @@ async function syncZendeskConversationBeforeAgentRun(input: {
   const ensured = await ensureZendeskAuditThread(input);
   const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
   const userMessageId = `zendesk-requester-${preparedComment.id}`;
-  const userText = [
-    `Zendesk Ticket #${input.ticketId}`,
-    input.context.ticket.subject ? `主题：${input.context.ticket.subject}` : undefined,
-    "",
-    preparedComment.body || (preparedComment.attachments.length > 0 ? "客户上传了附件。" : "")
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n")
-    .trim();
+  const userText = zendeskAuditInputSnapshot(input);
 
   const updated = await threads.appendMessage(ensured.thread.id, {
     parentId: ensured.thread.headId ?? null,
@@ -2303,6 +2433,8 @@ async function syncZendeskConversationBeforeAgentRun(input: {
         externalConversationKey: ensured.externalConversationKey,
         ticketId: input.ticketId,
         ticketSubject: input.context.ticket.subject,
+        requesterName: input.context.ticket.requester?.name,
+        requesterEmail: input.context.ticket.requester?.email,
         requesterCommentId: preparedComment.id,
         source: input.source,
         runId: input.runId
@@ -2350,10 +2482,15 @@ function zendeskAssistantAuditText(input: {
         ? "AI 已写入 Zendesk 公开回复。"
         : "AI 已写入 Zendesk 内部备注。";
   const body = trimOrUndefined(input.action.body) ?? trimOrUndefined(input.decision.internalNote) ?? trimOrUndefined(input.answerText);
+  const preview = trimOrUndefined(input.decision.publicReplyPreview);
+  const shouldAppendPreview = preview ? !body || !body.includes(preview) : false;
   return [
     heading,
     "",
     body,
+    shouldAppendPreview ? "" : undefined,
+    shouldAppendPreview ? "公开回复预览（未发送）：" : undefined,
+    shouldAppendPreview ? preview : undefined,
     "",
     `决策：${zendeskDecisionLabel(input.action.decision)}`,
     `处理结果：${input.action.detail}`,
@@ -2388,6 +2525,14 @@ async function syncZendeskConversationAfterAgentRun(input: {
   };
   commentId?: number;
   codexThreadId?: string;
+  processRows?: Array<{
+    id?: string;
+    kind?: string;
+    title?: string;
+    detail?: string;
+    rawDetail?: string;
+    at?: string;
+  }>;
 }): Promise<void> {
   const audit =
     input.audit ??
@@ -2403,12 +2548,14 @@ async function syncZendeskConversationAfterAgentRun(input: {
     }));
   if (!audit?.threadId) return;
 
+  const tracePart = zendeskTraceBatchPart(input.processRows);
   await threads.appendMessage(audit.threadId, {
     parentId: audit.userMessageId ?? null,
     message: zendeskMessage({
       id: `zendesk-agent-${input.runId}`,
       role: "assistant",
       text: zendeskAssistantAuditText(input),
+      contentParts: tracePart ? [tracePart] : undefined,
       metadata: {
         channel: ZENDESK_CHANNEL,
         integrationInstanceId: input.instanceId,
@@ -2416,6 +2563,7 @@ async function syncZendeskConversationAfterAgentRun(input: {
         ticketId: input.ticketId,
         runId: input.runId,
         decision: input.decision.decision,
+        publicReplyPreview: input.decision.publicReplyPreview,
         actionStatus: input.action.status,
         zendeskCommentId: input.commentId,
         codexThreadId: input.codexThreadId

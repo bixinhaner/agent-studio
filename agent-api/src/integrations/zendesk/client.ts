@@ -3,6 +3,7 @@ import type {
   ZendeskAttachmentPayload,
   ZendeskCommentPayload,
   ZendeskIntegrationSettings,
+  ZendeskRequesterPayload,
   ZendeskTicketContext,
   ZendeskTicketPayload,
   ZendeskValidatedUser
@@ -84,6 +85,17 @@ function normalizeTicket(ticket: ZendeskTicketEnvelope["ticket"]): ZendeskTicket
     tags: Array.isArray(ticket?.tags) ? ticket.tags.map((item) => String(item || "").trim()).filter(Boolean) : [],
     requesterId: typeof ticket?.requester_id === "number" ? ticket.requester_id : undefined,
     updatedAt: typeof ticket?.updated_at === "string" ? ticket.updated_at : undefined
+  };
+}
+
+function normalizeZendeskUser(user: ZendeskUserEnvelope["user"]): ZendeskRequesterPayload | undefined {
+  const id = Number(user?.id || 0);
+  if (!Number.isFinite(id) || id <= 0) return undefined;
+  return {
+    id,
+    name: typeof user?.name === "string" ? user.name.trim() || undefined : undefined,
+    email: typeof user?.email === "string" ? user.email.trim() || undefined : undefined,
+    role: typeof user?.role === "string" ? user.role.trim() || undefined : undefined
   };
 }
 
@@ -170,21 +182,32 @@ export class ZendeskClient {
 
   async getMe(): Promise<ZendeskValidatedUser> {
     const data = await this.request<ZendeskUserEnvelope>("/api/v2/users/me.json");
-    const user = data.user;
+    const user = normalizeZendeskUser(data.user);
     return {
       id: Number(user?.id || 0),
-      name: String(user?.name || "").trim() || "Zendesk User",
-      email: typeof user?.email === "string" ? user.email : undefined,
-      role: typeof user?.role === "string" ? user.role : undefined
+      name: user?.name || "Zendesk User",
+      email: user?.email,
+      role: user?.role
     };
+  }
+
+  async getUser(userId: number): Promise<ZendeskRequesterPayload | undefined> {
+    if (!Number.isFinite(userId) || userId <= 0) return undefined;
+    const data = await this.request<ZendeskUserEnvelope>(`/api/v2/users/${encodeURIComponent(String(userId))}.json`);
+    return normalizeZendeskUser(data.user);
   }
 
   async getTicketContext(ticketId: string, maxComments: number): Promise<ZendeskTicketContext> {
     const ticketData = await this.request<ZendeskTicketEnvelope>(`/api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
     const ticket = normalizeTicket(ticketData.ticket);
-    const comments = await this.listComments(ticketId, maxComments);
+    const [comments, requester] = await Promise.all([
+      this.listComments(ticketId, maxComments),
+      ticket.requesterId
+        ? this.getUser(ticket.requesterId).catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
     return {
-      ticket,
+      ticket: requester ? { ...ticket, requester } : ticket,
       comments
     };
   }

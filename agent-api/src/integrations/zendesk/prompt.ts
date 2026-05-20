@@ -64,7 +64,8 @@ export function buildZendeskAgentPrompt(
     "Return JSON in exactly this shape:",
     "{",
     '  "decision": "public_reply" | "internal_note" | "handoff",',
-    '  "body": "Customer-facing public reply. Leave it empty when the decision is not public_reply.",',
+    '  "body": "Customer-facing public reply to actually send. Leave it empty when the decision is not public_reply.",',
+    '  "publicReplyPreview": "Customer-facing draft for admin preview only. Fill it when a safe draft can be prepared but the decision is internal_note or handoff; otherwise leave it empty.",',
     '  "internalNote": "Internal support note. Leave it empty when there is nothing to add.",',
     '  "confidence": 0.0,',
     '  "reasons": ["Short reason 1", "Short reason 2"]',
@@ -73,11 +74,12 @@ export function buildZendeskAgentPrompt(
     "Rules:",
     "1. Choose handoff or internal_note when the available context is insufficient, the answer would create a high-risk commitment, or human verification is required.",
     "2. The body for public_reply must be concise and useful. Do not use marketing language, and do not mention that you are looking at a ticketing system.",
-    "3. internalNote may include a suggested reply, missing information, risk notes, and recommended next steps for the support team.",
-    "4. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
-    "5. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
-    "6. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply.",
-    "7. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
+    "3. When the preferred response mode is internal_note, keep body empty unless the best decision is public_reply, and use publicReplyPreview to show what could be sent publicly if it is safe.",
+    "4. internalNote may include missing information, risk notes, and recommended next steps for the support team.",
+    "5. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
+    "6. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
+    "7. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply or publicReplyPreview.",
+    "8. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
   ];
 
   const ticketContext = [
@@ -87,6 +89,9 @@ export function buildZendeskAgentPrompt(
     `  status: ${context.ticket.status || ""}`,
     `  priority: ${context.ticket.priority || ""}`,
     `  requester_id: ${context.ticket.requesterId || ""}`,
+    `  requester_name: ${context.ticket.requester?.name || ""}`,
+    `  requester_email: ${context.ticket.requester?.email || ""}`,
+    `  requester_role: ${context.ticket.requester?.role || ""}`,
     `  updated_at: ${context.ticket.updatedAt || ""}`,
     `  tags: ${(context.ticket.tags || []).join(", ")}`,
     "description: |",
@@ -120,6 +125,12 @@ function tryParseJson(text: string): ZendeskAgentDecision | null {
       const decisionRaw = String(parsed.decision || "").trim();
       if (!["public_reply", "internal_note", "handoff"].includes(decisionRaw)) continue;
       const body = typeof parsed.body === "string" ? trimBlock(parsed.body) : "";
+      const publicReplyPreview =
+        typeof parsed.publicReplyPreview === "string"
+          ? trimBlock(parsed.publicReplyPreview)
+          : typeof parsed.public_reply_preview === "string"
+            ? trimBlock(String(parsed.public_reply_preview))
+            : "";
       const internalNote =
         typeof parsed.internalNote === "string"
           ? trimBlock(parsed.internalNote)
@@ -133,6 +144,7 @@ function tryParseJson(text: string): ZendeskAgentDecision | null {
       return {
         decision: decisionRaw as ZendeskAgentDecision["decision"],
         body,
+        publicReplyPreview,
         internalNote,
         confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
         reasons
@@ -177,10 +189,20 @@ export function buildInternalNoteFromDecision(decision: ZendeskAgentDecision): s
     lines.push(`Reasons: ${decision.reasons.join("; ")}`);
   }
 
-  if (decision.body) {
+  const publicReplyPreview = trimBlock(decision.publicReplyPreview || "");
+  const bodyAsPreview = decision.decision !== "public_reply" ? trimBlock(decision.body || "") : "";
+  const preview = publicReplyPreview || bodyAsPreview;
+
+  if (decision.decision === "public_reply" && decision.body) {
     lines.push("");
     lines.push("Suggested public reply:");
     lines.push(decision.body);
+  }
+
+  if (preview) {
+    lines.push("");
+    lines.push("Public reply preview (not sent):");
+    lines.push(preview);
   }
 
   if (decision.internalNote) {

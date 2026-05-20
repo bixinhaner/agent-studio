@@ -130,7 +130,15 @@ export type ZendeskTicketPayload = {
   priority?: string | null;
   tags: string[];
   requesterId?: number;
+  requester?: ZendeskRequesterPayload;
   updatedAt?: string;
+};
+
+export type ZendeskRequesterPayload = {
+  id: number;
+  name?: string;
+  email?: string;
+  role?: string;
 };
 
 export type ZendeskCommentPayload = {
@@ -164,6 +172,7 @@ export type ZendeskTicketContext = {
 export type ZendeskAgentDecision = {
   decision: ZendeskDecisionType;
   body: string;
+  publicReplyPreview?: string;
   internalNote?: string;
   confidence?: number;
   reasons?: string[];
