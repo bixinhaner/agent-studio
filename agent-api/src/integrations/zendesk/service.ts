@@ -812,6 +812,11 @@ export class ZendeskIntegrationService {
       });
       const decision = parseZendeskAgentDecision(agentRun.answerText);
       const action = resolveAction(settings, decision);
+      if (decision.processSummary) {
+        agentRun.processRows.push(
+          zendeskProcessRow("reasoning", "AI process summary", shortenText(decision.processSummary, 1800))
+        );
+      }
       agentRun.processRows.push(
         zendeskProcessRow(
           "process",
@@ -819,6 +824,7 @@ export class ZendeskIntegrationService {
           [
             `decision: ${decision.decision}`,
             decision.confidence !== undefined ? `confidence: ${Math.round(decision.confidence * 100)}%` : "",
+            decision.processSummary ? `processSummary:\n${shortenText(decision.processSummary, 1200)}` : "",
             decision.publicReplyPreview ? `publicReplyPreview:\n${shortenText(decision.publicReplyPreview, 1200)}` : "",
             decision.reasons?.length ? `reasons: ${decision.reasons.join("; ")}` : ""
           ]

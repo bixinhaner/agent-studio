@@ -67,6 +67,7 @@ export function buildZendeskAgentPrompt(
     '  "body": "Customer-facing public reply to actually send. Leave it empty when the decision is not public_reply.",',
     '  "publicReplyPreview": "Customer-facing draft for admin preview only. Fill it when a safe draft can be prepared but the decision is internal_note or handoff; otherwise leave it empty.",',
     '  "internalNote": "Internal support note. Leave it empty when there is nothing to add.",',
+    '  "processSummary": "Admin-only visible summary of what evidence you checked, what was missing, and why you chose this decision. Keep it concise and do not reveal hidden chain-of-thought.",',
     '  "confidence": 0.0,',
     '  "reasons": ["Short reason 1", "Short reason 2"]',
     "}",
@@ -76,10 +77,11 @@ export function buildZendeskAgentPrompt(
     "2. The body for public_reply must be concise and useful. Do not use marketing language, and do not mention that you are looking at a ticketing system.",
     "3. When the preferred response mode is internal_note, keep body empty unless the best decision is public_reply, and use publicReplyPreview to show what could be sent publicly if it is safe.",
     "4. internalNote may include missing information, risk notes, and recommended next steps for the support team.",
-    "5. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
-    "6. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
-    "7. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply or publicReplyPreview.",
-    "8. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
+    "5. processSummary is for administrators only. Summarize observable steps and evidence, not private chain-of-thought.",
+    "6. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
+    "7. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
+    "8. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply or publicReplyPreview.",
+    "9. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
   ];
 
   const ticketContext = [
@@ -137,6 +139,12 @@ function tryParseJson(text: string): ZendeskAgentDecision | null {
           : typeof parsed.internal_note === "string"
             ? trimBlock(String(parsed.internal_note))
             : "";
+      const processSummary =
+        typeof parsed.processSummary === "string"
+          ? trimBlock(parsed.processSummary)
+          : typeof parsed.process_summary === "string"
+            ? trimBlock(String(parsed.process_summary))
+            : "";
       const confidence = Number(parsed.confidence);
       const reasons = Array.isArray(parsed.reasons)
         ? parsed.reasons.map((item) => String(item || "").trim()).filter(Boolean)
@@ -146,6 +154,7 @@ function tryParseJson(text: string): ZendeskAgentDecision | null {
         body,
         publicReplyPreview,
         internalNote,
+        processSummary,
         confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
         reasons
       };

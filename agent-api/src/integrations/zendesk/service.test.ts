@@ -261,6 +261,7 @@ describe("ZendeskIntegrationService", () => {
             body: "",
             publicReplyPreview: "We are reviewing the screenshot and will confirm the next configuration step.",
             internalNote: "Attachment checked.",
+            processSummary: "Reviewed the requester comment, inspected the downloaded screenshot attachment, and selected an internal note because a public reply needs support verification.",
             confidence: 0.8,
             reasons: ["test"]
           })
@@ -395,6 +396,7 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ title: "Resumed Codex thread" }),
           expect.objectContaining({ title: "Called agent" }),
           expect.objectContaining({ title: "Model reasoning summary" }),
+          expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),
           expect.objectContaining({ title: "Command execution completed" }),
           expect.objectContaining({ title: "Wrote Zendesk internal note" })
         ])

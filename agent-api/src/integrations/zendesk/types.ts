@@ -174,6 +174,7 @@ export type ZendeskAgentDecision = {
   body: string;
   publicReplyPreview?: string;
   internalNote?: string;
+  processSummary?: string;
   confidence?: number;
   reasons?: string[];
 };
