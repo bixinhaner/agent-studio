@@ -11,6 +11,7 @@ import {
   buildZendeskAgentPrompt,
   parseZendeskAgentDecision
 } from "./prompt.js";
+import type { ZendeskPromptKnowledgeSet } from "./prompt.js";
 import {
   computeWebhookUrl,
   findZendeskReadinessGaps,
@@ -68,6 +69,7 @@ type ZendeskAgentRuntimeOptions = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  knowledgeSets?: ZendeskPromptKnowledgeSet[];
 };
 
 type ZendeskConversationAuditAction = {
@@ -1062,7 +1064,8 @@ export class ZendeskIntegrationService {
       model: runtimeOptions.model,
       reasoningEffort: runtimeOptions.reasoningEffort,
       workspace: runtimeOptions.workspace,
-      codexRunConfig: runtimeOptions.codexRunConfig
+      codexRunConfig: runtimeOptions.codexRunConfig,
+      knowledgeSets: runtimeOptions.knowledgeSets
     };
     processRows.push(
       zendeskProcessRow(
@@ -1078,6 +1081,27 @@ export class ZendeskIntegrationService {
           .join("\n")
       )
     );
+    if (runtimeOptions.knowledgeSets?.length) {
+      processRows.push(
+        zendeskProcessRow(
+          "source",
+          "Mounted knowledge sets",
+          runtimeOptions.knowledgeSets
+            .map((knowledgeSet) =>
+              [
+                `name: ${knowledgeSet.name}`,
+                knowledgeSet.id ? `id: ${knowledgeSet.id}` : "",
+                knowledgeSet.relativePath ? `relative_path: ${knowledgeSet.relativePath}` : "",
+                `absolute_path: ${knowledgeSet.path}`,
+                knowledgeSet.manifestPath ? `manifest_path: ${knowledgeSet.manifestPath}` : ""
+              ]
+                .filter(Boolean)
+                .join("\n")
+            )
+            .join("\n\n")
+        )
+      );
+    }
     const preparedContext = await this.prepareContextAttachments(
       context,
       settings,
@@ -1143,12 +1167,18 @@ export class ZendeskIntegrationService {
       runId: run.runId
     });
 
-    const prompt = buildZendeskAgentPrompt(preparedContext, settings);
+    const prompt = buildZendeskAgentPrompt(preparedContext, settings, {
+      knowledgeSets: runtimeOptions.knowledgeSets
+    });
     processRows.push(
       zendeskProcessRow(
         "process",
         "Called agent",
-        [`prompt_chars: ${prompt.length}`, `comment_history: ${preparedContext.comments.length}`].join("\n")
+        [
+          `prompt_chars: ${prompt.length}`,
+          `comment_history: ${preparedContext.comments.length}`,
+          `knowledge_sets: ${runtimeOptions.knowledgeSets?.length ?? 0}`
+        ].join("\n")
       )
     );
     let output = "";

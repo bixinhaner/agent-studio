@@ -345,7 +345,18 @@ describe("ZendeskIntegrationService", () => {
           model: "gpt-5.5",
           reasoningEffort: "high" as const,
           workspace: tempRoot,
-          codexRunConfig: {}
+          codexRunConfig: {
+            additionalDirectories: ["/tmp/knowledge/Docs"]
+          },
+          knowledgeSets: [
+            {
+              id: "ks-docs",
+              name: "Docs",
+              path: "/tmp/knowledge/Docs",
+              relativePath: ".agent-studio/knowledge-sets/Docs",
+              manifestPath: ".agent-studio/knowledge-sets.md"
+            }
+          ]
         })),
         conversationAudit
       },
@@ -373,6 +384,10 @@ describe("ZendeskIntegrationService", () => {
       });
       expect(prompts[0]).toContain("attachments:");
       expect(prompts[0]).toContain("requester_email: requester@example.com");
+      expect(prompts[0]).toContain("Mounted knowledge sets are available.");
+      expect(prompts[0]).toContain("mounted_knowledge_sets:");
+      expect(prompts[0]).toContain("relative_path: .agent-studio/knowledge-sets/Docs");
+      expect(prompts[0]).toContain('search_example: rg -n -i -L "<ticket keywords>" ".agent-studio/knowledge-sets/Docs"');
       expect(prompts[0]).toContain(
         "local_path: .zendesk/attachments/cache/example.zendesk.com/ticket-123/comment-101/att-7788-signal screenshot.png"
       );
@@ -409,6 +424,7 @@ describe("ZendeskIntegrationService", () => {
         expect.arrayContaining([
           expect.objectContaining({ title: "Read Zendesk ticket" }),
           expect.objectContaining({ title: "Prepared Zendesk attachments" }),
+          expect.objectContaining({ kind: "source", title: "Mounted knowledge sets" }),
           expect.objectContaining({ title: "Started Codex thread" }),
           expect.objectContaining({ title: "Resumed Codex thread" }),
           expect.objectContaining({ title: "Called agent" }),
