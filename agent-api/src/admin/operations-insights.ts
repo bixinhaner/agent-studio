@@ -14,7 +14,25 @@ export type OperationsInsightsFilters = {
   query?: string;
   sessionPage: number;
   sessionPageSize: number;
+  sessionSortKey?: OperationsInsightsSessionSortKey;
+  sessionSortDirection?: SortDirection;
 };
+
+export type SortDirection = "asc" | "desc";
+export type OperationsInsightsSessionSortKey =
+  | "sessionId"
+  | "userName"
+  | "model"
+  | "entryLabel"
+  | "pathLabel"
+  | "requestCount"
+  | "inputTokens"
+  | "cachedInputTokens"
+  | "outputTokens"
+  | "totalTokens"
+  | "estimatedCost"
+  | "internalCost"
+  | "lastActiveAt";
 
 export type OperationsInsightsSummary = {
   totalOrganizations: number;
@@ -312,6 +330,67 @@ function formatRatio(value: number): number {
 function formatAverage(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Number(value.toFixed(2));
+}
+
+function compareText(left: string | undefined, right: string | undefined): number {
+  return (left || "").localeCompare(right || "", "zh-CN", { numeric: true, sensitivity: "base" });
+}
+
+function compareSessionRows(
+  left: OperationsInsightsSessionRow,
+  right: OperationsInsightsSessionRow,
+  key: OperationsInsightsSessionSortKey,
+  direction: SortDirection
+): number {
+  let ranked = 0;
+  switch (key) {
+    case "sessionId":
+      ranked = compareText(left.sessionId, right.sessionId);
+      break;
+    case "userName":
+      ranked = compareText(`${left.userName} ${left.organizationName || ""}`, `${right.userName} ${right.organizationName || ""}`);
+      break;
+    case "model":
+      ranked = compareText(left.model, right.model);
+      break;
+    case "entryLabel":
+      ranked = compareText(left.entryLabel, right.entryLabel);
+      break;
+    case "pathLabel":
+      ranked = compareText(left.pathLabel, right.pathLabel);
+      break;
+    case "requestCount":
+      ranked = left.requestCount - right.requestCount;
+      break;
+    case "inputTokens":
+      ranked = left.inputTokens - right.inputTokens;
+      break;
+    case "cachedInputTokens":
+      ranked = left.cachedInputTokens - right.cachedInputTokens;
+      break;
+    case "outputTokens":
+      ranked = left.outputTokens - right.outputTokens;
+      break;
+    case "totalTokens":
+      ranked = left.totalTokens - right.totalTokens;
+      break;
+    case "estimatedCost":
+      ranked = toNumber(left.estimatedCost) - toNumber(right.estimatedCost);
+      break;
+    case "internalCost":
+      ranked = toNumber(left.internalCost) - toNumber(right.internalCost);
+      break;
+    case "lastActiveAt":
+      ranked = new Date(left.lastActiveAt).getTime() - new Date(right.lastActiveAt).getTime();
+      break;
+  }
+
+  const sorted = direction === "asc" ? ranked : -ranked;
+  return (
+    sorted ||
+    new Date(right.lastActiveAt).getTime() - new Date(left.lastActiveAt).getTime() ||
+    compareText(left.sessionId, right.sessionId)
+  );
 }
 
 function toIsoString(value: string | Date): string {
@@ -888,7 +967,14 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       firstActiveAt: bucket.firstActiveAt,
       lastActiveAt: bucket.lastActiveAt
     }))
-    .sort((left, right) => new Date(right.lastActiveAt).getTime() - new Date(left.lastActiveAt).getTime());
+    .sort((left, right) =>
+      compareSessionRows(
+        left,
+        right,
+        input.filters.sessionSortKey ?? "lastActiveAt",
+        input.filters.sessionSortDirection ?? "desc"
+      )
+    );
 
   const totalPages = Math.max(1, Math.ceil(sessionRows.length / input.filters.sessionPageSize));
   const safePage = Math.min(Math.max(1, input.filters.sessionPage), totalPages);

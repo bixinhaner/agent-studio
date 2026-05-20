@@ -37,6 +37,8 @@ export async function fetchOperationsInsights(input: {
   query?: string;
   sessionPage?: number;
   sessionPageSize?: number;
+  sessionSortKey?: string;
+  sessionSortDirection?: "asc" | "desc";
 } = {}): Promise<OperationsInsightsResponse> {
   const query = new URLSearchParams();
   if (input.days) query.set("days", String(input.days));
@@ -48,6 +50,8 @@ export async function fetchOperationsInsights(input: {
   if (input.query) query.set("query", input.query);
   if (input.sessionPage) query.set("sessionPage", String(input.sessionPage));
   if (input.sessionPageSize) query.set("sessionPageSize", String(input.sessionPageSize));
+  if (input.sessionSortKey) query.set("sessionSortKey", input.sessionSortKey);
+  if (input.sessionSortDirection) query.set("sessionSortDirection", input.sessionSortDirection);
   const suffix = query.toString();
   return api<OperationsInsightsResponse>(`/api/admin/monitoring/operations-insights${suffix ? `?${suffix}` : ""}`);
 }

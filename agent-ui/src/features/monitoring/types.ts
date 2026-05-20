@@ -48,6 +48,8 @@ export type OperationsInsightsFilters = {
   query?: string;
   sessionPage: number;
   sessionPageSize: number;
+  sessionSortKey?: string;
+  sessionSortDirection?: "asc" | "desc";
 };
 
 export type OperationsInsightsSummary = {

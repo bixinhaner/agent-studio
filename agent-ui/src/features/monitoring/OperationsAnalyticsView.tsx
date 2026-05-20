@@ -1,5 +1,5 @@
 import { Alert, Button, Empty, Input, Pagination, Select, Spin, Tabs } from "antd";
-import { RefreshCcw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCcw, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { formatUsdAmount } from "../../lib/formatters";
@@ -9,6 +9,7 @@ import type {
   OperationsInsightsOrganizationRow,
   OperationsInsightsResponse,
   OperationsInsightsSessionRow,
+  OperationsInsightsTrendPoint,
   OperationsInsightsUserRow
 } from "./types";
 import { formatLocalDateTime } from "./types";
@@ -20,6 +21,55 @@ const DAY_OPTIONS = [
 ];
 
 type OperationsAnalyticsTab = "overview" | "breakdowns" | "organizations" | "users" | "sessions";
+type SortDirection = "asc" | "desc";
+type SortValue = string | number | null | undefined;
+type SortState<Key extends string> = {
+  key: Key;
+  direction: SortDirection;
+};
+type TrendSortKey = keyof Pick<
+  OperationsInsightsTrendPoint,
+  "day" | "organizationCount" | "userCount" | "sessionCount" | "requestCount" | "totalTokens" | "estimatedCost" | "internalCost"
+>;
+type OrganizationSortKey =
+  | "organization"
+  | "userCount"
+  | "sessionCount"
+  | "requestCount"
+  | "totalTokens"
+  | "estimatedCost"
+  | "internalCost"
+  | "topModel"
+  | "topPath"
+  | "cacheShare"
+  | "lastActiveAt";
+type UserSortKey =
+  | "user"
+  | "organizationName"
+  | "departmentName"
+  | "sessionCount"
+  | "requestCount"
+  | "totalTokens"
+  | "estimatedCost"
+  | "internalCost"
+  | "topModel"
+  | "topPath"
+  | "cacheShare"
+  | "lastActiveAt";
+type SessionSortKey =
+  | "sessionId"
+  | "userName"
+  | "model"
+  | "entryLabel"
+  | "pathLabel"
+  | "requestCount"
+  | "inputTokens"
+  | "cachedInputTokens"
+  | "outputTokens"
+  | "totalTokens"
+  | "estimatedCost"
+  | "internalCost"
+  | "lastActiveAt";
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat(undefined).format(value);
@@ -37,9 +87,59 @@ function resolveLocalTimeZone(): string {
   }
 }
 
-function MetricCard(props: { label: string; value: string; meta: string }) {
+function compareSortValues(left: SortValue, right: SortValue): number {
+  if (left === right) return 0;
+  if (left === null || left === undefined) return 1;
+  if (right === null || right === undefined) return -1;
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right), "zh-CN", { numeric: true, sensitivity: "base" });
+}
+
+function sortRows<Row, Key extends string>(
+  rows: readonly Row[],
+  sort: SortState<Key>,
+  accessors: Record<Key, (row: Row) => SortValue>
+): Row[] {
+  const direction = sort.direction === "asc" ? 1 : -1;
+  return [...rows].sort((left, right) => compareSortValues(accessors[sort.key](left), accessors[sort.key](right)) * direction);
+}
+
+function nextSortState<Key extends string>(
+  current: SortState<Key>,
+  key: Key,
+  defaultDirection: SortDirection = "desc"
+): SortState<Key> {
+  if (current.key !== key) return { key, direction: defaultDirection };
+  return { key, direction: current.direction === "desc" ? "asc" : "desc" };
+}
+
+function SortableHeader<Key extends string>(props: {
+  label: string;
+  sortKey: Key;
+  sort: SortState<Key>;
+  defaultDirection?: SortDirection;
+  onSort: (key: Key, defaultDirection?: SortDirection) => void;
+}) {
+  const active = props.sort.key === props.sortKey;
+  const Icon = active ? (props.sort.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  const directionLabel = active ? (props.sort.direction === "asc" ? "升序" : "降序") : "未排序";
   return (
-    <article className="ops-analytics-metric-card">
+    <button
+      type="button"
+      className={`ops-analytics-sort-button ${active ? "is-active" : ""}`}
+      aria-label={`${props.label}，${directionLabel}，点击切换排序`}
+      aria-pressed={active}
+      onClick={() => props.onSort(props.sortKey, props.defaultDirection)}
+    >
+      <span>{props.label}</span>
+      <Icon size={13} />
+    </button>
+  );
+}
+
+function MetricItem(props: { label: string; value: string; meta: string }) {
+  return (
+    <article className="ops-analytics-metric-item">
       <span className="ops-analytics-metric-label">{props.label}</span>
       <strong className="ops-analytics-metric-value" title={props.value}>{props.value}</strong>
       <span className="ops-analytics-metric-meta">{props.meta}</span>
@@ -111,27 +211,156 @@ function buildConversationRecordHref(row: OperationsInsightsSessionRow): string 
   return `#admin/conversations?${params.toString()}`;
 }
 
-function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] }) {
-  return props.rows.length ? (
+const TREND_SORT_ACCESSORS: Record<TrendSortKey, (row: OperationsInsightsTrendPoint) => SortValue> = {
+  day: (row) => row.day,
+  organizationCount: (row) => row.organizationCount,
+  userCount: (row) => row.userCount,
+  sessionCount: (row) => row.sessionCount,
+  requestCount: (row) => row.requestCount,
+  totalTokens: (row) => row.totalTokens,
+  estimatedCost: (row) => Number(row.estimatedCost),
+  internalCost: (row) => Number(row.internalCost)
+};
+
+const ORGANIZATION_SORT_ACCESSORS: Record<OrganizationSortKey, (row: OperationsInsightsOrganizationRow) => SortValue> = {
+  organization: renderOrgLabel,
+  userCount: (row) => row.userCount,
+  sessionCount: (row) => row.sessionCount,
+  requestCount: (row) => row.requestCount,
+  totalTokens: (row) => row.totalTokens,
+  estimatedCost: (row) => Number(row.estimatedCost),
+  internalCost: (row) => Number(row.internalCost),
+  topModel: (row) => row.topModel,
+  topPath: (row) => row.topPath,
+  cacheShare: (row) => row.cacheShare,
+  lastActiveAt: (row) => Date.parse(row.lastActiveAt)
+};
+
+const USER_SORT_ACCESSORS: Record<UserSortKey, (row: OperationsInsightsUserRow) => SortValue> = {
+  user: (row) => `${row.userName} ${row.userEmail || row.userId}`,
+  organizationName: (row) => row.organizationName || "",
+  departmentName: (row) => row.departmentName || "",
+  sessionCount: (row) => row.sessionCount,
+  requestCount: (row) => row.requestCount,
+  totalTokens: (row) => row.totalTokens,
+  estimatedCost: (row) => Number(row.estimatedCost),
+  internalCost: (row) => Number(row.internalCost),
+  topModel: (row) => row.topModel,
+  topPath: (row) => row.topPath,
+  cacheShare: (row) => row.cacheShare,
+  lastActiveAt: (row) => Date.parse(row.lastActiveAt)
+};
+
+function sortAria<Key extends string>(sort: SortState<Key>, key: Key): "ascending" | "descending" | "none" {
+  if (sort.key !== key) return "none";
+  return sort.direction === "asc" ? "ascending" : "descending";
+}
+
+function TrendTable(props: { rows: OperationsInsightsTrendPoint[] }) {
+  const [sort, setSort] = useState<SortState<TrendSortKey>>({ key: "day", direction: "asc" });
+  const rows = useMemo(() => sortRows(props.rows, sort, TREND_SORT_ACCESSORS), [props.rows, sort]);
+  const handleSort = (key: TrendSortKey, defaultDirection?: SortDirection) => setSort((current) => nextSortState(current, key, defaultDirection));
+
+  return rows.length ? (
     <div className="monitoring-table-wrap">
-      <table className="monitoring-table">
+      <table className="monitoring-table ops-analytics-sortable-table">
         <thead>
           <tr>
-            <th>组织</th>
-            <th>用户数</th>
-            <th>会话数</th>
-            <th>问题次数</th>
-            <th>总 tokens</th>
-            <th>预估价值</th>
-            <th>内部价值</th>
-            <th>主模型</th>
-            <th>主路径</th>
-            <th>缓存占比</th>
-            <th>最近活跃</th>
+            <th aria-sort={sortAria(sort, "day")}>
+              <SortableHeader label="日期" sortKey="day" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "organizationCount")}>
+              <SortableHeader label="组织数" sortKey="organizationCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "userCount")}>
+              <SortableHeader label="用户数" sortKey="userCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "sessionCount")}>
+              <SortableHeader label="会话数" sortKey="sessionCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "requestCount")}>
+              <SortableHeader label="问题次数" sortKey="requestCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "totalTokens")}>
+              <SortableHeader label="总 tokens" sortKey="totalTokens" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "estimatedCost")}>
+              <SortableHeader label="预估价值" sortKey="estimatedCost" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "internalCost")}>
+              <SortableHeader label="内部价值" sortKey="internalCost" sort={sort} onSort={handleSort} />
+            </th>
           </tr>
         </thead>
         <tbody>
-          {props.rows.map((row) => (
+          {rows.map((row) => (
+            <tr key={row.day}>
+              <td>{row.day}</td>
+              <td>{formatCount(row.organizationCount)}</td>
+              <td>{formatCount(row.userCount)}</td>
+              <td>{formatCount(row.sessionCount)}</td>
+              <td>{formatCount(row.requestCount)}</td>
+              <td>{formatCount(row.totalTokens)}</td>
+              <td>{formatUsdAmount(row.estimatedCost)}</td>
+              <td>{formatUsdAmount(row.internalCost)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <Empty description="当前窗口内没有趋势数据" />
+  );
+}
+
+function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] }) {
+  const [sort, setSort] = useState<SortState<OrganizationSortKey>>({ key: "internalCost", direction: "desc" });
+  const rows = useMemo(() => sortRows(props.rows, sort, ORGANIZATION_SORT_ACCESSORS), [props.rows, sort]);
+  const handleSort = (key: OrganizationSortKey, defaultDirection?: SortDirection) =>
+    setSort((current) => nextSortState(current, key, defaultDirection));
+
+  return props.rows.length ? (
+    <div className="monitoring-table-wrap">
+      <table className="monitoring-table ops-analytics-sortable-table">
+        <thead>
+          <tr>
+            <th aria-sort={sortAria(sort, "organization")}>
+              <SortableHeader label="组织" sortKey="organization" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "userCount")}>
+              <SortableHeader label="用户数" sortKey="userCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "sessionCount")}>
+              <SortableHeader label="会话数" sortKey="sessionCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "requestCount")}>
+              <SortableHeader label="问题次数" sortKey="requestCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "totalTokens")}>
+              <SortableHeader label="总 tokens" sortKey="totalTokens" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "estimatedCost")}>
+              <SortableHeader label="预估价值" sortKey="estimatedCost" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "internalCost")}>
+              <SortableHeader label="内部价值" sortKey="internalCost" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "topModel")}>
+              <SortableHeader label="主模型" sortKey="topModel" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "topPath")}>
+              <SortableHeader label="主路径" sortKey="topPath" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "cacheShare")}>
+              <SortableHeader label="缓存占比" sortKey="cacheShare" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "lastActiveAt")}>
+              <SortableHeader label="最近活跃" sortKey="lastActiveAt" sort={sort} onSort={handleSort} />
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
             <tr key={row.organizationId}>
               <td>
                 <div className="ops-analytics-cell-stack">
@@ -160,27 +389,55 @@ function OrganizationTable(props: { rows: OperationsInsightsOrganizationRow[] })
 }
 
 function UserTable(props: { rows: OperationsInsightsUserRow[] }) {
+  const [sort, setSort] = useState<SortState<UserSortKey>>({ key: "internalCost", direction: "desc" });
+  const rows = useMemo(() => sortRows(props.rows, sort, USER_SORT_ACCESSORS), [props.rows, sort]);
+  const handleSort = (key: UserSortKey, defaultDirection?: SortDirection) => setSort((current) => nextSortState(current, key, defaultDirection));
+
   return props.rows.length ? (
     <div className="monitoring-table-wrap">
-      <table className="monitoring-table">
+      <table className="monitoring-table ops-analytics-sortable-table">
         <thead>
           <tr>
-            <th>用户</th>
-            <th>组织</th>
-            <th>部门</th>
-            <th>会话数</th>
-            <th>问题次数</th>
-            <th>总 tokens</th>
-            <th>预估价值</th>
-            <th>内部价值</th>
-            <th>主模型</th>
-            <th>主路径</th>
-            <th>缓存占比</th>
-            <th>最近活跃</th>
+            <th aria-sort={sortAria(sort, "user")}>
+              <SortableHeader label="用户" sortKey="user" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "organizationName")}>
+              <SortableHeader label="组织" sortKey="organizationName" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "departmentName")}>
+              <SortableHeader label="部门" sortKey="departmentName" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "sessionCount")}>
+              <SortableHeader label="会话数" sortKey="sessionCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "requestCount")}>
+              <SortableHeader label="问题次数" sortKey="requestCount" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "totalTokens")}>
+              <SortableHeader label="总 tokens" sortKey="totalTokens" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "estimatedCost")}>
+              <SortableHeader label="预估价值" sortKey="estimatedCost" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "internalCost")}>
+              <SortableHeader label="内部价值" sortKey="internalCost" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "topModel")}>
+              <SortableHeader label="主模型" sortKey="topModel" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "topPath")}>
+              <SortableHeader label="主路径" sortKey="topPath" sort={sort} defaultDirection="asc" onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "cacheShare")}>
+              <SortableHeader label="缓存占比" sortKey="cacheShare" sort={sort} onSort={handleSort} />
+            </th>
+            <th aria-sort={sortAria(sort, "lastActiveAt")}>
+              <SortableHeader label="最近活跃" sortKey="lastActiveAt" sort={sort} onSort={handleSort} />
+            </th>
           </tr>
         </thead>
         <tbody>
-          {props.rows.map((row) => (
+          {rows.map((row) => (
             <tr key={row.userId}>
               <td>
                 <div className="ops-analytics-cell-stack">
@@ -209,25 +466,55 @@ function UserTable(props: { rows: OperationsInsightsUserRow[] }) {
   );
 }
 
-function SessionTable(props: { rows: OperationsInsightsSessionRow[] }) {
+function SessionTable(props: {
+  rows: OperationsInsightsSessionRow[];
+  sort: SortState<SessionSortKey>;
+  onSort: (key: SessionSortKey, defaultDirection?: SortDirection) => void;
+}) {
   return props.rows.length ? (
     <div className="monitoring-table-wrap">
-      <table className="monitoring-table">
+      <table className="monitoring-table ops-analytics-sortable-table">
         <thead>
           <tr>
-            <th>会话</th>
-            <th>用户 / 组织</th>
-            <th>模型</th>
-            <th>入口</th>
-            <th>路径</th>
-            <th>问题次数</th>
-            <th>输入</th>
-            <th>缓存</th>
-            <th>输出</th>
-            <th>总 tokens</th>
-            <th>预估价值</th>
-            <th>内部价值</th>
-            <th>最近活跃</th>
+            <th aria-sort={sortAria(props.sort, "sessionId")}>
+              <SortableHeader label="会话" sortKey="sessionId" sort={props.sort} defaultDirection="asc" onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "userName")}>
+              <SortableHeader label="用户 / 组织" sortKey="userName" sort={props.sort} defaultDirection="asc" onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "model")}>
+              <SortableHeader label="模型" sortKey="model" sort={props.sort} defaultDirection="asc" onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "entryLabel")}>
+              <SortableHeader label="入口" sortKey="entryLabel" sort={props.sort} defaultDirection="asc" onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "pathLabel")}>
+              <SortableHeader label="路径" sortKey="pathLabel" sort={props.sort} defaultDirection="asc" onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "requestCount")}>
+              <SortableHeader label="问题次数" sortKey="requestCount" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "inputTokens")}>
+              <SortableHeader label="输入" sortKey="inputTokens" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "cachedInputTokens")}>
+              <SortableHeader label="缓存" sortKey="cachedInputTokens" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "outputTokens")}>
+              <SortableHeader label="输出" sortKey="outputTokens" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "totalTokens")}>
+              <SortableHeader label="总 tokens" sortKey="totalTokens" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "estimatedCost")}>
+              <SortableHeader label="预估价值" sortKey="estimatedCost" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "internalCost")}>
+              <SortableHeader label="内部价值" sortKey="internalCost" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "lastActiveAt")}>
+              <SortableHeader label="最近活跃" sortKey="lastActiveAt" sort={props.sort} onSort={props.onSort} />
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -299,6 +586,7 @@ export function OperationsAnalyticsView() {
   const [query, setQuery] = useState("");
   const [sessionPage, setSessionPage] = useState(1);
   const [sessionPageSize, setSessionPageSize] = useState(20);
+  const [sessionSort, setSessionSort] = useState<SortState<SessionSortKey>>({ key: "lastActiveAt", direction: "desc" });
   const [activeTab, setActiveTab] = useState<OperationsAnalyticsTab>("overview");
   const [refreshToken, setRefreshToken] = useState(0);
 
@@ -323,7 +611,9 @@ export function OperationsAnalyticsView() {
       entry,
       query: deferredQuery || undefined,
       sessionPage,
-      sessionPageSize
+      sessionPageSize,
+      sessionSortKey: sessionSort.key,
+      sessionSortDirection: sessionSort.direction
     })
       .then((response) => {
         if (!active) return;
@@ -340,7 +630,25 @@ export function OperationsAnalyticsView() {
     return () => {
       active = false;
     };
-  }, [days, timeZone, organizationId, model, path, entry, deferredQuery, sessionPage, sessionPageSize, refreshToken]);
+  }, [
+    days,
+    timeZone,
+    organizationId,
+    model,
+    path,
+    entry,
+    deferredQuery,
+    sessionPage,
+    sessionPageSize,
+    sessionSort.key,
+    sessionSort.direction,
+    refreshToken
+  ]);
+
+  const handleSessionSort = (key: SessionSortKey, defaultDirection?: SortDirection) => {
+    setSessionSort((current) => nextSortState(current, key, defaultDirection));
+    setSessionPage(1);
+  };
 
   const valueHint =
     data && data.summary.estimatedCost === "0.000000" && data.summary.internalCost === "0.000000"
@@ -449,19 +757,19 @@ export function OperationsAnalyticsView() {
 
       {data ? (
         <>
-          <section className="ops-analytics-hero">
-            <MetricCard label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有调用的组织" />
-            <MetricCard label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有调用的用户" />
-            <MetricCard label="有效会话" value={formatCount(data.summary.totalSessions)} meta="至少提交过一个问题" />
-            <MetricCard label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`平均 ${data.summary.avgRequestsPerSession} 次/会话`} />
-            <MetricCard label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`平均 ${data.summary.avgTokensPerSession} /会话`} />
-            <MetricCard label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="按模型单价折算" />
-            <MetricCard
+          <section className="ops-analytics-kpi-strip" aria-label="运营关键指标">
+            <MetricItem label="活跃组织" value={formatCount(data.summary.totalOrganizations)} meta="当前窗口内有调用的组织" />
+            <MetricItem label="活跃用户" value={formatCount(data.summary.totalUsers)} meta="当前窗口内有调用的用户" />
+            <MetricItem label="有效会话" value={formatCount(data.summary.totalSessions)} meta="至少提交过一个问题" />
+            <MetricItem label="问题次数" value={formatCount(data.summary.totalRequests)} meta={`平均 ${data.summary.avgRequestsPerSession} 次/会话`} />
+            <MetricItem label="总 tokens" value={formatCount(data.summary.totalTokens)} meta={`平均 ${data.summary.avgTokensPerSession} /会话`} />
+            <MetricItem label="预估价值" value={formatUsdAmount(data.summary.estimatedCost)} meta="按模型单价折算" />
+            <MetricItem
               label="内部价值"
               value={formatUsdAmount(data.summary.internalCost)}
               meta={`平均 ${formatUsdAmount(data.summary.avgInternalCostPerSession)} /会话`}
             />
-            <MetricCard label="缓存占比" value={formatPercent(data.summary.cacheShare)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
+            <MetricItem label="缓存占比" value={formatPercent(data.summary.cacheShare)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
           </section>
 
           <section className="ops-analytics-context-strip">
@@ -487,40 +795,7 @@ export function OperationsAnalyticsView() {
                 label: "趋势总览",
                 children: (
                   <TableShell title="趋势" subtitle="按本地时区天粒度回放会话、问题次数、tokens 和价值变化。">
-                    {data.trends.length ? (
-                      <div className="monitoring-table-wrap">
-                        <table className="monitoring-table">
-                          <thead>
-                            <tr>
-                              <th>日期</th>
-                              <th>组织数</th>
-                              <th>用户数</th>
-                              <th>会话数</th>
-                              <th>问题次数</th>
-                              <th>总 tokens</th>
-                              <th>预估价值</th>
-                              <th>内部价值</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {data.trends.map((row) => (
-                              <tr key={row.day}>
-                                <td>{row.day}</td>
-                                <td>{formatCount(row.organizationCount)}</td>
-                                <td>{formatCount(row.userCount)}</td>
-                                <td>{formatCount(row.sessionCount)}</td>
-                                <td>{formatCount(row.requestCount)}</td>
-                                <td>{formatCount(row.totalTokens)}</td>
-                                <td>{formatUsdAmount(row.estimatedCost)}</td>
-                                <td>{formatUsdAmount(row.internalCost)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <Empty description="当前窗口内没有趋势数据" />
-                    )}
+                    <TrendTable rows={data.trends} />
                   </TableShell>
                 )
               },
@@ -581,7 +856,7 @@ export function OperationsAnalyticsView() {
                       </div>
                     }
                   >
-                    <SessionTable rows={data.sessions.items} />
+                    <SessionTable rows={data.sessions.items} sort={sessionSort} onSort={handleSessionSort} />
                     {data.sessions.totalItems > 0 ? (
                       <div className="ops-analytics-pagination">
                         <Pagination

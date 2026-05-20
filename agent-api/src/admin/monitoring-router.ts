@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type RequestHandler } from "express";
 
-import { buildOperationsInsights } from "./operations-insights.js";
+import { buildOperationsInsights, type OperationsInsightsSessionSortKey } from "./operations-insights.js";
 import type { AlertEventRepository } from "../persistence/alert-event-repository.js";
 import type { AlertRuleRepository, CreateAlertRuleInput } from "../persistence/alert-rule-repository.js";
 import type { CostProfileRepository, UpsertCostProfileInput } from "../persistence/cost-profile-repository.js";
@@ -56,6 +56,32 @@ function parsePositiveInt(value: unknown, fallback: number, min = 1, max = 365):
   const parsed = typeof value === "string" ? Number.parseInt(value, 10) : typeof value === "number" ? Math.trunc(value) : Number.NaN;
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+const OPERATIONS_SESSION_SORT_KEYS = new Set([
+  "sessionId",
+  "userName",
+  "model",
+  "entryLabel",
+  "pathLabel",
+  "requestCount",
+  "inputTokens",
+  "cachedInputTokens",
+  "outputTokens",
+  "totalTokens",
+  "estimatedCost",
+  "internalCost",
+  "lastActiveAt"
+]);
+
+function parseOperationsSortKey(value: unknown): OperationsInsightsSessionSortKey | undefined {
+  const key = trimOrUndefined(typeof value === "string" ? value : undefined);
+  return key && OPERATIONS_SESSION_SORT_KEYS.has(key) ? (key as OperationsInsightsSessionSortKey) : undefined;
+}
+
+function parseSortDirection(value: unknown): "asc" | "desc" | undefined {
+  const direction = trimOrUndefined(typeof value === "string" ? value : undefined);
+  return direction === "asc" || direction === "desc" ? direction : undefined;
 }
 
 function toNumber(value: unknown): number {
@@ -274,7 +300,9 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         entry: trimOrUndefined(typeof req.query.entry === "string" ? req.query.entry : undefined),
         query: trimOrUndefined(typeof req.query.query === "string" ? req.query.query : undefined),
         sessionPage,
-        sessionPageSize
+        sessionPageSize,
+        sessionSortKey: parseOperationsSortKey(req.query.sessionSortKey),
+        sessionSortDirection: parseSortDirection(req.query.sessionSortDirection)
       } as const;
 
       const usageEvents = await options.usageEvents.list({
