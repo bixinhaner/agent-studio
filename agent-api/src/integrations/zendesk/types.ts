@@ -139,6 +139,9 @@ export type ZendeskRequesterPayload = {
   name?: string;
   email?: string;
   role?: string;
+  organizationId?: number;
+  organizationName?: string;
+  countryRegion?: string;
 };
 
 export type ZendeskCommentPayload = {

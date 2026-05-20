@@ -133,6 +133,8 @@ type ConversationChannelSummary = {
   agentModeId: string | null;
   lastExternalMessageId: string | null;
   lastMessageAt: string | null;
+  requesterOrganization: string | null;
+  requesterCountryRegion: string | null;
 };
 
 type ConversationAgentModeSummary = {
@@ -1174,6 +1176,7 @@ function buildConversationChannelSummary(
   if (!binding) return null;
   const integration = integrationMap.get(binding.integrationInstanceId);
   const type = trimOrUndefined(binding.channel) ?? "external";
+  const metadata = asRecord(binding.metadata);
   const label =
     type === "dingtalk_bot"
       ? binding.conversationType === "group"
@@ -1199,7 +1202,9 @@ function buildConversationChannelSummary(
     botName: trimOrUndefined(binding.botName) ?? integration?.name ?? null,
     agentModeId: trimOrUndefined(binding.agentModeId) ?? null,
     lastExternalMessageId: trimOrUndefined(binding.lastExternalMessageId) ?? null,
-    lastMessageAt: trimOrUndefined(binding.lastMessageAt) ?? null
+    lastMessageAt: trimOrUndefined(binding.lastMessageAt) ?? null,
+    requesterOrganization: trimOrUndefined(metadata?.requesterOrganization) ?? null,
+    requesterCountryRegion: trimOrUndefined(metadata?.requesterCountryRegion) ?? null
   };
 }
 

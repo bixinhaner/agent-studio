@@ -15,6 +15,18 @@ type ZendeskUserEnvelope = {
     name?: string;
     email?: string;
     role?: string;
+    organization_id?: number | null;
+    locale?: string;
+    time_zone?: string;
+    user_fields?: Record<string, unknown> | null;
+  };
+};
+
+type ZendeskOrganizationEnvelope = {
+  organization?: {
+    id?: number;
+    name?: string;
+    organization_fields?: Record<string, unknown> | null;
   };
 };
 
@@ -88,14 +100,86 @@ function normalizeTicket(ticket: ZendeskTicketEnvelope["ticket"]): ZendeskTicket
   };
 }
 
-function normalizeZendeskUser(user: ZendeskUserEnvelope["user"]): ZendeskRequesterPayload | undefined {
+function trimString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function firstFieldValue(fields: Record<string, unknown> | null | undefined, keys: string[]): string | undefined {
+  if (!fields) return undefined;
+  const normalized = new Map(
+    Object.entries(fields).map(([key, value]) => [
+      key
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ""),
+      value
+    ])
+  );
+  for (const key of keys) {
+    const value = normalized.get(key.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+    const text = trimString(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function requesterCountryRegion(input: {
+  userFields?: Record<string, unknown> | null;
+  organizationFields?: Record<string, unknown> | null;
+}): string | undefined {
+  const keys = [
+    "country_region",
+    "countryregion",
+    "country",
+    "region",
+    "market",
+    "geo",
+    "location",
+    "requester_country_region"
+  ];
+  const userValue = firstFieldValue(input.userFields, keys);
+  if (userValue) return userValue;
+  return firstFieldValue(input.organizationFields, keys);
+}
+
+function requesterOrganizationName(input: {
+  userFields?: Record<string, unknown> | null;
+  organization?: ZendeskOrganizationEnvelope["organization"];
+}): string | undefined {
+  return (
+    trimString(input.organization?.name) ||
+    firstFieldValue(input.userFields, [
+      "organization",
+      "organisation",
+      "company",
+      "company_name",
+      "account",
+      "customer",
+      "customer_name"
+    ])
+  );
+}
+
+function normalizeZendeskUser(
+  user: ZendeskUserEnvelope["user"],
+  organization?: ZendeskOrganizationEnvelope["organization"]
+): ZendeskRequesterPayload | undefined {
   const id = Number(user?.id || 0);
   if (!Number.isFinite(id) || id <= 0) return undefined;
+  const organizationId = Number(user?.organization_id || organization?.id || 0);
   return {
     id,
     name: typeof user?.name === "string" ? user.name.trim() || undefined : undefined,
     email: typeof user?.email === "string" ? user.email.trim() || undefined : undefined,
-    role: typeof user?.role === "string" ? user.role.trim() || undefined : undefined
+    role: typeof user?.role === "string" ? user.role.trim() || undefined : undefined,
+    organizationId: Number.isFinite(organizationId) && organizationId > 0 ? organizationId : undefined,
+    organizationName: requesterOrganizationName({ userFields: user?.user_fields, organization }),
+    countryRegion: requesterCountryRegion({
+      userFields: user?.user_fields,
+      organizationFields: organization?.organization_fields
+    })
   };
 }
 
@@ -194,7 +278,20 @@ export class ZendeskClient {
   async getUser(userId: number): Promise<ZendeskRequesterPayload | undefined> {
     if (!Number.isFinite(userId) || userId <= 0) return undefined;
     const data = await this.request<ZendeskUserEnvelope>(`/api/v2/users/${encodeURIComponent(String(userId))}.json`);
-    return normalizeZendeskUser(data.user);
+    const organizationId = Number(data.user?.organization_id || 0);
+    const organization =
+      Number.isFinite(organizationId) && organizationId > 0
+        ? await this.getOrganization(organizationId).catch(() => undefined)
+        : undefined;
+    return normalizeZendeskUser(data.user, organization);
+  }
+
+  async getOrganization(organizationId: number): Promise<ZendeskOrganizationEnvelope["organization"] | undefined> {
+    if (!Number.isFinite(organizationId) || organizationId <= 0) return undefined;
+    const data = await this.request<ZendeskOrganizationEnvelope>(
+      `/api/v2/organizations/${encodeURIComponent(String(organizationId))}.json`
+    );
+    return data.organization;
   }
 
   async getTicketContext(ticketId: string, maxComments: number): Promise<ZendeskTicketContext> {

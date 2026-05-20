@@ -2438,6 +2438,8 @@ async function ensureZendeskAuditThread(input: {
       requesterId: input.context.ticket.requesterId,
       requesterName: input.context.ticket.requester?.name,
       requesterEmail: input.context.ticket.requester?.email,
+      requesterOrganization: input.context.ticket.requester?.organizationName,
+      requesterCountryRegion: input.context.ticket.requester?.countryRegion,
       ticketUrl: input.settings.zendeskBaseUrl
         ? `${input.settings.zendeskBaseUrl}/agent/tickets/${encodeURIComponent(input.ticketId)}`
         : undefined
@@ -2652,6 +2654,11 @@ async function syncZendeskConversationAfterAgentRun(input: {
         lastActionStatus: input.action.status,
         codexThreadId: input.codexThreadId,
         zendeskCommentId: input.commentId,
+        requesterId: input.context.ticket.requesterId,
+        requesterName: input.context.ticket.requester?.name,
+        requesterEmail: input.context.ticket.requester?.email,
+        requesterOrganization: input.context.ticket.requester?.organizationName,
+        requesterCountryRegion: input.context.ticket.requester?.countryRegion,
         ticketUrl: input.settings.zendeskBaseUrl
           ? `${input.settings.zendeskBaseUrl}/agent/tickets/${encodeURIComponent(input.ticketId)}`
           : undefined

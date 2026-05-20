@@ -84,6 +84,8 @@ export type AdminConversationChannelSummary = {
   agentModeId: string | null;
   lastExternalMessageId: string | null;
   lastMessageAt: string | null;
+  requesterOrganization: string | null;
+  requesterCountryRegion: string | null;
 };
 
 export type AdminConversationAgentModeSummary = {

@@ -1379,6 +1379,40 @@
   font-size: 13px;
 }
 
+.conversation-zendesk-requester-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-height: 38px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 10px;
+  background: rgba(8, 145, 178, 0.05);
+  color: var(--admin-color-text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.conversation-zendesk-requester-label {
+  flex: 0 0 auto;
+  color: var(--admin-color-subtle);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.conversation-zendesk-requester-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--admin-color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-zendesk-requester-value:first-of-type {
+  flex: 1 1 auto;
+}
+
 .conversation-feedback-section {
   margin-top: 16px;
   padding: 12px 14px;
@@ -2512,6 +2546,15 @@
   .admin-entity-card-grid,
   .conversation-channel-grid {
     grid-template-columns: 1fr;
+  }
+
+  .conversation-zendesk-requester-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .conversation-zendesk-requester-value {
+    max-width: 100%;
   }
 
   .admin-entity-card-actions {

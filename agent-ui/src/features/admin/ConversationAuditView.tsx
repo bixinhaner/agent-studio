@@ -199,6 +199,11 @@ function conversationAgentModeTitle(agentMode: AdminConversationAgentModeSummary
   return parts.join("\n");
 }
 
+function compactFieldValue(value: string | null | undefined): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || "-";
+}
+
 function conversationSkillSummaryLabel(skillNames: string[]): string {
   const [firstSkill] = skillNames;
   if (!firstSkill) return "";
@@ -1083,7 +1088,22 @@ function ConversationDetail(props: {
           ) : null}
         </div>
 
-        {conversation.channel ? (
+        {conversation.channel?.type === "zendesk" ? (
+          <div className="conversation-zendesk-requester-strip">
+            <span className="conversation-zendesk-requester-label">Zendesk 请求者</span>
+            <span className="conversation-zendesk-requester-value">
+              {compactFieldValue(conversation.channel.externalUserName || conversation.channel.externalUserId)}
+            </span>
+            <span className="conversation-zendesk-requester-label">组织</span>
+            <span className="conversation-zendesk-requester-value">
+              {compactFieldValue(conversation.channel.requesterOrganization)}
+            </span>
+            <span className="conversation-zendesk-requester-label">Country/Region</span>
+            <span className="conversation-zendesk-requester-value">
+              {compactFieldValue(conversation.channel.requesterCountryRegion)}
+            </span>
+          </div>
+        ) : conversation.channel ? (
           <div className="conversation-channel-section">
             <div className="conversation-channel-title-row">
               <span className="conversation-channel-title">{conversation.channel.label || "外部渠道"}</span>

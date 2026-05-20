@@ -93,6 +93,8 @@ export function buildZendeskAgentPrompt(
     `  requester_id: ${context.ticket.requesterId || ""}`,
     `  requester_name: ${context.ticket.requester?.name || ""}`,
     `  requester_email: ${context.ticket.requester?.email || ""}`,
+    `  requester_organization: ${context.ticket.requester?.organizationName || ""}`,
+    `  requester_country_region: ${context.ticket.requester?.countryRegion || ""}`,
     `  requester_role: ${context.ticket.requester?.role || ""}`,
     `  updated_at: ${context.ticket.updatedAt || ""}`,
     `  tags: ${(context.ticket.tags || []).join(", ")}`,
