@@ -465,7 +465,11 @@ function isPathInside(parentDir: string, candidatePath: string): boolean {
   return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
 }
 
-function resolveThreadFileAbsolutePath(input: {
+function isZendeskAttachmentRelativePath(value: string): boolean {
+  return value === ".zendesk/attachments" || value.startsWith(".zendesk/attachments/");
+}
+
+export function resolveThreadFileAbsolutePath(input: {
   workspacePath: string;
   uploadDir: string;
   relativePath?: string;
@@ -482,6 +486,14 @@ function resolveThreadFileAbsolutePath(input: {
       .filter(Boolean);
     if (relativeSegments.length === 0) {
       throw new Error("Invalid relative_path");
+    }
+    if (isZendeskAttachmentRelativePath(normalizedPosixRelative)) {
+      const zendeskAttachmentRoot = path.resolve(normalizedWorkspacePath, ".zendesk", "attachments");
+      const candidate = path.resolve(normalizedWorkspacePath, ...relativeSegments);
+      if (!isPathInside(zendeskAttachmentRoot, candidate)) {
+        throw new Error("Attachment path is outside the allowed Zendesk attachment directory");
+      }
+      return candidate;
     }
     const candidate = path.resolve(normalizedUploadDir, ...relativeSegments);
     if (!isPathInside(normalizedUploadDir, candidate)) {
@@ -828,8 +840,12 @@ function normalizeUser(row: ConversationAuditUserRow | null | undefined): Conver
   };
 }
 
-export function resolveConversationAudience(user: { userType?: string | null } | null | undefined): ConversationAudience {
+export function resolveConversationAudience(
+  user: { userType?: string | null } | null | undefined,
+  channel?: ConversationChannelSummary | null
+): ConversationAudience {
   const userType = trimOrUndefined(user?.userType ?? undefined);
+  if (!userType && channel?.type === "zendesk") return "external";
   if (!userType) return "unknown";
   return userType === "external_user" ? "external" : "internal";
 }
@@ -1163,6 +1179,8 @@ function buildConversationChannelSummary(
       ? binding.conversationType === "group"
         ? "钉钉群聊"
         : "钉钉单聊"
+      : type === "zendesk"
+        ? "Zendesk 工单"
       : type;
   return {
     type,
@@ -1223,7 +1241,7 @@ function buildConversationSummary(
   return {
     id: thread.id,
     externalId: trimOrUndefined(thread.externalId) ?? null,
-    audience: resolveConversationAudience(user),
+    audience: resolveConversationAudience(user, channel),
     title: conversationTitle(thread, firstUserText),
     status: thread.status,
     model: thread.model,

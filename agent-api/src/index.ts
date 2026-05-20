@@ -60,7 +60,12 @@ import {
 import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
 import { BroadcastRepository, type BroadcastRepositoryDb } from "./persistence/broadcast-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
-import type { ZendeskIntegrationSettings } from "./integrations/zendesk/types.js";
+import type {
+  ZendeskAgentDecision,
+  ZendeskCommentPayload,
+  ZendeskIntegrationSettings,
+  ZendeskTicketContext
+} from "./integrations/zendesk/types.js";
 import {
   ensureThreadUploadInRunConfig,
   replaceLiveRuntimeSession,
@@ -317,7 +322,11 @@ const accessRequestService = createAccessRequestService({
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
 const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
-  resolveAgentRuntime: resolveZendeskAgentRuntimeOptions
+  resolveAgentRuntime: resolveZendeskAgentRuntimeOptions,
+  conversationAudit: {
+    beforeAgentRun: syncZendeskConversationBeforeAgentRun,
+    afterAgentRun: syncZendeskConversationAfterAgentRun
+  }
 });
 const brandingAssetStorage = new BrandingAssetStorage(appConfig.brandingAssetRoot);
 const policyService = new PolicyService(resourcePolicies);
@@ -2009,6 +2018,440 @@ async function resolveZendeskAgentRuntimeOptions(input: {
       mountPaths
     )
   };
+}
+
+const ZENDESK_CHANNEL = "zendesk";
+
+type ZendeskAuditRuntimeOptions = {
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  workspace: string;
+  codexRunConfig?: Record<string, unknown>;
+};
+
+type ZendeskAuditState = {
+  threadId: string;
+  userMessageId?: string;
+  externalConversationKey?: string;
+};
+
+function zendeskConversationKey(input: {
+  instanceId: string;
+  ticketId: string;
+  agentModeId: string;
+}): string {
+  return [ZENDESK_CHANNEL, input.instanceId, "ticket", input.ticketId, input.agentModeId].join(":");
+}
+
+function zendeskThreadExternalId(externalConversationKey: string): string {
+  return `${externalConversationKey}:thread:${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+function zendeskConversationTitle(context: ZendeskTicketContext): string {
+  const subject = trimOrUndefined(context.ticket.subject);
+  return subject ? `Zendesk #${context.ticket.id} - ${subject}` : `Zendesk #${context.ticket.id}`;
+}
+
+function zendeskThreadRunConfig(input: {
+  runtime: ZendeskAuditRuntimeOptions;
+  instanceId: string;
+  ticketId: string;
+  externalConversationKey: string;
+}): Record<string, unknown> {
+  return {
+    ...(input.runtime.codexRunConfig ?? {}),
+    channel: ZENDESK_CHANNEL,
+    integrationInstanceId: input.instanceId,
+    externalConversationKey: input.externalConversationKey,
+    conversationType: "ticket",
+    zendeskTicketId: input.ticketId
+  };
+}
+
+function uploadedFileHint(input: {
+  name: string;
+  path?: string;
+  relativePath?: string;
+  mimeType?: string;
+  bytes?: number;
+}): string {
+  const attrs = [
+    `name=${JSON.stringify(input.name)}`,
+    input.path ? `path=${JSON.stringify(input.path)}` : "",
+    input.relativePath ? `relativePath=${JSON.stringify(input.relativePath)}` : "",
+    input.mimeType ? `mimeType=${JSON.stringify(input.mimeType)}` : "",
+    typeof input.bytes === "number" ? `bytes=${input.bytes}` : ""
+  ].filter(Boolean);
+  return `<uploaded_file ${attrs.join(" ")}>`;
+}
+
+function zendeskAttachmentKind(contentType?: string): "image" | "document" | "file" {
+  const normalized = trimOrUndefined(contentType)?.toLowerCase() ?? "";
+  if (normalized.startsWith("image/")) return "image";
+  if (
+    normalized === "application/pdf" ||
+    normalized.includes("word") ||
+    normalized.includes("excel") ||
+    normalized.startsWith("text/")
+  ) {
+    return "document";
+  }
+  return "file";
+}
+
+function zendeskMessage(input: {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt?: string | Date;
+  metadata?: Record<string, unknown>;
+  attachments?: ZendeskCommentPayload["attachments"];
+}) {
+  const createdAtText = input.createdAt instanceof Date ? undefined : trimOrUndefined(input.createdAt);
+  const parsedCreatedAt =
+    input.createdAt instanceof Date
+      ? input.createdAt
+      : createdAtText
+        ? new Date(createdAtText)
+        : undefined;
+  const createdAt = parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime())
+    ? parsedCreatedAt.toISOString()
+    : new Date().toISOString();
+  const attachments = (input.attachments ?? [])
+    .filter((attachment) => attachment.downloadStatus === "downloaded" && attachment.relativePath)
+    .map((attachment) => ({
+      type: zendeskAttachmentKind(attachment.contentType),
+      name: attachment.fileName,
+      contentType: attachment.contentType,
+      content: [
+        {
+          type: "text",
+          text: uploadedFileHint({
+            name: attachment.fileName,
+            path: attachment.localPath,
+            relativePath: attachment.relativePath,
+            mimeType: attachment.contentType,
+            bytes: attachment.size
+          })
+        }
+      ]
+    }));
+  return {
+    id: input.id,
+    role: input.role,
+    content: [
+      {
+        type: "text",
+        text: input.text
+      }
+    ],
+    ...(attachments.length > 0 ? { attachments } : {}),
+    createdAt,
+    ...(input.metadata ? { metadata: input.metadata } : {})
+  };
+}
+
+function latestPreparedZendeskComment(
+  context: ZendeskTicketContext,
+  requesterComment: ZendeskCommentPayload
+): ZendeskCommentPayload {
+  return context.comments.find((item) => item.id === requesterComment.id) ?? requesterComment;
+}
+
+async function ensureZendeskAuditThread(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  instanceId?: string;
+  ticketId: string;
+  runtime: ZendeskAuditRuntimeOptions;
+}): Promise<{
+  thread: ThreadRecord;
+  externalConversationKey: string;
+  integration: { id: string; name: string; slug: string; organizationId?: string | null };
+}> {
+  const instanceId = trimOrUndefined(input.instanceId);
+  if (!instanceId) {
+    throw new Error("Zendesk 对话审计需要集成实例 ID");
+  }
+
+  const integration = await db.integrationInstance.findUnique({ where: { id: instanceId } });
+  if (!integration) {
+    throw new Error("Zendesk 集成实例不存在");
+  }
+
+  const agentModeId = trimOrUndefined(input.settings.agentModeId) ?? "default";
+  const externalConversationKey = zendeskConversationKey({
+    instanceId,
+    ticketId: input.ticketId,
+    agentModeId
+  });
+  const binding = await externalConversationBindings.getByExternalConversationKey(externalConversationKey);
+  let thread = binding ? await threads.get(binding.threadId, integration.organizationId ?? undefined) : undefined;
+
+  const runConfig = zendeskThreadRunConfig({
+    runtime: input.runtime,
+    instanceId,
+    ticketId: input.ticketId,
+    externalConversationKey
+  });
+  const title = zendeskConversationTitle(input.context);
+  if (!thread) {
+    const threadId = randomUUID().replace(/-/g, "");
+    thread = await threads.create({
+      id: threadId,
+      organizationId: integration.organizationId ?? undefined,
+      title,
+      externalId: zendeskThreadExternalId(externalConversationKey),
+      model: input.runtime.model,
+      reasoningEffort: input.runtime.reasoningEffort,
+      workspace: input.runtime.workspace,
+      codexRunConfig: runConfig
+    });
+  } else {
+    const shouldUpdateThread =
+      thread.title !== title ||
+      thread.model !== input.runtime.model ||
+      thread.reasoningEffort !== input.runtime.reasoningEffort ||
+      thread.workspace !== input.runtime.workspace ||
+      stableJson(thread.codexRunConfig) !== stableJson(runConfig);
+    if (shouldUpdateThread) {
+      thread = await threads.update(thread.id, {
+        title,
+        model: input.runtime.model,
+        reasoningEffort: input.runtime.reasoningEffort,
+        workspace: input.runtime.workspace,
+        codexRunConfig: runConfig
+      });
+    }
+  }
+
+  const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
+  const messageAt = preparedComment.createdAt ? new Date(preparedComment.createdAt) : new Date();
+  await externalConversationBindings.upsert({
+    organizationId: integration.organizationId ?? null,
+    integrationInstanceId: integration.id,
+    threadId: thread.id,
+    channel: ZENDESK_CHANNEL,
+    externalConversationKey,
+    externalConversationId: input.ticketId,
+    conversationType: "ticket",
+    agentModeId,
+    externalUserId: input.context.ticket.requesterId ? String(input.context.ticket.requesterId) : undefined,
+    externalUserName: input.context.ticket.requesterId ? `Requester #${input.context.ticket.requesterId}` : undefined,
+    botName: integration.name,
+    lastExternalMessageId: String(preparedComment.id),
+    lastMessageAt: Number.isNaN(messageAt.getTime()) ? new Date() : messageAt,
+    metadata: {
+      integrationSlug: integration.slug,
+      ticketId: input.ticketId,
+      ticketSubject: input.context.ticket.subject,
+      ticketStatus: input.context.ticket.status,
+      ticketUrl: input.settings.zendeskBaseUrl
+        ? `${input.settings.zendeskBaseUrl}/agent/tickets/${encodeURIComponent(input.ticketId)}`
+        : undefined
+    }
+  });
+
+  return {
+    thread,
+    externalConversationKey,
+    integration: {
+      id: integration.id,
+      name: integration.name,
+      slug: integration.slug,
+      organizationId: integration.organizationId
+    }
+  };
+}
+
+async function syncZendeskConversationBeforeAgentRun(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+  runtime: ZendeskAuditRuntimeOptions;
+}): Promise<ZendeskAuditState | undefined> {
+  const ensured = await ensureZendeskAuditThread(input);
+  const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
+  const userMessageId = `zendesk-requester-${preparedComment.id}`;
+  const userText = [
+    `Zendesk Ticket #${input.ticketId}`,
+    input.context.ticket.subject ? `主题：${input.context.ticket.subject}` : undefined,
+    "",
+    preparedComment.body || (preparedComment.attachments.length > 0 ? "客户上传了附件。" : "")
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+    .trim();
+
+  const updated = await threads.appendMessage(ensured.thread.id, {
+    parentId: ensured.thread.headId ?? null,
+    message: zendeskMessage({
+      id: userMessageId,
+      role: "user",
+      text: userText,
+      createdAt: preparedComment.createdAt,
+      attachments: preparedComment.attachments,
+      metadata: {
+        channel: ZENDESK_CHANNEL,
+        integrationInstanceId: ensured.integration.id,
+        integrationSlug: ensured.integration.slug,
+        externalConversationKey: ensured.externalConversationKey,
+        ticketId: input.ticketId,
+        ticketSubject: input.context.ticket.subject,
+        requesterCommentId: preparedComment.id,
+        source: input.source,
+        runId: input.runId
+      }
+    }),
+    runConfig: {
+      channel: ZENDESK_CHANNEL,
+      integrationInstanceId: ensured.integration.id,
+      externalConversationKey: ensured.externalConversationKey,
+      conversationType: "ticket",
+      zendeskTicketId: input.ticketId,
+      runId: input.runId
+    }
+  });
+
+  return {
+    threadId: updated.id,
+    userMessageId,
+    externalConversationKey: ensured.externalConversationKey
+  };
+}
+
+function zendeskDecisionLabel(decision: ZendeskAgentDecision["decision"]): string {
+  if (decision === "public_reply") return "公开回复";
+  if (decision === "internal_note") return "内部备注";
+  return "转人工";
+}
+
+function zendeskAssistantAuditText(input: {
+  answerText: string;
+  decision: ZendeskAgentDecision;
+  action: {
+    mode: "skip" | "comment";
+    publicReply?: boolean;
+    body?: string;
+    detail: string;
+    decision: ZendeskAgentDecision["decision"];
+  };
+  commentId?: number;
+}): string {
+  const heading =
+    input.action.mode === "skip"
+      ? "AI 本次未写入 Zendesk。"
+      : input.action.publicReply
+        ? "AI 已写入 Zendesk 公开回复。"
+        : "AI 已写入 Zendesk 内部备注。";
+  const body = trimOrUndefined(input.action.body) ?? trimOrUndefined(input.decision.internalNote) ?? trimOrUndefined(input.answerText);
+  return [
+    heading,
+    "",
+    body,
+    "",
+    `决策：${zendeskDecisionLabel(input.action.decision)}`,
+    `处理结果：${input.action.detail}`,
+    input.decision.confidence !== undefined ? `置信度：${Math.round(input.decision.confidence * 100)}%` : undefined,
+    input.decision.reasons?.length ? `原因：${input.decision.reasons.join("；")}` : undefined,
+    input.commentId ? `Zendesk 评论 ID：${input.commentId}` : undefined
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+    .trim();
+}
+
+async function syncZendeskConversationAfterAgentRun(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  audit?: ZendeskAuditState;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+  runtime: ZendeskAuditRuntimeOptions;
+  answerText: string;
+  decision: ZendeskAgentDecision;
+  action: {
+    mode: "skip" | "comment";
+    publicReply?: boolean;
+    body?: string;
+    status: string;
+    detail: string;
+    decision: ZendeskAgentDecision["decision"];
+  };
+  commentId?: number;
+  codexThreadId?: string;
+}): Promise<void> {
+  const audit =
+    input.audit ??
+    (await syncZendeskConversationBeforeAgentRun({
+      settings: input.settings,
+      context: input.context,
+      requesterComment: input.requesterComment,
+      instanceId: input.instanceId,
+      ticketId: input.ticketId,
+      runId: input.runId,
+      source: input.source,
+      runtime: input.runtime
+    }));
+  if (!audit?.threadId) return;
+
+  await threads.appendMessage(audit.threadId, {
+    parentId: audit.userMessageId ?? null,
+    message: zendeskMessage({
+      id: `zendesk-agent-${input.runId}`,
+      role: "assistant",
+      text: zendeskAssistantAuditText(input),
+      metadata: {
+        channel: ZENDESK_CHANNEL,
+        integrationInstanceId: input.instanceId,
+        externalConversationKey: audit.externalConversationKey,
+        ticketId: input.ticketId,
+        runId: input.runId,
+        decision: input.decision.decision,
+        actionStatus: input.action.status,
+        zendeskCommentId: input.commentId,
+        codexThreadId: input.codexThreadId
+      }
+    }),
+    runConfig: {
+      channel: ZENDESK_CHANNEL,
+      integrationInstanceId: input.instanceId,
+      externalConversationKey: audit.externalConversationKey,
+      conversationType: "ticket",
+      zendeskTicketId: input.ticketId,
+      runId: input.runId,
+      codexThreadId: input.codexThreadId
+    }
+  });
+
+  if (audit.externalConversationKey) {
+    await externalConversationBindings.touch({
+      externalConversationKey: audit.externalConversationKey,
+      lastExternalMessageId: String(input.requesterComment.id),
+      lastMessageAt: input.requesterComment.createdAt ?? new Date(),
+      metadata: {
+        ticketId: input.ticketId,
+        ticketSubject: input.context.ticket.subject,
+        ticketStatus: input.context.ticket.status,
+        lastRunId: input.runId,
+        lastDecision: input.decision.decision,
+        lastActionStatus: input.action.status,
+        codexThreadId: input.codexThreadId,
+        zendeskCommentId: input.commentId,
+        ticketUrl: input.settings.zendeskBaseUrl
+          ? `${input.settings.zendeskBaseUrl}/agent/tickets/${encodeURIComponent(input.ticketId)}`
+          : undefined
+      }
+    });
+  }
 }
 
 function dingtalkMessageCreatedAt(value: unknown): Date {

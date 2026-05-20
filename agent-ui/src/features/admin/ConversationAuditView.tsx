@@ -48,6 +48,7 @@ import type {
   AdminApiAuditSort,
   AdminConversationDetailResponse,
   AdminConversationAudienceFilter,
+  AdminConversationChannelSummary,
   AdminConversationFeedback,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
@@ -147,10 +148,36 @@ function conversationAudienceLabel(audience: AdminConversationSummary["audience"
 function conversationChannelTargetLabel(conversation: AdminConversationSummary): string {
   const channel = conversation.channel;
   if (!channel) return displayUserLabel(conversation.user);
+  if (channel.type === "zendesk") {
+    return channel.externalConversationId ? `Zendesk #${channel.externalConversationId}` : "Zendesk 工单";
+  }
   if (channel.conversationType === "group") {
     return channel.externalGroupName || channel.externalGroupId || channel.externalConversationId || "钉钉群聊";
   }
   return channel.externalUserName || channel.externalUserId || channel.externalConversationId || "钉钉单聊";
+}
+
+function conversationChannelBadgeLabel(channel: AdminConversationChannelSummary): string {
+  if (channel.type === "zendesk") return "工单";
+  if (channel.conversationType === "group") return "群聊";
+  if (channel.conversationType === "ticket") return "工单";
+  return "单聊";
+}
+
+function conversationChannelUserFieldLabel(channel: AdminConversationChannelSummary): string {
+  return channel.type === "zendesk" ? "Zendesk 请求者" : "钉钉用户";
+}
+
+function conversationChannelConversationFieldLabel(channel: AdminConversationChannelSummary): string {
+  return channel.type === "zendesk" ? "工单" : "会话";
+}
+
+function conversationChannelBotFieldLabel(channel: AdminConversationChannelSummary): string {
+  return channel.type === "zendesk" ? "集成实例" : "机器人";
+}
+
+function conversationChannelMessageFieldLabel(channel: AdminConversationChannelSummary): string {
+  return channel.type === "zendesk" ? "客户评论" : "外部消息";
 }
 
 function conversationStatusColor(status: string): string {
@@ -1059,20 +1086,26 @@ function ConversationDetail(props: {
         {conversation.channel ? (
           <div className="conversation-channel-section">
             <div className="conversation-channel-title-row">
-              <span className="conversation-channel-title">机器人渠道</span>
-              <Tag color="cyan">{conversation.channel.conversationType === "group" ? "群聊" : "单聊"}</Tag>
+              <span className="conversation-channel-title">{conversation.channel.label || "外部渠道"}</span>
+              <Tag color={conversation.channel.type === "zendesk" ? "blue" : "cyan"}>
+                {conversationChannelBadgeLabel(conversation.channel)}
+              </Tag>
             </div>
             <div className="conversation-channel-grid">
               <div>
-                <span className="field-label">钉钉用户</span>
+                <span className="field-label">{conversationChannelUserFieldLabel(conversation.channel)}</span>
                 <p>{conversation.channel.externalUserName || conversation.channel.externalUserId || "-"}</p>
               </div>
               <div>
-                <span className="field-label">会话</span>
-                <p>{conversation.channel.externalGroupName || conversation.channel.externalConversationId || "-"}</p>
+                <span className="field-label">{conversationChannelConversationFieldLabel(conversation.channel)}</span>
+                <p>
+                  {conversation.channel.type === "zendesk" && conversation.channel.externalConversationId
+                    ? `#${conversation.channel.externalConversationId}`
+                    : conversation.channel.externalGroupName || conversation.channel.externalConversationId || "-"}
+                </p>
               </div>
               <div>
-                <span className="field-label">机器人</span>
+                <span className="field-label">{conversationChannelBotFieldLabel(conversation.channel)}</span>
                 <p>{conversation.channel.botName || conversation.channel.integrationName || "-"}</p>
               </div>
               <div>
@@ -1082,7 +1115,7 @@ function ConversationDetail(props: {
                 </p>
               </div>
               <div>
-                <span className="field-label">外部消息</span>
+                <span className="field-label">{conversationChannelMessageFieldLabel(conversation.channel)}</span>
                 <p>{conversation.channel.lastExternalMessageId || "-"}</p>
               </div>
               <div>

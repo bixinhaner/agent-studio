@@ -6,7 +6,8 @@ import {
   extractMessageAttachments,
   extractMessageProcessRows,
   extractMessageText,
-  resolveConversationAudience
+  resolveConversationAudience,
+  resolveThreadFileAbsolutePath
 } from "./conversation-audit-router.js";
 
 describe("resolveConversationAudience", () => {
@@ -14,6 +15,7 @@ describe("resolveConversationAudience", () => {
     expect(resolveConversationAudience({ userType: "internal_employee" })).toBe("internal");
     expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
     expect(resolveConversationAudience(null)).toBe("unknown");
+    expect(resolveConversationAudience(null, { type: "zendesk" } as never)).toBe("external");
   });
 });
 
@@ -270,6 +272,38 @@ describe("extractMessageAttachments", () => {
         contentUrl: null
       }
     ]);
+  });
+});
+
+describe("resolveThreadFileAbsolutePath", () => {
+  it("keeps existing upload relative paths under .uploads", () => {
+    expect(
+      resolveThreadFileAbsolutePath({
+        workspacePath: "/tmp/workspace",
+        uploadDir: "/tmp/workspace/.uploads",
+        relativePath: "171-report.pdf"
+      })
+    ).toBe("/tmp/workspace/.uploads/171-report.pdf");
+  });
+
+  it("allows Zendesk attachment relative paths under the workspace Zendesk attachment directory", () => {
+    expect(
+      resolveThreadFileAbsolutePath({
+        workspacePath: "/tmp/workspace",
+        uploadDir: "/tmp/workspace/.uploads",
+        relativePath: ".zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png"
+      })
+    ).toBe("/tmp/workspace/.zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png");
+  });
+
+  it("blocks Zendesk attachment relative path traversal", () => {
+    expect(() =>
+      resolveThreadFileAbsolutePath({
+        workspacePath: "/tmp/workspace",
+        uploadDir: "/tmp/workspace/.uploads",
+        relativePath: ".zendesk/attachments/../secret.txt"
+      })
+    ).toThrow("outside the allowed Zendesk attachment directory");
   });
 });
 

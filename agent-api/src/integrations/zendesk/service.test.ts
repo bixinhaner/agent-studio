@@ -274,6 +274,14 @@ describe("ZendeskIntegrationService", () => {
       }),
       listForInstance: vi.fn(async () => [])
     };
+    const conversationAudit = {
+      beforeAgentRun: vi.fn(async (input: { context: { comments: Array<{ attachments: Array<{ relativePath?: string }> }> }; runId: string }) => ({
+        threadId: "audit-thread-1",
+        userMessageId: `audit-user-${input.runId}`,
+        externalConversationKey: "zendesk:zendesk-1:ticket:123:mode-1"
+      })),
+      afterAgentRun: vi.fn(async (_input: unknown) => undefined)
+    };
 
     const service = new ZendeskIntegrationService(
       {
@@ -283,7 +291,8 @@ describe("ZendeskIntegrationService", () => {
           reasoningEffort: "high" as const,
           workspace: tempRoot,
           codexRunConfig: {}
-        }))
+        })),
+        conversationAudit
       },
       settingsStore as never,
       bindingStore as unknown as ZendeskBindingStore,
@@ -309,6 +318,19 @@ describe("ZendeskIntegrationService", () => {
       });
       expect(prompts[0]).toContain("attachments:");
       expect(prompts[0]).toContain("local_path: .zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png");
+      expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.comments[0]?.attachments[0]?.relativePath).toBe(
+        ".zendesk/attachments/run-run-1/comment-101/01-signal screenshot.png"
+      );
+      expect(conversationAudit.afterAgentRun.mock.calls[0]?.[0]).toMatchObject({
+        audit: {
+          threadId: "audit-thread-1",
+          externalConversationKey: "zendesk:zendesk-1:ticket:123:mode-1"
+        },
+        decision: {
+          decision: "internal_note"
+        },
+        codexThreadId: "codex-thread-1"
+      });
       await expect(
         fs.stat(path.join(tempRoot, ".zendesk", "attachments", "run-run-1", "comment-101", "01-signal screenshot.png"))
       ).resolves.toBeTruthy();

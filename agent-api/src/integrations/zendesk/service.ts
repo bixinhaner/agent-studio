@@ -21,6 +21,7 @@ import { ZendeskRunStore } from "./run-store.js";
 import type {
   ZendeskAgentDecision,
   ZendeskBindingRecord,
+  ZendeskCommentPayload,
   ZendeskIntegrationSettings,
   ZendeskOverview,
   ZendeskSetupGuide,
@@ -69,6 +70,52 @@ type ZendeskAgentRuntimeOptions = {
   codexRunConfig?: Record<string, unknown>;
 };
 
+type ZendeskConversationAuditAction = {
+  mode: "skip" | "comment";
+  publicReply?: boolean;
+  body?: string;
+  status: ZendeskRunStatus;
+  detail: string;
+  decision: ZendeskAgentDecision["decision"];
+};
+
+type ZendeskConversationAuditState = {
+  threadId: string;
+  userMessageId?: string;
+  externalConversationKey?: string;
+};
+
+type ZendeskConversationAuditSync = {
+  beforeAgentRun(input: {
+    settings: ZendeskIntegrationSettings;
+    context: ZendeskTicketContext;
+    requesterComment: ZendeskCommentPayload;
+    binding?: ZendeskBindingRecord;
+    instanceId?: string;
+    ticketId: string;
+    runId: string;
+    source: "webhook" | "manual";
+    runtime: Omit<ZendeskAgentRuntimeOptions, "runtime">;
+  }): Promise<ZendeskConversationAuditState | undefined>;
+  afterAgentRun(input: {
+    settings: ZendeskIntegrationSettings;
+    context: ZendeskTicketContext;
+    requesterComment: ZendeskCommentPayload;
+    binding?: ZendeskBindingRecord;
+    audit?: ZendeskConversationAuditState;
+    instanceId?: string;
+    ticketId: string;
+    runId: string;
+    source: "webhook" | "manual";
+    runtime: Omit<ZendeskAgentRuntimeOptions, "runtime">;
+    answerText: string;
+    decision: ZendeskAgentDecision;
+    action: ZendeskConversationAuditAction;
+    commentId?: number;
+    codexThreadId?: string;
+  }): Promise<void>;
+};
+
 type ZendeskRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
 
 type ZendeskRuntimeLike = {
@@ -86,6 +133,14 @@ type ZendeskRuntimeLike = {
     codexRunConfig?: Record<string, unknown>;
   }): Promise<ZendeskRuntimeThread>;
   runStreamed(thread: ZendeskRuntimeThread, message: string): AsyncGenerator<{ type: string; delta?: string; text?: string; raw?: unknown }>;
+};
+
+type ZendeskAgentRunResult = {
+  answerText: string;
+  preparedContext: ZendeskTicketContext;
+  runtimeOptions: Omit<ZendeskAgentRuntimeOptions, "runtime">;
+  audit?: ZendeskConversationAuditState;
+  codexThreadId?: string;
 };
 
 function sanitizeTicketId(value: string | number): string {
@@ -299,6 +354,7 @@ export class ZendeskIntegrationService {
         runId: string;
         source: "webhook" | "manual";
       }) => Promise<ZendeskAgentRuntimeOptions>;
+      conversationAudit?: ZendeskConversationAuditSync;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
     private readonly bindingStore = new ZendeskBindingStore(),
@@ -524,16 +580,32 @@ export class ZendeskIntegrationService {
         requesterCommentId: requesterComment.id
       });
 
-      const answerText = await this.runAgent(context, settings, client, binding, {
+      const agentRun = await this.runAgent(context, settings, client, binding, requesterComment, {
         instanceId,
         ticketId,
         runId,
         source
       });
-      const decision = parseZendeskAgentDecision(answerText);
+      const decision = parseZendeskAgentDecision(agentRun.answerText);
       const action = resolveAction(settings, decision);
 
       if (action.mode === "skip") {
+        await this.syncConversationAfterAgentRun({
+          settings,
+          context: agentRun.preparedContext,
+          requesterComment,
+          binding,
+          audit: agentRun.audit,
+          instanceId,
+          ticketId,
+          runId,
+          source,
+          runtime: agentRun.runtimeOptions,
+          answerText: agentRun.answerText,
+          decision,
+          action,
+          codexThreadId: agentRun.codexThreadId
+        });
         await this.bindingStore.upsert(ticketId, {
           lastProcessedRequesterCommentId: requesterComment.id,
           lastAction: "skip",
@@ -556,6 +628,23 @@ export class ZendeskIntegrationService {
       }
 
       const commentResult = await this.addCommentWithRetry(client, context, action, settings);
+      await this.syncConversationAfterAgentRun({
+        settings,
+        context: agentRun.preparedContext,
+        requesterComment,
+        binding,
+        audit: agentRun.audit,
+        instanceId,
+        ticketId,
+        runId,
+        source,
+        runtime: agentRun.runtimeOptions,
+        answerText: agentRun.answerText,
+        decision,
+        action,
+        commentId: commentResult.commentId,
+        codexThreadId: agentRun.codexThreadId
+      });
       await this.bindingStore.upsert(ticketId, {
         lastProcessedRequesterCommentId: requesterComment.id,
         lastAction: action.decision,
@@ -599,13 +688,14 @@ export class ZendeskIntegrationService {
     settings: ZendeskIntegrationSettings,
     client: ZendeskClient,
     binding: ZendeskBindingRecord | undefined,
+    requesterComment: ZendeskCommentPayload,
     run: {
       instanceId?: string;
       ticketId: string;
       runId: string;
       source: "webhook" | "manual";
     }
-  ): Promise<string> {
+  ): Promise<ZendeskAgentRunResult> {
     const runtimeOptions = this.dependencies.resolveAgentRuntime
       ? await this.dependencies.resolveAgentRuntime({
           settings,
@@ -622,7 +712,24 @@ export class ZendeskIntegrationService {
         };
     const runtime = (runtimeOptions.runtime ||
       (this.dependencies.resolveRuntime ? await this.dependencies.resolveRuntime() : new CodexRuntime())) as ZendeskRuntimeLike;
+    const publicRuntimeOptions = {
+      model: runtimeOptions.model,
+      reasoningEffort: runtimeOptions.reasoningEffort,
+      workspace: runtimeOptions.workspace,
+      codexRunConfig: runtimeOptions.codexRunConfig
+    };
     const preparedContext = await this.prepareContextAttachments(context, settings, client, runtimeOptions.workspace, run.runId);
+    const audit = await this.syncConversationBeforeAgentRun({
+      settings,
+      context: preparedContext,
+      requesterComment,
+      binding,
+      instanceId: run.instanceId,
+      ticketId: run.ticketId,
+      runId: run.runId,
+      source: run.source,
+      runtime: publicRuntimeOptions
+    });
     let observedCodexThreadId = trimOrUndefined(binding?.codexThreadId);
     let thread: ZendeskRuntimeThread | undefined;
 
@@ -675,7 +782,45 @@ export class ZendeskIntegrationService {
       workspacePath: runtimeOptions.workspace,
       runId: run.runId
     });
-    return output.trim();
+    return {
+      answerText: output.trim(),
+      preparedContext,
+      runtimeOptions: publicRuntimeOptions,
+      audit,
+      codexThreadId: observedCodexThreadId
+    };
+  }
+
+  private async syncConversationBeforeAgentRun(
+    input: Parameters<ZendeskConversationAuditSync["beforeAgentRun"]>[0]
+  ): Promise<ZendeskConversationAuditState | undefined> {
+    if (!this.dependencies.conversationAudit) return undefined;
+    try {
+      return await this.dependencies.conversationAudit.beforeAgentRun(input);
+    } catch (error) {
+      console.warn("[zendesk] conversation audit sync before agent run failed", {
+        ticketId: input.ticketId,
+        instanceId: input.instanceId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      return undefined;
+    }
+  }
+
+  private async syncConversationAfterAgentRun(
+    input: Parameters<ZendeskConversationAuditSync["afterAgentRun"]>[0]
+  ): Promise<void> {
+    if (!this.dependencies.conversationAudit) return;
+    try {
+      await this.dependencies.conversationAudit.afterAgentRun(input);
+    } catch (error) {
+      console.warn("[zendesk] conversation audit sync after agent run failed", {
+        ticketId: input.ticketId,
+        instanceId: input.instanceId,
+        runId: input.runId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private async rememberRuntimeBinding(
