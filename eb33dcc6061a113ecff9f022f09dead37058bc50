@@ -1,0 +1,11 @@
+实现内容:
+- Zendesk ticket binding 记录 codexThreadId 和 workspacePath，同一工单后续回复优先恢复同一个 Codex thread。
+- Zendesk 评论附件会按开关、数量、大小和 MIME 白名单下载到 ticket 工作区，并在 prompt 中提供相对路径。
+- 后台 Zendesk 统一配置页新增“上下文与附件”分组，配置评论历史和附件读取策略。
+
+验证:
+- agent-api npm run build
+- agent-ui npm run build
+- agent-api npm run test
+- npx prisma validate
+- git diff --check
