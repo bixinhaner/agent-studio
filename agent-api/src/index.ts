@@ -64,6 +64,7 @@ import type {
   ZendeskAgentDecision,
   ZendeskCommentPayload,
   ZendeskIntegrationSettings,
+  ZendeskRequesterPayload,
   ZendeskTicketContext
 } from "./integrations/zendesk/types.js";
 import {
@@ -324,9 +325,37 @@ const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
   costProfiles
 });
+
+async function resolveZendeskDingTalkMentionTarget(input: {
+  zendeskUser?: ZendeskRequesterPayload;
+}): Promise<{ userIds: string[]; label?: string; detail?: string } | undefined> {
+  const email = trimOrUndefined(input.zendeskUser?.email)?.toLowerCase();
+  const fallbackLabel = trimOrUndefined(input.zendeskUser?.name) || email;
+  if (!email) {
+    return fallbackLabel ? { userIds: [], label: fallbackLabel, detail: "Zendesk assignee has no email." } : undefined;
+  }
+  const row = await db.user.findFirst({
+    where: {
+      email,
+      status: "active"
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  const dingtalkUserId = trimOrUndefined(row?.dingtalkUserId);
+  const label = trimOrUndefined(row?.displayName) || fallbackLabel || email;
+  return {
+    userIds: dingtalkUserId ? [dingtalkUserId] : [],
+    label,
+    detail: dingtalkUserId
+      ? `Matched Zendesk assignee email ${email} to DingTalk user.`
+      : `No active Agent Studio DingTalk user was found for ${email}.`
+  };
+}
+
 const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
   resolveAgentRuntime: resolveZendeskAgentRuntimeOptions,
+  resolveDingTalkMentionTarget: resolveZendeskDingTalkMentionTarget,
   conversationAudit: {
     beforeAgentRun: syncZendeskConversationBeforeAgentRun,
     afterAgentRun: syncZendeskConversationAfterAgentRun

@@ -236,12 +236,17 @@ export type ZendeskConfigInput = {
   maxAttachmentCount?: number;
   maxAttachmentBytes?: number;
   allowedAttachmentMimeTypes?: string[];
+  dingtalkNotificationEnabled?: boolean;
+  dingtalkNotificationManualRunsEnabled?: boolean;
+  dingtalkNotificationFallbackUserIds?: string[];
   systemPrompt?: string;
 };
 
 export type ZendeskSecretInput = {
   zendeskApiToken?: string;
   webhookSigningSecret?: string;
+  dingtalkNotificationWebhookUrl?: string;
+  dingtalkNotificationRobotSecret?: string;
 };
 
 export type OpenAICodexConfigInput = {
@@ -383,6 +388,11 @@ export type ZendeskConfigDraft = {
   maxAttachmentCount: number;
   maxAttachmentSizeMb: number;
   allowedAttachmentMimeTypesRaw: string;
+  dingtalkNotificationEnabled: boolean;
+  dingtalkNotificationManualRunsEnabled: boolean;
+  dingtalkNotificationWebhookUrlDraft: string;
+  dingtalkNotificationRobotSecretDraft: string;
+  dingtalkNotificationFallbackUserIdsRaw: string;
   systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;

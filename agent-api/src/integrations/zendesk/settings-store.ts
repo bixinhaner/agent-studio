@@ -169,16 +169,29 @@ function defaultSettings(): ZendeskIntegrationSettings {
     maxAttachmentCount: 5,
     maxAttachmentBytes: 10 * 1024 * 1024,
     allowedAttachmentMimeTypes: defaultAllowedAttachmentMimeTypes(),
+    dingtalkNotificationEnabled: false,
+    dingtalkNotificationManualRunsEnabled: false,
+    dingtalkNotificationWebhookUrl: "",
+    dingtalkNotificationRobotSecret: "",
+    dingtalkNotificationFallbackUserIds: [],
     systemPrompt: defaultZendeskSystemPrompt()
   };
 }
 
 export function redactZendeskSettings(settings: ZendeskIntegrationSettings): ZendeskPublicSettings {
-  const { zendeskApiToken: _token, webhookSigningSecret: _secret, ...rest } = settings;
+  const {
+    zendeskApiToken: _token,
+    webhookSigningSecret: _secret,
+    dingtalkNotificationWebhookUrl: _dingtalkWebhook,
+    dingtalkNotificationRobotSecret: _dingtalkSecret,
+    ...rest
+  } = settings;
   return {
     ...rest,
     hasZendeskApiToken: Boolean(settings.zendeskApiToken),
-    hasWebhookSigningSecret: Boolean(settings.webhookSigningSecret)
+    hasWebhookSigningSecret: Boolean(settings.webhookSigningSecret),
+    hasDingTalkNotificationWebhookUrl: Boolean(settings.dingtalkNotificationWebhookUrl),
+    hasDingTalkNotificationRobotSecret: Boolean(settings.dingtalkNotificationRobotSecret)
   };
 }
 
@@ -232,7 +245,15 @@ export class ZendeskSettingsStore {
       webhookSigningSecret:
         patch.webhookSigningSecret === undefined
           ? current.webhookSigningSecret
-          : String(patch.webhookSigningSecret || "").trim()
+          : String(patch.webhookSigningSecret || "").trim(),
+      dingtalkNotificationWebhookUrl:
+        patch.dingtalkNotificationWebhookUrl === undefined
+          ? current.dingtalkNotificationWebhookUrl
+          : String(patch.dingtalkNotificationWebhookUrl || "").trim(),
+      dingtalkNotificationRobotSecret:
+        patch.dingtalkNotificationRobotSecret === undefined
+          ? current.dingtalkNotificationRobotSecret
+          : String(patch.dingtalkNotificationRobotSecret || "").trim()
     });
     return this.integrations.upsertZendeskSettings(next);
   }
@@ -263,7 +284,15 @@ export class ZendeskSettingsStore {
       webhookSigningSecret:
         patch.webhookSigningSecret === undefined
           ? current.webhookSigningSecret
-          : String(patch.webhookSigningSecret || "").trim()
+          : String(patch.webhookSigningSecret || "").trim(),
+      dingtalkNotificationWebhookUrl:
+        patch.dingtalkNotificationWebhookUrl === undefined
+          ? current.dingtalkNotificationWebhookUrl
+          : String(patch.dingtalkNotificationWebhookUrl || "").trim(),
+      dingtalkNotificationRobotSecret:
+        patch.dingtalkNotificationRobotSecret === undefined
+          ? current.dingtalkNotificationRobotSecret
+          : String(patch.dingtalkNotificationRobotSecret || "").trim()
     });
     return this.integrations.upsertZendeskSettingsForInstance(instanceId, next);
   }
@@ -309,6 +338,11 @@ export class ZendeskSettingsStore {
       maxAttachmentCount: normalizeAttachmentCount(input.maxAttachmentCount),
       maxAttachmentBytes: normalizeAttachmentBytes(input.maxAttachmentBytes),
       allowedAttachmentMimeTypes: normalizeMimeTypes(input.allowedAttachmentMimeTypes),
+      dingtalkNotificationEnabled: Boolean(input.dingtalkNotificationEnabled),
+      dingtalkNotificationManualRunsEnabled: Boolean(input.dingtalkNotificationManualRunsEnabled),
+      dingtalkNotificationWebhookUrl: String(input.dingtalkNotificationWebhookUrl || "").trim(),
+      dingtalkNotificationRobotSecret: String(input.dingtalkNotificationRobotSecret || "").trim(),
+      dingtalkNotificationFallbackUserIds: normalizeIdList(input.dingtalkNotificationFallbackUserIds),
       systemPrompt: normalizeSystemPrompt(input.systemPrompt),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser

@@ -36,6 +36,11 @@ const baseSettings: ZendeskIntegrationSettings = {
   maxAttachmentCount: 5,
   maxAttachmentBytes: 10 * 1024 * 1024,
   allowedAttachmentMimeTypes: ["image/*", "application/pdf", "text/*"],
+  dingtalkNotificationEnabled: false,
+  dingtalkNotificationManualRunsEnabled: false,
+  dingtalkNotificationWebhookUrl: "",
+  dingtalkNotificationRobotSecret: "",
+  dingtalkNotificationFallbackUserIds: [],
   systemPrompt: "Return JSON."
 };
 
@@ -144,6 +149,7 @@ describe("ZendeskIntegrationService", () => {
     }>();
     const runUpdates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
     const prompts: string[] = [];
+    const dingtalkPayloads: Array<Record<string, unknown>> = [];
     let nextRequesterCommentId = 101;
     let runCounter = 0;
 
@@ -159,6 +165,7 @@ describe("ZendeskIntegrationService", () => {
               status: "open",
               priority: "normal",
               requester_id: 9001,
+              assignee_id: 8001,
               updated_at: "2026-05-20T02:00:00Z",
               tags: []
             }
@@ -218,6 +225,19 @@ describe("ZendeskIntegrationService", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
+      if (url.includes("/api/v2/users/8001.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 8001,
+              name: "Assignee Agent",
+              email: "assignee@example.com",
+              role: "agent"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
       if (url === "https://example.zendesk.com/attachments/token/signal.png") {
         return new Response("pngdata", {
           status: 200,
@@ -225,6 +245,13 @@ describe("ZendeskIntegrationService", () => {
             "content-type": "image/png",
             "content-length": "7"
           }
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/robot/send")) {
+        dingtalkPayloads.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
         });
       }
       if (url.includes("/api/v2/tickets/123.json") && init?.method === "PUT") {
@@ -292,8 +319,24 @@ describe("ZendeskIntegrationService", () => {
     const recordUsage = vi.fn(async (_input: unknown) => undefined);
 
     const settingsStore = {
-      get: vi.fn(async () => ({ ...baseSettings, zendeskBaseUrl: "https://example.zendesk.com", zendeskEmail: "agent@example.com", zendeskApiToken: "token" })),
-      getForInstance: vi.fn(async () => ({ ...baseSettings, zendeskBaseUrl: "https://example.zendesk.com", zendeskEmail: "agent@example.com", zendeskApiToken: "token" }))
+      get: vi.fn(async () => ({
+        ...baseSettings,
+        zendeskBaseUrl: "https://example.zendesk.com",
+        zendeskEmail: "agent@example.com",
+        zendeskApiToken: "token",
+        dingtalkNotificationEnabled: true,
+        dingtalkNotificationManualRunsEnabled: true,
+        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token"
+      })),
+      getForInstance: vi.fn(async () => ({
+        ...baseSettings,
+        zendeskBaseUrl: "https://example.zendesk.com",
+        zendeskEmail: "agent@example.com",
+        zendeskApiToken: "token",
+        dingtalkNotificationEnabled: true,
+        dingtalkNotificationManualRunsEnabled: true,
+        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token"
+      }))
     };
     const bindingStore = {
       get: vi.fn(async (ticketId: string, instanceId?: string) => bindingRecords.get(`${instanceId || "legacy"}:${ticketId}`)),
@@ -337,7 +380,10 @@ describe("ZendeskIntegrationService", () => {
     const conversationAudit = {
       beforeAgentRun: vi.fn(async (input: {
         context: {
-          ticket: { requester?: { name?: string; email?: string } };
+          ticket: {
+            requester?: { name?: string; email?: string };
+            assignee?: { name?: string; email?: string };
+          };
           comments: Array<{ attachments: Array<{ relativePath?: string }> }>;
         };
         runId: string;
@@ -392,6 +438,11 @@ describe("ZendeskIntegrationService", () => {
             }
           ]
         })),
+        resolveDingTalkMentionTarget: vi.fn(async ({ zendeskUser }) => ({
+          userIds: zendeskUser?.email === "assignee@example.com" ? ["ding-assignee-1"] : [],
+          label: zendeskUser?.name,
+          detail: "matched in test"
+        })),
         conversationAudit,
         recordUsage
       },
@@ -433,6 +484,10 @@ describe("ZendeskIntegrationService", () => {
         name: "Ramen Support User",
         email: "requester@example.com"
       });
+      expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.ticket.assignee).toMatchObject({
+        name: "Assignee Agent",
+        email: "assignee@example.com"
+      });
       expect(conversationAudit.beforeAgentRun.mock.calls[0]?.[0].context.comments[0]?.attachments[0]?.relativePath).toBe(
         ".zendesk/attachments/cache/example.zendesk.com/ticket-123/comment-101/att-7788-signal screenshot.png"
       );
@@ -450,6 +505,20 @@ describe("ZendeskIntegrationService", () => {
         codexThreadId: "codex-thread-1"
       });
       expect(recordUsage).toHaveBeenCalledTimes(2);
+      expect(dingtalkPayloads).toHaveLength(2);
+      expect(dingtalkPayloads[0]).toMatchObject({
+        msgtype: "markdown",
+        at: {
+          atUserIds: ["ding-assignee-1"],
+          isAtAll: false
+        }
+      });
+      const firstDingTalkText = ((dingtalkPayloads[0].markdown as { text?: string } | undefined)?.text || "").trim();
+      expect(firstDingTalkText).toContain("### Zendesk #123 processed by AI");
+      expect(firstDingTalkText).toContain("#### AI Generated Content");
+      expect(firstDingTalkText).toContain("Public reply preview (not sent):");
+      expect(firstDingTalkText).not.toContain("Agent Studio");
+      expect(firstDingTalkText.endsWith("@Assignee Agent")).toBe(true);
       expect(recordUsage.mock.calls[0]?.[0]).toMatchObject({
         instanceId: "zendesk-1",
         ticketId: "123",
@@ -486,7 +555,8 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),
           expect.objectContaining({ title: "Command execution completed" }),
           expect.objectContaining({ title: "Recorded usage telemetry" }),
-          expect.objectContaining({ title: "Wrote Zendesk internal note" })
+          expect.objectContaining({ title: "Wrote Zendesk internal note" }),
+          expect.objectContaining({ title: "Sent DingTalk notification" })
         ])
       );
       await expect(

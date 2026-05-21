@@ -38,6 +38,7 @@ type ZendeskTicketEnvelope = {
     status?: string;
     priority?: string | null;
     requester_id?: number;
+    assignee_id?: number | null;
     updated_at?: string;
     tags?: string[];
   };
@@ -96,6 +97,7 @@ function normalizeTicket(ticket: ZendeskTicketEnvelope["ticket"]): ZendeskTicket
     priority: typeof ticket?.priority === "string" ? ticket.priority : null,
     tags: Array.isArray(ticket?.tags) ? ticket.tags.map((item) => String(item || "").trim()).filter(Boolean) : [],
     requesterId: typeof ticket?.requester_id === "number" ? ticket.requester_id : undefined,
+    assigneeId: typeof ticket?.assignee_id === "number" ? ticket.assignee_id : undefined,
     updatedAt: typeof ticket?.updated_at === "string" ? ticket.updated_at : undefined
   };
 }
@@ -297,14 +299,21 @@ export class ZendeskClient {
   async getTicketContext(ticketId: string, maxComments: number): Promise<ZendeskTicketContext> {
     const ticketData = await this.request<ZendeskTicketEnvelope>(`/api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
     const ticket = normalizeTicket(ticketData.ticket);
-    const [comments, requester] = await Promise.all([
+    const [comments, requester, assignee] = await Promise.all([
       this.listComments(ticketId, maxComments),
       ticket.requesterId
         ? this.getUser(ticket.requesterId).catch(() => undefined)
+        : Promise.resolve(undefined),
+      ticket.assigneeId
+        ? this.getUser(ticket.assigneeId).catch(() => undefined)
         : Promise.resolve(undefined)
     ]);
     return {
-      ticket: requester ? { ...ticket, requester } : ticket,
+      ticket: {
+        ...ticket,
+        ...(requester ? { requester } : {}),
+        ...(assignee ? { assignee } : {})
+      },
       comments
     };
   }

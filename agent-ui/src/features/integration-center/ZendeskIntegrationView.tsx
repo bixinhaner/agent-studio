@@ -177,6 +177,11 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
         ? detail.config.allowedAttachmentMimeTypes
         : DEFAULT_ATTACHMENT_MIME_TYPES
     ),
+    dingtalkNotificationEnabled: asBoolean(detail.config.dingtalkNotificationEnabled),
+    dingtalkNotificationManualRunsEnabled: asBoolean(detail.config.dingtalkNotificationManualRunsEnabled),
+    dingtalkNotificationWebhookUrlDraft: "",
+    dingtalkNotificationRobotSecretDraft: "",
+    dingtalkNotificationFallbackUserIdsRaw: asListText(detail.config.dingtalkNotificationFallbackUserIds),
     systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
@@ -318,14 +323,26 @@ export function ZendeskIntegrationView(props: {
           maxAttachmentCount: Math.max(1, Math.min(100, Number(draft.maxAttachmentCount) || 5)),
           maxAttachmentBytes: Math.max(1, Math.min(50, Number(draft.maxAttachmentSizeMb) || 10)) * 1024 * 1024,
           allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw),
+          dingtalkNotificationEnabled: draft.dingtalkNotificationEnabled,
+          dingtalkNotificationManualRunsEnabled: draft.dingtalkNotificationManualRunsEnabled,
+          dingtalkNotificationFallbackUserIds: parseList(draft.dingtalkNotificationFallbackUserIdsRaw),
           systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
-          draft.zendeskApiTokenDraft.trim() || draft.webhookSigningSecretDraft.trim()
+          draft.zendeskApiTokenDraft.trim() ||
+          draft.webhookSigningSecretDraft.trim() ||
+          draft.dingtalkNotificationWebhookUrlDraft.trim() ||
+          draft.dingtalkNotificationRobotSecretDraft.trim()
             ? {
                 ...(draft.zendeskApiTokenDraft.trim() ? { zendeskApiToken: draft.zendeskApiTokenDraft.trim() } : {}),
                 ...(draft.webhookSigningSecretDraft.trim()
                   ? { webhookSigningSecret: draft.webhookSigningSecretDraft.trim() }
+                  : {}),
+                ...(draft.dingtalkNotificationWebhookUrlDraft.trim()
+                  ? { dingtalkNotificationWebhookUrl: draft.dingtalkNotificationWebhookUrlDraft.trim() }
+                  : {}),
+                ...(draft.dingtalkNotificationRobotSecretDraft.trim()
+                  ? { dingtalkNotificationRobotSecret: draft.dingtalkNotificationRobotSecretDraft.trim() }
                   : {})
               }
             : undefined
@@ -570,6 +587,79 @@ export function ZendeskIntegrationView(props: {
                           disabled={saving}
                           onChange={(event) =>
                             setDraft((current) => ({ ...current, webhookSigningSecretDraft: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  )
+                },
+                {
+                  key: "notifications",
+                  label: "AI 结果钉钉通知",
+                  children: (
+                    <div className="resource-center-form-grid">
+                      <label className="field checkbox-field resource-center-toggle-row resource-center-form-span-2">
+                        <Switch
+                          checked={draft.dingtalkNotificationEnabled}
+                          disabled={saving}
+                          checkedChildren="发送"
+                          unCheckedChildren="关闭"
+                          onChange={(checked) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationEnabled: checked }))
+                          }
+                        />
+                        <span className="field-label">AI 写入 Zendesk 后发送钉钉消息</span>
+                        <span className="field-help">
+                          只在 Agent Studio 成功写入内部备注或公开回复后发送，消息内容为英文 Markdown，并在末尾 @ 当前处理人。
+                        </span>
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">DingTalk Robot Webhook</span>
+                        <Input.Password
+                          value={draft.dingtalkNotificationWebhookUrlDraft}
+                          placeholder="留空则保持现状"
+                          disabled={saving || !draft.dingtalkNotificationEnabled}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationWebhookUrlDraft: event.target.value }))
+                          }
+                        />
+                        <span className="field-help">
+                          使用钉钉群自定义机器人 webhook；不要再让 Zendesk 的 Dingtalk L2 Ticket Trigger 直接发群消息。
+                        </span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Robot Secret</span>
+                        <Input.Password
+                          value={draft.dingtalkNotificationRobotSecretDraft}
+                          placeholder="可选，留空则保持现状"
+                          disabled={saving || !draft.dingtalkNotificationEnabled}
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationRobotSecretDraft: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="field checkbox-field resource-center-toggle-row">
+                        <Switch
+                          checked={draft.dingtalkNotificationManualRunsEnabled}
+                          disabled={saving || !draft.dingtalkNotificationEnabled}
+                          checkedChildren="通知"
+                          unCheckedChildren="不通知"
+                          onChange={(checked) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationManualRunsEnabled: checked }))
+                          }
+                        />
+                        <span className="field-label">手动执行也发送</span>
+                        <span className="field-help">默认关闭，避免测试 ticket 打扰钉钉群。</span>
+                      </label>
+                      <label className="field resource-center-form-span-2">
+                        <span className="field-label">Fallback DingTalk User IDs</span>
+                        <Input.TextArea
+                          rows={2}
+                          value={draft.dingtalkNotificationFallbackUserIdsRaw}
+                          disabled={saving || !draft.dingtalkNotificationEnabled}
+                          placeholder="一行一个或逗号分隔；当前 ticket 没有可映射处理人时使用"
+                          onChange={(event) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationFallbackUserIdsRaw: event.target.value }))
                           }
                         />
                       </label>
@@ -842,6 +932,10 @@ export function ZendeskIntegrationView(props: {
               <div>
                 <strong>资料集</strong>
                 <p>{draft.knowledgeSetIds.length ? `${draft.knowledgeSetIds.length} 个` : "未绑定"}</p>
+              </div>
+              <div>
+                <strong>钉钉通知</strong>
+                <p>{draft.dingtalkNotificationEnabled ? "AI 写入后发送" : "未启用"}</p>
               </div>
             </div>
 

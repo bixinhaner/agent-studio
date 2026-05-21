@@ -60,6 +60,13 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         maxAttachmentCount: input.max_attachment_count,
         maxAttachmentBytes: input.max_attachment_bytes,
         allowedAttachmentMimeTypes: normalizeStringArray(input.allowed_attachment_mime_types),
+        dingtalkNotificationEnabled: input.dingtalk_notification_enabled,
+        dingtalkNotificationManualRunsEnabled: input.dingtalk_notification_manual_runs_enabled,
+        dingtalkNotificationWebhookUrl:
+          input.dingtalk_notification_webhook_url === undefined ? undefined : String(input.dingtalk_notification_webhook_url || "").trim(),
+        dingtalkNotificationRobotSecret:
+          input.dingtalk_notification_robot_secret === undefined ? undefined : String(input.dingtalk_notification_robot_secret || "").trim(),
+        dingtalkNotificationFallbackUserIds: normalizeStringArray(input.dingtalk_notification_fallback_user_ids),
         systemPrompt: input.system_prompt
       };
       const overview = instanceId ? await service.updateSettings(patch, instanceId) : await service.updateSettings(patch);

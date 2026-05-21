@@ -122,13 +122,19 @@ function splitZendeskSettings(config: Partial<ZendeskIntegrationSettings>): {
   secretState: Record<string, unknown>;
   hasSecrets: boolean;
 } {
-  const { zendeskApiToken, webhookSigningSecret, ...rest } = config;
+  const { zendeskApiToken, webhookSigningSecret, dingtalkNotificationWebhookUrl, dingtalkNotificationRobotSecret, ...rest } = config;
   const secretState: Record<string, unknown> = {};
   if (typeof zendeskApiToken === "string" && zendeskApiToken.trim()) {
     secretState.zendeskApiToken = zendeskApiToken.trim();
   }
   if (typeof webhookSigningSecret === "string" && webhookSigningSecret.trim()) {
     secretState.webhookSigningSecret = webhookSigningSecret.trim();
+  }
+  if (typeof dingtalkNotificationWebhookUrl === "string" && dingtalkNotificationWebhookUrl.trim()) {
+    secretState.dingtalkNotificationWebhookUrl = dingtalkNotificationWebhookUrl.trim();
+  }
+  if (typeof dingtalkNotificationRobotSecret === "string" && dingtalkNotificationRobotSecret.trim()) {
+    secretState.dingtalkNotificationRobotSecret = dingtalkNotificationRobotSecret.trim();
   }
   return {
     config: rest,
@@ -144,7 +150,9 @@ function mergeZendeskSettings(
   return {
     ...(config ?? {}),
     zendeskApiToken: trimOrUndefined(secretState?.zendeskApiToken),
-    webhookSigningSecret: trimOrUndefined(secretState?.webhookSigningSecret)
+    webhookSigningSecret: trimOrUndefined(secretState?.webhookSigningSecret),
+    dingtalkNotificationWebhookUrl: trimOrUndefined(secretState?.dingtalkNotificationWebhookUrl),
+    dingtalkNotificationRobotSecret: trimOrUndefined(secretState?.dingtalkNotificationRobotSecret)
   };
 }
 

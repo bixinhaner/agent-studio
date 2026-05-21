@@ -62,6 +62,11 @@ export type ZendeskIntegrationSettings = {
   maxAttachmentCount: number;
   maxAttachmentBytes: number;
   allowedAttachmentMimeTypes: string[];
+  dingtalkNotificationEnabled: boolean;
+  dingtalkNotificationManualRunsEnabled: boolean;
+  dingtalkNotificationWebhookUrl: string;
+  dingtalkNotificationRobotSecret: string;
+  dingtalkNotificationFallbackUserIds: string[];
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
@@ -69,10 +74,12 @@ export type ZendeskIntegrationSettings = {
 
 export type ZendeskPublicSettings = Omit<
   ZendeskIntegrationSettings,
-  "zendeskApiToken" | "webhookSigningSecret"
+  "zendeskApiToken" | "webhookSigningSecret" | "dingtalkNotificationWebhookUrl" | "dingtalkNotificationRobotSecret"
 > & {
   hasZendeskApiToken: boolean;
   hasWebhookSigningSecret: boolean;
+  hasDingTalkNotificationWebhookUrl: boolean;
+  hasDingTalkNotificationRobotSecret: boolean;
 };
 
 export type ZendeskBindingRecord = {
@@ -132,6 +139,8 @@ export type ZendeskTicketPayload = {
   tags: string[];
   requesterId?: number;
   requester?: ZendeskRequesterPayload;
+  assigneeId?: number;
+  assignee?: ZendeskRequesterPayload;
   updatedAt?: string;
 };
 
@@ -213,6 +222,11 @@ export const zendeskSettingsUpdateSchema = z.object({
   max_attachment_count: z.number().int().min(1).max(100).optional(),
   max_attachment_bytes: z.number().int().min(1024).max(50 * 1024 * 1024).optional(),
   allowed_attachment_mime_types: optionalStringArraySchema,
+  dingtalk_notification_enabled: z.boolean().optional(),
+  dingtalk_notification_manual_runs_enabled: z.boolean().optional(),
+  dingtalk_notification_webhook_url: optionalStringSchema,
+  dingtalk_notification_robot_secret: optionalStringSchema,
+  dingtalk_notification_fallback_user_ids: optionalStringArraySchema,
   system_prompt: optionalStringSchema
 });
 

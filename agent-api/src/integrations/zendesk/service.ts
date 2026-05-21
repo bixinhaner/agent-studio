@@ -30,6 +30,7 @@ import type {
   ZendeskCommentPayload,
   ZendeskIntegrationSettings,
   ZendeskOverview,
+  ZendeskRequesterPayload,
   ZendeskSetupGuide,
   ZendeskTicketContext,
   ZendeskRunStatus
@@ -189,6 +190,12 @@ type ZendeskAgentRunResult = {
   audit?: ZendeskConversationAuditState;
   codexThreadId?: string;
   processRows: ZendeskAuditProcessRow[];
+};
+
+type ZendeskDingTalkMentionTarget = {
+  userIds: string[];
+  label?: string;
+  detail?: string;
 };
 
 function sanitizeTicketId(value: string | number): string {
@@ -710,6 +717,136 @@ function resolveAction(
   };
 }
 
+const MAX_DINGTALK_MARKDOWN_CHARS = 12000;
+
+function formatDingTalkPercent(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "Not provided";
+  return `${Math.round(value * 100)}%`;
+}
+
+function zendeskUserDisplay(user: ZendeskRequesterPayload | undefined, fallback = "Unassigned"): string {
+  const name = trimOrUndefined(user?.name);
+  const email = trimOrUndefined(user?.email);
+  if (name && email) return `${name} <${email}>`;
+  return name || email || fallback;
+}
+
+function zendeskDecisionLabel(decision: ZendeskAgentDecision["decision"], publicReply: boolean): string {
+  if (publicReply) return "Public reply";
+  if (decision === "handoff") return "Internal handoff note";
+  return "Internal note";
+}
+
+function truncateDingTalkSection(value: string, maxChars: number): string {
+  const normalized = value.trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 34)).trimEnd()}\n\n[Content truncated for DingTalk.]`;
+}
+
+function buildZendeskDingTalkMarkdown(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  ticketId: string;
+  ticketUrl: string;
+  runId: string;
+  source: "webhook" | "manual";
+  decision: ZendeskAgentDecision;
+  action: Extract<ResolvedAction, { mode: "comment" }>;
+  commentId?: number;
+  mentionLabel?: string;
+}): string {
+  const ticket = input.context.ticket;
+  const mentionFooter = input.mentionLabel ? `\n\n---\n@${input.mentionLabel}` : "";
+  const reasons = input.decision.reasons?.length
+    ? input.decision.reasons.map((reason) => `- ${reason}`).join("\n")
+    : "- Not provided";
+  const headerLines = [
+    `### Zendesk #${input.ticketId} processed by AI`,
+    "",
+    `**Ticket:** [#${input.ticketId}](${input.ticketUrl})`,
+    `**Subject:** ${ticket.subject || "Untitled ticket"}`,
+    `**Requester:** ${zendeskUserDisplay(ticket.requester, "Unknown requester")}`,
+    `**Assignee:** ${zendeskUserDisplay(ticket.assignee)}`,
+    `**Result:** ${zendeskDecisionLabel(input.decision.decision, input.action.publicReply)}`,
+    `**Confidence:** ${formatDingTalkPercent(input.decision.confidence)}`,
+    `**Trigger:** ${input.source === "manual" ? "Manual run" : "Zendesk webhook"}`,
+    `**Requester Comment ID:** ${input.requesterComment.id}`,
+    "",
+    "#### Reasons",
+    reasons,
+    "",
+    "#### AI Generated Content"
+  ];
+  if (input.commentId) {
+    headerLines.splice(8, 0, `**Zendesk Comment ID:** ${input.commentId}`);
+  }
+  const header = headerLines.join("\n");
+  const availableForBody = Math.max(1200, MAX_DINGTALK_MARKDOWN_CHARS - header.length - mentionFooter.length - 4);
+  const body = truncateDingTalkSection(input.action.body || input.decision.body || input.decision.internalNote || "No AI content was generated.", availableForBody);
+  return `${header}\n${body}${mentionFooter}`;
+}
+
+function signedDingTalkWebhookUrl(webhookUrl: string, secret: string): string {
+  const normalizedSecret = trimOrUndefined(secret);
+  if (!normalizedSecret) return webhookUrl;
+  const timestamp = String(Date.now());
+  const sign = createHmac("sha256", normalizedSecret)
+    .update(`${timestamp}\n${normalizedSecret}`)
+    .digest("base64");
+  const url = new URL(webhookUrl);
+  url.searchParams.set("timestamp", timestamp);
+  url.searchParams.set("sign", sign);
+  return url.toString();
+}
+
+async function postDingTalkRobotMarkdown(input: {
+  webhookUrl: string;
+  robotSecret: string;
+  title: string;
+  markdown: string;
+  atUserIds: string[];
+}): Promise<void> {
+  const endpoint = signedDingTalkWebhookUrl(input.webhookUrl, input.robotSecret);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      msgtype: "markdown",
+      markdown: {
+        title: input.title,
+        text: input.markdown
+      },
+      at: {
+        atUserIds: input.atUserIds,
+        isAtAll: false
+      }
+    })
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`DingTalk robot notification failed (${response.status}): ${shortenText(text, 500)}`);
+  }
+  const payload = safeParseDingTalkResponse(text);
+  const code = Number(payload?.errcode ?? 0);
+  if (Number.isFinite(code) && code !== 0) {
+    throw new Error(`DingTalk robot notification failed (${code}): ${trimOrUndefined(payload?.errmsg) || "unknown error"}`);
+  }
+}
+
+function safeParseDingTalkResponse(input: string): Record<string, unknown> | undefined {
+  const text = input.trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    return asRecord(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
 function buildSetupGuide(settings: ZendeskIntegrationSettings, instanceId?: string): ZendeskSetupGuide {
   return {
     webhookUrl: computeWebhookUrl(settings, instanceId),
@@ -768,6 +905,13 @@ export class ZendeskIntegrationService {
         runId: string;
         source: "webhook" | "manual";
       }) => Promise<ZendeskAgentRuntimeOptions>;
+      resolveDingTalkMentionTarget?: (input: {
+        zendeskUser?: ZendeskRequesterPayload;
+        settings: ZendeskIntegrationSettings;
+        context: ZendeskTicketContext;
+        instanceId?: string;
+        ticketId: string;
+      }) => Promise<ZendeskDingTalkMentionTarget | undefined>;
       conversationAudit?: ZendeskConversationAuditSync;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
     } = {},
@@ -1102,6 +1246,22 @@ export class ZendeskIntegrationService {
             .join("\n")
         )
       );
+      const notificationRow = await this.sendDingTalkResultNotification({
+        settings,
+        context: agentRun.preparedContext,
+        requesterComment,
+        instanceId,
+        ticketId,
+        runId,
+        source,
+        decision,
+        action,
+        commentId: commentResult.commentId,
+        ticketUrl: client.buildTicketUrl(ticketId)
+      });
+      if (notificationRow) {
+        agentRun.processRows.push(notificationRow);
+      }
       await this.syncConversationAfterAgentRun({
         settings,
         context: agentRun.preparedContext,
@@ -1155,6 +1315,87 @@ export class ZendeskIntegrationService {
         error: detail
       });
       throw error;
+    }
+  }
+
+  private async sendDingTalkResultNotification(input: {
+    settings: ZendeskIntegrationSettings;
+    context: ZendeskTicketContext;
+    requesterComment: ZendeskCommentPayload;
+    instanceId?: string;
+    ticketId: string;
+    runId: string;
+    source: "webhook" | "manual";
+    decision: ZendeskAgentDecision;
+    action: Extract<ResolvedAction, { mode: "comment" }>;
+    commentId?: number;
+    ticketUrl: string;
+  }): Promise<ZendeskAuditProcessRow | undefined> {
+    if (!input.settings.dingtalkNotificationEnabled) return undefined;
+    if (input.source === "manual" && !input.settings.dingtalkNotificationManualRunsEnabled) return undefined;
+
+    const webhookUrl = trimOrUndefined(input.settings.dingtalkNotificationWebhookUrl);
+    if (!webhookUrl) {
+      return zendeskProcessRow("error", "DingTalk notification skipped", "DingTalk robot webhook URL is not configured.");
+    }
+
+    try {
+      const resolvedMention = this.dependencies.resolveDingTalkMentionTarget
+        ? await this.dependencies.resolveDingTalkMentionTarget({
+            zendeskUser: input.context.ticket.assignee,
+            settings: input.settings,
+            context: input.context,
+            instanceId: input.instanceId,
+            ticketId: input.ticketId
+          })
+        : undefined;
+      const atUserIds = [
+        ...(resolvedMention?.userIds ?? []),
+        ...input.settings.dingtalkNotificationFallbackUserIds
+      ]
+        .map((item) => String(item || "").trim())
+        .filter((item, index, array) => item && array.indexOf(item) === index);
+      const mentionLabel =
+        trimOrUndefined(resolvedMention?.label) ||
+        zendeskUserDisplay(input.context.ticket.assignee, "") ||
+        (atUserIds.length ? "Support team" : "");
+      const markdown = buildZendeskDingTalkMarkdown({
+        settings: input.settings,
+        context: input.context,
+        requesterComment: input.requesterComment,
+        ticketId: input.ticketId,
+        ticketUrl: input.ticketUrl,
+        runId: input.runId,
+        source: input.source,
+        decision: input.decision,
+        action: input.action,
+        commentId: input.commentId,
+        mentionLabel: atUserIds.length ? mentionLabel : undefined
+      });
+      await postDingTalkRobotMarkdown({
+        webhookUrl,
+        robotSecret: input.settings.dingtalkNotificationRobotSecret,
+        title: `Zendesk #${input.ticketId} processed by AI`,
+        markdown,
+        atUserIds
+      });
+      return zendeskProcessRow(
+        "done",
+        "Sent DingTalk notification",
+        [
+          `at_user_ids: ${atUserIds.length}`,
+          mentionLabel ? `mention_label: ${mentionLabel}` : "",
+          resolvedMention?.detail ? `mapping: ${resolvedMention.detail}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+    } catch (error) {
+      return zendeskProcessRow(
+        "error",
+        "DingTalk notification failed",
+        error instanceof Error ? error.message : "DingTalk notification failed"
+      );
     }
   }
 
