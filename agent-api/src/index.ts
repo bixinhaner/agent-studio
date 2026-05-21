@@ -385,6 +385,7 @@ const zendesk = new ZendeskIntegrationService({
     afterAgentRun: syncZendeskConversationAfterAgentRun
   },
   runtimeSession: createZendeskRuntimeSessionBridge(),
+  getDrainReason: getDeploymentDrainReason,
   async recordUsage(input) {
     const integration = input.instanceId
       ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })
@@ -790,6 +791,24 @@ function appendRuntimeAnswerPreview(
   if (event.delta) return current + event.delta;
   if (event.text && !current) return event.text;
   return current;
+}
+
+async function getDeploymentDrainReason(): Promise<string | undefined> {
+  try {
+    const raw = await fs.readFile(appConfig.deployDrainFile, "utf8");
+    const parsed = asRecord(JSON.parse(raw));
+    const reason = typeof parsed?.reason === "string" ? parsed.reason.trim() : "";
+    return reason || "Agent Studio is deploying. Please retry in a few minutes.";
+  } catch (error) {
+    if ((error as { code?: string })?.code === "ENOENT") {
+      return undefined;
+    }
+    console.warn("failed to read deploy drain file", {
+      path: appConfig.deployDrainFile,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  }
 }
 
 async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRuntimeThread | undefined> {
@@ -3384,22 +3403,40 @@ async function ensureDingTalkBotThreadSession(input: {
   return createSession(desiredSession, input.thread.id);
 }
 
-async function dingtalkMessageAlreadyProcessed(threadId: string, messageId: string): Promise<boolean> {
+async function dingtalkMessageProcessingState(threadId: string, messageId: string): Promise<{
+  userMessageExists: boolean;
+  assistantReplyExists: boolean;
+}> {
   const normalizedThreadId = trimOrUndefined(threadId);
   const normalizedMessageId = trimOrUndefined(messageId);
-  if (!normalizedThreadId || !normalizedMessageId) return false;
-  const row = await (db as unknown as {
+  if (!normalizedThreadId || !normalizedMessageId) {
+    return {
+      userMessageExists: false,
+      assistantReplyExists: false
+    };
+  }
+  const table = (db as unknown as {
     message: {
       findFirst(args: {
-        where: { threadId: string; externalId: string };
+        where: { threadId: string; externalId?: string; parentId?: string; role?: "assistant" | "user" | "system" };
         orderBy?: { createdAt?: "asc" | "desc" };
       }): Promise<{ id: string } | null>;
     };
-  }).message.findFirst({
-    where: { threadId: normalizedThreadId, externalId: normalizedMessageId },
-    orderBy: { createdAt: "asc" }
-  });
-  return Boolean(row);
+  }).message;
+  const [userMessage, assistantReply] = await Promise.all([
+    table.findFirst({
+      where: { threadId: normalizedThreadId, externalId: normalizedMessageId },
+      orderBy: { createdAt: "asc" }
+    }),
+    table.findFirst({
+      where: { threadId: normalizedThreadId, parentId: normalizedMessageId, role: "assistant" },
+      orderBy: { createdAt: "asc" }
+    })
+  ]);
+  return {
+    userMessageExists: Boolean(userMessage),
+    assistantReplyExists: Boolean(assistantReply)
+  };
 }
 
 async function createDingTalkBotThread(input: {
@@ -3550,10 +3587,20 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     });
   }
 
-  if (await dingtalkMessageAlreadyProcessed(thread.id, input.robotMessage.msgId)) {
+  const drainReason = await getDeploymentDrainReason();
+  if (drainReason) {
+    return {
+      status: "failed",
+      replyText: drainReason,
+      detail: "deployment drain is active"
+    };
+  }
+
+  const messageProcessingState = await dingtalkMessageProcessingState(thread.id, input.robotMessage.msgId);
+  if (messageProcessingState.assistantReplyExists) {
     return {
       status: "ignored",
-      detail: "duplicate DingTalk message"
+      detail: "duplicate DingTalk message already has an assistant reply"
     };
   }
 
@@ -3589,30 +3636,32 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     }
   }
 
-  const userMessage = dingtalkMessage({
-    id: input.robotMessage.msgId,
-    role: "user",
-    text: input.text,
-    createdAt: messageAt,
-    metadata: {
-      channel: DINGTALK_BOT_CHANNEL,
-      conversationType: scope,
-      senderNick: input.robotMessage.senderNick,
-      senderStaffId: input.robotMessage.senderStaffId,
-      integrationInstanceId: input.instance.id,
-      externalConversationKey
-    }
-  });
-  await threads.appendMessage(thread.id, {
-    parentId: thread.headId ?? null,
-    message: userMessage,
-    runConfig: {
-      channel: DINGTALK_BOT_CHANNEL,
-      integrationInstanceId: input.instance.id,
-      externalConversationKey,
-      conversationType: scope
-    }
-  });
+  if (!messageProcessingState.userMessageExists) {
+    const userMessage = dingtalkMessage({
+      id: input.robotMessage.msgId,
+      role: "user",
+      text: input.text,
+      createdAt: messageAt,
+      metadata: {
+        channel: DINGTALK_BOT_CHANNEL,
+        conversationType: scope,
+        senderNick: input.robotMessage.senderNick,
+        senderStaffId: input.robotMessage.senderStaffId,
+        integrationInstanceId: input.instance.id,
+        externalConversationKey
+      }
+    });
+    await threads.appendMessage(thread.id, {
+      parentId: thread.headId ?? null,
+      message: userMessage,
+      runConfig: {
+        channel: DINGTALK_BOT_CHANNEL,
+        integrationInstanceId: input.instance.id,
+        externalConversationKey,
+        conversationType: scope
+      }
+    });
+  }
 
   let currentSession = session;
   let streamedAnswerPreview = "";
@@ -5386,6 +5435,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
     const input = streamSchema.parse(req.body || {});
+    const drainReason = await getDeploymentDrainReason();
+    if (drainReason) {
+      sendSSE(res, "error", { detail: drainReason });
+      res.end();
+      return;
+    }
     let session = await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId);
     let liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
     if (!liveThread && session) {
@@ -5546,6 +5601,13 @@ async function bootstrap() {
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);
+  });
+  void zendesk.recoverInterruptedProcessingRuns({ reprocess: true }).then((result) => {
+    if (result.markedFailed > 0 || result.requeued > 0) {
+      console.log("recovered interrupted Zendesk runs", result);
+    }
+  }).catch((error) => {
+    console.warn("failed to recover interrupted Zendesk runs", error instanceof Error ? error.message : String(error));
   });
 }
 

@@ -48,7 +48,8 @@ const schema = z.object({
   KNOWLEDGE_SET_STORAGE_ROOT: z.string().default("./temp/knowledge-sets"),
   CODEX_BASE_HOME: z.string().optional(),
   CODEX_SESSION_HOME_ROOT: z.string().default("./temp/codex-homes"),
-  CODEX_SKILL_DRAFT_ROOT: z.string().default("./temp/skill-drafts")
+  CODEX_SKILL_DRAFT_ROOT: z.string().default("./temp/skill-drafts"),
+  AGENT_STUDIO_DEPLOY_DRAIN_FILE: z.string().default("./temp/deploy-drain.json")
 });
 
 const env = schema.parse(process.env);
@@ -111,6 +112,10 @@ const codexSessionHomeRoot = path.isAbsolute(env.CODEX_SESSION_HOME_ROOT)
 const codexSkillDraftRoot = path.isAbsolute(env.CODEX_SKILL_DRAFT_ROOT)
   ? env.CODEX_SKILL_DRAFT_ROOT
   : path.resolve(process.cwd(), env.CODEX_SKILL_DRAFT_ROOT);
+
+const deployDrainFile = path.isAbsolute(env.AGENT_STUDIO_DEPLOY_DRAIN_FILE)
+  ? env.AGENT_STUDIO_DEPLOY_DRAIN_FILE
+  : path.resolve(process.cwd(), env.AGENT_STUDIO_DEPLOY_DRAIN_FILE);
 
 function parseBoolean(value: string): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
@@ -202,6 +207,7 @@ export const appConfig = {
     sessionHomeRoot: codexSessionHomeRoot,
     skillDraftRoot: codexSkillDraftRoot
   },
+  deployDrainFile,
   orgSync: {
     enabled: parseBooleanWithDefault(env.ORG_SYNC_ENABLED, true),
     intervalMinutes: parseInteger(env.ORG_SYNC_INTERVAL_MINUTES, 24 * 60)

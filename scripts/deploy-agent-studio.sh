@@ -20,6 +20,10 @@ FRONTEND_BUILD_NODE_OPTIONS="${FRONTEND_BUILD_NODE_OPTIONS:---max-old-space-size
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 SKIP_RBAC_SEED="${SKIP_RBAC_SEED:-0}"
 SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
+SKIP_AGENT_DRAIN="${SKIP_AGENT_DRAIN:-0}"
+AGENT_DRAIN_TIMEOUT_SECONDS="${AGENT_DRAIN_TIMEOUT_SECONDS:-900}"
+AGENT_DRAIN_POLL_SECONDS="${AGENT_DRAIN_POLL_SECONDS:-5}"
+DEPLOY_DRAIN_FILE="${AGENT_STUDIO_DEPLOY_DRAIN_FILE:-}"
 
 usage() {
   cat <<USAGE
@@ -45,6 +49,8 @@ Options:
   --skip-git-pull        Rebuild current checkout without fetching or pulling
   --skip-rbac-seed       Skip built-in RBAC seed step
   --skip-caddy-reload    Skip rendering/reloading Caddy
+  --skip-agent-drain     Restart immediately without deployment drain/wait
+  --drain-timeout <sec>  Seconds to wait for active agent runs before restart [default: $AGENT_DRAIN_TIMEOUT_SECONDS]
   -h, --help             Show this help text
 USAGE
 }
@@ -104,6 +110,14 @@ while [[ $# -gt 0 ]]; do
       SKIP_CADDY_RELOAD=1
       shift
       ;;
+    --skip-agent-drain)
+      SKIP_AGENT_DRAIN=1
+      shift
+      ;;
+    --drain-timeout)
+      AGENT_DRAIN_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -116,6 +130,11 @@ done
 
 REPO_DIR="$APP_REPO_DIR"
 refresh_app_paths
+if [[ -z "$DEPLOY_DRAIN_FILE" ]]; then
+  DEPLOY_DRAIN_FILE="$APP_API_DIR/temp/deploy-drain.json"
+elif [[ "$DEPLOY_DRAIN_FILE" != /* ]]; then
+  DEPLOY_DRAIN_FILE="$APP_API_DIR/$DEPLOY_DRAIN_FILE"
+fi
 
 pm2_template_path="$script_dir/../templates/pm2-ecosystem.config.cjs.template"
 caddy_template_path="$script_dir/../templates/Caddyfile.template"
@@ -130,6 +149,14 @@ fi
 
 if [[ -n "$ASSET_RETENTION_DAYS" && ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   die "--asset-retention-days must be a non-negative integer"
+fi
+
+if [[ ! "$AGENT_DRAIN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  die "--drain-timeout must be a non-negative integer"
+fi
+
+if [[ ! "$AGENT_DRAIN_POLL_SECONDS" =~ ^[0-9]+$ || "$AGENT_DRAIN_POLL_SECONDS" == "0" ]]; then
+  die "AGENT_DRAIN_POLL_SECONDS must be a positive integer"
 fi
 
 shell_quote() {
@@ -307,6 +334,107 @@ git_update() {
   run_as_app_user_shell "cd '$APP_REPO_DIR' && git fetch '$GIT_REMOTE' && git checkout '$GIT_REF' && git pull --ff-only '$GIT_REMOTE' '$GIT_REF'"
 }
 
+enable_deploy_drain() {
+  if [[ "$SKIP_AGENT_DRAIN" == "1" ]]; then
+    log_info "Skipping deployment drain signal"
+    return 0
+  fi
+
+  log_step "Enabling deployment drain"
+  local drain_dir
+  drain_dir="$(dirname "$DEPLOY_DRAIN_FILE")"
+  if is_app_user; then
+    mkdir -p "$drain_dir"
+  else
+    run_as_root mkdir -p "$drain_dir"
+    run_as_root chown "$APP_USER:$APP_GROUP" "$drain_dir"
+  fi
+
+  local drain_file
+  drain_file="$(mktemp)"
+  python3 - "$drain_file" <<'PY'
+from datetime import datetime, timezone
+from pathlib import Path
+import json
+import sys
+
+Path(sys.argv[1]).write_text(json.dumps({
+    "active": True,
+    "reason": "Agent Studio is deploying. Please retry in a few minutes.",
+    "started_at": datetime.now(timezone.utc).isoformat()
+}, ensure_ascii=False, indent=2) + "\n")
+PY
+
+  if is_app_user; then
+    install -m 644 "$drain_file" "$DEPLOY_DRAIN_FILE"
+  else
+    run_as_root install -o "$APP_USER" -g "$APP_GROUP" -m 644 "$drain_file" "$DEPLOY_DRAIN_FILE"
+  fi
+  rm -f "$drain_file"
+  log_info "Deployment drain file: $DEPLOY_DRAIN_FILE"
+}
+
+disable_deploy_drain() {
+  [[ "$SKIP_AGENT_DRAIN" == "1" ]] && return 0
+  if [[ -e "$DEPLOY_DRAIN_FILE" ]]; then
+    log_step "Disabling deployment drain"
+    if is_app_user; then
+      rm -f "$DEPLOY_DRAIN_FILE"
+    else
+      run_as_root rm -f "$DEPLOY_DRAIN_FILE"
+    fi
+  fi
+}
+
+pm2_app_pid() {
+  run_as_app_user_shell "pm2 pid '$PM2_APP_NAME' 2>/dev/null | tail -n 1" | tr -dc '0-9'
+}
+
+active_agent_run_count() {
+  local api_pid="$1"
+  [[ -n "$api_pid" && "$api_pid" != "0" ]] || {
+    printf '%s\n' "0"
+    return 0
+  }
+  ps -eo ppid=,args= | awk -v api_pid="$api_pid" '$1 == api_pid && index($0, "codex exec") > 0 { count++ } END { print count + 0 }'
+}
+
+wait_for_agent_drain() {
+  if [[ "$SKIP_AGENT_DRAIN" == "1" ]]; then
+    log_info "Skipping active agent run wait"
+    return 0
+  fi
+
+  local api_pid
+  api_pid="$(pm2_app_pid || true)"
+  if [[ -z "$api_pid" || "$api_pid" == "0" ]]; then
+    log_info "PM2 app is not running; no active agent runs to drain"
+    return 0
+  fi
+
+  log_step "Waiting for active agent runs to finish"
+  local started
+  started="$(date +%s)"
+  while true; do
+    local active_count
+    active_count="$(active_agent_run_count "$api_pid")"
+    if [[ "$active_count" == "0" ]]; then
+      log_info "No active agent runs remain"
+      return 0
+    fi
+
+    local elapsed
+    elapsed=$(( $(date +%s) - started ))
+    if (( elapsed >= AGENT_DRAIN_TIMEOUT_SECONDS )); then
+      log_warn "Timed out waiting for $active_count active agent run(s); restarting anyway"
+      return 0
+    fi
+
+    log_info "Waiting for $active_count active agent run(s) before restart (${elapsed}s elapsed)"
+    sleep "$AGENT_DRAIN_POLL_SECONDS"
+  done
+}
+
 sanitize_frontend_env() {
   if ! grep -Eq '^[[:space:]]*NODE_ENV[[:space:]]*=' "$FRONTEND_ENV_FILE"; then
     return 0
@@ -420,11 +548,16 @@ main() {
   require_command pm2
 
   require_repo_checkout
+  enable_deploy_drain
+  trap disable_deploy_drain EXIT
   git_update
   build_backend
   seed_rbac
   build_frontend
+  wait_for_agent_drain
   restart_pm2
+  disable_deploy_drain
+  trap - EXIT
   refresh_caddy_config
 
   log_step "Deploy complete"

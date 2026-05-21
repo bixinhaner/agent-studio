@@ -131,6 +131,62 @@ describe("ZendeskIntegrationService", () => {
     }
   });
 
+  it("marks interrupted processing runs as failed during restart recovery", async () => {
+    const updates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
+    const runStore = {
+      create: vi.fn(async () => {
+        throw new Error("not used");
+      }),
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>) => {
+        updates.push({ runId, patch });
+        return {
+          id: runId,
+          instanceId: "zendesk-1",
+          ticketId: "45268",
+          source: "webhook",
+          status: patch.status,
+          detail: patch.detail,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }),
+      listForInstance: vi.fn(async () => []),
+      listProcessingOlderThan: vi.fn(async () => [
+        {
+          id: "run-stale-1",
+          instanceId: "zendesk-1",
+          ticketId: "45268",
+          source: "webhook" as const,
+          status: "processing" as const,
+          detail: "正在调用 agent 生成答复",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ])
+    };
+    const service = new ZendeskIntegrationService(
+      {},
+      {
+        getForInstance: vi.fn(async () => baseSettings)
+      } as never,
+      undefined as never,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.recoverInterruptedProcessingRuns({ reprocess: false });
+
+    expect(result).toEqual({ markedFailed: 1, requeued: 0 });
+    expect(runStore.listProcessingOlderThan).toHaveBeenCalledWith(expect.any(Date), 50);
+    expect(updates[0]).toMatchObject({
+      runId: "run-stale-1",
+      patch: {
+        status: "failed",
+        detail: "服务重启中断，已自动收尾"
+      }
+    });
+    expect(String(updates[0]?.patch.error)).toContain("Interrupted by Agent Studio service restart");
+  });
+
   it("reuses one Codex thread per Zendesk ticket and passes downloaded attachments into the prompt", async () => {
     const tempRoot = path.resolve(process.cwd(), "..", "temp", `zendesk-thread-${Date.now()}`);
     await fs.rm(tempRoot, { recursive: true, force: true });

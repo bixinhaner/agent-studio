@@ -1029,6 +1029,7 @@ export class ZendeskIntegrationService {
       }) => Promise<ZendeskDingTalkMentionTarget | undefined>;
       conversationAudit?: ZendeskConversationAuditSync;
       runtimeSession?: ZendeskRuntimeSessionBridge;
+      getDrainReason?: () => Promise<string | undefined>;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
@@ -1070,6 +1071,51 @@ export class ZendeskIntegrationService {
     };
   }
 
+  async recoverInterruptedProcessingRuns(options: {
+    olderThanMs?: number;
+    limit?: number;
+    reprocess?: boolean;
+  } = {}): Promise<{ markedFailed: number; requeued: number }> {
+    const olderThanMs = Math.max(0, Number(options.olderThanMs ?? 0) || 0);
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const interrupted = await this.runStore.listProcessingOlderThan(cutoff, options.limit ?? 50);
+    let markedFailed = 0;
+    let requeued = 0;
+    for (const run of interrupted) {
+      const updated = await this.runStore.update(run.id, {
+        status: "failed",
+        detail: "服务重启中断，已自动收尾",
+        error: "Interrupted by Agent Studio service restart before the agent completed."
+      });
+      if (!updated) continue;
+      markedFailed += 1;
+      if (options.reprocess === false) continue;
+
+      try {
+        const settings = await this.loadSettings(run.instanceId);
+        if (!settings.enabled) continue;
+        requeued += 1;
+        void this.enqueue(run.instanceId, run.ticketId, () => this.processTicket(run.ticketId, run.source, settings, run.instanceId))
+          .catch((error) => {
+            console.error("[zendesk] interrupted run reprocess failed", {
+              runId: run.id,
+              ticketId: run.ticketId,
+              instanceId: run.instanceId,
+              detail: error instanceof Error ? error.message : String(error)
+            });
+          });
+      } catch (error) {
+        console.warn("[zendesk] failed to requeue interrupted run", {
+          runId: run.id,
+          ticketId: run.ticketId,
+          instanceId: run.instanceId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    return { markedFailed, requeued };
+  }
+
   async updateSettings(
     patch: Partial<ZendeskIntegrationSettings> & {
       zendeskApiToken?: string | undefined;
@@ -1109,6 +1155,10 @@ export class ZendeskIntegrationService {
     headers: IncomingHttpHeaders,
     instanceId?: string
   ): Promise<{ accepted: true; result: ProcessTicketResult }> {
+    const drainReason = await this.dependencies.getDrainReason?.();
+    if (drainReason) {
+      throw new Error(drainReason);
+    }
     const settings = await this.loadSettings(instanceId);
     if (!settings.enabled) {
       throw new Error("Zendesk 自动答复未启用");
@@ -1138,6 +1188,10 @@ export class ZendeskIntegrationService {
   }
 
   async runTicket(ticketIdInput: string | number, instanceId?: string): Promise<ProcessTicketResult> {
+    const drainReason = await this.dependencies.getDrainReason?.();
+    if (drainReason) {
+      throw new Error(drainReason);
+    }
     const ticketId = sanitizeTicketId(ticketIdInput);
     return await this.enqueue(instanceId, ticketId, async () => {
       const settings = await this.loadSettings(instanceId);

@@ -145,4 +145,56 @@ describe("Zendesk persistence stores", () => {
     expect(record?.commentId).toBe(zendeskCommentId);
     expect(record?.requesterCommentId).toBe(zendeskCommentId);
   });
+
+  it("lists stale processing Zendesk runs for restart recovery", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        id: "run-stale-1",
+        integrationInstanceId: "inst-1",
+        scopeKey: "inst-1",
+        ticketId: "45268",
+        source: "webhook",
+        status: "processing",
+        detail: "正在调用 agent 生成答复",
+        decision: null,
+        commentId: null,
+        requesterCommentId: null,
+        ticketSubject: "stale ticket",
+        error: null,
+        createdAt: "2026-05-21T12:00:00.000Z",
+        updatedAt: "2026-05-21T12:01:00.000Z"
+      }
+    ]);
+    const store = new ZendeskRunStore({
+      zendeskRun: {
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        findMany,
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+
+    const cutoff = new Date("2026-05-21T12:05:00.000Z");
+    const records = await store.listProcessingOlderThan(cutoff, 25);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        status: "processing",
+        updatedAt: {
+          lt: cutoff
+        }
+      },
+      orderBy: { createdAt: "asc" },
+      take: 25
+    });
+    expect(records[0]).toMatchObject({
+      id: "run-stale-1",
+      instanceId: "inst-1",
+      status: "processing",
+      ticketId: "45268"
+    });
+  });
 });

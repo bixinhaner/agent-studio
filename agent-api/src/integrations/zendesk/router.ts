@@ -118,7 +118,7 @@ export async function handleZendeskWebhookRequest(
     res.status(202).json(result);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Zendesk webhook 处理失败";
-    const status = /签名|payload|ticket_id|时间戳/.test(detail) ? 400 : 500;
+    const status = /签名|payload|ticket_id|时间戳/.test(detail) ? 400 : /部署|drain|deploy/i.test(detail) ? 503 : 500;
     res.status(status).json({ detail });
   }
 }
