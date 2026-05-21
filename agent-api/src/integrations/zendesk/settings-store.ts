@@ -113,6 +113,32 @@ export function defaultAllowedAttachmentMimeTypes(): string[] {
   ];
 }
 
+export function defaultDingTalkNotificationTemplate(): string {
+  return [
+    "### Zendesk #{{ticketId}} - AI Update",
+    "",
+    "**Result**",
+    "{{result}} · {{confidence}}",
+    "",
+    "**Ticket**",
+    "[#{{ticketId}}]({{ticketUrl}})",
+    "{{subject}}",
+    "",
+    "**People**",
+    "Requester: {{requester}}",
+    "Assignee: {{assignee}}",
+    "",
+    "**Why**",
+    "{{reasons}}",
+    "",
+    "**AI Note**",
+    "{{aiContent}}",
+    "",
+    "---",
+    "{{mention}}"
+  ].join("\n");
+}
+
 export function defaultZendeskSystemPrompt(): string {
   return [
     "You are an automated support agent connected to Zendesk.",
@@ -138,6 +164,11 @@ function normalizeSystemPrompt(value: unknown): string {
   const prompt = String(value || "").trim();
   if (!prompt || isLegacyDefaultZendeskSystemPrompt(prompt)) return defaultZendeskSystemPrompt();
   return prompt;
+}
+
+function normalizeDingTalkNotificationTemplate(value: unknown): string {
+  const template = String(value || "").trim();
+  return template || defaultDingTalkNotificationTemplate();
 }
 
 function defaultSettings(): ZendeskIntegrationSettings {
@@ -174,6 +205,7 @@ function defaultSettings(): ZendeskIntegrationSettings {
     dingtalkNotificationWebhookUrl: "",
     dingtalkNotificationRobotSecret: "",
     dingtalkNotificationFallbackUserIds: [],
+    dingtalkNotificationTemplate: defaultDingTalkNotificationTemplate(),
     systemPrompt: defaultZendeskSystemPrompt()
   };
 }
@@ -343,6 +375,7 @@ export class ZendeskSettingsStore {
       dingtalkNotificationWebhookUrl: String(input.dingtalkNotificationWebhookUrl || "").trim(),
       dingtalkNotificationRobotSecret: String(input.dingtalkNotificationRobotSecret || "").trim(),
       dingtalkNotificationFallbackUserIds: normalizeIdList(input.dingtalkNotificationFallbackUserIds),
+      dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(input.dingtalkNotificationTemplate),
       systemPrompt: normalizeSystemPrompt(input.systemPrompt),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser

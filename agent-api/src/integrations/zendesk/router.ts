@@ -67,6 +67,7 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         dingtalkNotificationRobotSecret:
           input.dingtalk_notification_robot_secret === undefined ? undefined : String(input.dingtalk_notification_robot_secret || "").trim(),
         dingtalkNotificationFallbackUserIds: normalizeStringArray(input.dingtalk_notification_fallback_user_ids),
+        dingtalkNotificationTemplate: input.dingtalk_notification_template,
         systemPrompt: input.system_prompt
       };
       const overview = instanceId ? await service.updateSettings(patch, instanceId) : await service.updateSettings(patch);

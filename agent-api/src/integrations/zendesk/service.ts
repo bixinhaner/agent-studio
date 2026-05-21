@@ -19,6 +19,7 @@ import {
 import type { ZendeskPromptKnowledgeSet } from "./prompt.js";
 import {
   computeWebhookUrl,
+  defaultDingTalkNotificationTemplate,
   findZendeskReadinessGaps,
   redactZendeskSettings,
   ZendeskSettingsStore
@@ -718,6 +719,7 @@ function resolveAction(
 }
 
 const MAX_DINGTALK_MARKDOWN_CHARS = 12000;
+const DINGTALK_TEMPLATE_PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
 function formatDingTalkPercent(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) return "Not provided";
@@ -743,6 +745,55 @@ function truncateDingTalkSection(value: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(0, maxChars - 34)).trimEnd()}\n\n[Content truncated for DingTalk.]`;
 }
 
+function formatDingTalkList(items: string[] | undefined): string {
+  if (!items?.length) return "- Not provided";
+  return items.map((item) => `- ${item.replace(/\s+/g, " ").trim()}`).join("\n");
+}
+
+function dingtalkTriggerLabel(source: "webhook" | "manual"): string {
+  return source === "manual" ? "Manual run" : "Zendesk webhook";
+}
+
+function stripInternalNoteEnvelope(value: string): string {
+  const normalized = value.trim();
+  const match = normalized.match(/\bInternal note:\s*([\s\S]*)/i);
+  return (match?.[1] || normalized).trim();
+}
+
+function dingTalkAiContent(input: {
+  decision: ZendeskAgentDecision;
+  action: Extract<ResolvedAction, { mode: "comment" }>;
+}): string {
+  if (input.action.publicReply) {
+    return (
+      trimOrUndefined(input.decision.body) ||
+      trimOrUndefined(input.action.body) ||
+      trimOrUndefined(input.decision.publicReplyPreview) ||
+      "No public reply was generated."
+    );
+  }
+
+  const internalNote =
+    trimOrUndefined(input.decision.internalNote) ||
+    trimOrUndefined(input.decision.body) ||
+    (trimOrUndefined(input.action.body) ? stripInternalNoteEnvelope(input.action.body) : undefined);
+  return internalNote || "No internal note was generated.";
+}
+
+function renderDingTalkTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(DINGTALK_TEMPLATE_PLACEHOLDER_RE, (_match, key: string) => values[key] ?? "");
+}
+
+function capDingTalkMarkdown(markdown: string, mentionText: string): string {
+  const normalized = markdown.trim();
+  if (normalized.length <= MAX_DINGTALK_MARKDOWN_CHARS) return normalized;
+
+  const mentionFooter = mentionText ? `\n\n---\n${mentionText}` : "";
+  const body = mentionFooter && normalized.endsWith(mentionFooter) ? normalized.slice(0, -mentionFooter.length) : normalized;
+  const maxBodyChars = Math.max(0, MAX_DINGTALK_MARKDOWN_CHARS - mentionFooter.length - 34);
+  return `${body.slice(0, maxBodyChars).trimEnd()}\n\n[Content truncated for DingTalk.]${mentionFooter}`;
+}
+
 function buildZendeskDingTalkMarkdown(input: {
   settings: ZendeskIntegrationSettings;
   context: ZendeskTicketContext;
@@ -757,34 +808,43 @@ function buildZendeskDingTalkMarkdown(input: {
   mentionLabel?: string;
 }): string {
   const ticket = input.context.ticket;
-  const mentionFooter = input.mentionLabel ? `\n\n---\n@${input.mentionLabel}` : "";
-  const reasons = input.decision.reasons?.length
-    ? input.decision.reasons.map((reason) => `- ${reason}`).join("\n")
-    : "- Not provided";
-  const headerLines = [
-    `### Zendesk #${input.ticketId} processed by AI`,
-    "",
-    `**Ticket:** [#${input.ticketId}](${input.ticketUrl})`,
-    `**Subject:** ${ticket.subject || "Untitled ticket"}`,
-    `**Requester:** ${zendeskUserDisplay(ticket.requester, "Unknown requester")}`,
-    `**Assignee:** ${zendeskUserDisplay(ticket.assignee)}`,
-    `**Result:** ${zendeskDecisionLabel(input.decision.decision, input.action.publicReply)}`,
-    `**Confidence:** ${formatDingTalkPercent(input.decision.confidence)}`,
-    `**Trigger:** ${input.source === "manual" ? "Manual run" : "Zendesk webhook"}`,
-    `**Requester Comment ID:** ${input.requesterComment.id}`,
-    "",
-    "#### Reasons",
-    reasons,
-    "",
-    "#### AI Generated Content"
-  ];
-  if (input.commentId) {
-    headerLines.splice(8, 0, `**Zendesk Comment ID:** ${input.commentId}`);
+  const template = trimOrUndefined(input.settings.dingtalkNotificationTemplate) || defaultDingTalkNotificationTemplate();
+  const mentionText = input.mentionLabel ? `@${input.mentionLabel}` : "";
+  const baseValues = {
+    ticketId: input.ticketId,
+    ticketUrl: input.ticketUrl,
+    subject: ticket.subject || "Untitled ticket",
+    requester: zendeskUserDisplay(ticket.requester, "Unknown requester"),
+    assignee: zendeskUserDisplay(ticket.assignee),
+    result: zendeskDecisionLabel(input.decision.decision, input.action.publicReply),
+    confidence: formatDingTalkPercent(input.decision.confidence),
+    trigger: dingtalkTriggerLabel(input.source),
+    commentId: input.commentId ? String(input.commentId) : "Not recorded",
+    requesterCommentId: String(input.requesterComment.id),
+    reasons: formatDingTalkList(input.decision.reasons),
+    publicReplyPreview: trimOrUndefined(input.decision.publicReplyPreview) || "Not provided",
+    mention: mentionText
+  };
+  const rawAiContent = dingTalkAiContent({ decision: input.decision, action: input.action });
+  const renderWithAiContent = (aiContent: string) => renderDingTalkTemplate(template, { ...baseValues, aiContent });
+  let markdown = renderWithAiContent(rawAiContent);
+  if (mentionText && !markdown.includes(mentionText)) {
+    markdown = `${markdown.trimEnd()}\n\n---\n${mentionText}`;
   }
-  const header = headerLines.join("\n");
-  const availableForBody = Math.max(1200, MAX_DINGTALK_MARKDOWN_CHARS - header.length - mentionFooter.length - 4);
-  const body = truncateDingTalkSection(input.action.body || input.decision.body || input.decision.internalNote || "No AI content was generated.", availableForBody);
-  return `${header}\n${body}${mentionFooter}`;
+
+  if (markdown.length > MAX_DINGTALK_MARKDOWN_CHARS) {
+    const withoutContent = renderWithAiContent("");
+    const availableForContent = Math.max(
+      1200,
+      MAX_DINGTALK_MARKDOWN_CHARS - withoutContent.length - (mentionText ? mentionText.length + 10 : 0) - 80
+    );
+    markdown = renderWithAiContent(truncateDingTalkSection(rawAiContent, availableForContent));
+    if (mentionText && !markdown.includes(mentionText)) {
+      markdown = `${markdown.trimEnd()}\n\n---\n${mentionText}`;
+    }
+  }
+
+  return capDingTalkMarkdown(markdown, mentionText);
 }
 
 function signedDingTalkWebhookUrl(webhookUrl: string, secret: string): string {
@@ -1385,7 +1445,7 @@ export class ZendeskIntegrationService {
       await postDingTalkRobotMarkdown({
         webhookUrl,
         robotSecret: input.settings.dingtalkNotificationRobotSecret,
-        title: `Zendesk #${input.ticketId} processed by AI`,
+        title: `Zendesk #${input.ticketId} - AI Update`,
         markdown,
         atUserIds
       });

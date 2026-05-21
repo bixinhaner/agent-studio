@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Collapse, Input, InputNumber, Segmented, Select, Space, Switch, Tag } from "antd";
+import ReactMarkdown from "react-markdown";
 
 import { fetchAdminUsers } from "../admin/api";
 import type { AdminUser } from "../admin/types";
@@ -105,6 +106,74 @@ const AGENT_MODE_PROMPT_TEMPLATE = [
   "- Include practical next steps for device, SIM, coverage, configuration, or platform-side investigation when relevant."
 ].join("\n");
 
+const DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE = [
+  "### Zendesk #{{ticketId}} - AI Update",
+  "",
+  "**Result**",
+  "{{result}} · {{confidence}}",
+  "",
+  "**Ticket**",
+  "[#{{ticketId}}]({{ticketUrl}})",
+  "{{subject}}",
+  "",
+  "**People**",
+  "Requester: {{requester}}",
+  "Assignee: {{assignee}}",
+  "",
+  "**Why**",
+  "{{reasons}}",
+  "",
+  "**AI Note**",
+  "{{aiContent}}",
+  "",
+  "---",
+  "{{mention}}"
+].join("\n");
+
+const DINGTALK_TEMPLATE_TOKENS = [
+  { token: "{{ticketId}}", label: "Ticket ID" },
+  { token: "{{ticketUrl}}", label: "Zendesk link" },
+  { token: "{{subject}}", label: "Ticket subject" },
+  { token: "{{requester}}", label: "Requester" },
+  { token: "{{assignee}}", label: "Assignee" },
+  { token: "{{result}}", label: "AI write result" },
+  { token: "{{confidence}}", label: "Confidence" },
+  { token: "{{trigger}}", label: "Manual/Webhook" },
+  { token: "{{commentId}}", label: "Zendesk comment ID" },
+  { token: "{{requesterCommentId}}", label: "Requester comment ID" },
+  { token: "{{reasons}}", label: "Reason bullets" },
+  { token: "{{aiContent}}", label: "Clean AI content" },
+  { token: "{{publicReplyPreview}}", label: "Public reply preview" },
+  { token: "{{mention}}", label: "Final @ mention" }
+];
+
+const DINGTALK_TEMPLATE_PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+
+const DINGTALK_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
+  ticketId: "45250",
+  ticketUrl: "https://example.zendesk.com/agent/tickets/45250",
+  subject: "VOLTE Calls sent to IBaciore are returning to SIP server creating a loop",
+  requester: "Dave George <dgeorge@aislecom.com>",
+  assignee: "Li Mingjian <limingjian@baicells.com>",
+  result: "Internal note",
+  confidence: "72%",
+  trigger: "Zendesk webhook",
+  commentId: "49467830868500",
+  requesterCommentId: "49387224386196",
+  reasons: [
+    "- Attachment shows SIP online UE but missing MSISDN in UE status.",
+    "- Ticket IMSI conflicts with screenshot IMSI.",
+    "- SIP routing loop needs live BaiCore SIP trunk configuration and logs before public commitment."
+  ].join("\n"),
+  aiContent: [
+    "Context is insufficient for a safe public reply.",
+    "",
+    "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
+  ].join("\n"),
+  publicReplyPreview: "We are checking the SIP routing path and the IMSI/MSISDN mapping before providing a final answer.",
+  mention: "@Li Mingjian"
+};
+
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -155,6 +224,18 @@ function normalizeZendeskChannelPrompt(value: unknown) {
   return prompt;
 }
 
+function normalizeDingTalkNotificationTemplate(value: unknown) {
+  const template = asString(value).trim();
+  return template || DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE;
+}
+
+function renderDingTalkTemplatePreview(template: string) {
+  return normalizeDingTalkNotificationTemplate(template).replace(
+    DINGTALK_TEMPLATE_PLACEHOLDER_RE,
+    (_match, key: string) => DINGTALK_TEMPLATE_SAMPLE_VALUES[key] ?? ""
+  );
+}
+
 function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
   return {
     enabled: asBoolean(detail.config.enabled),
@@ -184,6 +265,7 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     dingtalkNotificationWebhookUrlDraft: "",
     dingtalkNotificationRobotSecretDraft: "",
     dingtalkNotificationFallbackUserIds: asStringArray(detail.config.dingtalkNotificationFallbackUserIds),
+    dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(detail.config.dingtalkNotificationTemplate),
     systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
@@ -322,6 +404,10 @@ export function ZendeskIntegrationView(props: {
         .filter((item) => Boolean(item.value)),
     [adminUsers]
   );
+  const dingtalkTemplatePreview = useMemo(
+    () => renderDingTalkTemplatePreview(draft.dingtalkNotificationTemplate),
+    [draft.dingtalkNotificationTemplate]
+  );
 
   async function handleSave() {
     if (draft.enabled && !draft.agentModeId.trim()) {
@@ -359,6 +445,7 @@ export function ZendeskIntegrationView(props: {
           dingtalkNotificationEnabled: draft.dingtalkNotificationEnabled,
           dingtalkNotificationManualRunsEnabled: draft.dingtalkNotificationManualRunsEnabled,
           dingtalkNotificationFallbackUserIds: asStringArray(draft.dingtalkNotificationFallbackUserIds),
+          dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(draft.dingtalkNotificationTemplate),
           systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
@@ -703,6 +790,59 @@ export function ZendeskIntegrationView(props: {
                           仅当 ticket 没有 assignee，或 assignee 无法映射到钉钉用户时，才 @ 这些 fallback 用户。
                         </span>
                       </label>
+                      <div className="field resource-center-form-span-2 zendesk-dingtalk-template-shell">
+                        <div className="zendesk-dingtalk-template-head">
+                          <div>
+                            <span className="field-label">Message Template</span>
+                            <span className="field-help">
+                              钉钉消息使用 Markdown；默认模板只展示结果、工单、人员、原因和干净的 AI 内容，避免重复堆字段。
+                            </span>
+                          </div>
+                          <Button
+                            size="small"
+                            disabled={saving || !draft.dingtalkNotificationEnabled}
+                            onClick={() =>
+                              setDraft((current) => ({
+                                ...current,
+                                dingtalkNotificationTemplate: DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE
+                              }))
+                            }
+                          >
+                            恢复默认
+                          </Button>
+                        </div>
+                        <div className="zendesk-dingtalk-template-grid">
+                          <div className="zendesk-dingtalk-template-editor">
+                            <Input.TextArea
+                              rows={16}
+                              value={draft.dingtalkNotificationTemplate}
+                              disabled={saving || !draft.dingtalkNotificationEnabled}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  dingtalkNotificationTemplate: event.target.value
+                                }))
+                              }
+                            />
+                            <div className="zendesk-template-token-list" aria-label="钉钉模板变量">
+                              {DINGTALK_TEMPLATE_TOKENS.map((item) => (
+                                <Tag key={item.token}>
+                                  {item.token} · {item.label}
+                                </Tag>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="zendesk-dingtalk-preview" aria-label="钉钉消息预览">
+                            <div className="zendesk-dingtalk-preview-toolbar">
+                              <strong>Live Preview</strong>
+                              <span>Sample ticket</span>
+                            </div>
+                            <div className="zendesk-dingtalk-preview-card">
+                              <ReactMarkdown>{dingtalkTemplatePreview}</ReactMarkdown>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )
                 },

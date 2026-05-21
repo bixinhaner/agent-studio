@@ -41,6 +41,7 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkNotificationWebhookUrl: "",
   dingtalkNotificationRobotSecret: "",
   dingtalkNotificationFallbackUserIds: [],
+  dingtalkNotificationTemplate: "",
   systemPrompt: "Return JSON."
 };
 
@@ -516,9 +517,10 @@ describe("ZendeskIntegrationService", () => {
         }
       });
       const firstDingTalkText = ((dingtalkPayloads[0].markdown as { text?: string } | undefined)?.text || "").trim();
-      expect(firstDingTalkText).toContain("### Zendesk #123 processed by AI");
-      expect(firstDingTalkText).toContain("#### AI Generated Content");
-      expect(firstDingTalkText).toContain("Public reply preview (not sent):");
+      expect(firstDingTalkText).toContain("### Zendesk #123 - AI Update");
+      expect(firstDingTalkText).toContain("**AI Note**");
+      expect(firstDingTalkText).toContain("Attachment checked.");
+      expect(firstDingTalkText).not.toContain("Public reply preview (not sent):");
       expect(firstDingTalkText).not.toContain("Agent Studio");
       expect(firstDingTalkText.endsWith("@Assignee Agent")).toBe(true);
       expect(recordUsage.mock.calls[0]?.[0]).toMatchObject({

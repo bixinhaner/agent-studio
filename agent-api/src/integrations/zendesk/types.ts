@@ -67,6 +67,7 @@ export type ZendeskIntegrationSettings = {
   dingtalkNotificationWebhookUrl: string;
   dingtalkNotificationRobotSecret: string;
   dingtalkNotificationFallbackUserIds: string[];
+  dingtalkNotificationTemplate: string;
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
@@ -227,6 +228,7 @@ export const zendeskSettingsUpdateSchema = z.object({
   dingtalk_notification_webhook_url: optionalStringSchema,
   dingtalk_notification_robot_secret: optionalStringSchema,
   dingtalk_notification_fallback_user_ids: optionalStringArraySchema,
+  dingtalk_notification_template: optionalStringSchema,
   system_prompt: optionalStringSchema
 });
 
