@@ -799,6 +799,91 @@ function stripInternalNoteEnvelope(value: string): string {
   return (match?.[1] || normalized).trim();
 }
 
+function splitZendeskCommentSection(body: string, label: string): { before: string; section: string; after: string } {
+  const pattern = new RegExp(`\\n\\n${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`, "i");
+  const match = pattern.exec(body);
+  if (!match || match.index < 0) {
+    return { before: body, section: "", after: "" };
+  }
+  return {
+    before: body.slice(0, match.index).trim(),
+    section: "",
+    after: body.slice(match.index + match[0].length).trim()
+  };
+}
+
+function splitKnownZendeskCommentSections(body: string): {
+  header: string;
+  publicReplyPreview: string;
+  internalNote: string;
+} {
+  const normalized = body.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return { header: "", publicReplyPreview: "", internalNote: "" };
+  }
+  const previewSplit = splitZendeskCommentSection(normalized, "Public reply preview (not sent):");
+  const internalSplit = splitZendeskCommentSection(previewSplit.after || previewSplit.before, "Internal note:");
+  if (previewSplit.after) {
+    return {
+      header: previewSplit.before,
+      publicReplyPreview: internalSplit.before,
+      internalNote: internalSplit.after
+    };
+  }
+  return {
+    header: internalSplit.before,
+    publicReplyPreview: "",
+    internalNote: internalSplit.after
+  };
+}
+
+function formatZendeskCommentHeaderForDingTalk(header: string): string {
+  const lines = header.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return "";
+  const output: string[] = [];
+  const status = lines[0] || "";
+  if (status) {
+    output.push("**Status**", status);
+  }
+  const confidence = lines.find((line) => /^Confidence:/i.test(line));
+  if (confidence) {
+    output.push("", "**Confidence**", confidence.replace(/^Confidence:\s*/i, "").trim() || "-");
+  }
+  const reasons = lines.find((line) => /^Reasons:/i.test(line));
+  if (reasons) {
+    const items = reasons
+      .replace(/^Reasons:\s*/i, "")
+      .split(/\s*;\s*/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    output.push("", "**Reasons**", items.length ? items.map((item) => `- ${item}`).join("\n") : "-");
+  }
+  const remaining = lines.filter((line, index) => index > 0 && !/^Confidence:/i.test(line) && !/^Reasons:/i.test(line));
+  if (remaining.length > 0) {
+    output.push("", remaining.join("\n"));
+  }
+  return output.join("\n");
+}
+
+function formatZendeskCommentForDingTalkMarkdown(body: string, publicReply: boolean): string {
+  const normalized = body.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "No Zendesk comment body was generated.";
+  if (publicReply) {
+    return ["**Public Reply Sent**", normalized].join("\n");
+  }
+  const sections = splitKnownZendeskCommentSections(normalized);
+  const output: string[] = [];
+  const header = formatZendeskCommentHeaderForDingTalk(sections.header);
+  if (header) output.push(header);
+  if (sections.publicReplyPreview) {
+    output.push("", "**Public Reply Preview (not sent)**", sections.publicReplyPreview);
+  }
+  if (sections.internalNote) {
+    output.push("", "**Internal Note**", sections.internalNote);
+  }
+  return output.length ? output.join("\n").trim() : normalized;
+}
+
 function dingTalkAiContent(input: {
   decision: ZendeskAgentDecision;
   action: Extract<ResolvedAction, { mode: "comment" }>;
@@ -877,6 +962,9 @@ function buildZendeskDingTalkMarkdown(input: {
     requesterCommentId: String(input.requesterComment.id),
     reasons: formatDingTalkList(input.decision.reasons),
     publicReplyPreview: trimOrUndefined(input.decision.publicReplyPreview) || "Not provided",
+    internalNote: trimOrUndefined(input.decision.internalNote) || "Not provided",
+    zendeskCommentBody: trimOrUndefined(input.action.body) || "No Zendesk comment body was generated.",
+    zendeskCommentMarkdown: formatZendeskCommentForDingTalkMarkdown(input.action.body, input.action.publicReply),
     mention: mentionText,
     mentionLabel
   };

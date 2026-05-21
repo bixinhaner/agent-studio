@@ -107,24 +107,17 @@ const AGENT_MODE_PROMPT_TEMPLATE = [
 ].join("\n");
 
 const DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE = [
-  "### Zendesk #{{ticketId}} - AI Update",
+  "### Zendesk #{{ticketId}} · {{result}}",
   "",
-  "**Result**",
-  "{{result}} · {{confidence}}",
-  "",
-  "**Ticket**",
   "[#{{ticketId}}]({{ticketUrl}})",
   "{{subject}}",
   "",
-  "**People**",
-  "Requester: {{requester}}",
-  "Assignee: {{assignee}}",
+  "**Requester:** {{requester}}",
+  "**Assignee:** {{assignee}}",
   "",
-  "**Why**",
-  "{{reasons}}",
+  "---",
   "",
-  "**AI Note**",
-  "{{aiContent}}",
+  "{{zendeskCommentMarkdown}}",
   "",
   "---",
   "{{mention}}"
@@ -144,6 +137,9 @@ const DINGTALK_TEMPLATE_TOKENS = [
   { token: "{{reasons}}", label: "Reason bullets" },
   { token: "{{aiContent}}", label: "Clean AI content" },
   { token: "{{publicReplyPreview}}", label: "Public reply preview" },
+  { token: "{{internalNote}}", label: "Agent internal note" },
+  { token: "{{zendeskCommentBody}}", label: "Exact Zendesk comment" },
+  { token: "{{zendeskCommentMarkdown}}", label: "Formatted Zendesk comment" },
   { token: "{{mention}}", label: "Real @ userId token" },
   { token: "{{mentionLabel}}", label: "Display name only" }
 ];
@@ -172,6 +168,44 @@ const DINGTALK_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
     "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
   ].join("\n"),
   publicReplyPreview: "We are checking the SIP routing path and the IMSI/MSISDN mapping before providing a final answer.",
+  internalNote: [
+    "Context is insufficient for a safe public reply.",
+    "",
+    "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
+  ].join("\n"),
+  zendeskCommentBody: [
+    "AI generated an internal note.",
+    "Confidence: 72%",
+    "Reasons: Attachment shows SIP online UE but missing MSISDN in UE status; Ticket IMSI conflicts with screenshot IMSI; SIP routing loop needs live BaiCore SIP trunk configuration and logs before public commitment.",
+    "",
+    "Public reply preview (not sent):",
+    "We are checking the SIP routing path and the IMSI/MSISDN mapping before providing a final answer.",
+    "",
+    "Internal note:",
+    "Context is insufficient for a safe public reply.",
+    "",
+    "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
+  ].join("\n"),
+  zendeskCommentMarkdown: [
+    "**Status**",
+    "AI generated an internal note.",
+    "",
+    "**Confidence**",
+    "72%",
+    "",
+    "**Reasons**",
+    "- Attachment shows SIP online UE but missing MSISDN in UE status.",
+    "- Ticket IMSI conflicts with screenshot IMSI.",
+    "- SIP routing loop needs live BaiCore SIP trunk configuration and logs before public commitment.",
+    "",
+    "**Public Reply Preview (not sent)**",
+    "We are checking the SIP routing path and the IMSI/MSISDN mapping before providing a final answer.",
+    "",
+    "**Internal Note**",
+    "Context is insufficient for a safe public reply.",
+    "",
+    "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
+  ].join("\n"),
   mention: "@manager422*****",
   mentionLabel: "@Li Mingjian"
 };
