@@ -7,25 +7,13 @@ import type {
   CreateCostProfileInput,
   CreateQuotaPolicyInput,
   CostProfileListResponse,
-  MonitoringOverviewResponse,
-  MonitoringRankingsResponse,
   NotificationRecordListResponse,
   OperationsInsightsResponse,
   QuotaPolicyListResponse,
-  ResourceAccessLogResponse,
   UpdateAlertRuleInput,
   UpdateCostProfileInput,
-  UpdateQuotaPolicyInput,
-  UsageEventResponse
+  UpdateQuotaPolicyInput
 } from "./types";
-
-export async function fetchMonitoringOverview(): Promise<MonitoringOverviewResponse> {
-  return api<MonitoringOverviewResponse>("/api/admin/monitoring/overview");
-}
-
-export async function fetchMonitoringRankings(): Promise<MonitoringRankingsResponse> {
-  return api<MonitoringRankingsResponse>("/api/admin/monitoring/rankings");
-}
 
 export async function fetchOperationsInsights(input: {
   days?: number;
@@ -54,19 +42,6 @@ export async function fetchOperationsInsights(input: {
   if (input.sessionSortDirection) query.set("sessionSortDirection", input.sessionSortDirection);
   const suffix = query.toString();
   return api<OperationsInsightsResponse>(`/api/admin/monitoring/operations-insights${suffix ? `?${suffix}` : ""}`);
-}
-
-export async function fetchMonitoringTrends(): Promise<MonitoringOverviewResponse["trends"]> {
-  const response = await api<MonitoringOverviewResponse>("/api/admin/monitoring/trends");
-  return response.trends;
-}
-
-export async function fetchResourceAccessLogs(): Promise<ResourceAccessLogResponse> {
-  return api<ResourceAccessLogResponse>("/api/admin/monitoring/resource-access-logs");
-}
-
-export async function fetchUsageEvents(): Promise<UsageEventResponse> {
-  return api<UsageEventResponse>("/api/admin/monitoring/usage-events");
 }
 
 export async function fetchQuotaPolicies(): Promise<QuotaPolicyListResponse> {

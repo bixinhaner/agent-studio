@@ -11,8 +11,7 @@ export type AdminSection =
   | "integrations"
   | "system-settings"
   | "organization"
-  | "rbac"
-  | "monitoring";
+  | "rbac";
 
 export type AdminOverview = {
   counts: {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
-import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2 } from "lucide-react";
+import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge } from "lucide-react";
 
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
 import { ArtifactAccessSettingsView } from "./ArtifactAccessSettingsView";
@@ -10,6 +10,7 @@ import { OrganizationDefaultsView } from "./OrganizationDefaultsView";
 import { PublishHistoryView } from "./PublishHistoryView";
 import { RetentionUploadView } from "./RetentionUploadView";
 import { SafetySettingsView } from "./SafetySettingsView";
+import { UsageGovernanceSettingsView } from "./UsageGovernanceSettingsView";
 import type {
   SystemSettingsFieldErrors,
   SystemSettingsPayload,
@@ -26,6 +27,7 @@ const SECTIONS: Array<{ id: SystemSettingsSection; label: string; icon: any; gro
   { id: "retention-upload", label: "保留与上传", icon: HardDrive, group: 'Security & Data' },
   { id: "artifact-access", label: "外部文件访问", icon: FileCheck2, group: 'Security & Data' },
   { id: "safety", label: "安全策略", icon: ShieldCheck, group: 'Security & Data' },
+  { id: "usage-governance", label: "用量治理", icon: Gauge, group: 'Operations' },
   { id: "publish-history", label: "发布记录", icon: History, group: 'System' }
 ];
 
@@ -304,6 +306,7 @@ export function SystemSettingsShell() {
   ].filter(Boolean).length;
 
   const currentSectionItem = SECTIONS.find((item) => item.id === section);
+  const isDraftBackedSection = section !== "usage-governance";
   
   // Group SECTIONS
   const groups = Array.from(new Set(SECTIONS.map(s => s.group)));
@@ -344,12 +347,16 @@ export function SystemSettingsShell() {
             <Typography.Title level={4} style={{ margin: '0 0 4px 0', fontSize: 20 }}>
               {currentSectionItem?.label}
             </Typography.Title>
-            <Space size={16}>
-              <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>草稿 {formatVersionLabel(draftMeta)}</span>
-              {publishedMeta && <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>发布 {formatVersionLabel(publishedMeta)}</span>}
-            </Space>
+            {isDraftBackedSection ? (
+              <Space size={16}>
+                <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>草稿 {formatVersionLabel(draftMeta)}</span>
+                {publishedMeta && <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>发布 {formatVersionLabel(publishedMeta)}</span>}
+              </Space>
+            ) : (
+              <span style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>即时生效配置，不进入草稿发布流</span>
+            )}
           </div>
-          {changedAreaCount > 0 && (
+          {isDraftBackedSection && changedAreaCount > 0 && (
             <Tag color="processing" style={{ borderRadius: 12 }}>
               有 {changedAreaCount} 项未发布变更
             </Tag>
@@ -386,40 +393,43 @@ export function SystemSettingsShell() {
           {section === "organization-defaults" && (
             <OrganizationDefaultsView value={draftPayload.organizationDefaults} fieldErrors={fieldErrors} disabled={saving || publishing} onChange={updateDraftOrganization} />
           )}
+          {section === "usage-governance" && <UsageGovernanceSettingsView />}
           {section === "publish-history" && (
             <PublishHistoryView draftMeta={draftMeta} publishedMeta={publishedMeta} />
           )}
         </div>
 
         {/* Footer Actions */}
-        <div className="admin-floating-action-bar">
-          <div style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>
-            自动保存草稿于 {formatLocalDateTime(draftMeta.updatedAt)}
+        {isDraftBackedSection ? (
+          <div className="admin-floating-action-bar">
+            <div style={{ fontSize: 13, color: 'var(--admin-color-subtle)' }}>
+              自动保存草稿于 {formatLocalDateTime(draftMeta.updatedAt)}
+            </div>
+            <Space>
+              <Button disabled={loading || saving || publishing} onClick={reloadSettings}>
+                放弃更改
+              </Button>
+              <Button 
+                type="default" 
+                icon={<Save size={16} />} 
+                disabled={saving || publishing} 
+                onClick={handleSaveDraft}
+                loading={saving}
+              >
+                保存草稿
+              </Button>
+              <Button 
+                type="primary" 
+                icon={<Send size={16} />} 
+                disabled={saving || publishing || changedAreaCount === 0} 
+                onClick={handlePublish}
+                loading={publishing}
+              >
+                应用并发布
+              </Button>
+            </Space>
           </div>
-          <Space>
-            <Button disabled={loading || saving || publishing} onClick={reloadSettings}>
-              放弃更改
-            </Button>
-            <Button 
-              type="default" 
-              icon={<Save size={16} />} 
-              disabled={saving || publishing} 
-              onClick={handleSaveDraft}
-              loading={saving}
-            >
-              保存草稿
-            </Button>
-            <Button 
-              type="primary" 
-              icon={<Send size={16} />} 
-              disabled={saving || publishing || changedAreaCount === 0} 
-              onClick={handlePublish}
-              loading={publishing}
-            >
-              应用并发布
-            </Button>
-          </Space>
-        </div>
+        ) : null}
       </div>
     </div>
   );

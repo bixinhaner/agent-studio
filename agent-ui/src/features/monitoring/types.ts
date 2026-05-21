@@ -1,43 +1,3 @@
-export type MonitoringOverviewMetrics = {
-  totalEstimatedCost: string;
-  totalInternalCost: string;
-  totalRequests: number;
-  totalUsageEvents: number;
-  totalResourceAccessLogs: number;
-  openAlertCount: number;
-  acknowledgedAlertCount: number;
-  notificationCount: number;
-};
-
-export type MonitoringTrendPoint = {
-  rollupDate: string;
-  requestCount: number;
-  successCount: number;
-  failureCount: number;
-  estimatedCost: string;
-  internalCost: string;
-};
-
-export type MonitoringOverviewResponse = {
-  overview: MonitoringOverviewMetrics;
-  trends: MonitoringTrendPoint[];
-};
-
-export type MonitoringRankingRow = {
-  requestCount: number;
-  estimatedCost: string;
-  internalCost: string;
-};
-
-export type MonitoringRankingsResponse = {
-  rankings: {
-    topUsers: Array<MonitoringRankingRow & { userId: string }>;
-    topDepartments: Array<MonitoringRankingRow & { departmentId: string }>;
-    topModels: Array<MonitoringRankingRow & { model: string }>;
-    topFeatures: Array<MonitoringRankingRow & { featureType: string }>;
-  };
-};
-
 export type OperationsInsightsFilters = {
   days: number;
   timeZone: string;
@@ -189,45 +149,6 @@ export type OperationsInsightsResponse = {
     totalItems: number;
     totalPages: number;
   };
-};
-
-export type ResourceAccessLogRecord = {
-  id: string;
-  userId: string | null;
-  departmentIdSnapshot: string | null;
-  threadId: string | null;
-  sessionId: string | null;
-  resourceType: string;
-  resourceId: string;
-  actionType: string;
-  resultStatus: string;
-  metadata?: unknown;
-  createdAt: string;
-};
-
-export type ResourceAccessLogResponse = {
-  resourceAccessLogs: ResourceAccessLogRecord[];
-};
-
-export type UsageEventRecord = {
-  id: string;
-  userId: string | null;
-  departmentIdSnapshot: string | null;
-  threadId: string | null;
-  sessionId: string | null;
-  model: string;
-  featureType: string;
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  estimatedCost: string;
-  internalCost: string;
-  resultStatus: string;
-  createdAt: string;
-};
-
-export type UsageEventResponse = {
-  usageEvents: UsageEventRecord[];
 };
 
 export type QuotaPolicyRecord = {

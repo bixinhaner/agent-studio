@@ -5,6 +5,7 @@ export type SystemSettingsSection =
   | "artifact-access"
   | "safety"
   | "organization-defaults"
+  | "usage-governance"
   | "publish-history";
 
 export type SystemSettingsBranding = {

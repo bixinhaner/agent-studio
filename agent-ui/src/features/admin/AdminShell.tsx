@@ -1,5 +1,4 @@
 import {
-  Activity,
   ArrowRight,
   BarChart3,
   Bell,
@@ -35,9 +34,6 @@ import { ADMIN_PREMIUM_THEME } from "./admin-theme";
 import type { AdminOverview, AdminSection } from "./types";
 import "./admin-console.css";
 
-const MonitoringShellLazy = lazy(() =>
-  import("../monitoring/MonitoringShell").then((module) => ({ default: module.MonitoringShell }))
-);
 const OperationsAnalyticsViewLazy = lazy(() =>
   import("../monitoring/OperationsAnalyticsView").then((module) => ({ default: module.OperationsAnalyticsView }))
 );
@@ -102,9 +98,9 @@ type AdminNavigationGroupView = AdminGroupMeta & {
 const ADMIN_HASH_PREFIX = "#admin/";
 
 const GROUPS: AdminGroupMeta[] = [
-  { id: "operations", label: "运营总览", description: "平台状态、监控告警与广播运营。" },
+  { id: "operations", label: "运营总览", description: "平台状态、运营分析与广播运营。" },
   { id: "governance", label: "组织治理", description: "用户、组织结构和权限审计。" },
-  { id: "runtime", label: "运行能力", description: "资源、能力、集成和系统默认策略。" }
+  { id: "runtime", label: "运行能力", description: "资源、能力、集成、用量治理和系统默认策略。" }
 ];
 
 const SECTION_ORDER: AdminConsoleSection[] = [
@@ -113,7 +109,6 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "conversations",
   "subscriptions",
   "access-requests",
-  "monitoring",
   "broadcasts",
   "users",
   "organization",
@@ -175,16 +170,6 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["trial", "access", "申请", "审核", "开通"],
     icon: <FileUser size={18} />
-  },
-  monitoring: {
-    id: "monitoring",
-    title: "审计监控",
-    description: "追踪请求、成本、配额、告警和资源访问轨迹。",
-    scope: "运行审计",
-    cadence: "建议持续观察",
-    group: "operations",
-    keywords: ["监控", "告警", "成本"],
-    icon: <Activity size={18} />
   },
   broadcasts: {
     id: "broadcasts",
@@ -269,11 +254,11 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   "system-settings": {
     id: "system-settings",
     title: "系统配置",
-    description: "维护平台默认参数、策略开关和版本发布记录。",
-    scope: "平台默认参数",
+    description: "维护平台默认参数、用量治理策略和版本发布记录。",
+    scope: "平台默认参数与治理策略",
     cadence: "变更前评审后发布",
     group: "runtime",
-    keywords: ["系统", "配置"],
+    keywords: ["系统", "配置", "定价", "配额", "告警", "用量"],
     icon: <Settings size={18} />
   }
 };
@@ -287,6 +272,7 @@ function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
   const rawValue = hash.slice(ADMIN_HASH_PREFIX.length).split("?")[0] ?? "";
   const value = decodeURIComponent(rawValue).trim();
+  if (value === "monitoring") return "analytics";
   if (!SECTION_ORDER.includes(value as AdminConsoleSection)) return null;
   return value as AdminConsoleSection;
 }
@@ -572,12 +558,6 @@ function AdminSectionContent(props: {
             </Row>
           </div>
         </div>
-      );
-    case "monitoring":
-      return (
-        <Suspense fallback={<AdminSectionLazyFallback />}>
-          <MonitoringShellLazy />
-        </Suspense>
       );
     default:
       return null;
