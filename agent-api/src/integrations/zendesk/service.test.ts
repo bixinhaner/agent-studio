@@ -591,6 +591,186 @@ describe("ZendeskIntegrationService", () => {
     }
   });
 
+  it("uses the Agent Studio runtime session bridge before the legacy Zendesk codex thread binding", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/321.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 321,
+              subject: "Runtime session ticket",
+              description: "Customer asks for a config check.",
+              status: "open",
+              requester_id: 9001,
+              updated_at: "2026-05-20T02:00:00Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/321/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 301,
+                author_id: 9001,
+                body: "Please check the current config.",
+                public: true,
+                created_at: "2026-05-20T02:01:00Z",
+                attachments: []
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 9001,
+              name: "Requester",
+              email: "requester@example.com",
+              role: "end-user"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/321.json") && init?.method === "PUT") {
+        return new Response(JSON.stringify({ audit: { events: [{ id: 9000000000321, type: "Comment" }] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = {
+      startThreadWithOptions: vi.fn(async () => ({ id: "fallback-codex-thread" })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "legacy-broken-codex", resumed: true })),
+      runStreamed: vi.fn(async function* () {
+        yield {
+          type: "thread.started",
+          raw: {
+            thread_id: "session-codex-new"
+          }
+        };
+        yield {
+          type: "message",
+          text: JSON.stringify({
+            decision: "internal_note",
+            internalNote: "Handled through the Agent Studio runtime session.",
+            confidence: 0.75,
+            reasons: ["runtime session bridge"]
+          })
+        };
+      })
+    };
+    const runtimeSession = {
+      acquire: vi.fn(async () => ({
+        thread: { id: "session-codex-old" },
+        sessionId: "runtime-session-1",
+        codexThreadId: "session-codex-old",
+        status: "restored" as const
+      })),
+      replace: vi.fn(async () => undefined),
+      persistCodexThreadId: vi.fn(async (input: { lease: { thread: unknown }; codexThreadId: string }) => ({
+        ...input.lease,
+        codexThreadId: input.codexThreadId
+      }))
+    };
+    const bindingRecords = new Map([
+      [
+        "zendesk-1:321",
+        {
+          ticketId: "321",
+          instanceId: "zendesk-1",
+          codexThreadId: "legacy-broken-codex",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ]
+    ]);
+    const bindingStore = {
+      get: vi.fn(async (ticketId: string, instanceId?: string) => bindingRecords.get(`${instanceId || "legacy"}:${ticketId}`)),
+      upsert: vi.fn(async (ticketId: string, patch: Record<string, unknown>, instanceId?: string) => {
+        const key = `${instanceId || "legacy"}:${ticketId}`;
+        const current = bindingRecords.get(key)!;
+        const next = { ...current, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) };
+        bindingRecords.set(key, next);
+        return next;
+      })
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-session-1",
+        instanceId: "zendesk-1",
+        ticketId: "321",
+        source: "manual" as const,
+        status: "received" as const,
+        detail: "received",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async () => undefined),
+      listForInstance: vi.fn(async () => [])
+    };
+    const conversationAudit = {
+      beforeAgentRun: vi.fn(async () => ({
+        threadId: "audit-thread-321",
+        userMessageId: "audit-user-321",
+        externalConversationKey: "zendesk:zendesk-1:ticket:321:mode-1"
+      })),
+      afterAgentRun: vi.fn(async (_input: unknown) => undefined)
+    };
+
+    const service = new ZendeskIntegrationService(
+      {
+        resolveAgentRuntime: vi.fn(async () => ({
+          runtime: runtime as never,
+          model: "gpt-5.5",
+          reasoningEffort: "high" as const,
+          workspace: "/tmp/zendesk-runtime-session",
+          codexRunConfig: {}
+        })),
+        conversationAudit,
+        runtimeSession
+      },
+      {
+        getForInstance: vi.fn(async () => ({
+          ...baseSettings,
+          zendeskBaseUrl: "https://example.zendesk.com",
+          zendeskEmail: "agent@example.com",
+          zendeskApiToken: "token"
+        }))
+      } as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    await service.runTicket("321", "zendesk-1");
+
+    expect(runtimeSession.acquire).toHaveBeenCalledWith(expect.objectContaining({ ticketId: "321" }));
+    expect(runtime.resumeThreadWithOptions).not.toHaveBeenCalled();
+    expect(runtime.startThreadWithOptions).not.toHaveBeenCalled();
+    expect(runtimeSession.persistCodexThreadId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexThreadId: "session-codex-new"
+      })
+    );
+    expect(bindingRecords.get("zendesk-1:321")).toMatchObject({
+      codexThreadId: "session-codex-new",
+      workspacePath: "/tmp/zendesk-runtime-session"
+    });
+    const processRows = (conversationAudit.afterAgentRun.mock.calls[0]?.[0] as { processRows?: Array<{ title?: string }> }).processRows ?? [];
+    expect(processRows).toEqual(expect.arrayContaining([expect.objectContaining({ title: "Resolved Agent Studio runtime session" })]));
+  });
+
   it("processes missed call transcripts as forced internal notes", async () => {
     const prompts: string[] = [];
     const ticketUpdates: unknown[] = [];

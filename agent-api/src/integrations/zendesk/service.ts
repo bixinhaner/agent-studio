@@ -184,6 +184,45 @@ type ZendeskRuntimeLike = {
   runStreamed(thread: ZendeskRuntimeThread, message: string): AsyncGenerator<{ type: string; delta?: string; text?: string; raw?: unknown }>;
 };
 
+type ZendeskRuntimeSessionInput = {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  binding?: ZendeskBindingRecord;
+  audit?: ZendeskConversationAuditState;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+  runtime: ZendeskRuntimeLike;
+  runtimeOptions: Omit<ZendeskAgentRuntimeOptions, "runtime">;
+};
+
+type ZendeskRuntimeSessionLease = {
+  thread: ZendeskRuntimeThread;
+  sessionId?: string;
+  codexThreadId?: string;
+  status?: "started" | "restored" | "replaced";
+  detail?: string;
+};
+
+type ZendeskRuntimeSessionBridge = {
+  acquire(input: ZendeskRuntimeSessionInput): Promise<ZendeskRuntimeSessionLease | undefined>;
+  replace(
+    input: ZendeskRuntimeSessionInput & {
+      previous?: ZendeskRuntimeSessionLease;
+      failedCodexThreadId?: string;
+      error?: unknown;
+    }
+  ): Promise<ZendeskRuntimeSessionLease | undefined>;
+  persistCodexThreadId?(
+    input: ZendeskRuntimeSessionInput & {
+      lease: ZendeskRuntimeSessionLease;
+      codexThreadId: string;
+    }
+  ): Promise<ZendeskRuntimeSessionLease | undefined | void>;
+};
+
 type ZendeskAgentRunResult = {
   answerText: string;
   preparedContext: ZendeskTicketContext;
@@ -989,6 +1028,7 @@ export class ZendeskIntegrationService {
         ticketId: string;
       }) => Promise<ZendeskDingTalkMentionTarget | undefined>;
       conversationAudit?: ZendeskConversationAuditSync;
+      runtimeSession?: ZendeskRuntimeSessionBridge;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
@@ -1603,10 +1643,44 @@ export class ZendeskIntegrationService {
       source: run.source,
       runtime: publicRuntimeOptions
     });
+    const runtimeSessionInput: ZendeskRuntimeSessionInput = {
+      settings,
+      context: preparedContext,
+      requesterComment,
+      binding,
+      audit,
+      instanceId: run.instanceId,
+      ticketId: run.ticketId,
+      runId: run.runId,
+      source: run.source,
+      runtime,
+      runtimeOptions: publicRuntimeOptions
+    };
     let observedCodexThreadId = trimOrUndefined(binding?.codexThreadId);
     let thread: ZendeskRuntimeThread | undefined;
+    let runtimeSessionLease: ZendeskRuntimeSessionLease | undefined;
 
-    if (observedCodexThreadId) {
+    runtimeSessionLease = await this.dependencies.runtimeSession?.acquire(runtimeSessionInput);
+    if (runtimeSessionLease?.thread) {
+      thread = runtimeSessionLease.thread;
+      observedCodexThreadId = trimOrUndefined(runtimeSessionLease.codexThreadId) || observedCodexThreadId;
+      processRows.push(
+        zendeskProcessRow(
+          "meta",
+          "Resolved Agent Studio runtime session",
+          [
+            runtimeSessionLease.status ? `status: ${runtimeSessionLease.status}` : "",
+            runtimeSessionLease.sessionId ? `session_id: ${runtimeSessionLease.sessionId}` : "",
+            observedCodexThreadId ? `codex_thread_id: ${observedCodexThreadId}` : "",
+            runtimeSessionLease.detail ? `detail: ${runtimeSessionLease.detail}` : ""
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
+    }
+
+    if (!thread && observedCodexThreadId) {
       try {
         thread = await runtime.resumeThreadWithOptions({
           threadId: observedCodexThreadId,
@@ -1672,7 +1746,18 @@ export class ZendeskIntegrationService {
       let runOutput = "";
       let runUsage: RuntimeUsageSnapshot | undefined;
       for await (const event of runtime.runStreamed(currentThread, prompt)) {
-        observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
+        const eventCodexThreadId = extractCodexThreadIdFromEvent(event);
+        if (eventCodexThreadId) {
+          observedCodexThreadId = eventCodexThreadId;
+          if (runtimeSessionLease && this.dependencies.runtimeSession?.persistCodexThreadId) {
+            const persisted = await this.dependencies.runtimeSession.persistCodexThreadId({
+              ...runtimeSessionInput,
+              lease: runtimeSessionLease,
+              codexThreadId: eventCodexThreadId
+            });
+            runtimeSessionLease = persisted || runtimeSessionLease;
+          }
+        }
         runUsage = extractRuntimeUsageFromStreamEvent(event) || runUsage;
         collectRuntimeProcessRow(event, processRows);
         if (event.delta) runOutput += event.delta;
@@ -1697,22 +1782,48 @@ export class ZendeskIntegrationService {
             .join("\n")
         )
       );
-      thread = await runtime.startThreadWithOptions({
-        model: runtimeOptions.model,
-        reasoningEffort: runtimeOptions.reasoningEffort,
-        workspace: runtimeOptions.workspace,
-        codexRunConfig: stripInternalRunConfigMetadata(runtimeOptions.codexRunConfig)
+      const replacementLease = await this.dependencies.runtimeSession?.replace({
+        ...runtimeSessionInput,
+        previous: runtimeSessionLease,
+        failedCodexThreadId: failedThreadId,
+        error
       });
-      observedCodexThreadId = extractCodexThreadIdFromThread(thread) || undefined;
-      processRows.push(
-        zendeskProcessRow(
-          "meta",
-          "Started replacement Codex thread",
-          [failedThreadId ? `failed_thread_id: ${failedThreadId}` : "", observedCodexThreadId ? `thread_id: ${observedCodexThreadId}` : ""]
-            .filter(Boolean)
-            .join("\n")
-        )
-      );
+      if (replacementLease?.thread) {
+        runtimeSessionLease = replacementLease;
+        thread = replacementLease.thread;
+        observedCodexThreadId = trimOrUndefined(replacementLease.codexThreadId) || undefined;
+        processRows.push(
+          zendeskProcessRow(
+            "meta",
+            "Started replacement Agent Studio runtime session",
+            [
+              failedThreadId ? `failed_codex_thread_id: ${failedThreadId}` : "",
+              replacementLease.sessionId ? `session_id: ${replacementLease.sessionId}` : "",
+              observedCodexThreadId ? `codex_thread_id: ${observedCodexThreadId}` : "",
+              replacementLease.detail ? `detail: ${replacementLease.detail}` : ""
+            ]
+              .filter(Boolean)
+              .join("\n")
+          )
+        );
+      } else {
+        thread = await runtime.startThreadWithOptions({
+          model: runtimeOptions.model,
+          reasoningEffort: runtimeOptions.reasoningEffort,
+          workspace: runtimeOptions.workspace,
+          codexRunConfig: stripInternalRunConfigMetadata(runtimeOptions.codexRunConfig)
+        });
+        observedCodexThreadId = extractCodexThreadIdFromThread(thread) || undefined;
+        processRows.push(
+          zendeskProcessRow(
+            "meta",
+            "Started replacement Codex thread",
+            [failedThreadId ? `failed_thread_id: ${failedThreadId}` : "", observedCodexThreadId ? `thread_id: ${observedCodexThreadId}` : ""]
+              .filter(Boolean)
+              .join("\n")
+          )
+        );
+      }
       await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
         codexThreadId: observedCodexThreadId,
         workspacePath: runtimeOptions.workspace,

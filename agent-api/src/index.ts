@@ -384,6 +384,7 @@ const zendesk = new ZendeskIntegrationService({
     beforeAgentRun: syncZendeskConversationBeforeAgentRun,
     afterAgentRun: syncZendeskConversationAfterAgentRun
   },
+  runtimeSession: createZendeskRuntimeSessionBridge(),
   async recordUsage(input) {
     const integration = input.instanceId
       ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })
@@ -2940,6 +2941,147 @@ async function syncZendeskConversationAfterAgentRun(input: {
       }
     });
   }
+}
+
+type ZendeskServiceDependencies = NonNullable<ConstructorParameters<typeof ZendeskIntegrationService>[0]>;
+type ZendeskRuntimeSessionBridge = NonNullable<ZendeskServiceDependencies["runtimeSession"]>;
+type ZendeskRuntimeSessionInput = Parameters<ZendeskRuntimeSessionBridge["acquire"]>[0];
+type ZendeskRuntimeSessionLease = NonNullable<Awaited<ReturnType<ZendeskRuntimeSessionBridge["acquire"]>>>;
+
+async function resolveZendeskRuntimeSessionThread(
+  input: ZendeskRuntimeSessionInput
+): Promise<ThreadRecord | undefined> {
+  const threadId = trimOrUndefined(input.audit?.threadId);
+  if (!threadId) return undefined;
+  const integration = input.instanceId
+    ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })
+    : null;
+  return await threads.get(threadId, integration?.organizationId ?? undefined);
+}
+
+function zendeskDesiredRuntimeConfig(input: ZendeskRuntimeSessionInput, thread: ThreadRecord): Record<string, unknown> | undefined {
+  return ensureThreadUploadDirsInRunConfig(input.runtimeOptions.codexRunConfig, thread.id, input.runtimeOptions.workspace);
+}
+
+async function materializeZendeskRuntimeConfig(input: ZendeskRuntimeSessionInput, thread: ThreadRecord): Promise<{
+  codexHome: string;
+  codexRunConfig?: Record<string, unknown>;
+}> {
+  await fs.mkdir(getThreadWorkspaceUploadDir(input.runtimeOptions.workspace), { recursive: true });
+  return await materializeCodexHomeForRunConfig({
+    scopeId: `thread-${thread.id}`,
+    codexRunConfig: zendeskDesiredRuntimeConfig(input, thread)
+  });
+}
+
+async function startZendeskRuntimeSession(
+  input: ZendeskRuntimeSessionInput,
+  thread: ThreadRecord,
+  status: ZendeskRuntimeSessionLease["status"],
+  existingProviderSnapshot?: ManagedCodexProviderSnapshot
+): Promise<ZendeskRuntimeSessionLease> {
+  const providerSnapshot = await resolveProviderSnapshot({
+    existingSnapshot: existingProviderSnapshot
+  });
+  const materializedCodexHome = await materializeZendeskRuntimeConfig(input, thread);
+  const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
+    envOverrides: {
+      CODEX_HOME: materializedCodexHome.codexHome
+    }
+  });
+  const started = await startLiveRuntimeSession({
+    runtime: sessionRuntime,
+    model: input.runtimeOptions.model,
+    reasoningEffort: input.runtimeOptions.reasoningEffort,
+    workspace: input.runtimeOptions.workspace,
+    codexRunConfig: materializedCodexHome.codexRunConfig
+  });
+  const session = await sessions.create({
+    organizationId: thread.organizationId,
+    userId: thread.userId,
+    threadId: thread.id,
+    model: input.runtimeOptions.model,
+    reasoningEffort: input.runtimeOptions.reasoningEffort,
+    workspace: input.runtimeOptions.workspace,
+    codexRunConfig: started.codexRunConfig,
+    codexThreadId: started.codexThreadId,
+    providerSnapshot
+  });
+  liveRuntimeThreads.set(session.sessionId, started.liveThread);
+  return {
+    thread: started.liveThread,
+    sessionId: session.sessionId,
+    codexThreadId: started.codexThreadId,
+    status,
+    detail: `thread_id: ${thread.id}`
+  };
+}
+
+async function ensureZendeskRuntimeSession(input: ZendeskRuntimeSessionInput): Promise<ZendeskRuntimeSessionLease | undefined> {
+  const thread = await resolveZendeskRuntimeSessionThread(input);
+  if (!thread) return undefined;
+
+  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
+  const liveThread = active ? liveRuntimeThreads.get(active.sessionId) || await restoreLiveRuntimeThread(active) : undefined;
+  const materializedCodexHome = await materializeZendeskRuntimeConfig(input, thread);
+  const changed =
+    !active ||
+    !liveThread ||
+    active.model !== input.runtimeOptions.model ||
+    active.reasoningEffort !== input.runtimeOptions.reasoningEffort ||
+    active.workspace !== input.runtimeOptions.workspace ||
+    stableJson(active.codexRunConfig) !== stableJson(materializedCodexHome.codexRunConfig);
+
+  if (!changed && active && liveThread) {
+    return {
+      thread: liveThread,
+      sessionId: active.sessionId,
+      codexThreadId: active.codexThreadId,
+      status: "restored",
+      detail: `thread_id: ${thread.id}`
+    };
+  }
+
+  if (active?.sessionId) {
+    await sessions.remove(active.sessionId);
+    liveRuntimeThreads.delete(active.sessionId);
+  }
+
+  return await startZendeskRuntimeSession(input, thread, "started", active?.providerSnapshot);
+}
+
+async function replaceZendeskRuntimeSession(input: ZendeskRuntimeSessionInput): Promise<ZendeskRuntimeSessionLease | undefined> {
+  const thread = await resolveZendeskRuntimeSessionThread(input);
+  if (!thread) return undefined;
+  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
+  if (active?.sessionId) {
+    await sessions.remove(active.sessionId);
+    liveRuntimeThreads.delete(active.sessionId);
+  }
+  return await startZendeskRuntimeSession(input, thread, "replaced", active?.providerSnapshot);
+}
+
+function createZendeskRuntimeSessionBridge(): ZendeskRuntimeSessionBridge {
+  return {
+    async acquire(input) {
+      return await ensureZendeskRuntimeSession(input);
+    },
+    async replace(input) {
+      return await replaceZendeskRuntimeSession(input);
+    },
+    async persistCodexThreadId(input) {
+      const sessionId = trimOrUndefined(input.lease.sessionId);
+      const codexThreadId = trimOrUndefined(input.codexThreadId);
+      if (!sessionId || !codexThreadId || trimOrUndefined(input.lease.codexThreadId) === codexThreadId) {
+        return undefined;
+      }
+      const updated = await sessions.update(sessionId, { codexThreadId });
+      return {
+        ...input.lease,
+        codexThreadId: updated.codexThreadId
+      };
+    }
+  };
 }
 
 function dingtalkMessageCreatedAt(value: unknown): Date {
