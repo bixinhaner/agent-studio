@@ -265,10 +265,16 @@ describe("ZendeskIntegrationService", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    let startedThreadCount = 0;
+    let resumeStreamFailed = false;
     const runtime = {
-      startThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-1" })),
-      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-1" })),
-      runStreamed: vi.fn(async function* (_thread: unknown, message: string) {
+      startThreadWithOptions: vi.fn(async () => ({ id: `codex-thread-${++startedThreadCount}` })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-1", resumed: true })),
+      runStreamed: vi.fn(async function* (thread: unknown, message: string) {
+        if ((thread as { resumed?: boolean }).resumed && !resumeStreamFailed) {
+          resumeStreamFailed = true;
+          throw new Error("Codex Exec exited with code 1: Error: thread/resume failed: no rollout found for thread id codex-thread-1 (code -32600)");
+        }
         prompts.push(message);
         yield {
           type: "item.completed",
@@ -459,7 +465,7 @@ describe("ZendeskIntegrationService", () => {
       nextRequesterCommentId = 102;
       await service.runTicket("123", "zendesk-1");
 
-      expect(runtime.startThreadWithOptions).toHaveBeenCalledTimes(1);
+      expect(runtime.startThreadWithOptions).toHaveBeenCalledTimes(2);
       expect(runtime.resumeThreadWithOptions).toHaveBeenCalledWith(
         expect.objectContaining({
           threadId: "codex-thread-1",
@@ -467,7 +473,7 @@ describe("ZendeskIntegrationService", () => {
         })
       );
       expect(bindingRecords.get("zendesk-1:123")).toMatchObject({
-        codexThreadId: "codex-thread-1",
+        codexThreadId: "codex-thread-2",
         workspacePath: tempRoot,
         lastProcessedRequesterCommentId: 102
       });
@@ -554,6 +560,8 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ kind: "source", title: "Enabled Codex skills" }),
           expect.objectContaining({ title: "Started Codex thread" }),
           expect.objectContaining({ title: "Resumed Codex thread" }),
+          expect.objectContaining({ title: "Codex resume failed during agent call" }),
+          expect.objectContaining({ title: "Started replacement Codex thread" }),
           expect.objectContaining({ title: "Called agent" }),
           expect.objectContaining({ title: "Model reasoning summary" }),
           expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),

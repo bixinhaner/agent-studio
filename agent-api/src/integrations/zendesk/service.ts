@@ -802,6 +802,11 @@ function dingtalkMentionText(atUserIds: string[]): string {
     .join(" ");
 }
 
+function isRecoverableCodexResumeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /thread\/resume failed|no rollout found for thread id/i.test(message);
+}
+
 function buildZendeskDingTalkMarkdown(input: {
   settings: ZendeskIntegrationSettings;
   context: ZendeskTicketContext;
@@ -1663,12 +1668,59 @@ export class ZendeskIntegrationService {
     );
     let output = "";
     let latestUsage: RuntimeUsageSnapshot | undefined;
-    for await (const event of runtime.runStreamed(thread, prompt)) {
-      observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
-      latestUsage = extractRuntimeUsageFromStreamEvent(event) || latestUsage;
-      collectRuntimeProcessRow(event, processRows);
-      if (event.delta) output += event.delta;
-      else if (!output && event.text) output += event.text;
+    const runAgentThread = async (currentThread: ZendeskRuntimeThread) => {
+      let runOutput = "";
+      let runUsage: RuntimeUsageSnapshot | undefined;
+      for await (const event of runtime.runStreamed(currentThread, prompt)) {
+        observedCodexThreadId = extractCodexThreadIdFromEvent(event) || observedCodexThreadId;
+        runUsage = extractRuntimeUsageFromStreamEvent(event) || runUsage;
+        collectRuntimeProcessRow(event, processRows);
+        if (event.delta) runOutput += event.delta;
+        else if (!runOutput && event.text) runOutput += event.text;
+      }
+      return { output: runOutput, latestUsage: runUsage };
+    };
+
+    try {
+      const result = await runAgentThread(thread);
+      output = result.output;
+      latestUsage = result.latestUsage;
+    } catch (error) {
+      if (!isRecoverableCodexResumeError(error)) throw error;
+      const failedThreadId = observedCodexThreadId;
+      processRows.push(
+        zendeskProcessRow(
+          "error",
+          "Codex resume failed during agent call",
+          [failedThreadId ? `thread_id: ${failedThreadId}` : "", error instanceof Error ? error.message : String(error)]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
+      thread = await runtime.startThreadWithOptions({
+        model: runtimeOptions.model,
+        reasoningEffort: runtimeOptions.reasoningEffort,
+        workspace: runtimeOptions.workspace,
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeOptions.codexRunConfig)
+      });
+      observedCodexThreadId = extractCodexThreadIdFromThread(thread) || undefined;
+      processRows.push(
+        zendeskProcessRow(
+          "meta",
+          "Started replacement Codex thread",
+          [failedThreadId ? `failed_thread_id: ${failedThreadId}` : "", observedCodexThreadId ? `thread_id: ${observedCodexThreadId}` : ""]
+            .filter(Boolean)
+            .join("\n")
+        )
+      );
+      await this.rememberRuntimeBinding(run.ticketId, run.instanceId, {
+        codexThreadId: observedCodexThreadId,
+        workspacePath: runtimeOptions.workspace,
+        runId: run.runId
+      });
+      const retryResult = await runAgentThread(thread);
+      output = retryResult.output;
+      latestUsage = retryResult.latestUsage;
     }
     processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
 
