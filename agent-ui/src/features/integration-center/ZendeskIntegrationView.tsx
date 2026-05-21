@@ -144,7 +144,8 @@ const DINGTALK_TEMPLATE_TOKENS = [
   { token: "{{reasons}}", label: "Reason bullets" },
   { token: "{{aiContent}}", label: "Clean AI content" },
   { token: "{{publicReplyPreview}}", label: "Public reply preview" },
-  { token: "{{mention}}", label: "Final @ mention" }
+  { token: "{{mention}}", label: "Real @ userId token" },
+  { token: "{{mentionLabel}}", label: "Display name only" }
 ];
 
 const DINGTALK_TEMPLATE_PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
@@ -171,7 +172,8 @@ const DINGTALK_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
     "Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
   ].join("\n"),
   publicReplyPreview: "We are checking the SIP routing path and the IMSI/MSISDN mapping before providing a final answer.",
-  mention: "@Li Mingjian"
+  mention: "@manager422*****",
+  mentionLabel: "@Li Mingjian"
 };
 
 function asString(value: unknown) {
@@ -795,7 +797,7 @@ export function ZendeskIntegrationView(props: {
                           <div>
                             <span className="field-label">Message Template</span>
                             <span className="field-help">
-                              钉钉消息使用 Markdown；默认模板只展示结果、工单、人员、原因和干净的 AI 内容，避免重复堆字段。
+                              钉钉消息使用 Markdown；保留 {"{{mention}}"} 才会触发真实 @，{"{{mentionLabel}}"} 只用于显示姓名。
                             </span>
                           </div>
                           <Button

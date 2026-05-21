@@ -522,7 +522,7 @@ describe("ZendeskIntegrationService", () => {
       expect(firstDingTalkText).toContain("Attachment checked.");
       expect(firstDingTalkText).not.toContain("Public reply preview (not sent):");
       expect(firstDingTalkText).not.toContain("Agent Studio");
-      expect(firstDingTalkText.endsWith("@Assignee Agent")).toBe(true);
+      expect(firstDingTalkText.endsWith("@ding-assignee-1")).toBe(true);
       expect(recordUsage.mock.calls[0]?.[0]).toMatchObject({
         instanceId: "zendesk-1",
         ticketId: "123",

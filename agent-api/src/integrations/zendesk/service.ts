@@ -794,6 +794,14 @@ function capDingTalkMarkdown(markdown: string, mentionText: string): string {
   return `${body.slice(0, maxBodyChars).trimEnd()}\n\n[Content truncated for DingTalk.]${mentionFooter}`;
 }
 
+function dingtalkMentionText(atUserIds: string[]): string {
+  return atUserIds
+    .map((item) => item.trim())
+    .filter((item, index, array) => item && array.indexOf(item) === index)
+    .map((item) => `@${item}`)
+    .join(" ");
+}
+
 function buildZendeskDingTalkMarkdown(input: {
   settings: ZendeskIntegrationSettings;
   context: ZendeskTicketContext;
@@ -806,10 +814,12 @@ function buildZendeskDingTalkMarkdown(input: {
   action: Extract<ResolvedAction, { mode: "comment" }>;
   commentId?: number;
   mentionLabel?: string;
+  atUserIds?: string[];
 }): string {
   const ticket = input.context.ticket;
   const template = trimOrUndefined(input.settings.dingtalkNotificationTemplate) || defaultDingTalkNotificationTemplate();
-  const mentionText = input.mentionLabel ? `@${input.mentionLabel}` : "";
+  const mentionText = dingtalkMentionText(input.atUserIds ?? []);
+  const mentionLabel = input.mentionLabel ? `@${input.mentionLabel}` : mentionText;
   const baseValues = {
     ticketId: input.ticketId,
     ticketUrl: input.ticketUrl,
@@ -823,7 +833,8 @@ function buildZendeskDingTalkMarkdown(input: {
     requesterCommentId: String(input.requesterComment.id),
     reasons: formatDingTalkList(input.decision.reasons),
     publicReplyPreview: trimOrUndefined(input.decision.publicReplyPreview) || "Not provided",
-    mention: mentionText
+    mention: mentionText,
+    mentionLabel
   };
   const rawAiContent = dingTalkAiContent({ decision: input.decision, action: input.action });
   const renderWithAiContent = (aiContent: string) => renderDingTalkTemplate(template, { ...baseValues, aiContent });
@@ -1440,7 +1451,8 @@ export class ZendeskIntegrationService {
         decision: input.decision,
         action: input.action,
         commentId: input.commentId,
-        mentionLabel: atUserIds.length ? mentionLabel : undefined
+        mentionLabel: atUserIds.length ? mentionLabel : undefined,
+        atUserIds
       });
       await postDingTalkRobotMarkdown({
         webhookUrl,
