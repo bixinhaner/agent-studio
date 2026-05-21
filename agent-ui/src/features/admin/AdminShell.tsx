@@ -1,5 +1,4 @@
 import {
-  ArrowRight,
   BarChart3,
   Bell,
   ClipboardList,
@@ -7,7 +6,6 @@ import {
   Crown,
   Database,
   FileUser,
-  LayoutDashboard,
   LogOutIcon,
   Menu,
   MessageSquareText,
@@ -29,9 +27,8 @@ import type { AuthUser } from "../auth/api";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { BrandMark } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
-import { fetchAdminOverview } from "./api";
 import { ADMIN_PREMIUM_THEME } from "./admin-theme";
-import type { AdminOverview, AdminSection } from "./types";
+import type { AdminSection } from "./types";
 import "./admin-console.css";
 
 const OperationsAnalyticsViewLazy = lazy(() =>
@@ -104,7 +101,6 @@ const GROUPS: AdminGroupMeta[] = [
 ];
 
 const SECTION_ORDER: AdminConsoleSection[] = [
-  "overview",
   "analytics",
   "conversations",
   "subscriptions",
@@ -121,16 +117,6 @@ const SECTION_ORDER: AdminConsoleSection[] = [
 ];
 
 const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
-  overview: {
-    id: "overview",
-    title: "平台概览",
-    description: "统一查看平台规模、活跃状态与核心运营指标。",
-    scope: "全局管理域",
-    cadence: "建议每小时刷新",
-    group: "operations",
-    keywords: ["概览", "运营", "dashboard"],
-    icon: <LayoutDashboard size={18} />
-  },
   analytics: {
     id: "analytics",
     title: "运营分析",
@@ -272,22 +258,9 @@ function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
   const rawValue = hash.slice(ADMIN_HASH_PREFIX.length).split("?")[0] ?? "";
   const value = decodeURIComponent(rawValue).trim();
-  if (value === "monitoring") return "analytics";
+  if (value === "overview" || value === "monitoring") return "analytics";
   if (!SECTION_ORDER.includes(value as AdminConsoleSection)) return null;
   return value as AdminConsoleSection;
-}
-
-function formatMetricValue(value: number | undefined): string {
-  if (!Number.isFinite(value ?? Number.NaN)) return "--";
-  return new Intl.NumberFormat("zh-CN").format(value ?? 0);
-}
-
-function getLocalTimeZoneLabel(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区";
-  } catch {
-    return "本地时区";
-  }
 }
 
 function AdminSectionLazyFallback() {
@@ -339,129 +312,8 @@ function AdminNavigation(props: {
   );
 }
 
-function OverviewWorkspace(props: {
-  overview: AdminOverview | null;
-  loading: boolean;
-  onNavigate: (section: AdminConsoleSection) => void;
-}) {
-  const stats = [
-    {
-      label: "用户规模",
-      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.users),
-      meta: "纳管成员总数"
-    },
-    {
-      label: "活跃会话",
-      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.activeSessions),
-      meta: "当前有上下文活动的运行会话"
-    },
-    {
-      label: "总线程数",
-      value: props.loading ? "..." : formatMetricValue(props.overview?.counts.threads),
-      meta: "平台累计沉淀的会话线程"
-    },
-    {
-      label: "管理工作区",
-      value: String(SECTION_ORDER.length - 1),
-      meta: "覆盖运营、治理、运行三大域"
-    }
-  ];
-
-  return (
-    <div className="admin-page-container">
-      <section className="admin-overview-hero">
-        <div className="admin-overview-hero-copy">
-          <span className="admin-overview-eyebrow">Control Tower</span>
-          <div>
-            <h1 className="admin-page-title">平台概览</h1>
-            <p className="admin-page-desc">统一查看平台规模、活跃状态与核心运营指标。</p>
-          </div>
-          <p>
-            这个入口现在承担整套管理控制台的导航职责。用户、权限、资料、能力、集成和系统配置都在同一壳层下切换，
-            时间信息默认跟随当前用户本地时区显示。
-          </p>
-        </div>
-
-        <div className="admin-overview-hero-metrics">
-          <div className="admin-overview-hero-stat">
-            <span>管理域</span>
-            <strong>{GROUPS.length}</strong>
-          </div>
-          <div className="admin-overview-hero-stat">
-            <span>导航工作区</span>
-            <strong>{SECTION_ORDER.length - 1}</strong>
-          </div>
-          <div className="admin-overview-hero-stat">
-            <span>当前时区</span>
-            <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{getLocalTimeZoneLabel()}</strong>
-          </div>
-          <div className="admin-overview-hero-stat">
-            <span>巡检节奏</span>
-            <strong style={{ fontSize: 20, lineHeight: 1.25 }}>持续值守</strong>
-          </div>
-        </div>
-      </section>
-
-      <div className="admin-page-summary-grid">
-        {stats.map((item) => (
-          <section key={item.label} className="admin-page-summary-card">
-            <div className="admin-page-summary-label">{item.label}</div>
-            <div className="admin-page-summary-value">{item.value}</div>
-            <div className="admin-page-summary-meta">{item.meta}</div>
-          </section>
-        ))}
-      </div>
-
-      <div className="admin-overview-group-grid">
-        {NAVIGATION_GROUPS.map((group) => (
-          <section key={group.id} className="admin-overview-group-card">
-            <div className="admin-overview-group-header">
-              <div>
-                <h3>{group.label}</h3>
-                <p>{group.description}</p>
-              </div>
-              <span className="admin-overview-group-count">{group.items.filter((item) => item.id !== "overview").length} 项</span>
-            </div>
-
-            <div className="admin-overview-link-list">
-              {group.items
-                .filter((item) => item.id !== "overview")
-                .map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="admin-overview-link-card"
-                    onClick={() => props.onNavigate(item.id)}
-                  >
-                    <span className="admin-overview-link-icon">{item.icon}</span>
-                    <span>
-                      <span className="admin-overview-link-title">{item.title}</span>
-                      <span className="admin-overview-link-description">{item.description}</span>
-                      <span className="admin-overview-link-meta">
-                        <span>{item.scope}</span>
-                        <span>{item.cadence}</span>
-                      </span>
-                    </span>
-                    <ArrowRight size={16} style={{ color: "var(--admin-color-subtle)", marginTop: 2 }} />
-                  </button>
-                ))}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AdminSectionContent(props: {
-  section: AdminConsoleSection;
-  overview: AdminOverview | null;
-  loading: boolean;
-  onNavigate: (section: AdminConsoleSection) => void;
-}) {
+function AdminSectionContent(props: { section: AdminConsoleSection }) {
   switch (props.section) {
-    case "overview":
-      return <OverviewWorkspace overview={props.overview} loading={props.loading} onNavigate={props.onNavigate} />;
     case "analytics":
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
@@ -566,11 +418,9 @@ function AdminSectionContent(props: {
 
 export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {
   const { branding } = useBranding();
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
-  const [loading, setLoading] = useState(true);
   const [section, setSection] = useState<AdminConsoleSection>(() => {
-    if (typeof window === "undefined") return "overview";
-    return sectionFromHash(window.location.hash) ?? "overview";
+    if (typeof window === "undefined") return "analytics";
+    return sectionFromHash(window.location.hash) ?? "analytics";
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -580,27 +430,6 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
 
   const currentSectionMeta = SECTION_META[section];
   const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadOverview() {
-      setLoading(true);
-      try {
-        const next = await fetchAdminOverview();
-        if (active) {
-          setOverview(next);
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    void loadOverview();
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -750,12 +579,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           </header>
 
           <div className="admin-content-scroll">
-            <AdminSectionContent
-              section={section}
-              overview={overview}
-              loading={loading}
-              onNavigate={handleNavClick}
-            />
+            <AdminSectionContent section={section} />
           </div>
         </main>
 

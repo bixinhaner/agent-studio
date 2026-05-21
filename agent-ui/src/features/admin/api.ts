@@ -17,7 +17,6 @@ import type {
   AdminProductFeedbackListInput,
   AdminProductFeedbackListResponse,
   AdminProductFeedbackStatus,
-  AdminOverview,
   AdminSubscriptionDenialsResponse,
   AdminSubscriptionGrantDetailResponse,
   AdminSubscriptionGrantInput,
@@ -44,10 +43,6 @@ type CreateAdminInvitePayload = {
     expires_at?: string | null;
   };
 };
-
-export async function fetchAdminOverview(): Promise<AdminOverview> {
-  return api<AdminOverview>("/api/admin/overview");
-}
 
 export async function fetchAdminSubscriptionPlans(): Promise<AdminSubscriptionPlansResponse> {
   return api<AdminSubscriptionPlansResponse>("/api/admin/subscriptions/plans");

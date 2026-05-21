@@ -1,5 +1,4 @@
 export type AdminSection =
-  | "overview"
   | "analytics"
   | "conversations"
   | "subscriptions"
@@ -12,24 +11,6 @@ export type AdminSection =
   | "system-settings"
   | "organization"
   | "rbac";
-
-export type AdminOverview = {
-  counts: {
-    users: number;
-    threads: number;
-    activeSessions: number;
-  };
-  integrations?: {
-    zendesk?: {
-      enabled: boolean;
-      ready: boolean;
-      missing: string[];
-      hasZendeskApiToken: boolean;
-      hasWebhookSigningSecret: boolean;
-      lastValidatedAt: string | null;
-    };
-  };
-};
 
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";

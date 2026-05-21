@@ -434,7 +434,7 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aut
     ? () => {
         if (typeof window === "undefined") return;
         const nextUrl = new URL(window.location.href);
-        nextUrl.hash = `${ADMIN_HASH_PREFIX}overview`;
+        nextUrl.hash = `${ADMIN_HASH_PREFIX}analytics`;
         const nextWindow = window.open(nextUrl.toString(), "_blank", "noopener,noreferrer");
         nextWindow?.focus?.();
       }
