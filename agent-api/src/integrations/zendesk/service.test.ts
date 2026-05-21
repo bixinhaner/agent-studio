@@ -357,8 +357,31 @@ describe("ZendeskIntegrationService", () => {
           reasoningEffort: "high" as const,
           workspace: tempRoot,
           codexRunConfig: {
-            additionalDirectories: ["/tmp/knowledge/Docs"]
+            additionalDirectories: ["/tmp/knowledge/Docs"],
+            enabledSkills: [
+              {
+                id: "managed:skill-support-triage",
+                name: "support-ticket-triage",
+                managedSkillId: "skill-support-triage",
+                sourcePath: "/tmp/skills/support-ticket-triage"
+              }
+            ],
+            _agentStudioSkillActivationPrompts: [
+              {
+                name: "support-ticket-triage",
+                prompt: "Use the support ticket triage workflow before drafting a Zendesk action."
+              }
+            ]
           },
+          enabledSkills: [
+            {
+              id: "managed:skill-support-triage",
+              name: "support-ticket-triage",
+              managedSkillId: "skill-support-triage",
+              sourcePath: "/tmp/skills/support-ticket-triage",
+              activationPrompt: "Use the support ticket triage workflow before drafting a Zendesk action."
+            }
+          ],
           knowledgeSets: [
             {
               id: "ks-docs",
@@ -396,6 +419,8 @@ describe("ZendeskIntegrationService", () => {
       });
       expect(prompts[0]).toContain("attachments:");
       expect(prompts[0]).toContain("requester_email: requester@example.com");
+      expect(prompts[0]).toContain("Internal enabled skill activation hints for this run.");
+      expect(prompts[0]).toContain("Use the support ticket triage workflow before drafting a Zendesk action.");
       expect(prompts[0]).toContain("Mounted knowledge sets are available.");
       expect(prompts[0]).toContain("mounted_knowledge_sets:");
       expect(prompts[0]).toContain("relative_path: .agent-studio/knowledge-sets/Docs");
@@ -453,6 +478,7 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ title: "Read Zendesk ticket" }),
           expect.objectContaining({ title: "Prepared Zendesk attachments" }),
           expect.objectContaining({ kind: "source", title: "Mounted knowledge sets" }),
+          expect.objectContaining({ kind: "source", title: "Enabled Codex skills" }),
           expect.objectContaining({ title: "Started Codex thread" }),
           expect.objectContaining({ title: "Resumed Codex thread" }),
           expect.objectContaining({ title: "Called agent" }),

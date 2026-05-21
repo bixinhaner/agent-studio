@@ -1367,6 +1367,85 @@ function withRunConfigEnabledSkillSelection(
   );
 }
 
+function selectionIdForManagedSkill(managedSkillId: string): string {
+  return `managed:${managedSkillId}`;
+}
+
+function skillNameFromBindingPayload(value: unknown): string | undefined {
+  const payload = asRecord(value);
+  if (!payload) return undefined;
+  const skillName = payload.skillName ?? payload.name;
+  return typeof skillName === "string" ? trimOrUndefined(skillName) : undefined;
+}
+
+function skillActivationPromptFromBindingPayload(value: unknown): string | undefined {
+  const payload = asRecord(value);
+  if (!payload) return undefined;
+  const prompt = payload.activationPrompt ?? payload.defaultPrompt ?? payload.prompt;
+  return typeof prompt === "string" ? trimOrUndefined(prompt) : undefined;
+}
+
+async function resolveEnabledSkillsForBotMode(agentModeId: string): Promise<EnabledSkillSelection[]> {
+  const agentMode = await agentModes.get(agentModeId);
+  if (!agentMode) return [];
+
+  const nativeSkillMap = new Map((await nativeCodexSkills.list()).map((skill) => [skill.name, skill] as const));
+  const selections: EnabledSkillSelection[] = [];
+  const selectedIds = new Set<string>();
+  const selectedNames = new Set<string>();
+
+  for (const modeSkillPackage of agentMode.skillPackages) {
+    const skillPackage = await skillPackages.get(modeSkillPackage.skillPackageId);
+    if (!skillPackage || trimOrUndefined(skillPackage.status) !== "active") {
+      continue;
+    }
+
+    for (const item of skillPackage.items) {
+      for (const binding of item.runtimeBindings) {
+        if (binding.runtimeType !== "codex" || binding.bindingType !== "codex_skill") continue;
+        const payload = asRecord(binding.bindingPayload);
+        const skillName = skillNameFromBindingPayload(binding.bindingPayload);
+        if (!skillName) continue;
+        const activationPrompt = skillActivationPromptFromBindingPayload(binding.bindingPayload);
+        const managedSkillId =
+          typeof payload?.managedSkillId === "string" ? trimOrUndefined(payload.managedSkillId) : undefined;
+
+        if (managedSkillId) {
+          const managedSkill = await codexSkills.getManagedSkill(managedSkillId);
+          if (!managedSkill || managedSkill.status !== "active") continue;
+          const selectionId = selectionIdForManagedSkill(managedSkill.id);
+          const nameKey = managedSkill.skillName.trim().toLowerCase();
+          if (selectedIds.has(selectionId) || selectedNames.has(nameKey)) continue;
+          selectedIds.add(selectionId);
+          selectedNames.add(nameKey);
+          selections.push({
+            id: selectionId,
+            name: managedSkill.skillName,
+            managedSkillId: managedSkill.id,
+            sourcePath: managedSkill.publishedPath,
+            activationPrompt
+          });
+          continue;
+        }
+
+        const nativeSkill = nativeSkillMap.get(skillName);
+        if (!nativeSkill) continue;
+        const nameKey = nativeSkill.name.trim().toLowerCase();
+        if (selectedIds.has(nativeSkill.name) || selectedNames.has(nameKey)) continue;
+        selectedIds.add(nativeSkill.name);
+        selectedNames.add(nameKey);
+        selections.push({
+          id: nativeSkill.name,
+          name: nativeSkill.name,
+          activationPrompt
+        });
+      }
+    }
+  }
+
+  return selections;
+}
+
 function withRunConfigCodexHome(
   codexRunConfig: Record<string, unknown> | undefined,
   codexHome: string
@@ -2084,6 +2163,7 @@ async function resolveZendeskAgentRuntimeOptions(input: {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   knowledgeSets?: ZendeskKnowledgeSetMount[];
+  enabledSkills?: EnabledSkillSelection[];
 }> {
   const agentModeId = trimOrUndefined(input.settings.agentModeId);
   if (!agentModeId) {
@@ -2128,13 +2208,9 @@ async function resolveZendeskAgentRuntimeOptions(input: {
   await fs.mkdir(workspacePath, { recursive: true });
   await applyWorkspaceAgentsMdForMode(agentModeId, workspacePath);
   const mountedKnowledgeSets = await prepareZendeskKnowledgeSetWorkspace(workspacePath, selectedKnowledgeSets);
-
-  return {
-    runtime: createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
-    model: selectedModel,
-    reasoningEffort: selectedReasoningEffort,
-    workspace: workspacePath,
-    codexRunConfig: mergeAdditionalDirectoriesForBot(
+  const enabledSkills = await resolveEnabledSkillsForBotMode(agentModeId);
+  const baseCodexRunConfig = mergeAdditionalDirectoriesForBot(
+    withRunConfigEnabledSkillSelection(
       {
         sandboxMode: runProfile.sandboxMode,
         approvalPolicy: runProfile.approvalPolicy,
@@ -2142,9 +2218,27 @@ async function resolveZendeskAgentRuntimeOptions(input: {
         webSearchMode: runProfile.webSearchMode,
         mode: agentModeId
       },
-      selectedKnowledgeSets.map((knowledgeSet) => knowledgeSet.path)
+      enabledSkills
     ),
-    knowledgeSets: mountedKnowledgeSets
+    selectedKnowledgeSets.map((knowledgeSet) => knowledgeSet.path)
+  );
+  const materializedCodexHome = await materializeCodexHomeForRunConfig({
+    scopeId: `zendesk-${input.instanceId || "legacy"}-ticket-${input.ticketId}`,
+    codexRunConfig: baseCodexRunConfig
+  });
+
+  return {
+    runtime: createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot(), {
+      envOverrides: {
+        CODEX_HOME: materializedCodexHome.codexHome
+      }
+    }),
+    model: selectedModel,
+    reasoningEffort: selectedReasoningEffort,
+    workspace: workspacePath,
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    knowledgeSets: mountedKnowledgeSets,
+    enabledSkills
   };
 }
 

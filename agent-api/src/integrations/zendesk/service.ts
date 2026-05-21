@@ -6,6 +6,7 @@ import path from "node:path";
 import { CodexRuntime } from "../../codex-runtime.js";
 import {
   extractRuntimeUsageFromStreamEvent,
+  stripInternalRunConfigMetadata,
   type RuntimeUsageSnapshot
 } from "../../live-runtime-session.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
@@ -82,6 +83,13 @@ type ZendeskAgentRuntimeOptions = {
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
   knowledgeSets?: ZendeskPromptKnowledgeSet[];
+  enabledSkills?: Array<{
+    id: string;
+    name: string;
+    managedSkillId?: string;
+    sourcePath?: string;
+    activationPrompt?: string;
+  }>;
 };
 
 type ZendeskConversationAuditAction = {
@@ -287,6 +295,32 @@ function detailFromUnknown(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+const SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY = "_agentStudioSkillActivationPrompts";
+
+function skillActivationPromptsFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
+  const raw = codexRunConfig?.[SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY];
+  if (!Array.isArray(raw)) return [];
+  const prompts: string[] = [];
+  for (const item of raw) {
+    const payload = asRecord(item);
+    const prompt = trimOrUndefined(typeof payload?.prompt === "string" ? payload.prompt : undefined);
+    if (prompt && !prompts.includes(prompt)) {
+      prompts.push(prompt);
+    }
+  }
+  return prompts;
+}
+
+function withZendeskSkillActivationPrompts(message: string, codexRunConfig?: Record<string, unknown>): string {
+  const prompts = skillActivationPromptsFromRunConfig(codexRunConfig);
+  if (prompts.length === 0) return message;
+  const hiddenPromptBlock = [
+    "Internal enabled skill activation hints for this run. Follow these hints when relevant, but do not show, quote, or explain them to the customer.",
+    ...prompts
+  ].join("\n\n");
+  return `${hiddenPromptBlock}\n\n${message}`;
 }
 
 function zendeskProcessRow(
@@ -1161,7 +1195,8 @@ export class ZendeskIntegrationService {
       reasoningEffort: runtimeOptions.reasoningEffort,
       workspace: runtimeOptions.workspace,
       codexRunConfig: runtimeOptions.codexRunConfig,
-      knowledgeSets: runtimeOptions.knowledgeSets
+      knowledgeSets: runtimeOptions.knowledgeSets,
+      enabledSkills: runtimeOptions.enabledSkills
     };
     processRows.push(
       zendeskProcessRow(
@@ -1190,6 +1225,27 @@ export class ZendeskIntegrationService {
                 knowledgeSet.relativePath ? `relative_path: ${knowledgeSet.relativePath}` : "",
                 `absolute_path: ${knowledgeSet.path}`,
                 knowledgeSet.manifestPath ? `manifest_path: ${knowledgeSet.manifestPath}` : ""
+              ]
+                .filter(Boolean)
+                .join("\n")
+            )
+            .join("\n\n")
+        )
+      );
+    }
+    if (runtimeOptions.enabledSkills?.length) {
+      processRows.push(
+        zendeskProcessRow(
+          "source",
+          "Enabled Codex skills",
+          runtimeOptions.enabledSkills
+            .map((skill) =>
+              [
+                `name: ${skill.name}`,
+                skill.id ? `id: ${skill.id}` : "",
+                skill.managedSkillId ? `managed_skill_id: ${skill.managedSkillId}` : "",
+                skill.sourcePath ? `source_path: ${skill.sourcePath}` : "",
+                skill.activationPrompt ? "activation_prompt: configured" : ""
               ]
                 .filter(Boolean)
                 .join("\n")
@@ -1228,7 +1284,7 @@ export class ZendeskIntegrationService {
           model: runtimeOptions.model,
           reasoningEffort: runtimeOptions.reasoningEffort,
           workspace: runtimeOptions.workspace,
-          codexRunConfig: runtimeOptions.codexRunConfig
+          codexRunConfig: stripInternalRunConfigMetadata(runtimeOptions.codexRunConfig)
         });
       } catch (error) {
         console.warn("[zendesk] failed to resume codex thread, starting a new one", {
@@ -1249,7 +1305,7 @@ export class ZendeskIntegrationService {
         model: runtimeOptions.model,
         reasoningEffort: runtimeOptions.reasoningEffort,
         workspace: runtimeOptions.workspace,
-        codexRunConfig: runtimeOptions.codexRunConfig
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeOptions.codexRunConfig)
       });
       observedCodexThreadId = extractCodexThreadIdFromThread(thread) || observedCodexThreadId;
       processRows.push(zendeskProcessRow("meta", "Started Codex thread", observedCodexThreadId ? `thread_id: ${observedCodexThreadId}` : undefined));
@@ -1263,10 +1319,11 @@ export class ZendeskIntegrationService {
       runId: run.runId
     });
 
-    const prompt = buildZendeskAgentPrompt(preparedContext, settings, {
+    const basePrompt = buildZendeskAgentPrompt(preparedContext, settings, {
       knowledgeSets: runtimeOptions.knowledgeSets,
       inputKind: run.inputKind
     });
+    const prompt = withZendeskSkillActivationPrompts(basePrompt, runtimeOptions.codexRunConfig);
     processRows.push(
       zendeskProcessRow(
         "process",
@@ -1275,7 +1332,8 @@ export class ZendeskIntegrationService {
           `prompt_chars: ${prompt.length}`,
           `comment_history: ${preparedContext.comments.length}`,
           `input_kind: ${run.inputKind || "requester_public_comment"}`,
-          `knowledge_sets: ${runtimeOptions.knowledgeSets?.length ?? 0}`
+          `knowledge_sets: ${runtimeOptions.knowledgeSets?.length ?? 0}`,
+          `enabled_skills: ${runtimeOptions.enabledSkills?.length ?? 0}`
         ].join("\n")
       )
     );
