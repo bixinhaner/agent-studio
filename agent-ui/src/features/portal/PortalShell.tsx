@@ -378,7 +378,7 @@ const PRODUCT_FEEDBACK_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PRODUCT_FEEDBACK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const RUNNING_STAGE_CONNECTING_TEXT = "Connecting to the assistant";
 const RUNNING_STAGE_WORKING_TEXT = "Working on your request";
-const RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT = "Still working, waiting for the first visible update";
+const RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT = "Still working. I'm thinking through the request and planning the next steps.";
 const RUNNING_STAGE_CONNECTING_FALLBACK_MS = 1800;
 const RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS = 8000;
 const DEFAULT_RUNNING_STAGE_TEXT = RUNNING_STAGE_CONNECTING_TEXT;
@@ -2149,6 +2149,33 @@ function ellipsizeSingleLine(value: string, max = 32): string {
   return `${normalized.slice(0, max)}...`;
 }
 
+function normalizedToolIdentity(item: Record<string, unknown> | null): string {
+  if (!item) return "";
+  return [
+    item.server,
+    item.tool,
+    item.name,
+    item.model,
+    item.title
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+}
+
+function isImageGenerationItem(itemType: string, item: Record<string, unknown> | null): boolean {
+  const identity = normalizedToolIdentity(item);
+  if (!identity) return false;
+  if (/\b(imagegen|image_gen|image-generation|image_generation|gpt-image|dall-e|dalle)\b/.test(identity)) {
+    return true;
+  }
+  return (
+    itemType === "mcp_tool_call" &&
+    /\b(generate|create|render|edit)\b/.test(identity) &&
+    /\b(image|picture|illustration|photo)\b/.test(identity)
+  );
+}
+
 function stageTextForCodexItem(
   itemType: string,
   lifecycle: "started" | "completed",
@@ -2157,6 +2184,7 @@ function stageTextForCodexItem(
   if (lifecycle === "started") {
     if (itemType === "reasoning") return "Thinking through your request";
     if (itemType === "command_execution") return "Checking the information needed to answer";
+    if (isImageGenerationItem(itemType, item)) return "Generating the image. This can take a little longer.";
     if (itemType === "mcp_tool_call") return "Gathering relevant details";
     if (itemType === "web_search") {
       const query = typeof item?.query === "string" ? ellipsizeSingleLine(item.query, 20) : "";
@@ -2171,6 +2199,7 @@ function stageTextForCodexItem(
 
   if (itemType === "reasoning") return "Refining the answer";
   if (itemType === "command_execution") return "Reviewing the results";
+  if (isImageGenerationItem(itemType, item)) return "Reviewing the generated image";
   if (itemType === "mcp_tool_call") return "Reviewing the details";
   if (itemType === "web_search") return "Reviewing what I found";
   if (itemType === "todo_list") return "Continuing with the plan";
