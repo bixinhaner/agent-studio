@@ -229,6 +229,25 @@ append_extra_caddy_snippets() {
   fi
 }
 
+reload_caddy() {
+  if ! command_exists caddy; then
+    log_warn "Caddy binary not found; Caddy was not reloaded"
+    return 0
+  fi
+
+  if command_exists systemctl; then
+    log_step "Reloading Caddy"
+    if run_as_root systemctl reload caddy; then
+      return 0
+    fi
+    log_warn "systemctl reload caddy failed; falling back to direct caddy reload"
+  else
+    log_warn "systemctl not found; falling back to direct caddy reload"
+  fi
+
+  run_as_root caddy reload --config "$CADDY_CONFIG_FILE" --force
+}
+
 resolve_caddy_domain() {
   if [[ -n "$DOMAIN" ]]; then
     return 0
@@ -268,14 +287,7 @@ refresh_caddy_config() {
   run_as_root mkdir -p "$(dirname "$CADDY_CONFIG_FILE")"
   run_as_root install -m 644 "$rendered_config" "$CADDY_CONFIG_FILE"
 
-  if command_exists caddy && command_exists systemctl; then
-    log_step "Reloading Caddy"
-    run_as_root systemctl reload caddy
-  elif ! command_exists caddy; then
-    log_warn "Caddy binary not found; Caddy was not reloaded"
-  else
-    log_warn "systemctl not found; Caddy was not reloaded"
-  fi
+  reload_caddy
 
   rm -f "$rendered_config"
 }
