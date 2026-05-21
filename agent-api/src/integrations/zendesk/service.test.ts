@@ -157,7 +157,7 @@ describe("ZendeskIntegrationService", () => {
 
     const service = new ZendeskIntegrationService(
       {
-        getDrainReason: vi.fn(async () => "Agent Studio is deploying. Please retry in a few minutes.")
+        getDrainReason: vi.fn(async () => "System is updating. Please retry in a few minutes.")
       },
       settingsStore as never,
       undefined as never,

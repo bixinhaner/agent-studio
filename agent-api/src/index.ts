@@ -798,7 +798,7 @@ async function getDeploymentDrainReason(): Promise<string | undefined> {
     const raw = await fs.readFile(appConfig.deployDrainFile, "utf8");
     const parsed = asRecord(JSON.parse(raw));
     const reason = typeof parsed?.reason === "string" ? parsed.reason.trim() : "";
-    return reason || "Agent Studio is deploying. Please retry in a few minutes.";
+    return reason || "System is updating. Please retry in a few minutes.";
   } catch (error) {
     if ((error as { code?: string })?.code === "ENOENT") {
       return undefined;

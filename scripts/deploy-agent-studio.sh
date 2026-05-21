@@ -360,7 +360,7 @@ import sys
 
 Path(sys.argv[1]).write_text(json.dumps({
     "active": True,
-    "reason": "Agent Studio is deploying. Please retry in a few minutes.",
+    "reason": "System is updating. Please retry in a few minutes.",
     "started_at": datetime.now(timezone.utc).isoformat()
 }, ensure_ascii=False, indent=2) + "\n")
 PY

@@ -1045,6 +1045,9 @@ function formatAssistantErrorNotice(detail: string, code?: string): string {
   if (/access is paused|currently paused|subscription_paused/i.test(normalized)) {
     return "Access is paused. Please contact your workspace admin to resume it.";
   }
+  if (/system is updating|agent studio is deploying|currently deploying|deployment drain/i.test(normalized)) {
+    return "System is updating. Please retry in a few minutes.";
+  }
   if (/service capacity|token limit|temporarily unavailable/i.test(normalized)) {
     return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
   }
