@@ -1,7 +1,7 @@
 export type ZendeskResponseMode = "public_reply" | "internal_note";
 export type ZendeskFallbackMode = "internal_note" | "skip";
 export type ZendeskAutoStatus = "unchanged" | "open" | "pending" | "hold";
-export type ZendeskRunStatus = "received" | "skipped" | "processing" | "replied" | "noted" | "handoff" | "failed";
+export type ZendeskRunStatus = "received" | "deferred" | "skipped" | "processing" | "replied" | "noted" | "handoff" | "failed";
 
 export type ZendeskPublicSettings = {
   enabled: boolean;

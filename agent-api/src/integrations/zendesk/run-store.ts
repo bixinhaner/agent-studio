@@ -129,6 +129,18 @@ export class ZendeskRunStore {
     return rows.map(mapRun);
   }
 
+  async listDeferred(limit = 50): Promise<ZendeskRunRecord[]> {
+    const safeLimit = Math.max(1, Math.min(200, limit));
+    const rows = await this.db.zendeskRun.findMany({
+      where: {
+        status: "deferred"
+      },
+      orderBy: { createdAt: "asc" },
+      take: safeLimit
+    });
+    return rows.map(mapRun);
+  }
+
   async create(input: {
     instanceId?: string;
     ticketId: string;

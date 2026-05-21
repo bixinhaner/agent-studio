@@ -1075,12 +1075,15 @@ export class ZendeskIntegrationService {
     olderThanMs?: number;
     limit?: number;
     reprocess?: boolean;
-  } = {}): Promise<{ markedFailed: number; requeued: number }> {
+  } = {}): Promise<{ markedFailed: number; requeued: number; deferredRequeued: number; deferredSkipped: number }> {
     const olderThanMs = Math.max(0, Number(options.olderThanMs ?? 0) || 0);
     const cutoff = new Date(Date.now() - olderThanMs);
-    const interrupted = await this.runStore.listProcessingOlderThan(cutoff, options.limit ?? 50);
+    const limit = options.limit ?? 50;
+    const interrupted = await this.runStore.listProcessingOlderThan(cutoff, limit);
     let markedFailed = 0;
     let requeued = 0;
+    let deferredRequeued = 0;
+    let deferredSkipped = 0;
     for (const run of interrupted) {
       const updated = await this.runStore.update(run.id, {
         status: "failed",
@@ -1113,7 +1116,53 @@ export class ZendeskIntegrationService {
         });
       }
     }
-    return { markedFailed, requeued };
+    if (options.reprocess !== false) {
+      const deferred = await this.runStore.listDeferred(limit);
+      for (const run of deferred) {
+        try {
+          const settings = await this.loadSettings(run.instanceId);
+          if (!settings.enabled) {
+            const skipped = await this.runStore.update(run.id, {
+              status: "skipped",
+              detail: "Zendesk 自动答复已关闭，延迟 webhook 未处理"
+            });
+            if (skipped) deferredSkipped += 1;
+            continue;
+          }
+          const updated = await this.runStore.update(run.id, {
+            status: "received",
+            detail: "部署完成，已重新进入后台处理队列"
+          });
+          if (!updated) continue;
+          requeued += 1;
+          deferredRequeued += 1;
+          void this.enqueue(run.instanceId, run.ticketId, () =>
+            this.processTicket(run.ticketId, run.source, settings, run.instanceId, run.id)
+          ).catch((error) => {
+            console.error("[zendesk] deferred webhook reprocess failed", {
+              runId: run.id,
+              ticketId: run.ticketId,
+              instanceId: run.instanceId,
+              detail: error instanceof Error ? error.message : String(error)
+            });
+          });
+        } catch (error) {
+          deferredSkipped += 1;
+          await this.runStore.update(run.id, {
+            status: "failed",
+            detail: "延迟 webhook 恢复失败",
+            error: error instanceof Error ? error.message : String(error)
+          });
+          console.warn("[zendesk] failed to requeue deferred webhook run", {
+            runId: run.id,
+            ticketId: run.ticketId,
+            instanceId: run.instanceId,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+    }
+    return { markedFailed, requeued, deferredRequeued, deferredSkipped };
   }
 
   async updateSettings(
@@ -1155,10 +1204,6 @@ export class ZendeskIntegrationService {
     headers: IncomingHttpHeaders,
     instanceId?: string
   ): Promise<{ accepted: true; result: ProcessTicketResult }> {
-    const drainReason = await this.dependencies.getDrainReason?.();
-    if (drainReason) {
-      throw new Error(drainReason);
-    }
     const settings = await this.loadSettings(instanceId);
     if (!settings.enabled) {
       throw new Error("Zendesk 自动答复未启用");
@@ -1166,6 +1211,24 @@ export class ZendeskIntegrationService {
     this.verifyWebhookSignature(headers, rawBody, settings.webhookSigningSecret);
     const payload = safeParseJson(rawBody);
     const ticketId = sanitizeTicketId((payload as { ticket_id?: string | number }).ticket_id || "");
+    const drainReason = await this.dependencies.getDrainReason?.();
+    if (drainReason) {
+      const run = await this.runStore.create({
+        instanceId,
+        ticketId,
+        source: "webhook",
+        status: "deferred",
+        detail: "Agent Studio 正在部署，已暂存 webhook，服务恢复后自动处理"
+      });
+      return {
+        accepted: true,
+        result: {
+          status: "deferred",
+          detail: "Agent Studio 正在部署，已暂存 webhook，服务恢复后自动处理",
+          runId: run.id
+        }
+      };
+    }
     const run = await this.runStore.create({
       instanceId,
       ticketId,

@@ -10,6 +10,7 @@ export const APPROVAL_POLICY_VALUES = ["never", "on-request", "on-failure", "unt
 export const WEB_SEARCH_MODE_VALUES = ["disabled", "cached", "live"] as const;
 export const ZENDESK_RUN_STATUS_VALUES = [
   "received",
+  "deferred",
   "skipped",
   "processing",
   "replied",

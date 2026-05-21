@@ -312,6 +312,7 @@ function formatLocalDateTime(value?: string) {
 function runStatusLabel(run: ZendeskRunRecord) {
   const map: Record<ZendeskRunRecord["status"], string> = {
     received: "已接收",
+    deferred: "部署后处理",
     skipped: "已跳过",
     processing: "处理中",
     replied: "已公开回复",

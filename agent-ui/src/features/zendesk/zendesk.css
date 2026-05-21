@@ -222,6 +222,7 @@
 }
 
 .zendesk-run-badge-received,
+.zendesk-run-badge-deferred,
 .zendesk-run-badge-processing {
   background: rgba(29, 78, 216, 0.14);
   color: #2251c3;

@@ -131,6 +131,64 @@ describe("ZendeskIntegrationService", () => {
     }
   });
 
+  it("defers valid Zendesk webhooks during deployment drain", async () => {
+    const body = JSON.stringify({ ticket_id: "45270" });
+    const timestamp = new Date().toISOString();
+    const settingsStore = {
+      get: vi.fn(async () => {
+        throw new Error("legacy settings should not be used");
+      }),
+      getForInstance: vi.fn(async () => baseSettings)
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-deferred-1",
+        instanceId: "zendesk-1",
+        ticketId: "45270",
+        source: "webhook" as const,
+        status: "deferred" as const,
+        detail: "deferred",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async () => undefined),
+      listForInstance: vi.fn(async () => [])
+    };
+
+    const service = new ZendeskIntegrationService(
+      {
+        getDrainReason: vi.fn(async () => "Agent Studio is deploying. Please retry in a few minutes.")
+      },
+      settingsStore as never,
+      undefined as never,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.handleWebhook(
+      body,
+      {
+        "x-zendesk-webhook-signature-timestamp": timestamp,
+        "x-zendesk-webhook-signature": signBody(body, timestamp, baseSettings.webhookSigningSecret)
+      },
+      "zendesk-1"
+    );
+
+    expect(settingsStore.getForInstance).toHaveBeenCalledWith("zendesk-1");
+    expect(runStore.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: "zendesk-1",
+        ticketId: "45270",
+        source: "webhook",
+        status: "deferred"
+      })
+    );
+    expect(runStore.update).not.toHaveBeenCalled();
+    expect(result.result).toMatchObject({
+      status: "deferred",
+      runId: "run-deferred-1"
+    });
+  });
+
   it("marks interrupted processing runs as failed during restart recovery", async () => {
     const updates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
     const runStore = {
@@ -175,7 +233,7 @@ describe("ZendeskIntegrationService", () => {
 
     const result = await service.recoverInterruptedProcessingRuns({ reprocess: false });
 
-    expect(result).toEqual({ markedFailed: 1, requeued: 0 });
+    expect(result).toEqual({ markedFailed: 1, requeued: 0, deferredRequeued: 0, deferredSkipped: 0 });
     expect(runStore.listProcessingOlderThan).toHaveBeenCalledWith(expect.any(Date), 50);
     expect(updates[0]).toMatchObject({
       runId: "run-stale-1",
@@ -185,6 +243,62 @@ describe("ZendeskIntegrationService", () => {
       }
     });
     expect(String(updates[0]?.patch.error)).toContain("Interrupted by Agent Studio service restart");
+  });
+
+  it("settles deferred webhook runs during restart recovery when Zendesk is disabled", async () => {
+    const updates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
+    const runStore = {
+      create: vi.fn(async () => {
+        throw new Error("not used");
+      }),
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>) => {
+        updates.push({ runId, patch });
+        return {
+          id: runId,
+          instanceId: "zendesk-1",
+          ticketId: "45270",
+          source: "webhook",
+          status: patch.status,
+          detail: patch.detail,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }),
+      listForInstance: vi.fn(async () => []),
+      listProcessingOlderThan: vi.fn(async () => []),
+      listDeferred: vi.fn(async () => [
+        {
+          id: "run-deferred-1",
+          instanceId: "zendesk-1",
+          ticketId: "45270",
+          source: "webhook" as const,
+          status: "deferred" as const,
+          detail: "Agent Studio 正在部署，已暂存 webhook",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ])
+    };
+    const service = new ZendeskIntegrationService(
+      {},
+      {
+        getForInstance: vi.fn(async () => ({ ...baseSettings, enabled: false }))
+      } as never,
+      undefined as never,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.recoverInterruptedProcessingRuns({ reprocess: true });
+
+    expect(result).toEqual({ markedFailed: 0, requeued: 0, deferredRequeued: 0, deferredSkipped: 1 });
+    expect(runStore.listDeferred).toHaveBeenCalledWith(50);
+    expect(updates[0]).toMatchObject({
+      runId: "run-deferred-1",
+      patch: {
+        status: "skipped",
+        detail: "Zendesk 自动答复已关闭，延迟 webhook 未处理"
+      }
+    });
   });
 
   it("reuses one Codex thread per Zendesk ticket and passes downloaded attachments into the prompt", async () => {

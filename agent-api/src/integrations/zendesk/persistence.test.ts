@@ -197,4 +197,52 @@ describe("Zendesk persistence stores", () => {
       ticketId: "45268"
     });
   });
+
+  it("lists deferred Zendesk webhook runs for deployment recovery", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        id: "run-deferred-1",
+        integrationInstanceId: "inst-1",
+        scopeKey: "inst-1",
+        ticketId: "45270",
+        source: "webhook",
+        status: "deferred",
+        detail: "Agent Studio 正在部署，已暂存 webhook",
+        decision: null,
+        commentId: null,
+        requesterCommentId: null,
+        ticketSubject: "deferred ticket",
+        error: null,
+        createdAt: "2026-05-21T12:00:00.000Z",
+        updatedAt: "2026-05-21T12:00:00.000Z"
+      }
+    ]);
+    const store = new ZendeskRunStore({
+      zendeskRun: {
+        create: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+        findMany,
+        update: vi.fn(async () => {
+          throw new Error("not used");
+        })
+      }
+    });
+
+    const records = await store.listDeferred(25);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        status: "deferred"
+      },
+      orderBy: { createdAt: "asc" },
+      take: 25
+    });
+    expect(records[0]).toMatchObject({
+      id: "run-deferred-1",
+      instanceId: "inst-1",
+      status: "deferred",
+      ticketId: "45270"
+    });
+  });
 });
