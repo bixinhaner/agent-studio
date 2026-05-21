@@ -237,7 +237,12 @@ reload_caddy() {
 
   if command_exists systemctl; then
     log_step "Reloading Caddy"
-    if run_as_root systemctl reload caddy; then
+    local systemctl_status=0
+    set +e
+    run_as_root systemctl reload caddy
+    systemctl_status=$?
+    set -e
+    if [[ "$systemctl_status" -eq 0 ]]; then
       return 0
     fi
     log_warn "systemctl reload caddy failed; falling back to direct caddy reload"
