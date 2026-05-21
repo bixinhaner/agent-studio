@@ -482,4 +482,224 @@ describe("ZendeskIntegrationService", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("processes missed call transcripts as forced internal notes", async () => {
+    const prompts: string[] = [];
+    const ticketUpdates: unknown[] = [];
+    const runUpdates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
+    const bindingRecords = new Map<string, {
+      ticketId: string;
+      instanceId?: string;
+      lastProcessedRequesterCommentId?: number;
+      lastAction?: "public_reply" | "internal_note" | "handoff" | "skip" | "error";
+      lastRunAt?: string;
+      lastRunId?: string;
+      createdAt: string;
+      updatedAt: string;
+    }>();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/45270.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 45270,
+              subject: "Missed call from East_Texas_DSL",
+              description: "Call from: +1 (936) 212-2907\nTime of call: May 20, 2026 at 4:12 PM UTC",
+              status: "new",
+              requester_id: 40908351238676,
+              updated_at: "2026-05-20T16:13:50Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/45270/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 49443304262036,
+                author_id: -1,
+                public: false,
+                created_at: "2026-05-20T16:13:50Z",
+                body: "#### **Call transcript:**\n\n**00:01** **Customer** My name is Joe Kelly with East Texas DSL. Please give me a callback.\n**00:24** **Customer** This is regarding the CloudCore charge."
+              },
+              {
+                id: 49443288545556,
+                author_id: 40908351238676,
+                public: false,
+                created_at: "2026-05-20T16:13:40Z",
+                body: "Voicemail from +1 (936) 212-2907\nCall Details:\nListen to the recording: https://example.zendesk.com/recording"
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/40908351238676.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 40908351238676,
+              name: "East_Texas_DSL",
+              role: "end-user"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/45270.json") && init?.method === "PUT") {
+        ticketUpdates.push(JSON.parse(String(init.body || "{}")));
+        return new Response(JSON.stringify({ audit: { events: [{ id: 49443355555555, type: "Comment" }] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = {
+      startThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-voice" })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-voice" })),
+      runStreamed: vi.fn(async function* (_thread: unknown, message: string) {
+        prompts.push(message);
+        yield {
+          type: "message",
+          text: JSON.stringify({
+            decision: "public_reply",
+            body: "We will call you back about the CloudCore charge.",
+            publicReplyPreview: "We will call you back about the CloudCore charge.",
+            internalNote: "Missed call transcript: caller requests a callback about a CloudCore charge.",
+            processSummary: "Reviewed the missed call transcript and prepared an internal follow-up note.",
+            confidence: 0.9,
+            reasons: ["voice transcript"]
+          })
+        };
+      })
+    };
+
+    const settingsStore = {
+      get: vi.fn(async () => ({
+        ...baseSettings,
+        responseMode: "public_reply" as const,
+        zendeskBaseUrl: "https://example.zendesk.com",
+        zendeskEmail: "agent@example.com",
+        zendeskApiToken: "token"
+      })),
+      getForInstance: vi.fn(async () => ({
+        ...baseSettings,
+        responseMode: "public_reply" as const,
+        zendeskBaseUrl: "https://example.zendesk.com",
+        zendeskEmail: "agent@example.com",
+        zendeskApiToken: "token"
+      }))
+    };
+    const bindingStore = {
+      get: vi.fn(async (ticketId: string, instanceId?: string) => bindingRecords.get(`${instanceId || "legacy"}:${ticketId}`)),
+      upsert: vi.fn(async (ticketId: string, patch: Record<string, unknown>, instanceId?: string) => {
+        const key = `${instanceId || "legacy"}:${ticketId}`;
+        const now = new Date().toISOString();
+        const current =
+          bindingRecords.get(key) ??
+          {
+            ticketId,
+            instanceId,
+            createdAt: now,
+            updatedAt: now
+          };
+        const next = {
+          ...current,
+          ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+          updatedAt: now
+        };
+        bindingRecords.set(key, next as typeof current);
+        return next;
+      })
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-voice-1",
+        instanceId: "zendesk-1",
+        ticketId: "45270",
+        source: "manual",
+        status: "received",
+        detail: "手动触发处理中",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>) => {
+        runUpdates.push({ runId, patch });
+        return undefined;
+      }),
+      listForInstance: vi.fn(async () => [])
+    };
+    const conversationAudit = {
+      beforeAgentRun: vi.fn(async () => ({
+        threadId: "audit-thread-voice",
+        userMessageId: "audit-user-voice",
+        externalConversationKey: "zendesk:zendesk-1:ticket:45270:mode-1"
+      })),
+      afterAgentRun: vi.fn(async (_input: unknown) => undefined)
+    };
+
+    const service = new ZendeskIntegrationService(
+      {
+        resolveAgentRuntime: vi.fn(async () => ({
+          runtime: runtime as never,
+          model: "gpt-5.5",
+          reasoningEffort: "high" as const,
+          workspace: "/tmp/zendesk-voice",
+          codexRunConfig: {}
+        })),
+        conversationAudit
+      },
+      settingsStore as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.runTicket("45270", "zendesk-1");
+
+    expect(result).toMatchObject({
+      status: "noted",
+      requesterCommentId: 49443304262036
+    });
+    expect(prompts[0]).toContain("input_kind: voice_transcript");
+    expect(prompts[0]).toContain("This ticket was triggered by a missed call, voicemail, or call transcript.");
+    expect(ticketUpdates).toHaveLength(1);
+    expect(ticketUpdates[0]).toMatchObject({
+      ticket: {
+        comment: {
+          public: false
+        }
+      }
+    });
+    expect(runUpdates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          patch: expect.objectContaining({
+            detail: "语音转写工单已强制记录为内部备注",
+            status: "noted",
+            requesterCommentId: 49443304262036
+          })
+        })
+      ])
+    );
+    const allProcessRows = conversationAudit.afterAgentRun.mock.calls.flatMap((call) => {
+      const value = call[0] as { processRows?: Array<{ title?: string; detail?: string }> };
+      return value.processRows ?? [];
+    });
+    expect(allProcessRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Selected voice transcript",
+          detail: expect.stringContaining("forced_action: internal_note")
+        })
+      ])
+    );
+  });
 });

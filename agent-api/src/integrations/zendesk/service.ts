@@ -67,6 +67,14 @@ type ProcessTicketResult = {
   decision?: ZendeskAgentDecision["decision"];
 };
 
+type ZendeskProcessableInputKind = "requester_public_comment" | "voice_transcript";
+
+type ZendeskProcessableComment = {
+  comment: ZendeskCommentPayload;
+  kind: ZendeskProcessableInputKind;
+  forceInternalNote: boolean;
+};
+
 type ZendeskAgentRuntimeOptions = {
   runtime?: CodexRuntime;
   model: string;
@@ -207,6 +215,52 @@ function selectLatestRequesterComment(context: ZendeskTicketContext) {
   return context.comments.find(
     (item) => item.public && item.authorId === requesterId && (item.body.trim() || (item.attachments?.length ?? 0) > 0)
   );
+}
+
+function normalizeTextForMatch(value: string | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isVoiceTranscriptComment(context: ZendeskTicketContext, comment: ZendeskCommentPayload): boolean {
+  if (comment.public) return false;
+  const body = normalizeTextForMatch(comment.body);
+  const subject = normalizeTextForMatch(context.ticket.subject);
+  if (!body) return false;
+  const hasVoiceBodySignal =
+    body.includes("call transcript") ||
+    body.includes("voicemail from") ||
+    body.includes("call details:") ||
+    body.includes("listen to the recording:") ||
+    body.includes("missed call");
+  if (!hasVoiceBodySignal) return false;
+  return (
+    subject.includes("missed call") ||
+    subject.includes("voicemail") ||
+    body.includes("call transcript") ||
+    body.includes("voicemail from")
+  );
+}
+
+function selectProcessableComment(context: ZendeskTicketContext): ZendeskProcessableComment | undefined {
+  const requesterComment = selectLatestRequesterComment(context);
+  if (requesterComment) {
+    return {
+      comment: requesterComment,
+      kind: "requester_public_comment",
+      forceInternalNote: false
+    };
+  }
+
+  const voiceComment = context.comments.find((comment) => isVoiceTranscriptComment(context, comment));
+  if (!voiceComment) return undefined;
+  return {
+    comment: voiceComment,
+    kind: "voice_transcript",
+    forceInternalNote: true
+  };
 }
 
 function trimOrUndefined(value: unknown): string | undefined {
@@ -571,15 +625,23 @@ type ResolvedAction =
       decision: ZendeskAgentDecision["decision"];
     };
 
-function resolveAction(settings: ZendeskIntegrationSettings, decision: ZendeskAgentDecision): ResolvedAction {
-  if (settings.responseMode === "internal_note") {
+function resolveAction(
+  settings: ZendeskIntegrationSettings,
+  decision: ZendeskAgentDecision,
+  options: { forceInternalNote?: boolean } = {}
+): ResolvedAction {
+  if (settings.responseMode === "internal_note" || options.forceInternalNote) {
     const body = normalizeMultilineBody(buildInternalNoteFromDecision(decision));
     return {
       mode: "comment",
       publicReply: false,
       body,
       status: decision.decision === "handoff" ? "handoff" : "noted",
-      detail: decision.decision === "handoff" ? "已记录内部备注，等待人工接管" : "已记录内部备注",
+      detail: options.forceInternalNote
+        ? "语音转写工单已强制记录为内部备注"
+        : decision.decision === "handoff"
+          ? "已记录内部备注，等待人工接管"
+          : "已记录内部备注",
       decision: decision.decision
     };
   }
@@ -643,6 +705,15 @@ function buildSetupGuide(settings: ZendeskIntegrationSettings, instanceId?: stri
         conditions: [
           "触发条件建议：Ticket is Updated",
           "附加条件建议：Current user is end-user",
+          "Action：Notify active webhook"
+        ]
+      },
+      {
+        name: "Agent Studio Auto Reply - Missed Call / Voicemail",
+        description: "未接来电、语音留言或 Call transcript 生成后触发内部备注建议。",
+        conditions: [
+          "触发条件建议：Ticket is Created 或 Ticket is Updated",
+          "附加条件建议：Subject text contains Missed call，或 Comment text contains Call transcript / Voicemail from",
           "Action：Notify active webhook"
         ]
       }
@@ -851,8 +922,8 @@ export class ZendeskIntegrationService {
         };
       }
 
-      const requesterComment = selectLatestRequesterComment(context);
-      if (!requesterComment) {
+      const processableInput = selectProcessableComment(context);
+      if (!processableInput) {
         await this.bindingStore.upsert(ticketId, {
           lastAction: "skip",
           lastRunAt: new Date().toISOString(),
@@ -860,14 +931,15 @@ export class ZendeskIntegrationService {
         }, instanceId);
         await this.runStore.update(runId, {
           status: "skipped",
-          detail: "未找到可处理的客户公开评论"
+          detail: "未找到可处理的客户公开评论或语音转写"
         });
         return {
           status: "skipped",
-          detail: "未找到可处理的客户公开评论",
+          detail: "未找到可处理的客户公开评论或语音转写",
           runId
         };
       }
+      const requesterComment = processableInput.comment;
 
       const binding = await this.bindingStore.get(ticketId, instanceId);
       if (
@@ -876,7 +948,7 @@ export class ZendeskIntegrationService {
       ) {
         await this.runStore.update(runId, {
           status: "skipped",
-          detail: `请求者评论 ${requesterComment.id} 已处理，跳过重复执行`,
+          detail: `Zendesk 输入 ${requesterComment.id} 已处理，跳过重复执行`,
           requesterCommentId: requesterComment.id
         });
         return {
@@ -895,9 +967,11 @@ export class ZendeskIntegrationService {
       processRows.push(
         zendeskProcessRow(
           "meta",
-          "Selected requester comment",
+          processableInput.kind === "voice_transcript" ? "Selected voice transcript" : "Selected requester comment",
           [
             `comment_id: ${requesterComment.id}`,
+            `input_kind: ${processableInput.kind}`,
+            processableInput.forceInternalNote ? "forced_action: internal_note" : "",
             `created_at: ${requesterComment.createdAt || ""}`,
             `attachments: ${requesterComment.attachments.length}`,
             requesterComment.body ? `body:\n${shortenText(requesterComment.body, 1200)}` : ""
@@ -912,10 +986,11 @@ export class ZendeskIntegrationService {
         ticketId,
         runId,
         source,
-        processRows
+        processRows,
+        inputKind: processableInput.kind
       });
       const decision = parseZendeskAgentDecision(agentRun.answerText);
-      const action = resolveAction(settings, decision);
+      const action = resolveAction(settings, decision, { forceInternalNote: processableInput.forceInternalNote });
       if (decision.processSummary) {
         agentRun.processRows.push(
           zendeskProcessRow("reasoning", "AI process summary", shortenText(decision.processSummary, 1800))
@@ -1061,6 +1136,7 @@ export class ZendeskIntegrationService {
       runId: string;
       source: "webhook" | "manual";
       processRows?: ZendeskAuditProcessRow[];
+      inputKind?: ZendeskProcessableInputKind;
     }
   ): Promise<ZendeskAgentRunResult> {
     const processRows = [...(run.processRows ?? [])];
@@ -1188,7 +1264,8 @@ export class ZendeskIntegrationService {
     });
 
     const prompt = buildZendeskAgentPrompt(preparedContext, settings, {
-      knowledgeSets: runtimeOptions.knowledgeSets
+      knowledgeSets: runtimeOptions.knowledgeSets,
+      inputKind: run.inputKind
     });
     processRows.push(
       zendeskProcessRow(
@@ -1197,6 +1274,7 @@ export class ZendeskIntegrationService {
         [
           `prompt_chars: ${prompt.length}`,
           `comment_history: ${preparedContext.comments.length}`,
+          `input_kind: ${run.inputKind || "requester_public_comment"}`,
           `knowledge_sets: ${runtimeOptions.knowledgeSets?.length ?? 0}`
         ].join("\n")
       )

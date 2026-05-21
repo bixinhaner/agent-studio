@@ -56,7 +56,10 @@ function formatComment(comment: ZendeskCommentPayload, requesterId?: number): st
 export function buildZendeskAgentPrompt(
   context: ZendeskTicketContext,
   settings: ZendeskIntegrationSettings,
-  options: { knowledgeSets?: ZendeskPromptKnowledgeSet[] } = {}
+  options: {
+    knowledgeSets?: ZendeskPromptKnowledgeSet[];
+    inputKind?: "requester_public_comment" | "voice_transcript";
+  } = {}
 ): string {
   const latestComments = context.comments
     .slice(0, settings.maxCommentHistory)
@@ -92,11 +95,14 @@ export function buildZendeskAgentPrompt(
     "6. If the customer wrote in Chinese, reply in Chinese. Otherwise, follow the language of the customer's latest message whenever possible.",
     "7. If comments include attachments with status downloaded, read the file at local_path when it is relevant. Treat images and screenshots as usable evidence.",
     "8. Never expose local paths, internal directories, manifest paths, API tokens, secrets, or implementation details in a public reply or publicReplyPreview.",
+    options.inputKind === "voice_transcript"
+      ? "9. This ticket was triggered by a missed call, voicemail, or call transcript. Treat it as a customer contact that requires internal support follow-up. Do not send a public reply; produce an internal note with the caller identity, callback/contact details, request summary, risk notes, and recommended next action."
+      : undefined,
     hasKnowledgeSets
-      ? "9. Mounted knowledge sets are available. Search the relevant mounted knowledge set files before concluding that local product documentation is unavailable. Include the document names or evidence checked in processSummary."
-      : "9. If no local knowledge sources are available, say what evidence is missing in processSummary.",
-    "10. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
-  ];
+      ? "10. Mounted knowledge sets are available. Search the relevant mounted knowledge set files before concluding that local product documentation is unavailable. Include the document names or evidence checked in processSummary."
+      : "10. If no local knowledge sources are available, say what evidence is missing in processSummary.",
+    "11. Output only the JSON object. Do not output markdown, code fences, explanations, or any extra text."
+  ].filter((line): line is string => Boolean(line));
 
   const ticketContext = [
     "ticket:",
@@ -112,6 +118,7 @@ export function buildZendeskAgentPrompt(
     `  requester_role: ${context.ticket.requester?.role || ""}`,
     `  updated_at: ${context.ticket.updatedAt || ""}`,
     `  tags: ${(context.ticket.tags || []).join(", ")}`,
+    `  input_kind: ${options.inputKind || "requester_public_comment"}`,
     "description: |",
     ...trimBlock(context.ticket.description || "")
       .split("\n")
