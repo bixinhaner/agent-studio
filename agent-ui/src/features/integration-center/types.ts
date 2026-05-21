@@ -392,7 +392,7 @@ export type ZendeskConfigDraft = {
   dingtalkNotificationManualRunsEnabled: boolean;
   dingtalkNotificationWebhookUrlDraft: string;
   dingtalkNotificationRobotSecretDraft: string;
-  dingtalkNotificationFallbackUserIdsRaw: string;
+  dingtalkNotificationFallbackUserIds: string[];
   systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;

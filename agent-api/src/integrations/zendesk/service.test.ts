@@ -326,7 +326,8 @@ describe("ZendeskIntegrationService", () => {
         zendeskApiToken: "token",
         dingtalkNotificationEnabled: true,
         dingtalkNotificationManualRunsEnabled: true,
-        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token"
+        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token",
+        dingtalkNotificationFallbackUserIds: ["ding-fallback-1"]
       })),
       getForInstance: vi.fn(async () => ({
         ...baseSettings,
@@ -335,7 +336,8 @@ describe("ZendeskIntegrationService", () => {
         zendeskApiToken: "token",
         dingtalkNotificationEnabled: true,
         dingtalkNotificationManualRunsEnabled: true,
-        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token"
+        dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token",
+        dingtalkNotificationFallbackUserIds: ["ding-fallback-1"]
       }))
     };
     const bindingStore = {

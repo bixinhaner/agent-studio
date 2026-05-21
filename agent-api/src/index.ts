@@ -328,9 +328,33 @@ const usageIngestion = new UsageIngestionService({
 
 async function resolveZendeskDingTalkMentionTarget(input: {
   zendeskUser?: ZendeskRequesterPayload;
+  settings: ZendeskIntegrationSettings;
 }): Promise<{ userIds: string[]; label?: string; detail?: string } | undefined> {
   const email = trimOrUndefined(input.zendeskUser?.email)?.toLowerCase();
   const fallbackLabel = trimOrUndefined(input.zendeskUser?.name) || email;
+  if (!input.zendeskUser) {
+    const fallbackUserIds = Array.from(new Set(input.settings.dingtalkNotificationFallbackUserIds.map((item) => item.trim()).filter(Boolean)));
+    if (fallbackUserIds.length === 0) return undefined;
+    const rows = await db.user.findMany({
+      where: {
+        dingtalkUserId: { in: fallbackUserIds },
+        status: "active"
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    const matchedIds = new Set(rows.map((row) => trimOrUndefined(row.dingtalkUserId)).filter((item): item is string => Boolean(item)));
+    const labels = rows
+      .map((row) => trimOrUndefined(row.displayName) || trimOrUndefined(row.email) || trimOrUndefined(row.dingtalkUserId))
+      .filter((item): item is string => Boolean(item));
+    const missingCount = fallbackUserIds.filter((id) => !matchedIds.has(id)).length;
+    return {
+      userIds: fallbackUserIds,
+      label: labels.length ? labels.join(", ") : "Support team",
+      detail: missingCount > 0
+        ? `Using ${fallbackUserIds.length} fallback DingTalk user(s); ${missingCount} not found in active Agent Studio users.`
+        : `Using ${fallbackUserIds.length} fallback DingTalk user(s).`
+    };
+  }
   if (!email) {
     return fallbackLabel ? { userIds: [], label: fallbackLabel, detail: "Zendesk assignee has no email." } : undefined;
   }

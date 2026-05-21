@@ -1349,15 +1349,25 @@ export class ZendeskIntegrationService {
             ticketId: input.ticketId
           })
         : undefined;
-      const atUserIds = [
-        ...(resolvedMention?.userIds ?? []),
-        ...input.settings.dingtalkNotificationFallbackUserIds
-      ]
+      const assigneeUserIds = (resolvedMention?.userIds ?? [])
+        .map((item) => String(item || "").trim())
+        .filter((item, index, array) => item && array.indexOf(item) === index);
+      const fallbackMention =
+        assigneeUserIds.length === 0 && this.dependencies.resolveDingTalkMentionTarget
+          ? await this.dependencies.resolveDingTalkMentionTarget({
+              settings: input.settings,
+              context: input.context,
+              instanceId: input.instanceId,
+              ticketId: input.ticketId
+            })
+          : undefined;
+      const atUserIds = (assigneeUserIds.length > 0 ? assigneeUserIds : fallbackMention?.userIds ?? [])
         .map((item) => String(item || "").trim())
         .filter((item, index, array) => item && array.indexOf(item) === index);
       const mentionLabel =
-        trimOrUndefined(resolvedMention?.label) ||
-        zendeskUserDisplay(input.context.ticket.assignee, "") ||
+        (assigneeUserIds.length > 0
+          ? trimOrUndefined(resolvedMention?.label) || zendeskUserDisplay(input.context.ticket.assignee, "")
+          : trimOrUndefined(fallbackMention?.label)) ||
         (atUserIds.length ? "Support team" : "");
       const markdown = buildZendeskDingTalkMarkdown({
         settings: input.settings,
@@ -1385,7 +1395,8 @@ export class ZendeskIntegrationService {
         [
           `at_user_ids: ${atUserIds.length}`,
           mentionLabel ? `mention_label: ${mentionLabel}` : "",
-          resolvedMention?.detail ? `mapping: ${resolvedMention.detail}` : ""
+          resolvedMention?.detail ? `assignee_mapping: ${resolvedMention.detail}` : "",
+          fallbackMention?.detail ? `fallback_mapping: ${fallbackMention.detail}` : ""
         ]
           .filter(Boolean)
           .join("\n")

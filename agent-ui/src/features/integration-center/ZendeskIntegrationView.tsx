@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Collapse, Input, InputNumber, Segmented, Select, Space, Switch, Tag } from "antd";
 
+import { fetchAdminUsers } from "../admin/api";
+import type { AdminUser } from "../admin/types";
 import { fetchAgentModes } from "../capability-center/api";
 import type { AgentModeRecord } from "../capability-center/types";
 import { fetchKnowledgeSets } from "../resources-center/api";
@@ -181,7 +183,7 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     dingtalkNotificationManualRunsEnabled: asBoolean(detail.config.dingtalkNotificationManualRunsEnabled),
     dingtalkNotificationWebhookUrlDraft: "",
     dingtalkNotificationRobotSecretDraft: "",
-    dingtalkNotificationFallbackUserIdsRaw: asListText(detail.config.dingtalkNotificationFallbackUserIds),
+    dingtalkNotificationFallbackUserIds: asStringArray(detail.config.dingtalkNotificationFallbackUserIds),
     systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
@@ -197,6 +199,20 @@ function optionsWithCurrent(options: Array<{ label: string; value: string }>, va
   if (!value) return options;
   if (options.some((item) => item.value === value)) return options;
   return [{ label: value, value }, ...options];
+}
+
+function optionsWithCurrentValues(options: Array<{ label: string; value: string }>, values: string[]) {
+  const known = new Set(options.map((item) => item.value));
+  const extras = values
+    .filter((value) => value && !known.has(value))
+    .map((value) => ({ label: value, value }));
+  return [...extras, ...options];
+}
+
+function adminUserDingTalkLabel(user: AdminUser) {
+  const name = user.synced.displayName || user.synced.email || user.synced.dingtalkUserId || user.id;
+  const email = user.synced.email ? ` · ${user.synced.email}` : "";
+  return `${name}${email}`;
 }
 
 function formatLocalDateTime(value?: string) {
@@ -242,6 +258,7 @@ export function ZendeskIntegrationView(props: {
   const [optionsErrorText, setOptionsErrorText] = useState("");
   const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
   const [knowledgeSets, setKnowledgeSets] = useState<KnowledgeSetRecord[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
 
   useEffect(() => {
     setName(props.detail.instance.name);
@@ -262,14 +279,19 @@ export function ZendeskIntegrationView(props: {
       setOptionsLoading(true);
       setOptionsErrorText("");
       try {
-        const [modeResponse, knowledgeSetResponse] = await Promise.all([fetchAgentModes(), fetchKnowledgeSets()]);
+        const [modeResponse, knowledgeSetResponse, usersResponse] = await Promise.all([
+          fetchAgentModes(),
+          fetchKnowledgeSets(),
+          fetchAdminUsers()
+        ]);
         if (!active) return;
         setAgentModes(modeResponse.agentModes.filter((item) => item.status === "active"));
         setKnowledgeSets(
           knowledgeSetResponse.knowledgeSets.filter((item) => item.status === "active" && item.sourceType === "managed_upload")
         );
+        setAdminUsers(usersResponse.users);
       } catch (error) {
-        if (active) setOptionsErrorText(error instanceof Error ? error.message : "加载 Agent Mode/资料集列表失败");
+        if (active) setOptionsErrorText(error instanceof Error ? error.message : "加载 Agent Mode/资料集/用户列表失败");
       } finally {
         if (active) setOptionsLoading(false);
       }
@@ -288,6 +310,17 @@ export function ZendeskIntegrationView(props: {
   const knowledgeSetOptions = useMemo(
     () => knowledgeSets.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
     [knowledgeSets]
+  );
+  const dingtalkUserOptions = useMemo(
+    () =>
+      adminUsers
+        .filter((user) => user.effective.status === "active" && Boolean(user.synced.dingtalkUserId))
+        .map((user) => ({
+          label: adminUserDingTalkLabel(user),
+          value: user.synced.dingtalkUserId || ""
+        }))
+        .filter((item) => Boolean(item.value)),
+    [adminUsers]
   );
 
   async function handleSave() {
@@ -325,7 +358,7 @@ export function ZendeskIntegrationView(props: {
           allowedAttachmentMimeTypes: parseList(draft.allowedAttachmentMimeTypesRaw),
           dingtalkNotificationEnabled: draft.dingtalkNotificationEnabled,
           dingtalkNotificationManualRunsEnabled: draft.dingtalkNotificationManualRunsEnabled,
-          dingtalkNotificationFallbackUserIds: parseList(draft.dingtalkNotificationFallbackUserIdsRaw),
+          dingtalkNotificationFallbackUserIds: asStringArray(draft.dingtalkNotificationFallbackUserIds),
           systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
@@ -652,16 +685,23 @@ export function ZendeskIntegrationView(props: {
                         <span className="field-help">默认关闭，避免测试 ticket 打扰钉钉群。</span>
                       </label>
                       <label className="field resource-center-form-span-2">
-                        <span className="field-label">Fallback DingTalk User IDs</span>
-                        <Input.TextArea
-                          rows={2}
-                          value={draft.dingtalkNotificationFallbackUserIdsRaw}
+                        <span className="field-label">Fallback @ Users</span>
+                        <Select
+                          mode="multiple"
+                          showSearch
+                          value={draft.dingtalkNotificationFallbackUserIds}
+                          options={optionsWithCurrentValues(dingtalkUserOptions, draft.dingtalkNotificationFallbackUserIds)}
+                          loading={optionsLoading}
+                          optionFilterProp="label"
                           disabled={saving || !draft.dingtalkNotificationEnabled}
-                          placeholder="一行一个或逗号分隔；当前 ticket 没有可映射处理人时使用"
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, dingtalkNotificationFallbackUserIdsRaw: event.target.value }))
+                          placeholder="搜索姓名、邮箱或钉钉 ID"
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, dingtalkNotificationFallbackUserIds: value }))
                           }
                         />
+                        <span className="field-help">
+                          仅当 ticket 没有 assignee，或 assignee 无法映射到钉钉用户时，才 @ 这些 fallback 用户。
+                        </span>
                       </label>
                     </div>
                   )
