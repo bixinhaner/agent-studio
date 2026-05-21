@@ -120,7 +120,7 @@ export function defaultDingTalkNotificationTemplate(): string {
     "[#{{ticketId}}]({{ticketUrl}})",
     "{{subject}}",
     "",
-    "**Requester:** {{requester}}",
+    "**Requester:** {{requester}}  ",
     "**Assignee:** {{assignee}}",
     "",
     "---",

@@ -694,16 +694,17 @@ describe("ZendeskIntegrationService", () => {
       });
       const firstDingTalkText = ((dingtalkPayloads[0].markdown as { text?: string } | undefined)?.text || "").trim();
       expect(firstDingTalkText).toContain("### Zendesk #123 · Internal note");
+      expect(firstDingTalkText).toContain("**Requester:** Ramen Support User <requester@example.com>  \n**Assignee:** Assignee Agent <assignee@example.com>");
       expect(firstDingTalkText).toContain("**Status**");
       expect(firstDingTalkText).toContain("AI generated an internal note.");
       expect(firstDingTalkText).toContain("**Confidence**");
       expect(firstDingTalkText).toContain("80%");
       expect(firstDingTalkText).toContain("**Reasons**");
-      expect(firstDingTalkText).toContain("- test");
+      expect(firstDingTalkText).toContain("> - test");
       expect(firstDingTalkText).toContain("**Public Reply Preview (not sent)**");
-      expect(firstDingTalkText).toContain("We are reviewing the screenshot and will confirm the next configuration step.");
+      expect(firstDingTalkText).toContain("> We are reviewing the screenshot and will confirm the next configuration step.");
       expect(firstDingTalkText).toContain("**Internal Note**");
-      expect(firstDingTalkText).toContain("Attachment checked.");
+      expect(firstDingTalkText).toContain("> Attachment checked.");
       expect(firstDingTalkText).not.toContain("Agent Studio");
       expect(firstDingTalkText.endsWith("@ding-assignee-1")).toBe(true);
       expect(recordUsage.mock.calls[0]?.[0]).toMatchObject({

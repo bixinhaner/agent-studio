@@ -837,6 +837,15 @@ function splitKnownZendeskCommentSections(body: string): {
   };
 }
 
+function formatDingTalkQuoteBlock(value: string): string {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "> -";
+  return normalized
+    .split("\n")
+    .map((line) => (line.trim() ? `> ${line}` : ">"))
+    .join("\n");
+}
+
 function formatZendeskCommentHeaderForDingTalk(header: string): string {
   const lines = header.split("\n").map((line) => line.trim()).filter(Boolean);
   if (lines.length === 0) return "";
@@ -856,7 +865,7 @@ function formatZendeskCommentHeaderForDingTalk(header: string): string {
       .split(/\s*;\s*/g)
       .map((item) => item.trim())
       .filter(Boolean);
-    output.push("", "**Reasons**", items.length ? items.map((item) => `- ${item}`).join("\n") : "-");
+    output.push("", "**Reasons**", items.length ? items.map((item) => `> - ${item}`).join("\n") : "> -");
   }
   const remaining = lines.filter((line, index) => index > 0 && !/^Confidence:/i.test(line) && !/^Reasons:/i.test(line));
   if (remaining.length > 0) {
@@ -876,10 +885,10 @@ function formatZendeskCommentForDingTalkMarkdown(body: string, publicReply: bool
   const header = formatZendeskCommentHeaderForDingTalk(sections.header);
   if (header) output.push(header);
   if (sections.publicReplyPreview) {
-    output.push("", "**Public Reply Preview (not sent)**", sections.publicReplyPreview);
+    output.push("", "**Public Reply Preview (not sent)**", formatDingTalkQuoteBlock(sections.publicReplyPreview));
   }
   if (sections.internalNote) {
-    output.push("", "**Internal Note**", sections.internalNote);
+    output.push("", "**Internal Note**", formatDingTalkQuoteBlock(sections.internalNote));
   }
   return output.length ? output.join("\n").trim() : normalized;
 }
