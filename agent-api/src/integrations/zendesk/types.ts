@@ -159,6 +159,7 @@ export type ZendeskRequesterPayload = {
 export type ZendeskCommentPayload = {
   id: number;
   authorId?: number;
+  author?: ZendeskRequesterPayload;
   body: string;
   public: boolean;
   createdAt?: string;

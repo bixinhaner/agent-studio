@@ -299,8 +299,8 @@ export class ZendeskClient {
   async getTicketContext(ticketId: string, maxComments: number): Promise<ZendeskTicketContext> {
     const ticketData = await this.request<ZendeskTicketEnvelope>(`/api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
     const ticket = normalizeTicket(ticketData.ticket);
-    const [comments, requester, assignee] = await Promise.all([
-      this.listComments(ticketId, maxComments),
+    const comments = await this.listComments(ticketId, maxComments);
+    const [requester, assignee] = await Promise.all([
       ticket.requesterId
         ? this.getUser(ticket.requesterId).catch(() => undefined)
         : Promise.resolve(undefined),
@@ -308,13 +308,34 @@ export class ZendeskClient {
         ? this.getUser(ticket.assigneeId).catch(() => undefined)
         : Promise.resolve(undefined)
     ]);
+    const usersById = new Map<number, ZendeskRequesterPayload>();
+    if (requester) usersById.set(requester.id, requester);
+    if (assignee) usersById.set(assignee.id, assignee);
+
+    const authorIds = [
+      ...new Set(
+        comments
+          .map((comment) => comment.authorId)
+          .filter((authorId): authorId is number => Number.isFinite(authorId) && Number(authorId) > 0)
+      )
+    ].filter((authorId) => !usersById.has(authorId));
+    await Promise.all(
+      authorIds.map(async (authorId) => {
+        const author = await this.getUser(authorId).catch(() => undefined);
+        if (author) usersById.set(author.id, author);
+      })
+    );
+
     return {
       ticket: {
         ...ticket,
         ...(requester ? { requester } : {}),
         ...(assignee ? { assignee } : {})
       },
-      comments
+      comments: comments.map((comment) => {
+        const author = comment.authorId ? usersById.get(comment.authorId) : undefined;
+        return author ? { ...comment, author } : comment;
+      })
     };
   }
 

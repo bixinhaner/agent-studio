@@ -25,6 +25,10 @@ function formatComment(comment: ZendeskCommentPayload, requesterId?: number): st
   const lines = [
     `- comment_id: ${comment.id}`,
     `  author: ${author}`,
+    `  author_id: ${comment.authorId || ""}`,
+    `  author_name: ${comment.author?.name || ""}`,
+    `  author_email: ${comment.author?.email || ""}`,
+    `  author_role: ${comment.author?.role || ""}`,
     `  visibility: ${visibility}`,
     `  created_at: ${createdAt}`,
     `  body: |`,
@@ -58,7 +62,7 @@ export function buildZendeskAgentPrompt(
   settings: ZendeskIntegrationSettings,
   options: {
     knowledgeSets?: ZendeskPromptKnowledgeSet[];
-    inputKind?: "requester_public_comment" | "voice_transcript";
+    inputKind?: "customer_public_comment" | "voice_transcript";
   } = {}
 ): string {
   const latestComments = context.comments
@@ -118,7 +122,7 @@ export function buildZendeskAgentPrompt(
     `  requester_role: ${context.ticket.requester?.role || ""}`,
     `  updated_at: ${context.ticket.updatedAt || ""}`,
     `  tags: ${(context.ticket.tags || []).join(", ")}`,
-    `  input_kind: ${options.inputKind || "requester_public_comment"}`,
+    `  input_kind: ${options.inputKind || "customer_public_comment"}`,
     "description: |",
     ...trimBlock(context.ticket.description || "")
       .split("\n")

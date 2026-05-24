@@ -70,7 +70,7 @@ type ProcessTicketResult = {
   decision?: ZendeskAgentDecision["decision"];
 };
 
-type ZendeskProcessableInputKind = "requester_public_comment" | "voice_transcript";
+type ZendeskProcessableInputKind = "customer_public_comment" | "voice_transcript";
 
 type ZendeskProcessableComment = {
   comment: ZendeskCommentPayload;
@@ -264,12 +264,50 @@ function normalizeMultilineBody(input: string): string {
     .slice(0, 20000);
 }
 
-function selectLatestRequesterComment(context: ZendeskTicketContext) {
-  const requesterId = context.ticket.requesterId;
-  if (!requesterId) return undefined;
-  return context.comments.find(
-    (item) => item.public && item.authorId === requesterId && (item.body.trim() || (item.attachments?.length ?? 0) > 0)
-  );
+function hasProcessableCommentContent(comment: ZendeskCommentPayload): boolean {
+  return Boolean(comment.body.trim() || (comment.attachments?.length ?? 0) > 0);
+}
+
+function normalizeZendeskRole(value: string | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isEndUserRole(value: string | undefined): boolean {
+  return normalizeZendeskRole(value) === "enduser";
+}
+
+function isStaffRole(value: string | undefined): boolean {
+  const role = normalizeZendeskRole(value);
+  return role === "agent" || role === "admin" || role === "lightagent";
+}
+
+function isCustomerPublicComment(context: ZendeskTicketContext, comment: ZendeskCommentPayload): boolean {
+  if (!comment.public || !hasProcessableCommentContent(comment)) return false;
+  if (isEndUserRole(comment.author?.role)) return true;
+  if (isStaffRole(comment.author?.role)) return false;
+  if (context.ticket.assigneeId && comment.authorId === context.ticket.assigneeId) return false;
+  return Boolean(context.ticket.requesterId && comment.authorId === context.ticket.requesterId);
+}
+
+export function selectProcessableComment(context: ZendeskTicketContext): ZendeskProcessableComment | undefined {
+  const customerComment = context.comments.find((comment) => isCustomerPublicComment(context, comment));
+  if (customerComment) {
+    return {
+      comment: customerComment,
+      kind: "customer_public_comment",
+      forceInternalNote: false
+    };
+  }
+
+  const voiceComment = context.comments.find((comment) => isVoiceTranscriptComment(context, comment));
+  if (!voiceComment) return undefined;
+  return {
+    comment: voiceComment,
+    kind: "voice_transcript",
+    forceInternalNote: true
+  };
 }
 
 function normalizeTextForMatch(value: string | undefined): string {
@@ -297,25 +335,6 @@ function isVoiceTranscriptComment(context: ZendeskTicketContext, comment: Zendes
     body.includes("call transcript") ||
     body.includes("voicemail from")
   );
-}
-
-function selectProcessableComment(context: ZendeskTicketContext): ZendeskProcessableComment | undefined {
-  const requesterComment = selectLatestRequesterComment(context);
-  if (requesterComment) {
-    return {
-      comment: requesterComment,
-      kind: "requester_public_comment",
-      forceInternalNote: false
-    };
-  }
-
-  const voiceComment = context.comments.find((comment) => isVoiceTranscriptComment(context, comment));
-  if (!voiceComment) return undefined;
-  return {
-    comment: voiceComment,
-    kind: "voice_transcript",
-    forceInternalNote: true
-  };
 }
 
 function trimOrUndefined(value: unknown): string | undefined {
@@ -1475,10 +1494,14 @@ export class ZendeskIntegrationService {
       processRows.push(
         zendeskProcessRow(
           "meta",
-          processableInput.kind === "voice_transcript" ? "Selected voice transcript" : "Selected requester comment",
+          processableInput.kind === "voice_transcript" ? "Selected voice transcript" : "Selected customer public comment",
           [
             `comment_id: ${requesterComment.id}`,
             `input_kind: ${processableInput.kind}`,
+            `author_id: ${requesterComment.authorId || ""}`,
+            requesterComment.author?.name ? `author_name: ${requesterComment.author.name}` : "",
+            requesterComment.author?.email ? `author_email: ${requesterComment.author.email}` : "",
+            requesterComment.author?.role ? `author_role: ${requesterComment.author.role}` : "",
             processableInput.forceInternalNote ? "forced_action: internal_note" : "",
             `created_at: ${requesterComment.createdAt || ""}`,
             `attachments: ${requesterComment.attachments.length}`,
@@ -1948,7 +1971,7 @@ export class ZendeskIntegrationService {
         [
           `prompt_chars: ${prompt.length}`,
           `comment_history: ${preparedContext.comments.length}`,
-          `input_kind: ${run.inputKind || "requester_public_comment"}`,
+          `input_kind: ${run.inputKind || "customer_public_comment"}`,
           `knowledge_sets: ${runtimeOptions.knowledgeSets?.length ?? 0}`,
           `enabled_skills: ${runtimeOptions.enabledSkills?.length ?? 0}`
         ].join("\n")

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ZendeskBindingStore } from "./binding-store.js";
 import { ZendeskRunStore } from "./run-store.js";
-import { ZendeskIntegrationService } from "./service.js";
+import { selectProcessableComment, ZendeskIntegrationService } from "./service.js";
 import { findZendeskReadinessGaps } from "./settings-store.js";
 import type { ZendeskIntegrationSettings } from "./types.js";
 
@@ -55,6 +55,104 @@ afterEach(() => {
 });
 
 describe("ZendeskIntegrationService", () => {
+  it("selects the latest public end-user comment even when the author is not the ticket requester", () => {
+    const selected = selectProcessableComment({
+      ticket: {
+        id: 45281,
+        subject: "Billing update",
+        requesterId: 48721511174292,
+        assigneeId: 382901729473,
+        tags: []
+      },
+      comments: [
+        {
+          id: 49510370049940,
+          authorId: 49506178214932,
+          author: {
+            id: 49506178214932,
+            name: "fastnetwireless23@gmail.com",
+            email: "fastnetwireless23@gmail.com",
+            role: "end-user"
+          },
+          body: "Please close the account.",
+          public: true,
+          createdAt: "2026-05-22T12:38:39Z",
+          attachments: []
+        },
+        {
+          id: 49506147651092,
+          authorId: 48721511174292,
+          author: {
+            id: 48721511174292,
+            name: "Zhang Jing",
+            email: "zhangjing-hwcw@baicells.com",
+            role: "end-user"
+          },
+          body: "Please arrange the payment.",
+          public: true,
+          createdAt: "2026-05-22T08:38:38Z",
+          attachments: []
+        }
+      ]
+    });
+
+    expect(selected).toMatchObject({
+      kind: "customer_public_comment",
+      comment: {
+        id: 49510370049940
+      }
+    });
+  });
+
+  it("ignores public staff comments when selecting Zendesk customer input", () => {
+    const selected = selectProcessableComment({
+      ticket: {
+        id: 45183,
+        subject: "X2 interface down",
+        requesterId: 364551041753,
+        assigneeId: 382901729473,
+        tags: []
+      },
+      comments: [
+        {
+          id: 49506137996180,
+          authorId: 382901729473,
+          author: {
+            id: 382901729473,
+            name: "Baicells Global Support",
+            email: "kyaw.htut@baicells.com",
+            role: "admin"
+          },
+          body: "Please let us know if we can be of further assistance.",
+          public: true,
+          createdAt: "2026-05-22T08:34:12Z",
+          attachments: []
+        },
+        {
+          id: 49356619673748,
+          authorId: 38111592863764,
+          author: {
+            id: 38111592863764,
+            name: "Tekalign Teketelew",
+            email: "tekalign.teketelew@getesa.gq",
+            role: "end-user"
+          },
+          body: "Still X2 interface is disconnected. Log files are attached.",
+          public: true,
+          createdAt: "2026-05-18T12:03:04Z",
+          attachments: []
+        }
+      ]
+    });
+
+    expect(selected).toMatchObject({
+      kind: "customer_public_comment",
+      comment: {
+        id: 49356619673748
+      }
+    });
+  });
+
   it("requires an Agent Mode binding for production readiness", () => {
     expect(findZendeskReadinessGaps({ ...baseSettings, agentModeId: "" })).toContain("agent_mode_id");
     expect(findZendeskReadinessGaps(baseSettings)).not.toContain("agent_mode_id");
