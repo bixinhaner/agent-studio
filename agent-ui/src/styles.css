@@ -45,12 +45,13 @@ body.access-request-route #root {
 .auth-card,
 .admin-card {
   width: min(720px, 100%);
-  border: 1px solid #d6e2f3;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: none;
-  padding: 24px 28px;
-  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.06), inset 0 2px 6px rgba(255, 255, 255, 0.8);
+  padding: 32px;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
 }
 
 .auth-card-shell {

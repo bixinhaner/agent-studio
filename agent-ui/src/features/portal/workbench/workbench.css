@@ -406,9 +406,9 @@ button.session-rail-new-btn:active,
 }
 
 .portal-workbench-root .session-rail-list > .agent-thread-list-item[data-portal-active="true"] {
-  background-color: rgba(255, 70, 20, 0.08);
+  background: linear-gradient(90deg, rgba(255, 70, 20, 0.12) 0%, rgba(255, 70, 20, 0.02) 100%);
   color: var(--workbench-sidebar-active-text);
-  box-shadow: inset 2px 0 0 var(--workbench-accent);
+  box-shadow: inset 3px 0 0 var(--workbench-accent);
   transform: none;
   font-weight: 600;
 }
@@ -549,11 +549,13 @@ button.session-rail-new-btn:active,
 }
 
 .thread-readonly-card {
-  background: white;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
   padding: 24px;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.04);
-  border: 1px solid var(--workbench-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.08), inset 0 2px 4px rgba(255,255,255,0.6);
+  border: 1px solid rgba(255, 255, 255, 0.8);
   text-align: center;
 }
 
@@ -583,10 +585,13 @@ button.session-rail-new-btn:active,
   border: 1px solid var(--workbench-border);
   border-radius: 24px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   transition:
     border-color 260ms var(--workbench-motion-ease-soft),
     box-shadow 260ms var(--workbench-motion-ease-soft),
+    background 260ms var(--workbench-motion-ease-soft),
     transform var(--workbench-motion-standard) var(--workbench-motion-ease-standard),
     min-height var(--workbench-motion-standard) var(--workbench-motion-ease-standard);
   margin: 0 20px 20px 20px;

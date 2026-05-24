@@ -129,6 +129,28 @@
     transform 220ms var(--auth-motion-ease-soft),
     opacity 220ms var(--auth-motion-ease-soft);
   box-shadow: 0 4px 14px rgba(255, 70, 20, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-modern-sso-btn::after,
+.auth-modern-accent-btn::after,
+.auth-access-modal-primary::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 100%);
+  transform: rotate(30deg);
+  animation: auth-sparkle 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes auth-sparkle {
+  0% { transform: rotate(30deg) translateY(0) translateX(-100%); }
+  50% { transform: rotate(30deg) translateY(0) translateX(100%); }
+  100% { transform: rotate(30deg) translateY(0) translateX(100%); }
 }
 
 .auth-modern-sso-btn:hover:not(:disabled),
