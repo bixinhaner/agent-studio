@@ -13,6 +13,7 @@ import { AdminAuditLogRepository } from "../persistence/admin-audit-log-reposito
 import { RolePermissionRepository } from "../persistence/role-permission-repository.js";
 import { RoleRepository } from "../persistence/role-repository.js";
 import { UserRoleRepository } from "../persistence/user-role-repository.js";
+import type { OrganizationMembershipRepositoryDb } from "../persistence/organization-membership-repository.js";
 import { OrganizationRepository, type OrganizationRepositoryDb, type OrganizationRecord } from "../persistence/organization-repository.js";
 import { SyncJobRepository, type SyncJobRepositoryDb } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
@@ -24,7 +25,13 @@ import { BrandingAssetStorage } from "../system-settings/branding-assets.js";
 import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 
-type AdminDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb & OrganizationRepositoryDb;
+type AdminDb =
+  UserRepositoryDb &
+  DepartmentRepositoryDb &
+  DepartmentMembershipRepositoryDb &
+  SyncJobRepositoryDb &
+  OrganizationRepositoryDb &
+  OrganizationMembershipRepositoryDb;
 
 type AdminRouterWithExtensions = Router & {
   systemSettingsRouter?: Router;

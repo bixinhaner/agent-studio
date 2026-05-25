@@ -20,6 +20,10 @@ import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { createDingTalkClient } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
+import {
+  ensureInternalOrganization,
+  INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
+} from "./auth/internal-organization.js";
 import { createOAuthStateCookieManager, createSessionCookieManager } from "./auth/session-cookie.js";
 import {
   resolveArtifactAccessPolicy,
@@ -745,6 +749,8 @@ const orgSyncService = new OrgSyncService({
   departments,
   users,
   memberships: departmentMemberships,
+  organizations,
+  organizationMemberships,
   jobs: syncJobs,
   resourceAccessLogs
 });
@@ -3240,31 +3246,54 @@ async function resolveDingTalkBotActor(input: DingTalkBotIncomingMessage): Promi
   if (!user || user.status !== "active") {
     return undefined;
   }
+  let activeUser = user;
 
-  const memberships = await organizationMemberships.listActiveForUser(user.id);
-  const preferredMembership =
-    memberships.find((item) => item.organizationId === user.primaryOrganizationId) ||
+  const memberships = await organizationMemberships.listActiveForUser(activeUser.id);
+  let preferredMembership =
+    memberships.find((item) => item.organizationId === activeUser.primaryOrganizationId) ||
     memberships.find((item) => item.organizationId === input.instance.organizationId) ||
     memberships[0];
-  const organization =
+  let organization =
     preferredMembership?.organization ||
-    (user.primaryOrganizationId ? await organizations.getById(user.primaryOrganizationId) : undefined) ||
+    (activeUser.primaryOrganizationId ? await organizations.getById(activeUser.primaryOrganizationId) : undefined) ||
     (input.instance.organizationId ? await organizations.getById(input.instance.organizationId) : undefined);
+  if (!organization && activeUser.userType === "internal_employee") {
+    organization = await ensureInternalOrganization(organizations);
+  }
   if (!organization) {
     return undefined;
+  }
+  if (activeUser.userType === "internal_employee" && organization.type === "internal") {
+    if (!preferredMembership || preferredMembership.organizationId !== organization.id) {
+      preferredMembership = await organizationMemberships.upsert({
+        organizationId: organization.id,
+        userId: activeUser.id,
+        membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
+        status: "active",
+        joinedAt: new Date()
+      });
+      organization = preferredMembership.organization ?? organization;
+    }
+    if (!activeUser.primaryOrganizationId) {
+      activeUser = await users.updateUserProfile({
+        userId: activeUser.id,
+        userType: "internal_employee",
+        primaryOrganizationId: organization.id
+      });
+    }
   }
 
   return {
     currentUser: {
-      id: user.id,
-      userType: user.userType,
-      role: user.role,
+      id: activeUser.id,
+      userType: activeUser.userType,
+      role: activeUser.role,
       organizationId: organization.id,
       organizationSlug: organization.slug,
       organizationType: organization.type,
       membershipType: preferredMembership?.membershipType
     },
-    displayName: trimOrUndefined(user.displayName) ?? trimOrUndefined(input.robotMessage.senderNick),
+    displayName: trimOrUndefined(activeUser.displayName) ?? trimOrUndefined(input.robotMessage.senderNick),
     dingtalkUserId: senderStaffId,
     dingtalkUnionId
   };

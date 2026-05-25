@@ -1,6 +1,13 @@
 import type { DingTalkOrgProvider, NormalizedOrgSnapshot } from "./dingtalk-org-provider.js";
+import {
+  ensureInternalOrganization,
+  INTERNAL_ORGANIZATION_ID,
+  INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
+} from "../auth/internal-organization.js";
 import { DepartmentMembershipRepository } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository } from "../persistence/department-repository.js";
+import type { OrganizationMembershipRepository } from "../persistence/organization-membership-repository.js";
+import type { OrganizationRepository } from "../persistence/organization-repository.js";
 import { SyncJobRepository } from "../persistence/sync-job-repository.js";
 import { UserRepository } from "../persistence/user-repository.js";
 
@@ -54,6 +61,8 @@ type OrgSyncRepositories = {
   departments: DepartmentRepository;
   users: UserRepository;
   memberships: DepartmentMembershipRepository;
+  organizations?: Pick<OrganizationRepository, "getById" | "getBySlug" | "create">;
+  organizationMemberships?: Pick<OrganizationMembershipRepository, "upsert">;
   jobs: SyncJobRepository;
   resourceAccessLogs?: {
     record(input: {
@@ -76,6 +85,7 @@ type UserRow = {
   email: string | null;
   displayName: string | null;
   role: string | null;
+  primaryOrganizationId: string | null;
   status: string | null;
   statusSource: string | null;
   syncState: string | null;
@@ -549,6 +559,31 @@ export class OrgSyncService {
 
   constructor(private readonly dependencies: OrgSyncRepositories) {}
 
+  private async resolveInternalOrganizationId(): Promise<string> {
+    if (!this.dependencies.organizations) {
+      return INTERNAL_ORGANIZATION_ID;
+    }
+    return (await ensureInternalOrganization(this.dependencies.organizations)).id;
+  }
+
+  private async upsertInternalOrganizationMembership(input: {
+    organizationId: string;
+    userId: string;
+    status: string;
+    joinedAt: Date;
+  }): Promise<void> {
+    if (!this.dependencies.organizationMemberships) {
+      return;
+    }
+    await this.dependencies.organizationMemberships.upsert({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
+      status: input.status,
+      joinedAt: input.joinedAt
+    });
+  }
+
   async run(input: OrgSyncRunInput): Promise<OrgSyncRunResult> {
     const normalizedScopeExternalId = trimOrUndefined(input.scopeExternalId);
     if ((input.scopeType === "department" || input.scopeType === "user") && !normalizedScopeExternalId) {
@@ -926,6 +961,7 @@ export class OrgSyncService {
     scopeType: OrgSyncScopeType
   ): Promise<void> {
     const now = new Date();
+    const internalOrganizationId = await this.resolveInternalOrganizationId();
     const departmentUpserts = snapshot.departments.map((department) => ({
       externalId: department.externalId,
       name: department.name,
@@ -966,6 +1002,7 @@ export class OrgSyncService {
         email: trimOrUndefined(user.email)?.toLowerCase() ?? existing?.email ?? null,
         displayName: user.displayName,
         role: existing?.role ?? "employee",
+        primaryOrganizationId: existing?.primaryOrganizationId ?? internalOrganizationId,
         status: status.status,
         statusSource: status.statusSource,
         syncState: status.syncState,
@@ -983,11 +1020,23 @@ export class OrgSyncService {
           data: record
         })) as UserRow;
         indexUserRowByStableKeys(persistedUserRowsByKey, saved);
+        await this.upsertInternalOrganizationMembership({
+          organizationId: internalOrganizationId,
+          userId: saved.id,
+          status: status.status === "active" ? "active" : "disabled",
+          joinedAt: now
+        });
       } else {
         const saved = (await db.user.create({
           data: record
         })) as UserRow;
         indexUserRowByStableKeys(persistedUserRowsByKey, saved);
+        await this.upsertInternalOrganizationMembership({
+          organizationId: internalOrganizationId,
+          userId: saved.id,
+          status: status.status === "active" ? "active" : "disabled",
+          joinedAt: now
+        });
       }
     }
 
@@ -1021,6 +1070,12 @@ export class OrgSyncService {
             syncState: status.syncState,
             lastSyncedAt: now
           }
+        });
+        await this.upsertInternalOrganizationMembership({
+          organizationId: internalOrganizationId,
+          userId: staleUser.id,
+          status: "disabled",
+          joinedAt: now
         });
         await this.dependencies.memberships.replaceSyncedMemberships({
           userId: staleUser.id,

@@ -5,6 +5,10 @@ import { z } from "zod";
 import { requireCurrentUser, userOut } from "./current-user.js";
 import { resolveDingTalkConfig, type DingTalkClient, type DingTalkConfig } from "./dingtalk.js";
 import type { AuthEmailSender } from "./email.js";
+import {
+  ensureInternalOrganization,
+  INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
+} from "./internal-organization.js";
 import type { OAuthStateCookieManager, SessionCookieManager } from "./session-cookie.js";
 import type { AuthIdentityRepository } from "../persistence/auth-identity-repository.js";
 import type { OrganizationMembershipRepository } from "../persistence/organization-membership-repository.js";
@@ -134,17 +138,6 @@ async function buildAuthEnvelope(input: {
   };
 }
 
-async function ensureInternalOrganization(organizations: OrganizationRepository) {
-  const existing = await organizations.getBySlug("internal");
-  if (existing) return existing;
-  return organizations.create({
-    slug: "internal",
-    name: "Internal Organization",
-    type: "internal",
-    status: "active"
-  });
-}
-
 async function resolveDingTalkUser(options: {
   users: UserRepositoryLike;
   identities: AuthIdentityRepository;
@@ -203,7 +196,7 @@ async function resolveDingTalkUser(options: {
   await options.memberships.upsert({
     organizationId: internalOrganization.id,
     userId: user.id,
-    membershipType: "employee",
+    membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
     status: "active",
     joinedAt: new Date()
   });

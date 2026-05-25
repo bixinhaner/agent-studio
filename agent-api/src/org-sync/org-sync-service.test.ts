@@ -10,6 +10,7 @@ function buildUserRow(overrides: Record<string, unknown> = {}) {
     email: "alice@example.com",
     displayName: "Alice Local",
     role: "employee",
+    primaryOrganizationId: null,
     status: "active",
     statusSource: "manual",
     syncState: "active",
@@ -22,6 +23,26 @@ function buildUserRow(overrides: Record<string, unknown> = {}) {
     createdAt: new Date("2026-04-01T00:00:00.000Z"),
     updatedAt: new Date("2026-04-01T00:00:00.000Z"),
     ...overrides
+  };
+}
+
+function buildInternalOrganization() {
+  return {
+    id: "org_internal",
+    slug: "internal",
+    name: "Internal Organization",
+    type: "internal",
+    status: "active",
+    createdAt: new Date("2026-04-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-04-01T00:00:00.000Z")
+  };
+}
+
+function buildOrganizationDependencies() {
+  return {
+    getById: vi.fn(async (id: string) => (id === "org_internal" ? buildInternalOrganization() : undefined)),
+    getBySlug: vi.fn(async (slug: string) => (slug === "internal" ? buildInternalOrganization() : undefined)),
+    create: vi.fn(async () => buildInternalOrganization())
   };
 }
 
@@ -135,6 +156,18 @@ describe("OrgSyncService", () => {
         );
       }
     );
+    const organizations = buildOrganizationDependencies();
+    const organizationMemberships = {
+      upsert: vi.fn(async (input: Record<string, unknown>) => ({
+        id: `membership-${input.userId}`,
+        organizationId: input.organizationId,
+        userId: input.userId,
+        membershipType: input.membershipType,
+        status: input.status,
+        createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
+      }))
+    };
 
     const service = new OrgSyncService({
       provider: {
@@ -149,6 +182,8 @@ describe("OrgSyncService", () => {
       memberships: {
         replaceSyncedMemberships
       },
+      organizations,
+      organizationMemberships,
       jobs: {
         db,
         create: vi.fn(async () => ({ id: "job-1" })),
@@ -172,6 +207,7 @@ describe("OrgSyncService", () => {
         externalId: "union-1",
         email: "alice@example.com",
         displayName: "Alice",
+        primaryOrganizationId: "org_internal",
         dingtalkOpenId: "open-1",
         dingtalkUserId: "ding-user-1",
         dingtalkCorpId: "corp-1"
@@ -181,6 +217,13 @@ describe("OrgSyncService", () => {
       userId: "login-user",
       memberships: [{ departmentId: "dept-row-1", isPrimary: true }],
       syncedAt: expect.any(Date)
+    });
+    expect(organizationMemberships.upsert).toHaveBeenCalledWith({
+      organizationId: "org_internal",
+      userId: "login-user",
+      membershipType: "employee",
+      status: "active",
+      joinedAt: expect.any(Date)
     });
     expect(users).toHaveLength(1);
   });
@@ -304,6 +347,18 @@ describe("OrgSyncService", () => {
         );
       }
     );
+    const organizations = buildOrganizationDependencies();
+    const organizationMemberships = {
+      upsert: vi.fn(async (input: Record<string, unknown>) => ({
+        id: `membership-${input.userId}`,
+        organizationId: input.organizationId,
+        userId: input.userId,
+        membershipType: input.membershipType,
+        status: input.status,
+        createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
+      }))
+    };
 
     const service = new OrgSyncService({
       provider: {
@@ -318,6 +373,8 @@ describe("OrgSyncService", () => {
       memberships: {
         replaceSyncedMemberships
       },
+      organizations,
+      organizationMemberships,
       jobs: {
         db,
         create: vi.fn(async () => ({ id: "job-1" })),
@@ -351,6 +408,20 @@ describe("OrgSyncService", () => {
         syncedAt: expect.any(Date)
       })
     );
+    expect(organizationMemberships.upsert).toHaveBeenCalledWith({
+      organizationId: "org_internal",
+      userId: "active-user",
+      membershipType: "employee",
+      status: "active",
+      joinedAt: expect.any(Date)
+    });
+    expect(organizationMemberships.upsert).toHaveBeenCalledWith({
+      organizationId: "org_internal",
+      userId: "stale-user",
+      membershipType: "employee",
+      status: "disabled",
+      joinedAt: expect.any(Date)
+    });
     expect(users.find((user) => user.id === "stale-user")).toMatchObject({
       status: "disabled",
       statusSource: "sync",

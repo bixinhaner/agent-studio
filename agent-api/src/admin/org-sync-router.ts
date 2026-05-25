@@ -10,6 +10,11 @@ import { AlertEventRepository, type AlertEventRepositoryDb } from "../persistenc
 import { AlertRuleRepository, type AlertRuleRepositoryDb } from "../persistence/alert-rule-repository.js";
 import { DepartmentMembershipRepository, type DepartmentMembershipRepositoryDb } from "../persistence/department-membership-repository.js";
 import { DepartmentRepository, type DepartmentRepositoryDb } from "../persistence/department-repository.js";
+import {
+  OrganizationMembershipRepository,
+  type OrganizationMembershipRepositoryDb
+} from "../persistence/organization-membership-repository.js";
+import { OrganizationRepository, type OrganizationRepositoryDb } from "../persistence/organization-repository.js";
 import { NotificationRecordRepository, type NotificationRecordRepositoryDb } from "../persistence/notification-record-repository.js";
 import { NotificationDispatchService } from "../operations/notification-dispatch-service.js";
 import { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
@@ -41,7 +46,13 @@ type OrgSyncRouterOptions = {
   db?: OrgSyncJobDb;
 };
 
-type OrgSyncJobDb = UserRepositoryDb & DepartmentRepositoryDb & DepartmentMembershipRepositoryDb & SyncJobRepositoryDb;
+type OrgSyncJobDb =
+  UserRepositoryDb &
+  DepartmentRepositoryDb &
+  DepartmentMembershipRepositoryDb &
+  OrganizationRepositoryDb &
+  OrganizationMembershipRepositoryDb &
+  SyncJobRepositoryDb;
 type OrgSyncQuotaDb = QuotaPolicyRepositoryDb & UsageRollupRepositoryDb;
 type OrgSyncAlertDb = AlertRuleRepositoryDb & AlertEventRepositoryDb & NotificationRecordRepositoryDb;
 
@@ -92,6 +103,8 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
   const users = new UserRepository(currentDb as UserRepositoryDb);
   const departments = new DepartmentRepository(currentDb as DepartmentRepositoryDb);
   const memberships = new DepartmentMembershipRepository(currentDb as DepartmentMembershipRepositoryDb);
+  const organizations = new OrganizationRepository(currentDb as OrganizationRepositoryDb);
+  const organizationMemberships = new OrganizationMembershipRepository(currentDb as OrganizationMembershipRepositoryDb);
   const syncJobs = new SyncJobRepository(currentDb as SyncJobRepositoryDb);
   const quotaDb = currentDb as unknown as OrgSyncQuotaDb;
   const alertDb = currentDb as unknown as OrgSyncAlertDb;
@@ -100,6 +113,8 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
     departments,
     users,
     memberships,
+    organizations,
+    organizationMemberships,
     jobs: syncJobs
   });
   const quotaChecks = new QuotaEvaluationService({
