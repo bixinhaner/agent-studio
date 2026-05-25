@@ -678,8 +678,22 @@ export type OrgSyncJob = {
   finishedAt?: string | null;
 };
 
+export type OrgSyncDiff = {
+  id: string;
+  entityType: string;
+  entityExternalId?: string | null;
+  changeType: string;
+  beforePayload?: unknown;
+  afterPayload?: unknown;
+  createdAt?: string;
+};
+
 export type OrgSyncJobListResponse = {
   jobs: OrgSyncJob[];
+};
+
+export type OrgSyncJobDiffsResponse = {
+  diffs: OrgSyncDiff[];
 };
 
 export type OrgSyncTriggerResponse = {

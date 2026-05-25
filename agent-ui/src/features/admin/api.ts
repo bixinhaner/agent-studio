@@ -30,6 +30,7 @@ import type {
   AdminUserLocalSettingsInput,
   DepartmentTreeResponse,
   OrgSyncConfigResponse,
+  OrgSyncJobDiffsResponse,
   OrgSyncJobListResponse,
   OrgSyncTriggerResponse
 } from "./types";
@@ -263,6 +264,10 @@ export async function fetchOrgSyncConfig(): Promise<OrgSyncConfigResponse> {
 
 export async function fetchOrgSyncJobs(): Promise<OrgSyncJobListResponse> {
   return api<OrgSyncJobListResponse>("/api/admin/org-sync/jobs");
+}
+
+export async function fetchOrgSyncJobDiffs(jobId: string): Promise<OrgSyncJobDiffsResponse> {
+  return api<OrgSyncJobDiffsResponse>(`/api/admin/org-sync/jobs/${encodeURIComponent(jobId)}/diffs`);
 }
 
 export async function triggerFullOrgSync(): Promise<OrgSyncTriggerResponse> {
