@@ -16,6 +16,7 @@ import {
   type IntegrationPolicySummary,
   type IntegrationTriggerType,
   type IntegrationValidationItem,
+  type IntegrationZendeskCacheCleanupResult,
   type IntegrationZendeskRunResult,
   type IntegrationValidationResult,
   sanitizeIntegrationConfigForRead
@@ -90,6 +91,18 @@ export type IntegrationCenterService = {
     instanceId: string;
     ticketId: string | number;
   }): Promise<IntegrationZendeskRunResult>;
+  previewZendeskCacheCleanup(input: {
+    currentUserId: string;
+    instanceId: string;
+    retentionDays?: number;
+    limit?: number;
+  }): Promise<IntegrationZendeskCacheCleanupResult>;
+  runZendeskCacheCleanup(input: {
+    currentUserId: string;
+    instanceId: string;
+    retentionDays?: number;
+    limit?: number;
+  }): Promise<IntegrationZendeskCacheCleanupResult>;
   listValidationHistory(input: { currentUserId: string; instanceId: string }): Promise<{ items: IntegrationValidationItem[] }>;
   getExternalApiUsage(input: {
     currentUserId: string;
@@ -424,6 +437,8 @@ export function createIntegrationCenterService(options: {
       requesterCommentId?: number;
       decision?: string;
     }>;
+    previewCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
+    runCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number; execute?: boolean }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
   };
   adapters?: Partial<Record<string, ValidationAdapter>>;
 }): IntegrationCenterService {
@@ -932,6 +947,43 @@ export function createIntegrationCenterService(options: {
       return {
         result,
         detail: await readDetail(instance.id, input.currentUserId)
+      };
+    },
+
+    async previewZendeskCacheCleanup(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== "zendesk") {
+        throw new Error("当前集成实例不是 Zendesk。");
+      }
+      if (!options.zendesk) {
+        throw new Error("Zendesk 集成功能未启用");
+      }
+
+      return {
+        result: await options.zendesk.previewCacheCleanup({
+          instanceId: instance.id,
+          retentionDays: input.retentionDays,
+          limit: input.limit
+        })
+      };
+    },
+
+    async runZendeskCacheCleanup(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== "zendesk") {
+        throw new Error("当前集成实例不是 Zendesk。");
+      }
+      if (!options.zendesk) {
+        throw new Error("Zendesk 集成功能未启用");
+      }
+
+      return {
+        result: await options.zendesk.runCacheCleanup({
+          instanceId: instance.id,
+          retentionDays: input.retentionDays,
+          limit: input.limit,
+          execute: true
+        })
       };
     },
 

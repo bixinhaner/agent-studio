@@ -8,6 +8,8 @@ import {
   integrationInstanceUpdateSchema,
   integrationListQuerySchema,
   integrationPoliciesUpdateSchema,
+  integrationZendeskCacheCleanupQuerySchema,
+  integrationZendeskCacheCleanupRunSchema,
   integrationZendeskManualRunSchema
 } from "./types.js";
 
@@ -114,6 +116,38 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
           currentUserId: req.currentUser!.id,
           instanceId: req.params.instanceId,
           ticketId: payload.ticket_id
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/integrations/:instanceId/zendesk/cache-cleanup", requireRead, async (req: Request, res: Response) => {
+    try {
+      const query = integrationZendeskCacheCleanupQuerySchema.parse(req.query ?? {});
+      res.json(
+        await options.service.previewZendeskCacheCleanup({
+          currentUserId: req.currentUser!.id,
+          instanceId: req.params.instanceId,
+          retentionDays: query.retention_days,
+          limit: query.limit
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/integrations/:instanceId/zendesk/cache-cleanup", requireWrite, async (req: Request, res: Response) => {
+    try {
+      const payload = integrationZendeskCacheCleanupRunSchema.parse(req.body ?? {});
+      res.json(
+        await options.service.runZendeskCacheCleanup({
+          currentUserId: req.currentUser!.id,
+          instanceId: req.params.instanceId,
+          retentionDays: payload.retention_days,
+          limit: payload.limit
         })
       );
     } catch (error) {

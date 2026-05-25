@@ -141,6 +141,22 @@ export class ZendeskRunStore {
     return rows.map(mapRun);
   }
 
+  async hasActiveForTicket(ticketId: string, instanceId?: string): Promise<boolean> {
+    const key = String(ticketId || "").trim();
+    if (!key) return false;
+    const rows = await this.db.zendeskRun.findMany({
+      where: {
+        scopeKey: zendeskScopeKey(instanceId),
+        ticketId: key,
+        status: {
+          in: ["received", "deferred", "processing"]
+        }
+      },
+      take: 1
+    });
+    return rows.length > 0;
+  }
+
   async create(input: {
     instanceId?: string;
     ticketId: string;

@@ -30,6 +30,8 @@ import type {
   ZendeskBindingRecord,
   ZendeskCommentPayload,
   ZendeskIntegrationSettings,
+  ZendeskCacheCleanupResult,
+  ZendeskCacheCleanupItem,
   ZendeskOverview,
   ZendeskRequesterPayload,
   ZendeskSetupGuide,
@@ -68,6 +70,13 @@ type ProcessTicketResult = {
   commentId?: number;
   requesterCommentId?: number;
   decision?: ZendeskAgentDecision["decision"];
+};
+
+type ZendeskCacheCleanupOptions = {
+  instanceId: string;
+  retentionDays?: number;
+  limit?: number;
+  execute?: boolean;
 };
 
 type ZendeskProcessableInputKind = "customer_public_comment" | "voice_transcript";
@@ -622,6 +631,53 @@ function zendeskHostSegment(settings: ZendeskIntegrationSettings): string {
   }
 }
 
+const ZENDESK_CACHE_HOME_RE = /^zendesk-(.+)-ticket-(.+)$/;
+const DEFAULT_CACHE_CLEANUP_RETENTION_DAYS = 7;
+const MAX_CACHE_CLEANUP_LIMIT = 500;
+
+function clampCacheCleanupRetentionDays(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_CACHE_CLEANUP_RETENTION_DAYS;
+  return Math.max(1, Math.min(365, Math.trunc(value as number)));
+}
+
+function clampCacheCleanupLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(1, Math.min(MAX_CACHE_CLEANUP_LIMIT, Math.trunc(value as number)));
+}
+
+function parseZendeskCacheHomeDirectoryName(name: string): { instanceId: string; ticketId: string } | undefined {
+  const match = name.match(ZENDESK_CACHE_HOME_RE);
+  if (!match) return undefined;
+  const instanceId = trimOrUndefined(match[1]);
+  const ticketId = trimOrUndefined(match[2]);
+  return instanceId && ticketId ? { instanceId, ticketId } : undefined;
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function directorySizeBytes(targetPath: string): Promise<number> {
+  const stat = await fs.lstat(targetPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    return stat.size;
+  }
+
+  let total = stat.size;
+  const entries = await fs.readdir(targetPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(targetPath, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      total += await directorySizeBytes(entryPath);
+      continue;
+    }
+    const entryStat = await fs.lstat(entryPath).catch(() => undefined);
+    if (entryStat) total += entryStat.size;
+  }
+  return total;
+}
+
 function attachmentIdentity(input: {
   attachment: ZendeskCommentPayload["attachments"][number];
   index: number;
@@ -1147,6 +1203,7 @@ export class ZendeskIntegrationService {
       runtimeSession?: ZendeskRuntimeSessionBridge;
       getDrainReason?: () => Promise<string | undefined>;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
+      codexSessionHomeRoot?: string;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
     private readonly bindingStore = new ZendeskBindingStore(),
@@ -1313,6 +1370,141 @@ export class ZendeskIntegrationService {
       ok: true,
       overview: await this.getOverview(instanceId)
     };
+  }
+
+  async previewCacheCleanup(options: Omit<ZendeskCacheCleanupOptions, "execute">): Promise<ZendeskCacheCleanupResult> {
+    return await this.inspectCacheCleanup({ ...options, execute: false });
+  }
+
+  async runCacheCleanup(options: ZendeskCacheCleanupOptions): Promise<ZendeskCacheCleanupResult> {
+    return await this.inspectCacheCleanup({ ...options, execute: true });
+  }
+
+  private async inspectCacheCleanup(options: ZendeskCacheCleanupOptions): Promise<ZendeskCacheCleanupResult> {
+    const instanceId = trimOrUndefined(options.instanceId);
+    if (!instanceId) {
+      throw new Error("Zendesk cache cleanup requires an integration instance ID.");
+    }
+
+    const settings = await this.loadSettings(instanceId);
+    const missing = [
+      settings.zendeskBaseUrl.trim() ? undefined : "zendesk_base_url",
+      settings.zendeskEmail.trim() ? undefined : "zendesk_email",
+      settings.zendeskApiToken.trim() ? undefined : "zendesk_api_token"
+    ].filter((item): item is string => Boolean(item));
+    if (missing.length > 0) {
+      throw new Error(`Zendesk 凭证不完整，无法确认工单状态: ${missing.join(", ")}`);
+    }
+
+    const cacheRoot = path.resolve(this.dependencies.codexSessionHomeRoot ?? path.resolve(process.cwd(), "temp/codex-homes"));
+    const retentionDays = clampCacheCleanupRetentionDays(options.retentionDays);
+    const limit = clampCacheCleanupLimit(options.limit);
+    const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    const client = new ZendeskClient(settings);
+    const generatedAt = new Date().toISOString();
+
+    const result: ZendeskCacheCleanupResult = {
+      retentionDays,
+      scannedCount: 0,
+      matchedCount: 0,
+      eligibleCount: 0,
+      deletedCount: 0,
+      totalBytes: 0,
+      reclaimableBytes: 0,
+      deletedBytes: 0,
+      generatedAt,
+      items: []
+    };
+
+    const entries = await fs.readdir(cacheRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+
+    const candidates: ZendeskCacheCleanupItem[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const parsed = parseZendeskCacheHomeDirectoryName(entry.name);
+      if (!parsed) continue;
+      result.scannedCount += 1;
+      if (parsed.instanceId !== instanceId) continue;
+      result.matchedCount += 1;
+
+      const directoryPath = path.join(cacheRoot, entry.name);
+      const stat = await fs.lstat(directoryPath).catch(() => undefined);
+      if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) continue;
+      const sizeBytes = await directorySizeBytes(directoryPath).catch(() => 0);
+      result.totalBytes += sizeBytes;
+      candidates.push({
+        directoryName: entry.name,
+        directoryPath,
+        instanceId: parsed.instanceId,
+        ticketId: parsed.ticketId,
+        sizeBytes,
+        modifiedAt: stat.mtime.toISOString(),
+        eligible: false,
+        reason: "待检查"
+      });
+    }
+
+    candidates.sort((left, right) => {
+      const leftAt = new Date(left.modifiedAt).getTime();
+      const rightAt = new Date(right.modifiedAt).getTime();
+      return leftAt - rightAt || left.ticketId.localeCompare(right.ticketId, "en", { numeric: true });
+    });
+
+    for (const item of candidates.slice(0, limit)) {
+      try {
+        if (await this.runStore.hasActiveForTicket(item.ticketId, instanceId)) {
+          item.reason = "存在 received/deferred/processing 运行记录，跳过";
+          result.items.push(item);
+          continue;
+        }
+
+        const ticket = await client.getTicket(item.ticketId);
+        item.ticketStatus = ticket.status;
+        item.ticketUpdatedAt = ticket.updatedAt;
+        if (ticket.status !== "closed") {
+          item.reason = `Zendesk 当前状态是 ${ticket.status || "未知"}，只清理 closed`;
+          result.items.push(item);
+          continue;
+        }
+
+        const ticketUpdatedAt = ticket.updatedAt ? new Date(ticket.updatedAt) : undefined;
+        if (!ticketUpdatedAt || Number.isNaN(ticketUpdatedAt.getTime())) {
+          item.reason = "closed 工单缺少可用 updated_at，跳过";
+          result.items.push(item);
+          continue;
+        }
+        if (ticketUpdatedAt.getTime() > cutoffMs) {
+          item.reason = `closed 工单未超过 ${retentionDays} 天保留期`;
+          result.items.push(item);
+          continue;
+        }
+
+        item.eligible = true;
+        item.reason = `closed 且 updated_at 已超过 ${retentionDays} 天`;
+        result.eligibleCount += 1;
+        result.reclaimableBytes += item.sizeBytes;
+
+        if (options.execute) {
+          if (!isPathInside(cacheRoot, item.directoryPath) || path.basename(item.directoryPath) !== item.directoryName) {
+            throw new Error("refusing to delete path outside cache root");
+          }
+          await fs.rm(item.directoryPath, { recursive: true, force: true });
+          item.deleted = true;
+          result.deletedCount += 1;
+          result.deletedBytes += item.sizeBytes;
+        }
+      } catch (error) {
+        item.eligible = false;
+        item.reason = "检查失败";
+        item.error = error instanceof Error ? error.message : String(error);
+      }
+      result.items.push(item);
+    }
+
+    return result;
   }
 
   async handleWebhook(

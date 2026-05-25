@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types.js";
+import type { ZendeskCacheCleanupResult, ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types.js";
 
 export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api"]);
 export type IntegrationType = z.infer<typeof integrationTypeSchema>;
@@ -39,6 +39,15 @@ export const integrationBindingsUpdateSchema = z.object({
 
 export const integrationZendeskManualRunSchema = z.object({
   ticket_id: z.union([z.number().int().positive(), z.string().trim().min(1)])
+});
+
+export const integrationZendeskCacheCleanupQuerySchema = z.object({
+  retention_days: z.coerce.number().int().min(1).max(365).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional()
+});
+
+export const integrationZendeskCacheCleanupRunSchema = integrationZendeskCacheCleanupQuerySchema.extend({
+  confirm: z.literal(true)
 });
 
 const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
@@ -146,6 +155,8 @@ export type IntegrationInstanceUpdateInput = z.infer<typeof integrationInstanceU
 export type IntegrationPoliciesUpdateInput = z.infer<typeof integrationPoliciesUpdateSchema>;
 export type IntegrationBindingsUpdateInput = z.infer<typeof integrationBindingsUpdateSchema>;
 export type IntegrationZendeskManualRunInput = z.infer<typeof integrationZendeskManualRunSchema>;
+export type IntegrationZendeskCacheCleanupQuery = z.infer<typeof integrationZendeskCacheCleanupQuerySchema>;
+export type IntegrationZendeskCacheCleanupRunInput = z.infer<typeof integrationZendeskCacheCleanupRunSchema>;
 
 export type IntegrationPolicyInput = {
   subjectType: IntegrationPolicySubjectType;
@@ -240,6 +251,10 @@ export type IntegrationZendeskRunResult = {
     decision?: string;
   };
   detail: IntegrationDetail;
+};
+
+export type IntegrationZendeskCacheCleanupResult = {
+  result: ZendeskCacheCleanupResult;
 };
 
 export type IntegrationPoliciesResult = {

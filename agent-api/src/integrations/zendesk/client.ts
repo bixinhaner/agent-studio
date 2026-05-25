@@ -288,6 +288,11 @@ export class ZendeskClient {
     return normalizeZendeskUser(data.user, organization);
   }
 
+  async getTicket(ticketId: string): Promise<ZendeskTicketPayload> {
+    const ticketData = await this.request<ZendeskTicketEnvelope>(`/api/v2/tickets/${encodeURIComponent(ticketId)}.json`);
+    return normalizeTicket(ticketData.ticket);
+  }
+
   async getOrganization(organizationId: number): Promise<ZendeskOrganizationEnvelope["organization"] | undefined> {
     if (!Number.isFinite(organizationId) || organizationId <= 0) return undefined;
     const data = await this.request<ZendeskOrganizationEnvelope>(

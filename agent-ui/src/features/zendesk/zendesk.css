@@ -245,6 +245,91 @@
   color: #b43a3a;
 }
 
+.zendesk-cache-cleanup {
+  display: grid;
+  gap: 12px;
+}
+
+.zendesk-cache-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.zendesk-cache-toolbar h4 {
+  margin: 0 0 4px;
+}
+
+.zendesk-cache-toolbar p {
+  margin: 0;
+  color: rgba(26, 23, 19, 0.68);
+}
+
+.zendesk-cache-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(160px, 220px) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.zendesk-cache-controls .ant-input-number {
+  width: 100%;
+}
+
+.zendesk-cache-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.zendesk-cache-summary {
+  margin-bottom: 0;
+}
+
+.zendesk-cache-list {
+  display: grid;
+  gap: 10px;
+}
+
+.zendesk-cache-row {
+  border: 1px solid rgba(26, 23, 19, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.zendesk-cache-row-eligible {
+  border-color: rgba(199, 126, 0, 0.28);
+  background: rgba(255, 252, 243, 0.9);
+}
+
+.zendesk-cache-row-deleted {
+  border-color: rgba(35, 121, 87, 0.24);
+  background: rgba(241, 250, 246, 0.92);
+}
+
+.zendesk-cache-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.zendesk-cache-row-head p,
+.zendesk-cache-row p {
+  margin: 4px 0 0;
+}
+
+.zendesk-cache-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  color: rgba(26, 23, 19, 0.62);
+  font-size: 12px;
+}
+
 .zendesk-prompt-textarea {
   min-height: 180px;
 }
@@ -362,7 +447,8 @@
 
   .zendesk-config-hero,
   .zendesk-launch-checklist,
-  .zendesk-dingtalk-template-grid {
+  .zendesk-dingtalk-template-grid,
+  .zendesk-cache-controls {
     grid-template-columns: 1fr;
   }
 

@@ -390,6 +390,7 @@ const zendesk = new ZendeskIntegrationService({
   },
   runtimeSession: createZendeskRuntimeSessionBridge(),
   getDrainReason: getDeploymentDrainReason,
+  codexSessionHomeRoot: appConfig.codex.sessionHomeRoot,
   async recordUsage(input) {
     const integration = input.instanceId
       ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })

@@ -8,19 +8,27 @@ import { fetchAgentModes } from "../capability-center/api";
 import type { AgentModeRecord } from "../capability-center/types";
 import { fetchKnowledgeSets } from "../resources-center/api";
 import type { KnowledgeSetRecord } from "../resources-center/types";
-import { fetchIntegrationDetail, runZendeskIntegrationTicket, updateIntegrationInstance, validateIntegrationInstance } from "./api";
+import {
+  fetchIntegrationDetail,
+  previewZendeskCacheCleanup,
+  runZendeskCacheCleanup,
+  runZendeskIntegrationTicket,
+  updateIntegrationInstance,
+  validateIntegrationInstance
+} from "./api";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
-import type { IntegrationDetail, ZendeskConfigDraft } from "./types";
+import type { IntegrationDetail, ZendeskCacheCleanupResult, ZendeskConfigDraft } from "./types";
 import type { ZendeskRunRecord } from "../zendesk/types";
 import "../zendesk/zendesk.css";
 
-type ZendeskTab = "basic" | "operations" | "bindings" | "policies" | "history";
+type ZendeskTab = "basic" | "operations" | "cache" | "bindings" | "policies" | "history";
 
 const TABS: Array<{ id: ZendeskTab; label: string }> = [
   { id: "basic", label: "统一配置" },
   { id: "operations", label: "上线与运行" },
+  { id: "cache", label: "缓存清理" },
   { id: "bindings", label: "绑定关系" },
   { id: "policies", label: "授权" },
   { id: "history", label: "验证与历史" }
@@ -343,6 +351,18 @@ function formatLocalDateTime(value?: string) {
   }).format(at);
 }
 
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
 function runStatusLabel(run: ZendeskRunRecord) {
   const map: Record<ZendeskRunRecord["status"], string> = {
     received: "已接收",
@@ -371,6 +391,11 @@ export function ZendeskIntegrationView(props: {
   const [refreshingOperations, setRefreshingOperations] = useState(false);
   const [runningTicket, setRunningTicket] = useState(false);
   const [manualTicketId, setManualTicketId] = useState("");
+  const [cleanupRetentionDays, setCleanupRetentionDays] = useState(7);
+  const [cleanupLimit, setCleanupLimit] = useState(100);
+  const [cleanupPreview, setCleanupPreview] = useState<ZendeskCacheCleanupResult | null>(null);
+  const [previewingCleanup, setPreviewingCleanup] = useState(false);
+  const [runningCleanup, setRunningCleanup] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -388,6 +413,7 @@ export function ZendeskIntegrationView(props: {
 
   useEffect(() => {
     setManualTicketId("");
+    setCleanupPreview(null);
     setErrorText("");
     setSuccessText("");
   }, [props.detail.instance.id]);
@@ -567,6 +593,52 @@ export function ZendeskIntegrationView(props: {
       setErrorText(error instanceof Error ? error.message : "手动执行 Zendesk ticket 失败");
     } finally {
       setRunningTicket(false);
+    }
+  }
+
+  async function handlePreviewCleanup() {
+    setPreviewingCleanup(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await previewZendeskCacheCleanup(props.detail.instance.id, {
+        retentionDays: cleanupRetentionDays,
+        limit: cleanupLimit
+      });
+      setCleanupPreview(response.result);
+      setSuccessText("缓存清理预览已生成");
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "生成缓存清理预览失败");
+    } finally {
+      setPreviewingCleanup(false);
+    }
+  }
+
+  async function handleRunCleanup() {
+    if (!cleanupPreview || cleanupPreview.eligibleCount <= 0) {
+      setErrorText("当前预览没有可清理目录");
+      setSuccessText("");
+      return;
+    }
+    const confirmed = window.confirm(
+      `确认删除 ${cleanupPreview.eligibleCount} 个 closed ticket 运行缓存，预计释放 ${formatBytes(cleanupPreview.reclaimableBytes)}？`
+    );
+    if (!confirmed) return;
+
+    setRunningCleanup(true);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await runZendeskCacheCleanup(props.detail.instance.id, {
+        retentionDays: cleanupRetentionDays,
+        limit: cleanupLimit
+      });
+      setCleanupPreview(response.result);
+      setSuccessText(`已清理 ${response.result.deletedCount} 个目录，释放 ${formatBytes(response.result.deletedBytes)}`);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "执行缓存清理失败");
+    } finally {
+      setRunningCleanup(false);
     }
   }
 
@@ -1258,6 +1330,134 @@ export function ZendeskIntegrationView(props: {
               </div>
             </div>
           </>
+        ) : null}
+
+        {activeTab === "cache" ? (
+          <div className="zendesk-section zendesk-cache-cleanup">
+            <div className="zendesk-cache-toolbar">
+              <div>
+                <h4>Zendesk 运行缓存清理</h4>
+                <p>
+                  只检查当前实例的 <code>zendesk-*-ticket-*</code> Codex HOME。预览会实时读取 Zendesk ticket 状态，执行时只删除
+                  closed 且超过保留期的目录。
+                </p>
+              </div>
+              <Tag color="processing">closed only</Tag>
+            </div>
+
+            <div className="zendesk-cache-controls">
+              <label className="field">
+                <span className="field-label">closed 后保留天数</span>
+                <InputNumber
+                  min={1}
+                  max={365}
+                  value={cleanupRetentionDays}
+                  disabled={previewingCleanup || runningCleanup}
+                  onChange={(value) => setCleanupRetentionDays(Math.max(1, Math.min(365, Number(value) || 7)))}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">单次检查目录数</span>
+                <InputNumber
+                  min={1}
+                  max={500}
+                  value={cleanupLimit}
+                  disabled={previewingCleanup || runningCleanup}
+                  onChange={(value) => setCleanupLimit(Math.max(1, Math.min(500, Number(value) || 100)))}
+                />
+              </label>
+              <div className="zendesk-cache-actions">
+                <Button onClick={() => void handlePreviewCleanup()} disabled={previewingCleanup || runningCleanup}>
+                  {previewingCleanup ? "预览中..." : "生成预览"}
+                </Button>
+                <Button
+                  danger
+                  type="primary"
+                  onClick={() => void handleRunCleanup()}
+                  disabled={runningCleanup || previewingCleanup || !cleanupPreview?.eligibleCount}
+                >
+                  {runningCleanup ? "清理中..." : "清理可删除项"}
+                </Button>
+              </div>
+            </div>
+
+            {cleanupPreview ? (
+              <>
+                <div className="zendesk-summary-grid zendesk-cache-summary">
+                  <div>
+                    <strong>匹配目录</strong>
+                    <p>
+                      {cleanupPreview.matchedCount} / {cleanupPreview.scannedCount}
+                    </p>
+                  </div>
+                  <div>
+                    <strong>当前占用</strong>
+                    <p>{formatBytes(cleanupPreview.totalBytes)}</p>
+                  </div>
+                  <div>
+                    <strong>可清理</strong>
+                    <p>
+                      {cleanupPreview.eligibleCount} 个 · {formatBytes(cleanupPreview.reclaimableBytes)}
+                    </p>
+                  </div>
+                  <div>
+                    <strong>已删除</strong>
+                    <p>
+                      {cleanupPreview.deletedCount} 个 · {formatBytes(cleanupPreview.deletedBytes)}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="field-help">
+                  预览时间 {formatLocalDateTime(cleanupPreview.generatedAt)}，当前只展示本次检查的 {cleanupPreview.items.length} 个目录。
+                </p>
+
+                <div className="zendesk-cache-list">
+                  {cleanupPreview.items.length ? (
+                    cleanupPreview.items.map((item) => (
+                      <article
+                        key={item.directoryName}
+                        className={
+                          item.deleted
+                            ? "zendesk-cache-row zendesk-cache-row-deleted"
+                            : item.eligible
+                              ? "zendesk-cache-row zendesk-cache-row-eligible"
+                              : "zendesk-cache-row"
+                        }
+                      >
+                        <div className="zendesk-cache-row-head">
+                          <div>
+                            <strong>#{item.ticketId}</strong>
+                            <p>{item.directoryName}</p>
+                          </div>
+                          <Tag color={item.deleted ? "success" : item.eligible ? "warning" : "default"}>
+                            {item.deleted ? "已删除" : item.eligible ? "可清理" : "保留"}
+                          </Tag>
+                        </div>
+                        <div className="zendesk-cache-row-meta">
+                          <span>{formatBytes(item.sizeBytes)}</span>
+                          <span>目录修改 {formatLocalDateTime(item.modifiedAt)}</span>
+                          <span>ticket {item.ticketStatus || "未知"}</span>
+                          {item.ticketUpdatedAt ? <span>ticket 更新 {formatLocalDateTime(item.ticketUpdatedAt)}</span> : null}
+                        </div>
+                        <p>{item.reason}</p>
+                        {item.error ? <p className="err-text">{item.error}</p> : null}
+                      </article>
+                    ))
+                  ) : (
+                    <p className="field-help">没有找到当前实例的 Zendesk 运行缓存目录。</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                className="admin-alert-inline"
+                message="先生成预览，确认 closed 工单与预计释放空间后再执行清理。"
+              />
+            )}
+          </div>
         ) : null}
 
         {activeTab === "bindings" ? <IntegrationBindingsEditor instanceId={props.detail.instance.id} /> : null}

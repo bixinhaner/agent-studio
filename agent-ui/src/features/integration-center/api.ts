@@ -11,6 +11,7 @@ import type {
   IntegrationListResponse,
   IntegrationPoliciesResponse,
   IntegrationPolicyInput,
+  IntegrationZendeskCacheCleanupResponse,
   IntegrationType,
   IntegrationZendeskRunResult,
   IntegrationValidationResult,
@@ -59,6 +60,31 @@ export async function runZendeskIntegrationTicket(
   return api<IntegrationZendeskRunResult>(`${integrationPath(instanceId)}/zendesk/run`, {
     method: "POST",
     json: { ticket_id: ticketId }
+  });
+}
+
+export async function previewZendeskCacheCleanup(
+  instanceId: string,
+  params: { retentionDays?: number; limit?: number } = {}
+): Promise<IntegrationZendeskCacheCleanupResponse> {
+  const search = new URLSearchParams();
+  if (params.retentionDays) search.set("retention_days", String(params.retentionDays));
+  if (params.limit) search.set("limit", String(params.limit));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return api<IntegrationZendeskCacheCleanupResponse>(`${integrationPath(instanceId)}/zendesk/cache-cleanup${suffix}`);
+}
+
+export async function runZendeskCacheCleanup(
+  instanceId: string,
+  params: { retentionDays?: number; limit?: number } = {}
+): Promise<IntegrationZendeskCacheCleanupResponse> {
+  return api<IntegrationZendeskCacheCleanupResponse>(`${integrationPath(instanceId)}/zendesk/cache-cleanup`, {
+    method: "POST",
+    json: {
+      confirm: true,
+      ...(params.retentionDays ? { retention_days: params.retentionDays } : {}),
+      ...(params.limit ? { limit: params.limit } : {})
+    }
   });
 }
 

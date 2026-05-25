@@ -98,6 +98,38 @@ export type IntegrationZendeskRunResult = {
   detail: IntegrationDetail;
 };
 
+export type ZendeskCacheCleanupItem = {
+  directoryName: string;
+  directoryPath: string;
+  instanceId: string;
+  ticketId: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  ticketStatus?: string;
+  ticketUpdatedAt?: string;
+  eligible: boolean;
+  reason: string;
+  deleted?: boolean;
+  error?: string;
+};
+
+export type ZendeskCacheCleanupResult = {
+  retentionDays: number;
+  scannedCount: number;
+  matchedCount: number;
+  eligibleCount: number;
+  deletedCount: number;
+  totalBytes: number;
+  reclaimableBytes: number;
+  deletedBytes: number;
+  generatedAt: string;
+  items: ZendeskCacheCleanupItem[];
+};
+
+export type IntegrationZendeskCacheCleanupResponse = {
+  result: ZendeskCacheCleanupResult;
+};
+
 export type CreateIntegrationInstanceInput = {
   type: IntegrationType;
   slug: string;
