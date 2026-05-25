@@ -10,7 +10,7 @@ import {
   triggerFullOrgSync,
   triggerUserOrgSync
 } from "./api";
-import type { OrgSyncConfig, OrgSyncDiff, OrgSyncJob } from "./types";
+import type { OrgSyncConfig, OrgSyncDepartmentLookupEntry, OrgSyncDiff, OrgSyncJob } from "./types";
 
 type JobDiffState = {
   expanded: boolean;
@@ -18,6 +18,7 @@ type JobDiffState = {
   showAll: boolean;
   errorText?: string;
   diffs?: OrgSyncDiff[];
+  departmentLookup?: Record<string, OrgSyncDepartmentLookupEntry>;
 };
 
 type SummaryChip = {
@@ -76,14 +77,14 @@ const USER_FIELD_LABELS: Record<string, string> = {
   statusSource: "状态来源",
   syncState: "钉钉状态",
   manualDisabled: "手动禁用",
-  departmentExternalIds: "所属部门 ID",
-  primaryDepartmentExternalId: "主部门 ID"
+  departmentExternalIds: "所属部门",
+  primaryDepartmentExternalId: "主部门"
 };
 
 const DEPARTMENT_FIELD_LABELS: Record<string, string> = {
   externalId: "部门 ID",
   name: "部门名称",
-  parentExternalId: "上级部门 ID",
+  parentExternalId: "上级部门",
   sortOrder: "排序",
   status: "状态"
 };
@@ -278,6 +279,41 @@ function formatValue(value: unknown): string {
   return text.length > 96 ? `${text.slice(0, 96)}...` : text;
 }
 
+function formatDepartmentReference(
+  value: unknown,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
+): string {
+  const externalId = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
+  if (!externalId) return formatValue(value);
+  if (externalId === "1") return "根部门（1）";
+  const department = departmentLookup?.[externalId];
+  if (!department) return externalId;
+  const label = department.path || department.name;
+  return `${label}（${externalId}）`;
+}
+
+function isDepartmentField(entityType: string, field: string): boolean {
+  return (
+    (entityType === "department" && field === "parentExternalId") ||
+    field === "departmentExternalIds" ||
+    field === "primaryDepartmentExternalId"
+  );
+}
+
+function formatFieldValue(
+  entityType: string,
+  field: string,
+  value: unknown,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
+): string {
+  if (!isDepartmentField(entityType, field)) return formatValue(value);
+  if (Array.isArray(value)) {
+    if (!value.length) return "空";
+    return value.map((item) => formatDepartmentReference(item, departmentLookup)).join("、");
+  }
+  return formatDepartmentReference(value, departmentLookup);
+}
+
 function isUnsetValue(value: unknown): boolean {
   return value === null || value === undefined || value === "";
 }
@@ -317,7 +353,8 @@ function fieldChanges(
   fields: string[],
   labels: Record<string, string>,
   changeType: string,
-  entityType: string
+  entityType: string,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
 ): FieldChangeRows {
   const rows: FieldChangeRows = { visible: [], hidden: [] };
   for (const field of fields) {
@@ -334,24 +371,34 @@ function fieldChanges(
 
     if (changeType === "created") {
       if (afterValue !== undefined && afterValue !== null && afterValue !== "") {
-        pushRow(`${labels[field] ?? field}：${formatValue(afterValue)}`);
+        pushRow(`${labels[field] ?? field}：${formatFieldValue(entityType, field, afterValue, departmentLookup)}`);
       }
       continue;
     }
     if (changeType === "removed") {
       if (beforeValue !== undefined && beforeValue !== null && beforeValue !== "") {
-        pushRow(`${labels[field] ?? field}：${formatValue(beforeValue)}`);
+        pushRow(`${labels[field] ?? field}：${formatFieldValue(entityType, field, beforeValue, departmentLookup)}`);
       }
       continue;
     }
     if (!sameValue(beforeValue, afterValue)) {
-      pushRow(`${labels[field] ?? field}：${formatValue(beforeValue)} → ${formatValue(afterValue)}`);
+      pushRow(
+        `${labels[field] ?? field}：${formatFieldValue(entityType, field, beforeValue, departmentLookup)} → ${formatFieldValue(
+          entityType,
+          field,
+          afterValue,
+          departmentLookup
+        )}`
+      );
     }
   }
   return rows;
 }
 
-function formatMembershipSet(payload: Record<string, unknown> | undefined): string {
+function formatMembershipSet(
+  payload: Record<string, unknown> | undefined,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
+): string {
   const memberships = asArray(payload?.memberships)
     .map((item) => asRecord(item))
     .filter((item): item is Record<string, unknown> => Boolean(item))
@@ -362,15 +409,17 @@ function formatMembershipSet(payload: Record<string, unknown> | undefined): stri
 
   if (memberships.length) {
     return memberships
-      .map((item) => `${item.isPrimary ? "主部门" : "部门"} ${item.departmentId}`)
+      .map((item) => `${item.isPrimary ? "主部门" : "部门"} ${formatDepartmentReference(item.departmentId, departmentLookup)}`)
       .join("、");
   }
 
-  const departmentIds = asArray(payload?.departmentExternalIds).map(formatValue);
+  const departmentIds = asArray(payload?.departmentExternalIds).map((departmentId) =>
+    formatDepartmentReference(departmentId, departmentLookup)
+  );
   const primaryDepartmentId = asString(payload?.primaryDepartmentExternalId);
   if (departmentIds.length || primaryDepartmentId) {
     return [
-      primaryDepartmentId ? `主部门 ${primaryDepartmentId}` : undefined,
+      primaryDepartmentId ? `主部门 ${formatDepartmentReference(primaryDepartmentId, departmentLookup)}` : undefined,
       departmentIds.length ? `部门 ${departmentIds.join("、")}` : undefined
     ].filter(Boolean).join("、");
   }
@@ -381,11 +430,12 @@ function formatMembershipSet(payload: Record<string, unknown> | undefined): stri
 function formatMembershipChanges(
   before: Record<string, unknown> | undefined,
   after: Record<string, unknown> | undefined,
-  changeType: string
+  changeType: string,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
 ): string[] {
-  if (changeType === "created") return [`加入：${formatMembershipSet(after)}`];
-  if (changeType === "removed") return [`移除：${formatMembershipSet(before)}`];
-  return [`从 ${formatMembershipSet(before)} 调整为 ${formatMembershipSet(after)}`];
+  if (changeType === "created") return [`加入：${formatMembershipSet(after, departmentLookup)}`];
+  if (changeType === "removed") return [`移除：${formatMembershipSet(before, departmentLookup)}`];
+  return [`从 ${formatMembershipSet(before, departmentLookup)} 调整为 ${formatMembershipSet(after, departmentLookup)}`];
 }
 
 function resolveDiffTarget(diff: OrgSyncDiff): string {
@@ -409,7 +459,10 @@ function resolveDiffTarget(diff: OrgSyncDiff): string {
   );
 }
 
-function formatDiff(diff: OrgSyncDiff): FormattedDiff {
+function formatDiff(
+  diff: OrgSyncDiff,
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
+): FormattedDiff {
   const before = asRecord(diff.beforePayload);
   const after = asRecord(diff.afterPayload);
   const entityLabel = ENTITY_LABELS[diff.entityType] ?? diff.entityType;
@@ -419,11 +472,27 @@ function formatDiff(diff: OrgSyncDiff): FormattedDiff {
 
   let rows: FieldChangeRows;
   if (diff.entityType === "membership") {
-    rows = { visible: formatMembershipChanges(before, after, diff.changeType), hidden: [] };
+    rows = { visible: formatMembershipChanges(before, after, diff.changeType, departmentLookup), hidden: [] };
   } else if (diff.entityType === "department") {
-    rows = fieldChanges(before, after, DEPARTMENT_VISIBLE_FIELDS, DEPARTMENT_FIELD_LABELS, diff.changeType, diff.entityType);
+    rows = fieldChanges(
+      before,
+      after,
+      DEPARTMENT_VISIBLE_FIELDS,
+      DEPARTMENT_FIELD_LABELS,
+      diff.changeType,
+      diff.entityType,
+      departmentLookup
+    );
   } else {
-    rows = fieldChanges(before, after, USER_VISIBLE_FIELDS, USER_FIELD_LABELS, diff.changeType, diff.entityType);
+    rows = fieldChanges(
+      before,
+      after,
+      USER_VISIBLE_FIELDS,
+      USER_FIELD_LABELS,
+      diff.changeType,
+      diff.entityType,
+      departmentLookup
+    );
   }
 
   if (!rows.visible.length && !rows.hidden.length) {
@@ -535,6 +604,7 @@ export function OrgSyncView() {
         loading: !state[jobId]?.diffs,
         showAll: state[jobId]?.showAll ?? false,
         diffs: state[jobId]?.diffs,
+        departmentLookup: state[jobId]?.departmentLookup,
         errorText: undefined
       }
     }));
@@ -550,6 +620,7 @@ export function OrgSyncView() {
           expanded: true,
           loading: false,
           diffs: response.diffs,
+          departmentLookup: response.departmentLookup,
           errorText: undefined
         }
       }));
@@ -697,7 +768,7 @@ export function OrgSyncView() {
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {jobs.map((job) => {
                   const diffState = diffStateByJobId[job.id];
-                  const formattedDiffs = (diffState?.diffs ?? []).map(formatDiff);
+                  const formattedDiffs = (diffState?.diffs ?? []).map((diff) => formatDiff(diff, diffState?.departmentLookup));
                   const businessDiffs = formattedDiffs.filter((diff) => diff.changes.length > 0);
                   const groups = groupDiffs(businessDiffs);
                   const hiddenChangeSummary = summarizeHiddenChanges(formattedDiffs);

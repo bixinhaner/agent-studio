@@ -688,12 +688,19 @@ export type OrgSyncDiff = {
   createdAt?: string;
 };
 
+export type OrgSyncDepartmentLookupEntry = {
+  externalId: string;
+  name: string;
+  path: string;
+};
+
 export type OrgSyncJobListResponse = {
   jobs: OrgSyncJob[];
 };
 
 export type OrgSyncJobDiffsResponse = {
   diffs: OrgSyncDiff[];
+  departmentLookup?: Record<string, OrgSyncDepartmentLookupEntry>;
 };
 
 export type OrgSyncTriggerResponse = {

@@ -23,17 +23,25 @@ import { UsageRollupRepository, type UsageRollupRepositoryDb } from "../persiste
 import { SyncJobRepository, type SyncJobRepositoryDb, type SyncJobRecord } from "../persistence/sync-job-repository.js";
 import { UserRepository, type UserRepositoryDb } from "../persistence/user-repository.js";
 
+type DepartmentLookupEntry = {
+  externalId: string;
+  name: string;
+  path: string;
+};
+
 type SyncJobDetailLike = {
   id: string;
   status: string;
   summary?: unknown;
   events?: Array<Record<string, unknown>>;
+  snapshots?: Array<Record<string, unknown>>;
   diffs?: Array<Record<string, unknown>>;
 };
 
 type OrgSyncRouterDependencies = {
   syncService: Pick<OrgSyncService, "run">;
   syncJobs: Pick<SyncJobRepository, "listRecent" | "getDetail">;
+  departments?: Pick<DepartmentRepository, "listTree">;
   quotaChecks: Pick<QuotaEvaluationService, "evaluate">;
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
 };
@@ -41,6 +49,7 @@ type OrgSyncRouterDependencies = {
 type OrgSyncRouterOptions = {
   syncService?: Pick<OrgSyncService, "run">;
   syncJobs?: Pick<SyncJobRepository, "listRecent" | "getDetail">;
+  departments?: Pick<DepartmentRepository, "listTree">;
   quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   db?: OrgSyncJobDb;
@@ -139,6 +148,7 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
   return {
     syncService,
     syncJobs,
+    departments,
     quotaChecks,
     alerts
   };
@@ -151,6 +161,7 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
       return {
         syncService: options.syncService,
         syncJobs: options.syncJobs,
+        departments: options.departments ?? createDefaultDependencies(options.db).departments,
         quotaChecks: options.quotaChecks ?? createDefaultDependencies(options.db).quotaChecks,
         alerts: options.alerts ?? createDefaultDependencies(options.db).alerts
       };
@@ -159,10 +170,104 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
     return {
       syncService: options.syncService ?? defaults.syncService,
       syncJobs: options.syncJobs ?? defaults.syncJobs,
+      departments: options.departments ?? defaults.departments,
       quotaChecks: options.quotaChecks ?? defaults.quotaChecks,
       alerts: options.alerts ?? defaults.alerts
     };
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function addDepartmentLookupSource(
+  sources: Map<string, { externalId: string; name: string; parentExternalId?: string }>,
+  payload: unknown
+): void {
+  const record = asRecord(payload);
+  const externalId = asString(record?.externalId);
+  const name = asString(record?.name);
+  if (!externalId || !name) return;
+  sources.set(externalId, {
+    externalId,
+    name,
+    parentExternalId: asString(record?.parentExternalId)
+  });
+}
+
+function buildPath(
+  externalId: string,
+  sources: Map<string, { externalId: string; name: string; parentExternalId?: string }>,
+  seen = new Set<string>()
+): string {
+  const source = sources.get(externalId);
+  if (!source) return externalId;
+  const parentExternalId = source.parentExternalId;
+  if (!parentExternalId || parentExternalId === "1" || seen.has(externalId) || !sources.has(parentExternalId)) {
+    return source.name;
+  }
+  seen.add(externalId);
+  return `${buildPath(parentExternalId, sources, seen)} / ${source.name}`;
+}
+
+async function buildDepartmentLookup(
+  job: SyncJobDetailLike,
+  departments?: Pick<DepartmentRepository, "listTree">
+): Promise<Record<string, DepartmentLookupEntry>> {
+  const sources = new Map<string, { externalId: string; name: string; parentExternalId?: string }>();
+
+  const addTreeNode = (node: Record<string, unknown>, parentExternalId?: string) => {
+    const externalId = asString(node.externalId);
+    const name = asString(node.name);
+    if (externalId && name) {
+      sources.set(externalId, { externalId, name, parentExternalId });
+    }
+    for (const child of asArray(node.children)) {
+      const childRecord = asRecord(child);
+      if (childRecord) {
+        addTreeNode(childRecord, externalId);
+      }
+    }
+  };
+
+  if (departments) {
+    for (const root of await departments.listTree()) {
+      addTreeNode(root as unknown as Record<string, unknown>);
+    }
+  }
+
+  for (const snapshot of job.snapshots ?? []) {
+    if (snapshot.entityType !== "department") continue;
+    for (const department of asArray(snapshot.snapshotPayload)) {
+      addDepartmentLookupSource(sources, department);
+    }
+  }
+
+  for (const diff of job.diffs ?? []) {
+    if (diff.entityType !== "department") continue;
+    addDepartmentLookupSource(sources, diff.beforePayload);
+    addDepartmentLookupSource(sources, diff.afterPayload);
+  }
+
+  const lookup: Record<string, DepartmentLookupEntry> = {};
+  for (const [externalId, source] of sources) {
+    lookup[externalId] = {
+      externalId,
+      name: source.name,
+      path: buildPath(externalId, sources)
+    };
+  }
+  return lookup;
 }
 
 function sendFailure(res: Response, status: number, detail: string, job?: SyncJobDetailLike | null): void {
@@ -296,7 +401,8 @@ export function createOrgSyncRouter(options: OrgSyncRouterOptions = {}): Router 
         sendFailure(res, 404, "sync job 不存在");
         return;
       }
-      res.json({ diffs: job.diffs ?? [] });
+      const departmentLookup = await buildDepartmentLookup(job, deps.departments);
+      res.json({ diffs: job.diffs ?? [], departmentLookup });
     } catch (error) {
       sendFailure(res, 500, detailFromError(error));
     }
