@@ -29,6 +29,14 @@ type DepartmentLookupEntry = {
   path: string;
 };
 
+type UserLookupEntry = {
+  key: string;
+  displayName?: string;
+  email?: string;
+  userId?: string;
+  unionId?: string;
+};
+
 type SyncJobDetailLike = {
   id: string;
   status: string;
@@ -42,6 +50,7 @@ type OrgSyncRouterDependencies = {
   syncService: Pick<OrgSyncService, "run">;
   syncJobs: Pick<SyncJobRepository, "listRecent" | "getDetail">;
   departments?: Pick<DepartmentRepository, "listTree">;
+  users?: Pick<UserRepository, "getByExternalId" | "getById">;
   quotaChecks: Pick<QuotaEvaluationService, "evaluate">;
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
 };
@@ -50,6 +59,7 @@ type OrgSyncRouterOptions = {
   syncService?: Pick<OrgSyncService, "run">;
   syncJobs?: Pick<SyncJobRepository, "listRecent" | "getDetail">;
   departments?: Pick<DepartmentRepository, "listTree">;
+  users?: Pick<UserRepository, "getByExternalId" | "getById">;
   quotaChecks?: Pick<QuotaEvaluationService, "evaluate">;
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   db?: OrgSyncJobDb;
@@ -149,6 +159,7 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
     syncService,
     syncJobs,
     departments,
+    users,
     quotaChecks,
     alerts
   };
@@ -162,6 +173,7 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
         syncService: options.syncService,
         syncJobs: options.syncJobs,
         departments: options.departments ?? createDefaultDependencies(options.db).departments,
+        users: options.users ?? createDefaultDependencies(options.db).users,
         quotaChecks: options.quotaChecks ?? createDefaultDependencies(options.db).quotaChecks,
         alerts: options.alerts ?? createDefaultDependencies(options.db).alerts
       };
@@ -171,6 +183,7 @@ function resolveDependencies(options: OrgSyncRouterOptions = {}): () => OrgSyncR
       syncService: options.syncService ?? defaults.syncService,
       syncJobs: options.syncJobs ?? defaults.syncJobs,
       departments: options.departments ?? defaults.departments,
+      users: options.users ?? defaults.users,
       quotaChecks: options.quotaChecks ?? defaults.quotaChecks,
       alerts: options.alerts ?? defaults.alerts
     };
@@ -268,6 +281,102 @@ async function buildDepartmentLookup(
     };
   }
   return lookup;
+}
+
+function mergeUserLookupEntry(
+  sources: Map<string, UserLookupEntry>,
+  key: string | undefined,
+  entry: Omit<UserLookupEntry, "key">
+): void {
+  const normalizedKey = trimOrUndefined(key);
+  if (!normalizedKey) return;
+  const existing = sources.get(normalizedKey);
+  sources.set(normalizedKey, {
+    key: normalizedKey,
+    displayName: entry.displayName ?? existing?.displayName,
+    email: entry.email ?? existing?.email,
+    userId: entry.userId ?? existing?.userId,
+    unionId: entry.unionId ?? existing?.unionId
+  });
+}
+
+function addUserLookupSource(
+  sources: Map<string, UserLookupEntry>,
+  payload: unknown,
+  fallbackKey?: string
+): void {
+  const record = asRecord(payload);
+  const userId = asString(record?.userId);
+  const unionId = asString(record?.unionId) ?? asString(record?.externalId);
+  const key = unionId ?? userId ?? trimOrUndefined(fallbackKey);
+  if (!key) return;
+
+  const entry = {
+    displayName: asString(record?.displayName),
+    email: asString(record?.email),
+    userId,
+    unionId
+  };
+  for (const candidateKey of [key, unionId, userId, fallbackKey]) {
+    mergeUserLookupEntry(sources, candidateKey, entry);
+  }
+}
+
+async function addPersistedUserLookupSource(
+  sources: Map<string, UserLookupEntry>,
+  key: string,
+  users?: Pick<UserRepository, "getByExternalId" | "getById">
+): Promise<void> {
+  if (!users) return;
+  if (sources.get(key)?.displayName || sources.get(key)?.email) return;
+  const user = (await users.getByExternalId(key)) ?? (await users.getById(key));
+  if (!user) return;
+  const entry = {
+    displayName: user.displayName,
+    email: user.email,
+    userId: undefined,
+    unionId: user.externalId
+  };
+  for (const candidateKey of [key, user.externalId, user.id]) {
+    mergeUserLookupEntry(sources, candidateKey, entry);
+  }
+}
+
+async function buildUserLookup(
+  job: SyncJobDetailLike,
+  users?: Pick<UserRepository, "getByExternalId" | "getById">
+): Promise<Record<string, UserLookupEntry>> {
+  const sources = new Map<string, UserLookupEntry>();
+  const membershipKeys = new Set<string>();
+
+  for (const snapshot of job.snapshots ?? []) {
+    if (snapshot.entityType !== "user") continue;
+    for (const user of asArray(snapshot.snapshotPayload)) {
+      addUserLookupSource(sources, user);
+    }
+  }
+
+  for (const diff of job.diffs ?? []) {
+    if (diff.entityType === "user") {
+      addUserLookupSource(sources, diff.beforePayload, asString(diff.entityExternalId));
+      addUserLookupSource(sources, diff.afterPayload, asString(diff.entityExternalId));
+      continue;
+    }
+    if (diff.entityType !== "membership") continue;
+    const diffKey = asString(diff.entityExternalId);
+    const beforeUserId = asString(asRecord(diff.beforePayload)?.userId);
+    const afterUserId = asString(asRecord(diff.afterPayload)?.userId);
+    for (const key of [diffKey, beforeUserId, afterUserId]) {
+      const normalized = trimOrUndefined(key);
+      if (normalized) membershipKeys.add(normalized);
+    }
+  }
+
+  for (const key of membershipKeys) {
+    await addPersistedUserLookupSource(sources, key, users);
+  }
+
+  return Object.fromEntries(sources.entries());
 }
 
 function sendFailure(res: Response, status: number, detail: string, job?: SyncJobDetailLike | null): void {
@@ -402,7 +511,8 @@ export function createOrgSyncRouter(options: OrgSyncRouterOptions = {}): Router 
         return;
       }
       const departmentLookup = await buildDepartmentLookup(job, deps.departments);
-      res.json({ diffs: job.diffs ?? [], departmentLookup });
+      const userLookup = await buildUserLookup(job, deps.users);
+      res.json({ diffs: job.diffs ?? [], departmentLookup, userLookup });
     } catch (error) {
       sendFailure(res, 500, detailFromError(error));
     }

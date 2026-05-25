@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createOrgSyncRouter } from "./org-sync-router.js";
 
 describe("createOrgSyncRouter", () => {
-  it("returns readable department lookup data with sync diffs", async () => {
+  it("returns readable department and user lookup data with sync diffs", async () => {
     const app = express();
     app.use(
       createOrgSyncRouter({
@@ -40,20 +40,34 @@ describe("createOrgSyncRouter", () => {
                   }
                 ],
                 createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
+              },
+              {
+                id: "snapshot-2",
+                entityType: "user",
+                scopeType: "full",
+                snapshotPayload: [
+                  {
+                    userId: "ding-user-1",
+                    unionId: "union-1",
+                    displayName: "张三",
+                    email: "zhangsan@example.com"
+                  }
+                ],
+                createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
               }
             ],
             diffs: [
               {
                 id: "diff-1",
                 entityType: "membership",
-                entityExternalId: "ding-user-1",
+                entityExternalId: "union-1",
                 changeType: "primary_changed",
                 beforePayload: {
-                  userId: "ding-user-1",
+                  userId: "union-1",
                   memberships: [{ departmentId: "dept-parent", isPrimary: true }]
                 },
                 afterPayload: {
-                  userId: "ding-user-1",
+                  userId: "union-1",
                   memberships: [{ departmentId: "dept-child", isPrimary: true }]
                 },
                 createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
@@ -65,6 +79,10 @@ describe("createOrgSyncRouter", () => {
         },
         departments: {
           listTree: vi.fn(async () => [])
+        },
+        users: {
+          getByExternalId: vi.fn(async () => undefined),
+          getById: vi.fn(async () => undefined)
         },
         quotaChecks: {
           evaluate: vi.fn(async () => ({
@@ -89,6 +107,22 @@ describe("createOrgSyncRouter", () => {
         externalId: "dept-child",
         name: "平台软件部",
         path: "研发部 / 平台软件部"
+      }
+    });
+    expect(response.body.userLookup).toMatchObject({
+      "union-1": {
+        key: "union-1",
+        displayName: "张三",
+        email: "zhangsan@example.com",
+        userId: "ding-user-1",
+        unionId: "union-1"
+      },
+      "ding-user-1": {
+        key: "ding-user-1",
+        displayName: "张三",
+        email: "zhangsan@example.com",
+        userId: "ding-user-1",
+        unionId: "union-1"
       }
     });
   });

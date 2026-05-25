@@ -694,6 +694,14 @@ export type OrgSyncDepartmentLookupEntry = {
   path: string;
 };
 
+export type OrgSyncUserLookupEntry = {
+  key: string;
+  displayName?: string;
+  email?: string;
+  userId?: string;
+  unionId?: string;
+};
+
 export type OrgSyncJobListResponse = {
   jobs: OrgSyncJob[];
 };
@@ -701,6 +709,7 @@ export type OrgSyncJobListResponse = {
 export type OrgSyncJobDiffsResponse = {
   diffs: OrgSyncDiff[];
   departmentLookup?: Record<string, OrgSyncDepartmentLookupEntry>;
+  userLookup?: Record<string, OrgSyncUserLookupEntry>;
 };
 
 export type OrgSyncTriggerResponse = {

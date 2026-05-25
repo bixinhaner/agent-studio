@@ -10,7 +10,13 @@ import {
   triggerFullOrgSync,
   triggerUserOrgSync
 } from "./api";
-import type { OrgSyncConfig, OrgSyncDepartmentLookupEntry, OrgSyncDiff, OrgSyncJob } from "./types";
+import type {
+  OrgSyncConfig,
+  OrgSyncDepartmentLookupEntry,
+  OrgSyncDiff,
+  OrgSyncJob,
+  OrgSyncUserLookupEntry
+} from "./types";
 
 type JobDiffState = {
   expanded: boolean;
@@ -19,6 +25,7 @@ type JobDiffState = {
   errorText?: string;
   diffs?: OrgSyncDiff[];
   departmentLookup?: Record<string, OrgSyncDepartmentLookupEntry>;
+  userLookup?: Record<string, OrgSyncUserLookupEntry>;
 };
 
 type SummaryChip = {
@@ -292,6 +299,39 @@ function formatDepartmentReference(
   return `${label}（${externalId}）`;
 }
 
+function formatUserReference(
+  value: unknown,
+  userLookup: Record<string, OrgSyncUserLookupEntry> | undefined
+): string {
+  const key = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
+  if (!key) return formatValue(value);
+  const user = userLookup?.[key];
+  if (!user) return key;
+  const label = user.displayName || user.email || user.userId || user.unionId || key;
+  const detail = user.email && user.email !== label
+    ? user.email
+    : user.userId && user.userId !== label
+      ? `钉钉 ${user.userId}`
+      : user.unionId && user.unionId !== label
+        ? user.unionId
+        : undefined;
+  return detail ? `${label}（${detail}）` : label;
+}
+
+function formatUserMeta(
+  value: unknown,
+  userLookup: Record<string, OrgSyncUserLookupEntry> | undefined
+): string {
+  const key = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
+  if (!key) return "未记录用户标识";
+  const user = userLookup?.[key];
+  if (!user) return `用户标识 ${key}`;
+  return [
+    user.userId ? `钉钉 UserID ${user.userId}` : undefined,
+    user.unionId ? `UnionID ${user.unionId}` : undefined
+  ].filter(Boolean).join(" · ") || `用户标识 ${key}`;
+}
+
 function isDepartmentField(entityType: string, field: string): boolean {
   return (
     (entityType === "department" && field === "parentExternalId") ||
@@ -438,14 +478,20 @@ function formatMembershipChanges(
   return [`从 ${formatMembershipSet(before, departmentLookup)} 调整为 ${formatMembershipSet(after, departmentLookup)}`];
 }
 
-function resolveDiffTarget(diff: OrgSyncDiff): string {
+function resolveDiffTarget(
+  diff: OrgSyncDiff,
+  userLookup: Record<string, OrgSyncUserLookupEntry> | undefined
+): string {
   const before = asRecord(diff.beforePayload);
   const after = asRecord(diff.afterPayload);
   if (diff.entityType === "department") {
     return asString(after?.name) ?? asString(before?.name) ?? asString(after?.externalId) ?? asString(diff.entityExternalId) ?? "未知部门";
   }
   if (diff.entityType === "membership") {
-    return asString(after?.userId) ?? asString(before?.userId) ?? asString(diff.entityExternalId) ?? "未知用户";
+    return formatUserReference(
+      asString(after?.userId) ?? asString(before?.userId) ?? asString(diff.entityExternalId),
+      userLookup
+    );
   }
   return (
     asString(after?.displayName) ??
@@ -461,14 +507,17 @@ function resolveDiffTarget(diff: OrgSyncDiff): string {
 
 function formatDiff(
   diff: OrgSyncDiff,
-  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined
+  departmentLookup: Record<string, OrgSyncDepartmentLookupEntry> | undefined,
+  userLookup: Record<string, OrgSyncUserLookupEntry> | undefined
 ): FormattedDiff {
   const before = asRecord(diff.beforePayload);
   const after = asRecord(diff.afterPayload);
   const entityLabel = ENTITY_LABELS[diff.entityType] ?? diff.entityType;
   const changeLabel = CHANGE_LABELS[diff.changeType] ?? diff.changeType;
-  const target = resolveDiffTarget(diff);
-  const idText = diff.entityExternalId ? `ID ${diff.entityExternalId}` : "未记录外部 ID";
+  const target = resolveDiffTarget(diff, userLookup);
+  const idText = diff.entityType === "membership"
+    ? formatUserMeta(asString(after?.userId) ?? asString(before?.userId) ?? asString(diff.entityExternalId), userLookup)
+    : diff.entityExternalId ? `ID ${diff.entityExternalId}` : "未记录外部 ID";
 
   let rows: FieldChangeRows;
   if (diff.entityType === "membership") {
@@ -605,6 +654,7 @@ export function OrgSyncView() {
         showAll: state[jobId]?.showAll ?? false,
         diffs: state[jobId]?.diffs,
         departmentLookup: state[jobId]?.departmentLookup,
+        userLookup: state[jobId]?.userLookup,
         errorText: undefined
       }
     }));
@@ -621,6 +671,7 @@ export function OrgSyncView() {
           loading: false,
           diffs: response.diffs,
           departmentLookup: response.departmentLookup,
+          userLookup: response.userLookup,
           errorText: undefined
         }
       }));
@@ -768,7 +819,9 @@ export function OrgSyncView() {
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {jobs.map((job) => {
                   const diffState = diffStateByJobId[job.id];
-                  const formattedDiffs = (diffState?.diffs ?? []).map((diff) => formatDiff(diff, diffState?.departmentLookup));
+                  const formattedDiffs = (diffState?.diffs ?? []).map((diff) =>
+                    formatDiff(diff, diffState?.departmentLookup, diffState?.userLookup)
+                  );
                   const businessDiffs = formattedDiffs.filter((diff) => diff.changes.length > 0);
                   const groups = groupDiffs(businessDiffs);
                   const hiddenChangeSummary = summarizeHiddenChanges(formattedDiffs);
