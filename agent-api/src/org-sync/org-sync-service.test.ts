@@ -433,4 +433,186 @@ describe("OrgSyncService", () => {
     });
     expect(memberships.filter((membership) => membership.userId === "stale-user")).toEqual([]);
   });
+
+  it("ignores unchanged department parents and preserved DingTalk identity fields in diffs", async () => {
+    const users = [
+      buildUserRow({
+        id: "synced-user",
+        externalId: "union-1",
+        email: "alice@example.com",
+        displayName: "Alice",
+        primaryOrganizationId: "org_internal",
+        statusSource: "sync",
+        dingtalkOpenId: "open-1",
+        dingtalkUserId: "ding-user-1"
+      })
+    ];
+    const departments = [
+      buildDepartmentRow({
+        id: "dept-parent-row",
+        externalId: "dept-parent",
+        name: "Engineering",
+        parentDepartmentId: null,
+        sortOrder: 1
+      }),
+      buildDepartmentRow({
+        id: "dept-child-row",
+        externalId: "dept-child",
+        name: "Platform",
+        parentDepartmentId: "dept-parent-row",
+        sortOrder: 2
+      })
+    ];
+    const memberships: Array<{ userId: string; departmentId: string; isPrimary: boolean; source: string }> = [
+      {
+        userId: "synced-user",
+        departmentId: "dept-child-row",
+        isPrimary: true,
+        source: "sync"
+      }
+    ];
+    const snapshot: NormalizedOrgSnapshot = {
+      departments: [
+        {
+          externalId: "dept-parent",
+          name: "Engineering",
+          parentExternalId: "1",
+          sortOrder: 1
+        },
+        {
+          externalId: "dept-child",
+          name: "Platform",
+          parentExternalId: "dept-parent",
+          sortOrder: 2
+        }
+      ],
+      users: [
+        {
+          userId: "ding-user-1",
+          unionId: "union-1",
+          displayName: "Alice",
+          email: "alice@example.com",
+          departmentExternalIds: ["dept-child"],
+          primaryDepartmentExternalId: "dept-child",
+          lifecycleState: "active"
+        }
+      ]
+    };
+
+    const db = {
+      user: {
+        findMany: vi.fn(async () => users),
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async () => {
+          throw new Error("unexpected user create");
+        }),
+        update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+          const index = users.findIndex((user) => user.id === args.where.id);
+          if (index < 0) throw new Error("user not found");
+          users[index] = { ...users[index], ...args.data };
+          return users[index];
+        })
+      },
+      department: {
+        findMany: vi.fn(async () => departments),
+        findUnique: vi.fn(async () => null)
+      },
+      departmentMembership: {
+        findMany: vi.fn(
+          async (args?: { where?: { userId?: string; departmentId?: { in: string[] } } }) => {
+            if (args?.where?.userId) {
+              return memberships.filter((membership) => membership.userId === args.where?.userId);
+            }
+            if (args?.where?.departmentId?.in) {
+              return memberships.filter((membership) =>
+                args.where?.departmentId?.in.includes(membership.departmentId)
+              );
+            }
+            return memberships;
+          }
+        )
+      },
+      authIdentity: {
+        findMany: vi.fn(async () => [])
+      },
+      syncJob: {
+        findMany: vi.fn(async () => [])
+      }
+    };
+
+    const replaceSyncedMemberships = vi.fn(
+      async (input: {
+        userId: string;
+        memberships: Array<{ departmentId: string; isPrimary: boolean }>;
+      }) => {
+        memberships.splice(0, memberships.length);
+        memberships.push(
+          ...input.memberships.map((membership) => ({
+            userId: input.userId,
+            departmentId: membership.departmentId,
+            isPrimary: membership.isPrimary,
+            source: "sync"
+          }))
+        );
+      }
+    );
+    const replaceDiffs = vi.fn(async () => undefined);
+    const markSucceeded = vi.fn(async () => undefined);
+    const organizations = buildOrganizationDependencies();
+    const organizationMemberships = {
+      upsert: vi.fn(async (input: Record<string, unknown>) => ({
+        id: `membership-${input.userId}`,
+        organizationId: input.organizationId,
+        userId: input.userId,
+        membershipType: input.membershipType,
+        status: input.status,
+        createdAt: new Date("2026-04-01T00:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-04-01T00:00:00.000Z").toISOString()
+      }))
+    };
+
+    const service = new OrgSyncService({
+      provider: {
+        fetchFullOrganization: vi.fn(async () => snapshot),
+        fetchDepartmentScope: vi.fn(async () => snapshot),
+        fetchUserScope: vi.fn(async () => snapshot)
+      },
+      departments: {
+        upsertMany: vi.fn(async () => undefined)
+      },
+      users: {},
+      memberships: {
+        replaceSyncedMemberships
+      },
+      organizations,
+      organizationMemberships,
+      jobs: {
+        db,
+        create: vi.fn(async () => ({ id: "job-1" })),
+        markRunning: vi.fn(async () => undefined),
+        appendEvent: vi.fn(async () => undefined),
+        replaceSnapshots: vi.fn(async () => undefined),
+        replaceDiffs,
+        markSucceeded,
+        markFailed: vi.fn(async () => undefined),
+        touch: vi.fn(async () => undefined)
+      }
+    } as unknown as ConstructorParameters<typeof OrgSyncService>[0]);
+
+    const result = await service.run({ scopeType: "full", triggerType: "manual" });
+
+    expect(result).toEqual({ jobId: "job-1", status: "succeeded" });
+    expect(replaceDiffs).toHaveBeenCalledWith("job-1", []);
+    expect(markSucceeded).toHaveBeenCalledWith("job-1", {
+      total: 0,
+      department: 0,
+      user: 0,
+      membership: 0,
+      byChangeType: {}
+    });
+    expect(users[0]).toMatchObject({
+      dingtalkOpenId: "open-1",
+      dingtalkUserId: "ding-user-1"
+    });
+  });
 });

@@ -318,17 +318,42 @@ function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): bool
   return startedAt !== null && now - startedAt >= STALE_RUNNING_JOB_AGE_MS;
 }
 
-function compareDepartment(before: DepartmentRow | null | undefined, after: DepartmentSnapshot): DepartmentDiff | null {
+function resolveComparableParentExternalId(
+  parentDepartmentId: string | null | undefined,
+  departmentRowsById: Map<string, DepartmentRow>
+): string | null {
+  if (!parentDepartmentId) return null;
+  return departmentRowsById.get(parentDepartmentId)?.externalId ?? parentDepartmentId;
+}
+
+function resolvePersistableParentExternalId(
+  parentExternalId: string | null | undefined,
+  knownDepartmentExternalIds: Set<string>
+): string | null {
+  const normalized = trimOrUndefined(parentExternalId ?? null);
+  if (!normalized) return null;
+  return knownDepartmentExternalIds.has(normalized) ? normalized : null;
+}
+
+function compareDepartment(
+  before: DepartmentRow | null | undefined,
+  after: DepartmentSnapshot,
+  departmentRowsById: Map<string, DepartmentRow>,
+  knownDepartmentExternalIds: Set<string>
+): DepartmentDiff | null {
   const beforePayload = before
     ? {
         externalId: before.externalId,
         name: before.name,
-        parentExternalId: before.parentDepartmentId ?? null,
+        parentExternalId: resolveComparableParentExternalId(before.parentDepartmentId, departmentRowsById),
         sortOrder: before.sortOrder,
         status: before.status ?? "active"
       }
     : undefined;
-  const afterPayload = normalizeDepartmentPayload(after);
+  const afterPayload = {
+    ...normalizeDepartmentPayload(after),
+    parentExternalId: resolvePersistableParentExternalId(after.parentExternalId, knownDepartmentExternalIds)
+  };
   if (!before) {
     return {
       entityType: "department",
@@ -356,11 +381,13 @@ function compareUser(
   resolvedStatusSource: string,
   resolvedSyncState: string
 ): UserDiff | null {
+  const resolvedOpenId = trimOrUndefined(after.openId) ?? before?.dingtalkOpenId ?? null;
+  const resolvedCorpId = trimOrUndefined(after.corpId) ?? before?.dingtalkCorpId ?? null;
   const afterPayload = {
     userId: after.userId,
     unionId: after.unionId ?? null,
-    openId: after.openId ?? null,
-    corpId: after.corpId ?? null,
+    openId: resolvedOpenId,
+    corpId: resolvedCorpId,
     displayName: after.displayName,
     email: after.email ?? null,
     status: resolvedStatus,
@@ -792,6 +819,10 @@ export class OrgSyncService {
       departmentRowsByExternalId.set(row.externalId, row);
       departmentRowsById.set(row.id, row);
     }
+    const knownDepartmentExternalIds = new Set([
+      ...departmentRowsByExternalId.keys(),
+      ...snapshot.departments.map((department) => department.externalId)
+    ]);
 
     const userRowsByKey = new Map<string, UserRow>();
     const userRowsById = new Map<string, UserRow>();
@@ -824,7 +855,7 @@ export class OrgSyncService {
 
     for (const department of snapshot.departments) {
       const before = departmentRowsByExternalId.get(department.externalId) ?? null;
-      const diff = compareDepartment(before, department);
+      const diff = compareDepartment(before, department, departmentRowsById, knownDepartmentExternalIds);
       if (diff) diffs.push(diff);
     }
 

@@ -26,6 +26,30 @@ type SummaryChip = {
   tone?: "neutral" | "success" | "warning" | "danger";
 };
 
+type HiddenChange = {
+  text: string;
+  reason: string;
+};
+
+type FieldChangeRows = {
+  visible: string[];
+  hidden: HiddenChange[];
+};
+
+type FormattedDiff = {
+  id: string;
+  entityType: string;
+  title: string;
+  meta: string;
+  changes: string[];
+  hiddenChanges: HiddenChange[];
+};
+
+type HiddenChangeSummary = {
+  count: number;
+  reasons: Array<{ label: string; count: number }>;
+};
+
 const ENTITY_LABELS: Record<string, string> = {
   user: "员工",
   department: "部门",
@@ -80,6 +104,7 @@ const USER_VISIBLE_FIELDS = [
 ];
 
 const DEPARTMENT_VISIBLE_FIELDS = ["name", "externalId", "parentExternalId", "sortOrder", "status"];
+const USER_SYSTEM_FIELDS = new Set(["openId", "corpId", "unionId"]);
 const PREVIEW_DIFF_LIMIT = 8;
 
 function formatLocalTime(value: string | null | undefined): string {
@@ -253,31 +278,74 @@ function formatValue(value: unknown): string {
   return text.length > 96 ? `${text.slice(0, 96)}...` : text;
 }
 
+function isUnsetValue(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+function looksLikeInternalRecordId(value: unknown): boolean {
+  const text = asString(value);
+  return Boolean(text && /^c[a-z0-9]{12,}$/i.test(text));
+}
+
+function isNoisyDepartmentParentChange(beforeValue: unknown, afterValue: unknown): boolean {
+  if (looksLikeInternalRecordId(beforeValue) || looksLikeInternalRecordId(afterValue)) {
+    return true;
+  }
+  const beforeText = asString(beforeValue);
+  const afterText = asString(afterValue);
+  return (isUnsetValue(beforeValue) && afterText === "1") || (beforeText === "1" && isUnsetValue(afterValue));
+}
+
+function getHiddenChangeReason(
+  entityType: string,
+  field: string,
+  beforeValue: unknown,
+  afterValue: unknown
+): string | undefined {
+  if (entityType === "user" && USER_SYSTEM_FIELDS.has(field)) {
+    return "钉钉系统标识";
+  }
+  if (entityType === "department" && field === "parentExternalId" && isNoisyDepartmentParentChange(beforeValue, afterValue)) {
+    return "部门父级 ID 标准化";
+  }
+  return undefined;
+}
+
 function fieldChanges(
   before: Record<string, unknown> | undefined,
   after: Record<string, unknown> | undefined,
   fields: string[],
   labels: Record<string, string>,
-  changeType: string
-): string[] {
-  const rows: string[] = [];
+  changeType: string,
+  entityType: string
+): FieldChangeRows {
+  const rows: FieldChangeRows = { visible: [], hidden: [] };
   for (const field of fields) {
     const beforeValue = before?.[field];
     const afterValue = after?.[field];
+    const hiddenReason = getHiddenChangeReason(entityType, field, beforeValue, afterValue);
+    const pushRow = (text: string) => {
+      if (hiddenReason) {
+        rows.hidden.push({ text, reason: hiddenReason });
+      } else {
+        rows.visible.push(text);
+      }
+    };
+
     if (changeType === "created") {
       if (afterValue !== undefined && afterValue !== null && afterValue !== "") {
-        rows.push(`${labels[field] ?? field}：${formatValue(afterValue)}`);
+        pushRow(`${labels[field] ?? field}：${formatValue(afterValue)}`);
       }
       continue;
     }
     if (changeType === "removed") {
       if (beforeValue !== undefined && beforeValue !== null && beforeValue !== "") {
-        rows.push(`${labels[field] ?? field}：${formatValue(beforeValue)}`);
+        pushRow(`${labels[field] ?? field}：${formatValue(beforeValue)}`);
       }
       continue;
     }
     if (!sameValue(beforeValue, afterValue)) {
-      rows.push(`${labels[field] ?? field}：${formatValue(beforeValue)} → ${formatValue(afterValue)}`);
+      pushRow(`${labels[field] ?? field}：${formatValue(beforeValue)} → ${formatValue(afterValue)}`);
     }
   }
   return rows;
@@ -341,7 +409,7 @@ function resolveDiffTarget(diff: OrgSyncDiff): string {
   );
 }
 
-function formatDiff(diff: OrgSyncDiff): { title: string; meta: string; changes: string[] } {
+function formatDiff(diff: OrgSyncDiff): FormattedDiff {
   const before = asRecord(diff.beforePayload);
   const after = asRecord(diff.afterPayload);
   const entityLabel = ENTITY_LABELS[diff.entityType] ?? diff.entityType;
@@ -349,29 +417,32 @@ function formatDiff(diff: OrgSyncDiff): { title: string; meta: string; changes: 
   const target = resolveDiffTarget(diff);
   const idText = diff.entityExternalId ? `ID ${diff.entityExternalId}` : "未记录外部 ID";
 
-  let changes: string[];
+  let rows: FieldChangeRows;
   if (diff.entityType === "membership") {
-    changes = formatMembershipChanges(before, after, diff.changeType);
+    rows = { visible: formatMembershipChanges(before, after, diff.changeType), hidden: [] };
   } else if (diff.entityType === "department") {
-    changes = fieldChanges(before, after, DEPARTMENT_VISIBLE_FIELDS, DEPARTMENT_FIELD_LABELS, diff.changeType);
+    rows = fieldChanges(before, after, DEPARTMENT_VISIBLE_FIELDS, DEPARTMENT_FIELD_LABELS, diff.changeType, diff.entityType);
   } else {
-    changes = fieldChanges(before, after, USER_VISIBLE_FIELDS, USER_FIELD_LABELS, diff.changeType);
+    rows = fieldChanges(before, after, USER_VISIBLE_FIELDS, USER_FIELD_LABELS, diff.changeType, diff.entityType);
   }
 
-  if (!changes.length) {
-    changes = ["仅同步元数据发生变化。"];
+  if (!rows.visible.length && !rows.hidden.length) {
+    rows.visible = ["仅同步元数据发生变化。"];
   }
 
   return {
+    id: diff.id,
+    entityType: diff.entityType,
     title: `${changeLabel} ${entityLabel} · ${target}`,
     meta: idText,
-    changes
+    changes: rows.visible,
+    hiddenChanges: rows.hidden
   };
 }
 
-function groupDiffs(diffs: OrgSyncDiff[]) {
+function groupDiffs(diffs: FormattedDiff[]) {
   const order = ["user", "department", "membership", "other"];
-  const groups = new Map<string, OrgSyncDiff[]>();
+  const groups = new Map<string, FormattedDiff[]>();
   for (const diff of diffs) {
     const key = diff.entityType === "user" || diff.entityType === "department" || diff.entityType === "membership" ? diff.entityType : "other";
     groups.set(key, [...(groups.get(key) ?? []), diff]);
@@ -379,6 +450,21 @@ function groupDiffs(diffs: OrgSyncDiff[]) {
   return order
     .map((key) => ({ key, label: ENTITY_LABELS[key] ?? "其他变化", diffs: groups.get(key) ?? [] }))
     .filter((group) => group.diffs.length > 0);
+}
+
+function summarizeHiddenChanges(diffs: FormattedDiff[]): HiddenChangeSummary {
+  const reasonCounts = new Map<string, number>();
+  let count = 0;
+  for (const diff of diffs) {
+    for (const change of diff.hiddenChanges) {
+      count += 1;
+      reasonCounts.set(change.reason, (reasonCounts.get(change.reason) ?? 0) + 1);
+    }
+  }
+  return {
+    count,
+    reasons: [...reasonCounts.entries()].map(([label, reasonCount]) => ({ label, count: reasonCount }))
+  };
 }
 
 export function OrgSyncView() {
@@ -611,9 +697,15 @@ export function OrgSyncView() {
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {jobs.map((job) => {
                   const diffState = diffStateByJobId[job.id];
-                  const groups = groupDiffs(diffState?.diffs ?? []);
-                  const visibleDiffCount = groups.reduce((count, group) => count + (diffState?.showAll ? group.diffs.length : Math.min(group.diffs.length, PREVIEW_DIFF_LIMIT)), 0);
-                  const hiddenDiffCount = (diffState?.diffs?.length ?? 0) - visibleDiffCount;
+                  const formattedDiffs = (diffState?.diffs ?? []).map(formatDiff);
+                  const businessDiffs = formattedDiffs.filter((diff) => diff.changes.length > 0);
+                  const groups = groupDiffs(businessDiffs);
+                  const hiddenChangeSummary = summarizeHiddenChanges(formattedDiffs);
+                  const visibleDiffCount = groups.reduce(
+                    (count, group) => count + (diffState?.showAll ? group.diffs.length : Math.min(group.diffs.length, PREVIEW_DIFF_LIMIT)),
+                    0
+                  );
+                  const collapsedBusinessDiffCount = businessDiffs.length - visibleDiffCount;
 
                   return (
                     <div key={job.id} className="admin-sync-job-item">
@@ -677,22 +769,37 @@ export function OrgSyncView() {
                           ) : (
                             <>
                               <div className="admin-sync-diff-panel-head">
-                                <span><ListTree size={14} /> 变化明细</span>
-                                <span>共 {diffState.diffs.length} 项</span>
+                                <span><ListTree size={14} /> 业务变化</span>
+                                <span>
+                                  {businessDiffs.length} 项业务变化
+                                  {hiddenChangeSummary.count > 0 ? `，已收起 ${hiddenChangeSummary.count} 项系统字段` : ""}
+                                </span>
                               </div>
-                              {groups.map((group) => {
-                                const visibleDiffs = diffState.showAll ? group.diffs : group.diffs.slice(0, PREVIEW_DIFF_LIMIT);
-                                return (
-                                  <section key={group.key} className="admin-sync-diff-group">
-                                    <div className="admin-sync-diff-group-title">
-                                      <span>{group.label}</span>
-                                      <Tag>{group.diffs.length}</Tag>
-                                    </div>
-                                    <div className="admin-sync-diff-list">
-                                      {visibleDiffs.map((diff) => {
-                                        const formatted = formatDiff(diff);
-                                        return (
-                                          <article key={diff.id} className="admin-sync-diff-row">
+                              {hiddenChangeSummary.count > 0 ? (
+                                <div className="admin-sync-diff-system-summary">
+                                  <div className="admin-sync-diff-system-title">
+                                    已收起系统字段变化
+                                    <strong>{hiddenChangeSummary.count}</strong>
+                                  </div>
+                                  <div className="admin-sync-diff-system-reasons">
+                                    {hiddenChangeSummary.reasons.map((item) => (
+                                      <Tag key={item.label}>{item.label} {item.count}</Tag>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {groups.length > 0 ? (
+                                groups.map((group) => {
+                                  const visibleDiffs = diffState.showAll ? group.diffs : group.diffs.slice(0, PREVIEW_DIFF_LIMIT);
+                                  return (
+                                    <section key={group.key} className="admin-sync-diff-group">
+                                      <div className="admin-sync-diff-group-title">
+                                        <span>{group.label}</span>
+                                        <Tag>{group.diffs.length}</Tag>
+                                      </div>
+                                      <div className="admin-sync-diff-list">
+                                        {visibleDiffs.map((formatted) => (
+                                          <article key={formatted.id} className="admin-sync-diff-row">
                                             <div className="admin-sync-diff-row-title">{formatted.title}</div>
                                             <div className="admin-sync-diff-row-meta">{formatted.meta}</div>
                                             <ul>
@@ -700,16 +807,30 @@ export function OrgSyncView() {
                                                 <li key={change}>{change}</li>
                                               ))}
                                             </ul>
+                                            {formatted.hiddenChanges.length > 0 ? (
+                                              <div className="admin-sync-diff-row-system-note">
+                                                另有 {formatted.hiddenChanges.length} 项系统字段已收起
+                                              </div>
+                                            ) : null}
                                           </article>
-                                        );
-                                      })}
-                                    </div>
-                                  </section>
-                                );
-                              })}
-                              {hiddenDiffCount > 0 || diffState.showAll ? (
+                                        ))}
+                                      </div>
+                                    </section>
+                                  );
+                                })
+                              ) : (
+                                <Empty
+                                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                                  description={
+                                    hiddenChangeSummary.count > 0
+                                      ? "本次没有需要人工判断的业务变化"
+                                      : "本次同步没有具体变化"
+                                  }
+                                />
+                              )}
+                              {collapsedBusinessDiffCount > 0 || diffState.showAll ? (
                                 <Button size="small" type="link" onClick={() => toggleShowAllDiffs(job.id)}>
-                                  {diffState.showAll ? "收起部分明细" : `显示全部，另有 ${hiddenDiffCount} 项`}
+                                  {diffState.showAll ? "收起部分明细" : `显示全部，另有 ${collapsedBusinessDiffCount} 项业务变化`}
                                 </Button>
                               ) : null}
                             </>
