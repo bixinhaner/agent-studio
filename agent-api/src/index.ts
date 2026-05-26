@@ -1,5 +1,5 @@
 import cors from "cors";
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, { type Request, type Response } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -80,6 +80,7 @@ import {
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
+import { createServiceTokenMiddleware } from "./service-token.js";
 import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
 import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
@@ -4432,19 +4433,7 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 
-function requireServiceToken(req: Request, res: Response, next: NextFunction) {
-  if (!appConfig.token) {
-    next();
-    return;
-  }
-  const auth = String(req.headers.authorization || "");
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (token !== appConfig.token) {
-    res.status(401).json({ detail: "Unauthorized" });
-    return;
-  }
-  next();
-}
+const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
 
 app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, now: new Date().toISOString() });
