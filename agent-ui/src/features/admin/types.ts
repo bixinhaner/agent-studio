@@ -14,7 +14,7 @@ export type AdminSection =
 
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-export type AdminConversationAudienceFilter = "all" | "internal" | "external";
+export type AdminConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk";
 export type AdminConversationSort = "updated_desc" | "created_desc";
 export type AdminApiAuditResultFilter = "all" | "success" | "failed";
 export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";
@@ -115,7 +115,7 @@ export type AdminConversationListInput = {
   query?: string;
   status?: AdminConversationStatusFilter;
   feedback?: AdminConversationFeedbackFilter;
-  audience?: AdminConversationAudienceFilter;
+  source?: AdminConversationSourceFilter;
   sort?: AdminConversationSort;
   page?: number;
   pageSize?: number;
@@ -126,7 +126,7 @@ export type AdminConversationListResponse = {
     query: string;
     status: AdminConversationStatusFilter;
     feedback: AdminConversationFeedbackFilter;
-    audience: AdminConversationAudienceFilter;
+    source: AdminConversationSourceFilter;
     sort: AdminConversationSort;
   };
   summary: {

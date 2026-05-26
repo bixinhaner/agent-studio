@@ -47,13 +47,13 @@ import type {
   AdminApiAuditResultFilter,
   AdminApiAuditSort,
   AdminConversationDetailResponse,
-  AdminConversationAudienceFilter,
   AdminConversationChannelSummary,
   AdminConversationFeedback,
   AdminConversationFeedbackFilter,
   AdminConversationListResponse,
   AdminConversationAgentModeSummary,
   AdminConversationSort,
+  AdminConversationSourceFilter,
   AdminConversationStatusFilter,
   AdminConversationSummary,
   AdminConversationTranscriptAttachment,
@@ -92,10 +92,12 @@ const FEEDBACK_OPTIONS: Array<{ value: AdminConversationFeedbackFilter; label: s
   { value: "none", label: "无反馈" }
 ];
 
-const AUDIENCE_OPTIONS: Array<{ value: AdminConversationAudienceFilter; label: string }> = [
-  { value: "all", label: "全部来源" },
+const SOURCE_OPTIONS: Array<{ value: AdminConversationSourceFilter; label: string }> = [
+  { value: "all", label: "全部" },
   { value: "internal", label: "内部对话" },
-  { value: "external", label: "外部客户" }
+  { value: "external", label: "外部客户对话" },
+  { value: "zendesk", label: "Zendesk" },
+  { value: "dingtalk", label: "钉钉" }
 ];
 
 const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
@@ -1241,7 +1243,7 @@ function ConversationWorkspace() {
   const canHardDeleteConversation = auth.user?.role === "super_admin";
   const [initialHashState] = useState(readConversationAuditHashState);
   const [query, setQuery] = useState(initialHashState.query);
-  const [audienceFilter, setAudienceFilter] = useState<AdminConversationAudienceFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<AdminConversationSourceFilter>("all");
   const [statusFilter, setStatusFilter] = useState<AdminConversationStatusFilter>("all");
   const [feedbackFilter, setFeedbackFilter] = useState<AdminConversationFeedbackFilter>("all");
   const [sort, setSort] = useState<AdminConversationSort>("updated_desc");
@@ -1279,7 +1281,7 @@ function ConversationWorkspace() {
     setListLoading(true);
     fetchAdminConversationAuditList({
       query: deferredQuery || undefined,
-      audience: audienceFilter,
+      source: sourceFilter,
       status: statusFilter,
       feedback: feedbackFilter,
       sort,
@@ -1289,7 +1291,7 @@ function ConversationWorkspace() {
       .then(res => active && setListData(res))
       .finally(() => active && setListLoading(false));
     return () => { active = false; };
-  }, [deferredQuery, audienceFilter, statusFilter, feedbackFilter, sort, page, listRefreshToken]);
+  }, [deferredQuery, sourceFilter, statusFilter, feedbackFilter, sort, page, listRefreshToken]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -1345,13 +1347,13 @@ function ConversationWorkspace() {
           <Space wrap size={[8, 8]} style={{ width: '100%' }}>
             <Select
               size="small"
-              value={audienceFilter}
-              options={AUDIENCE_OPTIONS}
+              value={sourceFilter}
+              options={SOURCE_OPTIONS}
               onChange={(value) => {
-                setAudienceFilter(value);
+                setSourceFilter(value);
                 setPage(1);
               }}
-              style={{ width: 112 }}
+              style={{ width: 128 }}
             />
             <Select
               size="small"

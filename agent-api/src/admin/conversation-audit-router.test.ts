@@ -6,6 +6,7 @@ import {
   extractMessageAttachments,
   extractMessageProcessRows,
   extractMessageText,
+  matchesConversationSourceFilter,
   resolveConversationAudience,
   resolveThreadFileAbsolutePath
 } from "./conversation-audit-router.js";
@@ -16,6 +17,21 @@ describe("resolveConversationAudience", () => {
     expect(resolveConversationAudience({ userType: "external_user" })).toBe("external");
     expect(resolveConversationAudience(null)).toBe("unknown");
     expect(resolveConversationAudience(null, { type: "zendesk" } as never)).toBe("external");
+  });
+});
+
+describe("matchesConversationSourceFilter", () => {
+  it("treats internal and external filters as Portal-only conversations", () => {
+    expect(matchesConversationSourceFilter({ audience: "internal", channel: null }, "internal")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "external", channel: null }, "external")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "external", channel: { type: "zendesk" } }, "external")).toBe(false);
+    expect(matchesConversationSourceFilter({ audience: "internal", channel: { type: "dingtalk_bot" } }, "internal")).toBe(false);
+  });
+
+  it("matches Zendesk and DingTalk by external channel", () => {
+    expect(matchesConversationSourceFilter({ audience: "external", channel: { type: "zendesk" } }, "zendesk")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "internal", channel: { type: "dingtalk_bot" } }, "dingtalk")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "external", channel: null }, "zendesk")).toBe(false);
   });
 });
 

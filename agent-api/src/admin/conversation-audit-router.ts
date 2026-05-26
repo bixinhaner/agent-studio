@@ -95,7 +95,7 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
 type ConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-type ConversationAudienceFilter = "all" | "internal" | "external";
+export type ConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk";
 type ConversationSort = "updated_desc" | "created_desc";
 
 type ApiAuditResultFilter = "all" | "success" | "failed";
@@ -788,8 +788,8 @@ function parseFeedbackFilter(value: unknown): ConversationFeedbackFilter {
     : "all";
 }
 
-function parseAudienceFilter(value: unknown): ConversationAudienceFilter {
-  return value === "internal" || value === "external" ? value : "all";
+function parseSourceFilter(value: unknown): ConversationSourceFilter {
+  return value === "internal" || value === "external" || value === "zendesk" || value === "dingtalk" ? value : "all";
 }
 
 function parseSort(value: unknown): ConversationSort {
@@ -851,6 +851,21 @@ export function resolveConversationAudience(
   if (!userType && channel?.type === "zendesk") return "external";
   if (!userType) return "unknown";
   return userType === "external_user" ? "external" : "internal";
+}
+
+export function matchesConversationSourceFilter(
+  summary: {
+    audience: ConversationAudience;
+    channel?: { type?: string | null } | null;
+  },
+  filter: ConversationSourceFilter
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "zendesk") return summary.channel?.type === "zendesk";
+  if (filter === "dingtalk") return summary.channel?.type === "dingtalk_bot";
+  if (filter === "internal") return !summary.channel && summary.audience === "internal";
+  if (filter === "external") return !summary.channel && summary.audience === "external";
+  return true;
 }
 
 function extractMessageRole(message: unknown): ConversationTranscriptMessage["role"] {
@@ -1361,9 +1376,8 @@ function matchesFeedbackFilter(summary: ConversationSummary, filter: Conversatio
   return true;
 }
 
-function matchesAudienceFilter(summary: ConversationSummary, filter: ConversationAudienceFilter): boolean {
-  if (filter === "all") return true;
-  return summary.audience === filter;
+function matchesSourceFilter(summary: ConversationSummary, filter: ConversationSourceFilter): boolean {
+  return matchesConversationSourceFilter(summary, filter);
 }
 
 function matchesQuery(summary: ConversationSummary, query: string | undefined): boolean {
@@ -1727,7 +1741,7 @@ export function createConversationAuditRouter(options: {
       const query = trimOrUndefined(req.query.query);
       const status = parseStatusFilter(req.query.status);
       const feedback = parseFeedbackFilter(req.query.feedback);
-      const audience = parseAudienceFilter(req.query.audience);
+      const source = parseSourceFilter(req.query.source ?? req.query.audience);
       const sort = parseSort(req.query.sort);
       const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
       const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
@@ -1735,7 +1749,7 @@ export function createConversationAuditRouter(options: {
       const filtered = (await listConversationSummaries())
         .filter((item) => matchesStatusFilter(item, status))
         .filter((item) => matchesFeedbackFilter(item, feedback))
-        .filter((item) => matchesAudienceFilter(item, audience))
+        .filter((item) => matchesSourceFilter(item, source))
         .filter((item) => matchesQuery(item, query))
         .sort((left, right) => compareConversationSummary(left, right, sort));
 
@@ -1750,7 +1764,7 @@ export function createConversationAuditRouter(options: {
           query: query ?? "",
           status,
           feedback,
-          audience,
+          source,
           sort
         },
         summary: buildConversationAggregateSummary(filtered),
