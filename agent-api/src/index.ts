@@ -840,7 +840,7 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
       codexRunConfig: session.codexRunConfig
     });
     const crestMcpConfig = session.userId
-      ? await buildCrestMcpRuntimeConfigForUser(session.userId)
+      ? await buildCrestMcpRuntimeConfigForUser(session.userId, session.workspace)
       : undefined;
     const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
       existingSnapshot: session.providerSnapshot,
@@ -1268,18 +1268,23 @@ async function resolveCrestActor(input: {
   };
 }
 
-async function buildCrestMcpRuntimeConfigForUser(userId: string): Promise<Record<string, unknown> | undefined> {
+async function buildCrestMcpRuntimeConfigForUser(
+  userId: string,
+  workspacePath?: string
+): Promise<Record<string, unknown> | undefined> {
   if (!(await hasUsableCrestDelegation(userId))) return undefined;
   const proxyScriptExists = await fs.access(crestMcpProxyScriptPath).then(
     () => true,
     () => false
   );
   if (!proxyScriptExists) return undefined;
+  const proxyScriptPath =
+    (workspacePath ? await materializeCrestMcpProxyScript(workspacePath) : undefined) ?? crestMcpProxyScriptPath;
   return {
     mcp_servers: {
       crest_crm: {
         command: process.execPath,
-        args: [crestMcpProxyScriptPath],
+        args: [proxyScriptPath],
         env: {
           AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
           AGENT_STUDIO_CREST_PROXY_TOKEN: issueCrestProxyToken(userId)
@@ -1287,6 +1292,25 @@ async function buildCrestMcpRuntimeConfigForUser(userId: string): Promise<Record
       }
     }
   };
+}
+
+async function materializeCrestMcpProxyScript(workspacePath: string): Promise<string | undefined> {
+  const workspace = trimOrUndefined(workspacePath);
+  if (!workspace) return undefined;
+  const targetDir = path.join(workspace, ".agent-studio");
+  const targetPath = path.join(targetDir, "crest-mcp-proxy.mjs");
+  try {
+    await fs.mkdir(targetDir, { recursive: true });
+    await fs.copyFile(crestMcpProxyScriptPath, targetPath);
+    await fs.chmod(targetPath, 0o644);
+    return targetPath;
+  } catch (error) {
+    console.warn("failed to materialize Crest MCP proxy script", {
+      workspacePath: workspace,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  }
 }
 
 async function hasUsableCrestDelegation(userId: string): Promise<boolean> {
@@ -2267,7 +2291,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const providerSnapshot = await resolveProviderSnapshot({
     existingSnapshot: options.providerSnapshot
   });
-  const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(options.userId);
+  const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(options.userId, options.workspace);
   const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
     configOverrides: crestMcpConfig,
     envOverrides: {
@@ -5497,7 +5521,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
             threadId: existing.threadId ?? undefined,
             featureType: "chat"
           });
-          const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(currentUser.id);
+          const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(currentUser.id, workspace);
           const sessionRuntime = createRuntimeForProviderSnapshot(
             await resolveProviderSnapshot({
               existingSnapshot: existing.providerSnapshot,
