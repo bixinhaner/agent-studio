@@ -54,6 +54,8 @@ const crestExchangeResponseSchema = z.object({
   delegationExpiresAt: z.string().trim().min(1)
 });
 
+export type CrestExchangeIdentity = z.infer<typeof crestExchangeResponseSchema>;
+
 const selectOrganizationSchema = z.object({
   organization_id: z.string().trim().min(1, "organization_id is required")
 });
@@ -276,12 +278,12 @@ async function exchangeCrestSsoCode(config: Required<CrestSsoConfig>, code: stri
   return crestExchangeResponseSchema.parse(data);
 }
 
-async function resolveCrestUser(options: {
+export async function resolveCrestUser(options: {
   users: UserRepositoryLike;
   identities: AuthIdentityRepository;
   memberships: OrganizationMembershipRepository;
   organizations: OrganizationRepository;
-  identity: z.infer<typeof crestExchangeResponseSchema>;
+  identity: CrestExchangeIdentity;
 }) {
   const internalOrganization = await ensureInternalOrganization(options.organizations);
   const providerSubject = `crest:${options.identity.user.id}`;

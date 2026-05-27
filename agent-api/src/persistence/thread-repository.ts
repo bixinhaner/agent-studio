@@ -105,7 +105,7 @@ type RuntimeSessionRow = {
 
 type ThreadTable = {
   count(args?: unknown): Promise<number>;
-  findUnique(args: { where: { id: string } }): Promise<ThreadRow | null>;
+  findUnique(args: { where: { id: string } } | { where: { externalId: string } }): Promise<ThreadRow | null>;
   findMany(args?: {
     where?: { status?: "active" | "archived"; userId?: string | null; organizationId?: string | null };
     orderBy?: { updatedAt: "asc" | "desc" };
@@ -343,6 +343,18 @@ export class ThreadRepository {
 
   async get(threadId: string, organizationId?: string): Promise<ThreadRecord | undefined> {
     const row = await this.db.thread.findUnique({ where: { id: threadId } });
+    if (!row) return undefined;
+    const normalizedOrganizationId = trimOrUndefined(organizationId);
+    if (normalizedOrganizationId && trimOrUndefined(row.organizationId ?? undefined) !== normalizedOrganizationId) {
+      return undefined;
+    }
+    return this.loadThreadRecord(this.db, row);
+  }
+
+  async getByExternalId(externalId: string, organizationId?: string): Promise<ThreadRecord | undefined> {
+    const normalizedExternalId = trimOrUndefined(externalId);
+    if (!normalizedExternalId) return undefined;
+    const row = await this.db.thread.findUnique({ where: { externalId: normalizedExternalId } });
     if (!row) return undefined;
     const normalizedOrganizationId = trimOrUndefined(organizationId);
     if (normalizedOrganizationId && trimOrUndefined(row.organizationId ?? undefined) !== normalizedOrganizationId) {

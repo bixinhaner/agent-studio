@@ -1,6 +1,6 @@
 import cors from "cors";
 import express, { type Request, type Response } from "express";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ import { createAdminAccessRequestRouter } from "./access-requests/admin-router.j
 import { createPublicAccessRequestRouter } from "./access-requests/public-router.js";
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
 import { createAccessRequestService } from "./access-requests/service.js";
-import { createAuthRouter } from "./auth/router.js";
+import { createAuthRouter, resolveCrestUser } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
@@ -906,6 +906,33 @@ const streamSchema = z.object({
   message: z.string().min(1)
 });
 
+const crestChatStreamSchema = z.object({
+  clientId: z.string().trim().min(1),
+  clientSecret: z.string().trim().min(1),
+  delegationToken: z.string().trim().min(1),
+  conversationId: z.string().trim().min(1).max(160),
+  message: z.string().trim().min(1).max(8000),
+  context: z.record(z.unknown()).optional()
+});
+
+const crestDelegationIntrospectionSchema = z.object({
+  active: z.boolean(),
+  user: z
+    .object({
+      id: z.string().trim().min(1),
+      domainName: z.string().trim().optional(),
+      email: z.string().trim().email().optional(),
+      fullName: z.string().trim().optional(),
+      businessUnitId: z.string().trim().optional(),
+      businessUnitName: z.string().trim().optional(),
+      roleNames: z.array(z.string()).optional(),
+      appNames: z.array(z.string()).optional(),
+      defaultCurrency: z.string().trim().optional()
+    })
+    .passthrough(),
+  delegationExpiresAt: z.string().trim().min(1)
+});
+
 const createThreadSchema = z.object({
   title: z.string().optional(),
   external_id: z.string().optional(),
@@ -1163,6 +1190,81 @@ async function resolveActiveCrestIntegrationConfig() {
     clientId: trimOrUndefined(config?.clientId as string | undefined) ?? appConfig.crest.clientId,
     clientSecret:
       trimOrUndefined(secret?.clientSecret as string | undefined) ?? appConfig.crest.clientSecret
+  };
+}
+
+function safeEqual(left: string | undefined, right: string | undefined): boolean {
+  const a = Buffer.from(left ?? "");
+  const b = Buffer.from(right ?? "");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function assertCrestClient(input: { clientId?: string; clientSecret?: string }) {
+  const config = await resolveActiveCrestIntegrationConfig();
+  if (!config.clientId || !config.clientSecret || !config.baseUrl) {
+    throw new Error("Crest CRM integration is not configured");
+  }
+  if (!safeEqual(input.clientId, config.clientId) || !safeEqual(input.clientSecret, config.clientSecret)) {
+    throw new Error("Invalid Crest integration credentials");
+  }
+  return config;
+}
+
+async function introspectCrestDelegation(input: {
+  baseUrl: string;
+  clientId: string;
+  clientSecret: string;
+  delegationToken: string;
+}) {
+  const response = await fetch(`${input.baseUrl.replace(/\/+$/, "")}/v1/agent-studio/delegation/introspect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: input.clientId,
+      clientSecret: input.clientSecret,
+      delegationToken: input.delegationToken
+    })
+  });
+  const data = (await response.json().catch(() => ({}))) as unknown;
+  if (!response.ok) {
+    const detail = asRecord(data)?.detail;
+    throw new Error(typeof detail === "string" ? detail : "Crest delegation introspection failed");
+  }
+  const parsed = crestDelegationIntrospectionSchema.parse(data);
+  if (!parsed.active) throw new Error("Crest delegation is inactive");
+  return parsed;
+}
+
+async function resolveCrestActor(input: {
+  clientId: string;
+  clientSecret: string;
+  delegationToken: string;
+}): Promise<CurrentActor> {
+  const config = await assertCrestClient(input);
+  const introspected = await introspectCrestDelegation({
+    baseUrl: config.baseUrl,
+    clientId: config.clientId,
+    clientSecret: config.clientSecret,
+    delegationToken: input.delegationToken
+  });
+  const resolved = await resolveCrestUser({
+    users,
+    identities: authIdentities,
+    memberships: organizationMemberships,
+    organizations,
+    identity: {
+      user: introspected.user,
+      delegationToken: input.delegationToken,
+      delegationExpiresAt: introspected.delegationExpiresAt
+    }
+  });
+  return {
+    id: resolved.user.id,
+    userType: resolved.user.userType,
+    role: resolved.user.role,
+    organizationId: resolved.organizationId,
+    organizationType: "internal",
+    membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE
   };
 }
 
@@ -1702,6 +1804,281 @@ function currentActorFromRequest(req: Request): CurrentActor {
     organizationType: req.currentOrganization.type,
     membershipType: req.currentMembership?.membershipType
   };
+}
+
+async function ensureCrestChatThread(input: {
+  currentUser: CurrentActor;
+  conversationId: string;
+  message: string;
+  context?: Record<string, unknown>;
+}): Promise<{ thread: ThreadRecord; session: SessionRecord }> {
+  const externalId = `crest:${input.currentUser.id}:${sanitizePathSegment(input.conversationId, "conversation")}`;
+  const existing = await threads.getByExternalId(externalId, input.currentUser.organizationId);
+  if (existing) {
+    const activeThread = existing.status === "archived" ? await threads.update(existing.id, { status: "regular" }) : existing;
+    const session = await ensureThreadSession(input.currentUser, activeThread.id, {
+      codex_run_config: activeThread.codexRunConfig
+    });
+    return { thread: (await threads.get(activeThread.id, input.currentUser.organizationId)) ?? activeThread, session };
+  }
+
+  const threadId = randomUUID().replace(/-/g, "");
+  const allocated = await allocateThreadWorkspacePath({
+    currentUser: input.currentUser,
+    threadId
+  });
+  const codexRunConfig = {
+    mode: allocated.modeId,
+    channel: "crest",
+    crest: {
+      conversationId: input.conversationId,
+      context: input.context ?? {}
+    }
+  };
+  const options = await resolveSessionOptions(
+    { codex_run_config: codexRunConfig },
+    input.currentUser,
+    allocated.workspacePath,
+    allocated.modeId,
+    allocated.runtimeProfile
+  );
+  await assertChatAllowsNewSession({
+    currentUser: input.currentUser,
+    model: options.model,
+    featureType: "chat"
+  });
+  const created = await threads.create({
+    id: threadId,
+    organizationId: input.currentUser.organizationId,
+    userId: input.currentUser.id,
+    title: crestThreadTitle(input.message),
+    externalId,
+    model: options.model,
+    reasoningEffort: options.reasoningEffort,
+    workspace: options.workspace,
+    codexRunConfig: options.codexRunConfig
+  });
+  const session = await createSession(options, created.id);
+  return { thread: (await threads.get(created.id, input.currentUser.organizationId)) ?? created, session };
+}
+
+async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
+  initSSE(res);
+  const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
+  try {
+    const input = crestChatStreamSchema.parse(req.body || {});
+    const drainReason = await getDeploymentDrainReason();
+    if (drainReason) {
+      sendSSE(res, "error", { message: drainReason });
+      return;
+    }
+
+    const currentUser = await resolveCrestActor(input);
+    const { thread, session } = await ensureCrestChatThread({
+      currentUser,
+      conversationId: input.conversationId,
+      message: input.message,
+      context: input.context
+    });
+    let currentSession = session;
+    let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
+    if (!liveThread) {
+      currentSession = await ensureThreadSession(currentUser, thread.id, {
+        codex_run_config: thread.codexRunConfig
+      });
+      liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
+    }
+    if (!liveThread) throw new Error("Agent Studio session is not available");
+
+    await assertChatAllowsNewSession({
+      currentUser,
+      model: currentSession.model,
+      threadId: thread.id,
+      sessionId: currentSession.sessionId,
+      featureType: "chat"
+    });
+
+    sendSSE(res, "thought", {
+      text: `已路由到 Agent Studio，对话已同步到 thread ${thread.id}。`
+    });
+
+    const userMessageId = `crest-user-${randomUUID().replace(/-/g, "")}`;
+    await threads.appendMessage(thread.id, {
+      parentId: thread.headId ?? null,
+      message: crestStoredMessage("user", userMessageId, input.message, {
+        conversationId: input.conversationId,
+        context: input.context ?? {}
+      }),
+      runConfig: { channel: "crest", conversationId: input.conversationId }
+    });
+
+    const runtimeFileChanges: RuntimeFileChange[] = [];
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: runtime.runStreamed(liveThread, withSkillActivationPrompts(crestRuntimePrompt(input), currentSession.codexRunConfig)),
+      onEvent(event) {
+        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+        if (codexThreadId) {
+          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+            currentSession = updated;
+          });
+        }
+        emitCrestRuntimeEvent(res, event);
+      },
+      async onDone(payload) {
+        const output = payload.answer.trim() || "(无输出)";
+        await threads.appendMessage(thread.id, {
+          parentId: userMessageId,
+          message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
+            conversationId: input.conversationId,
+            sessionId: currentSession.sessionId
+          }),
+          runConfig: { channel: "crest", conversationId: input.conversationId }
+        });
+        sendSSE(res, "done", {
+          output,
+          durationMs: 0,
+          threadId: thread.id,
+          sessionId: currentSession.sessionId
+        });
+      },
+      async recordUsage(usage) {
+        await usageIngestion.record({
+          organizationId: currentUser.organizationId,
+          userId: currentUser.id,
+          threadId: thread.id,
+          sessionId: currentSession.sessionId,
+          model: currentSession.model,
+          featureType: "chat",
+          inputTokens: usage.inputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          outputTokens: usage.outputTokens,
+          resultStatus: "success",
+          metadata: { source: "crest_chat_stream" }
+        });
+      },
+      onTelemetryError(error) {
+        console.warn("crest chat usage telemetry failed", {
+          threadId: thread.id,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+
+    if (runtimeFileChanges.length > 0) {
+      console.warn("crest chat generated file changes ignored", { threadId: thread.id, count: runtimeFileChanges.length });
+    }
+  } catch (error) {
+    sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
+}
+
+function crestThreadTitle(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return normalized ? `Crest CRM - ${normalized.slice(0, 40)}` : "Crest CRM 对话";
+}
+
+function crestStoredMessage(
+  role: "user" | "assistant",
+  id: string,
+  text: string,
+  metadata: Record<string, unknown>
+) {
+  return {
+    id,
+    role,
+    content: [{ type: "text", text }],
+    createdAt: new Date().toISOString(),
+    metadata: {
+      channel: "crest",
+      ...metadata
+    }
+  };
+}
+
+function crestRuntimePrompt(input: z.infer<typeof crestChatStreamSchema>): string {
+  const context = input.context ?? {};
+  const route = typeof context.route === "string" && context.route.trim() ? context.route.trim() : "";
+  return [
+    "这条消息来自 Crest CRM 内嵌 Agent 助手。",
+    "你已经通过 crest_crm MCP 获得当前 Crest 用户的委托访问能力。",
+    "需要查询或操作 CRM 数据时，优先使用 crest_crm 工具；不要要求用户手动复制系统数据。",
+    route ? `当前 Crest 页面：${route}` : undefined,
+    "",
+    "用户问题：",
+    input.message
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
+function emitCrestRuntimeEvent(
+  res: Response,
+  event: { type?: string; delta?: string; text?: string; raw?: unknown }
+): void {
+  const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  const itemType = typeof item?.type === "string" ? item.type : "";
+  const eventType = typeof event.type === "string" ? event.type : "";
+  const isCompleted = eventType === "item.completed";
+
+  if (itemType === "agent_message" && event.delta) {
+    sendSSE(res, "delta", { text: event.delta });
+    return;
+  }
+  if (itemType === "reasoning" && isCompleted) {
+    const text = typeof item?.text === "string" ? item.text.trim() : "";
+    if (text) sendSSE(res, "thought", { text: truncateText(text, 1200) });
+    return;
+  }
+  if (itemType === "mcp_tool_call" && isCompleted) {
+    const server = typeof item?.server === "string" ? item.server : "";
+    const tool = typeof item?.tool === "string" ? item.tool : "";
+    const args = asRecord(item?.arguments) ?? {};
+    const result = item?.result;
+    const name = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
+    sendSSE(res, "tool_call", { name, args });
+    const actionPayload = parseCrestActionPayload(result);
+    if (actionPayload?.requiresConfirmation === true) {
+      sendSSE(res, "action_preview", { name, preview: actionPayload });
+    } else {
+      sendSSE(res, "tool_result", { name, output: stringifyToolResult(result) });
+    }
+    const uiIntent = asRecord(actionPayload?.uiIntent);
+    if (uiIntent) sendSSE(res, "ui_intent", uiIntent);
+  }
+}
+
+function truncateText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function parseCrestActionPayload(result: unknown): Record<string, unknown> | null {
+  const direct = asRecord(result);
+  const content = Array.isArray(direct?.content) ? direct.content : undefined;
+  const text =
+    content
+      ?.map((item) => asRecord(item)?.text)
+      .find((value): value is string => typeof value === "string" && value.trim().startsWith("{")) ??
+    undefined;
+  if (!text) return direct;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const payload = asRecord(parsed);
+    return asRecord(payload?.result) ?? payload;
+  } catch {
+    return direct;
+  }
+}
+
+function stringifyToolResult(result: unknown): string {
+  const payload = parseCrestActionPayload(result);
+  if (payload) return JSON.stringify(payload, null, 2);
+  if (typeof result === "string") return result;
+  return JSON.stringify(result ?? null, null, 2);
 }
 
 async function listDepartmentIdsForActor(actor: CurrentActor): Promise<string[]> {
@@ -4581,6 +4958,16 @@ app.locals.resolveCodexSkillThreadPath = async (input: {
   });
 };
 
+const crestIntegrationRouter = express.Router();
+crestIntegrationRouter.use(createCrestRouter({
+  config: appConfig.crest,
+  configResolver: resolveActiveCrestIntegrationConfig,
+  identities: authIdentities
+}));
+crestIntegrationRouter.post("/chat/stream", async (req: Request, res: Response) => {
+  await handleCrestChatStream(req, res);
+});
+
 registerCommonApiRoutes(app, {
   currentUserMiddleware: createCurrentUserMiddleware({
     users,
@@ -4687,11 +5074,7 @@ registerCommonApiRoutes(app, {
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
-  crestRouter: createCrestRouter({
-    config: appConfig.crest,
-    configResolver: resolveActiveCrestIntegrationConfig,
-    identities: authIdentities
-  })
+  crestRouter: crestIntegrationRouter
 });
 
 app.use(
