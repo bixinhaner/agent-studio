@@ -2103,10 +2103,20 @@ function parseCrestActionPayload(result: unknown): Record<string, unknown> | nul
   try {
     const parsed = JSON.parse(text) as unknown;
     const payload = asRecord(parsed);
+    if (payload && isCrestActionEnvelope(payload)) return payload;
     return asRecord(payload?.result) ?? payload;
   } catch {
     return direct;
   }
+}
+
+function isCrestActionEnvelope(payload: Record<string, unknown>): boolean {
+  return (
+    typeof payload.actionId === "string" ||
+    typeof payload.requiresConfirmation === "boolean" ||
+    typeof payload.confirmationToken === "string" ||
+    Boolean(asRecord(payload.uiIntent))
+  );
 }
 
 function stringifyToolResult(result: unknown): string {
