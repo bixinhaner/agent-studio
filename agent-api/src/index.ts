@@ -3,6 +3,7 @@ import express, { type Request, type Response } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
@@ -154,6 +155,7 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
+import { createCrestRouter, issueCrestProxyToken } from "./integrations/crest/router.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { DINGTALK_BOT_CHANNEL, isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./integrations/dingtalk/bot-config.js";
 import {
@@ -777,6 +779,8 @@ const oauthStates = createOAuthStateCookieManager({
 const reasoningEffortSchema = z.enum(REASONING_EFFORT_VALUES);
 type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions"]>>;
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const crestMcpProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "crest-mcp-proxy.mjs");
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -835,10 +839,14 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
       scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
       codexRunConfig: session.codexRunConfig
     });
+    const crestMcpConfig = session.userId
+      ? await buildCrestMcpRuntimeConfigForUser(session.userId)
+      : undefined;
     const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
       existingSnapshot: session.providerSnapshot,
       fallbackToLocalAuth: true
     }), {
+      configOverrides: crestMcpConfig,
       envOverrides: {
         CODEX_HOME: materializedCodexHome.codexHome
       }
@@ -1137,21 +1145,100 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+async function resolveActiveCrestIntegrationConfig() {
+  const instance = await db.integrationInstance.findFirst({
+    where: { type: "crest_crm", status: "active" },
+    orderBy: { updatedAt: "desc" }
+  });
+  if (!instance) return appConfig.crest;
+
+  const [configRow, secretRow] = await Promise.all([
+    db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: instance.id } }),
+    db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: instance.id } })
+  ]);
+  const config = asRecord(configRow?.config);
+  const secret = asRecord(secretRow?.secretState);
+  return {
+    baseUrl: trimOrUndefined(config?.baseUrl as string | undefined) ?? appConfig.crest.baseUrl,
+    clientId: trimOrUndefined(config?.clientId as string | undefined) ?? appConfig.crest.clientId,
+    clientSecret:
+      trimOrUndefined(secret?.clientSecret as string | undefined) ?? appConfig.crest.clientSecret
+  };
+}
+
+async function buildCrestMcpRuntimeConfigForUser(userId: string): Promise<Record<string, unknown> | undefined> {
+  if (!(await hasUsableCrestDelegation(userId))) return undefined;
+  const proxyScriptExists = await fs.access(crestMcpProxyScriptPath).then(
+    () => true,
+    () => false
+  );
+  if (!proxyScriptExists) return undefined;
+  return {
+    mcp_servers: {
+      crest_crm: {
+        command: process.execPath,
+        args: [crestMcpProxyScriptPath],
+        env: {
+          AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
+          AGENT_STUDIO_CREST_PROXY_TOKEN: issueCrestProxyToken(userId)
+        }
+      }
+    }
+  };
+}
+
+async function hasUsableCrestDelegation(userId: string): Promise<boolean> {
+  const identity = (await authIdentities.listForUser(userId)).find((item) => item.provider === "crest");
+  const profile = asRecord(identity?.profileJson);
+  const token = typeof profile?.delegationToken === "string" ? trimOrUndefined(profile.delegationToken) : undefined;
+  const expiresAt =
+    typeof profile?.delegationExpiresAt === "string" ? trimOrUndefined(profile.delegationExpiresAt) : undefined;
+  if (!identity || !token) return false;
+  return !expiresAt || new Date(expiresAt).getTime() > Date.now();
+}
+
+function agentStudioInternalBaseUrl(): string {
+  return (process.env.AGENT_STUDIO_INTERNAL_BASE_URL || "").trim() || `http://127.0.0.1:${appConfig.port}`;
+}
+
 function createRuntimeForProviderSnapshot(
   snapshot?: ManagedCodexProviderSnapshot,
-  overrides?: { envOverrides?: Record<string, string> }
+  overrides?: { envOverrides?: Record<string, string>; configOverrides?: Record<string, unknown> }
 ): CodexRuntime {
   const runtimeOptions = snapshot?.runtimeOptions;
-  if (!overrides?.envOverrides || Object.keys(overrides.envOverrides).length === 0) {
+  const hasEnvOverrides = Boolean(overrides?.envOverrides && Object.keys(overrides.envOverrides).length > 0);
+  const hasConfigOverrides = Boolean(
+    overrides?.configOverrides && Object.keys(overrides.configOverrides).length > 0
+  );
+  if (!hasEnvOverrides && !hasConfigOverrides) {
     return new CodexRuntime(runtimeOptions);
   }
   return new CodexRuntime({
     ...(runtimeOptions ?? {}),
+    config: mergePlainConfig(runtimeOptions?.config, overrides?.configOverrides),
     envOverrides: {
       ...(runtimeOptions?.envOverrides ?? {}),
-      ...overrides.envOverrides
+      ...(overrides?.envOverrides ?? {})
     }
   });
+}
+
+function mergePlainConfig(
+  base: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!base && !override) return undefined;
+  if (!base) return override;
+  if (!override) return base;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const current = merged[key];
+    merged[key] =
+      current && typeof current === "object" && !Array.isArray(current) && value && typeof value === "object" && !Array.isArray(value)
+        ? mergePlainConfig(current as Record<string, unknown>, value as Record<string, unknown>)
+        : value;
+  }
+  return merged;
 }
 
 async function resolveProviderSnapshot(input?: {
@@ -1793,7 +1880,9 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const providerSnapshot = await resolveProviderSnapshot({
     existingSnapshot: options.providerSnapshot
   });
+  const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(options.userId);
   const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
+    configOverrides: crestMcpConfig,
     envOverrides: {
       CODEX_HOME: materializedCodexHome.codexHome
     }
@@ -4503,6 +4592,8 @@ registerCommonApiRoutes(app, {
     cookies: sessionCookies,
     dingtalkClient,
     dingtalkConfig: appConfig.dingtalk,
+    crestConfig: appConfig.crest,
+    crestConfigResolver: resolveActiveCrestIntegrationConfig,
     oauthStates,
     identities: authIdentities,
     memberships: organizationMemberships,
@@ -4595,7 +4686,12 @@ registerCommonApiRoutes(app, {
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
   serviceTokenMiddleware: requireServiceToken,
-  zendeskRouter: createZendeskAdminRouter(zendesk)
+  zendeskRouter: createZendeskAdminRouter(zendesk),
+  crestRouter: createCrestRouter({
+    config: appConfig.crest,
+    configResolver: resolveActiveCrestIntegrationConfig,
+    identities: authIdentities
+  })
 });
 
 app.use(
@@ -5008,12 +5104,14 @@ app.post("/api/session", async (req: Request, res: Response) => {
             threadId: existing.threadId ?? undefined,
             featureType: "chat"
           });
+          const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(currentUser.id);
           const sessionRuntime = createRuntimeForProviderSnapshot(
             await resolveProviderSnapshot({
               existingSnapshot: existing.providerSnapshot,
               fallbackToLocalAuth: !existing.providerSnapshot
             }),
             {
+              configOverrides: crestMcpConfig,
               envOverrides: {
                 CODEX_HOME: materializedCodexHome.codexHome
               }

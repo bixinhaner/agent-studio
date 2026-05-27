@@ -24,6 +24,7 @@ export function registerCommonApiRoutes(
     portalSkillRouter?: Router;
     serviceTokenMiddleware: RequestHandler;
     zendeskRouter: Router;
+    crestRouter?: Router;
   }
 ): void {
   const systemSettingsMount = Router();
@@ -54,5 +55,6 @@ export function registerCommonApiRoutes(
     options.portalSkillRouter ?? Router()
   );
   app.use("/api/integrations/zendesk", options.serviceTokenMiddleware, options.zendeskRouter);
+  app.use("/api/integrations/crest", options.crestRouter ?? Router());
   app.use("/api", requireCurrentUser, requireCurrentOrganization);
 }

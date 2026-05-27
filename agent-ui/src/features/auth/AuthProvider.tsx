@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type PropsWith
 import { AUTH_INVALID_EVENT } from "../../lib/api";
 import {
   buildDingTalkAuthorizeUrl,
+  createCrestSession,
   createDingTalkSession,
   fetchDingTalkConfig,
   fetchWhoAmI,
@@ -99,8 +100,30 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     async function bootstrap() {
       const params = new URLSearchParams(window.location.search);
+      const crestCode = params.get("crest_sso_code")?.trim() || "";
       const code = params.get("code")?.trim() || "";
       const state = params.get("state")?.trim() || "";
+      if (crestCode) {
+        try {
+          const next = await createCrestSession({ code: crestCode });
+          applySession(next);
+          setError(null);
+          params.delete("crest_sso_code");
+          params.delete("state");
+          const nextSearch = params.toString();
+          window.history.replaceState(
+            {},
+            document.title,
+            `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+          );
+        } catch (err) {
+          resetSession();
+          setError(authErrorMessage(err));
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
       if (code && state) {
         const nonce = window.sessionStorage.getItem(DINGTALK_NONCE_KEY) || "";
         try {

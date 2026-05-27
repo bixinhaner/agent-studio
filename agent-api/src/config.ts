@@ -17,6 +17,9 @@ const schema = z.object({
   DINGTALK_SCOPE: z.string().default("openid"),
   DINGTALK_ALERT_AGENT_ID: z.string().optional(),
   DINGTALK_ALERT_USER_IDS: z.string().optional(),
+  CREST_BASE_URL: z.string().optional(),
+  CREST_AGENT_STUDIO_CLIENT_ID: z.string().optional(),
+  CREST_AGENT_STUDIO_CLIENT_SECRET: z.string().optional(),
   DEFAULT_MODEL: z.string().default(DEFAULT_MODEL),
   DEFAULT_REASONING_EFFORT: z.enum(REASONING_EFFORT_VALUES).default("high"),
   DEFAULT_WORKSPACE: z.string().default("."),
@@ -159,6 +162,11 @@ export const appConfig = {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean)
+  },
+  crest: {
+    baseUrl: ((env.CREST_BASE_URL || "").trim() || "https://crest.baicells.com").replace(/\/+$/, ""),
+    clientId: (env.CREST_AGENT_STUDIO_CLIENT_ID || "").trim(),
+    clientSecret: (env.CREST_AGENT_STUDIO_CLIENT_SECRET || "").trim()
   },
   defaultModel,
   defaultReasoningEffort,

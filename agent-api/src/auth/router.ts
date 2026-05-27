@@ -25,6 +25,35 @@ const dingtalkSessionSchema = z.object({
   nonce: z.string().trim().min(1, "nonce is required")
 });
 
+const crestSessionSchema = z.object({
+  code: z.string().trim().min(1, "code is required")
+});
+
+export type CrestSsoConfig = {
+  baseUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+};
+
+const crestExchangeResponseSchema = z.object({
+  user: z
+    .object({
+      id: z.string().trim().min(1),
+      domainName: z.string().trim().optional(),
+      email: z.string().trim().email().optional(),
+      fullName: z.string().trim().optional(),
+      businessUnitId: z.string().trim().optional(),
+      businessUnitName: z.string().trim().optional(),
+      roleNames: z.array(z.string()).optional(),
+      appNames: z.array(z.string()).optional(),
+      defaultCurrency: z.string().trim().optional()
+    })
+    .passthrough(),
+  state: z.string().optional(),
+  delegationToken: z.string().trim().min(1),
+  delegationExpiresAt: z.string().trim().min(1)
+});
+
 const selectOrganizationSchema = z.object({
   organization_id: z.string().trim().min(1, "organization_id is required")
 });
@@ -204,6 +233,115 @@ async function resolveDingTalkUser(options: {
   return { user, organizationId: internalOrganization.id };
 }
 
+function resolveCrestConfig(config: CrestSsoConfig | undefined):
+  | { ok: true; config: Required<CrestSsoConfig> }
+  | { ok: false; missing: string[] } {
+  const baseUrl = trimOrUndefined(config?.baseUrl);
+  const clientId = trimOrUndefined(config?.clientId);
+  const clientSecret = trimOrUndefined(config?.clientSecret);
+  const missing = [
+    ...(baseUrl ? [] : ["crest_base_url"]),
+    ...(clientId ? [] : ["crest_client_id"]),
+    ...(clientSecret ? [] : ["crest_client_secret"])
+  ];
+  if (missing.length > 0) return { ok: false, missing };
+  if (!baseUrl || !clientId || !clientSecret) return { ok: false, missing };
+  return {
+    ok: true,
+    config: {
+      baseUrl: baseUrl.replace(/\/+$/, ""),
+      clientId,
+      clientSecret
+    }
+  };
+}
+
+async function exchangeCrestSsoCode(config: Required<CrestSsoConfig>, code: string) {
+  const response = await fetch(`${config.baseUrl}/v1/agent-studio/sso/exchange`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      code
+    })
+  });
+  const data = (await response.json().catch(() => ({}))) as unknown;
+  if (!response.ok) {
+    const detail = data && typeof data === "object" && "message" in data ? String((data as { message?: unknown }).message) : response.statusText;
+    throw new Error(detail || "Crest SSO exchange failed");
+  }
+  return crestExchangeResponseSchema.parse(data);
+}
+
+async function resolveCrestUser(options: {
+  users: UserRepositoryLike;
+  identities: AuthIdentityRepository;
+  memberships: OrganizationMembershipRepository;
+  organizations: OrganizationRepository;
+  identity: z.infer<typeof crestExchangeResponseSchema>;
+}) {
+  const internalOrganization = await ensureInternalOrganization(options.organizations);
+  const providerSubject = `crest:${options.identity.user.id}`;
+  const email = toEmail(options.identity.user.email ?? options.identity.user.domainName);
+  const displayName = trimOrUndefined(options.identity.user.fullName) ?? email ?? providerSubject;
+
+  const existingIdentity = await options.identities.getByProviderSubject("crest", providerSubject);
+  let user =
+    (existingIdentity ? await options.users.getById(existingIdentity.userId) : undefined) ??
+    (await options.users.getByExternalId(providerSubject)) ??
+    (email && options.users.getByEmail ? await options.users.getByEmail(email) : undefined);
+
+  if (!user) {
+    if (!options.users.createUser) {
+      throw new Error("user repository does not support creating users");
+    }
+    user = await options.users.createUser({
+      externalId: providerSubject,
+      email: email ?? null,
+      displayName,
+      userType: "internal_employee",
+      primaryOrganizationId: internalOrganization.id,
+      role: "employee"
+    });
+  } else if (options.users.updateUserProfile) {
+    user = await options.users.updateUserProfile({
+      userId: user.id,
+      externalId: providerSubject,
+      email: email ?? user.email ?? null,
+      displayName: displayName ?? user.displayName ?? null,
+      userType: "internal_employee",
+      primaryOrganizationId: user.primaryOrganizationId ?? internalOrganization.id
+    });
+  }
+
+  await options.identities.upsert({
+    userId: user.id,
+    provider: "crest",
+    providerSubject,
+    email: email ?? user.email ?? null,
+    emailVerifiedAt: email ? new Date() : null,
+    profileJson: {
+      crestUser: options.identity.user,
+      delegationToken: options.identity.delegationToken,
+      delegationExpiresAt: options.identity.delegationExpiresAt
+    },
+    lastLoginAt: new Date()
+  });
+
+  await options.memberships.upsert({
+    organizationId: internalOrganization.id,
+    userId: user.id,
+    membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
+    status: "active",
+    joinedAt: new Date()
+  });
+
+  return { user, organizationId: internalOrganization.id };
+}
+
 function canCreateInvite(req: Request): boolean {
   if (req.currentOrganization?.type !== "internal") {
     return false;
@@ -288,6 +426,8 @@ export function createAuthRouter(options: {
   cookies: SessionCookieManager;
   dingtalkClient: DingTalkClient;
   dingtalkConfig: DingTalkConfig;
+  crestConfig?: CrestSsoConfig;
+  crestConfigResolver?: () => Promise<CrestSsoConfig | undefined>;
   oauthStates: OAuthStateCookieManager;
   identities: AuthIdentityRepository;
   memberships: OrganizationMembershipRepository;
@@ -305,6 +445,14 @@ export function createAuthRouter(options: {
   };
 }): Router {
   const router = Router();
+
+  async function resolveConfiguredCrest() {
+    const configured = resolveCrestConfig(options.crestConfig);
+    if (configured.ok) return configured;
+    const dynamicConfig = await options.crestConfigResolver?.();
+    if (dynamicConfig) return resolveCrestConfig(dynamicConfig);
+    return configured;
+  }
 
   router.get("/dingtalk/config", (req: Request, res: Response) => {
     const redirectUri = resolveDingTalkRedirectUriForRequest(req, options.dingtalkConfig);
@@ -392,6 +540,45 @@ export function createAuthRouter(options: {
       }));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "DingTalk login failed";
+      res.status(400).json({ detail });
+    }
+  });
+
+  router.post("/crest/session", async (req: Request, res: Response) => {
+    try {
+      const input = crestSessionSchema.parse(req.body ?? {});
+      const resolved = await resolveConfiguredCrest();
+      const missing = resolved.ok ? [] : [...resolved.missing];
+      if (options.sessionCookieReady === false) {
+        missing.push("session_cookie_secret");
+      }
+      if (missing.length || !resolved.ok) {
+        res.status(503).json({
+          detail: "Crest SSO is not configured",
+          missing
+        });
+        return;
+      }
+
+      const identity = await exchangeCrestSsoCode(resolved.config, input.code);
+      const resolvedUser = await resolveCrestUser({
+        users: options.users,
+        identities: options.identities,
+        memberships: options.memberships,
+        organizations: options.organizations,
+        identity
+      });
+      const memberships = await options.memberships.listActiveForUser(resolvedUser.user.id);
+      const identities = await options.identities.listForUser(resolvedUser.user.id);
+      res.setHeader("Set-Cookie", options.cookies.create(resolvedUser.user.id, resolvedUser.organizationId));
+      res.json(await buildAuthEnvelope({
+        user: resolvedUser.user,
+        memberships,
+        activeOrganizationId: resolvedUser.organizationId,
+        identities
+      }));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Crest login failed";
       res.status(400).json({ detail });
     }
   });

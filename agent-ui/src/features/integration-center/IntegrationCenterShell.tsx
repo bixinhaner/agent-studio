@@ -21,10 +21,14 @@ const OpenAICodexIntegrationViewLazy = lazy(() =>
 const OpenAICompatibleApiIntegrationViewLazy = lazy(() =>
   import("./OpenAICompatibleApiIntegrationView").then((module) => ({ default: module.OpenAICompatibleApiIntegrationView }))
 );
+const CrestCrmIntegrationViewLazy = lazy(() =>
+  import("./CrestCrmIntegrationView").then((module) => ({ default: module.CrestCrmIntegrationView }))
+);
 
 const TABS: Array<{ id: IntegrationCenterTab; label: string }> = [
   { id: "dingtalk", label: "DingTalk" },
   { id: "zendesk", label: "Zendesk" },
+  { id: "crest_crm", label: "Crest CRM" },
   { id: "openai_codex", label: "OpenAI Codex" },
   { id: "openai_compatible_api", label: "外部 OpenAI API" }
 ];
@@ -59,14 +63,18 @@ function buildCreateDraft(tab: IntegrationCenterTab): CreateDraft {
         ? "DingTalk"
         : tab === "zendesk"
           ? "Zendesk"
-          : tab === "openai_codex"
-            ? "OpenAI/Codex"
-            : "外部 OpenAI API",
+          : tab === "crest_crm"
+            ? "Crest CRM"
+            : tab === "openai_codex"
+              ? "OpenAI/Codex"
+              : "外部 OpenAI API",
     slug:
       tab === "openai_codex"
         ? "openai-main"
         : tab === "openai_compatible_api"
           ? "external-openai-api"
+          : tab === "crest_crm"
+            ? "crest-crm"
           : `${tab}-main`,
     description: "",
     status: "active"
@@ -362,6 +370,10 @@ export function IntegrationCenterShell() {
               <Suspense fallback={<Spin />}>
                 <ZendeskIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
               </Suspense>
+            ) : detail.instance.type === "crest_crm" ? (
+              <Suspense fallback={<Spin />}>
+                <CrestCrmIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+              </Suspense>
             ) : detail.instance.type === "openai_codex" ? (
               <Suspense fallback={<Spin />}>
                 <OpenAICodexIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
@@ -421,6 +433,17 @@ export function IntegrationCenterShell() {
               )}
             >
               <ZendeskIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
+            </Suspense>
+          ) : null}
+          {detail && detail.instance.type === "crest_crm" ? (
+            <Suspense
+              fallback={(
+                <div className="admin-workspace-loading">
+                  <Spin size="small" />
+                </div>
+              )}
+            >
+              <CrestCrmIntegrationViewLazy detail={detail} onUpdated={handleUpdated} />
             </Suspense>
           ) : null}
           {detail && detail.instance.type === "openai_codex" ? (

@@ -42,6 +42,7 @@ export interface UserRepositoryLike {
   getByEmail?(email: string): Promise<AuthenticatedUser | undefined>;
   upsertFromDingTalk(identity: DingTalkUserIdentity): Promise<AuthenticatedUser>;
   createUser?(input: {
+    externalId?: string | null;
     email?: string | null;
     displayName?: string | null;
     userType?: string;
@@ -50,6 +51,7 @@ export interface UserRepositoryLike {
   }): Promise<AuthenticatedUser>;
   updateUserProfile?(input: {
     userId: string;
+    externalId?: string | null;
     email?: string | null;
     displayName?: string | null;
     userType?: string;
@@ -313,6 +315,7 @@ export class UserRepository implements UserRepositoryLike {
   }
 
   async createUser(input: {
+    externalId?: string | null;
     email?: string | null;
     displayName?: string | null;
     userType?: string;
@@ -322,6 +325,7 @@ export class UserRepository implements UserRepositoryLike {
     const created = await this.db.user.create({
       data: {
         userType: trimOrUndefined(input.userType) ?? "external_user",
+        externalId: trimOrUndefined(input.externalId ?? undefined) ?? null,
         primaryOrganizationId: trimOrUndefined(input.primaryOrganizationId ?? undefined) ?? null,
         email: trimOrUndefined(input.email ?? undefined)?.toLowerCase() ?? null,
         displayName: trimOrUndefined(input.displayName ?? undefined) ?? null,
@@ -338,6 +342,7 @@ export class UserRepository implements UserRepositoryLike {
 
   async updateUserProfile(input: {
     userId: string;
+    externalId?: string | null;
     email?: string | null;
     displayName?: string | null;
     userType?: string;
@@ -356,6 +361,8 @@ export class UserRepository implements UserRepositoryLike {
     const updated = await this.db.user.update({
       where: { id: userId },
       data: {
+        externalId:
+          input.externalId === undefined ? existing.externalId : trimOrUndefined(input.externalId ?? undefined) ?? null,
         email:
           input.email === undefined ? existing.email : trimOrUndefined(input.email ?? undefined)?.toLowerCase() ?? null,
         displayName:

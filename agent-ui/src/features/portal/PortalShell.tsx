@@ -2209,6 +2209,64 @@ function stageTextForCodexItem(
   return "Still working on your request";
 }
 
+function parseCrestActionResult(result: unknown): Record<string, unknown> | null {
+  const direct = asRecord(result);
+  const content = Array.isArray(direct?.content) ? direct.content : [];
+  const firstText = content
+    .map((item) => asRecord(item))
+    .find((item) => item?.type === "text" && typeof item.text === "string")?.text;
+  if (typeof firstText === "string") {
+    try {
+      return asRecord(JSON.parse(firstText));
+    } catch {
+      return null;
+    }
+  }
+  return direct;
+}
+
+function crestActionTrace(
+  toolName: string,
+  args: Record<string, unknown>,
+  result: unknown,
+  errMsg: string
+): { title: string; detail: string } | null {
+  if (!toolName.includes("crest_crm.") && !toolName.includes("crest.actions.")) return null;
+  const actionId = typeof args.actionId === "string" ? args.actionId : "";
+  const payload = parseCrestActionResult(result);
+  const title = typeof payload?.title === "string" ? payload.title : actionId || "Crest action";
+  if (errMsg) {
+    return {
+      title: `Crest CRM · ${title} failed`,
+      detail: `error: ${shorten(errMsg, 600)}`
+    };
+  }
+  const summary = typeof payload?.summary === "string" ? payload.summary : "";
+  const warnings = Array.isArray(payload?.warnings)
+    ? payload.warnings.filter((item): item is string => typeof item === "string")
+    : [];
+  const requiresConfirmation = payload?.requiresConfirmation === true;
+  const confirmationToken = typeof payload?.confirmationToken === "string" ? payload.confirmationToken : "";
+  const idempotencyKey = typeof payload?.idempotencyKey === "string" ? payload.idempotencyKey : "";
+  const auditId = typeof payload?.auditId === "string" ? payload.auditId : "";
+  const affectedResources = Array.isArray(payload?.affectedResources)
+    ? payload.affectedResources.map((item) => detailFromUnknown(item)).filter(Boolean)
+    : [];
+  const lines = [
+    actionId ? `action: ${actionId}` : "",
+    summary,
+    affectedResources.length ? `affected:\n${affectedResources.map((item) => `- ${item}`).join("\n")}` : "",
+    warnings.length ? `warnings:\n${warnings.map((item) => `- ${item}`).join("\n")}` : "",
+    confirmationToken ? "confirmation: required" : "",
+    idempotencyKey ? "idempotency: ready" : "",
+    auditId ? `audit: ${auditId}` : ""
+  ].filter(Boolean);
+  return {
+    title: requiresConfirmation ? `Crest CRM · Preview ${title}` : `Crest CRM · ${title}`,
+    detail: lines.join("\n")
+  };
+}
+
 function messageTextForTitle(messages: readonly ThreadMessage[]): string {
   for (let i = 0; i < messages.length; i += 1) {
     const msg = messages[i];
@@ -7026,6 +7084,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const errMsg = typeof error?.message === "string" ? error.message : "";
               const result = item?.result;
               const toolName = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
+              const crestTrace = crestActionTrace(toolName, args, result, errMsg);
               const rawDetail = [
                 server ? `server: ${server}` : "",
                 tool ? `tool: ${tool}` : "",
@@ -7049,8 +7108,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: errMsg ? "error" : "process",
                   at: new Date().toISOString(),
-                  title: `Tool call ${errMsg ? "Failed" : "Completed"}`,
-                  detail: errMsg ? GENERIC_TOOL_ERROR_DETAIL : rawDetail,
+                  title: crestTrace?.title ?? `Tool call ${errMsg ? "Failed" : "Completed"}`,
+                  detail: crestTrace?.detail ?? (errMsg ? GENERIC_TOOL_ERROR_DETAIL : rawDetail),
                   rawDetail: errMsg ? rawDetail : undefined,
                   event: eventType,
                   item_type: itemType

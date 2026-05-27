@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ZendeskCacheCleanupResult, ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types.js";
 
-export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api"]);
+export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api", "crest_crm"]);
 export type IntegrationType = z.infer<typeof integrationTypeSchema>;
 
 export const integrationStatusSchema = z.enum(["draft", "active", "disabled", "error"]);

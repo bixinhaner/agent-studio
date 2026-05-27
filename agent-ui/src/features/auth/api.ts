@@ -285,6 +285,16 @@ export async function createDingTalkSession(input: {
   return normalizeAuthSession(payload);
 }
 
+export async function createCrestSession(input: { code: string }): Promise<WhoAmIResponse> {
+  const payload = await api<WhoAmIPayload>("/api/auth/crest/session", {
+    method: "POST",
+    json: {
+      code: input.code.trim()
+    }
+  });
+  return normalizeAuthSession(payload);
+}
+
 export async function requestEmailSignIn(input: {
   email?: string;
   inviteToken?: string;
