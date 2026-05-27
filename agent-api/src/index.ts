@@ -1584,6 +1584,14 @@ function withExternalRunProfileBoundaries(
   delete next.outputSchemaFile;
   delete next._agentStudioKnowledgeSets;
   delete next._agentStudioCodexHome;
+  return withRunProfileRuntimeControls(next, runtimeProfile);
+}
+
+function withRunProfileRuntimeControls(
+  codexRunConfig: Record<string, unknown> | undefined,
+  runtimeProfile: PortalRuntimeOptionRunProfile
+): Record<string, unknown> {
+  const next = codexRunConfig ? { ...codexRunConfig } : {};
   next.sandboxMode = runtimeProfile.sandboxMode;
   next.approvalPolicy = runtimeProfile.approvalPolicy;
   next.networkAccessEnabled = runtimeProfile.networkAccessEnabled;
@@ -1817,7 +1825,8 @@ async function ensureCrestChatThread(input: {
   if (existing) {
     const activeThread = existing.status === "archived" ? await threads.update(existing.id, { status: "regular" }) : existing;
     const session = await ensureThreadSession(input.currentUser, activeThread.id, {
-      codex_run_config: activeThread.codexRunConfig
+      codex_run_config: activeThread.codexRunConfig,
+      force_run_profile_controls: true
     });
     return { thread: (await threads.get(activeThread.id, input.currentUser.organizationId)) ?? activeThread, session };
   }
@@ -1827,14 +1836,14 @@ async function ensureCrestChatThread(input: {
     currentUser: input.currentUser,
     threadId
   });
-  const codexRunConfig = {
+  const codexRunConfig = withRunProfileRuntimeControls({
     mode: allocated.modeId,
     channel: "crest",
     crest: {
       conversationId: input.conversationId,
       context: input.context ?? {}
     }
-  };
+  }, allocated.runtimeProfile);
   const options = await resolveSessionOptions(
     { codex_run_config: codexRunConfig },
     input.currentUser,
@@ -1884,7 +1893,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     if (!liveThread) {
       currentSession = await ensureThreadSession(currentUser, thread.id, {
-        codex_run_config: thread.codexRunConfig
+        codex_run_config: thread.codexRunConfig,
+        force_run_profile_controls: true
       });
       liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     }
@@ -2440,6 +2450,7 @@ async function ensureThreadSession(
     reasoning_effort?: ReasoningEffort;
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
+    force_run_profile_controls?: boolean;
   }
 ) {
   const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
@@ -2474,14 +2485,13 @@ async function ensureThreadSession(
     modeId: modeSelection.modeId,
     codexRunConfig: sourceCodexRunConfig
   });
-  const normalizedSourceCodexRunConfig = withExternalRunProfileBoundaries(
-    withRunConfigEnabledSkillSelection(
-      withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
-      enabledSkills
-    ),
-    currentUser,
-    modeSelection.runtimeProfile
+  const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
+    withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
+    enabledSkills
   );
+  const boundedSourceCodexRunConfig = patch?.force_run_profile_controls
+    ? withRunProfileRuntimeControls(normalizedSourceCodexRunConfig, modeSelection.runtimeProfile)
+    : withExternalRunProfileBoundaries(normalizedSourceCodexRunConfig, currentUser, modeSelection.runtimeProfile);
   const defaults = resolveManagedCodexDefaults({
     systemSettings: publishedSystemSettings,
     providerSnapshot,
@@ -2492,7 +2502,7 @@ async function ensureThreadSession(
     currentUser,
     workspacePath,
     knowledgeSetIds: patch?.knowledge_set_ids,
-    codexRunConfig: normalizedSourceCodexRunConfig
+    codexRunConfig: boundedSourceCodexRunConfig
   });
   await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
