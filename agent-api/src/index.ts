@@ -1285,6 +1285,7 @@ async function buildCrestMcpRuntimeConfigForUser(
       crest_crm: {
         command: process.execPath,
         args: [proxyScriptPath],
+        default_tools_approval_mode: "approve",
         env: {
           AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
           AGENT_STUDIO_CREST_PROXY_TOKEN: issueCrestProxyToken(userId)
