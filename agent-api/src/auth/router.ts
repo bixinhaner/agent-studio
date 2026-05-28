@@ -11,6 +11,7 @@ import {
 } from "./internal-organization.js";
 import type { OAuthStateCookieManager, SessionCookieManager } from "./session-cookie.js";
 import type { AuthIdentityRepository } from "../persistence/auth-identity-repository.js";
+import type { CrestDelegationCredentialRepository } from "../persistence/crest-delegation-credential-repository.js";
 import type { OrganizationMembershipRepository } from "../persistence/organization-membership-repository.js";
 import type { OrganizationRepository } from "../persistence/organization-repository.js";
 import type { UserRepositoryLike } from "../persistence/user-repository.js";
@@ -51,7 +52,9 @@ const crestExchangeResponseSchema = z.object({
     .passthrough(),
   state: z.string().optional(),
   delegationToken: z.string().trim().min(1),
-  delegationExpiresAt: z.string().trim().min(1)
+  delegationExpiresAt: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional()
 });
 
 export type CrestExchangeIdentity = z.infer<typeof crestExchangeResponseSchema>;
@@ -327,8 +330,9 @@ export async function resolveCrestUser(options: {
     emailVerifiedAt: email ? new Date() : null,
     profileJson: {
       crestUser: options.identity.user,
-      delegationToken: options.identity.delegationToken,
-      delegationExpiresAt: options.identity.delegationExpiresAt
+      ...(options.identity.delegationRefreshToken ? {} : { delegationToken: options.identity.delegationToken }),
+      delegationExpiresAt: options.identity.delegationExpiresAt,
+      delegationRefreshExpiresAt: options.identity.delegationRefreshExpiresAt ?? null
     },
     lastLoginAt: new Date()
   });
@@ -430,6 +434,7 @@ export function createAuthRouter(options: {
   dingtalkConfig: DingTalkConfig;
   crestConfig?: CrestSsoConfig;
   crestConfigResolver?: () => Promise<CrestSsoConfig | undefined>;
+  crestDelegationCredentials?: CrestDelegationCredentialRepository;
   oauthStates: OAuthStateCookieManager;
   identities: AuthIdentityRepository;
   memberships: OrganizationMembershipRepository;
@@ -570,6 +575,16 @@ export function createAuthRouter(options: {
         organizations: options.organizations,
         identity
       });
+      if (identity.delegationRefreshToken) {
+        await options.crestDelegationCredentials?.upsertForUser({
+          userId: resolvedUser.user.id,
+          providerSubject: `crest:${identity.user.id}`,
+          delegationToken: identity.delegationToken,
+          delegationExpiresAt: identity.delegationExpiresAt,
+          delegationRefreshToken: identity.delegationRefreshToken,
+          delegationRefreshExpiresAt: identity.delegationRefreshExpiresAt
+        });
+      }
       const memberships = await options.memberships.listActiveForUser(resolvedUser.user.id);
       const identities = await options.identities.listForUser(resolvedUser.user.id);
       res.setHeader("Set-Cookie", options.cookies.create(resolvedUser.user.id, resolvedUser.organizationId));

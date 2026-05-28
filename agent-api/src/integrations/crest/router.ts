@@ -4,6 +4,10 @@ import { z } from "zod";
 
 import type { CrestSsoConfig } from "../../auth/router.js";
 import type { AuthIdentityRepository } from "../../persistence/auth-identity-repository.js";
+import type {
+  CrestDelegationCredentialRecord,
+  CrestDelegationCredentialRepository
+} from "../../persistence/crest-delegation-credential-repository.js";
 
 const rpcSchema = z.object({
   rpc: z.object({
@@ -14,10 +18,18 @@ const rpcSchema = z.object({
   })
 });
 
+const refreshResponseSchema = z.object({
+  delegationToken: z.string().trim().min(1),
+  delegationExpiresAt: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional()
+});
+
 type CrestRouterOptions = {
   config: CrestSsoConfig;
   configResolver?: () => Promise<CrestSsoConfig | undefined>;
   identities: AuthIdentityRepository;
+  credentials: CrestDelegationCredentialRepository;
 };
 
 type ProxyTokenEntry = {
@@ -53,6 +65,12 @@ function readDelegation(profileJson: unknown): { token?: string; expiresAt?: str
   };
 }
 
+function isExpired(value: string | undefined): boolean {
+  if (!value) return true;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) || time <= Date.now();
+}
+
 function resolvedConfig(config: CrestSsoConfig): Required<CrestSsoConfig> | undefined {
   const baseUrl = trimOrUndefined(config.baseUrl);
   const clientId = trimOrUndefined(config.clientId);
@@ -79,10 +97,14 @@ export function createCrestRouter(options: CrestRouterOptions): Router {
       return;
     }
     const identity = (await options.identities.listForUser(userId)).find((item) => item.provider === "crest");
+    const credential = await options.credentials.getForUser(userId);
     const delegation = readDelegation(identity?.profileJson);
     res.json({
-      connected: Boolean(identity && delegation.token),
-      delegation_expires_at: delegation.expiresAt ?? null
+      connected:
+        options.credentials.isUsable(credential) ||
+        Boolean(identity && delegation.token && (!delegation.expiresAt || !isExpired(delegation.expiresAt))),
+      delegation_expires_at: credential?.delegationExpiresAt ?? delegation.expiresAt ?? null,
+      delegation_refresh_expires_at: credential?.delegationRefreshExpiresAt ?? null
     });
   });
 
@@ -98,27 +120,13 @@ export function createCrestRouter(options: CrestRouterOptions): Router {
         res.status(401).json({ detail: "Authentication required" });
         return;
       }
-      const identity = (await options.identities.listForUser(userId)).find((item) => item.provider === "crest");
-      const delegation = readDelegation(identity?.profileJson);
-      if (!delegation.token) {
-        res.status(401).json({ detail: "Crest delegation is not available; sign in from Crest again" });
-        return;
-      }
-      if (delegation.expiresAt && new Date(delegation.expiresAt).getTime() <= Date.now()) {
-        res.status(401).json({ detail: "Crest delegation has expired; sign in from Crest again" });
-        return;
-      }
       const input = rpcSchema.parse(req.body ?? {});
-      const response = await fetch(`${config.baseUrl}/v1/agent-studio/mcp/rpc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
-          delegationToken: delegation.token,
-          rpc: input.rpc
-        })
-      });
+      const delegation = await ensureDelegation({ options, config, userId });
+      let response = await callCrestRpc({ config, delegationToken: delegation.delegationToken, rpc: input.rpc });
+      if (!response.ok && response.status === 401 && delegation.delegationRefreshToken) {
+        const refreshed = await refreshDelegation({ options, config, userId, credential: delegation });
+        response = await callCrestRpc({ config, delegationToken: refreshed.delegationToken, rpc: input.rpc });
+      }
       const data = (await response.json().catch(() => ({}))) as unknown;
       res.status(response.ok ? 200 : response.status).json(data);
     } catch (error) {
@@ -127,6 +135,93 @@ export function createCrestRouter(options: CrestRouterOptions): Router {
   });
 
   return router;
+}
+
+async function ensureDelegation(input: {
+  options: CrestRouterOptions;
+  config: Required<CrestSsoConfig>;
+  userId: string;
+}): Promise<CrestDelegationCredentialRecord> {
+  const credential = await input.options.credentials.getForUser(input.userId);
+  if (credential) {
+    if (!isExpired(credential.delegationExpiresAt)) return credential;
+    if (credential.delegationRefreshToken && !isExpired(credential.delegationRefreshExpiresAt)) {
+      return refreshDelegation({ ...input, credential });
+    }
+  }
+
+  const identity = (await input.options.identities.listForUser(input.userId)).find((item) => item.provider === "crest");
+  const legacy = readDelegation(identity?.profileJson);
+  if (!legacy.token) {
+    throw new Error("Crest delegation is not available; sign in from Crest again");
+  }
+  if (legacy.expiresAt && isExpired(legacy.expiresAt)) {
+    throw new Error("Crest delegation has expired; sign in from Crest again");
+  }
+  return {
+    id: "legacy-profile",
+    userId: input.userId,
+    delegationToken: legacy.token,
+    delegationExpiresAt: legacy.expiresAt ?? new Date(Date.now() + 60_000).toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function refreshDelegation(input: {
+  options: CrestRouterOptions;
+  config: Required<CrestSsoConfig>;
+  userId: string;
+  credential: CrestDelegationCredentialRecord;
+}): Promise<CrestDelegationCredentialRecord> {
+  if (!input.credential.delegationRefreshToken) {
+    throw new Error("Crest delegation has expired; sign in from Crest again");
+  }
+  const response = await fetch(`${input.config.baseUrl}/v1/agent-studio/delegation/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: input.config.clientId,
+      clientSecret: input.config.clientSecret,
+      delegationToken: input.credential.delegationToken,
+      refreshToken: input.credential.delegationRefreshToken
+    })
+  });
+  const data = (await response.json().catch(() => ({}))) as unknown;
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      await input.options.credentials.deleteForUser(input.userId);
+      throw new Error("Crest delegation refresh failed; sign in from Crest again");
+    }
+    throw new Error("Crest delegation refresh is temporarily unavailable");
+  }
+  const parsed = refreshResponseSchema.parse(data);
+  return input.options.credentials.upsertForUser({
+    userId: input.userId,
+    providerSubject: input.credential.providerSubject,
+    delegationToken: parsed.delegationToken,
+    delegationExpiresAt: parsed.delegationExpiresAt,
+    delegationRefreshToken: parsed.delegationRefreshToken ?? input.credential.delegationRefreshToken,
+    delegationRefreshExpiresAt: parsed.delegationRefreshExpiresAt ?? input.credential.delegationRefreshExpiresAt,
+    lastRefreshedAt: new Date()
+  });
+}
+
+function callCrestRpc(input: {
+  config: Required<CrestSsoConfig>;
+  delegationToken: string;
+  rpc: z.infer<typeof rpcSchema>["rpc"];
+}): Promise<globalThis.Response> {
+  return fetch(`${input.config.baseUrl}/v1/agent-studio/mcp/rpc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: input.config.clientId,
+      clientSecret: input.config.clientSecret,
+      delegationToken: input.delegationToken,
+      rpc: input.rpc
+    })
+  });
 }
 
 function resolveRequestUserId(req: Request): string | undefined {

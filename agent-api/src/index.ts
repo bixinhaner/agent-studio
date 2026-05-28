@@ -131,6 +131,10 @@ import {
   type OrganizationMembershipRepositoryDb
 } from "./persistence/organization-membership-repository.js";
 import { AuthIdentityRepository, type AuthIdentityRepositoryDb } from "./persistence/auth-identity-repository.js";
+import {
+  CrestDelegationCredentialRepository,
+  type CrestDelegationCredentialRepositoryDb
+} from "./persistence/crest-delegation-credential-repository.js";
 import { OrganizationInviteRepository, type OrganizationInviteRepositoryDb } from "./persistence/organization-invite-repository.js";
 import { LoginChallengeRepository, type LoginChallengeRepositoryDb } from "./persistence/login-challenge-repository.js";
 import { UserRepository, type UserRepositoryDb } from "./persistence/user-repository.js";
@@ -212,6 +216,7 @@ const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
 const organizationMemberships = new OrganizationMembershipRepository(db as unknown as OrganizationMembershipRepositoryDb);
 const authIdentities = new AuthIdentityRepository(db as unknown as AuthIdentityRepositoryDb);
+const crestDelegationCredentials = new CrestDelegationCredentialRepository(db as unknown as CrestDelegationCredentialRepositoryDb);
 const organizationInvites = new OrganizationInviteRepository(db as unknown as OrganizationInviteRepositoryDb);
 const loginChallenges = new LoginChallengeRepository(db as unknown as LoginChallengeRepositoryDb);
 const users = new UserRepository(db as unknown as UserRepositoryDb);
@@ -1109,9 +1114,23 @@ const crestChatStreamSchema = z.object({
   clientId: z.string().trim().min(1),
   clientSecret: z.string().trim().min(1),
   delegationToken: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional(),
   conversationId: z.string().trim().min(1).max(160),
   message: z.string().trim().min(1).max(8000),
-  context: z.record(z.unknown()).optional()
+  context: z.record(z.unknown()).optional(),
+  attachments: z
+    .array(
+      z.object({
+        fileId: z.string().trim().min(1).max(80),
+        name: z.string().trim().min(1).max(180),
+        mimeType: z.string().trim().max(120).optional(),
+        bytes: z.number().int().nonnegative().optional(),
+        sha256: z.string().trim().max(80).optional()
+      })
+    )
+    .max(10)
+    .optional()
 });
 
 const crestDelegationIntrospectionSchema = z.object({
@@ -1130,6 +1149,25 @@ const crestDelegationIntrospectionSchema = z.object({
     })
     .passthrough(),
   delegationExpiresAt: z.string().trim().min(1)
+});
+
+const crestDelegationRefreshSchema = z.object({
+  user: crestDelegationIntrospectionSchema.shape.user,
+  delegationToken: z.string().trim().min(1),
+  delegationExpiresAt: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional()
+});
+
+const crestArtifactContentSchema = z.object({
+  clientId: z.string().trim().min(1),
+  clientSecret: z.string().trim().min(1),
+  delegationToken: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional(),
+  threadId: z.string().trim().min(1),
+  artifactId: z.string().trim().min(1),
+  disposition: z.enum(["inline", "attachment"]).optional()
 });
 
 const createThreadSchema = z.object({
@@ -1438,6 +1476,8 @@ async function resolveCrestActor(input: {
   clientId: string;
   clientSecret: string;
   delegationToken: string;
+  delegationRefreshToken?: string;
+  delegationRefreshExpiresAt?: string;
 }): Promise<CurrentActor> {
   const config = await assertCrestClient(input);
   const introspected = await introspectCrestDelegation({
@@ -1454,9 +1494,21 @@ async function resolveCrestActor(input: {
     identity: {
       user: introspected.user,
       delegationToken: input.delegationToken,
-      delegationExpiresAt: introspected.delegationExpiresAt
+      delegationExpiresAt: introspected.delegationExpiresAt,
+      delegationRefreshToken: input.delegationRefreshToken,
+      delegationRefreshExpiresAt: input.delegationRefreshExpiresAt
     }
   });
+  if (input.delegationRefreshToken) {
+    await crestDelegationCredentials.upsertForUser({
+      userId: resolved.user.id,
+      providerSubject: `crest:${introspected.user.id}`,
+      delegationToken: input.delegationToken,
+      delegationExpiresAt: introspected.delegationExpiresAt,
+      delegationRefreshToken: input.delegationRefreshToken,
+      delegationRefreshExpiresAt: input.delegationRefreshExpiresAt
+    });
+  }
   return {
     id: resolved.user.id,
     userType: resolved.user.userType,
@@ -1514,6 +1566,8 @@ async function materializeCrestMcpProxyScript(workspacePath: string): Promise<st
 }
 
 async function hasUsableCrestDelegation(userId: string): Promise<boolean> {
+  const credential = await crestDelegationCredentials.getForUser(userId);
+  if (crestDelegationCredentials.isUsable(credential)) return true;
   const identity = (await authIdentities.listForUser(userId)).find((item) => item.provider === "crest");
   const profile = asRecord(identity?.profileJson);
   const token = typeof profile?.delegationToken === "string" ? trimOrUndefined(profile.delegationToken) : undefined;
@@ -2132,23 +2186,45 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       featureType: "chat"
     });
 
+    const preparedAttachments = await materializeCrestAttachments({
+      input,
+      workspacePath: currentSession.workspace
+    });
+
     sendSSE(res, "thought", {
       text: `已路由到 Agent Studio，对话已同步到 thread ${thread.id}。`
     });
+    if (preparedAttachments.length > 0) {
+      sendSSE(res, "thought", {
+        text: `已接收 ${preparedAttachments.length} 个 Crest 原文件附件，运行时将直接读取文件。`
+      });
+    }
 
     const userMessageId = `crest-user-${randomUUID().replace(/-/g, "")}`;
     await threads.appendMessage(thread.id, {
       parentId: thread.headId ?? null,
-      message: crestStoredMessage("user", userMessageId, input.message, {
-        conversationId: input.conversationId,
-        context: input.context ?? {}
-      }),
+      message: crestStoredMessage(
+        "user",
+        userMessageId,
+        input.message,
+        {
+          conversationId: input.conversationId,
+          context: input.context ?? {}
+        },
+        preparedAttachments
+      ),
       runConfig: { channel: "crest", conversationId: input.conversationId }
     });
 
     const runtimeFileChanges: RuntimeFileChange[] = [];
     await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(liveThread, withSkillActivationPrompts(crestRuntimePrompt(input), currentSession.codexRunConfig)),
+      events: runtime.runStreamed(
+        liveThread,
+        withSkillActivationPrompts(
+          crestRuntimePrompt(input, preparedAttachments),
+          currentSession.codexRunConfig
+        )
+      ),
       onEvent(event) {
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
@@ -2160,12 +2236,36 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         emitCrestRuntimeEvent(res, event);
       },
       async onDone(payload) {
+        let generatedArtifacts: ThreadArtifactRecord[] = [];
+        try {
+          generatedArtifacts = await registerGeneratedArtifactsForSession({
+            currentUser,
+            session: currentSession,
+            changes: runtimeFileChanges
+          });
+          if (generatedArtifacts.length > 0) {
+            sendSSE(res, "artifacts", {
+              threadId: thread.id,
+              sessionId: currentSession.sessionId,
+              artifacts: generatedArtifacts.map(artifactOut)
+            });
+          }
+        } catch (error) {
+          console.warn("crest chat artifact registration failed", {
+            threadId: thread.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+          sendSSE(res, "artifact_warning", {
+            detail: "Generated files could not be registered for Crest download"
+          });
+        }
         const output = payload.answer.trim() || "(无输出)";
         await threads.appendMessage(thread.id, {
           parentId: userMessageId,
           message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
             conversationId: input.conversationId,
-            sessionId: currentSession.sessionId
+            sessionId: currentSession.sessionId,
+            artifacts: generatedArtifacts.map(artifactOut)
           }),
           runConfig: { channel: "crest", conversationId: input.conversationId }
         });
@@ -2199,14 +2299,31 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       }
     });
 
-    if (runtimeFileChanges.length > 0) {
-      console.warn("crest chat generated file changes ignored", { threadId: thread.id, count: runtimeFileChanges.length });
-    }
   } catch (error) {
     sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
   } finally {
     clearInterval(heartbeat);
     res.end();
+  }
+}
+
+async function handleCrestArtifactContent(req: Request, res: Response): Promise<void> {
+  try {
+    const input = crestArtifactContentSchema.parse(req.body || {});
+    const currentUser = await resolveCrestActor(input);
+    await sendThreadArtifactContent({
+      currentUser,
+      threadId: input.threadId,
+      artifactId: input.artifactId,
+      disposition: input.disposition ?? "attachment",
+      res
+    });
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(400).json({
+        detail: error instanceof Error ? error.message : "Crest artifact download failed"
+      });
+    }
   }
 }
 
@@ -2219,12 +2336,31 @@ function crestStoredMessage(
   role: "user" | "assistant",
   id: string,
   text: string,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
+  attachments: PreparedCrestAttachment[] = []
 ) {
+  const storedAttachments = attachments.map((attachment) => ({
+    type: crestAttachmentKind(attachment.mimeType),
+    name: attachment.name,
+    contentType: attachment.mimeType,
+    content: [
+      {
+        type: "text",
+        text: uploadedFileHint({
+          name: attachment.name,
+          path: attachment.path,
+          relativePath: attachment.relativePath,
+          mimeType: attachment.mimeType,
+          bytes: attachment.bytes
+        })
+      }
+    ]
+  }));
   return {
     id,
     role,
     content: [{ type: "text", text }],
+    ...(storedAttachments.length > 0 ? { attachments: storedAttachments } : {}),
     createdAt: new Date().toISOString(),
     metadata: {
       channel: "crest",
@@ -2233,14 +2369,120 @@ function crestStoredMessage(
   };
 }
 
-function crestRuntimePrompt(input: z.infer<typeof crestChatStreamSchema>): string {
+type PreparedCrestAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  sha256?: string;
+  path: string;
+  relativePath: string;
+};
+
+async function materializeCrestAttachments(input: {
+  input: z.infer<typeof crestChatStreamSchema>;
+  workspacePath: string;
+}): Promise<PreparedCrestAttachment[]> {
+  const attachments = input.input.attachments ?? [];
+  if (attachments.length === 0) return [];
+  const config = await assertCrestClient(input.input);
+  const uploadDir = getThreadWorkspaceUploadDir(input.workspacePath);
+  await fs.mkdir(uploadDir, { recursive: true });
+
+  const out: PreparedCrestAttachment[] = [];
+  let index = 0;
+  for (const attachment of attachments) {
+    index += 1;
+    const downloaded = await downloadCrestAttachment({
+      config,
+      delegationToken: input.input.delegationToken,
+      fileId: attachment.fileId
+    });
+    const safeName = sanitizeUploadFilename(attachment.name);
+    const storedName = `${Date.now()}-${String(index).padStart(2, "0")}-${safeName}`;
+    const absolutePath = path.join(uploadDir, storedName);
+    await fs.writeFile(absolutePath, downloaded.content);
+    out.push({
+      id: attachment.fileId,
+      name: safeName,
+      mimeType: downloaded.mimeType || attachment.mimeType || "application/octet-stream",
+      bytes: downloaded.content.length,
+      sha256: downloaded.sha256 || attachment.sha256,
+      path: absolutePath,
+      relativePath: normalizeRelativePath(path.relative(uploadDir, absolutePath))
+    });
+  }
+  return out;
+}
+
+async function downloadCrestAttachment(input: {
+  config: { baseUrl: string; clientId: string; clientSecret: string };
+  delegationToken: string;
+  fileId: string;
+}): Promise<{ content: Buffer; mimeType: string; sha256?: string }> {
+  const response = await fetch(
+    `${input.config.baseUrl.replace(/\/+$/, "")}/v1/agent-studio/files/download`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: input.config.clientId,
+        clientSecret: input.config.clientSecret,
+        delegationToken: input.delegationToken,
+        fileId: input.fileId
+      })
+    }
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Crest attachment download failed: HTTP ${response.status}`);
+  }
+  const content = Buffer.from(await response.arrayBuffer());
+  return {
+    content,
+    mimeType: response.headers.get("content-type") || "application/octet-stream",
+    sha256: trimOrUndefined(response.headers.get("x-crest-agent-file-sha256") ?? undefined)
+  };
+}
+
+function crestAttachmentKind(contentType?: string): "image" | "document" | "file" {
+  const normalized = trimOrUndefined(contentType)?.toLowerCase() ?? "";
+  if (normalized.startsWith("image/")) return "image";
+  if (
+    normalized === "application/pdf" ||
+    normalized.includes("word") ||
+    normalized.includes("excel") ||
+    normalized.startsWith("text/")
+  ) {
+    return "document";
+  }
+  return "file";
+}
+
+function crestRuntimePrompt(
+  input: z.infer<typeof crestChatStreamSchema>,
+  attachments: PreparedCrestAttachment[] = []
+): string {
   const context = input.context ?? {};
   const route = typeof context.route === "string" && context.route.trim() ? context.route.trim() : "";
+  const attachmentLines = attachments.map((attachment) =>
+    uploadedFileHint({
+      name: attachment.name,
+      path: attachment.path,
+      relativePath: attachment.relativePath,
+      mimeType: attachment.mimeType,
+      bytes: attachment.bytes
+    })
+  );
   return [
     "这条消息来自 Crest CRM 内嵌 Agent 助手。",
     "你已经通过 crest_crm MCP 获得当前 Crest 用户的委托访问能力。",
     "需要查询或操作 CRM 数据时，优先使用 crest_crm 工具；不要要求用户手动复制系统数据。",
     route ? `当前 Crest 页面：${route}` : undefined,
+    attachmentLines.length > 0
+      ? "用户本轮上传了以下原文件附件。请直接读取这些工作区文件，保留文件内格式、表格、样式和模板结构："
+      : undefined,
+    ...attachmentLines,
     "",
     "用户问题：",
     input.message
@@ -5206,10 +5448,14 @@ const crestIntegrationRouter = express.Router();
 crestIntegrationRouter.use(createCrestRouter({
   config: appConfig.crest,
   configResolver: resolveActiveCrestIntegrationConfig,
-  identities: authIdentities
+  identities: authIdentities,
+  credentials: crestDelegationCredentials
 }));
 crestIntegrationRouter.post("/chat/stream", async (req: Request, res: Response) => {
   await handleCrestChatStream(req, res);
+});
+crestIntegrationRouter.post("/artifacts/content", async (req: Request, res: Response) => {
+  await handleCrestArtifactContent(req, res);
 });
 
 registerCommonApiRoutes(app, {
@@ -5225,6 +5471,7 @@ registerCommonApiRoutes(app, {
     dingtalkConfig: appConfig.dingtalk,
     crestConfig: appConfig.crest,
     crestConfigResolver: resolveActiveCrestIntegrationConfig,
+    crestDelegationCredentials,
     oauthStates,
     identities: authIdentities,
     memberships: organizationMemberships,

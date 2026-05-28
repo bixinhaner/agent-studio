@@ -62,6 +62,7 @@ model User {
   targetAccessRequests AccessRequest[] @relation("AccessRequestTargetUser")
   accessRequestReviewAssignments AccessRequestReviewer[] @relation("AccessRequestReviewerUser")
   accessRequestEvents AccessRequestEvent[] @relation("AccessRequestEventActorUser")
+  crestDelegationCredential CrestDelegationCredential?
 
   @@index([email])
   @@index([status, role])
@@ -193,6 +194,24 @@ model AuthIdentity {
   @@index([userId, provider])
   @@index([email])
   @@map("auth_identities")
+}
+
+model CrestDelegationCredential {
+  id                         String    @id @default(cuid())
+  userId                     String    @unique @map("user_id")
+  user                       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerSubject            String?   @map("provider_subject")
+  delegationToken            String    @map("delegation_token")
+  delegationExpiresAt        DateTime  @map("delegation_expires_at")
+  delegationRefreshToken     String?   @map("delegation_refresh_token")
+  delegationRefreshExpiresAt DateTime? @map("delegation_refresh_expires_at")
+  lastRefreshedAt            DateTime? @map("last_refreshed_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+
+  @@index([delegationExpiresAt])
+  @@index([delegationRefreshExpiresAt])
+  @@map("crest_delegation_credentials")
 }
 
 model OrganizationInvite {
