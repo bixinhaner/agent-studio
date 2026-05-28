@@ -50,6 +50,14 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.add("ai-response-review-route");
+    return () => {
+      document.body.classList.remove("ai-response-review-route");
+    };
+  }, []);
+
   async function loadReview() {
     setLoading(true);
     setErrorText("");

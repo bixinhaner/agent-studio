@@ -19,7 +19,7 @@ import { createAuthRouter, resolveCrestUser } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
-import { createDingTalkClient } from "./auth/dingtalk.js";
+import { createDingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import {
   ensureInternalOrganization,
@@ -300,6 +300,45 @@ const codexProviders = new ManagedCodexProviderResolver({
   systemSettings
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
+
+async function resolveActiveDingTalkWorkNoticeConfig(): Promise<DingTalkConfig> {
+  const instance = await db.integrationInstance.findFirst({
+    where: {
+      type: "dingtalk",
+      status: "active"
+    },
+    orderBy: { updatedAt: "desc" }
+  });
+  if (!instance) return appConfig.dingtalk;
+
+  const [configRow, secretRow] = await Promise.all([
+    db.integrationInstanceConfig.findUnique({ where: { integrationInstanceId: instance.id } }),
+    db.integrationInstanceSecret.findUnique({ where: { integrationInstanceId: instance.id } })
+  ]);
+  const config = asRecord(configRow?.config) ?? {};
+  const secret = asRecord(secretRow?.secretState) ?? {};
+  const alertUserIds = asStringArray(config.alertUserIds);
+
+  return {
+    ...appConfig.dingtalk,
+    clientId: asString(config.clientId) ?? appConfig.dingtalk.clientId,
+    clientSecret: asString(secret.clientSecret) ?? appConfig.dingtalk.clientSecret,
+    redirectUri: asString(config.redirectUri) ?? appConfig.dingtalk.redirectUri,
+    scope: asString(config.scope) ?? appConfig.dingtalk.scope,
+    apiBaseUrl: asString(config.apiBaseUrl),
+    alertAgentId: asString(config.alertAgentId) ?? appConfig.dingtalk.alertAgentId,
+    alertUserIds: alertUserIds.length ? alertUserIds : appConfig.dingtalk.alertUserIds
+  };
+}
+
+async function sendActiveDingTalkWorkNotice(input: { userIds?: string[]; message: string }): Promise<void> {
+  const client = createDingTalkClient(await resolveActiveDingTalkWorkNoticeConfig());
+  if (!client.sendWorkNotice) {
+    throw new Error("DingTalk work notice sender is not available");
+  }
+  return client.sendWorkNotice(input);
+}
+
 const authEmailSender = createAuthEmailSender(appConfig.authEmail);
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({
@@ -532,10 +571,7 @@ async function requestZendeskDingTalkAiReviews(input: {
     }
 
     try {
-      if (!dingtalkClient.sendWorkNotice) {
-        throw new Error("DingTalk work notice sender is not available");
-      }
-      await dingtalkClient.sendWorkNotice({
+      await sendActiveDingTalkWorkNotice({
         userIds: [dingtalkUserId],
         message: [
           "AI response review required",

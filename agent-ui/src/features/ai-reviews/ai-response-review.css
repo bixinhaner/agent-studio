@@ -1,5 +1,15 @@
+body.ai-response-review-route {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+body.ai-response-review-route #root {
+  min-height: 100dvh;
+  height: auto;
+}
+
 .ai-review-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   background: #f4f6f8;
   padding: 40px 20px;
 }
