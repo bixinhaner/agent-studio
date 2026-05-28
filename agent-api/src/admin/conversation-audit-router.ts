@@ -19,6 +19,11 @@ import {
   type ProductFeedbackType
 } from "../persistence/product-feedback-repository.js";
 import {
+  AiResponseReviewRepository,
+  type AiResponseReviewEffectiveStatus,
+  type AiResponseReviewRepositoryDb
+} from "../persistence/ai-response-review-repository.js";
+import {
   ExternalConversationBindingRepository,
   type ExternalConversationBindingRecord,
   type ExternalConversationBindingRepositoryDb
@@ -104,6 +109,7 @@ type ApiAuditSort = "created_desc" | "tokens_desc" | "latency_desc";
 type ProductFeedbackTypeFilter = "all" | ProductFeedbackType;
 type ProductFeedbackStatusFilter = "all" | ProductFeedbackStatus;
 type ProductFeedbackSort = "created_desc" | "updated_desc";
+type AiResponseReviewStatusFilter = "all" | AiResponseReviewEffectiveStatus;
 
 type ConversationAuditUser = {
   id: string;
@@ -829,6 +835,11 @@ function parseProductFeedbackStatus(value: unknown): ProductFeedbackStatusFilter
 
 function parseProductFeedbackSort(value: unknown): ProductFeedbackSort {
   return value === "updated_desc" ? value : "created_desc";
+}
+
+function parseAiResponseReviewStatus(value: unknown): AiResponseReviewStatusFilter {
+  if (value === "pending" || value === "overdue" || value === "submitted" || value === "cancelled") return value;
+  return "all";
 }
 
 function normalizeUser(row: ConversationAuditUserRow | null | undefined): ConversationAuditUser | null {
@@ -1778,6 +1789,35 @@ export function createConversationAuditRouter(options: {
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "加载会话审计列表失败";
+      res.status(500).json({ detail });
+    }
+  });
+
+  router.get("/conversations/ai-response-reviews", async (req: Request, res: Response) => {
+    try {
+      const repository = new AiResponseReviewRepository(getDb() as unknown as AiResponseReviewRepositoryDb);
+      const query = trimOrUndefined(req.query.query);
+      const status = parseAiResponseReviewStatus(req.query.status);
+      const source = trimOrUndefined(req.query.source) || "zendesk";
+      const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
+      const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
+      const result = await repository.list({
+        query,
+        source: source === "all" ? undefined : source,
+        status,
+        page: requestedPage,
+        pageSize
+      });
+      res.json({
+        filters: {
+          query: query ?? "",
+          source,
+          status
+        },
+        ...result
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "加载 AI 评分列表失败";
       res.status(500).json({ detail });
     }
   });

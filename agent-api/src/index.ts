@@ -143,6 +143,11 @@ import {
   ProductFeedbackRepository,
   type ProductFeedbackRepositoryDb
 } from "./persistence/product-feedback-repository.js";
+import {
+  AiResponseReviewRepository,
+  type AiResponseReviewRepositoryDb
+} from "./persistence/ai-response-review-repository.js";
+import { createAiResponseReviewRouter } from "./ai-response-reviews/router.js";
 import { AlertEventRepository, type AlertEventRepositoryDb } from "./persistence/alert-event-repository.js";
 import { AlertRuleRepository, type AlertRuleRepositoryDb } from "./persistence/alert-rule-repository.js";
 import { KnowledgeSetRepository, type KnowledgeSetRepositoryDb } from "./persistence/knowledge-set-repository.js";
@@ -216,6 +221,7 @@ const userRoles = new UserRoleRepository(db as unknown as UserRoleRepositoryDb);
 const rolePermissions = new RolePermissionRepository(db as unknown as RolePermissionRepositoryDb);
 const adminAuditLogs = new AdminAuditLogRepository(db as unknown as AdminAuditLogRepositoryDb);
 const productFeedback = new ProductFeedbackRepository(db as unknown as ProductFeedbackRepositoryDb);
+const aiResponseReviews = new AiResponseReviewRepository(db as unknown as AiResponseReviewRepositoryDb);
 const alertRules = new AlertRuleRepository(db as unknown as AlertRuleRepositoryDb);
 const alertEvents = new AlertEventRepository(db as unknown as AlertEventRepositoryDb);
 const departmentMemberships = new DepartmentMembershipRepository(db as unknown as DepartmentMembershipRepositoryDb);
@@ -383,10 +389,203 @@ async function resolveZendeskDingTalkMentionTarget(input: {
   };
 }
 
+function zendeskReviewUserDisplay(user: ZendeskRequesterPayload | undefined, fallback = "Unassigned"): string {
+  if (!user) return fallback;
+  const name = trimOrUndefined(user.name);
+  const email = trimOrUndefined(user.email);
+  if (name && email) return `${name} <${email}>`;
+  return name || email || fallback;
+}
+
+function zendeskReviewResultLabel(input: { decision: ZendeskAgentDecision["decision"]; publicReply: boolean }): string {
+  if (input.publicReply) return "Public reply";
+  if (input.decision === "handoff") return "Human handoff note";
+  return "Internal note";
+}
+
+function buildAiResponseReviewUrl(baseUrl: string, reviewId: string): string {
+  const base = trimOrUndefined(baseUrl)?.replace(/\/+$/, "");
+  if (!base) return "";
+  return `${base}/review/ai-response/${encodeURIComponent(reviewId)}`;
+}
+
+function aiResponseReviewAdminUrl(baseUrl: string, ticketId: string): string {
+  const base = trimOrUndefined(baseUrl)?.replace(/\/+$/, "");
+  if (!base) return "";
+  return `${base}/#admin/conversations?mode=ai_reviews&query=${encodeURIComponent(ticketId)}`;
+}
+
+function aiResponseReviewDueAt(settings: ZendeskIntegrationSettings): Date {
+  const dueHours = Math.max(1, Math.min(168, Math.floor(Number(settings.dingtalkReviewDueHours) || 24)));
+  return new Date(Date.now() + dueHours * 60 * 60 * 1000);
+}
+
+async function requestZendeskDingTalkAiReviews(input: {
+  settings: ZendeskIntegrationSettings;
+  context: ZendeskTicketContext;
+  requesterComment: ZendeskCommentPayload;
+  instanceId?: string;
+  ticketId: string;
+  runId: string;
+  source: "webhook" | "manual";
+  decision: ZendeskAgentDecision;
+  action: {
+    publicReply: boolean;
+    body: string;
+    detail: string;
+    decision: ZendeskAgentDecision["decision"];
+  };
+  commentId?: number;
+  ticketUrl: string;
+  atUserIds: string[];
+  mentionLabel?: string;
+  auditThreadId?: string;
+  assistantMessageExternalId?: string;
+}): Promise<{ reviewCount: number; reviewUrl?: string; reviewSummaryMarkdown: string; detail?: string }> {
+  const uniqueDingTalkUserIds = Array.from(
+    new Set(input.atUserIds.map((item) => String(item || "").trim()).filter(Boolean))
+  );
+  if (!uniqueDingTalkUserIds.length) {
+    return {
+      reviewCount: 0,
+      reviewSummaryMarkdown: ""
+    };
+  }
+
+  const usersByDingTalkId = new Map<string, { id: string; displayName: string | null; email: string | null; dingtalkUserId: string | null }>();
+  const userRows = await db.user.findMany({
+    where: {
+      dingtalkUserId: { in: uniqueDingTalkUserIds },
+      status: "active"
+    },
+    select: {
+      id: true,
+      displayName: true,
+      email: true,
+      dingtalkUserId: true
+    }
+  });
+  for (const row of userRows) {
+    const dingtalkUserId = trimOrUndefined(row.dingtalkUserId);
+    if (dingtalkUserId) usersByDingTalkId.set(dingtalkUserId, row);
+  }
+
+  const baseUrl = trimOrUndefined(input.settings.publicBaseUrl) || trimOrUndefined(appConfig.appBaseUrl) || "";
+  const dueAt = aiResponseReviewDueAt(input.settings);
+  const resultLabel = zendeskReviewResultLabel({
+    decision: input.decision.decision,
+    publicReply: input.action.publicReply
+  });
+  const snapshot = {
+    source: input.source,
+    ticketId: input.ticketId,
+    ticketUrl: input.ticketUrl,
+    subject: input.context.ticket.subject,
+    requester: zendeskReviewUserDisplay(input.context.ticket.requester, "Unknown requester"),
+    assignee: zendeskReviewUserDisplay(input.context.ticket.assignee),
+    requesterCommentId: String(input.requesterComment.id),
+    zendeskCommentId: input.commentId ? String(input.commentId) : null,
+    result: resultLabel,
+    decision: input.decision.decision,
+    publicReply: input.action.publicReply,
+    confidence: input.decision.confidence,
+    reasons: input.decision.reasons ?? [],
+    publicReplyPreview: input.decision.publicReplyPreview,
+    internalNote: input.decision.internalNote,
+    zendeskCommentBody: input.action.body
+  };
+
+  const reviews = [];
+  for (const dingtalkUserId of uniqueDingTalkUserIds) {
+    const user = usersByDingTalkId.get(dingtalkUserId);
+    const displayName =
+      trimOrUndefined(user?.displayName) ||
+      trimOrUndefined(user?.email) ||
+      dingtalkUserId;
+    let review = await aiResponseReviews.upsertRequired({
+      source: "zendesk",
+      organizationId: undefined,
+      integrationInstanceId: input.instanceId,
+      threadId: input.auditThreadId,
+      assistantMessageExternalId: input.assistantMessageExternalId,
+      zendeskRunId: input.runId,
+      ticketId: input.ticketId,
+      ticketSubject: input.context.ticket.subject,
+      ticketUrl: input.ticketUrl,
+      zendeskCommentId: input.commentId,
+      zendeskRequesterCommentId: input.requesterComment.id,
+      reviewerUserId: user?.id,
+      reviewerDingTalkUserId: dingtalkUserId,
+      reviewerDisplayName: displayName,
+      reviewerEmail: trimOrUndefined(user?.email),
+      dueAt,
+      snapshot
+    });
+    const reviewUrl = buildAiResponseReviewUrl(baseUrl, review.id);
+    if (reviewUrl && review.reviewUrl !== reviewUrl) {
+      review = (await aiResponseReviews.updateReviewUrl(review.id, reviewUrl)) ?? review;
+    }
+
+    try {
+      if (!dingtalkClient.sendWorkNotice) {
+        throw new Error("DingTalk work notice sender is not available");
+      }
+      await dingtalkClient.sendWorkNotice({
+        userIds: [dingtalkUserId],
+        message: [
+          "AI response review required",
+          "",
+          `Zendesk #${input.ticketId} processed by AI.`,
+          `Subject: ${input.context.ticket.subject || "Untitled ticket"}`,
+          `Result: ${resultLabel}`,
+          `Reviewer: ${displayName}`,
+          `Due: ${dueAt.toISOString()}`,
+          review.reviewUrl ? `Review link: ${review.reviewUrl}` : "",
+          input.ticketUrl ? `Zendesk ticket: ${input.ticketUrl}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      });
+      await aiResponseReviews.markNotified(review.id, { status: "sent" });
+    } catch (error) {
+      await aiResponseReviews.markNotified(review.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "DingTalk work notice failed"
+      });
+    }
+    reviews.push(review);
+  }
+
+  const adminUrl = aiResponseReviewAdminUrl(baseUrl, input.ticketId);
+  const firstReviewUrl = reviews.find((review) => review.reviewUrl)?.reviewUrl;
+  const reviewUrl = firstReviewUrl || adminUrl || undefined;
+  return {
+    reviewCount: reviews.length,
+    reviewUrl,
+    reviewSummaryMarkdown: [
+      "**AI Review Required**",
+      `> ${reviews.length} private review task${reviews.length === 1 ? "" : "s"} created for the @ recipient${reviews.length === 1 ? "" : "s"}.`,
+      `> Due: ${dueAt.toISOString()}`,
+      adminUrl ? `> Admin tracking: [AI reviews](${adminUrl})` : ""
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    detail: [
+      `review_count: ${reviews.length}`,
+      `due_at: ${dueAt.toISOString()}`,
+      adminUrl ? `admin_url: ${adminUrl}` : "",
+      firstReviewUrl ? `first_review_url: ${firstReviewUrl}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n")
+  };
+}
+
 const zendesk = new ZendeskIntegrationService({
   resolveRuntime: async () => createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot()),
   resolveAgentRuntime: resolveZendeskAgentRuntimeOptions,
   resolveDingTalkMentionTarget: resolveZendeskDingTalkMentionTarget,
+  requestDingTalkAiReviews: requestZendeskDingTalkAiReviews,
   conversationAudit: {
     beforeAgentRun: syncZendeskConversationBeforeAgentRun,
     afterAgentRun: syncZendeskConversationAfterAgentRun
@@ -5128,6 +5327,13 @@ app.use(
 );
 
 app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessRequestService));
+
+app.use(
+  "/api/ai-response-reviews",
+  createAiResponseReviewRouter({
+    db: db as unknown as AiResponseReviewRepositoryDb
+  })
+);
 
 app.use(
   "/openai/v1",

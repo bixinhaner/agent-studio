@@ -1084,6 +1084,52 @@ model ZendeskTicketBinding {
   @@map("zendesk_ticket_bindings")
 }
 
+model AiResponseReview {
+  id                         String   @id @default(cuid())
+  source                     String   @default("zendesk")
+  status                     String   @default("pending")
+  required                   Boolean  @default(true)
+  organizationId             String?  @map("organization_id")
+  integrationInstanceId      String?  @map("integration_instance_id")
+  threadId                   String?  @map("thread_id")
+  assistantMessageExternalId String?  @map("assistant_message_external_id")
+  zendeskRunId               String?  @map("zendesk_run_id")
+  ticketId                   String?  @map("ticket_id")
+  ticketSubject              String?  @map("ticket_subject")
+  ticketUrl                  String?  @map("ticket_url")
+  zendeskCommentId           BigInt?  @map("zendesk_comment_id")
+  zendeskRequesterCommentId  BigInt?  @map("zendesk_requester_comment_id")
+  reviewerUserId             String?  @map("reviewer_user_id")
+  reviewerDingTalkUserId     String?  @map("reviewer_dingtalk_user_id")
+  reviewerDisplayName        String?  @map("reviewer_display_name")
+  reviewerEmail              String?  @map("reviewer_email")
+  score                      Int?
+  suggestion                 String?
+  submittedByUserId          String?  @map("submitted_by_user_id")
+  submittedAt                DateTime? @map("submitted_at")
+  dueAt                      DateTime? @map("due_at")
+  notificationStatus         String?  @map("notification_status")
+  notificationError          String?  @map("notification_error")
+  notifiedAt                 DateTime? @map("notified_at")
+  reminderCount              Int      @default(0) @map("reminder_count")
+  lastRemindedAt             DateTime? @map("last_reminded_at")
+  reviewUrl                  String?  @map("review_url")
+  snapshot                   Json?
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@unique([zendeskRunId, reviewerDingTalkUserId])
+  @@index([source, status, createdAt])
+  @@index([integrationInstanceId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([zendeskRunId])
+  @@index([ticketId, createdAt])
+  @@index([reviewerUserId, status, createdAt])
+  @@index([reviewerDingTalkUserId, status, createdAt])
+  @@index([dueAt])
+  @@map("ai_response_reviews")
+}
+
 model Workspace {
   id             String                 @id @default(cuid())
   organizationId String?                @map("organization_id")

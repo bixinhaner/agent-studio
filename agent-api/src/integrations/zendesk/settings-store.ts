@@ -87,6 +87,12 @@ function normalizeAttachmentCount(value: unknown): number {
   return Math.max(1, Math.min(100, Math.floor(numeric)));
 }
 
+function normalizeReviewDueHours(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 24;
+  return Math.max(1, Math.min(168, Math.floor(numeric)));
+}
+
 function uniqueLowercaseTags(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
@@ -126,6 +132,10 @@ export function defaultDingTalkNotificationTemplate(): string {
     "---",
     "",
     "{{zendeskCommentMarkdown}}",
+    "",
+    "---",
+    "",
+    "{{reviewSummary}}",
     "",
     "---",
     "{{mention}}"
@@ -199,6 +209,8 @@ function defaultSettings(): ZendeskIntegrationSettings {
     dingtalkNotificationRobotSecret: "",
     dingtalkNotificationFallbackUserIds: [],
     dingtalkNotificationTemplate: defaultDingTalkNotificationTemplate(),
+    dingtalkReviewRequiredEnabled: false,
+    dingtalkReviewDueHours: 24,
     systemPrompt: defaultZendeskSystemPrompt()
   };
 }
@@ -369,6 +381,11 @@ export class ZendeskSettingsStore {
       dingtalkNotificationRobotSecret: String(input.dingtalkNotificationRobotSecret || "").trim(),
       dingtalkNotificationFallbackUserIds: normalizeIdList(input.dingtalkNotificationFallbackUserIds),
       dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(input.dingtalkNotificationTemplate),
+      dingtalkReviewRequiredEnabled:
+        input.dingtalkReviewRequiredEnabled === undefined
+          ? Boolean(input.dingtalkNotificationEnabled)
+          : Boolean(input.dingtalkReviewRequiredEnabled),
+      dingtalkReviewDueHours: normalizeReviewDueHours(input.dingtalkReviewDueHours),
       systemPrompt: normalizeSystemPrompt(input.systemPrompt),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser

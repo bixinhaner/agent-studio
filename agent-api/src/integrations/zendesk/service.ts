@@ -247,6 +247,13 @@ type ZendeskDingTalkMentionTarget = {
   detail?: string;
 };
 
+type ZendeskDingTalkReviewRequestResult = {
+  reviewCount: number;
+  reviewUrl?: string;
+  reviewSummaryMarkdown: string;
+  detail?: string;
+};
+
 function sanitizeTicketId(value: string | number): string {
   const normalized = String(value || "").trim();
   if (!normalized) throw new Error("ticket_id 不能为空");
@@ -1028,6 +1035,8 @@ function buildZendeskDingTalkMarkdown(input: {
   commentId?: number;
   mentionLabel?: string;
   atUserIds?: string[];
+  reviewSummaryMarkdown?: string;
+  reviewUrl?: string;
 }): string {
   const ticket = input.context.ticket;
   const template = trimOrUndefined(input.settings.dingtalkNotificationTemplate) || defaultDingTalkNotificationTemplate();
@@ -1049,6 +1058,8 @@ function buildZendeskDingTalkMarkdown(input: {
     internalNote: trimOrUndefined(input.decision.internalNote) || "Not provided",
     zendeskCommentBody: trimOrUndefined(input.action.body) || "No Zendesk comment body was generated.",
     zendeskCommentMarkdown: formatZendeskCommentForDingTalkMarkdown(input.action.body, input.action.publicReply),
+    reviewSummary: trimOrUndefined(input.reviewSummaryMarkdown) || "",
+    reviewUrl: trimOrUndefined(input.reviewUrl) || "",
     mention: mentionText,
     mentionLabel
   };
@@ -1199,6 +1210,23 @@ export class ZendeskIntegrationService {
         instanceId?: string;
         ticketId: string;
       }) => Promise<ZendeskDingTalkMentionTarget | undefined>;
+      requestDingTalkAiReviews?: (input: {
+        settings: ZendeskIntegrationSettings;
+        context: ZendeskTicketContext;
+        requesterComment: ZendeskCommentPayload;
+        instanceId?: string;
+        ticketId: string;
+        runId: string;
+        source: "webhook" | "manual";
+        decision: ZendeskAgentDecision;
+        action: Extract<ResolvedAction, { mode: "comment" }>;
+        commentId?: number;
+        ticketUrl: string;
+        atUserIds: string[];
+        mentionLabel?: string;
+        auditThreadId?: string;
+        assistantMessageExternalId?: string;
+      }) => Promise<ZendeskDingTalkReviewRequestResult>;
       conversationAudit?: ZendeskConversationAuditSync;
       runtimeSession?: ZendeskRuntimeSessionBridge;
       getDrainReason?: () => Promise<string | undefined>;
@@ -1802,7 +1830,8 @@ export class ZendeskIntegrationService {
         decision,
         action,
         commentId: commentResult.commentId,
-        ticketUrl: client.buildTicketUrl(ticketId)
+        ticketUrl: client.buildTicketUrl(ticketId),
+        auditThreadId: agentRun.audit?.threadId
       });
       if (notificationRow) {
         agentRun.processRows.push(notificationRow);
@@ -1875,6 +1904,7 @@ export class ZendeskIntegrationService {
     action: Extract<ResolvedAction, { mode: "comment" }>;
     commentId?: number;
     ticketUrl: string;
+    auditThreadId?: string;
   }): Promise<ZendeskAuditProcessRow | undefined> {
     if (!input.settings.dingtalkNotificationEnabled) return undefined;
     if (input.source === "manual" && !input.settings.dingtalkNotificationManualRunsEnabled) return undefined;
@@ -1914,6 +1944,31 @@ export class ZendeskIntegrationService {
           ? trimOrUndefined(resolvedMention?.label) || zendeskUserDisplay(input.context.ticket.assignee, "")
           : trimOrUndefined(fallbackMention?.label)) ||
         (atUserIds.length ? "Support team" : "");
+      let reviewRequest: ZendeskDingTalkReviewRequestResult | undefined;
+      let reviewError = "";
+      if (input.settings.dingtalkReviewRequiredEnabled && atUserIds.length > 0 && this.dependencies.requestDingTalkAiReviews) {
+        try {
+          reviewRequest = await this.dependencies.requestDingTalkAiReviews({
+            settings: input.settings,
+            context: input.context,
+            requesterComment: input.requesterComment,
+            instanceId: input.instanceId,
+            ticketId: input.ticketId,
+            runId: input.runId,
+            source: input.source,
+            decision: input.decision,
+            action: input.action,
+            commentId: input.commentId,
+            ticketUrl: input.ticketUrl,
+            atUserIds,
+            mentionLabel,
+            auditThreadId: input.auditThreadId,
+            assistantMessageExternalId: `zendesk-agent-${input.runId}`
+          });
+        } catch (error) {
+          reviewError = error instanceof Error ? error.message : "AI review task creation failed";
+        }
+      }
       const markdown = buildZendeskDingTalkMarkdown({
         settings: input.settings,
         context: input.context,
@@ -1926,7 +1981,9 @@ export class ZendeskIntegrationService {
         action: input.action,
         commentId: input.commentId,
         mentionLabel: atUserIds.length ? mentionLabel : undefined,
-        atUserIds
+        atUserIds,
+        reviewSummaryMarkdown: reviewRequest?.reviewSummaryMarkdown,
+        reviewUrl: reviewRequest?.reviewUrl
       });
       await postDingTalkRobotMarkdown({
         webhookUrl,
@@ -1941,6 +1998,9 @@ export class ZendeskIntegrationService {
         [
           `at_user_ids: ${atUserIds.length}`,
           mentionLabel ? `mention_label: ${mentionLabel}` : "",
+          reviewRequest ? `ai_review_tasks: ${reviewRequest.reviewCount}` : "",
+          reviewRequest?.detail ? `ai_review_detail: ${reviewRequest.detail}` : "",
+          reviewError ? `ai_review_error: ${reviewError}` : "",
           resolvedMention?.detail ? `assignee_mapping: ${resolvedMention.detail}` : "",
           fallbackMention?.detail ? `fallback_mapping: ${fallbackMention.detail}` : ""
         ]

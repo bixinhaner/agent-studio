@@ -42,6 +42,8 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkNotificationRobotSecret: "",
   dingtalkNotificationFallbackUserIds: [],
   dingtalkNotificationTemplate: "",
+  dingtalkReviewRequiredEnabled: false,
+  dingtalkReviewDueHours: 24,
   systemPrompt: "Return JSON."
 };
 

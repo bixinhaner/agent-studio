@@ -69,6 +69,8 @@ export type ZendeskIntegrationSettings = {
   dingtalkNotificationRobotSecret: string;
   dingtalkNotificationFallbackUserIds: string[];
   dingtalkNotificationTemplate: string;
+  dingtalkReviewRequiredEnabled: boolean;
+  dingtalkReviewDueHours: number;
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
