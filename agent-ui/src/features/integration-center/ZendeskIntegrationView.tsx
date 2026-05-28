@@ -911,7 +911,7 @@ export function ZendeskIntegrationView(props: {
                         />
                         <span className="field-label">要求 @ 人评分</span>
                         <span className="field-help">
-                          开启后，每个被 @ 的钉钉用户都会生成必评任务，并收到个人工作通知。
+                          开启后，每个被 @ 的钉钉用户都会生成必评任务、钉钉待办，并收到个人工作通知。
                         </span>
                       </label>
                       <label className="field">
@@ -927,7 +927,7 @@ export function ZendeskIntegrationView(props: {
                           }
                           style={{ width: "100%" }}
                         />
-                        <span className="field-help">超时后进入后台逾期统计，用于追踪没有评分的处理人。</span>
+                        <span className="field-help">超时后进入后台逾期统计，并作为钉钉待办截止时间。</span>
                       </label>
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">Fallback @ Users</span>

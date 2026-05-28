@@ -366,6 +366,13 @@ export type AdminAiResponseReviewRecord = {
   notificationStatus?: string;
   notificationError?: string;
   notifiedAt?: string;
+  dingtalkTodoStatus?: string;
+  dingtalkTodoTaskId?: string;
+  dingtalkTodoUnionId?: string;
+  dingtalkTodoSourceId?: string;
+  dingtalkTodoError?: string;
+  dingtalkTodoCreatedAt?: string;
+  dingtalkTodoCompletedAt?: string;
   reviewUrl?: string;
   snapshot?: unknown;
   createdAt: string;

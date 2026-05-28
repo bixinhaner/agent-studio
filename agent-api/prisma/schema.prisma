@@ -1132,6 +1132,13 @@ model AiResponseReview {
   notifiedAt                 DateTime? @map("notified_at")
   reminderCount              Int      @default(0) @map("reminder_count")
   lastRemindedAt             DateTime? @map("last_reminded_at")
+  dingtalkTodoStatus         String?  @map("dingtalk_todo_status")
+  dingtalkTodoTaskId         String?  @map("dingtalk_todo_task_id")
+  dingtalkTodoUnionId        String?  @map("dingtalk_todo_union_id")
+  dingtalkTodoSourceId       String?  @map("dingtalk_todo_source_id")
+  dingtalkTodoError          String?  @map("dingtalk_todo_error")
+  dingtalkTodoCreatedAt      DateTime? @map("dingtalk_todo_created_at")
+  dingtalkTodoCompletedAt    DateTime? @map("dingtalk_todo_completed_at")
   reviewUrl                  String?  @map("review_url")
   snapshot                   Json?
   createdAt                  DateTime @default(now()) @map("created_at")
@@ -1146,6 +1153,8 @@ model AiResponseReview {
   @@index([reviewerUserId, status, createdAt])
   @@index([reviewerDingTalkUserId, status, createdAt])
   @@index([dueAt])
+  @@index([dingtalkTodoStatus, createdAt])
+  @@index([dingtalkTodoSourceId])
   @@map("ai_response_reviews")
 }
 

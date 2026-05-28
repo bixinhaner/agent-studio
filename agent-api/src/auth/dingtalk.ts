@@ -37,6 +37,33 @@ export type DingTalkOrganizationUser = {
   lifecycleState: "active" | "disabled" | "departed";
 };
 
+export type DingTalkTodoDetailUrl = {
+  pcUrl?: string;
+  appUrl?: string;
+};
+
+export type DingTalkCreateTodoTaskInput = {
+  unionId: string;
+  operatorUnionId?: string;
+  sourceId: string;
+  subject: string;
+  description?: string;
+  dueTime?: number;
+  detailUrl?: DingTalkTodoDetailUrl;
+  priority?: number;
+};
+
+export type DingTalkCreateTodoTaskResult = {
+  taskId: string;
+  sourceId?: string;
+};
+
+export type DingTalkCompleteTodoTaskInput = {
+  unionId: string;
+  operatorUnionId?: string;
+  taskId: string;
+};
+
 export interface DingTalkClient {
   exchangeCode(code: string, options?: { redirectUri?: string }): Promise<DingTalkUserIdentity>;
   validateCredentials?(): Promise<void>;
@@ -44,6 +71,8 @@ export interface DingTalkClient {
   listDepartmentUsers(input: { departmentId: string }): Promise<DingTalkOrganizationUser[]>;
   getUser(input: { userId: string }): Promise<DingTalkOrganizationUser | null>;
   sendWorkNotice?(input: { userIds?: string[]; message: string }): Promise<void>;
+  createTodoTask?(input: DingTalkCreateTodoTaskInput): Promise<DingTalkCreateTodoTaskResult>;
+  completeTodoTask?(input: DingTalkCompleteTodoTaskInput): Promise<void>;
 }
 
 type AppAccessTokenCache = {
@@ -535,6 +564,53 @@ export function createDingTalkClient(
     }
   };
 
+  const requestOpenApi = async (
+    method: "POST" | "PUT" | "GET" | "DELETE",
+    path: string,
+    body?: Record<string, unknown>,
+    query?: Record<string, string>
+  ): Promise<unknown> => {
+    const requestWithAppAccessToken = async (forceRefresh = false): Promise<unknown> => {
+      const accessToken = await getAppAccessToken({ forceRefresh });
+      const resolved = getResolvedConfig();
+      const input = new URL(`${resolved.config.apiBaseUrl}${path}`);
+      for (const [key, value] of Object.entries(query ?? {})) {
+        if (value) input.searchParams.set(key, value);
+      }
+      const payload = await requestJson(
+        input.toString(),
+        {
+          method,
+          headers: {
+            "content-type": "application/json",
+            "x-acs-dingtalk-access-token": accessToken
+          },
+          body: body === undefined ? undefined : JSON.stringify(body)
+        },
+        fetchImpl
+      );
+      const record = asRecord(payload);
+      const errorCode = getString(record, ["errcode", "code"]);
+      if (errorCode && errorCode !== "0" && errorCode.toLowerCase() !== "ok") {
+        throw new DingTalkRequestError({
+          message: getErrorMessage(payload) ?? `DingTalk request failed (${errorCode})`,
+          code: errorCode,
+          subcode: getString(record, ["subcode", "sub_code"])
+        });
+      }
+      return payload;
+    };
+
+    try {
+      return await requestWithAppAccessToken();
+    } catch (error) {
+      if (!isInvalidAccessTokenError(error)) {
+        throw error;
+      }
+      return requestWithAppAccessToken(true);
+    }
+  };
+
   const getUserIdByUnionId = async (unionId: string): Promise<string | undefined> => {
     const normalizedUnionId = normalizeString(unionId);
     if (!normalizedUnionId) return undefined;
@@ -695,6 +771,80 @@ export function createDingTalkClient(
           }
         }
       });
+    },
+    async createTodoTask(input: DingTalkCreateTodoTaskInput): Promise<DingTalkCreateTodoTaskResult> {
+      const unionId = normalizeString(input.unionId);
+      const sourceId = normalizeString(input.sourceId);
+      const subject = trimOrUndefined(input.subject);
+      if (!unionId) {
+        throw new Error("DingTalk todo unionId is required");
+      }
+      if (!sourceId) {
+        throw new Error("DingTalk todo sourceId is required");
+      }
+      if (!subject) {
+        throw new Error("DingTalk todo subject is required");
+      }
+      const detailUrl =
+        input.detailUrl?.pcUrl || input.detailUrl?.appUrl
+          ? {
+              pcUrl: trimOrUndefined(input.detailUrl.pcUrl),
+              appUrl: trimOrUndefined(input.detailUrl.appUrl)
+            }
+          : undefined;
+      const body: Record<string, unknown> = {
+        sourceId,
+        subject,
+        creatorId: unionId,
+        description: trimOrUndefined(input.description),
+        dueTime: Number.isFinite(input.dueTime) ? input.dueTime : undefined,
+        executorIds: [unionId],
+        participantIds: [],
+        detailUrl,
+        isOnlyShowExecutor: true,
+        priority: Number.isFinite(input.priority) ? input.priority : 20,
+        notifyConfigs: {
+          dingNotify: "1"
+        }
+      };
+      for (const key of Object.keys(body)) {
+        if (body[key] === undefined) delete body[key];
+      }
+      const payload = await requestOpenApi(
+        "POST",
+        `/v1.0/todo/users/${encodeURIComponent(unionId)}/tasks`,
+        body,
+        { operatorId: normalizeString(input.operatorUnionId) ?? unionId }
+      );
+      const record = asRecord(payload);
+      const taskId = getString(record, ["id", "taskId", "task_id"]);
+      if (!taskId) {
+        throw new Error("DingTalk todo creation did not return a task id");
+      }
+      return {
+        taskId,
+        sourceId: getString(record, ["sourceId", "source_id"]) ?? sourceId
+      };
+    },
+    async completeTodoTask(input: DingTalkCompleteTodoTaskInput): Promise<void> {
+      const unionId = normalizeString(input.unionId);
+      const taskId = normalizeString(input.taskId);
+      if (!unionId) {
+        throw new Error("DingTalk todo unionId is required");
+      }
+      if (!taskId) {
+        throw new Error("DingTalk todo taskId is required");
+      }
+      await requestOpenApi(
+        "PUT",
+        `/v1.0/todo/users/${encodeURIComponent(unionId)}/tasks/${encodeURIComponent(taskId)}`,
+        {
+          done: true,
+          executorIds: [unionId],
+          participantIds: []
+        },
+        { operatorId: normalizeString(input.operatorUnionId) ?? unionId }
+      );
     }
   };
 }

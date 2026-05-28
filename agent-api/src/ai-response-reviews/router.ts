@@ -41,7 +41,13 @@ function canAccessReview(review: AiResponseReviewRecord, user: AuthenticatedUser
   return false;
 }
 
-export function createAiResponseReviewRouter(options: { db: AiResponseReviewRepositoryDb }): Router {
+export function createAiResponseReviewRouter(options: {
+  db: AiResponseReviewRepositoryDb;
+  afterSubmit?: (
+    review: AiResponseReviewRecord,
+    repository: AiResponseReviewRepository
+  ) => Promise<AiResponseReviewRecord | null | void>;
+}): Router {
   const router = Router();
   const repository = new AiResponseReviewRepository(options.db);
 
@@ -84,12 +90,15 @@ export function createAiResponseReviewRouter(options: { db: AiResponseReviewRepo
         return;
       }
       const input = submitReviewSchema.parse(req.body ?? {});
-      const review = await repository.submit({
+      let review = await repository.submit({
         reviewId: existing.id,
         score: input.score,
         suggestion: input.suggestion ?? undefined,
         submittedByUserId: req.currentUser.id
       });
+      if (review && options.afterSubmit) {
+        review = (await options.afterSubmit(review, repository)) ?? review;
+      }
       res.json({ review });
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });

@@ -501,6 +501,7 @@ export function DingTalkIntegrationView(props: {
           <label className="field">
             <span className="field-label">通知 Agent ID</span>
             <Input value={configDraft.alertAgentId || ""} onChange={(event) => setConfigDraft((current) => ({ ...current, alertAgentId: event.target.value }))} />
+            <span className="field-help">用于个人工作通知；钉钉待办使用同一应用的 Client ID / Secret，并要求该应用具备待办读写权限。</span>
           </label>
           <label className="field">
             <span className="field-label">Client Secret</span>

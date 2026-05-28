@@ -19,7 +19,7 @@ import { createAuthRouter, resolveCrestUser } from "./auth/router.js";
 import { createCurrentUserMiddleware } from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
-import { createDingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
+import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
 import { createAuthEmailSender } from "./auth/email.js";
 import {
   ensureInternalOrganization,
@@ -149,6 +149,7 @@ import {
 } from "./persistence/product-feedback-repository.js";
 import {
   AiResponseReviewRepository,
+  type AiResponseReviewRecord,
   type AiResponseReviewRepositoryDb
 } from "./persistence/ai-response-review-repository.js";
 import { createAiResponseReviewRouter } from "./ai-response-reviews/router.js";
@@ -331,8 +332,12 @@ async function resolveActiveDingTalkWorkNoticeConfig(): Promise<DingTalkConfig> 
   };
 }
 
+async function createActiveDingTalkClient(): Promise<DingTalkClient> {
+  return createDingTalkClient(await resolveActiveDingTalkWorkNoticeConfig());
+}
+
 async function sendActiveDingTalkWorkNotice(input: { userIds?: string[]; message: string }): Promise<void> {
-  const client = createDingTalkClient(await resolveActiveDingTalkWorkNoticeConfig());
+  const client = await createActiveDingTalkClient();
   if (!client.sendWorkNotice) {
     throw new Error("DingTalk work notice sender is not available");
   }
@@ -464,6 +469,131 @@ function aiResponseReviewDueAt(settings: ZendeskIntegrationSettings): Date {
   return new Date(Date.now() + dueHours * 60 * 60 * 1000);
 }
 
+function aiResponseReviewTodoSourceId(reviewId: string): string {
+  return `agent-studio-ai-review-${reviewId}`;
+}
+
+function aiResponseReviewTodoSubject(input: { ticketId: string; subject?: string }): string {
+  const suffix = trimOrUndefined(input.subject);
+  const base = `Review Zendesk #${input.ticketId} AI response`;
+  if (!suffix) return base;
+  const full = `${base}: ${suffix}`;
+  return full.length > 120 ? `${full.slice(0, 117).trimEnd()}...` : full;
+}
+
+function aiResponseReviewTodoDescription(input: {
+  ticketUrl?: string;
+  reviewUrl?: string;
+  resultLabel: string;
+  dueAt: Date;
+}): string {
+  return [
+    `Result: ${input.resultLabel}`,
+    `Due: ${input.dueAt.toISOString()}`,
+    input.reviewUrl ? `Review link: ${input.reviewUrl}` : undefined,
+    input.ticketUrl ? `Zendesk ticket: ${input.ticketUrl}` : undefined
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join("\n");
+}
+
+async function createDingTalkAiResponseReviewTodo(input: {
+  review: AiResponseReviewRecord;
+  reviewerUnionId?: string | null;
+  ticketId: string;
+  ticketSubject?: string;
+  ticketUrl?: string;
+  resultLabel: string;
+  dueAt: Date;
+}): Promise<AiResponseReviewRecord> {
+  const unionId = trimOrUndefined(input.reviewerUnionId ?? undefined);
+  const sourceId = aiResponseReviewTodoSourceId(input.review.id);
+  if (!unionId) {
+    return (
+      (await aiResponseReviews.markDingTalkTodoFailed(input.review.id, {
+        status: "failed",
+        error: "Reviewer does not have a DingTalk unionId; sync or sign in with DingTalk first.",
+        sourceId
+      })) ?? input.review
+    );
+  }
+
+  try {
+    const client = await createActiveDingTalkClient();
+    if (!client.createTodoTask) {
+      throw new Error("DingTalk todo task creator is not available");
+    }
+    const result = await client.createTodoTask({
+      unionId,
+      sourceId,
+      subject: aiResponseReviewTodoSubject({
+        ticketId: input.ticketId,
+        subject: input.ticketSubject
+      }),
+      description: aiResponseReviewTodoDescription({
+        ticketUrl: input.ticketUrl,
+        reviewUrl: input.review.reviewUrl,
+        resultLabel: input.resultLabel,
+        dueAt: input.dueAt
+      }),
+      dueTime: input.dueAt.getTime(),
+      detailUrl: input.review.reviewUrl
+        ? {
+            pcUrl: input.review.reviewUrl,
+            appUrl: input.review.reviewUrl
+          }
+        : undefined,
+      priority: 20
+    });
+    return (
+      (await aiResponseReviews.markDingTalkTodoCreated(input.review.id, {
+        taskId: result.taskId,
+        unionId,
+        sourceId: result.sourceId ?? sourceId
+      })) ?? input.review
+    );
+  } catch (error) {
+    return (
+      (await aiResponseReviews.markDingTalkTodoFailed(input.review.id, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "DingTalk todo creation failed",
+        unionId,
+        sourceId
+      })) ?? input.review
+    );
+  }
+}
+
+async function completeDingTalkAiResponseReviewTodo(
+  review: AiResponseReviewRecord,
+  repository: AiResponseReviewRepository
+): Promise<AiResponseReviewRecord | null | void> {
+  const taskId = trimOrUndefined(review.dingtalkTodoTaskId);
+  const unionId = trimOrUndefined(review.dingtalkTodoUnionId);
+  if (!taskId || !unionId || review.dingtalkTodoStatus === "completed") {
+    return review;
+  }
+
+  try {
+    const client = await createActiveDingTalkClient();
+    if (!client.completeTodoTask) {
+      throw new Error("DingTalk todo task completer is not available");
+    }
+    await client.completeTodoTask({
+      unionId,
+      taskId
+    });
+    return await repository.markDingTalkTodoCompleted(review.id);
+  } catch (error) {
+    return await repository.markDingTalkTodoFailed(review.id, {
+      status: "complete_failed",
+      error: error instanceof Error ? error.message : "DingTalk todo completion failed",
+      unionId,
+      sourceId: review.dingtalkTodoSourceId
+    });
+  }
+}
+
 async function requestZendeskDingTalkAiReviews(input: {
   settings: ZendeskIntegrationSettings;
   context: ZendeskTicketContext;
@@ -496,7 +626,13 @@ async function requestZendeskDingTalkAiReviews(input: {
     };
   }
 
-  const usersByDingTalkId = new Map<string, { id: string; displayName: string | null; email: string | null; dingtalkUserId: string | null }>();
+  const usersByDingTalkId = new Map<string, {
+    id: string;
+    externalId: string | null;
+    displayName: string | null;
+    email: string | null;
+    dingtalkUserId: string | null;
+  }>();
   const userRows = await db.user.findMany({
     where: {
       dingtalkUserId: { in: uniqueDingTalkUserIds },
@@ -504,6 +640,7 @@ async function requestZendeskDingTalkAiReviews(input: {
     },
     select: {
       id: true,
+      externalId: true,
       displayName: true,
       email: true,
       dingtalkUserId: true
@@ -569,6 +706,15 @@ async function requestZendeskDingTalkAiReviews(input: {
     if (reviewUrl && review.reviewUrl !== reviewUrl) {
       review = (await aiResponseReviews.updateReviewUrl(review.id, reviewUrl)) ?? review;
     }
+    review = await createDingTalkAiResponseReviewTodo({
+      review,
+      reviewerUnionId: user?.externalId,
+      ticketId: input.ticketId,
+      ticketSubject: input.context.ticket.subject,
+      ticketUrl: input.ticketUrl,
+      resultLabel,
+      dueAt
+    });
 
     try {
       await sendActiveDingTalkWorkNotice({
@@ -5715,7 +5861,8 @@ app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessReq
 app.use(
   "/api/ai-response-reviews",
   createAiResponseReviewRouter({
-    db: db as unknown as AiResponseReviewRepositoryDb
+    db: db as unknown as AiResponseReviewRepositoryDb,
+    afterSubmit: completeDingTalkAiResponseReviewTodo
   })
 );
 

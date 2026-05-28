@@ -30,6 +30,21 @@ function statusLabel(status: AiResponseReviewRecord["effectiveStatus"]) {
   return "Pending";
 }
 
+function todoStatusLabel(status: string | undefined) {
+  if (status === "completed") return "DingTalk todo completed";
+  if (status === "created") return "DingTalk todo active";
+  if (status === "failed") return "DingTalk todo failed";
+  if (status === "complete_failed") return "DingTalk todo completion failed";
+  return "DingTalk todo not created";
+}
+
+function todoStatusColor(status: string | undefined) {
+  if (status === "completed") return "success";
+  if (status === "created") return "processing";
+  if (status === "failed" || status === "complete_failed") return "error";
+  return "default";
+}
+
 function snapshotText(review: AiResponseReviewRecord): string {
   const snapshot = review.snapshot && typeof review.snapshot === "object" ? (review.snapshot as Record<string, unknown>) : {};
   const body = typeof snapshot.zendeskCommentBody === "string" ? snapshot.zendeskCommentBody.trim() : "";
@@ -117,6 +132,7 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
               <h1>Zendesk #{review.ticketId || "-"} · {review.ticketSubject || "Untitled ticket"}</h1>
               <div className="ai-review-meta">
                 <Tag color={statusColor(review.effectiveStatus)}>{statusLabel(review.effectiveStatus)}</Tag>
+                <Tag color={todoStatusColor(review.dingtalkTodoStatus)}>{todoStatusLabel(review.dingtalkTodoStatus)}</Tag>
                 {review.ticketUrl ? (
                   <Button size="small" href={review.ticketUrl} target="_blank" rel="noreferrer">
                     Open Zendesk

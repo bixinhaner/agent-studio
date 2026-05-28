@@ -15,6 +15,10 @@ export type AiResponseReviewRecord = {
   suggestion?: string;
   submittedAt?: string;
   dueAt?: string;
+  dingtalkTodoStatus?: string;
+  dingtalkTodoError?: string;
+  dingtalkTodoCreatedAt?: string;
+  dingtalkTodoCompletedAt?: string;
   reviewUrl?: string;
   snapshot?: unknown;
   createdAt: string;

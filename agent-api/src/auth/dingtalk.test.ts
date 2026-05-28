@@ -235,4 +235,91 @@ describe("createDingTalkClient", () => {
     expect(userTokenRedirectUris).toEqual(["https://celix.baicells.com/auth/dingtalk/callback"]);
     expect(unionLookupTokens).toEqual(["app-token-1", "app-token-2"]);
   });
+
+  it("creates todo tasks with app access tokens and unionId executors", async () => {
+    const todoRequests: Array<{ url: string; body: Record<string, unknown>; token: string }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({
+          accessToken: "app-token",
+          expireIn: 7200
+        });
+      }
+      if (url.startsWith("https://api.dingtalk.com/v1.0/todo/users/union-1/tasks")) {
+        todoRequests.push({
+          url,
+          token: String((init?.headers as Record<string, string>)?.["x-acs-dingtalk-access-token"] ?? ""),
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+        });
+        return jsonResponse({
+          id: "todo-task-1",
+          sourceId: "review-1"
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock);
+    const result = await client.createTodoTask?.({
+      unionId: "union-1",
+      sourceId: "review-1",
+      subject: "Review Zendesk AI response",
+      description: "Please score the AI output.",
+      dueTime: 1770000000000,
+      detailUrl: {
+        pcUrl: "https://example.com/review/1",
+        appUrl: "https://example.com/review/1"
+      }
+    });
+
+    expect(result).toEqual({ taskId: "todo-task-1", sourceId: "review-1" });
+    expect(todoRequests).toHaveLength(1);
+    expect(new URL(todoRequests[0].url).searchParams.get("operatorId")).toBe("union-1");
+    expect(todoRequests[0].token).toBe("app-token");
+    expect(todoRequests[0].body).toMatchObject({
+      sourceId: "review-1",
+      creatorId: "union-1",
+      executorIds: ["union-1"],
+      isOnlyShowExecutor: true,
+      notifyConfigs: {
+        dingNotify: "1"
+      }
+    });
+  });
+
+  it("marks todo tasks done", async () => {
+    const todoUpdates: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1.0/oauth2/accessToken")) {
+        return jsonResponse({
+          accessToken: "app-token",
+          expireIn: 7200
+        });
+      }
+      if (url.startsWith("https://api.dingtalk.com/v1.0/todo/users/union-1/tasks/todo-task-1")) {
+        todoUpdates.push({
+          url,
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+        });
+        return jsonResponse({ result: true });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch;
+
+    const client = createDingTalkClient(TEST_CONFIG, fetchMock);
+    await client.completeTodoTask?.({
+      unionId: "union-1",
+      taskId: "todo-task-1"
+    });
+
+    expect(todoUpdates).toHaveLength(1);
+    expect(new URL(todoUpdates[0].url).searchParams.get("operatorId")).toBe("union-1");
+    expect(todoUpdates[0].body).toEqual({
+      done: true,
+      executorIds: ["union-1"],
+      participantIds: []
+    });
+  });
 });

@@ -4,6 +4,7 @@ export type AiResponseReviewSource = "zendesk" | string;
 
 export type AiResponseReviewUser = {
   id: string;
+  externalId: string | null;
   displayName: string | null;
   email: string | null;
   dingtalkUserId: string | null;
@@ -40,6 +41,13 @@ export type AiResponseReviewRecord = {
   notifiedAt?: string;
   reminderCount: number;
   lastRemindedAt?: string;
+  dingtalkTodoStatus?: string;
+  dingtalkTodoTaskId?: string;
+  dingtalkTodoUnionId?: string;
+  dingtalkTodoSourceId?: string;
+  dingtalkTodoError?: string;
+  dingtalkTodoCreatedAt?: string;
+  dingtalkTodoCompletedAt?: string;
   reviewUrl?: string;
   snapshot?: unknown;
   createdAt: string;
@@ -108,6 +116,13 @@ type AiResponseReviewRow = {
   notifiedAt: Date | string | null;
   reminderCount: number;
   lastRemindedAt: Date | string | null;
+  dingtalkTodoStatus: string | null;
+  dingtalkTodoTaskId: string | null;
+  dingtalkTodoUnionId: string | null;
+  dingtalkTodoSourceId: string | null;
+  dingtalkTodoError: string | null;
+  dingtalkTodoCreatedAt: Date | string | null;
+  dingtalkTodoCompletedAt: Date | string | null;
   reviewUrl: string | null;
   snapshot: unknown;
   createdAt: Date | string;
@@ -133,6 +148,7 @@ type AiResponseReviewTable = {
 
 type AiResponseReviewUserRow = {
   id: string;
+  externalId: string | null;
   displayName: string | null;
   email: string | null;
   dingtalkUserId: string | null;
@@ -206,6 +222,7 @@ function mapUser(row: AiResponseReviewUserRow | undefined | null): AiResponseRev
   if (!row) return null;
   return {
     id: row.id,
+    externalId: trimOrUndefined(row.externalId) ?? null,
     displayName: trimOrUndefined(row.displayName) ?? null,
     email: trimOrUndefined(row.email) ?? null,
     dingtalkUserId: trimOrUndefined(row.dingtalkUserId) ?? null
@@ -245,6 +262,13 @@ function mapReview(row: AiResponseReviewRow, userMap: Map<string, AiResponseRevi
     notifiedAt: toIsoString(row.notifiedAt),
     reminderCount: Number.isFinite(row.reminderCount) ? row.reminderCount : 0,
     lastRemindedAt: toIsoString(row.lastRemindedAt),
+    dingtalkTodoStatus: trimOrUndefined(row.dingtalkTodoStatus ?? undefined),
+    dingtalkTodoTaskId: trimOrUndefined(row.dingtalkTodoTaskId ?? undefined),
+    dingtalkTodoUnionId: trimOrUndefined(row.dingtalkTodoUnionId ?? undefined),
+    dingtalkTodoSourceId: trimOrUndefined(row.dingtalkTodoSourceId ?? undefined),
+    dingtalkTodoError: trimOrUndefined(row.dingtalkTodoError ?? undefined),
+    dingtalkTodoCreatedAt: toIsoString(row.dingtalkTodoCreatedAt),
+    dingtalkTodoCompletedAt: toIsoString(row.dingtalkTodoCompletedAt),
     reviewUrl: trimOrUndefined(row.reviewUrl ?? undefined),
     snapshot: row.snapshot ?? undefined,
     createdAt: toIsoString(row.createdAt) ?? new Date().toISOString(),
@@ -335,7 +359,14 @@ export class AiResponseReviewRepository {
               score: null,
               suggestion: null,
               submittedByUserId: null,
-              submittedAt: null
+              submittedAt: null,
+              dingtalkTodoStatus: null,
+              dingtalkTodoTaskId: null,
+              dingtalkTodoUnionId: null,
+              dingtalkTodoSourceId: null,
+              dingtalkTodoError: null,
+              dingtalkTodoCreatedAt: null,
+              dingtalkTodoCompletedAt: null
             }
           })
         : await this.db.aiResponseReview.create({ data });
@@ -366,6 +397,62 @@ export class AiResponseReviewRepository {
     return mapReview(row, await this.loadUserMap([row]));
   }
 
+  async markDingTalkTodoCreated(reviewId: string, input: {
+    taskId: string;
+    unionId: string;
+    sourceId: string;
+  }): Promise<AiResponseReviewRecord | null> {
+    const id = trimOrUndefined(reviewId);
+    if (!id) return null;
+    const row = await this.db.aiResponseReview.update({
+      where: { id },
+      data: {
+        dingtalkTodoStatus: "created",
+        dingtalkTodoTaskId: trimOrUndefined(input.taskId) ?? null,
+        dingtalkTodoUnionId: trimOrUndefined(input.unionId) ?? null,
+        dingtalkTodoSourceId: trimOrUndefined(input.sourceId) ?? null,
+        dingtalkTodoError: null,
+        dingtalkTodoCreatedAt: new Date(),
+        dingtalkTodoCompletedAt: null
+      }
+    });
+    return mapReview(row, await this.loadUserMap([row]));
+  }
+
+  async markDingTalkTodoFailed(reviewId: string, input: {
+    status: string;
+    error: string;
+    unionId?: string;
+    sourceId?: string;
+  }): Promise<AiResponseReviewRecord | null> {
+    const id = trimOrUndefined(reviewId);
+    if (!id) return null;
+    const row = await this.db.aiResponseReview.update({
+      where: { id },
+      data: {
+        dingtalkTodoStatus: trimOrUndefined(input.status) ?? "failed",
+        dingtalkTodoUnionId: trimOrUndefined(input.unionId) ?? undefined,
+        dingtalkTodoSourceId: trimOrUndefined(input.sourceId) ?? undefined,
+        dingtalkTodoError: trimOrUndefined(input.error) ?? "DingTalk todo sync failed"
+      }
+    });
+    return mapReview(row, await this.loadUserMap([row]));
+  }
+
+  async markDingTalkTodoCompleted(reviewId: string): Promise<AiResponseReviewRecord | null> {
+    const id = trimOrUndefined(reviewId);
+    if (!id) return null;
+    const row = await this.db.aiResponseReview.update({
+      where: { id },
+      data: {
+        dingtalkTodoStatus: "completed",
+        dingtalkTodoError: null,
+        dingtalkTodoCompletedAt: new Date()
+      }
+    });
+    return mapReview(row, await this.loadUserMap([row]));
+  }
+
   async get(reviewId: string): Promise<AiResponseReviewRecord | null> {
     const id = trimOrUndefined(reviewId);
     if (!id) return null;
@@ -380,6 +467,7 @@ export class AiResponseReviewRepository {
       where: { id },
       select: {
         id: true,
+        externalId: true,
         displayName: true,
         email: true,
         dingtalkUserId: true
@@ -461,6 +549,7 @@ export class AiResponseReviewRepository {
       where: { id: { in: userIds } },
       select: {
         id: true,
+        externalId: true,
         displayName: true,
         email: true,
         dingtalkUserId: true

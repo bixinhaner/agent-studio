@@ -1663,6 +1663,21 @@ function aiReviewReviewerLabel(review: AdminAiResponseReviewRecord): string {
   return review.reviewerDisplayName || review.reviewerEmail || review.reviewerDingTalkUserId || "未识别处理人";
 }
 
+function aiReviewTodoStatusLabel(status: string | undefined): string {
+  if (status === "completed") return "钉钉待办已完成";
+  if (status === "created") return "钉钉待办已创建";
+  if (status === "complete_failed") return "钉钉待办完成失败";
+  if (status === "failed") return "钉钉待办失败";
+  return "钉钉待办未创建";
+}
+
+function aiReviewTodoStatusColor(status: string | undefined): string {
+  if (status === "completed") return "success";
+  if (status === "created") return "processing";
+  if (status === "failed" || status === "complete_failed") return "error";
+  return "default";
+}
+
 function AiReviewWorkspace() {
   const [query, setQuery] = useState(() => readConversationAuditHashState().query);
   const [statusFilter, setStatusFilter] = useState<AdminAiResponseReviewStatusFilter>("all");
@@ -1778,7 +1793,15 @@ function AiReviewWorkspace() {
                   {review.notificationStatus === "failed" ? (
                     <Tag color="error">钉钉个人通知失败</Tag>
                   ) : null}
+                  <Tag color={aiReviewTodoStatusColor(review.dingtalkTodoStatus)}>
+                    {aiReviewTodoStatusLabel(review.dingtalkTodoStatus)}
+                  </Tag>
                 </div>
+                {review.dingtalkTodoError ? (
+                  <div className="admin-master-preview" style={{ WebkitLineClamp: 2 }}>
+                    待办错误：{review.dingtalkTodoError}
+                  </div>
+                ) : null}
                 {review.suggestion ? (
                   <div className="admin-master-preview" style={{ WebkitLineClamp: 3 }}>{review.suggestion}</div>
                 ) : null}
