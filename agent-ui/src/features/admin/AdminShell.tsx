@@ -442,6 +442,9 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
 
   useEffect(() => {
     const nextHash = `${ADMIN_HASH_PREFIX}${encodeURIComponent(section)}`;
+    if (sectionFromHash(window.location.hash) === section) {
+      return;
+    }
     if (window.location.hash !== nextHash) {
       window.history.replaceState(null, "", nextHash);
     }

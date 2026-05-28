@@ -10,6 +10,7 @@ import {
   Paperclip,
   RefreshCcw,
   Search,
+  Star,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -32,6 +33,7 @@ import {
 import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
+  fetchAdminAiResponseReviewList,
   fetchAdminConversationAuditDetail,
   fetchAdminConversationAuditList,
   fetchAdminProductFeedbackDetail,
@@ -46,6 +48,9 @@ import type {
   AdminApiAuditRecord,
   AdminApiAuditResultFilter,
   AdminApiAuditSort,
+  AdminAiResponseReviewListResponse,
+  AdminAiResponseReviewRecord,
+  AdminAiResponseReviewStatusFilter,
   AdminConversationDetailResponse,
   AdminConversationChannelSummary,
   AdminConversationFeedback,
@@ -70,12 +75,13 @@ import type {
   AdminProductFeedbackTypeFilter
 } from "./types";
 
-type AuditMode = "conversations" | "api" | "product_feedback";
+type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
 
 type ConversationAuditHashState = {
   query: string;
   conversationId: string;
+  mode: AuditMode;
 };
 
 const STATUS_OPTIONS: Array<{ value: AdminConversationStatusFilter; label: string }> = [
@@ -105,6 +111,14 @@ const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
   { value: "created_desc", label: "最近创建" }
 ];
 
+const AI_REVIEW_STATUS_OPTIONS: Array<{ value: AdminAiResponseReviewStatusFilter; label: string }> = [
+  { value: "all", label: "全部状态" },
+  { value: "pending", label: "待评分" },
+  { value: "overdue", label: "已逾期" },
+  { value: "submitted", label: "已评分" },
+  { value: "cancelled", label: "已取消" }
+];
+
 function formatLocalDateTime(value: string | null | undefined): string {
   if (!value) return "未知时间";
   const parsed = new Date(value);
@@ -125,15 +139,19 @@ function formatFileSize(bytes: number | null | undefined): string {
 }
 
 function readConversationAuditHashState(): ConversationAuditHashState {
-  if (typeof window === "undefined") return { query: "", conversationId: "" };
+  if (typeof window === "undefined") return { query: "", conversationId: "", mode: "conversations" };
   const hash = window.location.hash;
   const queryStart = hash.indexOf("?");
-  if (queryStart < 0) return { query: "", conversationId: "" };
+  if (queryStart < 0) return { query: "", conversationId: "", mode: "conversations" };
   const params = new URLSearchParams(hash.slice(queryStart + 1));
   const conversationId = params.get("conversation")?.trim() ?? "";
+  const rawMode = params.get("mode")?.trim();
+  const mode: AuditMode =
+    rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" ? rawMode : "conversations";
   return {
     conversationId,
-    query: params.get("query")?.trim() || conversationId
+    query: params.get("query")?.trim() || conversationId,
+    mode
   };
 }
 
@@ -1627,6 +1645,177 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
   );
 }
 
+function aiReviewStatusLabel(status: AdminAiResponseReviewRecord["effectiveStatus"]): string {
+  if (status === "submitted") return "已评分";
+  if (status === "overdue") return "已逾期";
+  if (status === "cancelled") return "已取消";
+  return "待评分";
+}
+
+function aiReviewStatusColor(status: AdminAiResponseReviewRecord["effectiveStatus"]): string {
+  if (status === "submitted") return "success";
+  if (status === "overdue") return "error";
+  if (status === "cancelled") return "default";
+  return "processing";
+}
+
+function aiReviewReviewerLabel(review: AdminAiResponseReviewRecord): string {
+  return review.reviewerDisplayName || review.reviewerEmail || review.reviewerDingTalkUserId || "未识别处理人";
+}
+
+function AiReviewWorkspace() {
+  const [query, setQuery] = useState(() => readConversationAuditHashState().query);
+  const [statusFilter, setStatusFilter] = useState<AdminAiResponseReviewStatusFilter>("all");
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<AdminAiResponseReviewListResponse | null>(null);
+  const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetchAdminAiResponseReviewList({
+      query: deferredQuery || undefined,
+      source: "zendesk",
+      status: statusFilter,
+      page,
+      pageSize: 20
+    })
+      .then((response) => active && setData(response))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [deferredQuery, statusFilter, page]);
+
+  const summary = data?.summary;
+
+  return (
+    <div className="admin-page-container" style={{ minHeight: 0, overflow: "auto" }}>
+      <div className="admin-page-header" style={{ marginBottom: 8 }}>
+        <div>
+          <h1 className="admin-page-title">AI 回复评分</h1>
+          <p className="admin-page-desc">追踪 Zendesk AI 写入后每个钉钉 @ 处理人的必评任务。</p>
+        </div>
+        <Button icon={<RefreshCcw size={14} />} onClick={() => setPage(1)} disabled={loading}>
+          刷新
+        </Button>
+      </div>
+
+      <div className="conversation-audit-summary-grid" style={{ marginBottom: 12 }}>
+        <div className="conversation-audit-summary-card">
+          <span>必评任务</span>
+          <strong>{summary?.total ?? 0}</strong>
+        </div>
+        <div className="conversation-audit-summary-card">
+          <span>待评分</span>
+          <strong>{summary?.pending ?? 0}</strong>
+        </div>
+        <div className="conversation-audit-summary-card">
+          <span>已逾期</span>
+          <strong>{summary?.overdue ?? 0}</strong>
+        </div>
+        <div className="conversation-audit-summary-card">
+          <span>平均分</span>
+          <strong>{summary?.averageScore ?? "-"}</strong>
+        </div>
+        <div className="conversation-audit-summary-card">
+          <span>低分</span>
+          <strong>{summary?.lowScoreCount ?? 0}</strong>
+        </div>
+      </div>
+
+      <div className="admin-split-master" style={{ width: "100%", minHeight: 0 }}>
+        <div style={{ padding: "16px", borderBottom: "1px solid var(--admin-color-border)" }}>
+          <Input
+            prefix={<Search size={14} />}
+            placeholder="搜索 ticket、处理人、建议..."
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            style={{ marginBottom: 12 }}
+          />
+          <Space wrap>
+            <Select
+              size="small"
+              value={statusFilter}
+              options={AI_REVIEW_STATUS_OPTIONS}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 112 }}
+            />
+          </Space>
+        </div>
+
+        <div className="admin-master-list" style={{ maxHeight: "none" }}>
+          {loading ? (
+            <Spin style={{ margin: "auto", padding: 24 }} />
+          ) : data?.reviews.length === 0 ? (
+            <Empty style={{ margin: "auto" }} description="暂无评分任务" />
+          ) : (
+            data?.reviews.map((review) => (
+              <article key={review.id} className="admin-master-item" style={{ cursor: "default" }}>
+                <div className="admin-master-header">
+                  <span className="admin-master-title">Zendesk #{review.ticketId || "-"} · {review.ticketSubject || "Untitled ticket"}</span>
+                  <span className="admin-master-time">{formatLocalDateTime(review.createdAt)}</span>
+                </div>
+                <div className="conversation-master-meta">
+                  <Tag color={aiReviewStatusColor(review.effectiveStatus)}>{aiReviewStatusLabel(review.effectiveStatus)}</Tag>
+                  <span className="conversation-master-meta-text">{aiReviewReviewerLabel(review)}</span>
+                  {review.score ? (
+                    <span className="conversation-master-meta-chip">
+                      <Star size={11} />
+                      {review.score}/5
+                    </span>
+                  ) : null}
+                  {review.dueAt ? (
+                    <span className="conversation-master-meta-text">截止 {formatLocalDateTime(review.dueAt)}</span>
+                  ) : null}
+                  {review.notificationStatus === "failed" ? (
+                    <Tag color="error">钉钉个人通知失败</Tag>
+                  ) : null}
+                </div>
+                {review.suggestion ? (
+                  <div className="admin-master-preview" style={{ WebkitLineClamp: 3 }}>{review.suggestion}</div>
+                ) : null}
+                <Space size="small" style={{ marginTop: 8 }}>
+                  {review.reviewUrl ? (
+                    <Button size="small" href={review.reviewUrl} target="_blank" rel="noreferrer">
+                      打开评分页
+                    </Button>
+                  ) : null}
+                  {review.ticketUrl ? (
+                    <Button size="small" href={review.ticketUrl} target="_blank" rel="noreferrer">
+                      Zendesk
+                    </Button>
+                  ) : null}
+                  {review.threadId ? (
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        window.location.hash = `#admin/conversations?conversation=${encodeURIComponent(review.threadId || "")}`;
+                      }}
+                    >
+                      对话记录
+                    </Button>
+                  ) : null}
+                </Space>
+              </article>
+            ))
+          )}
+        </div>
+        <div style={{ padding: "8px 16px", borderTop: "1px solid var(--admin-color-border)", textAlign: "center" }}>
+          <Pagination simple current={page} total={data?.page.totalItems || 0} pageSize={20} onChange={setPage} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: AdminProductFeedbackTypeFilter; label: string }> = [
   { value: "all", label: "全部类型" },
   { value: "usability_issue", label: "改进意见" },
@@ -1964,7 +2153,7 @@ function ProductFeedbackDetail(props: {
 }
 
 export function ConversationAuditView() {
-  const [mode, setMode] = useState<AuditMode>("conversations");
+  const [mode, setMode] = useState<AuditMode>(() => readConversationAuditHashState().mode);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1974,6 +2163,7 @@ export function ConversationAuditView() {
           onChange={k => setMode(k as AuditMode)} 
           items={[
             { key: "conversations", label: "用户交互会话" },
+            { key: "ai_reviews", label: "AI 回复评分" },
             { key: "product_feedback", label: "系统反馈" },
             { key: "api", label: "底层 API 调用" }
           ]}
@@ -1983,6 +2173,8 @@ export function ConversationAuditView() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {mode === "conversations" ? (
           <ConversationWorkspace />
+        ) : mode === "ai_reviews" ? (
+          <AiReviewWorkspace />
         ) : mode === "product_feedback" ? (
           <ProductFeedbackWorkspace />
         ) : (

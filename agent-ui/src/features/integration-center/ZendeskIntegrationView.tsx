@@ -128,6 +128,10 @@ const DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE = [
   "{{zendeskCommentMarkdown}}",
   "",
   "---",
+  "",
+  "{{reviewSummary}}",
+  "",
+  "---",
   "{{mention}}"
 ].join("\n");
 
@@ -148,6 +152,8 @@ const DINGTALK_TEMPLATE_TOKENS = [
   { token: "{{internalNote}}", label: "Agent internal note" },
   { token: "{{zendeskCommentBody}}", label: "Exact Zendesk comment" },
   { token: "{{zendeskCommentMarkdown}}", label: "Formatted Zendesk comment" },
+  { token: "{{reviewSummary}}", label: "AI review task summary" },
+  { token: "{{reviewUrl}}", label: "AI review link" },
   { token: "{{mention}}", label: "Real @ userId token" },
   { token: "{{mentionLabel}}", label: "Display name only" }
 ];
@@ -214,6 +220,12 @@ const DINGTALK_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
     ">",
     "> Recommended next step: verify the IMSI/MSISDN mapping, collect SIP trunk routing logs, and confirm the loop source before replying to the customer."
   ].join("\n"),
+  reviewSummary: [
+    "**AI Review Required**",
+    "> Each @ recipient receives a private review request. Please rate 1-5 and add improvement suggestions if needed.",
+    "> Due in 24 hours."
+  ].join("\n"),
+  reviewUrl: "https://aiagent.example.com/review/ai-response/review_123",
   mention: "@manager422*****",
   mentionLabel: "@Li Mingjian"
 };
@@ -310,6 +322,11 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     dingtalkNotificationRobotSecretDraft: "",
     dingtalkNotificationFallbackUserIds: asStringArray(detail.config.dingtalkNotificationFallbackUserIds),
     dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(detail.config.dingtalkNotificationTemplate),
+    dingtalkReviewRequiredEnabled:
+      detail.config.dingtalkReviewRequiredEnabled === undefined
+        ? asBoolean(detail.config.dingtalkNotificationEnabled)
+        : asBoolean(detail.config.dingtalkReviewRequiredEnabled),
+    dingtalkReviewDueHours: Math.max(1, Math.min(168, asNumber(detail.config.dingtalkReviewDueHours, 24))),
     systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
@@ -509,6 +526,8 @@ export function ZendeskIntegrationView(props: {
           dingtalkNotificationManualRunsEnabled: draft.dingtalkNotificationManualRunsEnabled,
           dingtalkNotificationFallbackUserIds: asStringArray(draft.dingtalkNotificationFallbackUserIds),
           dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(draft.dingtalkNotificationTemplate),
+          dingtalkReviewRequiredEnabled: draft.dingtalkReviewRequiredEnabled,
+          dingtalkReviewDueHours: Math.max(1, Math.min(168, Number(draft.dingtalkReviewDueHours) || 24)),
           systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
@@ -879,6 +898,36 @@ export function ZendeskIntegrationView(props: {
                         />
                         <span className="field-label">手动执行也发送</span>
                         <span className="field-help">默认关闭，避免测试 ticket 打扰钉钉群。</span>
+                      </label>
+                      <label className="field checkbox-field resource-center-toggle-row">
+                        <Switch
+                          checked={draft.dingtalkReviewRequiredEnabled}
+                          disabled={saving || !draft.dingtalkNotificationEnabled}
+                          checkedChildren="必评"
+                          unCheckedChildren="关闭"
+                          onChange={(checked) =>
+                            setDraft((current) => ({ ...current, dingtalkReviewRequiredEnabled: checked }))
+                          }
+                        />
+                        <span className="field-label">要求 @ 人评分</span>
+                        <span className="field-help">
+                          开启后，每个被 @ 的钉钉用户都会生成必评任务，并收到个人工作通知。
+                        </span>
+                      </label>
+                      <label className="field">
+                        <span className="field-label">评分截止时间</span>
+                        <InputNumber
+                          min={1}
+                          max={168}
+                          addonAfter="hours"
+                          value={draft.dingtalkReviewDueHours}
+                          disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, dingtalkReviewDueHours: Number(value) || 24 }))
+                          }
+                          style={{ width: "100%" }}
+                        />
+                        <span className="field-help">超时后进入后台逾期统计，用于追踪没有评分的处理人。</span>
                       </label>
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">Fallback @ Users</span>

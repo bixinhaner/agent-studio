@@ -20,6 +20,8 @@ export type ZendeskPublicSettings = {
   maxAttachmentCount: number;
   maxAttachmentBytes: number;
   allowedAttachmentMimeTypes: string[];
+  dingtalkReviewRequiredEnabled?: boolean;
+  dingtalkReviewDueHours?: number;
   lastValidatedAt?: string;
   lastValidatedUser?: {
     id: number;

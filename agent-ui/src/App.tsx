@@ -14,6 +14,9 @@ const PublicAccessRequestPageLazy = lazy(() =>
 const ReviewAccessRequestPageLazy = lazy(() =>
   import("./features/access-requests/ReviewAccessRequestPage").then((module) => ({ default: module.ReviewAccessRequestPage }))
 );
+const AiResponseReviewPageLazy = lazy(() =>
+  import("./features/ai-reviews/AiResponseReviewPage").then((module) => ({ default: module.AiResponseReviewPage }))
+);
 const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then((module) => ({ default: module.PortalShell })));
 const PublicSharePageLazy = lazy(() =>
   import("./features/public-share/PublicSharePage").then((module) => ({ default: module.PublicSharePage }))
@@ -52,6 +55,12 @@ function extractAccessRequestReviewId(pathname: string): string | undefined {
   const match = pathname.match(/^\/review\/access-requests\/([^/]+)\/?$/);
   const requestId = match ? decodeURIComponent(match[1] || "") : "";
   return requestId || undefined;
+}
+
+function extractAiResponseReviewId(pathname: string): string | undefined {
+  const match = pathname.match(/^\/review\/ai-response\/([^/]+)\/?$/);
+  const reviewId = match ? decodeURIComponent(match[1] || "") : "";
+  return reviewId || undefined;
 }
 
 function isInternalLoginPath(pathname: string): boolean {
@@ -391,7 +400,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   );
 }
 
-function AppContent(props: { inviteToken?: string; reviewRequestId?: string; authMode: AuthEntryMode }) {
+function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aiResponseReviewId?: string; authMode: AuthEntryMode }) {
   const auth = useAuth();
   const { branding } = useBranding();
   const adminEligible = useMemo(
@@ -471,6 +480,14 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aut
     );
   }
 
+  if (props.aiResponseReviewId) {
+    return (
+      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading AI review...</p></div></div>}>
+        <AiResponseReviewPageLazy reviewId={props.aiResponseReviewId} />
+      </Suspense>
+    );
+  }
+
   if (adminEligible && view === "admin") {
     return (
       <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>管理控制台加载中...</p></div></div>}>
@@ -506,7 +523,8 @@ function AppRoutes() {
   const inviteToken = extractInviteToken(pathname);
   const accessRequestToken = extractAccessRequestToken(pathname);
   const reviewRequestId = extractAccessRequestReviewId(pathname);
-  const authMode: AuthEntryMode = reviewRequestId || isInternalLoginPath(pathname) ? "internal" : "external";
+  const aiResponseReviewId = extractAiResponseReviewId(pathname);
+  const authMode: AuthEntryMode = reviewRequestId || aiResponseReviewId || isInternalLoginPath(pathname) ? "internal" : "external";
 
   if (publicShareToken) {
     return (
@@ -526,7 +544,12 @@ function AppRoutes() {
 
   return (
     <AuthProvider>
-      <AppContent inviteToken={inviteToken} reviewRequestId={reviewRequestId} authMode={authMode} />
+      <AppContent
+        inviteToken={inviteToken}
+        reviewRequestId={reviewRequestId}
+        aiResponseReviewId={aiResponseReviewId}
+        authMode={authMode}
+      />
     </AuthProvider>
   );
 }

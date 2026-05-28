@@ -4,6 +4,8 @@ import type {
   AdminApiAuditDetailResponse,
   AdminApiAuditListInput,
   AdminApiAuditListResponse,
+  AdminAiResponseReviewListInput,
+  AdminAiResponseReviewListResponse,
   AdminConversationDetailResponse,
   AdminConversationListInput,
   AdminConversationListResponse,
@@ -134,6 +136,21 @@ export async function fetchAdminConversationAuditDetail(
   conversationId: string
 ): Promise<AdminConversationDetailResponse> {
   return api<AdminConversationDetailResponse>(`/api/admin/conversations/${encodeURIComponent(conversationId)}`);
+}
+
+export async function fetchAdminAiResponseReviewList(
+  input: AdminAiResponseReviewListInput = {}
+): Promise<AdminAiResponseReviewListResponse> {
+  const params = new URLSearchParams();
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.source) params.set("source", input.source);
+  if (input.status) params.set("status", input.status);
+  if (typeof input.page === "number") params.set("page", String(input.page));
+  if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
+  const query = params.toString();
+  return api<AdminAiResponseReviewListResponse>(
+    `/api/admin/conversations/ai-response-reviews${query ? `?${query}` : ""}`
+  );
 }
 
 export async function hardDeleteAdminConversation(conversationId: string): Promise<{ ok: true; mode: "deleted" }> {

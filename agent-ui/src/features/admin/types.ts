@@ -25,6 +25,8 @@ export type AdminProductFeedbackSeverity = "blocking" | "high" | "medium" | "low
 export type AdminProductFeedbackStatus = "open" | "triaged" | "in_progress" | "resolved" | "closed";
 export type AdminProductFeedbackStatusFilter = "all" | AdminProductFeedbackStatus;
 export type AdminProductFeedbackSort = "created_desc" | "updated_desc";
+export type AdminAiResponseReviewStatus = "pending" | "overdue" | "submitted" | "cancelled";
+export type AdminAiResponseReviewStatusFilter = "all" | AdminAiResponseReviewStatus;
 
 export type AdminConversationUser = {
   id: string;
@@ -335,6 +337,73 @@ export type AdminProductFeedbackListResponse = {
 
 export type AdminProductFeedbackDetailResponse = {
   feedback: AdminProductFeedbackRecord;
+};
+
+export type AdminAiResponseReviewRecord = {
+  id: string;
+  source: string;
+  status: "pending" | "submitted" | "cancelled";
+  effectiveStatus: AdminAiResponseReviewStatus;
+  required: boolean;
+  integrationInstanceId?: string;
+  threadId?: string;
+  assistantMessageExternalId?: string;
+  zendeskRunId?: string;
+  ticketId?: string;
+  ticketSubject?: string;
+  ticketUrl?: string;
+  zendeskCommentId?: string;
+  zendeskRequesterCommentId?: string;
+  reviewerUserId?: string;
+  reviewerDingTalkUserId?: string;
+  reviewerDisplayName?: string;
+  reviewerEmail?: string;
+  score?: number;
+  suggestion?: string;
+  submittedByUserId?: string;
+  submittedAt?: string;
+  dueAt?: string;
+  notificationStatus?: string;
+  notificationError?: string;
+  notifiedAt?: string;
+  reviewUrl?: string;
+  snapshot?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminAiResponseReviewListInput = {
+  query?: string;
+  source?: string;
+  status?: AdminAiResponseReviewStatusFilter;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AdminAiResponseReviewListResponse = {
+  filters: {
+    query: string;
+    source: string;
+    status: AdminAiResponseReviewStatusFilter;
+  };
+  summary: {
+    total: number;
+    pending: number;
+    overdue: number;
+    submitted: number;
+    cancelled: number;
+    required: number;
+    averageScore: number | null;
+    lowScoreCount: number;
+    withSuggestion: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  reviews: AdminAiResponseReviewRecord[];
 };
 
 export type AdminSubscriptionSourceMode =

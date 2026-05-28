@@ -972,6 +972,38 @@
   line-height: 1.4;
 }
 
+.conversation-audit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.conversation-audit-summary-card {
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.conversation-audit-summary-card span {
+  display: block;
+  color: var(--admin-color-muted);
+  font-size: 12px;
+}
+
+.conversation-audit-summary-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--admin-color-text);
+  font-size: 20px;
+}
+
+@media (max-width: 980px) {
+  .conversation-audit-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .conversation-master-meta {
   margin-top: 6px;
   display: flex;

@@ -272,6 +272,8 @@ export type ZendeskConfigInput = {
   dingtalkNotificationManualRunsEnabled?: boolean;
   dingtalkNotificationFallbackUserIds?: string[];
   dingtalkNotificationTemplate?: string;
+  dingtalkReviewRequiredEnabled?: boolean;
+  dingtalkReviewDueHours?: number;
   systemPrompt?: string;
 };
 
@@ -435,6 +437,8 @@ export type ZendeskConfigDraft = {
   dingtalkNotificationRobotSecretDraft: string;
   dingtalkNotificationFallbackUserIds: string[];
   dingtalkNotificationTemplate: string;
+  dingtalkReviewRequiredEnabled: boolean;
+  dingtalkReviewDueHours: number;
   systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;
