@@ -1694,7 +1694,7 @@ function AiReviewWorkspace() {
     <div className="admin-page-container" style={{ minHeight: 0, overflow: "auto" }}>
       <div className="admin-page-header" style={{ marginBottom: 8 }}>
         <div>
-          <h1 className="admin-page-title">AI 回复评分</h1>
+          <h1 className="admin-page-title">Zendesk AI评分</h1>
           <p className="admin-page-desc">追踪 Zendesk AI 写入后每个钉钉 @ 处理人的必评任务。</p>
         </div>
         <Button icon={<RefreshCcw size={14} />} onClick={() => setPage(1)} disabled={loading}>
@@ -2163,7 +2163,7 @@ export function ConversationAuditView() {
           onChange={k => setMode(k as AuditMode)} 
           items={[
             { key: "conversations", label: "用户交互会话" },
-            { key: "ai_reviews", label: "AI 回复评分" },
+            { key: "ai_reviews", label: "Zendesk AI评分" },
             { key: "product_feedback", label: "系统反馈" },
             { key: "api", label: "底层 API 调用" }
           ]}
