@@ -2252,6 +2252,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       runConfig: { channel: "crest", conversationId: input.conversationId }
     });
 
+    const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
     await streamRuntimeCompletionWithBestEffortUsage({
       events: runtime.runStreamed(
@@ -2277,7 +2278,9 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           generatedArtifacts = await registerGeneratedArtifactsForSession({
             currentUser,
             session: currentSession,
-            changes: runtimeFileChanges
+            changes: runtimeFileChanges,
+            answerText: payload.answer,
+            changedAfter: artifactScanStartedAt
           });
           if (generatedArtifacts.length > 0) {
             sendSSE(res, "artifacts", {
@@ -4945,11 +4948,15 @@ const ARTIFACT_MIME_BY_EXTENSION: Record<string, string> = {
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".zip": "application/zip",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp"
 };
+
+const GENERATED_ARTIFACT_SCAN_DIRS = new Set(["outputs", "artifacts", "downloads"]);
+const GENERATED_ARTIFACT_SCAN_LIMIT = 50;
 
 function normalizeArtifactRelativePath(value: string): string {
   return normalizeRelativePath(value).replace(/^\/+/, "").trim();
@@ -5119,10 +5126,12 @@ async function registerGeneratedArtifactsForSession(input: {
   currentUser: CurrentActor;
   session: SessionRecord;
   changes: RuntimeFileChange[];
+  answerText?: string;
+  changedAfter?: Date;
 }): Promise<ThreadArtifactRecord[]> {
   const threadId = trimOrUndefined(input.session.threadId);
   const workspacePath = trimOrUndefined(input.session.workspace);
-  if (!threadId || !workspacePath || input.changes.length === 0) return [];
+  if (!threadId || !workspacePath) return [];
 
   const policy = await resolveArtifactPolicyForActor(input.currentUser);
   if (!policy.enabled || !policy.autoRegisterGeneratedFiles) return [];
@@ -5130,9 +5139,20 @@ async function registerGeneratedArtifactsForSession(input: {
   const thread = await threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId);
   if (!thread) return [];
 
+  const candidates = mergeRuntimeFileChanges([
+    input.changes,
+    extractArtifactChangesFromText(input.answerText ?? "", workspacePath),
+    await collectGeneratedArtifactChanges({
+      workspacePath,
+      changedAfter: input.changedAfter,
+      allowedExtensions: policy.allowedExtensions
+    })
+  ]);
+  if (candidates.length === 0) return [];
+
   const registered: ThreadArtifactRecord[] = [];
   const seen = new Set<string>();
-  for (const change of input.changes) {
+  for (const change of candidates) {
     if (shouldSkipArtifactChange(change)) continue;
 
     let resolved: { absolutePath: string; relativePath: string };
@@ -5199,6 +5219,87 @@ async function registerGeneratedArtifactsForSession(input: {
   }
 
   return registered;
+}
+
+function mergeRuntimeFileChanges(groups: RuntimeFileChange[][]): RuntimeFileChange[] {
+  const out: RuntimeFileChange[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const change of group) {
+      const normalizedPath = trimOrUndefined(change.path);
+      if (!normalizedPath) continue;
+      const key = `${change.kind.trim().toLowerCase() || "update"}::${normalizedPath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ path: normalizedPath, kind: change.kind || "update" });
+    }
+  }
+  return out;
+}
+
+function extractArtifactChangesFromText(text: string, workspacePath: string): RuntimeFileChange[] {
+  const normalizedText = trimOrUndefined(text);
+  if (!normalizedText) return [];
+  const workspace = path.resolve(workspacePath);
+  const out: RuntimeFileChange[] = [];
+  const seen = new Set<string>();
+  const pushPath = (value: string) => {
+    const cleaned = trimOrUndefined(value.replace(/^file:\/\//i, ""));
+    if (!cleaned) return;
+    let resolved: { absolutePath: string; relativePath: string };
+    try {
+      resolved = resolveWorkspaceFilePath({ workspacePath: workspace, filePath: decodeURIComponent(cleaned) });
+    } catch {
+      return;
+    }
+    if (seen.has(resolved.relativePath)) return;
+    seen.add(resolved.relativePath);
+    out.push({ path: resolved.absolutePath, kind: "text_reference" });
+  };
+
+  for (const match of normalizedText.matchAll(/\]\(([^)\n]+)\)/g)) pushPath(match[1] ?? "");
+  for (const match of normalizedText.matchAll(/<([^<>\n]+)>/g)) pushPath(match[1] ?? "");
+  for (const match of normalizedText.matchAll(/(?:^|[\s([])(\/[^\s<>)\]]+)/g)) pushPath(match[1] ?? "");
+  return out;
+}
+
+async function collectGeneratedArtifactChanges(input: {
+  workspacePath: string;
+  changedAfter?: Date;
+  allowedExtensions: string[];
+}): Promise<RuntimeFileChange[]> {
+  const workspace = path.resolve(input.workspacePath);
+  const sinceMs = input.changedAfter?.getTime() ?? 0;
+  const allowedExtensions = new Set(input.allowedExtensions);
+  const out: RuntimeFileChange[] = [];
+  const scanDir = async (dir: string) => {
+    if (out.length >= GENERATED_ARTIFACT_SCAN_LIMIT) return;
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (out.length >= GENERATED_ARTIFACT_SCAN_LIMIT) break;
+      if (entry.name.startsWith(".")) continue;
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await scanDir(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relativePath = normalizeArtifactRelativePath(path.relative(workspace, absolutePath));
+      const extension = extensionForArtifact(relativePath);
+      if (!allowedExtensions.has(extension)) continue;
+      const stat = await fs.stat(absolutePath).catch(() => null);
+      if (!stat || !stat.isFile()) continue;
+      if (sinceMs > 0 && stat.mtimeMs + 2000 < sinceMs) continue;
+      out.push({ path: absolutePath, kind: "workspace_scan" });
+    }
+  };
+
+  const topLevelEntries = await fs.readdir(workspace, { withFileTypes: true }).catch(() => []);
+  for (const entry of topLevelEntries) {
+    if (!entry.isDirectory() || !GENERATED_ARTIFACT_SCAN_DIRS.has(entry.name)) continue;
+    await scanDir(path.join(workspace, entry.name));
+  }
+  return out;
 }
 
 async function sendThreadArtifactContent(input: {
@@ -6525,6 +6626,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       started_at: new Date().toISOString()
     });
 
+    const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
     await streamRuntimeCompletionWithBestEffortUsage({
       events: runtime.runStreamed(ensuredLiveThread, withSkillActivationPrompts(input.message, currentSession.codexRunConfig)),
@@ -6543,7 +6645,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           const artifacts = await registerGeneratedArtifactsForSession({
             currentUser,
             session: currentSession,
-            changes: runtimeFileChanges
+            changes: runtimeFileChanges,
+            answerText: payload.answer,
+            changedAfter: artifactScanStartedAt
           });
           if (artifacts.length > 0) {
             const policy = await resolveArtifactPolicyForActor(currentUser);

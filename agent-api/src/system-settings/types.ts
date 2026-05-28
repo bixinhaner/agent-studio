@@ -265,6 +265,7 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
       ".docx",
       ".xlsx",
       ".pptx",
+      ".zip",
       ".png",
       ".jpg",
       ".jpeg",
