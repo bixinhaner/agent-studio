@@ -2284,6 +2284,13 @@ async function ensureCrestChatThread(input: {
   const existing = await threads.getByExternalId(externalId, input.currentUser.organizationId);
   if (existing) {
     const activeThread = existing.status === "archived" ? await threads.update(existing.id, { status: "regular" }) : existing;
+    const activeSession = activeThread.sessionId ? await sessions.get(activeThread.sessionId) : undefined;
+    const liveSession = activeSession
+      ? liveRuntimeThreads.has(activeSession.sessionId) || Boolean(await restoreLiveRuntimeThread(activeSession))
+      : false;
+    if (activeSession && liveSession) {
+      return { thread: activeThread, session: activeSession };
+    }
     const session = await ensureThreadSession(input.currentUser, activeThread.id, {
       codex_run_config: activeThread.codexRunConfig,
       force_run_profile_controls: true
