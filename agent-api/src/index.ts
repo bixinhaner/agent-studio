@@ -165,7 +165,7 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
-import { createCrestRouter, issueCrestProxyToken } from "./integrations/crest/router.js";
+import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { DINGTALK_BOT_CHANNEL, isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./integrations/dingtalk/bot-config.js";
 import {
@@ -1167,6 +1167,8 @@ type LiveRuntimeThread = Awaited<ReturnType<CodexRuntime["startThreadWithOptions
 const liveRuntimeThreads = new Map<string, LiveRuntimeThread>();
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const crestMcpProxyScriptPath = path.resolve(moduleDir, "..", "scripts", "crest-mcp-proxy.mjs");
+const RUNTIME_CAPABILITIES_RUN_CONFIG_KEY = "_agentStudioRuntimeCapabilities";
+const CREST_PROXY_TOKEN_REFRESH_SKEW_MS = 15 * 60_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -1223,16 +1225,18 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
   try {
     const materializedCodexHome = await materializeCodexHomeForRunConfig({
       scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
-      codexRunConfig: session.codexRunConfig
+      codexRunConfig: withoutRuntimeCapabilityMetadata(session.codexRunConfig)
     });
-    const crestMcpConfig = session.userId
-      ? await buildCrestMcpRuntimeConfigForUser(session.userId, session.workspace)
-      : undefined;
+    const runtimeLaunch = await resolveRuntimeLaunchConfig({
+      userId: session.userId,
+      workspace: session.workspace,
+      codexRunConfig: materializedCodexHome.codexRunConfig
+    });
     const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
       existingSnapshot: session.providerSnapshot,
       fallbackToLocalAuth: true
     }), {
-      configOverrides: crestMcpConfig,
+      configOverrides: runtimeLaunch.configOverrides,
       envOverrides: {
         CODEX_HOME: materializedCodexHome.codexHome
       }
@@ -1242,8 +1246,13 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
       model: session.model,
       reasoningEffort: session.reasoningEffort,
       workspace: session.workspace,
-      codexRunConfig: stripInternalRunConfigMetadata(materializedCodexHome.codexRunConfig)
+      codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
     });
+    if (stableJson(session.codexRunConfig) !== stableJson(runtimeLaunch.codexRunConfig)) {
+      await sessions.update(session.sessionId, {
+        codexRunConfig: runtimeLaunch.codexRunConfig
+      });
+    }
     liveRuntimeThreads.set(session.sessionId, liveThread);
     return liveThread;
   } catch (error) {
@@ -1255,6 +1264,13 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
     });
     return undefined;
   }
+}
+
+async function refreshLiveRuntimeThread(session: SessionRecord): Promise<SessionRecord | undefined> {
+  liveRuntimeThreads.delete(session.sessionId);
+  const restored = await restoreLiveRuntimeThread(session);
+  if (!restored) return undefined;
+  return await sessions.peek(session.sessionId) ?? session;
 }
 
 async function persistSessionCodexThreadId(session: SessionRecord, codexThreadId: string): Promise<SessionRecord> {
@@ -1434,6 +1450,24 @@ type SessionOptions = {
   providerSnapshot: ManagedCodexProviderSnapshot;
 };
 
+type RuntimeCapabilityFingerprint = {
+  crestCrm?: {
+    enabled: true;
+    proxyTokenExpiresAt: string;
+  };
+};
+
+type DesiredRuntimeCapabilities = {
+  crestCrm?: {
+    enabled: true;
+  };
+};
+
+type RuntimeLaunchConfig = {
+  configOverrides?: Record<string, unknown>;
+  codexRunConfig?: Record<string, unknown>;
+};
+
 type ModeSelection = {
   modeId: string;
   workspaceRootPath: string;
@@ -1506,6 +1540,66 @@ function stableJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function runtimeCapabilitiesFromRunConfig(
+  codexRunConfig?: Record<string, unknown>
+): RuntimeCapabilityFingerprint {
+  const raw = asRecord(codexRunConfig?.[RUNTIME_CAPABILITIES_RUN_CONFIG_KEY]);
+  const crestRaw = asRecord(raw?.crestCrm);
+  const proxyTokenExpiresAt =
+    typeof crestRaw?.proxyTokenExpiresAt === "string" ? trimOrUndefined(crestRaw.proxyTokenExpiresAt) : undefined;
+  if (crestRaw?.enabled === true && proxyTokenExpiresAt) {
+    return {
+      crestCrm: {
+        enabled: true,
+        proxyTokenExpiresAt
+      }
+    };
+  }
+  return {};
+}
+
+function withoutRuntimeCapabilityMetadata(
+  codexRunConfig?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!codexRunConfig) return codexRunConfig;
+  const next = { ...codexRunConfig };
+  delete next[RUNTIME_CAPABILITIES_RUN_CONFIG_KEY];
+  return next;
+}
+
+function withRuntimeCapabilityMetadata(
+  codexRunConfig: Record<string, unknown> | undefined,
+  capabilities: RuntimeCapabilityFingerprint
+): Record<string, unknown> | undefined {
+  const next = withoutRuntimeCapabilityMetadata(codexRunConfig);
+  if (!capabilities.crestCrm) return next;
+  return {
+    ...(next ?? {}),
+    [RUNTIME_CAPABILITIES_RUN_CONFIG_KEY]: capabilities
+  };
+}
+
+function runtimeCapabilityComparableConfig(
+  codexRunConfig?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  return withoutRuntimeCapabilityMetadata(codexRunConfig);
+}
+
+function runtimeCapabilitiesAreCurrent(
+  codexRunConfig: Record<string, unknown> | undefined,
+  desired: DesiredRuntimeCapabilities,
+  now = Date.now()
+): boolean {
+  const active = runtimeCapabilitiesFromRunConfig(codexRunConfig);
+  if (desired.crestCrm?.enabled) {
+    const expiresAt = active.crestCrm?.proxyTokenExpiresAt;
+    if (!expiresAt) return false;
+    const expiresAtMs = new Date(expiresAt).getTime();
+    return Number.isFinite(expiresAtMs) && expiresAtMs > now + CREST_PROXY_TOKEN_REFRESH_SKEW_MS;
+  }
+  return active.crestCrm?.enabled !== true;
 }
 
 function sessionOut(session: {
@@ -1701,31 +1795,75 @@ async function resolveCrestActor(input: {
   };
 }
 
-async function buildCrestMcpRuntimeConfigForUser(
-  userId: string,
-  workspacePath?: string
-): Promise<Record<string, unknown> | undefined> {
-  if (!(await hasUsableCrestDelegation(userId))) return undefined;
+async function canUseCrestMcpForUser(userId: string): Promise<boolean> {
+  if (!(await hasUsableCrestDelegation(userId))) return false;
   const proxyScriptExists = await fs.access(crestMcpProxyScriptPath).then(
     () => true,
     () => false
   );
-  if (!proxyScriptExists) return undefined;
+  return proxyScriptExists;
+}
+
+async function desiredRuntimeCapabilitiesForUser(userId?: string): Promise<DesiredRuntimeCapabilities> {
+  if (!userId || !(await canUseCrestMcpForUser(userId))) return {};
+  return {
+    crestCrm: {
+      enabled: true
+    }
+  };
+}
+
+async function buildCrestMcpRuntimeConfigForUser(
+  userId: string,
+  workspacePath?: string
+): Promise<{ configOverrides: Record<string, unknown>; capabilities: RuntimeCapabilityFingerprint } | undefined> {
+  if (!(await canUseCrestMcpForUser(userId))) return undefined;
   const proxyScriptPath =
     (workspacePath ? await materializeCrestMcpProxyScript(workspacePath) : undefined) ?? crestMcpProxyScriptPath;
+  const proxyToken = issueCrestProxyTokenLease(userId);
   return {
-    mcp_servers: {
-      crest_crm: {
-        command: process.execPath,
-        args: [proxyScriptPath],
-        default_tools_approval_mode: "approve",
-        env: {
-          AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
-          AGENT_STUDIO_CREST_PROXY_TOKEN: issueCrestProxyToken(userId)
+    configOverrides: {
+      mcp_servers: {
+        crest_crm: {
+          command: process.execPath,
+          args: [proxyScriptPath],
+          default_tools_approval_mode: "approve",
+          env: {
+            AGENT_STUDIO_BASE_URL: agentStudioInternalBaseUrl(),
+            AGENT_STUDIO_CREST_PROXY_TOKEN: proxyToken.token
+          }
         }
+      }
+    },
+    capabilities: {
+      crestCrm: {
+        enabled: true,
+        proxyTokenExpiresAt: proxyToken.expiresAt
       }
     }
   };
+}
+
+async function resolveRuntimeLaunchConfig(input: {
+  userId?: string;
+  workspace?: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<RuntimeLaunchConfig> {
+  const crestMcp = input.userId
+    ? await buildCrestMcpRuntimeConfigForUser(input.userId, input.workspace)
+    : undefined;
+  return {
+    configOverrides: crestMcp?.configOverrides,
+    codexRunConfig: withRuntimeCapabilityMetadata(
+      input.codexRunConfig,
+      crestMcp?.capabilities ?? {}
+    )
+  };
+}
+
+async function sessionRuntimeCapabilitiesAreCurrent(session: SessionRecord, userId?: string): Promise<boolean> {
+  const desired = await desiredRuntimeCapabilitiesForUser(userId ?? session.userId);
+  return runtimeCapabilitiesAreCurrent(session.codexRunConfig, desired);
 }
 
 async function materializeCrestMcpProxyScript(workspacePath: string): Promise<string | undefined> {
@@ -2044,6 +2182,7 @@ function withExternalRunProfileBoundaries(
   delete next.outputSchemaFile;
   delete next._agentStudioKnowledgeSets;
   delete next._agentStudioCodexHome;
+  delete next[RUNTIME_CAPABILITIES_RUN_CONFIG_KEY];
   return withRunProfileRuntimeControls(next, runtimeProfile);
 }
 
@@ -2284,13 +2423,6 @@ async function ensureCrestChatThread(input: {
   const existing = await threads.getByExternalId(externalId, input.currentUser.organizationId);
   if (existing) {
     const activeThread = existing.status === "archived" ? await threads.update(existing.id, { status: "regular" }) : existing;
-    const activeSession = activeThread.sessionId ? await sessions.get(activeThread.sessionId) : undefined;
-    const liveSession = activeSession
-      ? liveRuntimeThreads.has(activeSession.sessionId) || Boolean(await restoreLiveRuntimeThread(activeSession))
-      : false;
-    if (activeSession && liveSession) {
-      return { thread: activeThread, session: activeSession };
-    }
     const session = await ensureThreadSession(input.currentUser, activeThread.id, {
       codex_run_config: activeThread.codexRunConfig,
       force_run_profile_controls: true
@@ -2921,9 +3053,11 @@ async function createSession(options: SessionOptions, threadId?: string) {
     await fs.mkdir(getThreadWorkspaceUploadDir(options.workspace), { recursive: true });
   }
 
-  const sessionCodexRunConfig = threadId
-    ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
-    : options.codexRunConfig;
+  const sessionCodexRunConfig = withoutRuntimeCapabilityMetadata(
+    threadId
+      ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
+      : options.codexRunConfig
+  );
   const materializedCodexHome =
     options.codexHome && sessionCodexRunConfig
       ? { codexHome: options.codexHome, codexRunConfig: sessionCodexRunConfig }
@@ -2935,9 +3069,13 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const providerSnapshot = await resolveProviderSnapshot({
     existingSnapshot: options.providerSnapshot
   });
-  const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(options.userId, options.workspace);
+  const runtimeLaunch = await resolveRuntimeLaunchConfig({
+    userId: options.userId,
+    workspace: options.workspace,
+    codexRunConfig: materializedCodexHome.codexRunConfig
+  });
   const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
-    configOverrides: crestMcpConfig,
+    configOverrides: runtimeLaunch.configOverrides,
     envOverrides: {
       CODEX_HOME: materializedCodexHome.codexHome
     }
@@ -2947,7 +3085,7 @@ async function createSession(options: SessionOptions, threadId?: string) {
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: materializedCodexHome.codexRunConfig
+    codexRunConfig: runtimeLaunch.codexRunConfig
   });
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
@@ -3132,7 +3270,7 @@ async function ensureThreadSession(
     codexProviders.getPublishedSystemSettings()
   ]);
 
-  const sourceCodexRunConfig = patch?.codex_run_config ?? thread.codexRunConfig;
+  const sourceCodexRunConfig = withoutRuntimeCapabilityMetadata(patch?.codex_run_config ?? thread.codexRunConfig);
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
   const modeSelection = await resolveModeSelection({
     currentUser,
@@ -3211,19 +3349,51 @@ async function ensureThreadSession(
     });
   }
 
-  const hasLiveRuntime = active
-    ? liveRuntimeThreads.has(active.sessionId) || Boolean(await restoreLiveRuntimeThread(active))
-    : false;
+  let activeForComparison = active;
+  let hasLiveRuntime = false;
+  if (active) {
+    if (liveRuntimeThreads.has(active.sessionId)) {
+      hasLiveRuntime = true;
+    } else {
+      hasLiveRuntime = Boolean(await restoreLiveRuntimeThread(active));
+      if (hasLiveRuntime) {
+        activeForComparison = await sessions.peek(active.sessionId) ?? active;
+      }
+    }
+  }
+  const runtimeCapabilitiesCurrent = activeForComparison
+    ? await sessionRuntimeCapabilitiesAreCurrent(activeForComparison, desired.userId)
+    : true;
+  const baseRuntimeChanged = Boolean(
+    activeForComparison &&
+    (
+      activeForComparison.model !== desired.model ||
+      activeForComparison.reasoningEffort !== desired.reasoningEffort ||
+      activeForComparison.workspace !== desired.workspace ||
+      stableJson(runtimeCapabilityComparableConfig(activeForComparison.codexRunConfig)) !==
+        stableJson(runtimeCapabilityComparableConfig(desired.codexRunConfig))
+    )
+  );
+  let refreshedRuntimeCapabilitiesCurrent = runtimeCapabilitiesCurrent;
+  if (activeForComparison && hasLiveRuntime && !baseRuntimeChanged && !runtimeCapabilitiesCurrent) {
+    const refreshed = await refreshLiveRuntimeThread(activeForComparison);
+    if (refreshed) {
+      activeForComparison = refreshed;
+      refreshedRuntimeCapabilitiesCurrent = await sessionRuntimeCapabilitiesAreCurrent(refreshed, desired.userId);
+    }
+  }
   const changed =
-    !active ||
+    !activeForComparison ||
     !hasLiveRuntime ||
-    active.model !== desired.model ||
-    active.reasoningEffort !== desired.reasoningEffort ||
-    active.workspace !== desired.workspace ||
-    stableJson(active.codexRunConfig) !== stableJson(desired.codexRunConfig);
+    activeForComparison.model !== desired.model ||
+    activeForComparison.reasoningEffort !== desired.reasoningEffort ||
+    activeForComparison.workspace !== desired.workspace ||
+    stableJson(runtimeCapabilityComparableConfig(activeForComparison.codexRunConfig)) !==
+      stableJson(runtimeCapabilityComparableConfig(desired.codexRunConfig)) ||
+    !refreshedRuntimeCapabilitiesCurrent;
 
-  if (!changed && active) {
-    return active;
+  if (!changed && activeForComparison) {
+    return activeForComparison;
   }
 
   await assertChatAllowsNewSession({
@@ -6182,26 +6352,61 @@ app.post("/api/session", async (req: Request, res: Response) => {
     if (existingId) {
       const existing = await sessions.getOwned(existingId, currentUser.id, currentUser.organizationId);
       if (existing) {
-        const hasLiveRuntime =
-          liveRuntimeThreads.has(existing.sessionId) || Boolean(await restoreLiveRuntimeThread(existing));
+        let existingForComparison = existing;
+        let hasLiveRuntime = false;
+        if (liveRuntimeThreads.has(existing.sessionId)) {
+          hasLiveRuntime = true;
+        } else {
+          hasLiveRuntime = Boolean(await restoreLiveRuntimeThread(existing));
+          if (hasLiveRuntime) {
+            existingForComparison = await sessions.peek(existing.sessionId) ?? existing;
+          }
+        }
+        let runtimeCapabilitiesCurrent = await sessionRuntimeCapabilitiesAreCurrent(
+          existingForComparison,
+          currentUser.id
+        );
+        const hasSessionPatch = Boolean(
+          input.model ||
+          input.reasoning_effort ||
+          input.knowledge_set_ids ||
+          input.codex_run_config
+        );
+        if (hasLiveRuntime && !hasSessionPatch && !runtimeCapabilitiesCurrent) {
+          const refreshed = await refreshLiveRuntimeThread(existingForComparison);
+          if (refreshed) {
+            existingForComparison = refreshed;
+            runtimeCapabilitiesCurrent = await sessionRuntimeCapabilitiesAreCurrent(existingForComparison, currentUser.id);
+          }
+        }
         if (!hasLiveRuntime) {
           await sessions.remove(existing.sessionId);
           liveRuntimeThreads.delete(existing.sessionId);
-        } else if (input.model || input.reasoning_effort || input.knowledge_set_ids || input.codex_run_config) {
-          const nextSourceCodexRunConfig = input.codex_run_config ?? existing.codexRunConfig;
-          const modeHint = modeIdFromRunConfig(nextSourceCodexRunConfig) ?? modeIdFromRunConfig(existing.codexRunConfig);
+        } else if (
+          hasSessionPatch ||
+          !runtimeCapabilitiesCurrent
+        ) {
+          const nextSourceCodexRunConfig = withoutRuntimeCapabilityMetadata(
+            input.codex_run_config ?? existingForComparison.codexRunConfig
+          );
+          const modeHint =
+            modeIdFromRunConfig(nextSourceCodexRunConfig) ?? modeIdFromRunConfig(existingForComparison.codexRunConfig);
 
-          let workspace = existing.workspace;
+          let workspace = existingForComparison.workspace;
           let modeId = modeHint;
           let runtimeProfile: PortalRuntimeOptionRunProfile | undefined;
-          if (existing.threadId) {
+          if (existingForComparison.threadId) {
             const selection = await resolveModeSelection({
               currentUser,
               modeHint
             });
             modeId = selection.modeId;
             runtimeProfile = selection.runtimeProfile;
-            const ownedThread = await threads.getOwned(existing.threadId, currentUser.id, currentUser.organizationId);
+            const ownedThread = await threads.getOwned(
+              existingForComparison.threadId,
+              currentUser.id,
+              currentUser.organizationId
+            );
             workspace =
               trimOrUndefined(ownedThread?.workspace) ||
               trimOrUndefined(workspace) ||
@@ -6209,12 +6414,12 @@ app.post("/api/session", async (req: Request, res: Response) => {
                 selection.workspaceRootPath,
                 currentUser.organizationSlug ?? currentUser.organizationId,
                 currentUser.id,
-                existing.threadId,
+                existingForComparison.threadId,
                 ownedThread?.createdAt
               );
             await fs.mkdir(workspace, { recursive: true });
             if (ownedThread && trimOrUndefined(ownedThread.workspace) !== workspace) {
-              await threads.update(existing.threadId, { workspace });
+              await threads.update(existingForComparison.threadId, { workspace });
             }
           } else if (input.codex_run_config || !workspace || !modeId) {
             const allocated = await allocateDetachedSessionWorkspacePath({
@@ -6259,31 +6464,37 @@ app.post("/api/session", async (req: Request, res: Response) => {
             codexRunConfig: normalizedSourceCodexRunConfig
           });
           const runtimeCodexRunConfig =
-            existing.threadId && trimOrUndefined(workspace)
-              ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existing.threadId, workspace)
+            existingForComparison.threadId && trimOrUndefined(workspace)
+              ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existingForComparison.threadId, workspace)
               : nextCodexRunConfig;
           const materializedCodexHome = await materializeCodexHomeForRunConfig({
-            scopeId: existing.threadId ? `thread-${existing.threadId}` : `session-${existing.sessionId}`,
+            scopeId: existingForComparison.threadId
+              ? `thread-${existingForComparison.threadId}`
+              : `session-${existingForComparison.sessionId}`,
             codexRunConfig: runtimeCodexRunConfig
           });
-          if (existing.threadId && trimOrUndefined(workspace)) {
+          if (existingForComparison.threadId && trimOrUndefined(workspace)) {
             await fs.mkdir(getThreadWorkspaceUploadDir(workspace), { recursive: true });
           }
           await assertChatAllowsNewSession({
             currentUser,
-            model: (input.model || existing.model).trim(),
-            sessionId: existing.sessionId,
-            threadId: existing.threadId ?? undefined,
+            model: (input.model || existingForComparison.model).trim(),
+            sessionId: existingForComparison.sessionId,
+            threadId: existingForComparison.threadId ?? undefined,
             featureType: "chat"
           });
-          const crestMcpConfig = await buildCrestMcpRuntimeConfigForUser(currentUser.id, workspace);
+          const runtimeLaunch = await resolveRuntimeLaunchConfig({
+            userId: currentUser.id,
+            workspace,
+            codexRunConfig: materializedCodexHome.codexRunConfig
+          });
           const sessionRuntime = createRuntimeForProviderSnapshot(
             await resolveProviderSnapshot({
-              existingSnapshot: existing.providerSnapshot,
-              fallbackToLocalAuth: !existing.providerSnapshot
+              existingSnapshot: existingForComparison.providerSnapshot,
+              fallbackToLocalAuth: !existingForComparison.providerSnapshot
             }),
             {
-              configOverrides: crestMcpConfig,
+              configOverrides: runtimeLaunch.configOverrides,
               envOverrides: {
                 CODEX_HOME: materializedCodexHome.codexHome
               }
@@ -6292,12 +6503,12 @@ app.post("/api/session", async (req: Request, res: Response) => {
           const updated = await replaceLiveRuntimeSession({
             runtime: sessionRuntime,
             liveRuntimeThreads,
-            sessionId: existing.sessionId,
-            threadId: existing.threadId,
-            model: (input.model || existing.model).trim(),
-            reasoningEffort: input.reasoning_effort || existing.reasoningEffort,
+            sessionId: existingForComparison.sessionId,
+            threadId: existingForComparison.threadId,
+            model: (input.model || existingForComparison.model).trim(),
+            reasoningEffort: input.reasoning_effort || existingForComparison.reasoningEffort,
             workspace,
-            codexRunConfig: materializedCodexHome.codexRunConfig,
+            codexRunConfig: runtimeLaunch.codexRunConfig,
             persist: async (payload) =>
               sessions.update(existingId, {
                 model: payload.model,
@@ -6305,13 +6516,13 @@ app.post("/api/session", async (req: Request, res: Response) => {
                 workspace: payload.workspace,
                 codexRunConfig: payload.codexRunConfig,
                 codexThreadId: payload.codexThreadId,
-                providerSnapshot: existing.providerSnapshot ?? createLocalAuthProviderSnapshot()
+                providerSnapshot: existingForComparison.providerSnapshot ?? createLocalAuthProviderSnapshot()
               })
           });
           res.json(sessionOut(updated));
           return;
         } else {
-          res.json(sessionOut(existing));
+          res.json(sessionOut(existingForComparison));
           return;
         }
       }

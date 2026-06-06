@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { streamRuntimeCompletionWithBestEffortUsage } from "./live-runtime-session.js";
+import {
+  streamRuntimeCompletionWithBestEffortUsage,
+  stripInternalRunConfigMetadata
+} from "./live-runtime-session.js";
 
 async function* events(items: Array<Record<string, unknown>>) {
   for (const item of items) {
@@ -74,6 +77,22 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
     expect(onDone).toHaveBeenCalledWith({
       answer: "第一段第二段",
       usage: undefined
+    });
+  });
+});
+
+describe("stripInternalRunConfigMetadata", () => {
+  it("removes runtime capability metadata before starting Codex", () => {
+    expect(stripInternalRunConfigMetadata({
+      mode: "default",
+      _agentStudioRuntimeCapabilities: {
+        crestCrm: {
+          enabled: true,
+          proxyTokenExpiresAt: "2026-06-06T16:00:00.000Z"
+        }
+      }
+    })).toEqual({
+      mode: "default"
     });
   });
 });

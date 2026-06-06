@@ -38,12 +38,24 @@ type ProxyTokenEntry = {
 };
 
 const proxyTokens = new Map<string, ProxyTokenEntry>();
+export const CREST_PROXY_TOKEN_TTL_MS = 8 * 60 * 60_000;
 
-export function issueCrestProxyToken(userId: string, ttlMs = 8 * 60 * 60_000): string {
+export function issueCrestProxyTokenLease(
+  userId: string,
+  ttlMs = CREST_PROXY_TOKEN_TTL_MS
+): { token: string; expiresAt: string } {
   gcProxyTokens();
+  const expiresAt = Date.now() + ttlMs;
   const token = randomBytes(32).toString("base64url");
-  proxyTokens.set(token, { userId, expiresAt: Date.now() + ttlMs });
-  return token;
+  proxyTokens.set(token, { userId, expiresAt });
+  return {
+    token,
+    expiresAt: new Date(expiresAt).toISOString()
+  };
+}
+
+export function issueCrestProxyToken(userId: string, ttlMs = CREST_PROXY_TOKEN_TTL_MS): string {
+  return issueCrestProxyTokenLease(userId, ttlMs).token;
 }
 
 function trimOrUndefined(value: unknown): string | undefined {

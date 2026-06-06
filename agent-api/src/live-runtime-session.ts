@@ -134,6 +134,7 @@ export function stripInternalRunConfigMetadata(
   delete next._agentStudioKnowledgeSets;
   delete next._agentStudioCodexHome;
   delete next._agentStudioSkillActivationPrompts;
+  delete next._agentStudioRuntimeCapabilities;
   delete next.enabledSkills;
   return next;
 }
