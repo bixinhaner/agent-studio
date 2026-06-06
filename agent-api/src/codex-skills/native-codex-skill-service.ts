@@ -191,9 +191,14 @@ export class NativeCodexSkillService {
       }
     }
 
+    const systemSkillsRoot = path.join(sessionSkillsRoot, ".system");
+    await fs.mkdir(systemSkillsRoot, { recursive: true });
+
     // Codex auto-installs built-in .system skills into writable CODEX_HOME roots.
-    // Lock this session skills root so only Agent Studio's selected links are visible.
+    // Keep the parent locked so custom skills still come only from Agent Studio,
+    // while leaving .system writable for the Codex runtime's own bootstrap.
     await chmodDirectories(sessionSkillsRoot, 0o555);
+    await chmodDirectories(systemSkillsRoot, 0o755);
     return sessionHome;
   }
 

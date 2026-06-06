@@ -1193,6 +1193,21 @@ function appendRuntimeAnswerPreview(
   return current;
 }
 
+function runtimeErrorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || "");
+}
+
+function isRecoverableCodexResumeError(error: unknown): boolean {
+  return /thread\/resume failed|no rollout found for thread id/i.test(runtimeErrorDetail(error));
+}
+
+function crestRuntimeEventHasSideEffect(event: { delta?: string; text?: string; raw?: unknown }): boolean {
+  const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  const itemType = typeof item?.type === "string" ? item.type : "";
+  return Boolean(event.delta || itemType === "agent_message" || itemType === "mcp_tool_call");
+}
+
 async function getDeploymentDrainReason(): Promise<string | undefined> {
   try {
     const raw = await fs.readFile(appConfig.deployDrainFile, "utf8");
@@ -2539,89 +2554,127 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(
-        liveThread,
-        withSkillActivationPrompts(
-          crestRuntimePrompt(input, preparedAttachments),
-          currentSession.codexRunConfig
-        )
-      ),
-      onEvent(event) {
-        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
-        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
-        if (codexThreadId) {
-          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
-            currentSession = updated;
-          });
-        }
-        emitCrestRuntimeEvent(res, event);
-      },
-      async onDone(payload) {
-        let generatedArtifacts: ThreadArtifactRecord[] = [];
-        try {
-          generatedArtifacts = await registerGeneratedArtifactsForSession({
-            currentUser,
-            session: currentSession,
-            changes: runtimeFileChanges,
-            answerText: payload.answer,
-            changedAfter: artifactScanStartedAt
-          });
-          if (generatedArtifacts.length > 0) {
-            sendSSE(res, "artifacts", {
-              threadId: thread.id,
-              sessionId: currentSession.sessionId,
-              artifacts: generatedArtifacts.map(artifactOut)
+    let runtimeSideEffectStarted = false;
+    const runRuntimeCompletion = async () => {
+      await streamRuntimeCompletionWithBestEffortUsage({
+        events: runtime.runStreamed(
+          liveThread,
+          withSkillActivationPrompts(
+            crestRuntimePrompt(input, preparedAttachments),
+            currentSession.codexRunConfig
+          )
+        ),
+        onEvent(event) {
+          runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+          if (crestRuntimeEventHasSideEffect(event)) {
+            runtimeSideEffectStarted = true;
+          }
+          const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+          if (codexThreadId) {
+            void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+              currentSession = updated;
             });
           }
-        } catch (error) {
-          console.warn("crest chat artifact registration failed", {
+          emitCrestRuntimeEvent(res, event);
+        },
+        async onDone(payload) {
+          let generatedArtifacts: ThreadArtifactRecord[] = [];
+          try {
+            generatedArtifacts = await registerGeneratedArtifactsForSession({
+              currentUser,
+              session: currentSession,
+              changes: runtimeFileChanges,
+              answerText: payload.answer,
+              changedAfter: artifactScanStartedAt
+            });
+            if (generatedArtifacts.length > 0) {
+              sendSSE(res, "artifacts", {
+                threadId: thread.id,
+                sessionId: currentSession.sessionId,
+                artifacts: generatedArtifacts.map(artifactOut)
+              });
+            }
+          } catch (error) {
+            console.warn("crest chat artifact registration failed", {
+              threadId: thread.id,
+              detail: error instanceof Error ? error.message : String(error)
+            });
+            sendSSE(res, "artifact_warning", {
+              detail: "Generated files could not be registered for Crest download"
+            });
+          }
+          const output = payload.answer.trim() || "(无输出)";
+          await threads.appendMessage(thread.id, {
+            parentId: userMessageId,
+            message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
+              conversationId: input.conversationId,
+              sessionId: currentSession.sessionId,
+              artifacts: generatedArtifacts.map(artifactOut)
+            }),
+            runConfig: { channel: "crest", conversationId: input.conversationId }
+          });
+          sendSSE(res, "done", {
+            output,
+            durationMs: 0,
+            threadId: thread.id,
+            sessionId: currentSession.sessionId
+          });
+        },
+        async recordUsage(usage) {
+          await usageIngestion.record({
+            organizationId: currentUser.organizationId,
+            userId: currentUser.id,
+            threadId: thread.id,
+            sessionId: currentSession.sessionId,
+            model: currentSession.model,
+            featureType: "chat",
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            outputTokens: usage.outputTokens,
+            resultStatus: "success",
+            metadata: { source: "crest_chat_stream" }
+          });
+        },
+        onTelemetryError(error) {
+          console.warn("crest chat usage telemetry failed", {
             threadId: thread.id,
             detail: error instanceof Error ? error.message : String(error)
           });
-          sendSSE(res, "artifact_warning", {
-            detail: "Generated files could not be registered for Crest download"
-          });
         }
-        const output = payload.answer.trim() || "(无输出)";
-        await threads.appendMessage(thread.id, {
-          parentId: userMessageId,
-          message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
-            conversationId: input.conversationId,
-            sessionId: currentSession.sessionId,
-            artifacts: generatedArtifacts.map(artifactOut)
-          }),
-          runConfig: { channel: "crest", conversationId: input.conversationId }
-        });
-        sendSSE(res, "done", {
-          output,
-          durationMs: 0,
-          threadId: thread.id,
-          sessionId: currentSession.sessionId
-        });
-      },
-      async recordUsage(usage) {
-        await usageIngestion.record({
-          organizationId: currentUser.organizationId,
-          userId: currentUser.id,
-          threadId: thread.id,
-          sessionId: currentSession.sessionId,
-          model: currentSession.model,
-          featureType: "chat",
-          inputTokens: usage.inputTokens,
-          cachedInputTokens: usage.cachedInputTokens,
-          outputTokens: usage.outputTokens,
-          resultStatus: "success",
-          metadata: { source: "crest_chat_stream" }
-        });
-      },
-      onTelemetryError(error) {
-        console.warn("crest chat usage telemetry failed", {
-          threadId: thread.id,
-          detail: error instanceof Error ? error.message : String(error)
-        });
+      });
+    };
+
+    try {
+      await runRuntimeCompletion();
+    } catch (error) {
+      const recoverable = isRecoverableCodexResumeError(error);
+      console.warn("crest chat runtime failed", {
+        threadId: thread.id,
+        sessionId: currentSession.sessionId,
+        codexThreadId: currentSession.codexThreadId,
+        recoverable,
+        runtimeSideEffectStarted,
+        detail: runtimeErrorDetail(error)
+      });
+      if (!recoverable || runtimeSideEffectStarted) {
+        throw error;
       }
-    });
+      sendSSE(res, "thought", {
+        text: "检测到底层运行时会话已过期，正在重建运行环境并重试本轮请求。"
+      });
+      const replacement = await replaceCrestLiveRuntimeSession({
+        currentUser,
+        session: currentSession,
+        threadId: thread.id,
+        failedCodexThreadId: currentSession.codexThreadId,
+        error
+      });
+      currentSession = replacement.session;
+      liveThread = replacement.liveThread;
+      runtimeSideEffectStarted = false;
+      runtimeFileChanges.length = 0;
+      await runRuntimeCompletion();
+    }
 
   } catch (error) {
     sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
@@ -3102,6 +3155,69 @@ async function createSession(options: SessionOptions, threadId?: string) {
   });
   liveRuntimeThreads.set(session.sessionId, started.liveThread);
   return session;
+}
+
+async function replaceCrestLiveRuntimeSession(input: {
+  currentUser: CurrentActor;
+  session: SessionRecord;
+  threadId: string;
+  failedCodexThreadId?: string;
+  error: unknown;
+}): Promise<{ session: SessionRecord; liveThread: LiveRuntimeThread }> {
+  const userId = trimOrUndefined(input.session.userId) ?? input.currentUser.id;
+  const codexRunConfig = withoutRuntimeCapabilityMetadata(
+    ensureThreadUploadDirsInRunConfig(input.session.codexRunConfig, input.threadId, input.session.workspace)
+  );
+  await fs.mkdir(getThreadWorkspaceUploadDir(input.session.workspace), { recursive: true });
+  const materializedCodexHome = await materializeCodexHomeForRunConfig({
+    scopeId: `thread-${input.threadId}`,
+    codexRunConfig
+  });
+  const providerSnapshot = await resolveProviderSnapshot({
+    existingSnapshot: input.session.providerSnapshot,
+    fallbackToLocalAuth: !input.session.providerSnapshot
+  });
+  const runtimeLaunch = await resolveRuntimeLaunchConfig({
+    userId,
+    workspace: input.session.workspace,
+    codexRunConfig: materializedCodexHome.codexRunConfig
+  });
+  const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
+    configOverrides: runtimeLaunch.configOverrides,
+    envOverrides: {
+      CODEX_HOME: materializedCodexHome.codexHome
+    }
+  });
+  console.warn("crest chat replacing stale codex runtime session", {
+    threadId: input.threadId,
+    sessionId: input.session.sessionId,
+    failedCodexThreadId: input.failedCodexThreadId,
+    detail: runtimeErrorDetail(input.error)
+  });
+  const updated = await replaceLiveRuntimeSession({
+    runtime: sessionRuntime,
+    liveRuntimeThreads,
+    sessionId: input.session.sessionId,
+    threadId: input.threadId,
+    model: input.session.model,
+    reasoningEffort: input.session.reasoningEffort,
+    workspace: input.session.workspace,
+    codexRunConfig: runtimeLaunch.codexRunConfig,
+    persist: async (payload) =>
+      sessions.update(input.session.sessionId, {
+        model: payload.model,
+        reasoningEffort: payload.reasoningEffort,
+        workspace: payload.workspace,
+        codexRunConfig: payload.codexRunConfig,
+        codexThreadId: payload.codexThreadId,
+        providerSnapshot
+      })
+  });
+  const liveThread = liveRuntimeThreads.get(updated.sessionId);
+  if (!liveThread) {
+    throw new Error("Replacement Agent Studio runtime session is not available");
+  }
+  return { session: updated, liveThread };
 }
 
 async function resolveKnowledgeSetRunConfig(input: {
