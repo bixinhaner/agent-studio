@@ -190,6 +190,8 @@ type ThreadMessagesOut = {
     parent_id?: string | null;
     message: unknown;
     run_config?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
   }>;
   feedback?: ThreadFeedbackOut[];
 };
@@ -1068,6 +1070,41 @@ function formatUserLocalDateTime(value?: string | null): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(parsed);
+}
+
+function coerceDate(value: unknown): Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isSameLocalDate(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function formatPortalMessageTime(value: unknown, referenceDate = new Date()): { label: string; fullLabel: string; iso: string } | null {
+  const date = coerceDate(value);
+  if (!date) return null;
+
+  const label = new Intl.DateTimeFormat(undefined, {
+    ...(isSameLocalDate(date, referenceDate) ? {} : { dateStyle: "medium" as const }),
+    timeStyle: "short"
+  }).format(date);
+  const fullLabel = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+
+  return {
+    label,
+    fullLabel,
+    iso: date.toISOString()
+  };
 }
 
 function isSubscriptionAccessBlocked(status: PortalSubscriptionStatus | null | undefined): status is PortalSubscriptionStatus {
@@ -2683,18 +2720,14 @@ function sanitizeMessageForPersistence(message: unknown): unknown {
   };
 }
 
-function reviveMessage(message: unknown): unknown {
+function reviveMessage(message: unknown, persistedCreatedAt?: string | null): unknown {
   const obj = asRecord(message);
   if (!obj) return message;
 
   const role = typeof obj.role === "string" ? obj.role : "";
   const revived: Record<string, unknown> = { ...obj };
 
-  if (typeof revived.createdAt === "string" || typeof revived.createdAt === "number") {
-    revived.createdAt = new Date(revived.createdAt);
-  } else if (!(revived.createdAt instanceof Date)) {
-    revived.createdAt = new Date();
-  }
+  revived.createdAt = coerceDate(persistedCreatedAt) ?? coerceDate(revived.createdAt) ?? new Date();
 
   if (!Array.isArray(revived.content)) {
     if (typeof revived.content === "string" && revived.content.trim()) {
@@ -3712,6 +3745,24 @@ const ThreadPublicShareTurnCheckbox: FC = () => {
   );
 };
 
+const MessageTimestamp: FC = () => {
+  const createdAt = useAuiState((s) => (s.message as ThreadMessage & { createdAt?: unknown }).createdAt);
+  const timestamp = useMemo(() => formatPortalMessageTime(createdAt), [createdAt]);
+
+  if (!timestamp) return null;
+
+  return (
+    <time
+      className="portal-message-timestamp"
+      dateTime={timestamp.iso}
+      title={timestamp.fullLabel}
+      aria-label={`Sent ${timestamp.fullLabel}`}
+    >
+      {timestamp.label}
+    </time>
+  );
+};
+
 const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: ReactNode }> = ({ tone, children }) => {
   const messageId = useAuiState((s) => s.message.id);
   const selection = useContext(ThreadPublicShareSelectionContext);
@@ -3736,6 +3787,7 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
     >
       {selectable ? <ThreadPublicShareTurnCheckbox /> : null}
       {children}
+      <MessageTimestamp />
     </div>
   );
 };
@@ -5044,7 +5096,7 @@ const AgentRuntimeAdapterProvider: FC<
         const repository: ExportedMessageRepository = {
           headId: out.head_id ?? null,
           messages: (out.messages || []).map((item) => {
-            const revived = reviveMessage(item.message);
+            const revived = reviveMessage(item.message, item.created_at);
             const messageId = typeof asRecord(revived)?.id === "string" ? String(asRecord(revived)?.id).trim() : "";
             return {
               parentId: item.parent_id ?? null,

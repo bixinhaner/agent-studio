@@ -33,6 +33,7 @@ export type ThreadPublicShareSnapshotProcessRow = {
 export type ThreadPublicShareSnapshotMessage = {
   id: string;
   role: "user" | "assistant";
+  createdAt?: string;
   parts: ThreadPublicShareSnapshotPart[];
   processRows?: ThreadPublicShareSnapshotProcessRow[];
 };
@@ -154,6 +155,13 @@ function sanitizeProcessDetail(value: unknown): string | undefined {
 function sanitizeProcessAt(value: unknown): string | undefined {
   const at = asTrimmedString(value);
   return at || undefined;
+}
+
+function sanitizeMessageAt(value: unknown): string | undefined {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function stringifyProcessValue(value: unknown): string {
@@ -320,6 +328,7 @@ function parseShareableMessages(items: StoredMessageItem[]): ParsedShareableMess
     parsed.push({
       id: asTrimmedString(message.id) || `message-${index + 1}`,
       role,
+      createdAt: sanitizeMessageAt(item.createdAt) ?? sanitizeMessageAt(message.createdAt) ?? sanitizeMessageAt(message.created_at),
       parts,
       ...(processRows.length > 0 ? { processRows } : {})
     });
@@ -497,6 +506,7 @@ function normalizeSnapshotMessage(value: unknown, index: number): ThreadPublicSh
   return {
     id: asTrimmedString(message.id) || `message-${index + 1}`,
     role,
+    createdAt: sanitizeMessageAt(message.createdAt) ?? sanitizeMessageAt(message.created_at),
     parts,
     ...(processRows.length > 0 ? { processRows } : {})
   };

@@ -21,6 +21,7 @@ export type PublicShareSnapshotProcessRow = {
 export type PublicShareSnapshotMessage = {
   id: string;
   role: "user" | "assistant";
+  createdAt?: string;
   parts: PublicShareSnapshotPart[];
   processRows?: PublicShareSnapshotProcessRow[];
 };

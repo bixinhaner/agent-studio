@@ -1410,7 +1410,9 @@ const ensureThreadSessionSchema = z.object({
 const appendMessageSchema = z.object({
   parent_id: z.string().nullable().optional(),
   message: z.unknown(),
-  run_config: z.record(z.unknown()).optional()
+  run_config: z.record(z.unknown()).optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional()
 });
 
 const replaceMessagesSchema = z.object({
@@ -6915,7 +6917,9 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       messages: repository.messages.map((item) => ({
         parent_id: item.parentId,
         message: item.message,
-        run_config: item.runConfig
+        run_config: item.runConfig,
+        created_at: item.createdAt,
+        updated_at: item.updatedAt
       })),
       feedback: thread.feedback.map(feedbackOut)
     });
@@ -6979,7 +6983,9 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
     const updated = await threads.appendMessage(threadId, {
       parentId: input.parent_id ?? null,
       message: input.message,
-      runConfig: input.run_config
+      runConfig: input.run_config,
+      createdAt: input.created_at,
+      updatedAt: input.updated_at
     });
     res.json({ ok: true, head_id: updated.headId ?? null });
   } catch (error) {
@@ -7003,7 +7009,9 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       messages: input.messages.map((item) => ({
         parentId: item.parent_id ?? null,
         message: item.message,
-        runConfig: item.run_config
+        runConfig: item.run_config,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
       }))
     });
     res.json({ ok: true });

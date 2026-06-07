@@ -9,6 +9,8 @@ export type StoredMessageItem = {
   parentId: string | null;
   message: unknown;
   runConfig?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ThreadFeedback = {
@@ -173,6 +175,25 @@ function toDate(value: string | undefined): Date | undefined {
   return parsed;
 }
 
+function messageDate(message: unknown, key: "createdAt" | "updatedAt"): Date | undefined {
+  const obj = asRecord(message);
+  if (!obj) return undefined;
+  const snakeKey = key === "createdAt" ? "created_at" : "updated_at";
+  const value = obj[key] ?? obj[snakeKey];
+  if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) return undefined;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed;
+}
+
+function resolvedMessageCreatedAt(item: StoredMessageItem, fallback?: Date): Date {
+  return toDate(item.createdAt) ?? messageDate(item.message, "createdAt") ?? fallback ?? new Date();
+}
+
+function resolvedMessageUpdatedAt(item: StoredMessageItem, createdAt: Date): Date {
+  return toDate(item.updatedAt) ?? messageDate(item.message, "updatedAt") ?? createdAt;
+}
+
 function normalizeFeedback(value: unknown): ThreadFeedback[] {
   if (!Array.isArray(value)) return [];
   const items: ThreadFeedback[] = [];
@@ -207,7 +228,9 @@ function mapMessageRow(row: MessageRow): StoredMessageItem {
   return {
     parentId: row.parentId ?? null,
     message: row.content,
-    runConfig: asRecord(row.runConfig) ?? undefined
+    runConfig: asRecord(row.runConfig) ?? undefined,
+    createdAt: toIsoString(row.createdAt),
+    updatedAt: toIsoString(row.updatedAt)
   };
 }
 
@@ -321,6 +344,7 @@ export class ThreadRepository {
       });
 
       for (const [index, item] of record.messages.entries()) {
+        const createdAt = resolvedMessageCreatedAt(item, toDate(record.createdAt));
         await tx.message.create({
           data: {
             id: randomUUID(),
@@ -331,8 +355,8 @@ export class ThreadRepository {
             parentId: item.parentId,
             runConfig: item.runConfig ?? null,
             position: index,
-            createdAt: toDate(record.createdAt),
-            updatedAt: toDate(record.updatedAt)
+            createdAt,
+            updatedAt: resolvedMessageUpdatedAt(item, createdAt)
           }
         });
       }
@@ -430,6 +454,7 @@ export class ThreadRepository {
             }
           });
         } else {
+          const createdAt = resolvedMessageCreatedAt(item);
           await tx.message.create({
             data: {
               id: randomUUID(),
@@ -440,8 +465,8 @@ export class ThreadRepository {
               parentId: item.parentId,
               runConfig: item.runConfig ?? null,
               position,
-              createdAt: new Date(),
-              updatedAt: new Date()
+              createdAt,
+              updatedAt: resolvedMessageUpdatedAt(item, createdAt)
             }
           });
         }
@@ -453,6 +478,7 @@ export class ThreadRepository {
           }
         });
       } else {
+        const createdAt = resolvedMessageCreatedAt(item);
         await tx.message.create({
           data: {
             id: randomUUID(),
@@ -463,8 +489,8 @@ export class ThreadRepository {
             parentId: item.parentId,
             runConfig: item.runConfig ?? null,
             position,
-            createdAt: new Date(),
-            updatedAt: new Date()
+            createdAt,
+            updatedAt: resolvedMessageUpdatedAt(item, createdAt)
           }
         });
         await tx.thread.update({
@@ -490,6 +516,7 @@ export class ThreadRepository {
       await tx.message.deleteMany({ where: { threadId } });
       const externalIds = persistedExternalIds(repository.messages);
       for (const [index, item] of repository.messages.entries()) {
+        const createdAt = resolvedMessageCreatedAt(item);
         await tx.message.create({
           data: {
             id: randomUUID(),
@@ -500,8 +527,8 @@ export class ThreadRepository {
             parentId: item.parentId,
             runConfig: item.runConfig ?? null,
             position: index,
-            createdAt: new Date(),
-            updatedAt: new Date()
+            createdAt,
+            updatedAt: resolvedMessageUpdatedAt(item, createdAt)
           }
         });
       }

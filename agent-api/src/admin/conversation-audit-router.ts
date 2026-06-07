@@ -1157,7 +1157,7 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
     attachments: extractMessageAttachments(threadId, item.message, id),
     ...(processRows.length > 0 ? { processRows } : {}),
     parentId: item.parentId ?? null,
-    createdAt: extractMessageCreatedAt(item.message),
+    createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(item.message),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
   };
 }

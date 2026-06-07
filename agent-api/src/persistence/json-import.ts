@@ -30,7 +30,9 @@ function asMessageList(value: unknown): ThreadRecord["messages"] {
     items.push({
       parentId: asString(obj.parentId) ?? null,
       message: obj.message,
-      runConfig: asRecord(obj.runConfig ?? undefined) ?? undefined
+      runConfig: asRecord(obj.runConfig ?? undefined) ?? undefined,
+      createdAt: asString(obj.createdAt),
+      updatedAt: asString(obj.updatedAt)
     });
   }
   return items;

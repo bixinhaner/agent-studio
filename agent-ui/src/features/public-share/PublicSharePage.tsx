@@ -314,6 +314,17 @@ function formatProcessRowTime(value?: string): string {
   return formatLocalDateTime(value);
 }
 
+function PublicShareMessageTime(props: { value?: string }) {
+  if (!props.value) return null;
+  const label = formatLocalDateTime(props.value);
+  if (!label) return null;
+  return (
+    <time className="public-share-message-time" dateTime={props.value} title={label}>
+      {label}
+    </time>
+  );
+}
+
 function processRowKindLabel(kind: string): string {
   if (kind === "reasoning") return "Reasoning";
   if (kind === "tool") return "Tool";
@@ -331,6 +342,7 @@ function UserMessageBlock(props: { message: PublicShareSnapshotMessage; token: s
     <section className="public-share-message public-share-message-user">
       <div className="public-share-message-head">
         <span className="public-share-message-role">{props.userLabel}</span>
+        <PublicShareMessageTime value={props.message.createdAt} />
       </div>
       <div className="public-share-message-body">
         <PublicShareMarkdown text={text} token={props.token} />
@@ -348,6 +360,7 @@ function AssistantMessageBlock(props: { message: PublicShareSnapshotMessage; tok
     <section className="public-share-message public-share-message-assistant">
       <div className="public-share-message-head">
         <span className="public-share-message-role">{props.assistantLabel}</span>
+        <PublicShareMessageTime value={props.message.createdAt} />
       </div>
 
       {processRows.length > 0 ? (

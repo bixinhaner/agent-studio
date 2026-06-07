@@ -36,3 +36,35 @@
   `cd /usr/local/agent-studio/agent-api && DATABASE_URL=$(grep -m1 "^DATABASE_URL=" .env | sed "s/^DATABASE_URL=//; s/^\"//; s/\"$//") && DATABASE_URL=$(printf "%s" "$DATABASE_URL" | sed "s/[?].*$//") && psql "$DATABASE_URL"`
 - 生产服务由 PM2 管理，应用名为 `agent-studio-api`。
 - Caddy 配置由部署脚本渲染和 reload，除非用户明确要求，不要手动改 `/etc/caddy/Caddyfile`。
+
+
+## Git 与提交规则
+
+### Commit 格式
+
+```
+<type>(<scope>): <中文一句话概述>
+
+例:
+  fix(scope): 修复用户启用后看不到负责客户/商机/联系人
+  feat(boq): 增加价格管理 BOQ 可销售清单
+  hotfix(login): 修复生产登录 CORS 配置遗漏
+  ux(account): 重组客户详情页 SAP 信息区
+  docs(contributing): 补充 GitFlow 分支策略
+```
+
+`type` 可选：`feat` / `fix` / `hotfix` / `ux` / `ops` / `data` / `docs` / `chore` / `perm` / `test`
+
+提交信息强制规则：
+- 标题描述必须使用中文；`type`、`scope`、文件路径、命令、配置键等约定字段可保留英文
+- 每次 commit 都必须写 body，并按序号描述修改功能和内容
+- 序号顺序按影响面组织：业务/用户可见变化 → API/数据/权限 → 前端/UI → 运维/文档/测试 → 验证结果
+- 每条序号写清“为什么”和“对用户/生产的影响”，避免只写“修改代码”
+
+Commit body 模板：
+
+```text
+1. <功能或模块>：<具体改动、为什么这样改、对用户或生产的影响>
+2. <功能或模块>：<具体改动、为什么这样改、对用户或生产的影响>
+3. 验证：<执行的检查、测试、部署或未执行原因>
+```
