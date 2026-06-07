@@ -20,6 +20,7 @@ import {
   AttachmentPrimitive,
   AssistantRuntimeProvider,
   ComposerPrimitive,
+  MessagePrimitive,
   RuntimeAdapterProvider,
   ThreadPrimitive,
   ThreadListPrimitive,
@@ -3935,7 +3936,14 @@ const ThreadPublicShareMessageShell: FC<{ tone: "user" | "assistant"; children: 
 const AgentUserMessage: FC = () => {
   return (
     <ThreadPublicShareMessageShell tone="user">
-      <UserMessage />
+      <MessagePrimitive.If hasAttachments>
+        <div className="aui-user-message-attachments portal-user-message-download-attachments">
+          <MessagePrimitive.Attachments components={UPLOAD_AWARE_ATTACHMENT_COMPONENTS} />
+        </div>
+      </MessagePrimitive.If>
+      <div className="portal-user-message-default-with-hidden-attachments">
+        <UserMessage />
+      </div>
     </ThreadPublicShareMessageShell>
   );
 };

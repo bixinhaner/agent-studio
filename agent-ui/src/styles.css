@@ -1763,6 +1763,20 @@ body.access-request-route #root {
   justify-self: end;
 }
 
+.thread-wrap .portal-user-message-download-attachments {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0 0 auto;
+}
+
+.thread-wrap .portal-user-message-default-with-hidden-attachments .aui-user-message-attachments {
+  display: none;
+}
+
+.thread-wrap .portal-user-message-default-with-hidden-attachments .aui-user-message-root {
+  margin-top: 0;
+}
+
 .thread-wrap .aui-composer-attachments {
   flex-wrap: wrap;
   gap: 8px;
