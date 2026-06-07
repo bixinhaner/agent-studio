@@ -1444,6 +1444,10 @@ const threadFileContentQuerySchema = z
     message: "Either relative_path or path is required"
   });
 
+const attachmentContentQuerySchema = z.object({
+  relative_path: z.string().trim().min(1)
+});
+
 const artifactResolveQuerySchema = z.object({
   path: z.string().trim().min(1)
 });
@@ -5296,8 +5300,25 @@ function normalizeMimeType(value: string): string {
   return "application/octet-stream";
 }
 
+function createUploadAttachmentId(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
 function normalizeRelativePath(value: string): string {
   return value.split(path.sep).join("/");
+}
+
+function attachmentIdFromRelativePath(value: string): string {
+  const normalized = normalizeRelativePath(value).replace(/^\/+/, "");
+  const fileName = path.posix.basename(normalized);
+  const match = fileName.match(/^\d+-([a-f0-9]{12})-/i);
+  return match?.[1]?.toLowerCase() ?? "";
+}
+
+function uploadDisplayNameFromStoredPath(filePath: string): string {
+  const fileName = path.basename(filePath);
+  const match = fileName.match(/^\d+-[a-f0-9]{12}-(.+)$/i);
+  return sanitizeUploadFilename(match?.[1] || fileName);
 }
 
 function isPathInside(parentDir: string, candidatePath: string): boolean {
@@ -6271,7 +6292,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
     await fs.mkdir(uploadDir, { recursive: true });
 
-    const id = randomUUID().replace(/-/g, "").slice(0, 12);
+    const id = createUploadAttachmentId();
     const storedName = `${Date.now()}-${id}-${safeName}`;
     const absolutePath = path.join(uploadDir, storedName);
     await fs.writeFile(absolutePath, payload);
@@ -6279,6 +6300,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     const relativePath = normalizeRelativePath(path.relative(uploadDir, absolutePath));
     res.json({
       attachment: {
+        id,
         name: safeName,
         mime_type: mimeType,
         bytes: payload.length,
@@ -6289,6 +6311,75 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to upload attachment";
+    res.status(400).json({ detail });
+  }
+});
+
+app.get("/api/threads/:threadId/attachments/:attachmentId/content", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const attachmentId = String(req.params.attachmentId || "").trim().toLowerCase();
+    if (!threadId) {
+      res.status(400).json({ detail: "threadId is required" });
+      return;
+    }
+    if (!/^[a-f0-9]{12}$/i.test(attachmentId)) {
+      res.status(400).json({ detail: "attachmentId is invalid" });
+      return;
+    }
+
+    const query = attachmentContentQuerySchema.parse({
+      relative_path: typeof req.query.relative_path === "string" ? req.query.relative_path : undefined
+    });
+
+    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    if (!thread) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+
+    if (isExternalActor(currentUser)) {
+      res.status(403).json({ detail: "External users cannot download source attachments" });
+      return;
+    }
+
+    if (attachmentIdFromRelativePath(query.relative_path) !== attachmentId) {
+      res.status(403).json({ detail: "Attachment id does not match the requested file" });
+      return;
+    }
+
+    const workspacePath = trimOrUndefined(thread.workspace);
+    if (!workspacePath) {
+      res.status(404).json({ detail: "Thread workspace does not exist" });
+      return;
+    }
+
+    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
+    const absolutePath = resolveThreadFileAbsolutePath({
+      workspacePath,
+      uploadDir,
+      relativePath: query.relative_path
+    });
+
+    const stat = await fs.stat(absolutePath).catch(() => null);
+    if (!stat || !stat.isFile()) {
+      res.status(404).json({ detail: "Attachment file does not exist" });
+      return;
+    }
+
+    const fileName = uploadDisplayNameFromStoredPath(absolutePath);
+    const ext = path.extname(fileName);
+    const fileBuffer = await fs.readFile(absolutePath);
+
+    res.setHeader("Cache-Control", "private, max-age=60");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.type(ext || "application/octet-stream");
+    res.status(200).send(fileBuffer);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to download attachment";
     res.status(400).json({ detail });
   }
 });

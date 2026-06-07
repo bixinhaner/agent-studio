@@ -59,6 +59,7 @@ import {
   ThumbsDownIcon,
   Trash2Icon,
   XIcon,
+  DownloadIcon,
   MoreHorizontalIcon,
   PackageIcon,
   ClipboardListIcon,
@@ -1260,12 +1261,15 @@ function guessAttachmentType(file: File): "image" | "document" | "file" {
 }
 
 type UploadedAttachmentMeta = {
+  id: string;
   name: string;
   path: string;
   relativePath: string;
   mimeType: string;
   size: number;
 };
+
+type UploadedAttachmentDownloadMeta = Omit<UploadedAttachmentMeta, "path">;
 
 type WorkspacePendingAttachment = PendingAttachment & {
   uploadError?: string;
@@ -1283,6 +1287,12 @@ function decodeMaybeUri(value: string): string {
   }
 }
 
+function uploadAttachmentIdFromRelativePath(value: string): string {
+  const fileName = value.trim().replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+  const match = fileName.match(/^\d+-([a-f0-9]{12})-/i);
+  return match?.[1]?.toLowerCase() ?? "";
+}
+
 function uploadedMetaFromUnknown(value: unknown): UploadedAttachmentMeta {
   const obj = asRecord(value);
   if (!obj) {
@@ -1296,7 +1306,12 @@ function uploadedMetaFromUnknown(value: unknown): UploadedAttachmentMeta {
   const relativePath = String(obj.relative_path ?? "").trim();
   const mimeType = fileNameFromUnknown(decodeMaybeUri(String(obj.mime_type ?? "")), "application/octet-stream");
   const sizeValue = Number(obj.bytes ?? 0);
+  const id =
+    String(obj.id ?? "").trim().toLowerCase() ||
+    uploadAttachmentIdFromRelativePath(relativePath) ||
+    uploadAttachmentIdFromRelativePath(pathValue);
   return {
+    id,
     name,
     path: pathValue,
     relativePath: relativePath || pathValue,
@@ -1433,10 +1448,116 @@ function uploadThreadAttachment(
 
 function buildUploadedAttachmentHint(meta: UploadedAttachmentMeta): string {
   return [
-    `<uploaded_file name=${JSON.stringify(meta.name)} path=${JSON.stringify(meta.path)} relativePath=${JSON.stringify(meta.relativePath)} mimeType=${JSON.stringify(meta.mimeType)} bytes=${meta.size}>`,
+    `<uploaded_file id=${JSON.stringify(meta.id)} name=${JSON.stringify(meta.name)} path=${JSON.stringify(meta.path)} relativePath=${JSON.stringify(meta.relativePath)} mimeType=${JSON.stringify(meta.mimeType)} bytes=${meta.size}>`,
     "The file has been uploaded to the workspace. Use filesystem tools to read this path instead of assuming the content is already in context.",
     "</uploaded_file>"
   ].join("\n");
+}
+
+const UPLOADED_FILE_ATTR_PATTERN = /([A-Za-z_][A-Za-z0-9_]*)=("(?:\\.|[^"\\])*"|[^\s>]+)/g;
+
+function extractUploadedFileHintAttrs(text: string): string {
+  const tagStart = text.search(/<uploaded_file\b/i);
+  if (tagStart < 0) return "";
+  const tagMatch = text.slice(tagStart).match(/^<uploaded_file\b/i);
+  if (!tagMatch) return "";
+  const attrsStart = tagStart + tagMatch[0].length;
+  let inQuote = false;
+  let escaped = false;
+  for (let index = attrsStart; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inQuote) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inQuote = !inQuote;
+      continue;
+    }
+    if (char === ">" && !inQuote) {
+      return text.slice(attrsStart, index).trim();
+    }
+  }
+  return "";
+}
+
+function parseUploadedFileAttrValue(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "string" ? parsed : String(parsed ?? "");
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
+function parseUploadedFileHint(text: string): Record<string, string> | null {
+  const rawAttrs = extractUploadedFileHintAttrs(text);
+  if (!rawAttrs) return null;
+  const attrs: Record<string, string> = {};
+  for (const attrMatch of rawAttrs.matchAll(UPLOADED_FILE_ATTR_PATTERN)) {
+    const key = attrMatch[1];
+    const value = attrMatch[2];
+    if (!key || value === undefined) continue;
+    attrs[key] = parseUploadedFileAttrValue(value);
+  }
+  return attrs;
+}
+
+function normalizeUploadedAttachmentDownloadMeta(
+  value: unknown,
+  fallback?: { name?: unknown; mimeType?: unknown }
+): UploadedAttachmentDownloadMeta | null {
+  const obj = asRecord(value);
+  if (!obj) return null;
+  const relativePath = String(obj.relativePath ?? obj.relative_path ?? "").trim();
+  if (!relativePath) return null;
+  const id = String(obj.id ?? "").trim().toLowerCase() || uploadAttachmentIdFromRelativePath(relativePath);
+  if (!id) return null;
+  const name = fileNameFromUnknown(obj.name ?? fallback?.name, "Uploaded file");
+  const mimeType = fileNameFromUnknown(obj.mimeType ?? obj.mime_type ?? fallback?.mimeType, "application/octet-stream");
+  const sizeValue = Number(obj.size ?? obj.bytes ?? 0);
+  return {
+    id,
+    name,
+    relativePath,
+    mimeType,
+    size: Number.isFinite(sizeValue) && sizeValue >= 0 ? sizeValue : 0
+  };
+}
+
+function uploadedAttachmentDownloadMetaFromAttachment(attachment: unknown): UploadedAttachmentDownloadMeta | null {
+  const obj = asRecord(attachment);
+  if (!obj) return null;
+
+  const content = Array.isArray(obj.content) ? obj.content : [];
+  for (const part of content) {
+    const partObj = asRecord(part);
+    if (!partObj || partObj.type !== "text" || typeof partObj.text !== "string") continue;
+    const hint = parseUploadedFileHint(partObj.text);
+    const parsed = normalizeUploadedAttachmentDownloadMeta(hint, {
+      name: obj.name,
+      mimeType: obj.contentType
+    });
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function buildUploadedAttachmentDownloadHref(threadId: string, meta: UploadedAttachmentDownloadMeta | null): string {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId || !meta?.id || !meta.relativePath) return "";
+  const query = new URLSearchParams({ relative_path: meta.relativePath });
+  return `${apiBase()}/api/threads/${encodeURIComponent(normalizedThreadId)}/attachments/${encodeURIComponent(meta.id)}/content?${query.toString()}`;
 }
 
 class WorkspaceFileAttachmentAdapter implements AttachmentAdapter {
@@ -1592,6 +1713,8 @@ function uploadStatusLabel(attachment: Attachment & { uploadError?: string }): s
 
 const UploadAwareAttachment: FC = () => {
   const aui = useAui();
+  const activeThreadId = useContext(ActiveThreadIdContext);
+  const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const attachment = useAttachment((item) => item as Attachment & { source?: string; uploadError?: string });
   const status = attachment.status;
   const progress = status.type === "running" ? clampUploadProgress(status.progress) : 0;
@@ -1599,6 +1722,11 @@ const UploadAwareAttachment: FC = () => {
   const isFailed = status.type === "incomplete";
   const isImage = attachment.type === "image";
   const canRetry = isFailed && attachment.source !== "message" && attachment.file instanceof File;
+  const downloadMeta = useMemo(() => uploadedAttachmentDownloadMetaFromAttachment(attachment), [attachment]);
+  const downloadHref =
+    attachment.source === "message" && !isExternalPortalUser
+      ? buildUploadedAttachmentDownloadHref(activeThreadId, downloadMeta)
+      : "";
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -1670,6 +1798,18 @@ const UploadAwareAttachment: FC = () => {
         <button type="button" className="portal-upload-retry-overlay" onClick={retryUpload}>
           Retry
         </button>
+      ) : null}
+      {downloadHref && downloadMeta ? (
+        <a
+          className="portal-upload-download"
+          href={downloadHref}
+          download={downloadMeta.name}
+          title={`Download ${downloadMeta.name}${downloadMeta.size ? ` (${formatFileSize(downloadMeta.size)})` : ""}`}
+          aria-label={`Download ${downloadMeta.name}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <DownloadIcon size={12} strokeWidth={2.2} />
+        </a>
       ) : null}
       {attachment.source !== "message" ? (
         <AttachmentPrimitive.Remove asChild>
