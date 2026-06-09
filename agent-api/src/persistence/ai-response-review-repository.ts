@@ -1,6 +1,25 @@
 export type AiResponseReviewStatus = "pending" | "submitted" | "cancelled";
 export type AiResponseReviewEffectiveStatus = AiResponseReviewStatus | "overdue";
 export type AiResponseReviewSource = "zendesk" | string;
+export type AiResponseReviewFilter =
+  | "all"
+  | "unreviewed"
+  | "overdue_unreviewed"
+  | "submitted"
+  | "low_score"
+  | "critical_low_score"
+  | "lowest_score"
+  | "with_suggestion"
+  | "notification_failed"
+  | "todo_failed"
+  | "cancelled";
+export type AiResponseReviewSort =
+  | "auto"
+  | "created_desc"
+  | "due_asc"
+  | "overdue_desc"
+  | "submitted_desc"
+  | "score_asc";
 
 export type AiResponseReviewUser = {
   id: string;
@@ -78,13 +97,19 @@ export type AiResponseReviewCreateInput = {
 export type AiResponseReviewSummary = {
   total: number;
   pending: number;
+  unreviewed: number;
   overdue: number;
   submitted: number;
   cancelled: number;
   required: number;
   averageScore: number | null;
   lowScoreCount: number;
+  criticalLowScoreCount: number;
+  lowestScore: number | null;
+  lowestScoreCount: number;
   withSuggestion: number;
+  notificationFailedCount: number;
+  todoFailedCount: number;
 };
 
 type AiResponseReviewRow = {
@@ -323,17 +348,107 @@ function buildSummary(reviews: AiResponseReviewRecord[]): AiResponseReviewSummar
   const submitted = reviews.filter((item) => item.status === "submitted");
   const scored = submitted.map((item) => item.score).filter((score): score is number => typeof score === "number");
   const scoreSum = scored.reduce((sum, score) => sum + score, 0);
+  const lowestScore = scored.length > 0 ? Math.min(...scored) : null;
   return {
     total: reviews.length,
     pending: reviews.filter((item) => item.effectiveStatus === "pending").length,
+    unreviewed: reviews.filter((item) => item.status === "pending").length,
     overdue: reviews.filter((item) => item.effectiveStatus === "overdue").length,
     submitted: submitted.length,
     cancelled: reviews.filter((item) => item.status === "cancelled").length,
     required: reviews.filter((item) => item.required).length,
     averageScore: scored.length > 0 ? Math.round((scoreSum / scored.length) * 10) / 10 : null,
     lowScoreCount: submitted.filter((item) => typeof item.score === "number" && item.score <= 3).length,
-    withSuggestion: reviews.filter((item) => Boolean(item.suggestion)).length
+    criticalLowScoreCount: submitted.filter((item) => typeof item.score === "number" && item.score <= 2).length,
+    lowestScore,
+    lowestScoreCount:
+      lowestScore === null ? 0 : submitted.filter((item) => typeof item.score === "number" && item.score === lowestScore).length,
+    withSuggestion: reviews.filter((item) => Boolean(item.suggestion)).length,
+    notificationFailedCount: reviews.filter((item) => item.notificationStatus === "failed").length,
+    todoFailedCount: reviews.filter((item) => item.dingtalkTodoStatus === "failed" || item.dingtalkTodoStatus === "complete_failed").length
   };
+}
+
+function reviewMatchesFilter(
+  review: AiResponseReviewRecord,
+  filter: AiResponseReviewFilter,
+  lowestScore: number | null
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "unreviewed") return review.status === "pending";
+  if (filter === "overdue_unreviewed") return review.effectiveStatus === "overdue";
+  if (filter === "submitted") return review.status === "submitted";
+  if (filter === "low_score") return review.status === "submitted" && typeof review.score === "number" && review.score <= 3;
+  if (filter === "critical_low_score") return review.status === "submitted" && typeof review.score === "number" && review.score <= 2;
+  if (filter === "lowest_score") {
+    return lowestScore !== null && review.status === "submitted" && review.score === lowestScore;
+  }
+  if (filter === "with_suggestion") return Boolean(review.suggestion);
+  if (filter === "notification_failed") return review.notificationStatus === "failed";
+  if (filter === "todo_failed") return review.dingtalkTodoStatus === "failed" || review.dingtalkTodoStatus === "complete_failed";
+  if (filter === "cancelled") return review.status === "cancelled";
+  return true;
+}
+
+function timestampForSort(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function compareByNumber(left: number, right: number): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function resolveSort(sort: AiResponseReviewSort | undefined, filter: AiResponseReviewFilter): AiResponseReviewSort {
+  if (sort && sort !== "auto") return sort;
+  if (filter === "unreviewed") return "due_asc";
+  if (filter === "overdue_unreviewed") return "overdue_desc";
+  if (filter === "submitted" || filter === "with_suggestion" || filter === "lowest_score") return "submitted_desc";
+  if (filter === "low_score" || filter === "critical_low_score") return "score_asc";
+  return "created_desc";
+}
+
+function filterFromLegacyStatus(status: AiResponseReviewEffectiveStatus | undefined): AiResponseReviewFilter {
+  if (status === "pending") return "unreviewed";
+  if (status === "overdue") return "overdue_unreviewed";
+  if (status === "submitted") return "submitted";
+  if (status === "cancelled") return "cancelled";
+  return "all";
+}
+
+function compareReviews(
+  left: AiResponseReviewRecord,
+  right: AiResponseReviewRecord,
+  sort: AiResponseReviewSort
+): number {
+  if (sort === "due_asc") {
+    return (
+      compareByNumber(timestampForSort(left.dueAt, Number.MAX_SAFE_INTEGER), timestampForSort(right.dueAt, Number.MAX_SAFE_INTEGER)) ||
+      compareByNumber(timestampForSort(right.createdAt, 0), timestampForSort(left.createdAt, 0))
+    );
+  }
+  if (sort === "overdue_desc") {
+    return (
+      compareByNumber(timestampForSort(left.dueAt, Number.MAX_SAFE_INTEGER), timestampForSort(right.dueAt, Number.MAX_SAFE_INTEGER)) ||
+      compareByNumber(timestampForSort(right.createdAt, 0), timestampForSort(left.createdAt, 0))
+    );
+  }
+  if (sort === "submitted_desc") {
+    return (
+      compareByNumber(timestampForSort(right.submittedAt, 0), timestampForSort(left.submittedAt, 0)) ||
+      compareByNumber(timestampForSort(right.createdAt, 0), timestampForSort(left.createdAt, 0))
+    );
+  }
+  if (sort === "score_asc") {
+    return (
+      compareByNumber(left.score ?? Number.MAX_SAFE_INTEGER, right.score ?? Number.MAX_SAFE_INTEGER) ||
+      compareByNumber(timestampForSort(right.submittedAt, 0), timestampForSort(left.submittedAt, 0))
+    );
+  }
+  return compareByNumber(timestampForSort(right.createdAt, 0), timestampForSort(left.createdAt, 0));
 }
 
 export class AiResponseReviewRepository {
@@ -503,11 +618,15 @@ export class AiResponseReviewRepository {
     query?: string;
     source?: string;
     status?: AiResponseReviewEffectiveStatus | "all";
+    filter?: AiResponseReviewFilter;
+    sort?: AiResponseReviewSort;
     page?: number;
     pageSize?: number;
   } = {}): Promise<{
     reviews: AiResponseReviewRecord[];
     summary: AiResponseReviewSummary;
+    activeFilter: AiResponseReviewFilter;
+    activeSort: AiResponseReviewSort;
     page: { page: number; pageSize: number; totalItems: number; totalPages: number };
   }> {
     const rows = await this.db.aiResponseReview.findMany({
@@ -518,11 +637,16 @@ export class AiResponseReviewRepository {
     const source = trimOrUndefined(input.source);
     const status = input.status && input.status !== "all" ? input.status : undefined;
     const query = trimOrUndefined(input.query);
-    const filtered = rows
+    const baseFiltered = rows
       .map((row) => mapReview(row, userMap))
       .filter((item) => !source || item.source === source)
-      .filter((item) => !status || item.effectiveStatus === status || item.status === status)
       .filter((item) => reviewMatchesQuery(item, query));
+    const summary = buildSummary(baseFiltered);
+    const filter = input.filter ?? filterFromLegacyStatus(status);
+    const sort = resolveSort(input.sort, filter);
+    const filtered = baseFiltered
+      .filter((item) => reviewMatchesFilter(item, filter, summary.lowestScore))
+      .sort((left, right) => compareReviews(left, right, sort));
     const pageSize = Math.max(1, Math.min(100, Math.floor(input.pageSize ?? 24)));
     const totalItems = filtered.length;
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -530,7 +654,9 @@ export class AiResponseReviewRepository {
     const start = (page - 1) * pageSize;
     return {
       reviews: filtered.slice(start, start + pageSize),
-      summary: buildSummary(filtered),
+      summary,
+      activeFilter: filter,
+      activeSort: sort,
       page: {
         page,
         pageSize,

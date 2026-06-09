@@ -48,9 +48,9 @@ import type {
   AdminApiAuditRecord,
   AdminApiAuditResultFilter,
   AdminApiAuditSort,
+  AdminAiResponseReviewFilter,
   AdminAiResponseReviewListResponse,
   AdminAiResponseReviewRecord,
-  AdminAiResponseReviewStatusFilter,
   AdminConversationDetailResponse,
   AdminConversationChannelSummary,
   AdminConversationFeedback,
@@ -111,11 +111,17 @@ const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
   { value: "created_desc", label: "最近创建" }
 ];
 
-const AI_REVIEW_STATUS_OPTIONS: Array<{ value: AdminAiResponseReviewStatusFilter; label: string }> = [
-  { value: "all", label: "全部状态" },
-  { value: "pending", label: "待评分" },
-  { value: "overdue", label: "已逾期" },
+const AI_REVIEW_FILTER_OPTIONS: Array<{ value: AdminAiResponseReviewFilter; label: string }> = [
+  { value: "all", label: "全部任务" },
+  { value: "unreviewed", label: "未评分" },
+  { value: "overdue_unreviewed", label: "逾期未评分" },
   { value: "submitted", label: "已评分" },
+  { value: "low_score", label: "低分任务 <=3" },
+  { value: "critical_low_score", label: "严重低分 <=2" },
+  { value: "lowest_score", label: "最低分 case" },
+  { value: "with_suggestion", label: "有改进建议" },
+  { value: "notification_failed", label: "钉钉通知失败" },
+  { value: "todo_failed", label: "钉钉待办失败" },
   { value: "cancelled", label: "已取消" }
 ];
 
@@ -1647,9 +1653,9 @@ function ApiAuditDetail(props: { detail: AdminApiAuditDetailResponse | null; loa
 
 function aiReviewStatusLabel(status: AdminAiResponseReviewRecord["effectiveStatus"]): string {
   if (status === "submitted") return "已评分";
-  if (status === "overdue") return "已逾期";
+  if (status === "overdue") return "逾期未评分";
   if (status === "cancelled") return "已取消";
-  return "待评分";
+  return "未评分";
 }
 
 function aiReviewStatusColor(status: AdminAiResponseReviewRecord["effectiveStatus"]): string {
@@ -1661,6 +1667,18 @@ function aiReviewStatusColor(status: AdminAiResponseReviewRecord["effectiveStatu
 
 function aiReviewReviewerLabel(review: AdminAiResponseReviewRecord): string {
   return review.reviewerDisplayName || review.reviewerEmail || review.reviewerDingTalkUserId || "未识别处理人";
+}
+
+function aiReviewFilterLabel(filter: AdminAiResponseReviewFilter): string {
+  return AI_REVIEW_FILTER_OPTIONS.find((item) => item.value === filter)?.label ?? "全部任务";
+}
+
+function aiReviewSortLabel(sort: string | undefined): string {
+  if (sort === "due_asc") return "截止时间最近优先";
+  if (sort === "overdue_desc") return "逾期最久优先";
+  if (sort === "submitted_desc") return "最近评分优先";
+  if (sort === "score_asc") return "低分优先";
+  return "最新创建优先";
 }
 
 function aiReviewTodoStatusLabel(status: string | undefined): string {
@@ -1680,7 +1698,7 @@ function aiReviewTodoStatusColor(status: string | undefined): string {
 
 function AiReviewWorkspace() {
   const [query, setQuery] = useState(() => readConversationAuditHashState().query);
-  const [statusFilter, setStatusFilter] = useState<AdminAiResponseReviewStatusFilter>("all");
+  const [filter, setFilter] = useState<AdminAiResponseReviewFilter>("all");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AdminAiResponseReviewListResponse | null>(null);
@@ -1692,7 +1710,7 @@ function AiReviewWorkspace() {
     fetchAdminAiResponseReviewList({
       query: deferredQuery || undefined,
       source: "zendesk",
-      status: statusFilter,
+      filter,
       page,
       pageSize: 20
     })
@@ -1701,16 +1719,77 @@ function AiReviewWorkspace() {
     return () => {
       active = false;
     };
-  }, [deferredQuery, statusFilter, page]);
+  }, [deferredQuery, filter, page]);
 
   const summary = data?.summary;
+  const activeFilterLabel = aiReviewFilterLabel(filter);
+  const applyFilter = (nextFilter: AdminAiResponseReviewFilter) => {
+    setFilter(nextFilter);
+    setPage(1);
+  };
+  const summaryCards: Array<{
+    filter: AdminAiResponseReviewFilter;
+    label: string;
+    value: ReactNode;
+    hint: string;
+    tone?: "default" | "warning" | "danger";
+    disabled?: boolean;
+  }> = [
+    {
+      filter: "all",
+      label: "必评任务",
+      value: summary?.total ?? 0,
+      hint: "全部必评任务"
+    },
+    {
+      filter: "unreviewed",
+      label: "未评分",
+      value: summary?.unreviewed ?? 0,
+      hint: "包含逾期未评分",
+      tone: (summary?.unreviewed ?? 0) > 0 ? "warning" : "default"
+    },
+    {
+      filter: "overdue_unreviewed",
+      label: "逾期未评分",
+      value: summary?.overdue ?? 0,
+      hint: "超过截止时间仍未评分",
+      tone: (summary?.overdue ?? 0) > 0 ? "danger" : "default"
+    },
+    {
+      filter: "submitted",
+      label: "已评分",
+      value: summary?.submitted ?? 0,
+      hint: "已提交评分"
+    },
+    {
+      filter: "submitted",
+      label: "平均分",
+      value: summary?.averageScore ?? "-",
+      hint: "仅统计已评分任务",
+      disabled: true
+    },
+    {
+      filter: "low_score",
+      label: "低分任务",
+      value: summary?.lowScoreCount ?? 0,
+      hint: "评分 <= 3",
+      tone: (summary?.lowScoreCount ?? 0) > 0 ? "danger" : "default"
+    },
+    {
+      filter: "lowest_score",
+      label: "最低分",
+      value: summary?.lowestScore ? `${summary.lowestScore}/5` : "-",
+      hint: summary?.lowestScore ? `${summary.lowestScoreCount} 个 case` : "暂无已评分任务",
+      tone: summary?.lowestScore && summary.lowestScore <= 3 ? "danger" : "default"
+    }
+  ];
 
   return (
     <div className="admin-page-container" style={{ minHeight: 0, overflow: "auto" }}>
       <div className="admin-page-header" style={{ marginBottom: 8 }}>
         <div>
           <h1 className="admin-page-title">Zendesk AI评分</h1>
-          <p className="admin-page-desc">追踪 Zendesk AI 写入后每个钉钉 @ 处理人的必评任务。</p>
+          <p className="admin-page-desc">追踪 Zendesk AI 写入后的必评任务，优先处理未评分和低分 case。</p>
         </div>
         <Button icon={<RefreshCcw size={14} />} onClick={() => setPage(1)} disabled={loading}>
           刷新
@@ -1718,26 +1797,25 @@ function AiReviewWorkspace() {
       </div>
 
       <div className="conversation-audit-summary-grid" style={{ marginBottom: 12 }}>
-        <div className="conversation-audit-summary-card">
-          <span>必评任务</span>
-          <strong>{summary?.total ?? 0}</strong>
-        </div>
-        <div className="conversation-audit-summary-card">
-          <span>待评分</span>
-          <strong>{summary?.pending ?? 0}</strong>
-        </div>
-        <div className="conversation-audit-summary-card">
-          <span>已逾期</span>
-          <strong>{summary?.overdue ?? 0}</strong>
-        </div>
-        <div className="conversation-audit-summary-card">
-          <span>平均分</span>
-          <strong>{summary?.averageScore ?? "-"}</strong>
-        </div>
-        <div className="conversation-audit-summary-card">
-          <span>低分</span>
-          <strong>{summary?.lowScoreCount ?? 0}</strong>
-        </div>
+        {summaryCards.map((card) => (
+          <button
+            key={`${card.label}-${card.filter}`}
+            type="button"
+            className={[
+              "conversation-audit-summary-card",
+              card.disabled ? "" : "conversation-audit-summary-action",
+              !card.disabled && filter === card.filter ? "active" : "",
+              card.tone === "danger" ? "danger" : "",
+              card.tone === "warning" ? "warning" : ""
+            ].filter(Boolean).join(" ")}
+            disabled={card.disabled}
+            onClick={() => !card.disabled && applyFilter(card.filter)}
+          >
+            <span>{card.label}</span>
+            <strong>{card.value}</strong>
+            <em>{card.hint}</em>
+          </button>
+        ))}
       </div>
 
       <div className="admin-split-master" style={{ width: "100%", minHeight: 0 }}>
@@ -1755,14 +1833,17 @@ function AiReviewWorkspace() {
           <Space wrap>
             <Select
               size="small"
-              value={statusFilter}
-              options={AI_REVIEW_STATUS_OPTIONS}
+              value={filter}
+              options={AI_REVIEW_FILTER_OPTIONS}
               onChange={(value) => {
-                setStatusFilter(value);
-                setPage(1);
+                applyFilter(value);
               }}
-              style={{ width: 112 }}
+              style={{ width: 168 }}
             />
+            <Tag color={filter === "all" ? "default" : "blue"}>当前筛选：{activeFilterLabel}</Tag>
+            {data?.filters.sort ? (
+              <span className="conversation-master-meta-text">自动排序：{aiReviewSortLabel(data.filters.sort)}</span>
+            ) : null}
           </Space>
         </div>
 
@@ -1788,7 +1869,11 @@ function AiReviewWorkspace() {
                     </span>
                   ) : null}
                   {review.dueAt ? (
-                    <span className="conversation-master-meta-text">截止 {formatLocalDateTime(review.dueAt)}</span>
+                    <span className="conversation-master-meta-text">
+                      {review.status === "submitted" && review.submittedAt
+                        ? `评分 ${formatLocalDateTime(review.submittedAt)}`
+                        : `截止 ${formatLocalDateTime(review.dueAt)}`}
+                    </span>
                   ) : null}
                   {review.notificationStatus === "failed" ? (
                     <Tag color="error">钉钉个人通知失败</Tag>

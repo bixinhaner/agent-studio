@@ -21,7 +21,9 @@ import {
 import {
   AiResponseReviewRepository,
   type AiResponseReviewEffectiveStatus,
-  type AiResponseReviewRepositoryDb
+  type AiResponseReviewFilter,
+  type AiResponseReviewRepositoryDb,
+  type AiResponseReviewSort
 } from "../persistence/ai-response-review-repository.js";
 import {
   ExternalConversationBindingRepository,
@@ -840,6 +842,39 @@ function parseProductFeedbackSort(value: unknown): ProductFeedbackSort {
 function parseAiResponseReviewStatus(value: unknown): AiResponseReviewStatusFilter {
   if (value === "pending" || value === "overdue" || value === "submitted" || value === "cancelled") return value;
   return "all";
+}
+
+function parseAiResponseReviewFilter(value: unknown): AiResponseReviewFilter | undefined {
+  if (
+    value === "all" ||
+    value === "unreviewed" ||
+    value === "overdue_unreviewed" ||
+    value === "submitted" ||
+    value === "low_score" ||
+    value === "critical_low_score" ||
+    value === "lowest_score" ||
+    value === "with_suggestion" ||
+    value === "notification_failed" ||
+    value === "todo_failed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function parseAiResponseReviewSort(value: unknown): AiResponseReviewSort | undefined {
+  if (
+    value === "auto" ||
+    value === "created_desc" ||
+    value === "due_asc" ||
+    value === "overdue_desc" ||
+    value === "submitted_desc" ||
+    value === "score_asc"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function normalizeUser(row: ConversationAuditUserRow | null | undefined): ConversationAuditUser | null {
@@ -1798,6 +1833,8 @@ export function createConversationAuditRouter(options: {
       const repository = new AiResponseReviewRepository(getDb() as unknown as AiResponseReviewRepositoryDb);
       const query = trimOrUndefined(req.query.query);
       const status = parseAiResponseReviewStatus(req.query.status);
+      const filter = parseAiResponseReviewFilter(req.query.filter);
+      const sort = parseAiResponseReviewSort(req.query.sort);
       const source = trimOrUndefined(req.query.source) || "zendesk";
       const requestedPage = parsePositiveInteger(req.query.page, 1, 1, 10_000);
       const pageSize = parsePositiveInteger(req.query.page_size, 24, 1, 100);
@@ -1805,6 +1842,8 @@ export function createConversationAuditRouter(options: {
         query,
         source: source === "all" ? undefined : source,
         status,
+        filter,
+        sort,
         page: requestedPage,
         pageSize
       });
@@ -1812,7 +1851,9 @@ export function createConversationAuditRouter(options: {
         filters: {
           query: query ?? "",
           source,
-          status
+          status,
+          filter: result.activeFilter,
+          sort: result.activeSort
         },
         ...result
       });

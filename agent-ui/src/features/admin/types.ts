@@ -27,6 +27,19 @@ export type AdminProductFeedbackStatusFilter = "all" | AdminProductFeedbackStatu
 export type AdminProductFeedbackSort = "created_desc" | "updated_desc";
 export type AdminAiResponseReviewStatus = "pending" | "overdue" | "submitted" | "cancelled";
 export type AdminAiResponseReviewStatusFilter = "all" | AdminAiResponseReviewStatus;
+export type AdminAiResponseReviewFilter =
+  | "all"
+  | "unreviewed"
+  | "overdue_unreviewed"
+  | "submitted"
+  | "low_score"
+  | "critical_low_score"
+  | "lowest_score"
+  | "with_suggestion"
+  | "notification_failed"
+  | "todo_failed"
+  | "cancelled";
+export type AdminAiResponseReviewSort = "auto" | "created_desc" | "due_asc" | "overdue_desc" | "submitted_desc" | "score_asc";
 
 export type AdminConversationUser = {
   id: string;
@@ -383,6 +396,8 @@ export type AdminAiResponseReviewListInput = {
   query?: string;
   source?: string;
   status?: AdminAiResponseReviewStatusFilter;
+  filter?: AdminAiResponseReviewFilter;
+  sort?: AdminAiResponseReviewSort;
   page?: number;
   pageSize?: number;
 };
@@ -392,17 +407,25 @@ export type AdminAiResponseReviewListResponse = {
     query: string;
     source: string;
     status: AdminAiResponseReviewStatusFilter;
+    filter: AdminAiResponseReviewFilter;
+    sort: AdminAiResponseReviewSort;
   };
   summary: {
     total: number;
     pending: number;
+    unreviewed: number;
     overdue: number;
     submitted: number;
     cancelled: number;
     required: number;
     averageScore: number | null;
     lowScoreCount: number;
+    criticalLowScoreCount: number;
+    lowestScore: number | null;
+    lowestScoreCount: number;
     withSuggestion: number;
+    notificationFailedCount: number;
+    todoFailedCount: number;
   };
   page: {
     page: number;
