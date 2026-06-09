@@ -11,6 +11,7 @@ import type {
   IntegrationListResponse,
   IntegrationPoliciesResponse,
   IntegrationPolicyInput,
+  IntegrationZendeskAiReviewEmailReminderResponse,
   IntegrationZendeskCacheCleanupResponse,
   IntegrationType,
   IntegrationZendeskRunResult,
@@ -86,6 +87,19 @@ export async function runZendeskCacheCleanup(
       ...(params.limit ? { limit: params.limit } : {})
     }
   });
+}
+
+export async function sendZendeskAiReviewEmailReminder(
+  instanceId: string,
+  mode: "test" | "live"
+): Promise<IntegrationZendeskAiReviewEmailReminderResponse> {
+  return api<IntegrationZendeskAiReviewEmailReminderResponse>(
+    `${integrationPath(instanceId)}/zendesk/ai-review-email-reminders/send`,
+    {
+      method: "POST",
+      json: { mode }
+    }
+  );
 }
 
 export async function fetchDingTalkBotStatus(instanceId: string): Promise<DingTalkBotStatusResponse> {

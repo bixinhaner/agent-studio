@@ -9,13 +9,30 @@ import {
 } from "../persistence/ai-response-review-repository.js";
 import type { AuthenticatedUser } from "../persistence/user-repository.js";
 
+export const LOW_SCORE_SUGGESTION_MIN_LENGTH = 10;
+export const LOW_SCORE_SUGGESTION_REQUIRED_MESSAGE =
+  "Reason and improvement suggestion are required for ratings 1-3 (at least 10 characters).";
+
 const submitReviewSchema = z.object({
   score: z.number().int().min(1).max(5),
   suggestion: z.string().trim().max(4000).optional().nullable()
+}).superRefine((value, ctx) => {
+  const suggestion = typeof value.suggestion === "string" ? value.suggestion.trim() : "";
+  if (value.score <= 3 && suggestion.length < LOW_SCORE_SUGGESTION_MIN_LENGTH) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["suggestion"],
+      message: LOW_SCORE_SUGGESTION_REQUIRED_MESSAGE
+    });
+  }
 });
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
+}
+
+export function parseSubmitReviewInput(input: unknown): z.infer<typeof submitReviewSchema> {
+  return submitReviewSchema.parse(input);
 }
 
 function normalizeEmail(value: unknown): string {
@@ -89,7 +106,7 @@ export function createAiResponseReviewRouter(options: {
         res.status(403).json({ detail: "You are not assigned to this AI response review" });
         return;
       }
-      const input = submitReviewSchema.parse(req.body ?? {});
+      const input = parseSubmitReviewInput(req.body ?? {});
       let review = await repository.submit({
         reviewId: existing.id,
         score: input.score,

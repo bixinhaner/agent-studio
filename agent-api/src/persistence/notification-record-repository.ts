@@ -1,4 +1,4 @@
-export type NotificationChannelType = "in_app" | "dingtalk";
+export type NotificationChannelType = "in_app" | "dingtalk" | "email";
 export type NotificationStatus = "pending" | "sent" | "failed";
 
 export type NotificationRecord = {
@@ -102,7 +102,7 @@ function mapNotificationRecord(row: NotificationRecordRow): NotificationRecord {
 }
 
 function isNotificationChannelType(value: string | undefined): value is NotificationChannelType {
-  return value === "in_app" || value === "dingtalk";
+  return value === "in_app" || value === "dingtalk" || value === "email";
 }
 
 export class NotificationRecordRepository {

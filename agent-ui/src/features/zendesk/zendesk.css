@@ -372,6 +372,33 @@
   background: rgba(26, 23, 19, 0.04);
 }
 
+.zendesk-email-reminder-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(26, 23, 19, 0.08);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.zendesk-email-reminder-head {
+  display: grid;
+  gap: 4px;
+}
+
+.zendesk-email-reminder-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.zendesk-email-reminder-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .zendesk-dingtalk-preview {
   min-width: 0;
   border: 1px solid rgba(26, 23, 19, 0.08);
@@ -448,6 +475,7 @@
   .zendesk-config-hero,
   .zendesk-launch-checklist,
   .zendesk-dingtalk-template-grid,
+  .zendesk-email-reminder-grid,
   .zendesk-cache-controls {
     grid-template-columns: 1fr;
   }

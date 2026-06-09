@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ZendeskCacheCleanupResult, ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types.js";
+import type { ZendeskAiReviewEmailReminderSendResult } from "../zendesk/ai-review-email-reminder-service.js";
 
 export const integrationTypeSchema = z.enum(["dingtalk", "zendesk", "openai_codex", "openai_compatible_api", "crest_crm"]);
 export type IntegrationType = z.infer<typeof integrationTypeSchema>;
@@ -48,6 +49,11 @@ export const integrationZendeskCacheCleanupQuerySchema = z.object({
 
 export const integrationZendeskCacheCleanupRunSchema = integrationZendeskCacheCleanupQuerySchema.extend({
   confirm: z.literal(true)
+});
+
+export const integrationZendeskAiReviewEmailReminderSchema = z.object({
+  mode: z.enum(["test", "live"]),
+  test_email: z.string().trim().email().optional()
 });
 
 const secretLikeKeyPattern = /(api[_-]?key|access[_-]?token|token|client[_-]?secret|webhook[_-]?signing[_-]?secret|secret)/i;
@@ -255,6 +261,10 @@ export type IntegrationZendeskRunResult = {
 
 export type IntegrationZendeskCacheCleanupResult = {
   result: ZendeskCacheCleanupResult;
+};
+
+export type IntegrationZendeskAiReviewEmailReminderResult = {
+  result: ZendeskAiReviewEmailReminderSendResult;
 };
 
 export type IntegrationPoliciesResult = {

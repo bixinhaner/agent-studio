@@ -71,6 +71,10 @@ export type ZendeskIntegrationSettings = {
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;
+  aiReviewEmailReminderEnabled: boolean;
+  aiReviewEmailReminderTime: string;
+  aiReviewEmailReminderTimezone: string;
+  aiReviewEmailReminderCcEmails: string[];
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
@@ -261,6 +265,12 @@ export const zendeskSettingsUpdateSchema = z.object({
   dingtalk_notification_robot_secret: optionalStringSchema,
   dingtalk_notification_fallback_user_ids: optionalStringArraySchema,
   dingtalk_notification_template: optionalStringSchema,
+  dingtalk_review_required_enabled: z.boolean().optional(),
+  dingtalk_review_due_hours: z.number().int().min(1).max(168).optional(),
+  ai_review_email_reminder_enabled: z.boolean().optional(),
+  ai_review_email_reminder_time: optionalStringSchema,
+  ai_review_email_reminder_timezone: optionalStringSchema,
+  ai_review_email_reminder_cc_emails: optionalStringArraySchema,
   system_prompt: optionalStringSchema
 });
 

@@ -1888,7 +1888,14 @@ function AiReviewWorkspace() {
                   </div>
                 ) : null}
                 {review.suggestion ? (
-                  <div className="admin-master-preview" style={{ WebkitLineClamp: 3 }}>{review.suggestion}</div>
+                  <div className="admin-master-preview" style={{ WebkitLineClamp: 3 }}>
+                    {typeof review.score === "number" && review.score <= 3 ? "低分原因/改进建议：" : "改进建议："}
+                    {review.suggestion}
+                  </div>
+                ) : typeof review.score === "number" && review.score <= 3 ? (
+                  <div className="admin-master-preview" style={{ WebkitLineClamp: 2 }}>
+                    低分原因/改进建议：历史低分记录未填写
+                  </div>
                 ) : null}
                 <Space size="small" style={{ marginTop: 8 }}>
                   {review.reviewUrl ? (

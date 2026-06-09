@@ -130,6 +130,21 @@ export type IntegrationZendeskCacheCleanupResponse = {
   result: ZendeskCacheCleanupResult;
 };
 
+export type IntegrationZendeskAiReviewEmailReminderResponse = {
+  result: {
+    sent: boolean;
+    mode: "test" | "live" | "scheduled";
+    detail: string;
+    to: string[];
+    cc: string[];
+    pendingCount: number;
+    reviewerCount: number;
+    skippedNoEmailCount: number;
+    reviewIds: string[];
+    notificationId?: string;
+  };
+};
+
 export type CreateIntegrationInstanceInput = {
   type: IntegrationType;
   slug: string;
@@ -274,6 +289,10 @@ export type ZendeskConfigInput = {
   dingtalkNotificationTemplate?: string;
   dingtalkReviewRequiredEnabled?: boolean;
   dingtalkReviewDueHours?: number;
+  aiReviewEmailReminderEnabled?: boolean;
+  aiReviewEmailReminderTime?: string;
+  aiReviewEmailReminderTimezone?: string;
+  aiReviewEmailReminderCcEmails?: string[];
   systemPrompt?: string;
 };
 
@@ -439,6 +458,10 @@ export type ZendeskConfigDraft = {
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;
+  aiReviewEmailReminderEnabled: boolean;
+  aiReviewEmailReminderTime: string;
+  aiReviewEmailReminderTimezone: string;
+  aiReviewEmailReminderCcEmailsRaw: string;
   systemPrompt: string;
   zendeskApiTokenDraft: string;
   webhookSigningSecretDraft: string;

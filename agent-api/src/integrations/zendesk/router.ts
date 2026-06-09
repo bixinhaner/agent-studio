@@ -68,6 +68,12 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
           input.dingtalk_notification_robot_secret === undefined ? undefined : String(input.dingtalk_notification_robot_secret || "").trim(),
         dingtalkNotificationFallbackUserIds: normalizeStringArray(input.dingtalk_notification_fallback_user_ids),
         dingtalkNotificationTemplate: input.dingtalk_notification_template,
+        dingtalkReviewRequiredEnabled: input.dingtalk_review_required_enabled,
+        dingtalkReviewDueHours: input.dingtalk_review_due_hours,
+        aiReviewEmailReminderEnabled: input.ai_review_email_reminder_enabled,
+        aiReviewEmailReminderTime: input.ai_review_email_reminder_time,
+        aiReviewEmailReminderTimezone: input.ai_review_email_reminder_timezone,
+        aiReviewEmailReminderCcEmails: normalizeStringArray(input.ai_review_email_reminder_cc_emails),
         systemPrompt: input.system_prompt
       };
       const overview = instanceId ? await service.updateSettings(patch, instanceId) : await service.updateSettings(patch);

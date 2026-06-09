@@ -15,6 +15,7 @@ import {
   type IntegrationPolicyInput,
   type IntegrationPolicySummary,
   type IntegrationTriggerType,
+  type IntegrationZendeskAiReviewEmailReminderResult,
   type IntegrationValidationItem,
   type IntegrationZendeskCacheCleanupResult,
   type IntegrationZendeskRunResult,
@@ -27,6 +28,11 @@ import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from ".
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
 import { OpenAICompatibleApiIntegrationAdapter } from "./openai-compatible-api-adapter.js";
 import type { ZendeskOverview } from "../zendesk/types.js";
+import type {
+  ZendeskAiReviewEmailReminderManualMode,
+  ZendeskAiReviewEmailReminderSendResult,
+  ZendeskAiReviewEmailReminderInstance
+} from "../zendesk/ai-review-email-reminder-service.js";
 
 const EXTERNAL_OPENAI_API_TYPE = "openai_compatible_api";
 
@@ -104,6 +110,13 @@ export type IntegrationCenterService = {
     retentionDays?: number;
     limit?: number;
   }): Promise<IntegrationZendeskCacheCleanupResult>;
+  sendZendeskAiReviewEmailReminder(input: {
+    currentUserId: string;
+    currentUserEmail?: string;
+    instanceId: string;
+    mode: ZendeskAiReviewEmailReminderManualMode;
+    testEmail?: string;
+  }): Promise<IntegrationZendeskAiReviewEmailReminderResult>;
   listValidationHistory(input: { currentUserId: string; instanceId: string }): Promise<{ items: IntegrationValidationItem[] }>;
   getExternalApiUsage(input: {
     currentUserId: string;
@@ -440,6 +453,13 @@ export function createIntegrationCenterService(options: {
     }>;
     previewCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
     runCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number; execute?: boolean }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
+  };
+  zendeskAiReviewEmailReminders?: {
+    sendManualReminder(input: {
+      instance: ZendeskAiReviewEmailReminderInstance;
+      mode: ZendeskAiReviewEmailReminderManualMode;
+      testEmail?: string;
+    }): Promise<ZendeskAiReviewEmailReminderSendResult>;
   };
   adapters?: Partial<Record<string, ValidationAdapter>>;
 }): IntegrationCenterService {
@@ -987,6 +1007,28 @@ export function createIntegrationCenterService(options: {
           execute: true
         })
       };
+    },
+
+    async sendZendeskAiReviewEmailReminder(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== "zendesk") {
+        throw new Error("当前集成实例不是 Zendesk。");
+      }
+      if (!options.zendeskAiReviewEmailReminders) {
+        throw new Error("Zendesk AI review email reminder is not available");
+      }
+      const testEmail = trimOrUndefined(input.testEmail) ?? trimOrUndefined(input.currentUserEmail);
+      const result = await options.zendeskAiReviewEmailReminders.sendManualReminder({
+        instance: {
+          id: instance.id,
+          slug: instance.slug,
+          name: instance.name,
+          organizationId: instance.organizationId
+        },
+        mode: input.mode,
+        testEmail
+      });
+      return { result };
     },
 
     async listValidationHistory(input) {

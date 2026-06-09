@@ -6,6 +6,7 @@ import {
   integrationExternalApiUsageQuerySchema,
   integrationInstanceBaseSchema,
   integrationInstanceUpdateSchema,
+  integrationZendeskAiReviewEmailReminderSchema,
   integrationListQuerySchema,
   integrationPoliciesUpdateSchema,
   integrationZendeskCacheCleanupQuerySchema,
@@ -148,6 +149,23 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
           instanceId: req.params.instanceId,
           retentionDays: payload.retention_days,
           limit: payload.limit
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/integrations/:instanceId/zendesk/ai-review-email-reminders/send", requireWrite, async (req: Request, res: Response) => {
+    try {
+      const payload = integrationZendeskAiReviewEmailReminderSchema.parse(req.body ?? {});
+      res.json(
+        await options.service.sendZendeskAiReviewEmailReminder({
+          currentUserId: req.currentUser!.id,
+          currentUserEmail: req.currentUser!.email ?? undefined,
+          instanceId: req.params.instanceId,
+          mode: payload.mode,
+          testEmail: payload.test_email
         })
       );
     } catch (error) {

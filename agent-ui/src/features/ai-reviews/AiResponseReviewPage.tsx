@@ -9,6 +9,8 @@ type AiResponseReviewPageProps = {
   reviewId: string;
 };
 
+const LOW_SCORE_SUGGESTION_MIN_LENGTH = 10;
+
 function formatLocalDateTime(value: string | null | undefined): string {
   if (!value) return "Not set";
   const parsed = new Date(value);
@@ -93,8 +95,13 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
   }, [props.reviewId]);
 
   async function handleSubmit() {
+    const trimmedSuggestion = suggestion.trim();
     if (!score) {
       setErrorText("Please choose a rating from 1 to 5.");
+      return;
+    }
+    if (score <= 3 && trimmedSuggestion.length < LOW_SCORE_SUGGESTION_MIN_LENGTH) {
+      setErrorText("For ratings 1-3, please add a reason and improvement suggestion (at least 10 characters).");
       return;
     }
     setSaving(true);
@@ -103,7 +110,7 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
     try {
       const response = await submitAiResponseReview(props.reviewId, {
         score,
-        suggestion: suggestion.trim() || null
+        suggestion: trimmedSuggestion || null
       });
       setReview(response.review);
       setSuccessText("Review submitted.");
@@ -115,6 +122,7 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
   }
 
   const aiOutput = useMemo(() => (review ? snapshotText(review) : ""), [review]);
+  const lowScoreRequiresSuggestion = score > 0 && score <= 3;
 
   return (
     <section className="ai-review-page">
@@ -172,11 +180,26 @@ export function AiResponseReviewPage(props: AiResponseReviewPageProps) {
                   <div className="ai-review-kicker" style={{ marginBottom: 6 }}>Rating</div>
                   <Rate value={score} onChange={setScore} disabled={saving} />
                 </div>
+                {lowScoreRequiresSuggestion ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="Reason required"
+                    description="Ratings 1-3 require a reason and improvement suggestion before submission."
+                  />
+                ) : null}
+                <div className="ai-review-kicker">
+                  {lowScoreRequiresSuggestion ? "Reason and improvement suggestion (required)" : "Improvement suggestion (optional)"}
+                </div>
                 <Input.TextArea
                   rows={5}
                   value={suggestion}
                   disabled={saving}
-                  placeholder="Improvement suggestions, if any"
+                  placeholder={
+                    lowScoreRequiresSuggestion
+                      ? "Explain why the AI response was rated low and what should be improved."
+                      : "Improvement suggestions, if any"
+                  }
                   onChange={(event) => setSuggestion(event.target.value)}
                 />
                 <div className="ai-review-actions">

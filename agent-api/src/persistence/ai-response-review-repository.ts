@@ -568,6 +568,47 @@ export class AiResponseReviewRepository {
     return mapReview(row, await this.loadUserMap([row]));
   }
 
+  async listPendingReminderCandidates(input: { integrationInstanceId?: string } = {}): Promise<AiResponseReviewRecord[]> {
+    const integrationInstanceId = trimOrUndefined(input.integrationInstanceId);
+    const rows = await this.db.aiResponseReview.findMany({
+      where: {
+        source: "zendesk",
+        status: "pending",
+        required: true,
+        ...(integrationInstanceId ? { integrationInstanceId } : {})
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5000
+    });
+    const userMap = await this.loadUserMap(rows);
+    return rows
+      .map((row) => mapReview(row, userMap))
+      .sort((left, right) => {
+        const leftDueAt = left.dueAt ? new Date(left.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const rightDueAt = right.dueAt ? new Date(right.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const dueOrder = (Number.isFinite(leftDueAt) ? leftDueAt : Number.MAX_SAFE_INTEGER) -
+          (Number.isFinite(rightDueAt) ? rightDueAt : Number.MAX_SAFE_INTEGER);
+        if (dueOrder !== 0) return dueOrder;
+        return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      });
+  }
+
+  async markReminderSent(reviewIds: string[], at = new Date()): Promise<number> {
+    const ids = Array.from(
+      new Set(reviewIds.map((item) => trimOrUndefined(item)).filter((item): item is string => Boolean(item)))
+    );
+    for (const id of ids) {
+      await this.db.aiResponseReview.update({
+        where: { id },
+        data: {
+          reminderCount: { increment: 1 },
+          lastRemindedAt: at
+        }
+      });
+    }
+    return ids.length;
+  }
+
   async get(reviewId: string): Promise<AiResponseReviewRecord | null> {
     const id = trimOrUndefined(reviewId);
     if (!id) return null;

@@ -65,6 +65,11 @@ import {
 import { SyncJobRepository, type SyncJobRepositoryDb } from "./persistence/sync-job-repository.js";
 import { BroadcastRepository, type BroadcastRepositoryDb } from "./persistence/broadcast-repository.js";
 import { createZendeskAdminRouter, handleZendeskWebhookRequest, ZendeskIntegrationService } from "./integrations/zendesk/index.js";
+import {
+  ZendeskAiReviewEmailReminderScheduler,
+  ZendeskAiReviewEmailReminderService
+} from "./integrations/zendesk/ai-review-email-reminder-service.js";
+import { ZendeskSettingsStore } from "./integrations/zendesk/settings-store.js";
 import type {
   ZendeskAgentDecision,
   ZendeskCommentPayload,
@@ -301,6 +306,7 @@ const codexProviders = new ManagedCodexProviderResolver({
   systemSettings
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
+const zendeskSettingsStore = new ZendeskSettingsStore();
 
 async function resolveActiveDingTalkWorkNoticeConfig(): Promise<DingTalkConfig> {
   const instance = await db.integrationInstance.findFirst({
@@ -822,6 +828,29 @@ const zendesk = new ZendeskIntegrationService({
     });
   }
 });
+const zendeskAiReviewEmailReminderService = new ZendeskAiReviewEmailReminderService({
+  reviews: aiResponseReviews,
+  notifications: notificationRecords,
+  emailSender: authEmailSender,
+  listInstances: async () =>
+    db.integrationInstance.findMany({
+      where: {
+        type: "zendesk",
+        status: "active"
+      },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        organizationId: true
+      },
+      orderBy: { createdAt: "asc" }
+    }),
+  resolveSettings: (instanceId) => zendeskSettingsStore.getForInstance(instanceId)
+});
+const zendeskAiReviewEmailReminderScheduler = new ZendeskAiReviewEmailReminderScheduler(
+  zendeskAiReviewEmailReminderService
+);
 const brandingAssetStorage = new BrandingAssetStorage(appConfig.brandingAssetRoot);
 const policyService = new PolicyService(resourcePolicies);
 const integrationCenter = createIntegrationCenterService({
@@ -829,6 +858,9 @@ const integrationCenter = createIntegrationCenterService({
   policies: resourcePolicies as never,
   policyService,
   usageEvents: usageEventRepository,
+  zendeskAiReviewEmailReminders: {
+    sendManualReminder: (input) => zendeskAiReviewEmailReminderService.sendManualReminder(input)
+  },
   zendesk,
   accessResolver: {
     getRoleIdsForUser: async (userId) => (await userRoles.listForUser(userId)).map((assignment) => assignment.roleId),
@@ -7315,6 +7347,7 @@ async function bootstrap() {
     );
   }
   orgSyncScheduler.start();
+  zendeskAiReviewEmailReminderScheduler.start();
   dingtalkBotStream.start();
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console

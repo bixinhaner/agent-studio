@@ -93,6 +93,39 @@ function normalizeReviewDueHours(value: unknown): number {
   return Math.max(1, Math.min(168, Math.floor(numeric)));
 }
 
+function normalizeReminderTime(value: unknown): string {
+  const raw = String(value || "").trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(raw);
+  if (!match) return "09:00";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return "09:00";
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeTimezone(value: unknown): string {
+  const timezone = String(value || "").trim() || "Asia/Shanghai";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    return timezone;
+  } catch {
+    return "Asia/Shanghai";
+  }
+}
+
+function normalizeEmailList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) {
+    const email = String(item || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+    if (!result.includes(email)) result.push(email);
+  }
+  return result;
+}
+
 function uniqueLowercaseTags(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
@@ -211,6 +244,10 @@ function defaultSettings(): ZendeskIntegrationSettings {
     dingtalkNotificationTemplate: defaultDingTalkNotificationTemplate(),
     dingtalkReviewRequiredEnabled: false,
     dingtalkReviewDueHours: 24,
+    aiReviewEmailReminderEnabled: false,
+    aiReviewEmailReminderTime: "09:00",
+    aiReviewEmailReminderTimezone: "Asia/Shanghai",
+    aiReviewEmailReminderCcEmails: [],
     systemPrompt: defaultZendeskSystemPrompt()
   };
 }
@@ -386,6 +423,10 @@ export class ZendeskSettingsStore {
           ? Boolean(input.dingtalkNotificationEnabled)
           : Boolean(input.dingtalkReviewRequiredEnabled),
       dingtalkReviewDueHours: normalizeReviewDueHours(input.dingtalkReviewDueHours),
+      aiReviewEmailReminderEnabled: Boolean(input.aiReviewEmailReminderEnabled),
+      aiReviewEmailReminderTime: normalizeReminderTime(input.aiReviewEmailReminderTime),
+      aiReviewEmailReminderTimezone: normalizeTimezone(input.aiReviewEmailReminderTimezone),
+      aiReviewEmailReminderCcEmails: normalizeEmailList(input.aiReviewEmailReminderCcEmails),
       systemPrompt: normalizeSystemPrompt(input.systemPrompt),
       lastValidatedAt: input.lastValidatedAt,
       lastValidatedUser: input.lastValidatedUser

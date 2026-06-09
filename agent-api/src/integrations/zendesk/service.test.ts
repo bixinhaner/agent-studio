@@ -44,6 +44,10 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkNotificationTemplate: "",
   dingtalkReviewRequiredEnabled: false,
   dingtalkReviewDueHours: 24,
+  aiReviewEmailReminderEnabled: false,
+  aiReviewEmailReminderTime: "09:00",
+  aiReviewEmailReminderTimezone: "Asia/Shanghai",
+  aiReviewEmailReminderCcEmails: [],
   systemPrompt: "Return JSON."
 };
 

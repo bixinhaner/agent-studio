@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Collapse, Input, InputNumber, Segmented, Select, Space, Switch, Tag } from "antd";
+import { Alert, Button, Card, Collapse, Input, InputNumber, Popconfirm, Segmented, Select, Space, Switch, Tag } from "antd";
 import ReactMarkdown from "react-markdown";
 
 import { fetchAdminUsers } from "../admin/api";
@@ -13,6 +13,7 @@ import {
   previewZendeskCacheCleanup,
   runZendeskCacheCleanup,
   runZendeskIntegrationTicket,
+  sendZendeskAiReviewEmailReminder,
   updateIntegrationInstance,
   validateIntegrationInstance
 } from "./api";
@@ -134,6 +135,15 @@ const DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE = [
   "---",
   "{{mention}}"
 ].join("\n");
+
+const DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIME = "09:00";
+const DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIMEZONE = "Asia/Shanghai";
+const AI_REVIEW_EMAIL_REMINDER_TIMEZONE_OPTIONS = [
+  { label: "Asia/Shanghai", value: "Asia/Shanghai" },
+  { label: "Asia/Singapore", value: "Asia/Singapore" },
+  { label: "Asia/Jakarta", value: "Asia/Jakarta" },
+  { label: "UTC", value: "UTC" }
+];
 
 const DINGTALK_TEMPLATE_TOKENS = [
   { token: "{{ticketId}}", label: "Ticket ID" },
@@ -285,6 +295,15 @@ function normalizeDingTalkNotificationTemplate(value: unknown) {
   return template || DEFAULT_DINGTALK_NOTIFICATION_TEMPLATE;
 }
 
+function normalizeAiReviewEmailReminderTime(value: unknown) {
+  const raw = asString(value).trim();
+  return /^\d{2}:\d{2}$/.test(raw) ? raw : DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIME;
+}
+
+function normalizeAiReviewEmailReminderTimezone(value: unknown) {
+  return asString(value).trim() || DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIMEZONE;
+}
+
 function renderDingTalkTemplatePreview(template: string) {
   return normalizeDingTalkNotificationTemplate(template).replace(
     DINGTALK_TEMPLATE_PLACEHOLDER_RE,
@@ -327,6 +346,10 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
         ? asBoolean(detail.config.dingtalkNotificationEnabled)
         : asBoolean(detail.config.dingtalkReviewRequiredEnabled),
     dingtalkReviewDueHours: Math.max(1, Math.min(168, asNumber(detail.config.dingtalkReviewDueHours, 24))),
+    aiReviewEmailReminderEnabled: asBoolean(detail.config.aiReviewEmailReminderEnabled),
+    aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(detail.config.aiReviewEmailReminderTime),
+    aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(detail.config.aiReviewEmailReminderTimezone),
+    aiReviewEmailReminderCcEmailsRaw: asListText(detail.config.aiReviewEmailReminderCcEmails),
     systemPrompt: normalizeZendeskChannelPrompt(detail.config.systemPrompt)
   };
 }
@@ -413,6 +436,7 @@ export function ZendeskIntegrationView(props: {
   const [cleanupPreview, setCleanupPreview] = useState<ZendeskCacheCleanupResult | null>(null);
   const [previewingCleanup, setPreviewingCleanup] = useState(false);
   const [runningCleanup, setRunningCleanup] = useState(false);
+  const [sendingEmailReminder, setSendingEmailReminder] = useState<"test" | "live" | null>(null);
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -528,6 +552,10 @@ export function ZendeskIntegrationView(props: {
           dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(draft.dingtalkNotificationTemplate),
           dingtalkReviewRequiredEnabled: draft.dingtalkReviewRequiredEnabled,
           dingtalkReviewDueHours: Math.max(1, Math.min(168, Number(draft.dingtalkReviewDueHours) || 24)),
+          aiReviewEmailReminderEnabled: draft.aiReviewEmailReminderEnabled,
+          aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(draft.aiReviewEmailReminderTime),
+          aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(draft.aiReviewEmailReminderTimezone),
+          aiReviewEmailReminderCcEmails: parseList(draft.aiReviewEmailReminderCcEmailsRaw),
           systemPrompt: draft.systemPrompt.trim()
         },
         secretState:
@@ -555,6 +583,33 @@ export function ZendeskIntegrationView(props: {
       setErrorText(error instanceof Error ? error.message : "保存 Zendesk 集成失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSendAiReviewEmailReminder(mode: "test" | "live") {
+    setSendingEmailReminder(mode);
+    setErrorText("");
+    setSuccessText("");
+    try {
+      const response = await sendZendeskAiReviewEmailReminder(props.detail.instance.id, mode);
+      const result = response.result;
+      if (!result.sent) {
+        setSuccessText(result.detail || "当前没有可发送的 Zendesk AI 评分提醒邮件");
+        return;
+      }
+      if (mode === "test") {
+        setSuccessText(`测试邮件已发送给 ${result.to.join(", ")}，包含 ${result.pendingCount} 个 Pending 任务。`);
+      } else {
+        setSuccessText(
+          `提醒邮件已发送给 ${result.reviewerCount} 个处理人，共 ${result.pendingCount} 个 Pending 任务。${
+            result.skippedNoEmailCount > 0 ? ` 有 ${result.skippedNoEmailCount} 个任务因缺少邮箱未发送。` : ""
+          }`
+        );
+      }
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "发送 Zendesk AI 评分提醒邮件失败");
+    } finally {
+      setSendingEmailReminder(null);
     }
   }
 
@@ -929,6 +984,125 @@ export function ZendeskIntegrationView(props: {
                         />
                         <span className="field-help">超时后进入后台逾期统计，并作为钉钉待办截止时间。</span>
                       </label>
+                      <div className="field resource-center-form-span-2 zendesk-email-reminder-panel">
+                        <div className="zendesk-email-reminder-head">
+                          <label className="checkbox-field resource-center-toggle-row">
+                            <Switch
+                              checked={draft.aiReviewEmailReminderEnabled}
+                              disabled={saving || !draft.dingtalkReviewRequiredEnabled}
+                              checkedChildren="发送"
+                              unCheckedChildren="关闭"
+                              onChange={(checked) =>
+                                setDraft((current) => ({ ...current, aiReviewEmailReminderEnabled: checked }))
+                              }
+                            />
+                            <span className="field-label">Daily English email digest</span>
+                          </label>
+                          <span className="field-help">
+                            每天一封群发汇总邮件；To 为所有未评分处理人，CC 为固定管理者。Pending 包含已逾期任务。
+                          </span>
+                        </div>
+                        <div className="zendesk-email-reminder-grid">
+                          <label className="field">
+                            <span className="field-label">Send time</span>
+                            <Input
+                              type="time"
+                              value={draft.aiReviewEmailReminderTime}
+                              disabled={
+                                saving || !draft.dingtalkReviewRequiredEnabled || !draft.aiReviewEmailReminderEnabled
+                              }
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  aiReviewEmailReminderTime: event.target.value || DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIME
+                                }))
+                              }
+                            />
+                            <span className="field-help">到达该时间后发送；服务重启后当天未发会补发一次。</span>
+                          </label>
+                          <label className="field">
+                            <span className="field-label">Timezone</span>
+                            <Select
+                              showSearch
+                              value={draft.aiReviewEmailReminderTimezone}
+                              options={optionsWithCurrent(
+                                AI_REVIEW_EMAIL_REMINDER_TIMEZONE_OPTIONS,
+                                draft.aiReviewEmailReminderTimezone
+                              )}
+                              disabled={
+                                saving || !draft.dingtalkReviewRequiredEnabled || !draft.aiReviewEmailReminderEnabled
+                              }
+                              onChange={(value) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  aiReviewEmailReminderTimezone: value || DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIMEZONE
+                                }))
+                              }
+                            />
+                            <span className="field-help">用于判断每天发送时间和邮件内到期时间显示。</span>
+                          </label>
+                          <label className="field resource-center-form-span-2">
+                            <span className="field-label">Fixed CC emails</span>
+                            <Input.TextArea
+                              rows={3}
+                              value={draft.aiReviewEmailReminderCcEmailsRaw}
+                              placeholder={"manager@example.com\nlead@example.com"}
+                              disabled={
+                                saving || !draft.dingtalkReviewRequiredEnabled || !draft.aiReviewEmailReminderEnabled
+                              }
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  aiReviewEmailReminderCcEmailsRaw: event.target.value
+                                }))
+                              }
+                            />
+                            <span className="field-help">
+                              可用换行或逗号分隔。邮件正文按处理人分组列出未评分任务，逾期任务显示 Past due by X days。
+                            </span>
+                          </label>
+                          <div className="field resource-center-form-span-2 zendesk-email-reminder-actions">
+                            <Button
+                              disabled={
+                                saving ||
+                                !draft.dingtalkReviewRequiredEnabled ||
+                                !draft.aiReviewEmailReminderEnabled ||
+                                Boolean(sendingEmailReminder)
+                              }
+                              loading={sendingEmailReminder === "test"}
+                              onClick={() => void handleSendAiReviewEmailReminder("test")}
+                            >
+                              Send test digest now
+                            </Button>
+                            <Popconfirm
+                              title="Send reminder now?"
+                              description="This will email all reviewers with pending Zendesk AI review tasks and mark today's reminder as sent."
+                              okText="Send"
+                              cancelText="Cancel"
+                              onConfirm={() => void handleSendAiReviewEmailReminder("live")}
+                              disabled={
+                                saving ||
+                                !draft.dingtalkReviewRequiredEnabled ||
+                                !draft.aiReviewEmailReminderEnabled ||
+                                Boolean(sendingEmailReminder)
+                              }
+                            >
+                              <Button
+                                type="primary"
+                                disabled={
+                                  saving ||
+                                  !draft.dingtalkReviewRequiredEnabled ||
+                                  !draft.aiReviewEmailReminderEnabled ||
+                                  Boolean(sendingEmailReminder)
+                                }
+                                loading={sendingEmailReminder === "live"}
+                              >
+                                Send reminder now
+                              </Button>
+                            </Popconfirm>
+                          </div>
+                        </div>
+                      </div>
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">Fallback @ Users</span>
                         <Select
