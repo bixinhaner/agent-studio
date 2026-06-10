@@ -194,7 +194,13 @@ import {
   SubscriptionEntitlementService
 } from "./operations/subscription-entitlement-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
-import { CodexExecutionService } from "./operations/codex-execution-service.js";
+import {
+  CodexExecutionService,
+  codexTraceRowsToContentPart,
+  projectCodexRuntimeEvent,
+  type CodexRuntimeEventProjection,
+  type CodexTraceRow
+} from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
@@ -2643,6 +2649,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
+    const traceRows: CodexTraceRow[] = [];
     let runtimeSideEffectStarted = false;
     const runRuntimeCompletion = async () => {
       await codexExecution.streamFromRuntime({
@@ -2653,6 +2660,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           currentSession.codexRunConfig
         ),
         onEvent(event) {
+          const projection = projectCodexRuntimeEvent(event);
+          traceRows.push(...projection.traceRows);
           runtimeFileChanges.push(...extractRuntimeFileChanges(event));
           if (crestRuntimeEventHasSideEffect(event)) {
             runtimeSideEffectStarted = true;
@@ -2663,7 +2672,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
               currentSession = updated;
             });
           }
-          emitCrestRuntimeEvent(res, event);
+          emitCrestRuntimeEvent(res, projection);
         },
         async onDone(payload) {
           let generatedArtifacts: ThreadArtifactRecord[] = [];
@@ -2692,14 +2701,23 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             });
           }
           const output = payload.answer.trim() || "(无输出)";
+          const tracePart = codexTraceRowsToContentPart(traceRows);
+          const traceContentParts = tracePart ? [tracePart] : [];
           await conversationRecords.appendMessage({
             threadId: thread.id,
             parentId: userMessageId,
-            message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
-              conversationId: input.conversationId,
-              sessionId: currentSession.sessionId,
-              artifacts: generatedArtifacts.map(artifactOut)
-            }),
+            message: crestStoredMessage(
+              "assistant",
+              `crest-assistant-${randomUUID().replace(/-/g, "")}`,
+              output,
+              {
+                conversationId: input.conversationId,
+                sessionId: currentSession.sessionId,
+                artifacts: generatedArtifacts.map(artifactOut)
+              },
+              [],
+              traceContentParts
+            ),
             runConfig: { channel: "crest", conversationId: input.conversationId }
           });
           sendSSE(res, "done", {
@@ -2764,6 +2782,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       liveThread = replacement.liveThread;
       runtimeSideEffectStarted = false;
       runtimeFileChanges.length = 0;
+      traceRows.length = 0;
       await runRuntimeCompletion();
     }
 
@@ -2805,7 +2824,8 @@ function crestStoredMessage(
   id: string,
   text: string,
   metadata: Record<string, unknown>,
-  attachments: PreparedCrestAttachment[] = []
+  attachments: PreparedCrestAttachment[] = [],
+  contentParts: Record<string, unknown>[] = []
 ) {
   const storedAttachments = attachments.map((attachment) => ({
     type: crestAttachmentKind(attachment.mimeType),
@@ -2827,7 +2847,7 @@ function crestStoredMessage(
   return {
     id,
     role,
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text }, ...contentParts],
     ...(storedAttachments.length > 0 ? { attachments: storedAttachments } : {}),
     createdAt: new Date().toISOString(),
     metadata: {
@@ -2959,37 +2979,25 @@ function crestRuntimePrompt(
     .join("\n");
 }
 
-function emitCrestRuntimeEvent(
-  res: Response,
-  event: { type?: string; delta?: string; text?: string; raw?: unknown }
-): void {
-  const raw = asRecord(event.raw);
-  const item = asRecord(raw?.item);
-  const itemType = typeof item?.type === "string" ? item.type : "";
-  const eventType = typeof event.type === "string" ? event.type : "";
-  const isCompleted = eventType === "item.completed";
-
-  if (itemType === "agent_message" && event.delta) {
-    sendSSE(res, "delta", { text: event.delta });
+function emitCrestRuntimeEvent(res: Response, projection: CodexRuntimeEventProjection): void {
+  if (projection.answerDelta) {
+    sendSSE(res, "delta", { text: projection.answerDelta });
     return;
   }
-  if (itemType === "reasoning" && isCompleted) {
-    const text = typeof item?.text === "string" ? item.text.trim() : "";
-    if (text) sendSSE(res, "thought", { text: truncateText(text, 1200) });
+  if (projection.reasoningText) {
+    sendSSE(res, "thought", { text: truncateText(projection.reasoningText, 1200) });
     return;
   }
-  if (itemType === "mcp_tool_call" && isCompleted) {
-    const server = typeof item?.server === "string" ? item.server : "";
-    const tool = typeof item?.tool === "string" ? item.tool : "";
-    const args = asRecord(item?.arguments) ?? {};
-    const result = item?.result;
-    const name = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
-    sendSSE(res, "tool_call", { name, args });
-    const actionPayload = parseCrestActionPayload(result);
+  if (projection.toolCall) {
+    sendSSE(res, "tool_call", { name: projection.toolCall.name, args: projection.toolCall.args });
+    const actionPayload = parseCrestActionPayload(projection.toolCall.result);
     if (actionPayload?.requiresConfirmation === true) {
-      sendSSE(res, "action_preview", { name, preview: actionPayload });
+      sendSSE(res, "action_preview", { name: projection.toolCall.name, preview: actionPayload });
     } else {
-      sendSSE(res, "tool_result", { name, output: stringifyToolResult(result) });
+      sendSSE(res, "tool_result", {
+        name: projection.toolCall.name,
+        output: stringifyToolResult(projection.toolCall.result)
+      });
     }
     const uiIntent = asRecord(actionPayload?.uiIntent);
     if (uiIntent) sendSSE(res, "ui_intent", uiIntent);
