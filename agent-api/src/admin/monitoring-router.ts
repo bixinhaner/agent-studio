@@ -11,13 +11,13 @@ import type { QuotaPolicyRepository, UpsertQuotaPolicyInput } from "../persisten
 import type { ResourceAccessLogRepository } from "../persistence/resource-access-log-repository.js";
 import type { SessionRepository } from "../persistence/session-repository.js";
 import type { UsageRollupRepository } from "../persistence/usage-rollup-repository.js";
-import type { UsageEventRecord, UsageEventRepository } from "../persistence/usage-event-repository.js";
+import type { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import type { UserRepositoryLike } from "../persistence/user-repository.js";
 
 type MonitoringRouterOptions = {
   requirePermission: (permissionKey: string) => RequestHandler;
   resourceAccessLogs: Pick<ResourceAccessLogRepository, "list">;
-  usageEvents: Pick<UsageEventRepository, "list">;
+  usageLedger: Pick<UsageLedgerService, "buildOverview" | "buildRankings" | "buildTrends" | "listEvents">;
   usageRollups: Pick<UsageRollupRepository, "list">;
   sessions: Pick<SessionRepository, "listByIds">;
   users: Pick<UserRepositoryLike, "getById">;
@@ -28,22 +28,6 @@ type MonitoringRouterOptions = {
   alertRules: Pick<AlertRuleRepository, "list" | "create" | "getById" | "update">;
   alertEvents: Pick<AlertEventRepository, "list" | "getById" | "update">;
   notificationRecords: Pick<NotificationRecordRepository, "list">;
-};
-
-type AggregatedRanking = {
-  key: string;
-  requestCount: number;
-  estimatedCost: string;
-  internalCost: string;
-};
-
-type MonitoringTrend = {
-  rollupDate: string;
-  requestCount: number;
-  successCount: number;
-  failureCount: number;
-  estimatedCost: string;
-  internalCost: string;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -82,76 +66,6 @@ function parseOperationsSortKey(value: unknown): OperationsInsightsSessionSortKe
 function parseSortDirection(value: unknown): "asc" | "desc" | undefined {
   const direction = trimOrUndefined(typeof value === "string" ? value : undefined);
   return direction === "asc" || direction === "desc" ? direction : undefined;
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function toDateKey(value: string | Date): string {
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-  const trimmed = value.trim();
-  if (!trimmed) return new Date().toISOString().slice(0, 10);
-  return trimmed.slice(0, 10);
-}
-
-function aggregateRankings<T extends UsageEventRecord>(
-  records: T[],
-  selectKey: (record: T) => string | undefined
-): AggregatedRanking[] {
-  const buckets = new Map<string, { requestCount: number; estimatedCost: number; internalCost: number }>();
-  for (const record of records) {
-    const key = trimOrUndefined(selectKey(record));
-    if (!key) continue;
-    const existing = buckets.get(key) ?? { requestCount: 0, estimatedCost: 0, internalCost: 0 };
-    existing.requestCount += 1;
-    existing.estimatedCost += toNumber(record.estimatedCost);
-    existing.internalCost += toNumber(record.internalCost);
-    buckets.set(key, existing);
-  }
-
-  return [...buckets.entries()]
-    .map(([key, value]) => ({
-      key,
-      requestCount: value.requestCount,
-      estimatedCost: value.estimatedCost.toFixed(6),
-      internalCost: value.internalCost.toFixed(6)
-    }))
-    .sort(
-      (left, right) =>
-        right.requestCount - left.requestCount ||
-        toNumber(right.estimatedCost) - toNumber(left.estimatedCost) ||
-        left.key.localeCompare(right.key)
-    );
-}
-
-function buildTrendsFromUsageEvents(records: UsageEventRecord[]): MonitoringTrend[] {
-  const buckets = new Map<string, MonitoringTrend>();
-  for (const record of records) {
-    const rollupDate = toDateKey(record.createdAt);
-    const existing = buckets.get(rollupDate) ?? {
-      rollupDate,
-      requestCount: 0,
-      successCount: 0,
-      failureCount: 0,
-      estimatedCost: "0.000000",
-      internalCost: "0.000000"
-    };
-    existing.requestCount += 1;
-    existing.successCount += record.resultStatus === "success" ? 1 : 0;
-    existing.failureCount += record.resultStatus === "success" ? 0 : 1;
-    existing.estimatedCost = (toNumber(existing.estimatedCost) + toNumber(record.estimatedCost)).toFixed(6);
-    existing.internalCost = (toNumber(existing.internalCost) + toNumber(record.internalCost)).toFixed(6);
-    buckets.set(rollupDate, existing);
-  }
-  return [...buckets.values()].sort((left, right) => left.rollupDate.localeCompare(right.rollupDate));
 }
 
 function detailFromError(error: unknown): string {
@@ -222,28 +136,25 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
   router.get("/monitoring/overview", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
       const [usageEvents, accessLogs, alertEvents, notificationRecords] = await Promise.all([
-        options.usageEvents.list(),
+        options.usageLedger.listEvents(),
         options.resourceAccessLogs.list(),
         options.alertEvents.list(),
         options.notificationRecords.list()
       ]);
-      const trends = buildTrendsFromUsageEvents(usageEvents);
-      const totalRequests = usageEvents.length;
-      const totalEstimatedCost = usageEvents.reduce((sum, item) => sum + toNumber(item.estimatedCost), 0).toFixed(6);
-      const totalInternalCost = usageEvents.reduce((sum, item) => sum + toNumber(item.internalCost), 0).toFixed(6);
+      const usageOverview = options.usageLedger.buildOverview(usageEvents);
 
       res.json({
         overview: {
-          totalEstimatedCost,
-          totalInternalCost,
-          totalRequests,
+          totalEstimatedCost: usageOverview.totalEstimatedCost,
+          totalInternalCost: usageOverview.totalInternalCost,
+          totalRequests: usageOverview.totalRequests,
           totalUsageEvents: usageEvents.length,
           totalResourceAccessLogs: accessLogs.length,
           openAlertCount: alertEvents.filter((item) => item.status === "open").length,
           acknowledgedAlertCount: alertEvents.filter((item) => item.status === "acknowledged").length,
           notificationCount: notificationRecords.length
         },
-        trends
+        trends: usageOverview.trends
       });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
@@ -252,35 +163,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/monitoring/rankings", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
-      const usageEvents = await options.usageEvents.list();
-      res.json({
-        rankings: {
-          topUsers: aggregateRankings(usageEvents, (record) => record.userId).map((item) => ({
-            userId: item.key,
-            requestCount: item.requestCount,
-            estimatedCost: item.estimatedCost,
-            internalCost: item.internalCost
-          })),
-          topDepartments: aggregateRankings(usageEvents, (record) => record.departmentIdSnapshot).map((item) => ({
-            departmentId: item.key,
-            requestCount: item.requestCount,
-            estimatedCost: item.estimatedCost,
-            internalCost: item.internalCost
-          })),
-          topModels: aggregateRankings(usageEvents, (record) => record.model).map((item) => ({
-            model: item.key,
-            requestCount: item.requestCount,
-            estimatedCost: item.estimatedCost,
-            internalCost: item.internalCost
-          })),
-          topFeatures: aggregateRankings(usageEvents, (record) => record.featureType).map((item) => ({
-            featureType: item.key,
-            requestCount: item.requestCount,
-            estimatedCost: item.estimatedCost,
-            internalCost: item.internalCost
-          }))
-        }
-      });
+      res.json({ rankings: options.usageLedger.buildRankings(await options.usageLedger.listEvents()) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }
@@ -305,7 +188,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
         sessionSortDirection: parseSortDirection(req.query.sessionSortDirection)
       } as const;
 
-      const usageEvents = await options.usageEvents.list({
+      const usageEvents = await options.usageLedger.listEvents({
         organizationId: filters.organizationId,
         model: filters.model,
         from: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
@@ -344,7 +227,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
 
   router.get("/monitoring/trends", options.requirePermission("monitoring.read"), async (_req: Request, res: Response) => {
     try {
-      res.json({ trends: buildTrendsFromUsageEvents(await options.usageEvents.list()) });
+      res.json({ trends: options.usageLedger.buildTrends(await options.usageLedger.listEvents()) });
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
     }
@@ -369,7 +252,7 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
   router.get("/monitoring/usage-events", options.requirePermission("monitoring.read"), async (req: Request, res: Response) => {
     try {
       const take = typeof req.query.take === "string" ? Number(req.query.take) : undefined;
-      const usageEvents = await options.usageEvents.list({
+      const usageEvents = await options.usageLedger.listEvents({
         take: Number.isFinite(take) ? take : undefined
       });
       res.json({ usageEvents });

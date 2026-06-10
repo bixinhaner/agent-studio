@@ -1,5 +1,6 @@
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb, type IntegrationValidationRecord } from "../../persistence/integration-instance-repository.js";
-import type { UsageEventRecord, UsageEventRepository } from "../../persistence/usage-event-repository.js";
+import type { UsageEventRecord } from "../../persistence/usage-event-repository.js";
+import type { UsageLedgerService } from "../../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../../operations/usage-metrics.js";
 import {
   createEmptyPolicySummary,
@@ -439,7 +440,7 @@ export function createIntegrationCenterService(options: {
   policies: IntegrationPolicyStore;
   policyService: Pick<PolicyService, "filterAllowedResources">;
   accessResolver: AccessResolver;
-  usageEvents: Pick<UsageEventRepository, "list">;
+  usageLedger: Pick<UsageLedgerService, "listExternalApiEvents">;
   zendesk?: {
     getOverview(instanceId?: string): Promise<ZendeskOverview>;
     validateConnection(instanceId?: string): Promise<{ ok: true; overview: ZendeskOverview }>;
@@ -1051,9 +1052,7 @@ export function createIntegrationCenterService(options: {
       fromDate.setUTCDate(fromDate.getUTCDate() - (windowDays - 1));
       fromDate.setUTCHours(0, 0, 0, 0);
 
-      const rawEvents = await options.usageEvents.list({
-        featureType: "external_openai_api"
-      });
+      const rawEvents = await options.usageLedger.listExternalApiEvents();
       const relevantEvents = rawEvents.filter((record) => {
         const metadata = asRecord(record.metadata);
         if (asString(metadata?.integrationInstanceId) !== instance.id) {

@@ -192,8 +192,8 @@ describe("IntegrationCenterService", () => {
       policyService: {
         filterAllowedResources: vi.fn(async ({ candidateIds }: { candidateIds: string[] }) => candidateIds)
       },
-      usageEvents: {
-        list: vi.fn(async () => [])
+      usageLedger: {
+        listExternalApiEvents: vi.fn(async () => [])
       },
       accessResolver: {
         getRoleIdsForUser: vi.fn(async () => []),

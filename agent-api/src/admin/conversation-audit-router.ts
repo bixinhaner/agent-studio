@@ -30,9 +30,11 @@ import {
   type ExternalConversationBindingRecord,
   type ExternalConversationBindingRepositoryDb
 } from "../persistence/external-conversation-binding-repository.js";
+import { UsageEventRepository, type UsageEventRecord, type UsageEventRepositoryDb } from "../persistence/usage-event-repository.js";
+import { ConversationRecordService } from "../operations/conversation-record-service.js";
+import { UsageLedgerService } from "../operations/usage-ledger-service.js";
 import { usageTotalTokens } from "../operations/usage-metrics.js";
 
-const EXTERNAL_API_FEATURE_TYPE = "external_openai_api";
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
 
 type ConversationAuditUserRow = {
@@ -44,20 +46,7 @@ type ConversationAuditUserRow = {
   status: string | null;
 };
 
-type UsageEventAuditRow = {
-  id: string;
-  sessionId: string | null;
-  model: string;
-  featureType: string;
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  estimatedCost: unknown;
-  internalCost: unknown;
-  resultStatus: string;
-  metadata: unknown;
-  createdAt: Date | string;
-};
+type UsageEventAuditRow = UsageEventRecord;
 
 type IntegrationInstanceAuditRow = {
   id: string;
@@ -74,18 +63,10 @@ type AgentModeAuditRow = {
   status: string | null;
 };
 
-type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & {
+type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & UsageEventRepositoryDb & {
   user: {
     findMany(args?: { orderBy?: { createdAt: "asc" | "desc" } }): Promise<ConversationAuditUserRow[]>;
     findUnique(args: { where: { id: string } }): Promise<ConversationAuditUserRow | null>;
-  };
-  usageEvent: {
-    findMany(args?: {
-      where?: {
-        featureType?: string;
-      };
-      orderBy?: { createdAt: "asc" | "desc" };
-    }): Promise<UsageEventAuditRow[]>;
   };
   integrationInstance: {
     findMany(args?: {
@@ -1638,11 +1619,25 @@ export function createConversationAuditRouter(options: {
     return cachedDb;
   }
 
+  function conversationRecords(): ConversationRecordService {
+    const db = getDb();
+    return new ConversationRecordService({
+      threads: new ThreadRepository(db as unknown as ThreadRepositoryDb),
+      externalConversations: new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb)
+    });
+  }
+
+  function usageLedger(): UsageLedgerService {
+    return new UsageLedgerService({
+      usageEvents: new UsageEventRepository(getDb() as unknown as UsageEventRepositoryDb)
+    });
+  }
+
   async function listConversationSummaries(): Promise<ConversationSummary[]> {
     const db = getDb();
-    const repository = new ThreadRepository(db as unknown as ThreadRepositoryDb);
+    const records = conversationRecords();
     const [threads, users, integrations, agentModes] = await Promise.all([
-      repository.list(undefined, true),
+      records.listThreads({ includeArchived: true }),
       db.user.findMany({ orderBy: { createdAt: "asc" } }),
       db.integrationInstance.findMany(),
       db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
@@ -1650,9 +1645,7 @@ export function createConversationAuditRouter(options: {
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
     const agentModeMap = new Map(agentModes.map((item) => [item.id, item] as const));
-    const bindings = await new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds(
-      threads.map((thread) => thread.id)
-    );
+    const bindings = await records.listExternalConversationBindingsByThreadIds(threads.map((thread) => thread.id));
     const bindingByThreadId = new Map<string, ExternalConversationBindingRecord>();
     for (const binding of bindings) {
       if (!bindingByThreadId.has(binding.threadId)) {
@@ -1672,10 +1665,7 @@ export function createConversationAuditRouter(options: {
   async function listApiAuditRecords(): Promise<ApiAuditRecord[]> {
     const db = getDb();
     const [events, integrations] = await Promise.all([
-      db.usageEvent.findMany({
-        where: { featureType: EXTERNAL_API_FEATURE_TYPE },
-        orderBy: { createdAt: "desc" }
-      }),
+      usageLedger().listExternalApiEvents(),
       db.integrationInstance.findMany({
         where: { type: OPENAI_COMPATIBLE_API_TYPE }
       })
@@ -1954,8 +1944,7 @@ export function createConversationAuditRouter(options: {
         return;
       }
 
-      const repository = new ThreadRepository(getDb() as unknown as ThreadRepositoryDb);
-      const thread = await repository.get(threadId);
+      const thread = await conversationRecords().getThread(threadId);
       if (!thread) {
         res.status(404).json({ detail: "thread 不存在" });
         return;
@@ -2004,8 +1993,8 @@ export function createConversationAuditRouter(options: {
       }
 
       const db = getDb();
-      const repository = new ThreadRepository(db as unknown as ThreadRepositoryDb);
-      const thread = await repository.get(threadId);
+      const records = conversationRecords();
+      const thread = await records.getThread(threadId);
       if (!thread) {
         res.status(404).json({ detail: "thread 不存在" });
         return;
@@ -2013,7 +2002,7 @@ export function createConversationAuditRouter(options: {
 
       const [userRow, bindings, integrationRows, agentModeRows] = await Promise.all([
         thread.userId ? db.user.findUnique({ where: { id: thread.userId } }) : Promise.resolve(null),
-        new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb).listByThreadIds([thread.id]),
+        records.listExternalConversationBindingsByThreadIds([thread.id]),
         db.integrationInstance.findMany(),
         db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
       ]);

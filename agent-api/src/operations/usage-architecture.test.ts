@@ -43,4 +43,32 @@ describe("usage recording architecture", () => {
     expect(matches(/usageIngestion\.record\s*\(/)).toEqual(["operations/usage-recorder.ts"]);
     expect(matches(/(?:db|prisma)\.usageEvent\.create\s*\(/)).toEqual(["persistence/usage-event-repository.ts"]);
   });
+
+  it("keeps usage read models behind the common ledger", () => {
+    expect(matches(/usageEvents\.list\s*\(/)).toEqual([
+      "operations/usage-ingestion-service.ts",
+      "operations/usage-ledger-service.ts"
+    ]);
+    expect(matches(/\.usageEvent\.findMany\s*\(/)).toEqual(["persistence/usage-event-repository.ts"]);
+  });
+
+  it("keeps conversation message persistence behind the common record service", () => {
+    expect(matches(/\bthreads\.(appendMessage|replaceMessages|getRepository)\s*\(/)).toEqual([
+      "operations/conversation-record-service.ts"
+    ]);
+  });
+
+  it("keeps shared Codex stream execution behind the common execution service", () => {
+    expect(matches(/streamRuntimeCompletionWithBestEffortUsage\s*\(/)).toEqual([
+      "live-runtime-session.ts",
+      "operations/codex-execution-service.ts"
+    ]);
+    expect(matches(/collectRuntimeCompletion\s*\(/)).toEqual([
+      "live-runtime-session.ts",
+      "operations/codex-execution-service.ts"
+    ]);
+    expect(matches(/extractRuntimeUsageFromStreamEvent\s*\(/)).toEqual([
+      "live-runtime-session.ts"
+    ]);
+  });
 });

@@ -5,10 +5,10 @@ import path from "node:path";
 
 import { CodexRuntime } from "../../codex-runtime.js";
 import {
-  extractRuntimeUsageFromStreamEvent,
   stripInternalRunConfigMetadata,
   type RuntimeUsageSnapshot
 } from "../../live-runtime-session.js";
+import { CodexExecutionService } from "../../operations/codex-execution-service.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
 import { ZendeskBindingStore } from "./binding-store.js";
 import {
@@ -472,7 +472,7 @@ function summarizePreparedAttachments(context: ZendeskTicketContext): string {
 }
 
 function collectRuntimeProcessRow(
-  event: { type: string; delta?: string; text?: string; raw?: unknown },
+  event: { type?: string; delta?: string; text?: string; raw?: unknown },
   processRows: ZendeskAuditProcessRow[]
 ): void {
   if (processRows.length >= 120) return;
@@ -1229,6 +1229,7 @@ export class ZendeskIntegrationService {
       }) => Promise<ZendeskDingTalkReviewRequestResult>;
       conversationAudit?: ZendeskConversationAuditSync;
       runtimeSession?: ZendeskRuntimeSessionBridge;
+      codexExecution?: Pick<CodexExecutionService, "collectFromRuntime">;
       getDrainReason?: () => Promise<string | undefined>;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
       codexSessionHomeRoot?: string;
@@ -2232,27 +2233,30 @@ export class ZendeskIntegrationService {
     let output = "";
     let latestUsage: RuntimeUsageSnapshot | undefined;
     const runAgentThread = async (currentThread: ZendeskRuntimeThread) => {
-      let runOutput = "";
-      let runUsage: RuntimeUsageSnapshot | undefined;
-      for await (const event of runtime.runStreamed(currentThread, prompt)) {
-        const eventCodexThreadId = extractCodexThreadIdFromEvent(event);
-        if (eventCodexThreadId) {
-          observedCodexThreadId = eventCodexThreadId;
-          if (runtimeSessionLease && this.dependencies.runtimeSession?.persistCodexThreadId) {
-            const persisted = await this.dependencies.runtimeSession.persistCodexThreadId({
-              ...runtimeSessionInput,
-              lease: runtimeSessionLease,
-              codexThreadId: eventCodexThreadId
-            });
-            runtimeSessionLease = persisted || runtimeSessionLease;
+      const dependencies = this.dependencies;
+      const execution = dependencies.codexExecution ?? new CodexExecutionService();
+      const result = await execution.collectFromRuntime({
+        runtime,
+        thread: currentThread,
+        prompt,
+        textMode: "first",
+        onEvent: async (event) => {
+          const eventCodexThreadId = extractCodexThreadIdFromEvent(event);
+          if (eventCodexThreadId) {
+            observedCodexThreadId = eventCodexThreadId;
+            if (runtimeSessionLease && dependencies.runtimeSession?.persistCodexThreadId) {
+              const persisted = await dependencies.runtimeSession.persistCodexThreadId({
+                ...runtimeSessionInput,
+                lease: runtimeSessionLease,
+                codexThreadId: eventCodexThreadId
+              });
+              runtimeSessionLease = persisted || runtimeSessionLease;
+            }
           }
+          collectRuntimeProcessRow(event, processRows);
         }
-        runUsage = extractRuntimeUsageFromStreamEvent(event) || runUsage;
-        collectRuntimeProcessRow(event, processRows);
-        if (event.delta) runOutput += event.delta;
-        else if (!runOutput && event.text) runOutput += event.text;
-      }
-      return { output: runOutput, latestUsage: runUsage };
+      });
+      return { output: result.answer, latestUsage: result.usage };
     };
 
     try {

@@ -11,13 +11,15 @@ export type RuntimeUsageSnapshot = {
   codexThreadId?: string;
 };
 
-type RuntimeStreamEvent = {
+export type RuntimeStreamEvent = {
   type?: string;
   delta?: string;
   text?: string;
   raw?: unknown;
   usage?: unknown;
 };
+
+export type RuntimeCompletionTextMode = "append" | "first";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -116,6 +118,45 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
   return turn ?? parseUsageRecord(usage, "cumulative_snapshot", { codexThreadId });
 }
 
+export async function collectRuntimeCompletion(input: {
+  events: AsyncIterable<RuntimeStreamEvent>;
+  textMode?: RuntimeCompletionTextMode;
+  onEvent?(event: RuntimeStreamEvent): void | Promise<void>;
+  onUsage?(usage: RuntimeUsageSnapshot, event: RuntimeStreamEvent): void | Promise<void>;
+  onTextDelta?(delta: string, event: RuntimeStreamEvent): void | Promise<void>;
+}): Promise<{ answer: string; usage?: RuntimeUsageSnapshot }> {
+  let fallbackAnswer = "";
+  let finalAgentAnswer: string | undefined;
+  let latestUsage: RuntimeUsageSnapshot | undefined;
+  const textMode = input.textMode ?? "append";
+
+  for await (const event of input.events) {
+    const usage = extractRuntimeUsageFromStreamEvent(event);
+    if (usage) {
+      latestUsage = usage;
+      await input.onUsage?.(usage, event);
+    }
+    const completedAgentText = completedAgentMessageText(event);
+    if (completedAgentText !== undefined) {
+      finalAgentAnswer = completedAgentText;
+    } else if (event.delta) {
+      fallbackAnswer += event.delta;
+      await input.onTextDelta?.(event.delta, event);
+    } else if (event.text) {
+      if (textMode === "append" || !fallbackAnswer) {
+        fallbackAnswer += event.text;
+        await input.onTextDelta?.(event.text, event);
+      }
+    }
+    await input.onEvent?.(event);
+  }
+
+  return {
+    answer: finalAgentAnswer ?? fallbackAnswer,
+    usage: latestUsage
+  };
+}
+
 export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   events: AsyncIterable<RuntimeStreamEvent>;
   onEvent(event: RuntimeStreamEvent): void;
@@ -123,26 +164,17 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   recordUsage?(usage: RuntimeUsageSnapshot, resultStatus?: "success" | "failed"): Promise<void>;
   onTelemetryError?(error: unknown): void;
 }): Promise<void> {
-  let fallbackAnswer = "";
-  let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
+  let completion: { answer: string; usage?: RuntimeUsageSnapshot };
 
   try {
-    for await (const event of input.events) {
-      const usage = extractRuntimeUsageFromStreamEvent(event);
-      if (usage) {
+    completion = await collectRuntimeCompletion({
+      events: input.events,
+      onEvent: input.onEvent,
+      onUsage(usage) {
         latestUsage = usage;
       }
-      const completedAgentText = completedAgentMessageText(event);
-      if (completedAgentText !== undefined) {
-        finalAgentAnswer = completedAgentText;
-      } else if (event.delta) {
-        fallbackAnswer += event.delta;
-      } else if (event.text) {
-        fallbackAnswer += event.text;
-      }
-      input.onEvent(event);
-    }
+    });
   } catch (error) {
     const failedUsage = latestUsage;
     if (failedUsage && input.recordUsage) {
@@ -155,14 +187,11 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
     throw error;
   }
 
-  await input.onDone({
-    answer: finalAgentAnswer ?? fallbackAnswer,
-    usage: latestUsage
-  });
+  await input.onDone(completion);
 
-  if (latestUsage && input.recordUsage) {
+  if (completion.usage && input.recordUsage) {
     void Promise.resolve()
-      .then(() => input.recordUsage?.(latestUsage, "success"))
+      .then(() => input.recordUsage?.(completion.usage!, "success"))
       .catch((error) => {
         input.onTelemetryError?.(error);
       });

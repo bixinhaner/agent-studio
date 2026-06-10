@@ -81,8 +81,7 @@ import {
   ensureThreadUploadInRunConfig,
   replaceLiveRuntimeSession,
   stripInternalRunConfigMetadata,
-  startLiveRuntimeSession,
-  streamRuntimeCompletionWithBestEffortUsage
+  startLiveRuntimeSession
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
@@ -195,6 +194,9 @@ import {
   SubscriptionEntitlementService
 } from "./operations/subscription-entitlement-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
+import { CodexExecutionService } from "./operations/codex-execution-service.js";
+import { ConversationRecordService } from "./operations/conversation-record-service.js";
+import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
@@ -217,6 +219,7 @@ import {
 
 const app = express();
 const runtime = new CodexRuntime();
+const codexExecution = new CodexExecutionService();
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
@@ -247,6 +250,10 @@ const threadPublicShares = new ThreadPublicShareRepository(db as unknown as Thre
 const threadArtifacts = new ThreadArtifactRepository(db as unknown as ThreadArtifactRepositoryDb);
 const threadShares = new ThreadShareRepository(db as unknown as ThreadShareRepositoryDb);
 const externalConversationBindings = new ExternalConversationBindingRepository(db as unknown as ExternalConversationBindingRepositoryDb);
+const conversationRecords = new ConversationRecordService({
+  threads,
+  externalConversations: externalConversationBindings
+});
 const threadComments = new ThreadCommentRepository(db as unknown as ThreadCommentRepositoryDb);
 const threadCollaboration = new ThreadCollaborationRepository(db as unknown as ThreadCollaborationRepositoryDb);
 const inboxItems = new InboxItemRepository(db as unknown as InboxItemRepositoryDb);
@@ -259,6 +266,7 @@ const accessRequestEvents = new AccessRequestEventRepository(db as never);
 const accessRequestPolicies = new AccessRequestPolicyRepository(db as never);
 const subscriptionDenialLogs = new SubscriptionDenialLogRepository(db as never);
 const usageEventRepository = new UsageEventRepository(db as unknown as UsageEventRepositoryDb);
+const usageLedger = new UsageLedgerService({ usageEvents: usageEventRepository });
 const usageRollupRepository = new UsageRollupRepository(db as unknown as UsageRollupRepositoryDb);
 const costProfiles = new CostProfileRepository(db as unknown as CostProfileRepositoryDb);
 const quotaPolicies = new QuotaPolicyRepository(db as unknown as QuotaPolicyRepositoryDb);
@@ -826,6 +834,7 @@ const zendesk = new ZendeskIntegrationService({
     afterAgentRun: syncZendeskConversationAfterAgentRun
   },
   runtimeSession: createZendeskRuntimeSessionBridge(),
+  codexExecution,
   getDrainReason: getDeploymentDrainReason,
   codexSessionHomeRoot: appConfig.codex.sessionHomeRoot,
   async recordUsage(input) {
@@ -898,7 +907,7 @@ const integrationCenter = createIntegrationCenterService({
   db: db as unknown as IntegrationCenterDb,
   policies: resourcePolicies as never,
   policyService,
-  usageEvents: usageEventRepository,
+  usageLedger,
   zendeskAiReviewEmailReminders: {
     sendManualReminder: (input) => zendeskAiReviewEmailReminderService.sendManualReminder(input)
   },
@@ -2616,7 +2625,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     }
 
     const userMessageId = `crest-user-${randomUUID().replace(/-/g, "")}`;
-    await threads.appendMessage(thread.id, {
+    await conversationRecords.appendMessage({
+      threadId: thread.id,
       parentId: thread.headId ?? null,
       message: crestStoredMessage(
         "user",
@@ -2635,13 +2645,12 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     const runtimeFileChanges: RuntimeFileChange[] = [];
     let runtimeSideEffectStarted = false;
     const runRuntimeCompletion = async () => {
-      await streamRuntimeCompletionWithBestEffortUsage({
-        events: runtime.runStreamed(
-          liveThread,
-          withSkillActivationPrompts(
-            crestRuntimePrompt(input, preparedAttachments),
-            currentSession.codexRunConfig
-          )
+      await codexExecution.streamFromRuntime({
+        runtime,
+        thread: liveThread,
+        prompt: withSkillActivationPrompts(
+          crestRuntimePrompt(input, preparedAttachments),
+          currentSession.codexRunConfig
         ),
         onEvent(event) {
           runtimeFileChanges.push(...extractRuntimeFileChanges(event));
@@ -2683,7 +2692,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             });
           }
           const output = payload.answer.trim() || "(无输出)";
-          await threads.appendMessage(thread.id, {
+          await conversationRecords.appendMessage({
+            threadId: thread.id,
             parentId: userMessageId,
             message: crestStoredMessage("assistant", `crest-assistant-${randomUUID().replace(/-/g, "")}`, output, {
               conversationId: input.conversationId,
@@ -4188,7 +4198,7 @@ async function ensureZendeskAuditThread(input: {
     ticketId: input.ticketId,
     agentModeId
   });
-  const binding = await externalConversationBindings.getByExternalConversationKey(externalConversationKey);
+  const binding = await conversationRecords.getExternalConversationBinding(externalConversationKey);
   let thread = binding ? await threads.get(binding.threadId, integration.organizationId ?? undefined) : undefined;
 
   const runConfig = zendeskThreadRunConfig({
@@ -4230,7 +4240,7 @@ async function ensureZendeskAuditThread(input: {
 
   const preparedComment = latestPreparedZendeskComment(input.context, input.requesterComment);
   const messageAt = preparedComment.createdAt ? new Date(preparedComment.createdAt) : new Date();
-  await externalConversationBindings.upsert({
+  await conversationRecords.upsertExternalConversation({
     organizationId: integration.organizationId ?? null,
     integrationInstanceId: integration.id,
     threadId: thread.id,
@@ -4287,7 +4297,8 @@ async function syncZendeskConversationBeforeAgentRun(input: {
   const userMessageId = `zendesk-requester-${preparedComment.id}`;
   const userText = zendeskRequesterMessageText(input);
 
-  const updated = await threads.appendMessage(ensured.thread.id, {
+  const updated = await conversationRecords.appendMessage({
+    threadId: ensured.thread.id,
     parentId: ensured.thread.headId ?? null,
     message: zendeskMessage({
       id: userMessageId,
@@ -4423,7 +4434,8 @@ async function syncZendeskConversationAfterAgentRun(input: {
     ...(input.processRows ?? []).filter((row) => row.id !== inputSnapshotRow.id && row.title !== inputSnapshotRow.title)
   ];
   const tracePart = zendeskTraceBatchPart(processRows);
-  await threads.appendMessage(audit.threadId, {
+  await conversationRecords.appendMessage({
+    threadId: audit.threadId,
     parentId: audit.userMessageId ?? null,
     message: zendeskMessage({
       id: `zendesk-agent-${input.runId}`,
@@ -4455,7 +4467,7 @@ async function syncZendeskConversationAfterAgentRun(input: {
   });
 
   if (audit.externalConversationKey) {
-    await externalConversationBindings.touch({
+    await conversationRecords.touchExternalConversation({
       externalConversationKey: audit.externalConversationKey,
       lastExternalMessageId: String(input.requesterComment.id),
       lastMessageAt: input.requesterComment.createdAt ?? new Date(),
@@ -5027,7 +5039,7 @@ async function upsertDingTalkBinding(input: {
   messageAt: Date;
   robotMessage: DingTalkBotIncomingMessage["robotMessage"];
 }): Promise<ExternalConversationBindingRecord> {
-  return externalConversationBindings.upsert({
+  return conversationRecords.upsertExternalConversation({
     organizationId: input.actor.currentUser.organizationId,
     integrationInstanceId: input.instance.id,
     threadId: input.thread.id,
@@ -5077,7 +5089,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     conversationId: input.robotMessage.conversationId,
     agentModeId
   });
-  let binding = await externalConversationBindings.getByExternalConversationKey(externalConversationKey);
+  let binding = await conversationRecords.getExternalConversationBinding(externalConversationKey);
   let thread = binding ? await threads.get(binding.threadId, actor.currentUser.organizationId) : undefined;
 
   const title = dingtalkConversationTitle({
@@ -5193,7 +5205,8 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
         externalConversationKey
       }
     });
-    await threads.appendMessage(thread.id, {
+    await conversationRecords.appendMessage({
+      threadId: thread.id,
       parentId: thread.headId ?? null,
       message: userMessage,
       runConfig: {
@@ -5218,8 +5231,10 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   let answerText = "";
   let streamingCardFinalized = false;
   try {
-    await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(liveThread, withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig)),
+    await codexExecution.streamFromRuntime({
+      runtime,
+      thread: liveThread,
+      prompt: withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig),
       onEvent(event) {
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
@@ -5241,7 +5256,8 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           await streamingCardReply.finish(answerText);
           streamingCardFinalized = true;
         }
-        await threads.appendMessage(thread!.id, {
+        await conversationRecords.appendMessage({
+          threadId: thread!.id,
           parentId: input.robotMessage.msgId,
           message: dingtalkMessage({
             id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
@@ -5306,7 +5322,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     throw error;
   }
 
-  await externalConversationBindings.touch({
+  await conversationRecords.touchExternalConversation({
     externalConversationKey,
     lastExternalMessageId: input.robotMessage.msgId,
     lastMessageAt: messageAt,
@@ -6191,13 +6207,13 @@ registerCommonApiRoutes(app, {
     dingtalkBot: {
       getStatus: (instanceId) => dingtalkBotStream.getStatuses(instanceId),
       restart: (instanceId) => dingtalkBotStream.restart(instanceId),
-      listRecentConversations: (instanceId, take) => externalConversationBindings.listRecentForIntegration(instanceId, take)
+      listRecentConversations: (instanceId, take) => conversationRecords.listRecentExternalConversations(instanceId, take)
     }
   }),
   monitoringAdminRouter: createMonitoringRouter({
     requirePermission,
     resourceAccessLogs: resourceAccessLogRepository,
-    usageEvents: usageEventRepository,
+    usageLedger,
     usageRollups: usageRollupRepository,
     sessions,
     users,
@@ -6267,6 +6283,7 @@ app.use(
     knowledgeSets,
     knowledgeSetStorage,
     usageRecorder,
+    codexExecution,
     systemSettings,
     sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot,
     defaultModel: appConfig.defaultModel,
@@ -7077,7 +7094,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
-    const repository = await threads.getRepository(threadId);
+    const repository = await conversationRecords.getMessageRepository(threadId);
     res.json({
       head_id: repository.headId ?? null,
       messages: repository.messages.map((item) => ({
@@ -7107,7 +7124,7 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
     }
 
     const input = createThreadPublicShareSchema.parse(req.body || {});
-    const repository = await threads.getRepository(threadId);
+    const repository = await conversationRecords.getMessageRepository(threadId);
     const built = buildThreadPublicShareSnapshot({
       thread,
       repository,
@@ -7146,7 +7163,8 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       return;
     }
     const input = appendMessageSchema.parse(req.body || {});
-    const updated = await threads.appendMessage(threadId, {
+    const updated = await conversationRecords.appendMessage({
+      threadId,
       parentId: input.parent_id ?? null,
       message: input.message,
       runConfig: input.run_config,
@@ -7170,7 +7188,8 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
       return;
     }
     const input = replaceMessagesSchema.parse(req.body || {});
-    await threads.replaceMessages(threadId, {
+    await conversationRecords.replaceMessages({
+      threadId,
       headId: input.head_id ?? null,
       messages: input.messages.map((item) => ({
         parentId: item.parent_id ?? null,
@@ -7283,8 +7302,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    await streamRuntimeCompletionWithBestEffortUsage({
-      events: runtime.runStreamed(ensuredLiveThread, withSkillActivationPrompts(input.message, currentSession.codexRunConfig)),
+    await codexExecution.streamFromRuntime({
+      runtime,
+      thread: ensuredLiveThread,
+      prompt: withSkillActivationPrompts(input.message, currentSession.codexRunConfig),
       onEvent(event) {
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);

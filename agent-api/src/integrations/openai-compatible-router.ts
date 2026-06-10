@@ -7,7 +7,8 @@ import { z } from "zod";
 import { resolveWorkspaceAgentsMdContent } from "../agent-mode/workspace-agents-md.js";
 import type { ReasoningEffort } from "../model-config.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "../model-config.js";
-import { extractRuntimeUsageFromStreamEvent, type RuntimeUsageSnapshot } from "../live-runtime-session.js";
+import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
+import type { CodexExecutionService } from "../operations/codex-execution-service.js";
 import type { RecordCodexUsageInput } from "../operations/usage-recorder.js";
 
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
@@ -142,6 +143,7 @@ type OpenAICompatibleRouterOptions = {
   usageRecorder?: {
     recordCodexUsage(input: RecordCodexUsageInput): Promise<unknown>;
   };
+  codexExecution: Pick<CodexExecutionService, "collectFromRuntime">;
   systemSettings?: {
     getCurrentPublished(): Promise<
       | {
@@ -853,30 +855,28 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           ]
         });
 
-        for await (const event of options.runtime.runStreamed(thread, prompt)) {
-          const eventUsage = extractRuntimeUsageFromStreamEvent(event);
-          if (eventUsage) {
-            usage = eventUsage;
+        const streamed = await options.codexExecution.collectFromRuntime({
+          runtime: options.runtime,
+          thread,
+          prompt,
+          onTextDelta(delta) {
+            outputChars += delta.length;
+            writeOpenAIStreamChunk(res, {
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model: selectedModel,
+              choices: [
+                {
+                  index: 0,
+                  delta: { content: delta },
+                  finish_reason: null
+                }
+              ]
+            });
           }
-          const delta = event.delta ?? event.text;
-          if (!delta) {
-            continue;
-          }
-          outputChars += delta.length;
-          writeOpenAIStreamChunk(res, {
-            id: completionId,
-            object: "chat.completion.chunk",
-            created,
-            model: selectedModel,
-            choices: [
-              {
-                index: 0,
-                delta: { content: delta },
-                finish_reason: null
-              }
-            ]
-          });
-        }
+        });
+        usage = streamed.usage;
 
         writeOpenAIStreamChunk(res, {
           id: completionId,
@@ -898,16 +898,13 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         return;
       }
 
-      let answer = "";
-
-      for await (const event of options.runtime.runStreamed(thread, prompt)) {
-        const eventUsage = extractRuntimeUsageFromStreamEvent(event);
-        if (eventUsage) {
-          usage = eventUsage;
-        }
-        if (event.delta) answer += event.delta;
-        else if (event.text) answer += event.text;
-      }
+      const completion = await options.codexExecution.collectFromRuntime({
+        runtime: options.runtime,
+        thread,
+        prompt
+      });
+      const answer = completion.answer;
+      usage = completion.usage;
       executionStatus = "success";
       outputChars = answer.length;
       markResponseReady();
