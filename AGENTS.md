@@ -5,6 +5,14 @@
 - 前端显示时区都要跟随用户本地时区。
 - 当用户要求执行 Git 提交并推送 GitHub 时，必须严格按以下流程串行执行（禁止并行执行任何会修改 Git 状态的命令，如 add/commit/amend/notes/push）：先确认提交范围（全部或部分）并 `git add`，再提交；提交信息和 note 若为多行必须使用真实换行，禁止在文本中写字面量 `\n`；若有 note，提交后执行 `git notes add`；随后必须用 `git show -s --format=%B HEAD` 与 `git notes show HEAD` 自检格式；最后先推送分支再推送 `refs/notes/commits`，如因 amend 导致提交哈希变化则使用 `--force-with-lease`；完成后向用户明确反馈提交哈希与推送结果。
 
+## Usage 统计与计费约束
+
+- 所有业务入口必须统一走 `UsageRecorder`，禁止直接调用 `UsageIngestionService`、`usageEventRepository.create()` 或自行计算 `estimated_cost` / `internal_cost`；底层 token 归一化、费用计算和 daily rollup 更新由 `UsageIngestionService` 内部完成。
+- 新增 Codex 会话入口（包括站内聊天、钉钉、Zendesk、CREST、OpenAI-compatible API、其它外部渠道）必须调用 `usageRecorder.recordCodexUsage()`，只传业务归属、metadata、`RuntimeUsageSnapshot`、`codexThreadId` 和 `resultStatus`；原因是 Codex runtime 可能返回累计快照，需要公共服务按 thread 分段差分，否则会重复计费或漏计。
+- 新增确实不是 Codex runtime 的计量入口时，必须调用 `usageRecorder.recordDirectUsage()`，并说明为什么不能提供 `RuntimeUsageSnapshot`。
+- 修改 `live-runtime-session.ts` 的 token 提取逻辑会影响所有 Codex 渠道；修改前必须确认钉钉、Zendesk、CREST、站内聊天等入口仍能正确记录成功/失败 usage。
+- 新增或修改 usage 入口必须补充测试，至少覆盖 token、cached input 边界、cost profile 计费、rollup 更新；如果是 Codex 入口，还必须覆盖累计快照差分和 thread 切换场景。
+
 ## 生产环境
 
 - SSH 登录入口：`ssh agent-studio`。

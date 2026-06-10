@@ -195,6 +195,7 @@ import {
   SubscriptionEntitlementService
 } from "./operations/subscription-entitlement-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
+import { UsageRecorder } from "./operations/usage-recorder.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
@@ -433,6 +434,7 @@ const usageIngestion = new UsageIngestionService({
   costProfiles,
   afterRecord: rebuildUsageRollupForEvent
 });
+const usageRecorder = new UsageRecorder({ usageIngestion });
 
 async function resolveZendeskDingTalkMentionTarget(input: {
   zendeskUser?: ZendeskRequesterPayload;
@@ -834,27 +836,14 @@ const zendesk = new ZendeskIntegrationService({
       typeof integration?.slug === "string" && integration.slug.trim()
         ? integration.slug.trim()
         : input.instanceId || "legacy";
-    await usageIngestion.recordCodexRuntimeUsage({
+    await usageRecorder.recordCodexUsage({
       organizationId: integration?.organizationId ?? undefined,
       userId: `zendesk-bot:${input.instanceId || "legacy"}`,
       threadId: input.auditThreadId,
       sessionId: `zendesk:${input.instanceId || "legacy"}:ticket:${input.ticketId}`,
       model: input.runtime.model,
       featureType: "chat",
-      inputTokens: input.usage.inputTokens,
-      cachedInputTokens: input.usage.cachedInputTokens,
-      outputTokens: input.usage.outputTokens,
-      codexRuntimeUsageKind: input.usage.kind,
-      codexRuntimeCumulativeUsage:
-        input.usage.cumulativeInputTokens !== undefined &&
-        input.usage.cumulativeCachedInputTokens !== undefined &&
-        input.usage.cumulativeOutputTokens !== undefined
-          ? {
-              inputTokens: input.usage.cumulativeInputTokens,
-              cachedInputTokens: input.usage.cumulativeCachedInputTokens,
-              outputTokens: input.usage.cumulativeOutputTokens
-            }
-          : undefined,
+      usage: input.usage,
       codexThreadId: input.codexThreadId,
       resultStatus: "success",
       metadata: Object.fromEntries(
@@ -2712,32 +2701,18 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         },
         async recordUsage(usage, resultStatus = "success") {
           const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-          await usageIngestion.recordCodexRuntimeUsage({
+          await usageRecorder.recordCodexUsage({
             organizationId: currentUser.organizationId,
             userId: currentUser.id,
             threadId: thread.id,
             sessionId: currentSession.sessionId,
             model: currentSession.model,
             featureType: "chat",
-            inputTokens: usage.inputTokens,
-            cachedInputTokens: usage.cachedInputTokens,
-            outputTokens: usage.outputTokens,
-            codexRuntimeUsageKind: usage.kind,
-            codexRuntimeCumulativeUsage:
-              usage.cumulativeInputTokens !== undefined &&
-              usage.cumulativeCachedInputTokens !== undefined &&
-              usage.cumulativeOutputTokens !== undefined
-                ? {
-                    inputTokens: usage.cumulativeInputTokens,
-                    cachedInputTokens: usage.cumulativeCachedInputTokens,
-                    outputTokens: usage.cumulativeOutputTokens
-                  }
-                : undefined,
+            usage,
             codexThreadId,
             resultStatus,
             metadata: {
               source: "crest_chat_stream",
-              ...(codexThreadId ? { codexThreadId } : {})
             }
           });
         },
@@ -5293,7 +5268,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
             ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
             : undefined;
         const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-        await usageIngestion.recordCodexRuntimeUsage({
+        await usageRecorder.recordCodexUsage({
           organizationId: actor.currentUser.organizationId,
           userId: actor.currentUser.id,
           departmentIdSnapshot,
@@ -5301,20 +5276,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           sessionId: currentSession.sessionId,
           model: currentSession.model,
           featureType: "chat",
-          inputTokens: usage.inputTokens,
-          cachedInputTokens: usage.cachedInputTokens,
-          outputTokens: usage.outputTokens,
-          codexRuntimeUsageKind: usage.kind,
-          codexRuntimeCumulativeUsage:
-            usage.cumulativeInputTokens !== undefined &&
-            usage.cumulativeCachedInputTokens !== undefined &&
-            usage.cumulativeOutputTokens !== undefined
-              ? {
-                  inputTokens: usage.cumulativeInputTokens,
-                  cachedInputTokens: usage.cumulativeCachedInputTokens,
-                  outputTokens: usage.cumulativeOutputTokens
-                }
-              : undefined,
+          usage,
           codexThreadId,
           resultStatus,
           metadata: {
@@ -5326,7 +5288,6 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
             externalConversationKey,
             externalConversationId: input.robotMessage.conversationId,
             externalMessageId: input.robotMessage.msgId,
-            ...(codexThreadId ? { codexThreadId } : {})
           }
         });
       },
@@ -6305,7 +6266,7 @@ app.use(
     runProfiles,
     knowledgeSets,
     knowledgeSetStorage,
-    usageIngestion,
+    usageRecorder,
     systemSettings,
     sessionWorkspaceRoot: appConfig.sessionWorkspaceRoot,
     defaultModel: appConfig.defaultModel,
@@ -7371,7 +7332,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
             : undefined;
         const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-        await usageIngestion.recordCodexRuntimeUsage({
+        await usageRecorder.recordCodexUsage({
           organizationId: currentUser.organizationId,
           userId: currentUser.id,
           departmentIdSnapshot,
@@ -7379,25 +7340,11 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           sessionId: currentSession.sessionId,
           model: currentSession.model,
           featureType: "chat",
-          inputTokens: usage.inputTokens,
-          cachedInputTokens: usage.cachedInputTokens,
-          outputTokens: usage.outputTokens,
-          codexRuntimeUsageKind: usage.kind,
-          codexRuntimeCumulativeUsage:
-            usage.cumulativeInputTokens !== undefined &&
-            usage.cumulativeCachedInputTokens !== undefined &&
-            usage.cumulativeOutputTokens !== undefined
-              ? {
-                  inputTokens: usage.cumulativeInputTokens,
-                  cachedInputTokens: usage.cumulativeCachedInputTokens,
-                  outputTokens: usage.cumulativeOutputTokens
-                }
-              : undefined,
+          usage,
           codexThreadId,
           resultStatus,
           metadata: {
             source: "chat_stream",
-            ...(codexThreadId ? { codexThreadId } : {})
           }
         });
       },

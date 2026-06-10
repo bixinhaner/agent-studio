@@ -7,7 +7,8 @@ import { z } from "zod";
 import { resolveWorkspaceAgentsMdContent } from "../agent-mode/workspace-agents-md.js";
 import type { ReasoningEffort } from "../model-config.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "../model-config.js";
-import { extractRuntimeUsageFromStreamEvent } from "../live-runtime-session.js";
+import { extractRuntimeUsageFromStreamEvent, type RuntimeUsageSnapshot } from "../live-runtime-session.js";
+import type { RecordCodexUsageInput } from "../operations/usage-recorder.js";
 
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
 const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
@@ -138,19 +139,8 @@ type OpenAICompatibleRouterOptions = {
   knowledgeSetStorage: {
     resolveReadableMountPath(knowledgeSetId: string): string;
   };
-  usageIngestion?: {
-    record(input: {
-      organizationId?: string;
-      sessionId?: string;
-      model: string;
-      featureType: string;
-      inputTokens: number;
-      cachedInputTokens: number;
-      outputTokens: number;
-      resultStatus?: string;
-      metadata?: unknown;
-      createdAt?: string | Date;
-    }): Promise<unknown>;
+  usageRecorder?: {
+    recordCodexUsage(input: RecordCodexUsageInput): Promise<unknown>;
   };
   systemSettings?: {
     getCurrentPublished(): Promise<
@@ -668,13 +658,8 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     let selectedModel: string | undefined;
     let selectedReasoningEffort: ReasoningEffort | undefined;
     const startedAtMs = Date.now();
-    let usage:
-      | {
-          inputTokens: number;
-          cachedInputTokens: number;
-          outputTokens: number;
-        }
-      | undefined;
+    let usage: RuntimeUsageSnapshot | undefined;
+    let runtimeCodexThreadId: string | undefined;
     let executionStatus: "success" | "failed" = "failed";
     let deliveryStatus: "delivered" | "client_aborted" | "connection_closed" | undefined;
     let requestAborted = false;
@@ -706,20 +691,19 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     };
 
     const recordUsageIfNeeded = (nextDeliveryStatus: "delivered" | "client_aborted" | "connection_closed") => {
-      if (recordedUsage || !options.usageIngestion) {
+      if (recordedUsage || !options.usageRecorder) {
         return;
       }
       recordedUsage = true;
       deliveryStatus = nextDeliveryStatus;
       responseCompletedAtMs = responseCompletedAtMs ?? Date.now();
-      void options.usageIngestion.record({
+      void options.usageRecorder.recordCodexUsage({
         organizationId: trimOrUndefined(authenticated.instance.organizationId),
         sessionId: completionId,
         model: selectedModel || normalizeModel(options.defaultModel),
         featureType: "external_openai_api",
-        inputTokens: usage?.inputTokens ?? 0,
-        cachedInputTokens: usage?.cachedInputTokens ?? 0,
-        outputTokens: usage?.outputTokens ?? 0,
+        usage,
+        codexThreadId: runtimeCodexThreadId,
         resultStatus: executionStatus,
         createdAt: new Date(startedAtMs),
         metadata: buildExternalApiUsageMetadata({
@@ -844,6 +828,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         workspace: workspacePath,
         codexRunConfig
       });
+      runtimeCodexThreadId = trimOrUndefined(typeof (thread as { id?: unknown })?.id === "string" ? (thread as { id: string }).id : undefined);
 
       if (body.stream) {
         responseMode = "stream";
