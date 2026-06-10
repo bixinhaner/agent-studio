@@ -26,6 +26,9 @@ describe("UsageIngestionService", () => {
         }
       },
       usageEvents: {
+        async list() {
+          return [];
+        },
         async create(input) {
           createdInput = input as CreateUsageEventInput & { estimatedCost: string; internalCost: string };
           return {
@@ -61,5 +64,172 @@ describe("UsageIngestionService", () => {
 
     expect(createdInput?.estimatedCost).toBe("15.250000");
     expect(createdInput?.internalCost).toBe("18.300000");
+  });
+
+  it("records Codex runtime cumulative snapshots as per-turn deltas", async () => {
+    const createdInputs: Array<CreateUsageEventInput & { estimatedCost: string; internalCost: string }> = [];
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return createdInputs
+            .map((input, index) => ({
+              id: `usage-${index + 1}`,
+              organizationId: input.organizationId,
+              userId: input.userId,
+              departmentIdSnapshot: input.departmentIdSnapshot,
+              threadId: input.threadId,
+              sessionId: input.sessionId,
+              model: input.model,
+              featureType: input.featureType,
+              inputTokens: input.inputTokens ?? 0,
+              cachedInputTokens: input.cachedInputTokens ?? 0,
+              outputTokens: input.outputTokens ?? 0,
+              estimatedCost: input.estimatedCost,
+              internalCost: input.internalCost,
+              resultStatus: input.resultStatus,
+              metadata: input.metadata,
+              createdAt: `2026-04-15T00:00:0${index}.000Z`
+            }))
+            .reverse();
+        },
+        async create(input) {
+          const createdInput = input as CreateUsageEventInput & { estimatedCost: string; internalCost: string };
+          createdInputs.push(createdInput);
+          return {
+            id: `usage-${createdInputs.length}`,
+            organizationId: input.organizationId,
+            userId: input.userId,
+            departmentIdSnapshot: input.departmentIdSnapshot,
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-04-15T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.recordCodexRuntimeUsage({
+      sessionId: "session-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 1000,
+      cachedInputTokens: 300,
+      outputTokens: 100,
+      metadata: { source: "chat_stream" }
+    });
+    await service.recordCodexRuntimeUsage({
+      sessionId: "session-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 1800,
+      cachedInputTokens: 900,
+      outputTokens: 250,
+      metadata: { source: "chat_stream" }
+    });
+
+    expect(createdInputs).toHaveLength(2);
+    expect(createdInputs[0]).toMatchObject({
+      inputTokens: 1000,
+      cachedInputTokens: 300,
+      outputTokens: 100
+    });
+    expect(createdInputs[1]).toMatchObject({
+      inputTokens: 800,
+      cachedInputTokens: 600,
+      outputTokens: 150
+    });
+    expect(createdInputs[1].metadata).toMatchObject({
+      source: "chat_stream",
+      _codexRuntimeUsage: {
+        version: 1,
+        kind: "cumulative_snapshot",
+        inputTokens: 1800,
+        cachedInputTokens: 900,
+        outputTokens: 250
+      }
+    });
+  });
+
+  it("uses the current snapshot when a Codex runtime counter resets", async () => {
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return [{
+            id: "usage-previous",
+            sessionId: "session-1",
+            model: "gpt-5.4",
+            featureType: "chat",
+            inputTokens: 9000,
+            cachedInputTokens: 8000,
+            outputTokens: 700,
+            estimatedCost: "0.000000",
+            internalCost: "0.000000",
+            resultStatus: "success",
+            metadata: {
+              _codexRuntimeUsage: {
+                version: 1,
+                kind: "cumulative_snapshot",
+                inputTokens: 9000,
+                cachedInputTokens: 8000,
+                outputTokens: 700
+              }
+            },
+            createdAt: "2026-04-15T00:00:00.000Z"
+          }];
+        },
+        async create(input) {
+          return {
+            id: "usage-next",
+            organizationId: input.organizationId,
+            userId: input.userId,
+            departmentIdSnapshot: input.departmentIdSnapshot,
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-04-15T00:00:01.000Z"
+          };
+        }
+      }
+    });
+
+    const created = await service.recordCodexRuntimeUsage({
+      sessionId: "session-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 500,
+      cachedInputTokens: 100,
+      outputTokens: 50
+    });
+
+    expect(created.inputTokens).toBe(500);
+    expect(created.cachedInputTokens).toBe(100);
+    expect(created.outputTokens).toBe(50);
   });
 });

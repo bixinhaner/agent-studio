@@ -794,7 +794,7 @@ const zendesk = new ZendeskIntegrationService({
       typeof integration?.slug === "string" && integration.slug.trim()
         ? integration.slug.trim()
         : input.instanceId || "legacy";
-    await usageIngestion.record({
+    await usageIngestion.recordCodexRuntimeUsage({
       organizationId: integration?.organizationId ?? undefined,
       userId: `zendesk-bot:${input.instanceId || "legacy"}`,
       threadId: input.auditThreadId,
@@ -2659,7 +2659,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           });
         },
         async recordUsage(usage) {
-          await usageIngestion.record({
+          await usageIngestion.recordCodexRuntimeUsage({
             organizationId: currentUser.organizationId,
             userId: currentUser.id,
             threadId: thread.id,
@@ -5224,7 +5224,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           trimOrUndefined(actor.currentUser.organizationType) === "internal"
             ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
             : undefined;
-        await usageIngestion.record({
+        await usageIngestion.recordCodexRuntimeUsage({
           organizationId: actor.currentUser.organizationId,
           userId: actor.currentUser.id,
           departmentIdSnapshot,
@@ -7288,7 +7288,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           trimOrUndefined(currentUser.organizationType) === "internal"
             ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
             : undefined;
-        await usageIngestion.record({
+        await usageIngestion.recordCodexRuntimeUsage({
           organizationId: currentUser.organizationId,
           userId: currentUser.id,
           departmentIdSnapshot,
