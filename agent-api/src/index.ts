@@ -197,6 +197,7 @@ import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
 import {
   CodexExecutionService,
   CodexRunProjection,
+  type CodexCommentaryEntry,
   type CodexRuntimeEventProjection
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
@@ -2669,7 +2670,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
               currentSession = updated;
             });
           }
-          emitCrestRuntimeEvent(res, projection);
+          emitCrestRuntimeEvent(res, projection, { emitReasoningThought: false });
+          emitCrestCommentaryThoughts(res, projection.liveCommentaryEntries);
         },
         async onDone(payload) {
           let generatedArtifacts: ThreadArtifactRecord[] = [];
@@ -2698,7 +2700,9 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             });
           }
           const output = payload.answer.trim() || "(无输出)";
-          const processContentParts = runProjection.finalize({ finalAnswer: output }).contentParts;
+          const finalizedProcess = runProjection.finalize({ finalAnswer: output });
+          emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
+          const processContentParts = finalizedProcess.contentParts;
           await conversationRecords.appendMessage({
             threadId: thread.id,
             parentId: userMessageId,
@@ -2975,12 +2979,16 @@ function crestRuntimePrompt(
     .join("\n");
 }
 
-function emitCrestRuntimeEvent(res: Response, projection: CodexRuntimeEventProjection): void {
+function emitCrestRuntimeEvent(
+  res: Response,
+  projection: CodexRuntimeEventProjection,
+  options: { emitReasoningThought?: boolean } = {}
+): void {
   if (projection.answerDelta) {
     sendSSE(res, "delta", { text: projection.answerDelta });
     return;
   }
-  if (projection.reasoningText) {
+  if (projection.reasoningText && options.emitReasoningThought !== false) {
     sendSSE(res, "thought", { text: truncateText(projection.reasoningText, 1200) });
     return;
   }
@@ -2997,6 +3005,18 @@ function emitCrestRuntimeEvent(res: Response, projection: CodexRuntimeEventProje
     }
     const uiIntent = asRecord(actionPayload?.uiIntent);
     if (uiIntent) sendSSE(res, "ui_intent", uiIntent);
+  }
+}
+
+function emitCrestCommentaryThoughts(res: Response, entries: CodexCommentaryEntry[] | undefined): void {
+  for (const entry of entries ?? []) {
+    const lines = entry.lines.length > 0 ? entry.lines : [entry.text];
+    lines.map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+      sendSSE(res, "thought", {
+        id: `${entry.id}:${index + 1}`,
+        text: truncateText(line, 1200)
+      });
+    });
   }
 }
 

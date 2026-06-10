@@ -39,6 +39,7 @@ export type CodexRuntimeEventProjection = {
   };
   toolCall?: CodexProjectedToolCall;
   traceRows: CodexTraceRow[];
+  liveCommentaryEntries?: CodexCommentaryEntry[];
 };
 export type CodexCommentaryEntry = {
   id: string;
@@ -52,6 +53,7 @@ export type CodexRunProjectionFinalizeInput = {
 };
 export type CodexRunProjectionFinalized = {
   commentaryEntries: CodexCommentaryEntry[];
+  liveCommentaryEntries: CodexCommentaryEntry[];
   traceRows: CodexTraceRow[];
   contentParts: Record<string, unknown>[];
 };
@@ -94,6 +96,30 @@ function commentaryLinesFromText(value: string): string[] {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function removeFinalAnswerFromCommentaryText(text: string, finalAnswer: string | undefined): string | undefined {
+  const normalizedText = text.trim();
+  const normalizedFinal = trimOrUndefined(finalAnswer);
+  if (!normalizedText) return undefined;
+  if (!normalizedFinal) return normalizedText;
+
+  const comparableText = normalizeComparableText(normalizedText);
+  const comparableFinal = normalizeComparableText(normalizedFinal);
+  if (!comparableFinal) return normalizedText;
+  if (comparableText === comparableFinal) return undefined;
+  if (!comparableText.endsWith(comparableFinal)) return normalizedText;
+
+  const exactIndex = normalizedText.lastIndexOf(normalizedFinal);
+  if (exactIndex > 0) {
+    return trimOrUndefined(normalizedText.slice(0, exactIndex));
+  }
+
+  const lines = normalizedText.split(/\n+/);
+  while (lines.length > 0 && normalizeComparableText(lines.join("\n")).endsWith(comparableFinal)) {
+    lines.pop();
+  }
+  return trimOrUndefined(lines.join("\n"));
 }
 
 function mcpToolCallDetail(input: { server?: string; tool?: string; errorMessage?: string }): string | undefined {
@@ -314,6 +340,22 @@ export function codexTraceRowsToContentPart(rows: CodexTraceRow[]): Record<strin
   };
 }
 
+function normalizeTraceRows(rows: CodexTraceRow[], input: CodexRunProjectionFinalizeInput = {}): CodexTraceRow[] {
+  return rows
+    .map((row) => {
+      if (row.kind !== "reasoning") return row;
+      const detail = row.detail ? removeFinalAnswerFromCommentaryText(row.detail, input.finalAnswer) : undefined;
+      const rawDetail = row.rawDetail ? removeFinalAnswerFromCommentaryText(row.rawDetail, input.finalAnswer) : undefined;
+      if (!detail && !rawDetail) return undefined;
+      return {
+        ...row,
+        detail,
+        rawDetail
+      };
+    })
+    .filter((row): row is CodexTraceRow => Boolean(row));
+}
+
 function normalizeCommentaryEntries(
   entries: CodexCommentaryEntry[],
   input: CodexRunProjectionFinalizeInput = {}
@@ -321,10 +363,10 @@ function normalizeCommentaryEntries(
   const finalComparable = normalizeComparableText(input.finalAnswer);
   const normalized: CodexCommentaryEntry[] = [];
   entries.forEach((entry, index) => {
-    const text = trimOrUndefined(entry.text);
+    const text = removeFinalAnswerFromCommentaryText(trimOrUndefined(entry.text) ?? "", input.finalAnswer);
     if (!text) return;
     if (finalComparable && normalizeComparableText(text) === finalComparable) return;
-    const lines = entry.lines.length > 0 ? entry.lines.map((line) => line.trim()).filter(Boolean) : commentaryLinesFromText(text);
+    const lines = commentaryLinesFromText(text);
     const lastEventAt = typeof entry.last_event_at === "number" && Number.isFinite(entry.last_event_at) ? entry.last_event_at : undefined;
     normalized.push({
       id: trimOrUndefined(entry.id) ?? `codex-commentary-${index + 1}`,
@@ -367,6 +409,7 @@ export function codexCommentaryEntriesToContentPart(
 export class CodexRunProjection {
   private readonly traceRows: CodexTraceRow[] = [];
   private readonly commentaryEntries: CodexCommentaryEntry[] = [];
+  private pendingLiveCommentaryEntry: CodexCommentaryEntry | undefined;
   private commentarySeq = 0;
 
   constructor(private readonly options: { now?: () => number } = {}) {}
@@ -375,18 +418,26 @@ export class CodexRunProjection {
     const projection = projectCodexRuntimeEvent(event);
     this.traceRows.push(...projection.traceRows);
     if (projection.completedAgentMessage) {
-      this.upsertCommentaryEntry(projection.completedAgentMessage);
+      const nextEntry = this.upsertCommentaryEntry(projection.completedAgentMessage);
+      projection.liveCommentaryEntries = this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [];
+      this.pendingLiveCommentaryEntry = nextEntry;
     }
     return projection;
   }
 
   finalize(input: CodexRunProjectionFinalizeInput = {}): CodexRunProjectionFinalized {
     const commentaryEntries = normalizeCommentaryEntries(this.commentaryEntries, input);
+    const liveCommentaryEntries = normalizeCommentaryEntries(
+      this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [],
+      input
+    );
+    const traceRows = normalizeTraceRows(this.traceRows, input);
     const commentaryPart = codexCommentaryEntriesToContentPart(commentaryEntries);
-    const tracePart = codexTraceRowsToContentPart(this.traceRows);
+    const tracePart = codexTraceRowsToContentPart(traceRows);
     return {
       commentaryEntries,
-      traceRows: [...this.traceRows],
+      liveCommentaryEntries,
+      traceRows,
       contentParts: [commentaryPart, tracePart].filter((part): part is Record<string, unknown> => Boolean(part))
     };
   }
@@ -394,12 +445,13 @@ export class CodexRunProjection {
   reset(): void {
     this.traceRows.length = 0;
     this.commentaryEntries.length = 0;
+    this.pendingLiveCommentaryEntry = undefined;
     this.commentarySeq = 0;
   }
 
-  private upsertCommentaryEntry(message: { id?: string; text: string }): void {
+  private upsertCommentaryEntry(message: { id?: string; text: string }): CodexCommentaryEntry | undefined {
     const text = trimOrUndefined(message.text);
-    if (!text) return;
+    if (!text) return undefined;
     const id = trimOrUndefined(message.id) ?? `codex-commentary-${++this.commentarySeq}`;
     const next: CodexCommentaryEntry = {
       id,
@@ -411,9 +463,10 @@ export class CodexRunProjection {
     const existingIndex = this.commentaryEntries.findIndex((entry) => entry.id === id);
     if (existingIndex >= 0) {
       this.commentaryEntries[existingIndex] = next;
-      return;
+      return next;
     }
     this.commentaryEntries.push(next);
+    return next;
   }
 }
 

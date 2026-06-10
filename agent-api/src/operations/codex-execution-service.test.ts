@@ -196,6 +196,87 @@ describe("CodexExecutionService", () => {
     });
   });
 
+  it("removes final answers from commentary suffixes", () => {
+    expect(codexCommentaryEntriesToContentPart([
+      {
+        id: "message-1",
+        text: "I checked CRM records.\n\nHere is the final answer.",
+        lines: ["I checked CRM records.", "Here is the final answer."],
+        last_event_at: 1781100000000,
+        status: "completed"
+      }
+    ], { finalAnswer: "Here is the final answer." })).toMatchObject({
+      name: "codex_commentary",
+      data: {
+        text: "I checked CRM records.",
+        entries: [
+          {
+            id: "message-1",
+            text: "I checked CRM records.",
+            lines: ["I checked CRM records."]
+          }
+        ]
+      }
+    });
+  });
+
+  it("emits live commentary only after it is no longer the possible final answer", () => {
+    const projection = new CodexRunProjection({ now: () => 1781100000000 });
+    const first = projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-1",
+          type: "agent_message",
+          text: "I will check the CRM records."
+        }
+      }
+    });
+    const second = projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "Done."
+        }
+      }
+    });
+
+    expect(first.liveCommentaryEntries).toEqual([]);
+    expect(second.liveCommentaryEntries).toEqual([
+      expect.objectContaining({
+        id: "message-1",
+        text: "I will check the CRM records."
+      })
+    ]);
+    expect(projection.finalize({ finalAnswer: "Done." }).liveCommentaryEntries).toEqual([]);
+  });
+
+  it("removes final answers from reasoning trace suffixes", () => {
+    const projection = new CodexRunProjection({ now: () => 1781100000000 });
+    projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "reasoning-1",
+          type: "reasoning",
+          text: "I checked CRM records.\n\nHere is the final answer."
+        }
+      }
+    });
+
+    expect(projection.finalize({ finalAnswer: "Here is the final answer." }).traceRows).toEqual([
+      expect.objectContaining({
+        id: "reasoning-1-reasoning",
+        detail: "I checked CRM records."
+      })
+    ]);
+  });
+
   it("collects a full run projection into commentary and trace content parts", () => {
     const projection = new CodexRunProjection({ now: () => 1781100000000 });
     projection.push({
