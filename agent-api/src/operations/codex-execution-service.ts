@@ -33,8 +33,27 @@ export type CodexRuntimeEventProjection = {
   itemId?: string;
   answerDelta?: string;
   reasoningText?: string;
+  completedAgentMessage?: {
+    id?: string;
+    text: string;
+  };
   toolCall?: CodexProjectedToolCall;
   traceRows: CodexTraceRow[];
+};
+export type CodexCommentaryEntry = {
+  id: string;
+  text: string;
+  lines: string[];
+  last_event_at?: number;
+  status: "streaming" | "completed";
+};
+export type CodexRunProjectionFinalizeInput = {
+  finalAnswer?: string;
+};
+export type CodexRunProjectionFinalized = {
+  commentaryEntries: CodexCommentaryEntry[];
+  traceRows: CodexTraceRow[];
+  contentParts: Record<string, unknown>[];
 };
 
 type RuntimeStreamSource<TThread> = {
@@ -64,6 +83,17 @@ function stringifyDetail(value: unknown, max = 1200): string | undefined {
   } catch {
     return shortenText(String(value), max);
   }
+}
+
+function normalizeComparableText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+}
+
+function commentaryLinesFromText(value: string): string[] {
+  return value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function mcpToolCallDetail(input: { server?: string; tool?: string; errorMessage?: string }): string | undefined {
@@ -104,6 +134,17 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     answerDelta: itemType === "agent_message" ? trimOrUndefined(event.delta) : undefined,
     traceRows
   };
+
+  if (itemType === "agent_message" && isCompleted) {
+    const text = trimOrUndefined(item?.text) ?? trimOrUndefined(event.text);
+    if (text) {
+      projection.completedAgentMessage = {
+        id: itemId,
+        text
+      };
+    }
+    return projection;
+  }
 
   if (itemType === "reasoning" && isCompleted) {
     const reasoningText = trimOrUndefined(item?.text) ?? trimOrUndefined(event.text);
@@ -271,6 +312,109 @@ export function codexTraceRowsToContentPart(rows: CodexTraceRow[]): Record<strin
       rows: normalized
     }
   };
+}
+
+function normalizeCommentaryEntries(
+  entries: CodexCommentaryEntry[],
+  input: CodexRunProjectionFinalizeInput = {}
+): CodexCommentaryEntry[] {
+  const finalComparable = normalizeComparableText(input.finalAnswer);
+  const normalized: CodexCommentaryEntry[] = [];
+  entries.forEach((entry, index) => {
+    const text = trimOrUndefined(entry.text);
+    if (!text) return;
+    if (finalComparable && normalizeComparableText(text) === finalComparable) return;
+    const lines = entry.lines.length > 0 ? entry.lines.map((line) => line.trim()).filter(Boolean) : commentaryLinesFromText(text);
+    const lastEventAt = typeof entry.last_event_at === "number" && Number.isFinite(entry.last_event_at) ? entry.last_event_at : undefined;
+    normalized.push({
+      id: trimOrUndefined(entry.id) ?? `codex-commentary-${index + 1}`,
+      text,
+      lines: lines.length > 0 ? lines : [text],
+      ...(lastEventAt !== undefined ? { last_event_at: lastEventAt } : {}),
+      status: "completed"
+    });
+  });
+  return normalized;
+}
+
+export function codexCommentaryEntriesToContentPart(
+  entries: CodexCommentaryEntry[],
+  input: CodexRunProjectionFinalizeInput = {}
+): Record<string, unknown> | undefined {
+  const normalized = normalizeCommentaryEntries(entries, input);
+  if (normalized.length === 0) return undefined;
+
+  const texts = normalized.map((entry) => entry.text.trim()).filter(Boolean);
+  const latestEventAt = normalized
+    .map((entry) => entry.last_event_at)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => right - left)[0];
+  return {
+    type: "data",
+    name: "codex_commentary",
+    data: {
+      id: "assistant-thoughts",
+      text: texts.join("\n\n"),
+      lines: texts,
+      entries: normalized,
+      open: false,
+      status: "completed",
+      last_event_at: latestEventAt
+    }
+  };
+}
+
+export class CodexRunProjection {
+  private readonly traceRows: CodexTraceRow[] = [];
+  private readonly commentaryEntries: CodexCommentaryEntry[] = [];
+  private commentarySeq = 0;
+
+  constructor(private readonly options: { now?: () => number } = {}) {}
+
+  push(event: RuntimeStreamEvent): CodexRuntimeEventProjection {
+    const projection = projectCodexRuntimeEvent(event);
+    this.traceRows.push(...projection.traceRows);
+    if (projection.completedAgentMessage) {
+      this.upsertCommentaryEntry(projection.completedAgentMessage);
+    }
+    return projection;
+  }
+
+  finalize(input: CodexRunProjectionFinalizeInput = {}): CodexRunProjectionFinalized {
+    const commentaryEntries = normalizeCommentaryEntries(this.commentaryEntries, input);
+    const commentaryPart = codexCommentaryEntriesToContentPart(commentaryEntries);
+    const tracePart = codexTraceRowsToContentPart(this.traceRows);
+    return {
+      commentaryEntries,
+      traceRows: [...this.traceRows],
+      contentParts: [commentaryPart, tracePart].filter((part): part is Record<string, unknown> => Boolean(part))
+    };
+  }
+
+  reset(): void {
+    this.traceRows.length = 0;
+    this.commentaryEntries.length = 0;
+    this.commentarySeq = 0;
+  }
+
+  private upsertCommentaryEntry(message: { id?: string; text: string }): void {
+    const text = trimOrUndefined(message.text);
+    if (!text) return;
+    const id = trimOrUndefined(message.id) ?? `codex-commentary-${++this.commentarySeq}`;
+    const next: CodexCommentaryEntry = {
+      id,
+      text,
+      lines: commentaryLinesFromText(text),
+      last_event_at: this.options.now?.() ?? Date.now(),
+      status: "completed"
+    };
+    const existingIndex = this.commentaryEntries.findIndex((entry) => entry.id === id);
+    if (existingIndex >= 0) {
+      this.commentaryEntries[existingIndex] = next;
+      return;
+    }
+    this.commentaryEntries.push(next);
+  }
 }
 
 export class CodexExecutionService {

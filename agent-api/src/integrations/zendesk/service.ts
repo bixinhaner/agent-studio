@@ -8,7 +8,7 @@ import {
   stripInternalRunConfigMetadata,
   type RuntimeUsageSnapshot
 } from "../../live-runtime-session.js";
-import { CodexExecutionService } from "../../operations/codex-execution-service.js";
+import { CodexExecutionService, CodexRunProjection } from "../../operations/codex-execution-service.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
 import { ZendeskBindingStore } from "./binding-store.js";
 import {
@@ -171,6 +171,7 @@ type ZendeskConversationAuditSync = {
     commentId?: number;
     codexThreadId?: string;
     processRows?: ZendeskAuditProcessRow[];
+    processContentParts?: Record<string, unknown>[];
   }): Promise<void>;
 };
 
@@ -239,6 +240,7 @@ type ZendeskAgentRunResult = {
   audit?: ZendeskConversationAuditState;
   codexThreadId?: string;
   processRows: ZendeskAuditProcessRow[];
+  processContentParts?: Record<string, unknown>[];
 };
 
 type ZendeskDingTalkMentionTarget = {
@@ -469,115 +471,6 @@ function summarizePreparedAttachments(context: ZendeskTicketContext): string {
       return `- ${bits.join(" | ")}`;
     })
     .join("\n");
-}
-
-function collectRuntimeProcessRow(
-  event: { type?: string; delta?: string; text?: string; raw?: unknown },
-  processRows: ZendeskAuditProcessRow[]
-): void {
-  if (processRows.length >= 120) return;
-  const raw = asRecord(event.raw);
-  const item = asRecord(raw?.item);
-  const eventType = event.type;
-  const itemType = trimOrUndefined(item?.type) ?? "";
-  if (!item || !itemType || eventType !== "item.completed") return;
-
-  if (itemType === "reasoning") {
-    const reasoningText = trimOrUndefined(item.text) ?? trimOrUndefined(event.text);
-    if (reasoningText) {
-      processRows.push(zendeskProcessRow("reasoning", "Model reasoning summary", shortenText(reasoningText, 1800)));
-    }
-    return;
-  }
-
-  if (itemType === "command_execution") {
-    const command = trimOrUndefined(item.command) ?? "";
-    const output = trimOrUndefined(item.aggregated_output) ?? "";
-    const status = trimOrUndefined(item.status);
-    const exitCode = typeof item.exit_code === "number" ? item.exit_code : undefined;
-    processRows.push(
-      zendeskProcessRow(
-        "tool",
-        "Command execution completed",
-        [
-          command ? `$ ${command}` : "",
-          status ? `status=${status}` : "",
-          exitCode !== undefined ? `exit_code=${exitCode}` : "",
-          output ? `output:\n${shortenText(output, 1200)}` : ""
-        ]
-          .filter(Boolean)
-          .join("\n")
-      )
-    );
-    return;
-  }
-
-  if (itemType === "mcp_tool_call") {
-    const server = trimOrUndefined(item.server) ?? "";
-    const tool = trimOrUndefined(item.tool) ?? "";
-    const error = asRecord(item.error);
-    const errMsg = trimOrUndefined(error?.message);
-    processRows.push(
-      zendeskProcessRow(
-        errMsg ? "error" : "tool",
-        `Tool call ${errMsg ? "failed" : "completed"}`,
-        [
-          server ? `server: ${server}` : "",
-          tool ? `tool: ${tool}` : "",
-          errMsg ? `error: ${shortenText(errMsg, 600)}` : "",
-          item.result !== undefined ? `result:\n${shortenText(detailFromUnknown(item.result), 1200)}` : ""
-        ]
-          .filter(Boolean)
-          .join("\n")
-      )
-    );
-    return;
-  }
-
-  if (itemType === "web_search") {
-    const query = trimOrUndefined(item.query);
-    processRows.push(zendeskProcessRow("tool", "Web search completed", query));
-    return;
-  }
-
-  if (itemType === "todo_list") {
-    const items = Array.isArray(item.items) ? item.items : [];
-    const detail = items
-      .slice(0, 20)
-      .map((entry) => {
-        const obj = asRecord(entry);
-        if (!obj) return "";
-        const text = trimOrUndefined(obj.text);
-        if (!text) return "";
-        return `${obj.completed ? "[x]" : "[ ]"} ${text}`;
-      })
-      .filter(Boolean)
-      .join("\n");
-    processRows.push(zendeskProcessRow("process", "Execution plan updated", detail));
-    return;
-  }
-
-  if (itemType === "file_change") {
-    const changes = Array.isArray(item.changes) ? item.changes : [];
-    const detail = changes
-      .slice(0, 30)
-      .map((entry) => {
-        const obj = asRecord(entry);
-        const filePath = trimOrUndefined(obj?.path);
-        if (!filePath) return "";
-        const kind = trimOrUndefined(obj?.kind) ?? "update";
-        return `${kind}: ${filePath}`;
-      })
-      .filter(Boolean)
-      .join("\n");
-    processRows.push(zendeskProcessRow("process", "File changes produced", detail));
-    return;
-  }
-
-  if (itemType === "error") {
-    const message = trimOrUndefined(item.message) ?? detailFromUnknown(item);
-    processRows.push(zendeskProcessRow("error", "Execution error", shortenText(message, 1200)));
-  }
 }
 
 function extractCodexThreadIdFromThread(thread: unknown): string | undefined {
@@ -1780,6 +1673,7 @@ export class ZendeskIntegrationService {
           decision,
           action,
           codexThreadId: agentRun.codexThreadId,
+          processContentParts: agentRun.processContentParts,
           processRows: [
             ...agentRun.processRows,
             zendeskProcessRow("done", "Skipped Zendesk write", action.detail)
@@ -1853,6 +1747,7 @@ export class ZendeskIntegrationService {
         action,
         commentId: commentResult.commentId,
         codexThreadId: agentRun.codexThreadId,
+        processContentParts: agentRun.processContentParts,
         processRows: agentRun.processRows
       });
       await this.bindingStore.upsert(ticketId, {
@@ -2232,6 +2127,7 @@ export class ZendeskIntegrationService {
     );
     let output = "";
     let latestUsage: RuntimeUsageSnapshot | undefined;
+    const runtimeProjection = new CodexRunProjection();
     const runAgentThread = async (currentThread: ZendeskRuntimeThread) => {
       const dependencies = this.dependencies;
       const execution = dependencies.codexExecution ?? new CodexExecutionService();
@@ -2253,7 +2149,7 @@ export class ZendeskIntegrationService {
               runtimeSessionLease = persisted || runtimeSessionLease;
             }
           }
-          collectRuntimeProcessRow(event, processRows);
+          runtimeProjection.push(event);
         }
       });
       return { output: result.answer, latestUsage: result.usage };
@@ -2322,10 +2218,13 @@ export class ZendeskIntegrationService {
         workspacePath: runtimeOptions.workspace,
         runId: run.runId
       });
+      runtimeProjection.reset();
       const retryResult = await runAgentThread(thread);
       output = retryResult.output;
       latestUsage = retryResult.latestUsage;
     }
+    const runtimeProcess = runtimeProjection.finalize({ finalAnswer: output.trim() });
+    processRows.push(...runtimeProcess.traceRows);
     processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
 
     if (latestUsage && this.dependencies.recordUsage) {
@@ -2377,7 +2276,11 @@ export class ZendeskIntegrationService {
       runtimeOptions: publicRuntimeOptions,
       audit,
       codexThreadId: observedCodexThreadId,
-      processRows
+      processRows,
+      processContentParts: runtimeProcess.contentParts.filter((part) => {
+        const record = asRecord(part);
+        return trimOrUndefined(record?.type) === "data" && trimOrUndefined(record?.name) === "codex_commentary";
+      })
     };
   }
 

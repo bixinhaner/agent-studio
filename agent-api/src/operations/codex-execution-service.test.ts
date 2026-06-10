@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CodexExecutionService,
+  CodexRunProjection,
+  codexCommentaryEntriesToContentPart,
   codexTraceRowsToContentPart,
   projectCodexRuntimeEvent
 } from "./codex-execution-service.js";
@@ -106,6 +108,25 @@ describe("CodexExecutionService", () => {
     });
   });
 
+  it("projects completed agent messages for run-level commentary", () => {
+    expect(projectCodexRuntimeEvent({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-1",
+          type: "agent_message",
+          text: "I will inspect the CRM records first."
+        }
+      }
+    })).toMatchObject({
+      completedAgentMessage: {
+        id: "message-1",
+        text: "I will inspect the CRM records first."
+      }
+    });
+  });
+
   it("serializes projected trace rows into the shared transcript content format", () => {
     expect(codexTraceRowsToContentPart([
       {
@@ -134,5 +155,100 @@ describe("CodexExecutionService", () => {
         ]
       }
     });
+  });
+
+  it("serializes completed agent messages as shared commentary content", () => {
+    expect(codexCommentaryEntriesToContentPart([
+      {
+        id: "message-1",
+        text: "I checked CRM updates before answering.",
+        lines: ["I checked CRM updates before answering."],
+        last_event_at: 1781100000000,
+        status: "completed"
+      },
+      {
+        id: "message-final",
+        text: "Here is the final answer.",
+        lines: ["Here is the final answer."],
+        last_event_at: 1781100001000,
+        status: "completed"
+      }
+    ], { finalAnswer: "Here is the final answer." })).toEqual({
+      type: "data",
+      name: "codex_commentary",
+      data: {
+        id: "assistant-thoughts",
+        text: "I checked CRM updates before answering.",
+        lines: ["I checked CRM updates before answering."],
+        entries: [
+          {
+            id: "message-1",
+            text: "I checked CRM updates before answering.",
+            lines: ["I checked CRM updates before answering."],
+            last_event_at: 1781100000000,
+            status: "completed"
+          }
+        ],
+        open: false,
+        status: "completed",
+        last_event_at: 1781100000000
+      }
+    });
+  });
+
+  it("collects a full run projection into commentary and trace content parts", () => {
+    const projection = new CodexRunProjection({ now: () => 1781100000000 });
+    projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-1",
+          type: "agent_message",
+          text: "I will search the customer record."
+        }
+      }
+    });
+    projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "tool-1",
+          type: "mcp_tool_call",
+          server: "crest_crm",
+          tool: "customers.search",
+          arguments: { q: "ACME" },
+          result: { count: 1 }
+        }
+      }
+    });
+    projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "ACME was updated today."
+        }
+      }
+    });
+
+    const finalized = projection.finalize({ finalAnswer: "ACME was updated today." });
+    expect(finalized.traceRows).toHaveLength(1);
+    expect(finalized.contentParts.map((part) => part.name)).toEqual(["codex_commentary", "codex_trace_batch"]);
+    expect(finalized.contentParts[0]).toMatchObject({
+      name: "codex_commentary",
+      data: {
+        entries: [
+          expect.objectContaining({
+            id: "message-1",
+            text: "I will search the customer record."
+          })
+        ]
+      }
+    });
+    expect(JSON.stringify(finalized.contentParts[0])).not.toContain("ACME was updated today.");
   });
 });

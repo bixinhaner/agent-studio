@@ -196,10 +196,8 @@ import {
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
 import {
   CodexExecutionService,
-  codexTraceRowsToContentPart,
-  projectCodexRuntimeEvent,
-  type CodexRuntimeEventProjection,
-  type CodexTraceRow
+  CodexRunProjection,
+  type CodexRuntimeEventProjection
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
@@ -2649,7 +2647,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    const traceRows: CodexTraceRow[] = [];
+    let runProjection = new CodexRunProjection();
     let runtimeSideEffectStarted = false;
     const runRuntimeCompletion = async () => {
       await codexExecution.streamFromRuntime({
@@ -2660,8 +2658,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           currentSession.codexRunConfig
         ),
         onEvent(event) {
-          const projection = projectCodexRuntimeEvent(event);
-          traceRows.push(...projection.traceRows);
+          const projection = runProjection.push(event);
           runtimeFileChanges.push(...extractRuntimeFileChanges(event));
           if (crestRuntimeEventHasSideEffect(event)) {
             runtimeSideEffectStarted = true;
@@ -2701,8 +2698,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             });
           }
           const output = payload.answer.trim() || "(无输出)";
-          const tracePart = codexTraceRowsToContentPart(traceRows);
-          const traceContentParts = tracePart ? [tracePart] : [];
+          const processContentParts = runProjection.finalize({ finalAnswer: output }).contentParts;
           await conversationRecords.appendMessage({
             threadId: thread.id,
             parentId: userMessageId,
@@ -2716,7 +2712,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
                 artifacts: generatedArtifacts.map(artifactOut)
               },
               [],
-              traceContentParts
+              processContentParts
             ),
             runConfig: { channel: "crest", conversationId: input.conversationId }
           });
@@ -2782,7 +2778,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       liveThread = replacement.liveThread;
       runtimeSideEffectStarted = false;
       runtimeFileChanges.length = 0;
-      traceRows.length = 0;
+      runProjection = new CodexRunProjection();
       await runRuntimeCompletion();
     }
 
@@ -4421,6 +4417,7 @@ async function syncZendeskConversationAfterAgentRun(input: {
     rawDetail?: string;
     at?: string;
   }>;
+  processContentParts?: Record<string, unknown>[];
 }): Promise<void> {
   const audit =
     input.audit ??
@@ -4442,6 +4439,10 @@ async function syncZendeskConversationAfterAgentRun(input: {
     ...(input.processRows ?? []).filter((row) => row.id !== inputSnapshotRow.id && row.title !== inputSnapshotRow.title)
   ];
   const tracePart = zendeskTraceBatchPart(processRows);
+  const contentParts = [
+    ...(input.processContentParts ?? []),
+    ...(tracePart ? [tracePart] : [])
+  ];
   await conversationRecords.appendMessage({
     threadId: audit.threadId,
     parentId: audit.userMessageId ?? null,
@@ -4449,7 +4450,7 @@ async function syncZendeskConversationAfterAgentRun(input: {
       id: `zendesk-agent-${input.runId}`,
       role: "assistant",
       text: zendeskAssistantAuditText(input),
-      contentParts: tracePart ? [tracePart] : undefined,
+      contentParts: contentParts.length > 0 ? contentParts : undefined,
       metadata: {
         channel: ZENDESK_CHANNEL,
         integrationInstanceId: input.instanceId,
@@ -4681,6 +4682,7 @@ function dingtalkMessage(input: {
   text: string;
   createdAt?: Date;
   metadata?: Record<string, unknown>;
+  contentParts?: Record<string, unknown>[];
 }) {
   return {
     id: input.id,
@@ -4689,7 +4691,8 @@ function dingtalkMessage(input: {
       {
         type: "text",
         text: input.text
-      }
+      },
+      ...(input.contentParts ?? [])
     ],
     createdAt: (input.createdAt ?? new Date()).toISOString(),
     ...(input.metadata ? { metadata: input.metadata } : {})
@@ -5238,12 +5241,14 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
 
   let answerText = "";
   let streamingCardFinalized = false;
+  const runProjection = new CodexRunProjection();
   try {
     await codexExecution.streamFromRuntime({
       runtime,
       thread: liveThread,
       prompt: withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig),
       onEvent(event) {
+        runProjection.push(event);
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
@@ -5264,6 +5269,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           await streamingCardReply.finish(answerText);
           streamingCardFinalized = true;
         }
+        const processContentParts = runProjection.finalize({ finalAnswer: answerText }).contentParts;
         await conversationRecords.appendMessage({
           threadId: thread!.id,
           parentId: input.robotMessage.msgId,
@@ -5271,6 +5277,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
             id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
             role: "assistant",
             text: answerText,
+            contentParts: processContentParts,
             metadata: {
               channel: DINGTALK_BOT_CHANNEL,
               integrationInstanceId: input.instance.id,

@@ -845,7 +845,7 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ title: "Codex resume failed during agent call" }),
           expect.objectContaining({ title: "Started replacement Codex thread" }),
           expect.objectContaining({ title: "Called agent" }),
-          expect.objectContaining({ title: "Model reasoning summary" }),
+          expect.objectContaining({ title: "Reasoning summary" }),
           expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),
           expect.objectContaining({ title: "Command execution completed" }),
           expect.objectContaining({ title: "Recorded usage telemetry" }),
