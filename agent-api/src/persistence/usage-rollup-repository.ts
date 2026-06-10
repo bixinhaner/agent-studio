@@ -57,7 +57,7 @@ export type UsageDailyRollupDeleteInput = {
 type UsageDailyRollupRow = {
   id: string;
   organizationId: string | null;
-  rollupDate: string;
+  rollupDate: Date | string;
   scopeType: string;
   scopeId: string;
   model: string | null;
@@ -79,7 +79,7 @@ type UsageDailyRollupTable = {
   findMany(args?: {
     where?: {
       organizationId?: string | null;
-      rollupDate?: string;
+      rollupDate?: Date | string;
       scopeType?: string;
       scopeId?: string;
       model?: string | null;
@@ -87,7 +87,7 @@ type UsageDailyRollupTable = {
     };
     orderBy?: { createdAt?: "asc" | "desc" };
   }): Promise<UsageDailyRollupRow[]>;
-  deleteMany(args?: { where?: { organizationId?: string | null; rollupDate?: string } }): Promise<{ count: number }>;
+  deleteMany(args?: { where?: { organizationId?: string | null; rollupDate?: Date | string } }): Promise<{ count: number }>;
 };
 
 export type UsageRollupRepositoryDb = {
@@ -104,9 +104,19 @@ function toDayKey(value: string | Date): string {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed) return trimmed.slice(0, 10);
-    return new Date().toLocaleDateString("en-CA");
+    return new Date().toISOString().slice(0, 10);
   }
-  return value.toLocaleDateString("en-CA");
+  if (Number.isNaN(value.getTime())) return new Date().toISOString().slice(0, 10);
+  return value.toISOString().slice(0, 10);
+}
+
+function toRollupDate(value: string | Date): Date {
+  const parsed = new Date(`${toDayKey(value)}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  }
+  return parsed;
 }
 
 function toIsoString(value: Date | string): string {
@@ -135,7 +145,7 @@ function mapUsageDailyRollup(row: UsageDailyRollupRow): UsageDailyRollupRecord {
   return {
     id: row.id,
     organizationId: trimOrUndefined(row.organizationId),
-    rollupDate: row.rollupDate,
+    rollupDate: toDayKey(row.rollupDate),
     scopeType: row.scopeType as UsageDailyRollupScopeType,
     scopeId: row.scopeId,
     model: trimOrUndefined(row.model),
@@ -157,7 +167,7 @@ export class UsageRollupRepository {
   constructor(private readonly db: UsageRollupRepositoryDb) {}
 
   async replaceDaily(input: { rollupDate: string | Date; organizationId?: string | null; records: UsageDailyRollupInput[] }): Promise<UsageDailyRollupRecord[]> {
-    const rollupDate = toDayKey(input.rollupDate);
+    const rollupDate = toRollupDate(input.rollupDate);
     const explicitOrganizationId = input.organizationId === undefined ? undefined : input.organizationId === null ? null : trimOrUndefined(input.organizationId);
     const targetOrganizationIds = explicitOrganizationId !== undefined
       ? [explicitOrganizationId]
@@ -206,7 +216,7 @@ export class UsageRollupRepository {
   async list(input: ListUsageDailyRollupsInput = {}): Promise<UsageDailyRollupRecord[]> {
     const where = {
       ...(input.organizationId !== undefined ? { organizationId: input.organizationId ?? null } : {}),
-      ...(input.rollupDate ? { rollupDate: toDayKey(input.rollupDate) } : {}),
+      ...(input.rollupDate ? { rollupDate: toRollupDate(input.rollupDate) } : {}),
       ...(input.scopeType ? { scopeType: input.scopeType } : {}),
       ...(trimOrUndefined(input.scopeId) ? { scopeId: trimOrUndefined(input.scopeId) } : {}),
       ...(input.model !== undefined ? { model: trimOrUndefined(input.model) ?? null } : {}),
