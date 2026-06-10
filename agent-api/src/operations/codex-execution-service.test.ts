@@ -255,6 +255,56 @@ describe("CodexExecutionService", () => {
     expect(projection.finalize({ finalAnswer: "Done." }).liveCommentaryEntries).toEqual([]);
   });
 
+  it("can suppress live answer deltas while keeping commentary projection", () => {
+    const projection = new CodexRunProjection({
+      now: () => 1781100000000,
+      streamAnswerDeltas: false
+    });
+    const streamed = projection.push({
+      type: "item.updated",
+      delta: "I will generate a draft image first.",
+      raw: {
+        type: "item.updated",
+        item: {
+          id: "message-1",
+          type: "agent_message",
+          text: "I will generate a draft image first."
+        }
+      }
+    });
+    const completed = projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-1",
+          type: "agent_message",
+          text: "I will generate a draft image first."
+        }
+      }
+    });
+    const final = projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "Done."
+        }
+      }
+    });
+
+    expect(streamed.answerDelta).toBeUndefined();
+    expect(completed.liveCommentaryEntries).toEqual([]);
+    expect(final.liveCommentaryEntries).toEqual([
+      expect.objectContaining({
+        id: "message-1",
+        text: "I will generate a draft image first."
+      })
+    ]);
+  });
+
   it("removes final answers from reasoning trace suffixes", () => {
     const projection = new CodexRunProjection({ now: () => 1781100000000 });
     projection.push({

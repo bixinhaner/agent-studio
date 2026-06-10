@@ -2648,7 +2648,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
-    let runProjection = new CodexRunProjection();
+    let runProjection = new CodexRunProjection({ streamAnswerDeltas: false });
     let runtimeSideEffectStarted = false;
     const runRuntimeCompletion = async () => {
       await codexExecution.streamFromRuntime({
@@ -2782,7 +2782,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       liveThread = replacement.liveThread;
       runtimeSideEffectStarted = false;
       runtimeFileChanges.length = 0;
-      runProjection = new CodexRunProjection();
+      runProjection = new CodexRunProjection({ streamAnswerDeltas: false });
       await runRuntimeCompletion();
     }
 

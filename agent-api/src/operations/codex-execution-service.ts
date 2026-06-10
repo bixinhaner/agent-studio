@@ -57,6 +57,10 @@ export type CodexRunProjectionFinalized = {
   traceRows: CodexTraceRow[];
   contentParts: Record<string, unknown>[];
 };
+export type CodexRunProjectionOptions = {
+  now?: () => number;
+  streamAnswerDeltas?: boolean;
+};
 
 type RuntimeStreamSource<TThread> = {
   runStreamed(thread: TThread, message: string): AsyncIterable<RuntimeStreamEvent>;
@@ -412,10 +416,13 @@ export class CodexRunProjection {
   private pendingLiveCommentaryEntry: CodexCommentaryEntry | undefined;
   private commentarySeq = 0;
 
-  constructor(private readonly options: { now?: () => number } = {}) {}
+  constructor(private readonly options: CodexRunProjectionOptions = {}) {}
 
   push(event: RuntimeStreamEvent): CodexRuntimeEventProjection {
     const projection = projectCodexRuntimeEvent(event);
+    if (this.options.streamAnswerDeltas === false) {
+      projection.answerDelta = undefined;
+    }
     this.traceRows.push(...projection.traceRows);
     if (projection.completedAgentMessage) {
       const nextEntry = this.upsertCommentaryEntry(projection.completedAgentMessage);
