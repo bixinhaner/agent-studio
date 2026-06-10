@@ -4,6 +4,11 @@ export type RuntimeUsageSnapshot = {
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
+  kind?: "turn_delta" | "cumulative_snapshot";
+  cumulativeInputTokens?: number;
+  cumulativeCachedInputTokens?: number;
+  cumulativeOutputTokens?: number;
+  codexThreadId?: string;
 };
 
 type RuntimeStreamEvent = {
@@ -38,22 +43,15 @@ function toTokenCount(value: unknown): number | undefined {
   return Math.round(numeric);
 }
 
-function completedAgentMessageText(event: RuntimeStreamEvent): string | undefined {
-  const raw = asRecord(event.raw);
-  if (raw?.type !== "item.completed") return undefined;
-  const item = asRecord(raw.item);
-  if (item?.type !== "agent_message") return undefined;
-  return typeof item.text === "string" ? item.text : "";
-}
-
-export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsageSnapshot | undefined {
-  const event = asRecord(value);
-  if (!event) return undefined;
-  const eventType = trimOrUndefined(typeof event.type === "string" ? event.type : undefined);
-  if (eventType !== "turn.completed") return undefined;
-
-  const raw = asRecord(event.raw);
-  const usage = asRecord(raw?.usage ?? event.usage);
+function parseUsageRecord(
+  value: unknown,
+  kind: RuntimeUsageSnapshot["kind"],
+  options: {
+    cumulative?: RuntimeUsageSnapshot;
+    codexThreadId?: string;
+  } = {}
+): RuntimeUsageSnapshot | undefined {
+  const usage = asRecord(value);
   if (!usage) return undefined;
 
   const inputTokens = toTokenCount(usage.input_tokens);
@@ -66,35 +64,95 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
   return {
     inputTokens,
     cachedInputTokens,
-    outputTokens
+    outputTokens,
+    kind,
+    cumulativeInputTokens: options.cumulative?.inputTokens,
+    cumulativeCachedInputTokens: options.cumulative?.cachedInputTokens,
+    cumulativeOutputTokens: options.cumulative?.outputTokens,
+    codexThreadId: options.codexThreadId
   };
+}
+
+function parseTokenCountUsage(event: Record<string, unknown>, raw: Record<string, unknown> | undefined): RuntimeUsageSnapshot | undefined {
+  const source = raw?.type === "token_count" ? raw : event;
+  const info = asRecord(source.info);
+  const codexThreadId = trimOrUndefined(typeof source.thread_id === "string" ? source.thread_id : undefined);
+  const cumulative = parseUsageRecord(info?.total_token_usage, "cumulative_snapshot", { codexThreadId });
+  return parseUsageRecord(info?.last_token_usage, "turn_delta", {
+    cumulative,
+    codexThreadId
+  });
+}
+
+function completedAgentMessageText(event: RuntimeStreamEvent): string | undefined {
+  const raw = asRecord(event.raw);
+  if (raw?.type !== "item.completed") return undefined;
+  const item = asRecord(raw.item);
+  if (item?.type !== "agent_message") return undefined;
+  return typeof item.text === "string" ? item.text : "";
+}
+
+export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsageSnapshot | undefined {
+  const event = asRecord(value);
+  if (!event) return undefined;
+  const eventType = trimOrUndefined(typeof event.type === "string" ? event.type : undefined);
+
+  const raw = asRecord(event.raw);
+  if (eventType === "token_count" || raw?.type === "token_count") {
+    return parseTokenCountUsage(event, raw);
+  }
+  if (eventType !== "turn.completed") return undefined;
+
+  const usage = asRecord(raw?.usage ?? event.usage);
+  if (!usage) return undefined;
+  const codexThreadId = trimOrUndefined(
+    typeof raw?.thread_id === "string" ? raw.thread_id : typeof event.thread_id === "string" ? event.thread_id : undefined
+  );
+  const cumulative = parseUsageRecord(usage.total_token_usage, "cumulative_snapshot", { codexThreadId });
+  const turn = parseUsageRecord(usage.last_token_usage, "turn_delta", {
+    cumulative,
+    codexThreadId
+  });
+  return turn ?? parseUsageRecord(usage, "cumulative_snapshot", { codexThreadId });
 }
 
 export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   events: AsyncIterable<RuntimeStreamEvent>;
   onEvent(event: RuntimeStreamEvent): void;
   onDone(payload: { answer: string; usage?: RuntimeUsageSnapshot }): void | Promise<void>;
-  recordUsage?(usage: RuntimeUsageSnapshot): Promise<void>;
+  recordUsage?(usage: RuntimeUsageSnapshot, resultStatus?: "success" | "failed"): Promise<void>;
   onTelemetryError?(error: unknown): void;
 }): Promise<void> {
   let fallbackAnswer = "";
   let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
 
-  for await (const event of input.events) {
-    const usage = extractRuntimeUsageFromStreamEvent(event);
-    if (usage) {
-      latestUsage = usage;
+  try {
+    for await (const event of input.events) {
+      const usage = extractRuntimeUsageFromStreamEvent(event);
+      if (usage) {
+        latestUsage = usage;
+      }
+      const completedAgentText = completedAgentMessageText(event);
+      if (completedAgentText !== undefined) {
+        finalAgentAnswer = completedAgentText;
+      } else if (event.delta) {
+        fallbackAnswer += event.delta;
+      } else if (event.text) {
+        fallbackAnswer += event.text;
+      }
+      input.onEvent(event);
     }
-    const completedAgentText = completedAgentMessageText(event);
-    if (completedAgentText !== undefined) {
-      finalAgentAnswer = completedAgentText;
-    } else if (event.delta) {
-      fallbackAnswer += event.delta;
-    } else if (event.text) {
-      fallbackAnswer += event.text;
+  } catch (error) {
+    const failedUsage = latestUsage;
+    if (failedUsage && input.recordUsage) {
+      await Promise.resolve()
+        .then(() => input.recordUsage?.(failedUsage, "failed"))
+        .catch((telemetryError) => {
+          input.onTelemetryError?.(telemetryError);
+        });
     }
-    input.onEvent(event);
+    throw error;
   }
 
   await input.onDone({
@@ -104,7 +162,7 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
 
   if (latestUsage && input.recordUsage) {
     void Promise.resolve()
-      .then(() => input.recordUsage?.(latestUsage))
+      .then(() => input.recordUsage?.(latestUsage, "success"))
       .catch((error) => {
         input.onTelemetryError?.(error);
       });

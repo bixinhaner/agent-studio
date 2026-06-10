@@ -195,6 +195,7 @@ import {
   SubscriptionEntitlementService
 } from "./operations/subscription-entitlement-service.js";
 import { UsageIngestionService } from "./operations/usage-ingestion-service.js";
+import { UsageRollupService } from "./operations/usage-rollup-service.js";
 import { PermissionService } from "./rbac/permission-service.js";
 import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
@@ -389,9 +390,48 @@ const accessRequestService = createAccessRequestService({
   }
 });
 const knowledgeSetStorage = new FilesystemKnowledgeSetStorage(appConfig.knowledgeSetStorageRoot);
+const usageRollups = new UsageRollupService({
+  usageEvents: usageEventRepository,
+  rollups: usageRollupRepository
+});
+const usageRollupRebuilds = new Map<string, Promise<void>>();
+
+function toUsageRollupDateKey(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+async function rebuildUsageRollupForEvent(event: {
+  organizationId?: string;
+  createdAt: string;
+}): Promise<void> {
+  const rollupDate = toUsageRollupDateKey(event.createdAt);
+  const organizationId = trimOrUndefined(event.organizationId) ?? null;
+  const key = `${organizationId ?? "global"}:${rollupDate}`;
+  const previous = usageRollupRebuilds.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      await usageRollups.rebuildDaily({
+        rollupDate,
+        organizationId
+      });
+    });
+  usageRollupRebuilds.set(key, next);
+  try {
+    await next;
+  } finally {
+    if (usageRollupRebuilds.get(key) === next) {
+      usageRollupRebuilds.delete(key);
+    }
+  }
+}
+
 const usageIngestion = new UsageIngestionService({
   usageEvents: usageEventRepository,
-  costProfiles
+  costProfiles,
+  afterRecord: rebuildUsageRollupForEvent
 });
 
 async function resolveZendeskDingTalkMentionTarget(input: {
@@ -804,6 +844,18 @@ const zendesk = new ZendeskIntegrationService({
       inputTokens: input.usage.inputTokens,
       cachedInputTokens: input.usage.cachedInputTokens,
       outputTokens: input.usage.outputTokens,
+      codexRuntimeUsageKind: input.usage.kind,
+      codexRuntimeCumulativeUsage:
+        input.usage.cumulativeInputTokens !== undefined &&
+        input.usage.cumulativeCachedInputTokens !== undefined &&
+        input.usage.cumulativeOutputTokens !== undefined
+          ? {
+              inputTokens: input.usage.cumulativeInputTokens,
+              cachedInputTokens: input.usage.cumulativeCachedInputTokens,
+              outputTokens: input.usage.cumulativeOutputTokens
+            }
+          : undefined,
+      codexThreadId: input.codexThreadId,
       resultStatus: "success",
       metadata: Object.fromEntries(
         Object.entries({
@@ -2658,7 +2710,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             sessionId: currentSession.sessionId
           });
         },
-        async recordUsage(usage) {
+        async recordUsage(usage, resultStatus = "success") {
+          const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
           await usageIngestion.recordCodexRuntimeUsage({
             organizationId: currentUser.organizationId,
             userId: currentUser.id,
@@ -2669,8 +2722,23 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             inputTokens: usage.inputTokens,
             cachedInputTokens: usage.cachedInputTokens,
             outputTokens: usage.outputTokens,
-            resultStatus: "success",
-            metadata: { source: "crest_chat_stream" }
+            codexRuntimeUsageKind: usage.kind,
+            codexRuntimeCumulativeUsage:
+              usage.cumulativeInputTokens !== undefined &&
+              usage.cumulativeCachedInputTokens !== undefined &&
+              usage.cumulativeOutputTokens !== undefined
+                ? {
+                    inputTokens: usage.cumulativeInputTokens,
+                    cachedInputTokens: usage.cumulativeCachedInputTokens,
+                    outputTokens: usage.cumulativeOutputTokens
+                  }
+                : undefined,
+            codexThreadId,
+            resultStatus,
+            metadata: {
+              source: "crest_chat_stream",
+              ...(codexThreadId ? { codexThreadId } : {})
+            }
           });
         },
         onTelemetryError(error) {
@@ -5219,11 +5287,12 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           }
         });
       },
-      async recordUsage(usage) {
+      async recordUsage(usage, resultStatus = "success") {
         const departmentIdSnapshot =
           trimOrUndefined(actor.currentUser.organizationType) === "internal"
             ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
             : undefined;
+        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
         await usageIngestion.recordCodexRuntimeUsage({
           organizationId: actor.currentUser.organizationId,
           userId: actor.currentUser.id,
@@ -5235,7 +5304,19 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           inputTokens: usage.inputTokens,
           cachedInputTokens: usage.cachedInputTokens,
           outputTokens: usage.outputTokens,
-          resultStatus: "success",
+          codexRuntimeUsageKind: usage.kind,
+          codexRuntimeCumulativeUsage:
+            usage.cumulativeInputTokens !== undefined &&
+            usage.cumulativeCachedInputTokens !== undefined &&
+            usage.cumulativeOutputTokens !== undefined
+              ? {
+                  inputTokens: usage.cumulativeInputTokens,
+                  cachedInputTokens: usage.cumulativeCachedInputTokens,
+                  outputTokens: usage.cumulativeOutputTokens
+                }
+              : undefined,
+          codexThreadId,
+          resultStatus,
           metadata: {
             source: DINGTALK_BOT_CHANNEL,
             integrationInstanceId: input.instance.id,
@@ -5244,7 +5325,8 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
             conversationType: scope,
             externalConversationKey,
             externalConversationId: input.robotMessage.conversationId,
-            externalMessageId: input.robotMessage.msgId
+            externalMessageId: input.robotMessage.msgId,
+            ...(codexThreadId ? { codexThreadId } : {})
           }
         });
       },
@@ -7283,11 +7365,12 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           completed_at: new Date().toISOString()
         });
       },
-      async recordUsage(usage) {
+      async recordUsage(usage, resultStatus = "success") {
         const departmentIdSnapshot =
           trimOrUndefined(currentUser.organizationType) === "internal"
             ? await departmentMemberships.getPreferredDepartmentIdForUser(currentUser.id)
             : undefined;
+        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
         await usageIngestion.recordCodexRuntimeUsage({
           organizationId: currentUser.organizationId,
           userId: currentUser.id,
@@ -7299,9 +7382,22 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           inputTokens: usage.inputTokens,
           cachedInputTokens: usage.cachedInputTokens,
           outputTokens: usage.outputTokens,
-          resultStatus: "success",
+          codexRuntimeUsageKind: usage.kind,
+          codexRuntimeCumulativeUsage:
+            usage.cumulativeInputTokens !== undefined &&
+            usage.cumulativeCachedInputTokens !== undefined &&
+            usage.cumulativeOutputTokens !== undefined
+              ? {
+                  inputTokens: usage.cumulativeInputTokens,
+                  cachedInputTokens: usage.cumulativeCachedInputTokens,
+                  outputTokens: usage.cumulativeOutputTokens
+                }
+              : undefined,
+          codexThreadId,
+          resultStatus,
           metadata: {
-            source: "chat_stream"
+            source: "chat_stream",
+            ...(codexThreadId ? { codexThreadId } : {})
           }
         });
       },

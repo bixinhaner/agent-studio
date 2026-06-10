@@ -64,6 +64,68 @@ describe("UsageIngestionService", () => {
 
     expect(createdInput?.estimatedCost).toBe("15.250000");
     expect(createdInput?.internalCost).toBe("18.300000");
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: {
+        matched: true,
+        profileId: "profile-gpt-54",
+        model: "gpt-5.4",
+        inputTokenPrice: "2.500000",
+        cachedInputTokenPrice: "0.250000",
+        outputTokenPrice: "15.000000",
+        internalCostMultiplier: "1.2000"
+      }
+    });
+  });
+
+  it("bounds cached input tokens before storing and billing", async () => {
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; internalCost: string }) | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return [];
+        },
+        async create(input) {
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; internalCost: string };
+          return {
+            id: "usage-1",
+            organizationId: input.organizationId,
+            userId: input.userId,
+            departmentIdSnapshot: input.departmentIdSnapshot,
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-04-15T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.record({
+      organizationId: "org-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 1000,
+      cachedInputTokens: 2000,
+      outputTokens: 100
+    });
+
+    expect(createdInput?.inputTokens).toBe(1000);
+    expect(createdInput?.cachedInputTokens).toBe(1000);
+    expect(createdInput?.outputTokens).toBe(100);
+    expect(createdInput?.estimatedCost).toBe("0.001750");
   });
 
   it("records Codex runtime cumulative snapshots as per-turn deltas", async () => {
@@ -231,5 +293,170 @@ describe("UsageIngestionService", () => {
     expect(created.inputTokens).toBe(500);
     expect(created.cachedInputTokens).toBe(100);
     expect(created.outputTokens).toBe(50);
+  });
+
+  it("stores Codex per-turn usage without applying another delta", async () => {
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return [{
+            id: "usage-previous",
+            sessionId: "session-1",
+            model: "gpt-5.4",
+            featureType: "chat",
+            inputTokens: 9000,
+            cachedInputTokens: 8000,
+            outputTokens: 700,
+            estimatedCost: "0.000000",
+            internalCost: "0.000000",
+            resultStatus: "success",
+            metadata: {
+              codexThreadId: "codex-thread-1",
+              _codexRuntimeUsage: {
+                version: 1,
+                kind: "cumulative_snapshot",
+                inputTokens: 9000,
+                cachedInputTokens: 8000,
+                outputTokens: 700,
+                codexThreadId: "codex-thread-1"
+              }
+            },
+            createdAt: "2026-04-15T00:00:00.000Z"
+          }];
+        },
+        async create(input) {
+          return {
+            id: "usage-next",
+            organizationId: input.organizationId,
+            userId: input.userId,
+            departmentIdSnapshot: input.departmentIdSnapshot,
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-04-15T00:00:01.000Z"
+          };
+        }
+      }
+    });
+
+    const created = await service.recordCodexRuntimeUsage({
+      sessionId: "session-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 1200,
+      cachedInputTokens: 800,
+      outputTokens: 90,
+      codexRuntimeUsageKind: "turn_delta",
+      codexRuntimeCumulativeUsage: {
+        inputTokens: 10_200,
+        cachedInputTokens: 8800,
+        outputTokens: 790
+      },
+      codexThreadId: "codex-thread-1"
+    });
+
+    expect(created.inputTokens).toBe(1200);
+    expect(created.cachedInputTokens).toBe(800);
+    expect(created.outputTokens).toBe(90);
+    expect(created.metadata).toMatchObject({
+      codexThreadId: "codex-thread-1",
+      _codexRuntimeUsage: {
+        kind: "turn_delta",
+        inputTokens: 1200,
+        cachedInputTokens: 800,
+        outputTokens: 90,
+        codexThreadId: "codex-thread-1",
+        cumulative: {
+          inputTokens: 10_200,
+          cachedInputTokens: 8800,
+          outputTokens: 790
+        }
+      }
+    });
+  });
+
+  it("starts a new delta segment when the Codex thread id changes", async () => {
+    const service = new UsageIngestionService({
+      costProfiles: {
+        async getActiveByModel() {
+          return profile;
+        }
+      },
+      usageEvents: {
+        async list() {
+          return [{
+            id: "usage-previous",
+            sessionId: "session-1",
+            model: "gpt-5.4",
+            featureType: "chat",
+            inputTokens: 1000,
+            cachedInputTokens: 600,
+            outputTokens: 100,
+            estimatedCost: "0.000000",
+            internalCost: "0.000000",
+            resultStatus: "success",
+            metadata: {
+              codexThreadId: "codex-thread-old",
+              _codexRuntimeUsage: {
+                version: 1,
+                kind: "cumulative_snapshot",
+                inputTokens: 10_000,
+                cachedInputTokens: 8000,
+                outputTokens: 900,
+                codexThreadId: "codex-thread-old"
+              }
+            },
+            createdAt: "2026-04-15T00:00:00.000Z"
+          }];
+        },
+        async create(input) {
+          return {
+            id: "usage-next",
+            organizationId: input.organizationId,
+            userId: input.userId,
+            departmentIdSnapshot: input.departmentIdSnapshot,
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-04-15T00:00:01.000Z"
+          };
+        }
+      }
+    });
+
+    const created = await service.recordCodexRuntimeUsage({
+      sessionId: "session-1",
+      model: "gpt-5.4",
+      featureType: "chat",
+      inputTokens: 3000,
+      cachedInputTokens: 2000,
+      outputTokens: 200,
+      codexThreadId: "codex-thread-new"
+    });
+
+    expect(created.inputTokens).toBe(3000);
+    expect(created.cachedInputTokens).toBe(2000);
+    expect(created.outputTokens).toBe(200);
   });
 });
