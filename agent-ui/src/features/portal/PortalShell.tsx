@@ -3580,7 +3580,7 @@ const ProcessDataFallback: FC<any> = ({
           {visibleChanges.map((item) => {
             const label = fileChangeKindLabel(item.kind);
             const canPreview = !isExternalPortalUser || item.canPreview;
-            const canDownload = isExternalPortalUser && item.canDownload && activeThreadId.trim();
+            const canDownload = item.canDownload && activeThreadId.trim();
             const downloadHref = canDownload
               ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
                   path: item.path,
@@ -7062,42 +7062,47 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "artifacts") {
-              if (!isExternalPortalUser || !payload) continue;
-              const policy = asRecord(payload.policy);
-              const previewEnabled = policy?.preview_enabled === true;
-              const downloadEnabled = policy?.download_enabled === true;
-              const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
-              const changes = artifacts
-                .map((item) => {
-                  const artifact = asRecord(item);
-                  if (!artifact) return null;
-                  const filePath = normalizePreviewFilePath(asString(artifact.relative_path));
-                  if (!filePath) return null;
-                  const canPreview = previewEnabled && asString(artifact.preview_status) === "ready";
-                  const canDownload = downloadEnabled && asString(artifact.download_status) === "ready";
-                  if (!canPreview && !canDownload) return null;
-                  return {
-                    path: filePath,
-                    kind: "ready",
-                    artifact_id: asString(artifact.id),
-                    preview_status: asString(artifact.preview_status),
-                    download_status: asString(artifact.download_status),
-                    can_preview: canPreview,
-                    can_download: canDownload,
-                    blocked_reason: asString(artifact.blocked_reason)
-                  };
-                })
-                .filter(Boolean);
-              if (changes.length === 0) continue;
-              updates.push({
-                type: "data",
-                name: "codex_file_change",
-                data: {
-                  at: new Date().toISOString(),
-                  artifact_only: true,
-                  changes
-                }
-              });
+              if (!payload) continue;
+              const serverContentPart = asRecord(payload.content_part ?? payload.contentPart);
+              if (serverContentPart?.type === "data" && serverContentPart.name === "codex_file_change") {
+                updates.push(serverContentPart);
+              } else {
+                const policy = asRecord(payload.policy);
+                const previewEnabled = policy?.preview_enabled === true;
+                const downloadEnabled = policy?.download_enabled === true;
+                const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
+                const changes = artifacts
+                  .map((item) => {
+                    const artifact = asRecord(item);
+                    if (!artifact) return null;
+                    const filePath = normalizePreviewFilePath(asString(artifact.relative_path));
+                    if (!filePath) return null;
+                    const canPreview = previewEnabled && asString(artifact.preview_status) === "ready";
+                    const canDownload = downloadEnabled && asString(artifact.download_status) === "ready";
+                    if (!canPreview && !canDownload) return null;
+                    return {
+                      path: filePath,
+                      kind: "ready",
+                      artifact_id: asString(artifact.id),
+                      preview_status: asString(artifact.preview_status),
+                      download_status: asString(artifact.download_status),
+                      can_preview: canPreview,
+                      can_download: canDownload,
+                      blocked_reason: asString(artifact.blocked_reason)
+                    };
+                  })
+                  .filter(Boolean);
+                if (changes.length === 0) continue;
+                updates.push({
+                  type: "data",
+                  name: "codex_file_change",
+                  data: {
+                    at: new Date().toISOString(),
+                    artifact_only: true,
+                    changes
+                  }
+                });
+              }
               const dataPartChanged = appendDisplayDataParts(updates);
               if (dataPartChanged) {
                 const content = snapshotContent();

@@ -42,6 +42,7 @@ function mbToBytes(value: string): number {
 function normalizeExtension(value: string): string {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return "";
+  if (trimmed === "*") return "*";
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
 }
 
@@ -328,7 +329,7 @@ export function ArtifactAccessSettingsView({ value, fieldErrors, disabled, onCha
               <input
                 className="field-input"
                 value={extensionDraft}
-                placeholder="输入 .pdf、xlsx、csv，按 Enter 添加"
+                placeholder="输入 .pdf、xlsx、csv；输入 * 表示不限类型"
                 disabled={disabled}
                 onChange={(event) => setExtensionDraft(event.target.value)}
                 onKeyDown={(event) => {

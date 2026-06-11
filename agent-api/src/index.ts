@@ -2676,6 +2676,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           const output = payload.answer.trim() || "(无输出)";
           const finalizedProcess = runProjection.finalize({ finalAnswer: output });
           emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
+          const artifactPolicy = await resolveArtifactPolicyForActor(currentUser);
+          const artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
           const processContentParts = finalizedProcess.contentParts;
           await conversationRecords.appendMessage({
             threadId: thread.id,
@@ -2690,7 +2692,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
                 artifacts: generatedArtifacts.map(artifactOut)
               },
               [],
-              processContentParts
+              artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts
             ),
             runConfig: { channel: "crest", conversationId: input.conversationId }
           });
@@ -5641,6 +5643,8 @@ const ARTIFACT_MIME_BY_EXTENSION: Record<string, string> = {
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".zip": "application/zip",
+  ".mp4": "video/mp4",
+  ".srt": "application/x-subrip",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -5711,6 +5715,42 @@ function artifactPolicyOut(policy: ResolvedArtifactAccessPolicy) {
   };
 }
 
+function artifactContentPartForArtifacts(
+  artifacts: ThreadArtifactRecord[],
+  policy: ResolvedArtifactAccessPolicy,
+  at = new Date()
+): Record<string, unknown> | undefined {
+  const changes: Record<string, unknown>[] = [];
+  for (const artifact of artifacts) {
+    const filePath = normalizeArtifactRelativePath(artifact.relativePath);
+    if (!filePath) continue;
+    const canPreview = policy.previewEnabled && artifact.previewStatus === "ready";
+    const canDownload = policy.downloadEnabled && artifact.downloadStatus === "ready";
+    if (!canPreview && !canDownload) continue;
+    const change: Record<string, unknown> = {
+      path: filePath,
+      kind: "ready",
+      artifact_id: artifact.id,
+      preview_status: artifact.previewStatus,
+      download_status: artifact.downloadStatus,
+      can_preview: canPreview,
+      can_download: canDownload
+    };
+    if (artifact.blockedReason) change.blocked_reason = artifact.blockedReason;
+    changes.push(change);
+  }
+  if (changes.length === 0) return undefined;
+  return {
+    type: "data",
+    name: "codex_file_change",
+    data: {
+      at: at.toISOString(),
+      artifact_only: true,
+      changes
+    }
+  };
+}
+
 function artifactActorFromCurrentActor(actor: CurrentActor, departmentIds: string[] = []): ArtifactAccessActor {
   return {
     id: actor.id,
@@ -5777,7 +5817,7 @@ function detectBlockedArtifactPath(relativePath: string, policy: ResolvedArtifac
     return "Hidden paths are blocked by artifact policy";
   }
   const extension = extensionForArtifact(normalized);
-  if (!extension || !policy.allowedExtensions.includes(extension)) {
+  if (!policy.allowedExtensions.includes("*") && (!extension || !policy.allowedExtensions.includes(extension))) {
     return "File type is not allowed by artifact policy";
   }
   return undefined;
@@ -5963,6 +6003,7 @@ async function collectGeneratedArtifactChanges(input: {
   const workspace = path.resolve(input.workspacePath);
   const sinceMs = input.changedAfter?.getTime() ?? 0;
   const allowedExtensions = new Set(input.allowedExtensions);
+  const allowAllExtensions = allowedExtensions.has("*");
   const out: RuntimeFileChange[] = [];
   const scanDir = async (dir: string) => {
     if (out.length >= GENERATED_ARTIFACT_SCAN_LIMIT) return;
@@ -5978,7 +6019,7 @@ async function collectGeneratedArtifactChanges(input: {
       if (!entry.isFile()) continue;
       const relativePath = normalizeArtifactRelativePath(path.relative(workspace, absolutePath));
       const extension = extensionForArtifact(relativePath);
-      if (!allowedExtensions.has(extension)) continue;
+      if (!allowAllExtensions && !allowedExtensions.has(extension)) continue;
       const stat = await fs.stat(absolutePath).catch(() => null);
       if (!stat || !stat.isFile()) continue;
       if (sinceMs > 0 && stat.mtimeMs + 2000 < sinceMs) continue;
@@ -7466,7 +7507,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             const policy = await resolveArtifactPolicyForActor(currentUser);
             sendSSE(res, "artifacts", {
               policy: artifactPolicyOut(policy),
-              artifacts: artifacts.map(artifactOut)
+              artifacts: artifacts.map(artifactOut),
+              content_part: artifactContentPartForArtifacts(artifacts, policy)
             });
           }
         } catch (error) {

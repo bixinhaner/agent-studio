@@ -34,9 +34,12 @@ const systemSettingsUploadsBaseSchema = z.object({
   maxSingleFileBytes: positiveIntegerSchema,
   maxTotalUploadBytes: positiveIntegerSchema
 });
-const artifactExtensionSchema = z.string().trim().regex(/^\.[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/, {
-  message: "must start with a dot and contain only letters, numbers, underscores, or hyphens"
-});
+const artifactExtensionSchema = z.string().trim().refine(
+  (value) => value === "*" || /^\.[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(value),
+  {
+    message: "must be * or start with a dot and contain only letters, numbers, underscores, or hyphens"
+  }
+);
 const artifactAccessOverrideSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -265,6 +268,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
       ".docx",
       ".xlsx",
       ".pptx",
+      ".mp4",
+      ".srt",
       ".zip",
       ".png",
       ".jpg",

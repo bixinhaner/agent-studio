@@ -32,6 +32,7 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 function normalizeExtension(value: string): string {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return "";
+  if (trimmed === "*") return "*";
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
 }
 
