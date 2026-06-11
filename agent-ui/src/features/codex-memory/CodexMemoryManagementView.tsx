@@ -810,7 +810,7 @@ export function CodexMemoryManagementView() {
 
   function renderOverview() {
     return (
-      <Space direction="vertical" size={16} style={{ width: "100%", marginTop: 16 }}>
+      <div style={{ width: "100%", marginTop: 16 }}>
         <div className="codex-memory-overview-grid">
           <div className="codex-memory-grid-cell">{renderSettingsPanel()}</div>
           <div className="codex-memory-grid-cell">
@@ -827,7 +827,7 @@ export function CodexMemoryManagementView() {
           </div>
         </div>
 
-        <div className="admin-card codex-memory-spaces-card" style={{ padding: 20 }}>
+        <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
             <div>
               <Typography.Title level={4} style={{ margin: 0 }}>
@@ -878,7 +878,7 @@ export function CodexMemoryManagementView() {
             })}
           />
         </div>
-      </Space>
+      </div>
     );
   }
 
