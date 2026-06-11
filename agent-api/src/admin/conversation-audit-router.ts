@@ -461,6 +461,26 @@ function isZendeskAttachmentRelativePath(value: string): boolean {
   return value === ".zendesk/attachments" || value.startsWith(".zendesk/attachments/");
 }
 
+function sanitizePathSegment(value: string, fallback: string): string {
+  const normalized = value
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function legacyThreadWorkspaceUploadDir(workspacePath: string): string {
+  return path.join(workspacePath, ".uploads");
+}
+
+function threadScopedWorkspaceUploadDir(workspacePath: string, threadId: string): string {
+  return path.join(workspacePath, ".agent-studio", "uploads", sanitizePathSegment(threadId, "thread"));
+}
+
+export function threadWorkspaceUploadDirs(workspacePath: string, threadId: string): string[] {
+  return [...new Set([threadScopedWorkspaceUploadDir(workspacePath, threadId), legacyThreadWorkspaceUploadDir(workspacePath)])];
+}
+
 export function resolveThreadFileAbsolutePath(input: {
   workspacePath: string;
   uploadDir: string;
@@ -506,6 +526,39 @@ export function resolveThreadFileAbsolutePath(input: {
     throw new Error("File path is outside the thread workspace");
   }
   return candidate;
+}
+
+async function resolveExistingThreadFileAbsolutePath(input: {
+  workspacePath: string;
+  threadId: string;
+  relativePath?: string;
+  filePath?: string;
+}): Promise<string> {
+  if (!trimOrUndefined(input.relativePath)) {
+    return resolveThreadFileAbsolutePath({
+      workspacePath: input.workspacePath,
+      uploadDir: threadScopedWorkspaceUploadDir(input.workspacePath, input.threadId),
+      filePath: input.filePath
+    });
+  }
+
+  let firstCandidate: string | undefined;
+  for (const uploadDir of threadWorkspaceUploadDirs(input.workspacePath, input.threadId)) {
+    const candidate = resolveThreadFileAbsolutePath({
+      workspacePath: input.workspacePath,
+      uploadDir,
+      relativePath: input.relativePath
+    });
+    firstCandidate ??= candidate;
+    const stat = await fs.stat(candidate).catch(() => null);
+    if (stat?.isFile()) return candidate;
+  }
+
+  return firstCandidate ?? resolveThreadFileAbsolutePath({
+    workspacePath: input.workspacePath,
+    uploadDir: threadScopedWorkspaceUploadDir(input.workspacePath, input.threadId),
+    relativePath: input.relativePath
+  });
 }
 
 function normalizeProcessKind(
@@ -1956,9 +2009,9 @@ export function createConversationAuditRouter(options: {
         return;
       }
 
-      const absolutePath = resolveThreadFileAbsolutePath({
+      const absolutePath = await resolveExistingThreadFileAbsolutePath({
         workspacePath,
-        uploadDir: path.join(workspacePath, ".uploads"),
+        threadId,
         relativePath,
         filePath
       });

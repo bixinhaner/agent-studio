@@ -8,7 +8,8 @@ import {
   extractMessageText,
   matchesConversationSourceFilter,
   resolveConversationAudience,
-  resolveThreadFileAbsolutePath
+  resolveThreadFileAbsolutePath,
+  threadWorkspaceUploadDirs
 } from "./conversation-audit-router.js";
 
 describe("resolveConversationAudience", () => {
@@ -292,6 +293,23 @@ describe("extractMessageAttachments", () => {
 });
 
 describe("resolveThreadFileAbsolutePath", () => {
+  it("checks thread-scoped uploads before legacy workspace uploads", () => {
+    expect(threadWorkspaceUploadDirs("/tmp/workspace", "thread-123")).toEqual([
+      "/tmp/workspace/.agent-studio/uploads/thread-123",
+      "/tmp/workspace/.uploads"
+    ]);
+  });
+
+  it("resolves thread-scoped upload relative paths under .agent-studio/uploads", () => {
+    expect(
+      resolveThreadFileAbsolutePath({
+        workspacePath: "/tmp/workspace",
+        uploadDir: "/tmp/workspace/.agent-studio/uploads/thread-123",
+        relativePath: "171-report.pdf"
+      })
+    ).toBe("/tmp/workspace/.agent-studio/uploads/thread-123/171-report.pdf");
+  });
+
   it("keeps existing upload relative paths under .uploads", () => {
     expect(
       resolveThreadFileAbsolutePath({
