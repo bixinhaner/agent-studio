@@ -1,4 +1,5 @@
 import { appConfig } from "./config.js";
+import { applyCodexMemoryToProviderSnapshot } from "./codex-memory-config.js";
 import type { CodexRuntimeOptions } from "./codex-runtime.js";
 import {
   normalizeModel,
@@ -286,23 +287,27 @@ export class ManagedCodexProviderResolver {
 
   async resolveActiveProviderSnapshot(): Promise<ManagedCodexProviderSnapshot> {
     const published = await this.dependencies.systemSettings?.getCurrentPublished();
+    const memorySettings = published?.payload.codexMemory;
     const preferredSource = asString(published?.payload.platformDefaults.provider);
     if (preferredSource === "local_auth" || preferredSource === "chatgpt") {
-      return createLocalAuthProviderSnapshot();
+      return applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), memorySettings);
     }
 
     const instances = await this.dependencies.integrations.listOpenAICodexInstances();
     const active = instances.find((item) => item.status === "active");
     if (!active) {
-      return createLocalAuthProviderSnapshot();
+      return applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), memorySettings);
     }
-    return createManagedCodexProviderSnapshot({
-      config: active.config,
-      secrets: active.secretState,
-      integrationInstanceId: active.id,
-      integrationSlug: active.slug,
-      integrationUpdatedAt: active.updatedAt,
-      source: "integration"
-    });
+    return applyCodexMemoryToProviderSnapshot(
+      createManagedCodexProviderSnapshot({
+        config: active.config,
+        secrets: active.secretState,
+        integrationInstanceId: active.id,
+        integrationSlug: active.slug,
+        integrationUpdatedAt: active.updatedAt,
+        source: "integration"
+      }),
+      memorySettings
+    );
   }
 }

@@ -6,6 +6,7 @@ export type AdminSection =
   | "users"
   | "resources"
   | "capabilities"
+  | "codex-memory"
   | "skill-drafts"
   | "integrations"
   | "system-settings"

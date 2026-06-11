@@ -124,6 +124,19 @@ export const systemSettingsOrganizationDefaultsSchema = z.object({
   orgSyncIntervalMinutes: positiveIntegerSchema.max(10080)
 });
 
+export const systemSettingsCodexMemorySchema = z
+  .object({
+    enabled: z.boolean(),
+    useMemories: z.boolean(),
+    generateMemories: z.boolean(),
+    disableOnExternalContext: z.boolean(),
+    minRateLimitRemainingPercent: z.number().int().min(0).max(100),
+    minRolloutIdleHours: z.number().int().min(0).max(720),
+    maxRolloutAgeDays: positiveIntegerSchema.max(3650),
+    maxUnusedDays: positiveIntegerSchema.max(3650)
+  })
+  .strict();
+
 export const systemSettingsAnswerFeedbackSchema = z.object({
   enabledForExternalUsers: z.boolean().default(true),
   enabledForInternalUsers: z.boolean().default(false),
@@ -156,6 +169,7 @@ export const systemSettingsPayloadSchema = z
     artifactAccess: systemSettingsArtifactAccessSchema,
     safety: systemSettingsSafetySchema,
     organizationDefaults: systemSettingsOrganizationDefaultsSchema,
+    codexMemory: systemSettingsCodexMemorySchema,
     behavior: systemSettingsBehaviorSchema
   })
   .strict();
@@ -167,6 +181,7 @@ export const systemSettingsUploadsPatchSchema = systemSettingsUploadsBaseSchema.
 export const systemSettingsArtifactAccessPatchSchema = systemSettingsArtifactAccessSchema.partial();
 export const systemSettingsSafetyPatchSchema = systemSettingsSafetySchema.partial();
 export const systemSettingsOrganizationDefaultsPatchSchema = systemSettingsOrganizationDefaultsSchema.partial();
+export const systemSettingsCodexMemoryPatchSchema = systemSettingsCodexMemorySchema.partial();
 export const systemSettingsBehaviorPatchSchema = systemSettingsBehaviorSchema.partial();
 
 export const systemSettingsPayloadPatchSchema = z
@@ -178,6 +193,7 @@ export const systemSettingsPayloadPatchSchema = z
     artifactAccess: systemSettingsArtifactAccessPatchSchema.optional(),
     safety: systemSettingsSafetyPatchSchema.optional(),
     organizationDefaults: systemSettingsOrganizationDefaultsPatchSchema.optional(),
+    codexMemory: systemSettingsCodexMemoryPatchSchema.optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
   })
   .strict();
@@ -190,6 +206,7 @@ export type SystemSettingsArtifactAccess = z.infer<typeof systemSettingsArtifact
 export type SystemSettingsArtifactAccessRule = z.infer<typeof systemSettingsArtifactAccessRuleSchema>;
 export type SystemSettingsSafety = z.infer<typeof systemSettingsSafetySchema>;
 export type SystemSettingsOrganizationDefaults = z.infer<typeof systemSettingsOrganizationDefaultsSchema>;
+export type SystemSettingsCodexMemory = z.infer<typeof systemSettingsCodexMemorySchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
@@ -291,6 +308,16 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
   },
   organizationDefaults: {
     orgSyncIntervalMinutes: 24 * 60
+  },
+  codexMemory: {
+    enabled: true,
+    useMemories: true,
+    generateMemories: true,
+    disableOnExternalContext: true,
+    minRateLimitRemainingPercent: 25,
+    minRolloutIdleHours: 6,
+    maxRolloutAgeDays: 30,
+    maxUnusedDays: 30
   },
   behavior: {
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",

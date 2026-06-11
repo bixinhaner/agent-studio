@@ -47,6 +47,7 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
     },
     safety: { ...payload.safety },
     organizationDefaults: { ...payload.organizationDefaults },
+    codexMemory: { ...payload.codexMemory },
     behavior: {
       ...payload.behavior,
       portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item })),

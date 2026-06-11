@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  BrainCircuit,
   ClipboardList,
   Component,
   Crown,
@@ -58,6 +59,9 @@ const ResourceCenterShellLazy = lazy(() =>
 const CapabilityCenterShellLazy = lazy(() =>
   import("../capability-center/CapabilityCenterShell").then((module) => ({ default: module.CapabilityCenterShell }))
 );
+const CodexMemoryManagementViewLazy = lazy(() =>
+  import("../codex-memory/CodexMemoryManagementView").then((module) => ({ default: module.CodexMemoryManagementView }))
+);
 const SkillDraftReviewViewLazy = lazy(() =>
   import("../skills/SkillDraftReviewView").then((module) => ({ default: module.SkillDraftReviewView }))
 );
@@ -111,6 +115,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "rbac",
   "resources",
   "capabilities",
+  "codex-memory",
   "skill-drafts",
   "integrations",
   "system-settings"
@@ -216,6 +221,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "runtime",
     keywords: ["能力", "mode", "skill"],
     icon: <Wrench size={18} />
+  },
+  "codex-memory": {
+    id: "codex-memory",
+    title: "记忆管理",
+    description: "统一管理 Codex 原生 memory 的开关、生成策略和记忆文件。",
+    scope: "Codex Memory",
+    cadence: "按运行策略维护",
+    group: "runtime",
+    keywords: ["memory", "memories", "记忆", "codex"],
+    icon: <BrainCircuit size={18} />
   },
   "skill-drafts": {
     id: "skill-drafts",
@@ -354,6 +369,12 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <CapabilityCenterShellLazy />
+        </Suspense>
+      );
+    case "codex-memory":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <CodexMemoryManagementViewLazy />
         </Suspense>
       );
     case "skill-drafts":

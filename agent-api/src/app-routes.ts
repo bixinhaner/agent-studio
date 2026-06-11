@@ -18,6 +18,7 @@ export function registerCommonApiRoutes(
     monitoringAdminRouter?: Router;
     resourcesAdminRouter?: Router;
     modeAdminRouter?: Router;
+    codexMemoryAdminRouter?: Router;
     adminSkillRouter?: Router;
     portalRouter: Router;
     resourcesPortalRouter?: Router;
@@ -44,6 +45,7 @@ export function registerCommonApiRoutes(
     options.monitoringAdminRouter ?? Router(),
     options.resourcesAdminRouter ?? Router(),
     options.modeAdminRouter ?? Router(),
+    options.codexMemoryAdminRouter ?? Router(),
     options.adminSkillRouter ?? Router()
   );
   app.use(

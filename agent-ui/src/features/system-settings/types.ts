@@ -80,6 +80,17 @@ export type SystemSettingsOrganizationDefaults = {
   orgSyncIntervalMinutes: number;
 };
 
+export type SystemSettingsCodexMemory = {
+  enabled: boolean;
+  useMemories: boolean;
+  generateMemories: boolean;
+  disableOnExternalContext: boolean;
+  minRateLimitRemainingPercent: number;
+  minRolloutIdleHours: number;
+  maxRolloutAgeDays: number;
+  maxUnusedDays: number;
+};
+
 export type SystemSettingsBehavior = {
   markdown: string;
   portalWelcomeMessageDesktop: string;
@@ -117,6 +128,7 @@ export type SystemSettingsPayload = {
   artifactAccess: SystemSettingsArtifactAccess;
   safety: SystemSettingsSafety;
   organizationDefaults: SystemSettingsOrganizationDefaults;
+  codexMemory: SystemSettingsCodexMemory;
   behavior: SystemSettingsBehavior;
 };
 

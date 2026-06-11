@@ -347,6 +347,59 @@ require_command() {
   command_exists "$1" || die "missing required command: $1"
 }
 
+codex_linux_sandbox_remediation() {
+  cat >&2 <<'EOF'
+Install and load the Codex Linux sandbox prerequisites:
+  sudo apt-get update
+  sudo apt-get install -y bubblewrap apparmor-profiles apparmor-utils
+  sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+  sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+EOF
+}
+
+ensure_codex_bwrap_apparmor_profile() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+  command_exists apparmor_parser || return 0
+
+  local source_profile="/usr/share/apparmor/extra-profiles/bwrap-userns-restrict"
+  local target_profile="/etc/apparmor.d/bwrap-userns-restrict"
+  if [[ ! -f "$source_profile" ]]; then
+    log_warn "Codex bwrap AppArmor profile source not found: $source_profile"
+    return 0
+  fi
+
+  run_as_root install -m 0644 "$source_profile" "$target_profile"
+  run_as_root apparmor_parser -r "$target_profile"
+}
+
+check_codex_linux_sandbox_prerequisites() {
+  [[ "$(uname -s)" == "Linux" ]] || return 0
+
+  log_step "Checking Codex Linux sandbox prerequisites"
+  if ! command_exists bwrap; then
+    log_error "missing required command: bwrap"
+    codex_linux_sandbox_remediation
+    exit 1
+  fi
+
+  local output
+  if ! output="$(run_as_app_user_shell "command -v bwrap >/dev/null && bwrap --ro-bind / / --proc /proc --dev /dev -- /usr/bin/true" 2>&1)"; then
+    log_error "Codex Linux sandbox basic bwrap check failed for user $APP_USER"
+    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+    codex_linux_sandbox_remediation
+    exit 1
+  fi
+
+  if ! output="$(run_as_app_user_shell "bwrap --ro-bind / / --unshare-net --proc /proc --dev /dev -- /usr/bin/true" 2>&1)"; then
+    log_error "Codex Linux sandbox network namespace check failed for user $APP_USER"
+    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+    codex_linux_sandbox_remediation
+    exit 1
+  fi
+
+  log_info "Codex Linux sandbox prerequisites are ready"
+}
+
 current_user() {
   id -un
 }

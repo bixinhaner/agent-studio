@@ -40,6 +40,8 @@ import { createCollaborationRouter } from "./collaboration/router.js";
 import { ThreadCollaborationService } from "./collaboration/thread-collaboration-service.js";
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
+import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
@@ -2045,7 +2047,7 @@ function createRuntimeForProviderSnapshot(
   }
   return new CodexRuntime({
     ...(runtimeOptions ?? {}),
-    config: mergePlainConfig(runtimeOptions?.config, overrides?.configOverrides),
+    config: mergeCodexConfig(runtimeOptions?.config, overrides?.configOverrides),
     envOverrides: {
       ...(runtimeOptions?.envOverrides ?? {}),
       ...(overrides?.envOverrides ?? {})
@@ -2053,33 +2055,18 @@ function createRuntimeForProviderSnapshot(
   });
 }
 
-function mergePlainConfig(
-  base: Record<string, unknown> | undefined,
-  override: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!base && !override) return undefined;
-  if (!base) return override;
-  if (!override) return base;
-  const merged: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(override)) {
-    const current = merged[key];
-    merged[key] =
-      current && typeof current === "object" && !Array.isArray(current) && value && typeof value === "object" && !Array.isArray(value)
-        ? mergePlainConfig(current as Record<string, unknown>, value as Record<string, unknown>)
-        : value;
-  }
-  return merged;
-}
-
 async function resolveProviderSnapshot(input?: {
   existingSnapshot?: ManagedCodexProviderSnapshot;
   fallbackToLocalAuth?: boolean;
 }): Promise<ManagedCodexProviderSnapshot> {
+  const memorySettings =
+    (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+    createDefaultSystemSettingsPayload().codexMemory;
   if (input?.existingSnapshot) {
-    return input.existingSnapshot;
+    return applyCodexMemoryToProviderSnapshot(input.existingSnapshot, memorySettings);
   }
   if (input?.fallbackToLocalAuth) {
-    return createLocalAuthProviderSnapshot();
+    return applyCodexMemoryToProviderSnapshot(createLocalAuthProviderSnapshot(), memorySettings);
   }
   return await codexProviders.resolveActiveProviderSnapshot();
 }
@@ -6428,6 +6415,10 @@ registerCommonApiRoutes(app, {
     resourcePolicies,
     nativeCodexSkills
   }),
+  codexMemoryAdminRouter: createCodexMemoryAdminRouter({
+    sessionHomeRoot: appConfig.codex.sessionHomeRoot,
+    requirePermission
+  }),
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
@@ -6977,18 +6968,16 @@ app.post("/api/session", async (req: Request, res: Response) => {
             workspace,
             codexRunConfig: materializedCodexHome.codexRunConfig
           });
-          const sessionRuntime = createRuntimeForProviderSnapshot(
-            await resolveProviderSnapshot({
-              existingSnapshot: existingForComparison.providerSnapshot,
-              fallbackToLocalAuth: !existingForComparison.providerSnapshot
-            }),
-            {
-              configOverrides: runtimeLaunch.configOverrides,
-              envOverrides: {
-                CODEX_HOME: materializedCodexHome.codexHome
-              }
+          const providerSnapshot = await resolveProviderSnapshot({
+            existingSnapshot: existingForComparison.providerSnapshot,
+            fallbackToLocalAuth: !existingForComparison.providerSnapshot
+          });
+          const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
+            configOverrides: runtimeLaunch.configOverrides,
+            envOverrides: {
+              CODEX_HOME: materializedCodexHome.codexHome
             }
-          );
+          });
           const updated = await replaceLiveRuntimeSession({
             runtime: sessionRuntime,
             liveRuntimeThreads,
@@ -7005,7 +6994,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
                 workspace: payload.workspace,
                 codexRunConfig: payload.codexRunConfig,
                 codexThreadId: payload.codexThreadId,
-                providerSnapshot: existingForComparison.providerSnapshot ?? createLocalAuthProviderSnapshot()
+                providerSnapshot
               })
           });
           res.json(sessionOut(updated));

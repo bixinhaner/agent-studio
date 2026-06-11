@@ -547,6 +547,7 @@ main() {
   require_command python3
   require_command pm2
 
+  check_codex_linux_sandbox_prerequisites
   require_repo_checkout
   enable_deploy_drain
   trap disable_deploy_drain EXIT

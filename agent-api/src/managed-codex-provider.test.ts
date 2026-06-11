@@ -183,6 +183,7 @@ describe("ManagedCodexProviderResolver", () => {
               organizationDefaults: {
                 orgSyncIntervalMinutes: 60
               },
+              codexMemory: createDefaultSystemSettingsPayload().codexMemory,
               behavior: {
                 markdown: "test",
                 portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
@@ -210,7 +211,75 @@ describe("ManagedCodexProviderResolver", () => {
     const snapshot = await resolver.resolveActiveProviderSnapshot();
 
     expect(snapshot.kind).toBe("chatgpt");
-    expect(snapshot.runtimeOptions).toEqual({});
+    expect(snapshot.runtimeOptions.config).toMatchObject({
+      features: {
+        memories: true
+      },
+      memories: {
+        use_memories: true,
+        generate_memories: true
+      }
+    });
+  });
+
+  it("merges published memory settings into active integration runtime config", async () => {
+    const resolver = new ManagedCodexProviderResolver({
+      integrations: {
+        async listOpenAICodexInstances() {
+          return [
+            {
+              id: "provider-1",
+              slug: "openai-main",
+              status: "active",
+              config: {
+                providerKind: "openai_api",
+                baseUrl: "https://example.com/v1",
+                defaultModel: "gpt-5.4",
+                defaultReasoningEffort: "high"
+              },
+              secretState: {
+                apiKey: "openai-secret"
+              }
+            }
+          ];
+        }
+      },
+      systemSettings: {
+        async getCurrentPublished() {
+          return {
+            id: "settings-1",
+            versionNumber: 1,
+            revision: 1,
+            status: "published" as const,
+            payload: {
+              ...createDefaultSystemSettingsPayload(),
+              platformDefaults: {
+                ...createDefaultSystemSettingsPayload().platformDefaults,
+                provider: "openai_codex"
+              },
+              codexMemory: {
+                ...createDefaultSystemSettingsPayload().codexMemory,
+                minRateLimitRemainingPercent: 35
+              }
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+      }
+    });
+
+    const snapshot = await resolver.resolveActiveProviderSnapshot();
+
+    expect(snapshot.runtimeOptions.config).toMatchObject({
+      model_provider: "agentstudio_openai_compatible",
+      features: {
+        memories: true
+      },
+      memories: {
+        min_rate_limit_remaining_percent: 35
+      }
+    });
   });
 });
 
@@ -261,6 +330,7 @@ describe("resolveManagedCodexDefaults", () => {
           organizationDefaults: {
             orgSyncIntervalMinutes: 60
           },
+          codexMemory: createDefaultSystemSettingsPayload().codexMemory,
           behavior: {
             markdown: "test",
             portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
