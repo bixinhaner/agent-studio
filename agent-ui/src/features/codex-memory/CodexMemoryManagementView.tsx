@@ -5,6 +5,7 @@ import {
   Empty,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Row,
   Segmented,
@@ -256,7 +257,7 @@ function SettingNumber(props: {
         value={props.value}
         addonAfter={props.suffix}
         onChange={(value) => props.onChange(Number(value ?? props.min))}
-        style={{ width: "100%", marginTop: 8 }}
+        style={{ width: "100%", maxWidth: 160, marginTop: 8 }}
       />
     </div>
   );
@@ -314,6 +315,45 @@ export function CodexMemoryManagementView() {
   const selectedFile = files.find((file) => file.path === selectedFilePath) ?? null;
   const isSettingsDirty = settingsChanged(settings, publishedSettings);
   const publishedVersion = publishedMeta ? `v${publishedMeta.versionNumber}` : "未发布";
+
+  const isFileDirty = useMemo(() => {
+    if (!fileContent) return false;
+    return fileDraft !== fileContent.content;
+  }, [fileDraft, fileContent]);
+
+  function confirmSetFilePath(path: string) {
+    if (view === "file" && isFileDirty) {
+      Modal.confirm({
+        title: "放弃未保存的改动？",
+        content: "当前文件有未保存的修改，切换到其他文件将丢失这些改动。是否继续？",
+        okText: "放弃修改",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk() {
+          setSelectedFilePath(path);
+        }
+      });
+    } else {
+      setSelectedFilePath(path);
+    }
+  }
+
+  function confirmSetView(nextView: MemoryView) {
+    if (view === "file" && isFileDirty) {
+      Modal.confirm({
+        title: "放弃未保存的改动？",
+        content: "当前文件有未保存的修改，返回将丢失这些改动。是否继续？",
+        okText: "放弃修改",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk() {
+          setView(nextView);
+        }
+      });
+    } else {
+      setView(nextView);
+    }
+  }
 
   const scopeStats = useMemo(() => {
     const totalBytes = scopes.reduce((sum, scope) => sum + scope.totalBytes, 0);
@@ -636,7 +676,7 @@ export function CodexMemoryManagementView() {
         <div>
           <Space size={10} wrap style={{ marginBottom: 8 }}>
             {view !== "overview" ? (
-              <Button icon={<ArrowLeft size={16} />} onClick={() => setView(view === "file" ? "scope" : "overview")}>
+              <Button icon={<ArrowLeft size={16} />} onClick={() => confirmSetView(view === "file" ? "scope" : "overview")}>
                 {view === "file" ? "返回空间" : "返回列表"}
               </Button>
             ) : null}
@@ -658,6 +698,7 @@ export function CodexMemoryManagementView() {
           </p>
         </div>
         <Space>
+          {view === "file" && isFileDirty ? <Tag color="gold">● 未保存改动</Tag> : null}
           <Button
             icon={<RefreshCcw size={16} />}
             onClick={() => {
@@ -811,72 +852,72 @@ export function CodexMemoryManagementView() {
   function renderOverview() {
     return (
       <div style={{ width: "100%", marginTop: 16 }}>
+        <div className="codex-memory-overview-metrics" style={{ marginBottom: 16 }}>
+          <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
+          <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
+          <MemoryMetric label="占用空间" value={formatBytes(scopeStats.totalBytes)} hint="仅 memory 文件" />
+          <MemoryMetric
+            label="发布状态"
+            value={publishedSettings?.enabled ? "已启用" : "未启用"}
+            hint={publishedVersion}
+          />
+        </div>
+
         <div className="codex-memory-overview-grid">
           <div className="codex-memory-grid-cell">{renderSettingsPanel()}</div>
           <div className="codex-memory-grid-cell">
-            <div className="codex-memory-overview-metrics">
-              <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
-              <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
-              <MemoryMetric label="占用空间" value={formatBytes(scopeStats.totalBytes)} hint="仅 memory 文件" />
-              <MemoryMetric
-                label="发布状态"
-                value={publishedSettings?.enabled ? "已启用" : "未启用"}
-                hint={publishedVersion}
+            <div className="admin-card codex-memory-spaces-card" style={{ padding: 20 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+                <div>
+                  <Typography.Title level={4} style={{ margin: 0 }}>
+                    记忆空间
+                  </Typography.Title>
+                  <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
+                </div>
+                <Space wrap>
+                  <Segmented
+                    value={scopeKind}
+                    onChange={(value) => {
+                      const next = value as CodexMemoryScopeKind | "all";
+                      setScopeKind(next);
+                      void loadScopes(scopeQuery, next);
+                    }}
+                    options={[
+                      { label: "全部", value: "all" },
+                      { label: "用户", value: "user_agent" },
+                      { label: "集成", value: "integration_agent" },
+                      { label: "旧会话", value: "legacy_thread" }
+                    ]}
+                  />
+                  <Input
+                    allowClear
+                    prefix={<Search size={14} />}
+                    placeholder="搜索用户、智能体或集成"
+                    value={scopeQuery}
+                    onChange={(event) => setScopeQuery(event.target.value)}
+                    onPressEnter={() => void loadScopes()}
+                    style={{ width: 260, maxWidth: "100%" }}
+                  />
+                  <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
+                </Space>
+              </div>
+
+              {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
+              <Table
+                rowKey="id"
+                loading={scopesLoading}
+                columns={scopeColumns}
+                dataSource={scopes}
+                scroll={{ x: 960 }}
+                pagination={{ pageSize: 8, showSizeChanger: false }}
+                locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
+                onRow={(scope) => ({
+                  onClick: () => openScope(scope),
+                  style: { cursor: "pointer" }
+                })}
               />
             </div>
           </div>
-        </div>
-
-        <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, marginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
-            <div>
-              <Typography.Title level={4} style={{ margin: 0 }}>
-                记忆空间
-              </Typography.Title>
-              <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
-            </div>
-            <Space wrap>
-              <Segmented
-                value={scopeKind}
-                onChange={(value) => {
-                  const next = value as CodexMemoryScopeKind | "all";
-                  setScopeKind(next);
-                  void loadScopes(scopeQuery, next);
-                }}
-                options={[
-                  { label: "全部", value: "all" },
-                  { label: "用户", value: "user_agent" },
-                  { label: "集成", value: "integration_agent" },
-                  { label: "旧会话", value: "legacy_thread" }
-                ]}
-              />
-              <Input
-                allowClear
-                prefix={<Search size={14} />}
-                placeholder="搜索用户、智能体或集成"
-                value={scopeQuery}
-                onChange={(event) => setScopeQuery(event.target.value)}
-                onPressEnter={() => void loadScopes()}
-                style={{ width: 260, maxWidth: "100%" }}
-              />
-              <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
-            </Space>
-          </div>
-
-          {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
-          <Table
-            rowKey="id"
-            loading={scopesLoading}
-            columns={scopeColumns}
-            dataSource={scopes}
-            scroll={{ x: 960 }}
-            pagination={{ pageSize: 8, showSizeChanger: false }}
-            locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
-            onRow={(scope) => ({
-              onClick: () => openScope(scope),
-              style: { cursor: "pointer" }
-            })}
-          />
         </div>
       </div>
     );
@@ -1006,7 +1047,17 @@ export function CodexMemoryManagementView() {
             </div>
 
             <div className="admin-card" style={{ padding: 20, minHeight: 260 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 12,
+                  opacity: fileLoading ? 0.45 : 1,
+                  pointerEvents: fileLoading ? "none" : undefined,
+                  transition: "opacity 0.2s ease"
+                }}
+              >
                 <div>
                   <Typography.Title level={5} style={{ margin: 0 }}>
                     {selectedFile ? fileDisplayName(selectedFile) : "文件预览"}
@@ -1058,16 +1109,56 @@ export function CodexMemoryManagementView() {
       <Input.TextArea
         value={fileDraft}
         onChange={(event) => setFileDraft(event.target.value)}
-        autoSize={{ minRows: 18, maxRows: 30 }}
         disabled={fileContent?.truncated}
+        className="codex-memory-editor-textarea"
         style={{ fontFamily: "var(--admin-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)" }}
       />
     );
     const preview = isMarkdownFile(selectedFile) ? (
-      <CodexMemoryMarkdownPreview text={fileDraft} maxHeight={620} />
+      <CodexMemoryMarkdownPreview text={fileDraft} maxHeight={450} />
     ) : (
-      <RawTextPreview text={fileDraft} maxHeight={620} />
+      <RawTextPreview text={fileDraft} maxHeight={450} />
     );
+    const rawText = <RawTextPreview text={fileDraft} maxHeight={450} />;
+
+    const isMD = isMarkdownFile(selectedFile);
+    const tabItems = [
+      {
+        key: "edit",
+        label: "编辑",
+        children: <div className="codex-memory-editor-container">{editor}</div>
+      },
+      ...(isMD ? [
+        {
+          key: "preview",
+          label: "预览",
+          children: <div className="codex-memory-preview-container">{preview}</div>
+        },
+        {
+          key: "split",
+          label: "分屏",
+          children: (
+            <div className="codex-memory-editor-container">
+              <Row gutter={[16, 16]} style={{ height: "100%", margin: 0 }}>
+                <Col xs={24} xl={12} style={{ height: "100%", padding: 0 }}>
+                  {editor}
+                </Col>
+                <Col xs={24} xl={12} style={{ height: "100%", padding: "0 0 0 16px" }}>
+                  <div className="codex-memory-preview-container" style={{ height: "100%" }}>
+                    {preview}
+                  </div>
+                </Col>
+              </Row>
+            </div>
+          )
+        }
+      ] : []),
+      {
+        key: "raw",
+        label: "原文",
+        children: <div className="codex-memory-preview-container">{rawText}</div>
+      }
+    ];
 
     return (
       <div className="codex-memory-file-grid" style={{ marginTop: 16 }}>
@@ -1083,7 +1174,7 @@ export function CodexMemoryManagementView() {
                   type={file.path === selectedFilePath ? "primary" : "default"}
                   icon={<FileText size={14} />}
                   style={{ justifyContent: "flex-start", width: "100%", overflow: "hidden" }}
-                  onClick={() => setSelectedFilePath(file.path)}
+                  onClick={() => confirmSetFilePath(file.path)}
                 >
                   <Typography.Text ellipsis style={{ color: file.path === selectedFilePath ? "inherit" : undefined }}>
                     {fileDisplayName(file)}
@@ -1102,44 +1193,21 @@ export function CodexMemoryManagementView() {
             ) : fileContent?.truncated ? (
               <Alert type="warning" showIcon message="文件过大，界面不加载内容，也不能直接编辑。" />
             ) : (
-              <Tabs
-                items={[
-                  {
-                    key: "edit",
-                    label: "编辑",
-                    children: editor
-                  },
-                  {
-                    key: "preview",
-                    label: "预览",
-                    children: preview
-                  },
-                  {
-                    key: "split",
-                    label: "分屏",
-                    children: (
-                      <Row gutter={[12, 12]}>
-                        <Col xs={24} xl={12}>
-                          {editor}
-                        </Col>
-                        <Col xs={24} xl={12}>
-                          {preview}
-                        </Col>
-                      </Row>
-                    )
-                  },
-                  {
-                    key: "raw",
-                    label: "原文",
-                    children: <RawTextPreview text={fileDraft} maxHeight={620} />
-                  }
-                ]}
-              />
+              <Tabs items={tabItems} />
             )}
           </div>
         </div>
         <div className="codex-memory-grid-cell">
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Space
+            direction="vertical"
+            size={16}
+            style={{
+              width: "100%",
+              opacity: fileLoading ? 0.45 : 1,
+              pointerEvents: fileLoading ? "none" : undefined,
+              transition: "opacity 0.2s ease"
+            }}
+          >
             <div className="admin-card" style={{ padding: 20 }}>
               <Typography.Title level={5} style={{ marginTop: 0 }}>
                 文件信息
