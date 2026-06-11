@@ -291,7 +291,7 @@
 .codex-memory-file-grid {
   display: grid;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   min-width: 0;
   width: 100%;
 }
@@ -340,31 +340,58 @@
   padding-right: 2px;
 }
 
-/* 优化编辑器高度以支持完美分屏比对 */
+/* 优化自适应高度和对齐分屏 */
 .codex-memory-editor-container {
-  height: 520px;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  flex: 1;
 }
 
 .codex-memory-editor-textarea {
   height: 100% !important;
-  min-height: 480px !important;
-  max-height: 480px !important;
   resize: none;
+  flex: 1;
 }
 
 .codex-memory-preview-container {
-  height: 480px;
+  height: 100%;
   overflow-y: auto;
   border: 1px solid var(--admin-color-border);
   border-radius: 8px;
   padding: 12px;
   background: var(--admin-color-bg-subtle, #f8fafc);
+  flex: 1;
 }
 
 .dark .codex-memory-preview-container {
   background: var(--admin-color-bg-subtle, #09090b);
+}
+
+/* 让 Antd Tabs 高度撑满并支持内容自适应 */
+.codex-memory-tabs-stretch {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+}
+
+.codex-memory-tabs-stretch > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-memory-tabs-stretch .ant-tabs-content {
+  height: 100%;
+}
+
+.codex-memory-tabs-stretch .ant-tabs-tabpane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (max-width: 1400px) {

@@ -18,6 +18,7 @@ import {
   Typography,
   message
 } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeft,
   BrainCircuit,
@@ -110,6 +111,14 @@ function formatLocalTime(value?: string | null): string {
   return parsed.toLocaleString();
 }
 
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+}
+
+function compareTime(a?: string | null, b?: string | null): number {
+  return (a ? Date.parse(a) : 0) - (b ? Date.parse(b) : 0);
+}
+
 function settingsChanged(left: CodexMemorySettings | null, right: CodexMemorySettings | null): boolean {
   if (!left || !right) return Boolean(left || right);
   return JSON.stringify(left) !== JSON.stringify(right);
@@ -156,14 +165,15 @@ function scopeHealth(scope: CodexMemoryScope): "empty" | "active" {
   return scope.fileCount > 0 ? "active" : "empty";
 }
 
-function CodexMemoryMarkdownPreview(props: { text: string; maxHeight?: number }) {
+function CodexMemoryMarkdownPreview(props: { text: string; maxHeight?: number; style?: React.CSSProperties }) {
   return (
     <div
       className="conversation-audit-markdown"
       style={{
-        maxHeight: props.maxHeight ?? 520,
+        maxHeight: props.maxHeight,
         overflow: "auto",
-        padding: "2px 4px"
+        padding: "2px 4px",
+        ...props.style
       }}
     >
       <ReactMarkdown
@@ -263,11 +273,11 @@ function SettingNumber(props: {
   );
 }
 
-function RawTextPreview(props: { text: string; maxHeight?: number }) {
+function RawTextPreview(props: { text: string; maxHeight?: number; style?: React.CSSProperties }) {
   return (
     <pre
       style={{
-        maxHeight: props.maxHeight ?? 420,
+        maxHeight: props.maxHeight,
         overflow: "auto",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
@@ -276,7 +286,8 @@ function RawTextPreview(props: { text: string; maxHeight?: number }) {
         borderRadius: 10,
         padding: 12,
         background: "var(--admin-color-bg-subtle, #f8fafc)",
-        fontFamily: "var(--admin-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)"
+        fontFamily: "var(--admin-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+        ...props.style
       }}
     >
       {props.text}
@@ -552,11 +563,11 @@ export function CodexMemoryManagementView() {
     setView("file");
   }
 
-  const scopeColumns = [
+  const scopeColumns: ColumnsType<CodexMemoryScope> = [
     {
       title: "记忆空间",
       key: "scope",
-      width: "30%",
+      sorter: (a, b) => compareText(scopeTitle(a), scopeTitle(b)),
       render: (_: unknown, scope: CodexMemoryScope) => (
         <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
           <Space size={8} wrap>
@@ -571,26 +582,10 @@ export function CodexMemoryManagementView() {
       )
     },
     {
-      title: "归属",
-      key: "owner",
-      width: "22%",
-      render: (_: unknown, scope: CodexMemoryScope) => (
-        <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
-          <Typography.Text>{ownerLabel(scope)}</Typography.Text>
-          {scope.ownerEmail ? <Typography.Text type="secondary">{scope.ownerEmail}</Typography.Text> : null}
-        </Space>
-      )
-    },
-    {
-      title: "智能体",
-      key: "agent",
-      width: "14%",
-      render: (_: unknown, scope: CodexMemoryScope) => <Typography.Text ellipsis>{agentLabel(scope)}</Typography.Text>
-    },
-    {
       title: "内容",
       key: "content",
       width: 140,
+      sorter: (a, b) => a.fileCount - b.fileCount || a.totalBytes - b.totalBytes,
       render: (_: unknown, scope: CodexMemoryScope) => (
         <Space direction="vertical" size={2} style={{ whiteSpace: "nowrap" }}>
           <Typography.Text>{scope.fileCount} 个文件</Typography.Text>
@@ -603,6 +598,8 @@ export function CodexMemoryManagementView() {
       dataIndex: "latestModifiedAt",
       key: "latestModifiedAt",
       width: 170,
+      defaultSortOrder: "descend",
+      sorter: (a, b) => compareTime(a.latestModifiedAt, b.latestModifiedAt),
       render: (value: string | null) => formatLocalTime(value)
     },
     {
@@ -617,25 +614,36 @@ export function CodexMemoryManagementView() {
     }
   ];
 
-  const fileColumns = [
+  const fileColumns: ColumnsType<CodexMemoryFile> = [
     {
       title: "文件",
       key: "file",
+      sorter: (a, b) => compareText(fileDisplayName(a), fileDisplayName(b)),
       render: (_: unknown, file: CodexMemoryFile) => (
         <Space size={8} style={{ minWidth: 0 }}>
           <FileText size={15} />
           <Space direction="vertical" size={0} style={{ minWidth: 0 }}>
             <Typography.Text strong>{fileDisplayName(file)}</Typography.Text>
-            <Typography.Text type="secondary">{fileExtension(file).toUpperCase()} · {formatBytes(file.bytes)}</Typography.Text>
+            <Typography.Text type="secondary">{fileExtension(file).toUpperCase()}</Typography.Text>
           </Space>
         </Space>
       )
+    },
+    {
+      title: "大小",
+      dataIndex: "bytes",
+      key: "bytes",
+      width: 110,
+      sorter: (a, b) => a.bytes - b.bytes,
+      render: (value: number) => formatBytes(value)
     },
     {
       title: "更新时间",
       dataIndex: "modifiedAt",
       key: "modifiedAt",
       width: 160,
+      defaultSortOrder: "descend",
+      sorter: (a, b) => compareTime(a.modifiedAt, b.modifiedAt),
       render: (value: string) => formatLocalTime(value)
     },
     {
@@ -866,7 +874,7 @@ export function CodexMemoryManagementView() {
         <div className="codex-memory-overview-grid">
           <div className="codex-memory-grid-cell">{renderSettingsPanel()}</div>
           <div className="codex-memory-grid-cell">
-            <div className="admin-card codex-memory-spaces-card" style={{ padding: 20 }}>
+            <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, height: "100%", display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
                 <div>
                   <Typography.Title level={4} style={{ margin: 0 }}>
@@ -908,7 +916,7 @@ export function CodexMemoryManagementView() {
                 loading={scopesLoading}
                 columns={scopeColumns}
                 dataSource={scopes}
-                scroll={{ x: 960 }}
+                scroll={{ x: 640 }}
                 pagination={{ pageSize: 8, showSizeChanger: false }}
                 locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
                 onRow={(scope) => ({
@@ -1015,8 +1023,8 @@ export function CodexMemoryManagementView() {
           </Space>
         </div>
 
-        <div className="codex-memory-grid-cell">
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <div className="codex-memory-grid-cell" style={{ height: "100%" }}>
+          <Space direction="vertical" size={16} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
             <div className="admin-card" style={{ padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
                 <div>
@@ -1046,7 +1054,7 @@ export function CodexMemoryManagementView() {
               />
             </div>
 
-            <div className="admin-card" style={{ padding: 20, minHeight: 260 }}>
+            <div className="admin-card" style={{ padding: 20, flex: 1, display: "flex", flexDirection: "column", minHeight: 320 }}>
               <div
                 style={{
                   display: "flex",
@@ -1075,19 +1083,23 @@ export function CodexMemoryManagementView() {
                 ) : null}
               </div>
               {fileLoading ? (
-                <div style={{ padding: 32, textAlign: "center" }}>
+                <div style={{ padding: 32, textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Spin />
                 </div>
               ) : fileContent ? (
-                fileContent.truncated ? (
-                  <Alert type="warning" showIcon message="文件过大，界面不加载内容预览" />
-                ) : isMarkdownFile(fileContent) ? (
-                  <CodexMemoryMarkdownPreview text={fileDraft} maxHeight={360} />
-                ) : (
-                  <RawTextPreview text={fileDraft} maxHeight={360} />
-                )
+                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                  {fileContent.truncated ? (
+                    <Alert type="warning" showIcon message="文件过大，界面不加载内容预览" />
+                  ) : isMarkdownFile(fileContent) ? (
+                    <CodexMemoryMarkdownPreview text={fileDraft} style={{ flex: 1 }} />
+                  ) : (
+                    <RawTextPreview text={fileDraft} style={{ flex: 1 }} />
+                  )}
+                </div>
               ) : (
-                <Empty description="选择一个 memory 文件查看内容" />
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Empty description="选择一个 memory 文件查看内容" />
+                </div>
               )}
             </div>
           </Space>
@@ -1115,11 +1127,11 @@ export function CodexMemoryManagementView() {
       />
     );
     const preview = isMarkdownFile(selectedFile) ? (
-      <CodexMemoryMarkdownPreview text={fileDraft} maxHeight={450} />
+      <CodexMemoryMarkdownPreview text={fileDraft} style={{ height: "100%" }} />
     ) : (
-      <RawTextPreview text={fileDraft} maxHeight={450} />
+      <RawTextPreview text={fileDraft} style={{ height: "100%" }} />
     );
-    const rawText = <RawTextPreview text={fileDraft} maxHeight={450} />;
+    const rawText = <RawTextPreview text={fileDraft} style={{ height: "100%" }} />;
 
     const isMD = isMarkdownFile(selectedFile);
     const tabItems = [
@@ -1162,12 +1174,12 @@ export function CodexMemoryManagementView() {
 
     return (
       <div className="codex-memory-file-grid" style={{ marginTop: 16 }}>
-        <div className="codex-memory-grid-cell">
-          <div className="admin-card" style={{ padding: 16 }}>
+        <div className="codex-memory-grid-cell" style={{ height: "100%" }}>
+          <div className="admin-card" style={{ padding: 16, height: "100%", display: "flex", flexDirection: "column" }}>
             <Typography.Title level={5} style={{ marginTop: 0 }}>
               当前空间文件
             </Typography.Title>
-            <Space className="codex-memory-scroll-list" direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space className="codex-memory-scroll-list" direction="vertical" size={8} style={{ width: "100%", flex: 1, overflow: "auto" }}>
               {files.map((file) => (
                 <Button
                   key={file.path}
@@ -1184,28 +1196,31 @@ export function CodexMemoryManagementView() {
             </Space>
           </div>
         </div>
-        <div className="codex-memory-grid-cell">
-          <div className="admin-card" style={{ padding: 20, minHeight: 620 }}>
+        <div className="codex-memory-grid-cell" style={{ height: "100%" }}>
+          <div className="admin-card" style={{ padding: 20, height: "100%", display: "flex", flexDirection: "column" }}>
             {fileLoading ? (
-              <div style={{ padding: 48, textAlign: "center" }}>
+              <div style={{ padding: 48, textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Spin />
               </div>
             ) : fileContent?.truncated ? (
               <Alert type="warning" showIcon message="文件过大，界面不加载内容，也不能直接编辑。" />
             ) : (
-              <Tabs items={tabItems} />
+              <Tabs items={tabItems} className="codex-memory-tabs-stretch" />
             )}
           </div>
         </div>
-        <div className="codex-memory-grid-cell">
+        <div className="codex-memory-grid-cell" style={{ height: "100%" }}>
           <Space
             direction="vertical"
             size={16}
             style={{
               width: "100%",
+              height: "100%",
               opacity: fileLoading ? 0.45 : 1,
               pointerEvents: fileLoading ? "none" : undefined,
-              transition: "opacity 0.2s ease"
+              transition: "opacity 0.2s ease",
+              display: "flex",
+              flexDirection: "column"
             }}
           >
             <div className="admin-card" style={{ padding: 20 }}>
