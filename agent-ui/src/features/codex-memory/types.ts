@@ -17,6 +17,16 @@ export type CodexMemoryScope = {
   organizationKey?: string;
   userId?: string;
   agentSegment?: string;
+  displayLabel?: string;
+  displaySubtitle?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  agentModeId?: string;
+  agentName?: string;
+  agentSlug?: string;
+  integrationName?: string;
+  integrationType?: string;
+  integrationSlug?: string;
 };
 
 export type CodexMemoryScopeListResponse = {
@@ -38,7 +48,7 @@ export type CodexMemoryFileContent = CodexMemoryFile & {
 };
 
 export type CodexMemoryFilesResponse = {
-  scope: Pick<CodexMemoryScope, "id" | "kind" | "label" | "relativeHome" | "codexHome" | "memoriesPath">;
+  scope: CodexMemoryScope;
   files: CodexMemoryFile[];
 };
 

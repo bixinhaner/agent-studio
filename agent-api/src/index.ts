@@ -6536,7 +6536,22 @@ registerCommonApiRoutes(app, {
   }),
   codexMemoryAdminRouter: createCodexMemoryAdminRouter({
     sessionHomeRoot: appConfig.codex.sessionHomeRoot,
-    requirePermission
+    requirePermission,
+    users,
+    agentModes,
+    listIntegrationInstancesByIds: async (ids) => {
+      if (!ids.length) return [];
+      return db.integrationInstance.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          type: true,
+          slug: true,
+          name: true,
+          status: true
+        }
+      });
+    }
   }),
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   portalRouter: createPortalRouter({

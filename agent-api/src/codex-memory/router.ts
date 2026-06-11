@@ -6,6 +6,19 @@ import { z } from "zod";
 type CodexMemoryAdminRouterOptions = {
   sessionHomeRoot: string;
   requirePermission(permissionKey: string): RequestHandler;
+  users?: {
+    getById(id: string): Promise<{ displayName?: string; email?: string } | undefined>;
+  };
+  agentModes?: {
+    get(id: string): Promise<{ name: string; slug: string } | undefined>;
+  };
+  listIntegrationInstancesByIds?: (ids: string[]) => Promise<Array<{
+    id: string;
+    type: string;
+    slug: string;
+    name: string;
+    status: string;
+  }>>;
 };
 
 type CodexMemoryScopeKind = "user_agent" | "integration_agent" | "legacy_thread" | "unknown";
@@ -25,6 +38,16 @@ type CodexMemoryScope = {
   organizationKey?: string;
   userId?: string;
   agentSegment?: string;
+  displayLabel?: string;
+  displaySubtitle?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  agentModeId?: string;
+  agentName?: string;
+  agentSlug?: string;
+  integrationName?: string;
+  integrationType?: string;
+  integrationSlug?: string;
 };
 
 const MAX_SCAN_DEPTH = 8;
@@ -67,6 +90,11 @@ function safeRelativePath(value: string, label: string): string {
   return normalized;
 }
 
+function trimOrUndefined(value: string | null | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
 function resolveScopeHome(sessionHomeRoot: string, scopeId: string): { relativeHome: string; codexHome: string } {
   const relativeHome = safeRelativePath(decodeScopeId(scopeId), "scope");
   const codexHome = path.resolve(sessionHomeRoot, relativeHome);
@@ -94,12 +122,14 @@ function resolveMemoryFile(input: {
 function classifyScope(relativeHome: string): Omit<CodexMemoryScope, "id" | "relativeHome" | "codexHome" | "memoriesPath" | "fileCount" | "totalBytes" | "latestModifiedAt"> {
   const parts = relativeHome.split("/").filter(Boolean);
   if (parts[0] === "integrations" && parts.length >= 4) {
+    const agentModeId = agentModeIdFromSegment(parts[3]);
     return {
       kind: "integration_agent",
       label: `${parts[1]} / ${parts[2]} / ${parts[3]}`,
       provider: parts[1],
       integrationInstanceId: parts[2],
-      agentSegment: parts[3]
+      agentSegment: parts[3],
+      agentModeId
     };
   }
   if (parts[0]?.startsWith("thread-") || parts[0]?.startsWith("session-")) {
@@ -109,18 +139,122 @@ function classifyScope(relativeHome: string): Omit<CodexMemoryScope, "id" | "rel
     };
   }
   if (parts.length >= 3) {
+    const agentModeId = agentModeIdFromSegment(parts[2]);
     return {
       kind: "user_agent",
       label: `${parts[0]} / ${parts[1]} / ${parts[2]}`,
       organizationKey: parts[0],
       userId: parts[1],
-      agentSegment: parts[2]
+      agentSegment: parts[2],
+      agentModeId
     };
   }
   return {
     kind: "unknown",
     label: relativeHome
   };
+}
+
+function agentModeIdFromSegment(segment: string | undefined): string | undefined {
+  const normalized = trimOrUndefined(segment);
+  if (!normalized) return undefined;
+  const withoutPrefix = normalized.startsWith("agent-") ? normalized.slice("agent-".length) : normalized;
+  return trimOrUndefined(withoutPrefix.replace(/-[a-f0-9]{12}$/i, ""));
+}
+
+function providerDisplayName(provider: string | undefined): string | undefined {
+  const normalized = trimOrUndefined(provider);
+  if (!normalized) return undefined;
+  const labels: Record<string, string> = {
+    zendesk: "Zendesk",
+    dingtalk: "钉钉",
+    crest: "CREST",
+    openai: "OpenAI API"
+  };
+  return labels[normalized.toLowerCase()] ?? normalized;
+}
+
+async function enrichMemoryScopes(
+  scopes: CodexMemoryScope[],
+  options: CodexMemoryAdminRouterOptions
+): Promise<CodexMemoryScope[]> {
+  const userIds = [...new Set(scopes.map((scope) => scope.userId).filter((value): value is string => Boolean(value)))];
+  const agentModeIds = [...new Set(scopes.map((scope) => scope.agentModeId).filter((value): value is string => Boolean(value)))];
+  const integrationIds = [
+    ...new Set(scopes.map((scope) => scope.integrationInstanceId).filter((value): value is string => Boolean(value)))
+  ];
+  const usersById = new Map<string, { displayName?: string; email?: string }>();
+  const modesById = new Map<string, { name: string; slug: string }>();
+  const integrationsById = new Map<string, { id: string; type: string; slug: string; name: string; status: string }>();
+
+  await Promise.all([
+    Promise.all(
+      userIds.map(async (userId) => {
+        const user = await options.users?.getById(userId);
+        if (user) usersById.set(userId, user);
+      })
+    ),
+    Promise.all(
+      agentModeIds.map(async (agentModeId) => {
+        const mode = await options.agentModes?.get(agentModeId);
+        if (mode) modesById.set(agentModeId, mode);
+      })
+    ),
+    (async () => {
+      const integrations = await options.listIntegrationInstancesByIds?.(integrationIds);
+      for (const integration of integrations ?? []) {
+        integrationsById.set(integration.id, integration);
+      }
+    })()
+  ]);
+
+  return scopes.map((scope) => {
+    const user = scope.userId ? usersById.get(scope.userId) : undefined;
+    const mode = scope.agentModeId ? modesById.get(scope.agentModeId) : undefined;
+    const integration = scope.integrationInstanceId ? integrationsById.get(scope.integrationInstanceId) : undefined;
+    const ownerName = trimOrUndefined(user?.displayName) ?? trimOrUndefined(user?.email);
+    const agentName = trimOrUndefined(mode?.name) ?? trimOrUndefined(mode?.slug);
+    const integrationName =
+      trimOrUndefined(integration?.name) ??
+      trimOrUndefined(integration?.slug) ??
+      providerDisplayName(scope.provider);
+
+    if (scope.kind === "user_agent") {
+      return {
+        ...scope,
+        ownerName,
+        ownerEmail: trimOrUndefined(user?.email),
+        agentName,
+        agentSlug: trimOrUndefined(mode?.slug),
+        displayLabel: [ownerName ?? "未知用户", agentName ?? "默认智能体"].join(" · "),
+        displaySubtitle: scope.organizationKey ? `组织：${scope.organizationKey}` : "用户智能体记忆空间"
+      };
+    }
+    if (scope.kind === "integration_agent") {
+      return {
+        ...scope,
+        agentName,
+        agentSlug: trimOrUndefined(mode?.slug),
+        integrationName,
+        integrationType: trimOrUndefined(integration?.type) ?? scope.provider,
+        integrationSlug: trimOrUndefined(integration?.slug),
+        displayLabel: [integrationName ?? providerDisplayName(scope.provider) ?? "集成", agentName ?? "默认智能体"].join(" · "),
+        displaySubtitle: `${providerDisplayName(scope.provider) ?? "集成"} 共享记忆空间`
+      };
+    }
+    if (scope.kind === "legacy_thread") {
+      return {
+        ...scope,
+        displayLabel: "旧会话记忆",
+        displaySubtitle: "历史兼容空间，建议只在排查时查看"
+      };
+    }
+    return {
+      ...scope,
+      displayLabel: "未识别记忆空间",
+      displaySubtitle: "目录结构无法归类，建议排查来源"
+    };
+  });
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -311,11 +445,28 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
       const kind = String(req.query.kind ?? "").trim();
       const limitInput = Number.parseInt(String(req.query.limit ?? "200"), 10);
       const limit = Number.isFinite(limitInput) && limitInput > 0 ? Math.min(limitInput, 500) : 200;
-      const scopes = (await listMemoryScopes(sessionHomeRoot))
+      const allScopes = await enrichMemoryScopes(await listMemoryScopes(sessionHomeRoot), options);
+      const scopes = allScopes
         .filter((scope) => !kind || scope.kind === kind)
         .filter((scope) => {
           if (!query) return true;
-          return [scope.label, scope.relativeHome, scope.provider, scope.integrationInstanceId, scope.userId, scope.agentSegment]
+          return [
+            scope.displayLabel,
+            scope.displaySubtitle,
+            scope.ownerName,
+            scope.ownerEmail,
+            scope.agentName,
+            scope.agentSlug,
+            scope.integrationName,
+            scope.integrationType,
+            scope.integrationSlug,
+            scope.label,
+            scope.relativeHome,
+            scope.provider,
+            scope.integrationInstanceId,
+            scope.userId,
+            scope.agentSegment
+          ]
             .filter(Boolean)
             .some((value) => String(value).toLowerCase().includes(query));
         });
@@ -337,14 +488,22 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         res.status(404).json({ detail: "memories directory does not exist" });
         return;
       }
+      const summary = await summarizeMemoryDirectory(memoriesPath);
+      const enrichedScopes = await enrichMemoryScopes(
+        [
+          {
+            id: req.params.scopeId,
+            ...classifyScope(scope.relativeHome),
+            relativeHome: scope.relativeHome,
+            codexHome: scope.codexHome,
+            memoriesPath,
+            ...summary
+          }
+        ],
+        options
+      );
       res.json({
-        scope: {
-          id: req.params.scopeId,
-          ...classifyScope(scope.relativeHome),
-          relativeHome: scope.relativeHome,
-          codexHome: scope.codexHome,
-          memoriesPath
-        },
+        scope: enrichedScopes[0],
         files: await listMemoryFiles(memoriesPath)
       });
     } catch (error) {
