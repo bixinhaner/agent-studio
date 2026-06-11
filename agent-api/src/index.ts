@@ -3285,8 +3285,7 @@ function ensureThreadUploadDirsInRunConfig(
   threadId: string,
   workspacePath: string
 ): Record<string, unknown> {
-  const withWorkspaceUpload = ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath, threadId));
-  return ensureThreadUploadInRunConfig(withWorkspaceUpload, getThreadUploadTempDir(threadId));
+  return ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath, threadId));
 }
 
 async function createSession(options: SessionOptions, threadId?: string, timing?: RuntimeStartupTimer) {
