@@ -210,10 +210,10 @@ import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import {
+  buildIntegrationAgentWorkspacePath,
   buildSharedIntegrationCodexHomeScope,
   buildSharedCodexHomeScope,
   buildUserAgentWorkspacePath,
-  isUserAgentWorkspacePath
 } from "./runtime-scope-resolver.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
@@ -3195,24 +3195,6 @@ async function allocateUserAgentWorkspacePath(input: {
   };
 }
 
-function isSharedUserAgentWorkspace(input: {
-  rootPath: string;
-  currentUser: CurrentActor;
-  modeId: string;
-  workspacePath: string;
-}): boolean {
-  return isUserAgentWorkspacePath({
-    rootPath: input.rootPath,
-    actor: {
-      organizationId: input.currentUser.organizationId,
-      organizationSlug: input.currentUser.organizationSlug,
-      userId: input.currentUser.id
-    },
-    modeId: input.modeId,
-    workspacePath: input.workspacePath
-  });
-}
-
 function userAgentWorkspacePathForSelection(input: {
   currentUser: CurrentActor;
   selection: ModeSelection;
@@ -3228,35 +3210,14 @@ function userAgentWorkspacePathForSelection(input: {
   });
 }
 
-async function materializeCodexHomeForWorkspaceScope(input: {
+async function materializeUserAgentCodexHomeForRunConfig(input: {
   currentUser: CurrentActor;
   modeId: string;
-  workspaceRootPath: string;
-  workspacePath: string;
-  threadId?: string;
-  sessionId?: string;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
-  if (
-    isSharedUserAgentWorkspace({
-      rootPath: input.workspaceRootPath,
-      currentUser: input.currentUser,
-      modeId: input.modeId,
-      workspacePath: input.workspacePath
-    })
-  ) {
-    return materializeSharedCodexHomeForRunConfig({
-      currentUser: input.currentUser,
-      modeId: input.modeId,
-      codexRunConfig: input.codexRunConfig
-    });
-  }
-  return materializeCodexHomeForRunConfig({
-    scopeId: input.threadId
-      ? `thread-${input.threadId}`
-      : input.sessionId
-        ? `session-${input.sessionId}`
-        : `workspace-${path.basename(input.workspacePath)}`,
+  return materializeSharedCodexHomeForRunConfig({
+    currentUser: input.currentUser,
+    modeId: input.modeId,
     codexRunConfig: input.codexRunConfig
   });
 }
@@ -3288,6 +3249,11 @@ function getThreadWorkspaceUploadDirs(workspacePath: string, threadId?: string):
   return [...new Set(dirs)];
 }
 
+function shouldRemoveWorkspaceOnThreadHardDelete(threadId: string, workspacePath: string): boolean {
+  const normalizedThreadId = sanitizePathSegment(threadId, "thread");
+  return path.basename(path.resolve(workspacePath)) === `thread-${normalizedThreadId}`;
+}
+
 function ensureThreadUploadDirsInRunConfig(
   codexRunConfig: Record<string, unknown> | undefined,
   threadId: string,
@@ -3308,8 +3274,8 @@ async function createSession(options: SessionOptions, threadId?: string) {
       : options.codexRunConfig
   );
   const materializedCodexHome =
-    options.codexHome && sessionCodexRunConfig
-      ? { codexHome: options.codexHome, codexRunConfig: sessionCodexRunConfig }
+    options.codexHome
+      ? { codexHome: options.codexHome, codexRunConfig: withRunConfigCodexHome(sessionCodexRunConfig, options.codexHome) }
       : await materializeCodexHomeForRunConfig({
           scopeId: threadId ? `thread-${threadId}` : `session-${randomUUID()}`,
           codexRunConfig: sessionCodexRunConfig
@@ -3369,12 +3335,9 @@ async function replaceCrestLiveRuntimeSession(input: {
     currentUser: input.currentUser,
     modeHint: modeIdFromRunConfig(codexRunConfig)
   });
-  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser: input.currentUser,
     modeId: modeSelection.modeId,
-    workspaceRootPath: modeSelection.workspaceRootPath,
-    workspacePath: input.session.workspace,
-    threadId: input.threadId,
     codexRunConfig
   });
   const providerSnapshot = await resolveProviderSnapshot({
@@ -3509,12 +3472,9 @@ async function resolveSessionOptions(
     knowledgeSetIds: input.knowledge_set_ids,
     codexRunConfig: sourceCodexRunConfig
   });
-  const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
-  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser,
     modeId,
-    workspaceRootPath,
-    workspacePath,
     codexRunConfig: resolvedCodexRunConfig
   });
   return {
@@ -3633,12 +3593,9 @@ async function ensureThreadSession(
   });
   await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
-  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser,
     modeId: modeSelection.modeId,
-    workspaceRootPath: modeSelection.workspaceRootPath,
-    workspacePath,
-    threadId,
     codexRunConfig: desiredCodexRunConfig
   });
 
@@ -3780,16 +3737,6 @@ function mergeAdditionalDirectoriesForBot(
   return next;
 }
 
-function buildZendeskTicketWorkspacePath(rootPath: string, instanceId: string | undefined, ticketId: string): string {
-  return path.join(
-    rootPath,
-    "zendesk",
-    sanitizePathSegment(instanceId || "legacy", "instance"),
-    "tickets",
-    `ticket-${sanitizePathSegment(ticketId, "ticket")}`
-  );
-}
-
 type ZendeskKnowledgeSetMount = {
   id: string;
   name: string;
@@ -3846,7 +3793,7 @@ async function prepareZendeskKnowledgeSetWorkspace(
   const manifestLines = [
     "# Zendesk Mounted Knowledge Sets",
     "",
-    "This file is generated by Agent Studio for the current Zendesk ticket workspace.",
+    "This file is generated by Agent Studio for the current Zendesk integration workspace.",
     "Search these local sources before deciding that product documentation is unavailable.",
     "",
     "Recommended workflow:",
@@ -3924,7 +3871,12 @@ async function resolveZendeskAgentRuntimeOptions(input: {
   });
 
   const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
-  const workspacePath = buildZendeskTicketWorkspacePath(workspaceRoot, input.instanceId, input.ticketId);
+  const workspacePath = buildIntegrationAgentWorkspacePath({
+    rootPath: workspaceRoot,
+    provider: ZENDESK_CHANNEL,
+    integrationInstanceId: input.instanceId || "legacy",
+    modeId: agentModeId
+  });
   await fs.mkdir(workspacePath, { recursive: true });
   await applyWorkspaceAgentsMdForMode(agentModeId, workspacePath);
   const mountedKnowledgeSets = await prepareZendeskKnowledgeSetWorkspace(workspacePath, selectedKnowledgeSets);
@@ -5053,12 +5005,9 @@ async function ensureDingTalkBotThreadSession(input: {
   }
 
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desired.baseCodexRunConfig, input.thread.id, workspacePath);
-  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser: input.currentUser,
     modeId: agentModeId,
-    workspaceRootPath,
-    workspacePath,
-    threadId: input.thread.id,
     codexRunConfig: desiredCodexRunConfig
   });
   const desiredSession: SessionOptions = {
@@ -5167,12 +5116,9 @@ async function createDingTalkBotThread(input: {
     codexRunConfig: options.baseCodexRunConfig
   });
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(options.baseCodexRunConfig, thread.id, workspacePath);
-  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser: input.currentUser,
     modeId: agentModeId,
-    workspaceRootPath: workspaceRoot,
-    workspacePath,
-    threadId: thread.id,
     codexRunConfig: desiredCodexRunConfig
   });
   await createSession({
@@ -6470,6 +6416,13 @@ app.use(
   "/openai/v1",
   createOpenAICompatibleRouter({
     runtime: managedRouterRuntime,
+    createRuntimeForRequest: async (input) =>
+      createRuntimeForProviderSnapshot(await codexProviders.resolveActiveProviderSnapshot(), {
+        envOverrides: {
+          CODEX_HOME: input.codexHome
+        }
+      }),
+    materializeCodexHome: materializeSharedIntegrationCodexHomeForRunConfig,
     integrationsDb: db as never,
     agentModes,
     runProfiles,
@@ -6885,7 +6838,6 @@ app.post("/api/session", async (req: Request, res: Response) => {
           let workspace = existingForComparison.workspace;
           let modeId = modeHint;
           let runtimeProfile: PortalRuntimeOptionRunProfile | undefined;
-          let workspaceRootPath: string | undefined;
           if (existingForComparison.threadId) {
             const selection = await resolveModeSelection({
               currentUser,
@@ -6893,7 +6845,6 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             modeId = selection.modeId;
             runtimeProfile = selection.runtimeProfile;
-            workspaceRootPath = selection.workspaceRootPath;
             const ownedThread = await threads.getOwned(
               existingForComparison.threadId,
               currentUser.id,
@@ -6918,7 +6869,6 @@ app.post("/api/session", async (req: Request, res: Response) => {
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
             runtimeProfile = allocated.runtimeProfile;
-            workspaceRootPath = allocated.workspaceRootPath;
           }
 
           if (!modeId || !runtimeProfile) {
@@ -6928,7 +6878,6 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             modeId = fallback.modeId;
             runtimeProfile = fallback.runtimeProfile;
-            workspaceRootPath ??= fallback.workspaceRootPath;
           }
 
           if (modeId && workspace) {
@@ -6958,14 +6907,9 @@ app.post("/api/session", async (req: Request, res: Response) => {
             existingForComparison.threadId && trimOrUndefined(workspace)
               ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existingForComparison.threadId, workspace)
               : nextCodexRunConfig;
-          const materializedWorkspaceRootPath = workspaceRootPath ?? (await resolveEffectiveSessionWorkspaceRootPath());
-          const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+          const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
             currentUser,
             modeId,
-            workspaceRootPath: materializedWorkspaceRootPath,
-            workspacePath: workspace,
-            threadId: existingForComparison.threadId ?? undefined,
-            sessionId: existingForComparison.sessionId,
             codexRunConfig: runtimeCodexRunConfig
           });
           if (existingForComparison.threadId && trimOrUndefined(workspace)) {
@@ -7255,7 +7199,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 
     const workspacePath = trimOrUndefined(thread.workspace);
     await threads.delete(threadId);
-    if (workspacePath) {
+    if (workspacePath && shouldRemoveWorkspaceOnThreadHardDelete(threadId, workspacePath)) {
       await fs.rm(workspacePath, { recursive: true, force: true });
     }
     await fs.rm(getThreadUploadTempDir(threadId), { recursive: true, force: true });

@@ -10,8 +10,10 @@ import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForMod
 import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
 import type { CodexExecutionService } from "../operations/codex-execution-service.js";
 import type { RecordCodexUsageInput } from "../operations/usage-recorder.js";
+import { buildIntegrationAgentWorkspacePath } from "../runtime-scope-resolver.js";
 
 const OPENAI_COMPATIBLE_API_TYPE = "openai_compatible_api";
+const OPENAI_COMPATIBLE_PROVIDER_SCOPE = "openai-compatible";
 const MANAGED_UPLOAD_SOURCE_TYPE = "managed_upload";
 
 type IntegrationInstanceRow = {
@@ -90,16 +92,25 @@ type AuthenticatedIntegration = {
   config: OpenAICompatibleApiConfig;
 };
 
+type OpenAICompatibleRuntime = {
+  startThreadWithOptions(options: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<unknown>;
+  runStreamed(thread: unknown, message: string): AsyncIterable<RuntimeStreamEvent>;
+};
+
 type OpenAICompatibleRouterOptions = {
-  runtime: {
-    startThreadWithOptions(options: {
-      model: string;
-      reasoningEffort: ReasoningEffort;
-      workspace: string;
-      codexRunConfig?: Record<string, unknown>;
-    }): Promise<unknown>;
-    runStreamed(thread: unknown, message: string): AsyncGenerator<RuntimeStreamEvent>;
-  };
+  runtime: OpenAICompatibleRuntime;
+  createRuntimeForRequest?(input: { codexHome: string }): Promise<OpenAICompatibleRuntime> | OpenAICompatibleRuntime;
+  materializeCodexHome?(input: {
+    provider: string;
+    integrationInstanceId: string;
+    modeId: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }>;
   integrationsDb: {
     integrationInstance: {
       findMany(args: {
@@ -391,21 +402,6 @@ function buildPrompt(messages: ChatCompletionMessage[]): string {
   return sections.join("\n\n").trim();
 }
 
-function dateSegment(now = new Date()): string {
-  const year = String(now.getFullYear()).padStart(4, "0");
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function sanitizePathSegment(value: string, fallback: string): string {
-  const normalized = value
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return normalized || fallback;
-}
-
 function writeOpenAIError(
   res: Response,
   status: number,
@@ -677,6 +673,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     let outputChars = 0;
     let recordedUsage = false;
     let errorMessage: string | undefined;
+    let requestRuntime = options.runtime;
 
     const markResponseStarted = (statusCode: number) => {
       responseStarted = true;
@@ -802,17 +799,16 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         return options.knowledgeSetStorage.resolveReadableMountPath(resolveKnowledgeSetStorageKey(knowledgeSet));
       });
       const sessionWorkspaceRoot = await resolveEffectiveSessionWorkspaceRoot(options);
-      const workspaceBase = path.join(
-        sessionWorkspaceRoot,
-        "external-openai",
-        sanitizePathSegment(authenticated.instance.slug, "instance"),
-        dateSegment()
-      );
-      workspacePath = path.join(workspaceBase, `request-${sanitizePathSegment(completionId, "completion")}`);
+      workspacePath = buildIntegrationAgentWorkspacePath({
+        rootPath: sessionWorkspaceRoot,
+        provider: OPENAI_COMPATIBLE_PROVIDER_SCOPE,
+        integrationInstanceId: authenticated.instance.id || authenticated.instance.slug || "legacy",
+        modeId: selectedAgentModeId
+      });
       await fs.mkdir(workspacePath, { recursive: true });
       await applyWorkspaceAgentsMdForMode(options.agentModes, selectedAgentModeId, workspacePath);
 
-      const codexRunConfig = mergeAdditionalDirectories(
+      let codexRunConfig = mergeAdditionalDirectories(
         {
           sandboxMode: runProfile.sandboxMode,
           approvalPolicy: runProfile.approvalPolicy,
@@ -822,9 +818,21 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         },
         mountPaths
       );
+      if (options.materializeCodexHome) {
+        const materializedCodexHome = await options.materializeCodexHome({
+          provider: OPENAI_COMPATIBLE_PROVIDER_SCOPE,
+          integrationInstanceId: authenticated.instance.id || authenticated.instance.slug || "legacy",
+          modeId: selectedAgentModeId,
+          codexRunConfig
+        });
+        codexRunConfig = materializedCodexHome.codexRunConfig;
+        requestRuntime = options.createRuntimeForRequest
+          ? await options.createRuntimeForRequest({ codexHome: materializedCodexHome.codexHome })
+          : options.runtime;
+      }
 
       const prompt = buildPrompt(body.messages as ChatCompletionMessage[]);
-      const thread = await options.runtime.startThreadWithOptions({
+      const thread = await requestRuntime.startThreadWithOptions({
         model: selectedModel,
         reasoningEffort: selectedReasoningEffort,
         workspace: workspacePath,
@@ -856,7 +864,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         });
 
         const streamed = await options.codexExecution.collectFromRuntime({
-          runtime: options.runtime,
+          runtime: requestRuntime,
           thread,
           prompt,
           onTextDelta(delta) {
@@ -899,7 +907,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       }
 
       const completion = await options.codexExecution.collectFromRuntime({
-        runtime: options.runtime,
+        runtime: requestRuntime,
         thread,
         prompt
       });
@@ -928,10 +936,6 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         writeOpenAIError(res, 400, errorMessage, "invalid_request");
       } else {
         res.end();
-      }
-    } finally {
-      if (workspacePath) {
-        await fs.rm(workspacePath, { recursive: true, force: true }).catch(() => undefined);
       }
     }
   });

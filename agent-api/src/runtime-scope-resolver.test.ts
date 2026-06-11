@@ -3,9 +3,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildIntegrationAgentWorkspacePath,
   buildSharedIntegrationCodexHomeScope,
   buildSharedCodexHomeScope,
   buildUserAgentWorkspacePath,
+  isIntegrationAgentWorkspacePath,
   isUserAgentWorkspacePath
 } from "./runtime-scope-resolver.js";
 
@@ -33,6 +35,30 @@ describe("runtime scope resolver", () => {
       rootPath: "/var/lib/agent-studio/sessions",
       actor,
       modeId: "sales/copilot",
+      workspacePath
+    })).toBe(true);
+  });
+
+  it("uses a stable integration-agent workspace path", () => {
+    const workspacePath = buildIntegrationAgentWorkspacePath({
+      rootPath: "/var/lib/agent-studio/sessions",
+      provider: "openai-compatible/api",
+      integrationInstanceId: "instance:42",
+      modeId: "support/copilot"
+    });
+
+    expect(workspacePath).toBe(path.join(
+      "/var/lib/agent-studio/sessions",
+      "integrations",
+      "openai-compatible_api",
+      "instance_42",
+      "agent-support_copilot"
+    ));
+    expect(isIntegrationAgentWorkspacePath({
+      rootPath: "/var/lib/agent-studio/sessions",
+      provider: "openai-compatible/api",
+      integrationInstanceId: "instance:42",
+      modeId: "support/copilot",
       workspacePath
     })).toBe(true);
   });

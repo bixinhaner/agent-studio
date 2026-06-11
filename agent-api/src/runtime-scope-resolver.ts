@@ -147,6 +147,31 @@ export function buildUserAgentWorkspacePath(input: {
   );
 }
 
+export function buildIntegrationAgentWorkspacePath(input: {
+  rootPath: string;
+  provider: string;
+  integrationInstanceId: string;
+  modeId: string;
+}): string {
+  return path.join(
+    input.rootPath,
+    "integrations",
+    sanitizePathSegment(input.provider, "integration"),
+    sanitizePathSegment(input.integrationInstanceId, "instance"),
+    `agent-${sanitizePathSegment(input.modeId, "default")}`
+  );
+}
+
+export function isIntegrationAgentWorkspacePath(input: {
+  rootPath: string;
+  provider: string;
+  integrationInstanceId: string;
+  modeId: string;
+  workspacePath: string;
+}): boolean {
+  return path.resolve(input.workspacePath) === path.resolve(buildIntegrationAgentWorkspacePath(input));
+}
+
 export function isUserAgentWorkspacePath(input: {
   rootPath: string;
   actor: RuntimeScopeActor;
