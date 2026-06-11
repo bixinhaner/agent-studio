@@ -1208,7 +1208,7 @@ export function CodexMemoryManagementView() {
   }
 
   return (
-    <div className="admin-page-container">
+    <div className="admin-page-container codex-memory-page">
       {renderHeader()}
       {view === "overview" ? renderOverview() : view === "scope" ? renderScopeDetail() : renderFileEditor()}
     </div>

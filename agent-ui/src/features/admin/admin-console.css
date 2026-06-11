@@ -296,8 +296,14 @@
   width: 100%;
 }
 
+.codex-memory-page {
+  align-self: stretch;
+  width: 100%;
+  max-width: none;
+}
+
 .codex-memory-overview-grid {
-  grid-template-columns: minmax(380px, 0.78fr) minmax(420px, 1.22fr);
+  grid-template-columns: minmax(420px, 520px) minmax(0, 1fr);
 }
 
 .codex-memory-overview-metrics {
@@ -315,15 +321,16 @@
 }
 
 .codex-memory-scope-grid {
-  grid-template-columns: minmax(300px, 0.64fr) minmax(0, 2.36fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
 }
 
 .codex-memory-file-grid {
-  grid-template-columns: minmax(260px, 0.58fr) minmax(0, 2.12fr) minmax(240px, 0.52fr);
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(220px, 260px);
 }
 
 .codex-memory-grid-cell {
   min-width: 0;
+  width: 100%;
 }
 
 .codex-memory-scroll-list {
