@@ -39,6 +39,21 @@ export type SharedCodexHomeScope = {
   };
 };
 
+export type SharedIntegrationCodexHomeScope = {
+  capabilityHash: string;
+  fingerprint: CodexCapabilityFingerprint;
+  scopeSegments: string[];
+  manifest: {
+    version: 1;
+    scope: "integration_agent";
+    provider: string;
+    integrationInstanceId: string;
+    modeId: string;
+    capabilityHash: string;
+    fingerprint: CodexCapabilityFingerprint;
+  };
+};
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -183,6 +198,40 @@ export function buildSharedCodexHomeScope(input: {
       scope: "user_agent",
       organizationKey,
       userId: input.actor.userId,
+      modeId: input.modeId,
+      capabilityHash,
+      fingerprint
+    }
+  };
+}
+
+export function buildSharedIntegrationCodexHomeScope(input: {
+  provider: string;
+  integrationInstanceId: string;
+  modeId: string;
+  codexRunConfig?: Record<string, unknown>;
+}): SharedIntegrationCodexHomeScope {
+  const provider = sanitizePathSegment(input.provider, "integration");
+  const integrationInstanceId = sanitizePathSegment(input.integrationInstanceId, "instance");
+  const fingerprint = buildCodexCapabilityFingerprint({
+    modeId: input.modeId,
+    codexRunConfig: input.codexRunConfig
+  });
+  const capabilityHash = shortHash(fingerprint);
+  return {
+    capabilityHash,
+    fingerprint,
+    scopeSegments: [
+      "integrations",
+      provider,
+      integrationInstanceId,
+      `agent-${sanitizePathSegment(input.modeId, "default")}-${capabilityHash}`
+    ],
+    manifest: {
+      version: 1,
+      scope: "integration_agent",
+      provider,
+      integrationInstanceId,
       modeId: input.modeId,
       capabilityHash,
       fingerprint

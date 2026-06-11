@@ -210,6 +210,7 @@ import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
 import {
+  buildSharedIntegrationCodexHomeScope,
   buildSharedCodexHomeScope,
   buildUserAgentWorkspacePath,
   isUserAgentWorkspacePath
@@ -3152,6 +3153,24 @@ async function materializeSharedCodexHomeForRunConfig(input: {
   });
 }
 
+async function materializeSharedIntegrationCodexHomeForRunConfig(input: {
+  provider: string;
+  integrationInstanceId: string;
+  modeId: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
+  const scope = buildSharedIntegrationCodexHomeScope({
+    provider: input.provider,
+    integrationInstanceId: input.integrationInstanceId,
+    modeId: input.modeId,
+    codexRunConfig: input.codexRunConfig
+  });
+  return materializeCodexHomeForRunConfig({
+    scopeSegments: scope.scopeSegments,
+    codexRunConfig: input.codexRunConfig
+  });
+}
+
 async function allocateUserAgentWorkspacePath(input: {
   currentUser: CurrentActor;
   modeHint?: string;
@@ -3923,8 +3942,10 @@ async function resolveZendeskAgentRuntimeOptions(input: {
     ),
     selectedKnowledgeSets.map((knowledgeSet) => knowledgeSet.path)
   );
-  const materializedCodexHome = await materializeCodexHomeForRunConfig({
-    scopeId: `zendesk-${input.instanceId || "legacy"}-ticket-${input.ticketId}`,
+  const materializedCodexHome = await materializeSharedIntegrationCodexHomeForRunConfig({
+    provider: ZENDESK_CHANNEL,
+    integrationInstanceId: input.instanceId || "legacy",
+    modeId: agentModeId,
     codexRunConfig: baseCodexRunConfig
   });
 
@@ -4622,9 +4643,12 @@ async function materializeZendeskRuntimeConfig(input: ZendeskRuntimeSessionInput
   codexRunConfig?: Record<string, unknown>;
 }> {
   await fs.mkdir(getThreadWorkspaceUploadDir(input.runtimeOptions.workspace, thread.id), { recursive: true });
-  return await materializeCodexHomeForRunConfig({
-    scopeId: `thread-${thread.id}`,
-    codexRunConfig: zendeskDesiredRuntimeConfig(input, thread)
+  const codexRunConfig = zendeskDesiredRuntimeConfig(input, thread);
+  return await materializeSharedIntegrationCodexHomeForRunConfig({
+    provider: ZENDESK_CHANNEL,
+    integrationInstanceId: input.instanceId || "legacy",
+    modeId: modeIdFromRunConfig(codexRunConfig) ?? "default",
+    codexRunConfig
   });
 }
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSharedIntegrationCodexHomeScope,
   buildSharedCodexHomeScope,
   buildUserAgentWorkspacePath,
   isUserAgentWorkspacePath
@@ -89,5 +90,29 @@ describe("runtime scope resolver", () => {
 
     expect(crmAndDocs.capabilityHash).not.toBe(crmOnly.capabilityHash);
     expect(crmAndDocs.scopeSegments).not.toEqual(crmOnly.scopeSegments);
+  });
+
+  it("builds shared integration CODEX_HOME scopes without ticket-specific paths", () => {
+    const support = buildSharedIntegrationCodexHomeScope({
+      provider: "zendesk",
+      integrationInstanceId: "instance/1",
+      modeId: "support",
+      codexRunConfig: {
+        mode: "support",
+        additionalDirectories: ["/var/lib/agent-studio/sessions/zendesk/instance-1/tickets/ticket-100"]
+      }
+    });
+    const anotherTicket = buildSharedIntegrationCodexHomeScope({
+      provider: "zendesk",
+      integrationInstanceId: "instance/1",
+      modeId: "support",
+      codexRunConfig: {
+        mode: "support",
+        additionalDirectories: ["/var/lib/agent-studio/sessions/zendesk/instance-1/tickets/ticket-200"]
+      }
+    });
+
+    expect(support.scopeSegments.slice(0, 3)).toEqual(["integrations", "zendesk", "instance_1"]);
+    expect(anotherTicket.scopeSegments).toEqual(support.scopeSegments);
   });
 });
