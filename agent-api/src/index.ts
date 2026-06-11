@@ -88,6 +88,10 @@ import {
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { createServiceTokenMiddleware } from "./service-token.js";
+import {
+  createRuntimeStartupTimer,
+  type RuntimeStartupTimer
+} from "./runtime-startup-timing.js";
 import { resolveThreadDeleteMode } from "./thread-delete-policy.js";
 import { SessionRepository, type SessionRecord, type SessionRepositoryDb } from "./persistence/session-repository.js";
 import {
@@ -1330,18 +1334,28 @@ async function getDeploymentDrainReason(): Promise<string | undefined> {
   }
 }
 
-async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRuntimeThread | undefined> {
+async function restoreLiveRuntimeThread(
+  session: SessionRecord,
+  timing?: RuntimeStartupTimer
+): Promise<LiveRuntimeThread | undefined> {
   const cached = liveRuntimeThreads.get(session.sessionId);
   if (cached) {
+    timing?.mark("restore_runtime.cached", { sessionId: session.sessionId });
     return cached;
   }
 
   const codexThreadId = trimOrUndefined(session.codexThreadId);
   if (!codexThreadId) {
+    timing?.mark("restore_runtime.missing_codex_thread_id", { sessionId: session.sessionId });
     return undefined;
   }
 
   try {
+    const time = async <T>(
+      name: string,
+      action: () => Promise<T>,
+      metadata?: Record<string, unknown>
+    ): Promise<T> => (timing ? timing.time(name, action, metadata) : action());
     const sourceCodexRunConfig = withoutRuntimeCapabilityMetadata(session.codexRunConfig);
     const existingCodexHome = codexHomeFromRunConfig(session.codexRunConfig);
     const materializedCodexHome = existingCodexHome
@@ -1349,35 +1363,49 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
           codexHome: existingCodexHome,
           codexRunConfig: withRunConfigCodexHome(sourceCodexRunConfig, existingCodexHome)
         }
-      : await materializeCodexHomeForRunConfig({
-          scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
-          codexRunConfig: sourceCodexRunConfig
-        });
-    const runtimeLaunch = await resolveRuntimeLaunchConfig({
-      userId: session.userId,
-      workspace: session.workspace,
-      codexRunConfig: materializedCodexHome.codexRunConfig
-    });
-    const sessionRuntime = createRuntimeForProviderSnapshot(await resolveProviderSnapshot({
-      existingSnapshot: session.providerSnapshot,
-      fallbackToLocalAuth: true
-    }), {
+      : await time("restore_runtime.materialize_codex_home", () =>
+          materializeCodexHomeForRunConfig({
+            scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
+            codexRunConfig: sourceCodexRunConfig
+          })
+        );
+    if (existingCodexHome) {
+      timing?.mark("restore_runtime.reuse_codex_home", { sessionId: session.sessionId });
+    }
+    const runtimeLaunch = await time("restore_runtime.resolve_launch_config", () =>
+      resolveRuntimeLaunchConfig({
+        userId: session.userId,
+        workspace: session.workspace,
+        codexRunConfig: materializedCodexHome.codexRunConfig
+      })
+    );
+    const providerSnapshot = await time("restore_runtime.resolve_provider_snapshot", () =>
+      resolveProviderSnapshot({
+        existingSnapshot: session.providerSnapshot,
+        fallbackToLocalAuth: true
+      })
+    );
+    const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
       configOverrides: runtimeLaunch.configOverrides,
       envOverrides: {
         CODEX_HOME: materializedCodexHome.codexHome
       }
     });
-    const liveThread = await sessionRuntime.resumeThreadWithOptions({
-      threadId: codexThreadId,
-      model: session.model,
-      reasoningEffort: session.reasoningEffort,
-      workspace: session.workspace,
-      codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
-    });
+    const liveThread = await time("restore_runtime.resume_thread", () =>
+      sessionRuntime.resumeThreadWithOptions({
+        threadId: codexThreadId,
+        model: session.model,
+        reasoningEffort: session.reasoningEffort,
+        workspace: session.workspace,
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+      })
+    );
     if (stableJson(session.codexRunConfig) !== stableJson(runtimeLaunch.codexRunConfig)) {
-      await sessions.update(session.sessionId, {
-        codexRunConfig: runtimeLaunch.codexRunConfig
-      });
+      await time("restore_runtime.persist_updated_config", () =>
+        sessions.update(session.sessionId, {
+          codexRunConfig: runtimeLaunch.codexRunConfig
+        })
+      );
     }
     liveRuntimeThreads.set(session.sessionId, liveThread);
     return liveThread;
@@ -3261,9 +3289,16 @@ function ensureThreadUploadDirsInRunConfig(
   return ensureThreadUploadInRunConfig(withWorkspaceUpload, getThreadUploadTempDir(threadId));
 }
 
-async function createSession(options: SessionOptions, threadId?: string) {
+async function createSession(options: SessionOptions, threadId?: string, timing?: RuntimeStartupTimer) {
+  const time = async <T>(
+    name: string,
+    action: () => Promise<T>,
+    metadata?: Record<string, unknown>
+  ): Promise<T> => (timing ? timing.time(name, action, metadata) : action());
   if (threadId) {
-    await fs.mkdir(getThreadWorkspaceUploadDir(options.workspace, threadId), { recursive: true });
+    await time("create_session.prepare_upload_dir", () =>
+      fs.mkdir(getThreadWorkspaceUploadDir(options.workspace, threadId), { recursive: true })
+    );
   }
 
   const sessionCodexRunConfig = withoutRuntimeCapabilityMetadata(
@@ -3274,45 +3309,58 @@ async function createSession(options: SessionOptions, threadId?: string) {
   const materializedCodexHome =
     options.codexHome
       ? { codexHome: options.codexHome, codexRunConfig: withRunConfigCodexHome(sessionCodexRunConfig, options.codexHome) }
-      : await materializeCodexHomeForRunConfig({
-          scopeId: threadId ? `thread-${threadId}` : `session-${randomUUID()}`,
-          codexRunConfig: sessionCodexRunConfig
-        });
+      : await time("create_session.materialize_codex_home", () =>
+          materializeCodexHomeForRunConfig({
+            scopeId: threadId ? `thread-${threadId}` : `session-${randomUUID()}`,
+            codexRunConfig: sessionCodexRunConfig
+          })
+        );
+  if (options.codexHome) {
+    timing?.mark("create_session.reuse_codex_home", { threadId });
+  }
 
-  const providerSnapshot = await resolveProviderSnapshot({
-    existingSnapshot: options.providerSnapshot
-  });
-  const runtimeLaunch = await resolveRuntimeLaunchConfig({
-    userId: options.userId,
-    workspace: options.workspace,
-    codexRunConfig: materializedCodexHome.codexRunConfig
-  });
+  const providerSnapshot = await time("create_session.resolve_provider_snapshot", () =>
+    resolveProviderSnapshot({
+      existingSnapshot: options.providerSnapshot
+    })
+  );
+  const runtimeLaunch = await time("create_session.resolve_launch_config", () =>
+    resolveRuntimeLaunchConfig({
+      userId: options.userId,
+      workspace: options.workspace,
+      codexRunConfig: materializedCodexHome.codexRunConfig
+    })
+  );
   const sessionRuntime = createRuntimeForProviderSnapshot(providerSnapshot, {
     configOverrides: runtimeLaunch.configOverrides,
     envOverrides: {
       CODEX_HOME: materializedCodexHome.codexHome
     }
   });
-  const started = await startLiveRuntimeSession({
-    runtime: sessionRuntime,
-    model: options.model,
-    reasoningEffort: options.reasoningEffort,
-    workspace: options.workspace,
-    codexRunConfig: runtimeLaunch.codexRunConfig
-  });
+  const started = await time("create_session.start_live_runtime_thread", () =>
+    startLiveRuntimeSession({
+      runtime: sessionRuntime,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      workspace: options.workspace,
+      codexRunConfig: runtimeLaunch.codexRunConfig
+    })
+  );
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
-  const session = await sessions.create({
-    organizationId: options.organizationId,
-    userId: options.userId,
-    threadId,
-    model: options.model,
-    reasoningEffort: options.reasoningEffort,
-    workspace: options.workspace,
-    codexRunConfig,
-    codexThreadId,
-    providerSnapshot
-  });
+  const session = await time("create_session.persist_runtime_session", () =>
+    sessions.create({
+      organizationId: options.organizationId,
+      userId: options.userId,
+      threadId,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      workspace: options.workspace,
+      codexRunConfig,
+      codexThreadId,
+      providerSnapshot
+    })
+  );
   liveRuntimeThreads.set(session.sessionId, started.liveThread);
   return session;
 }
@@ -3438,11 +3486,19 @@ async function resolveSessionOptions(
   currentUser: CurrentActor,
   workspacePath: string,
   modeId: string,
-  runtimeProfile: PortalRuntimeOptionRunProfile
+  runtimeProfile: PortalRuntimeOptionRunProfile,
+  timing?: RuntimeStartupTimer
 ): Promise<SessionOptions> {
+  const time = async <T>(
+    name: string,
+    action: () => Promise<T>,
+    metadata?: Record<string, unknown>
+  ): Promise<T> => (timing ? timing.time(name, action, metadata) : action());
   const [providerSnapshot, publishedSystemSettings] = await Promise.all([
-    resolveProviderSnapshot({ existingSnapshot: input.providerSnapshot }),
-    codexProviders.getPublishedSystemSettings()
+    time("resolve_session_options.resolve_provider_snapshot", () =>
+      resolveProviderSnapshot({ existingSnapshot: input.providerSnapshot })
+    ),
+    time("resolve_session_options.load_system_settings", () => codexProviders.getPublishedSystemSettings())
   ]);
   const defaults = resolveManagedCodexDefaults({
     systemSettings: publishedSystemSettings,
@@ -3450,11 +3506,13 @@ async function resolveSessionOptions(
     model: input.model,
     reasoningEffort: input.reasoning_effort
   });
-  const enabledSkills = await resolveEnabledSkillsForMode({
-    currentUser,
-    modeId,
-    codexRunConfig: input.codex_run_config
-  });
+  const enabledSkills = await time("resolve_session_options.resolve_enabled_skills", () =>
+    resolveEnabledSkillsForMode({
+      currentUser,
+      modeId,
+      codexRunConfig: input.codex_run_config
+    })
+  );
   const sourceCodexRunConfig = withExternalRunProfileBoundaries(
     withRunConfigEnabledSkillSelection(
       withRunConfigMode(input.codex_run_config, modeId),
@@ -3463,18 +3521,26 @@ async function resolveSessionOptions(
     currentUser,
     runtimeProfile
   );
-  await applyWorkspaceAgentsMdForMode(modeId, workspacePath);
-  const resolvedCodexRunConfig = await resolveKnowledgeSetRunConfig({
-    currentUser,
-    workspacePath,
-    knowledgeSetIds: input.knowledge_set_ids,
-    codexRunConfig: sourceCodexRunConfig
-  });
-  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
-    currentUser,
-    modeId,
-    codexRunConfig: resolvedCodexRunConfig
-  });
+  await time("resolve_session_options.apply_workspace_agents_md", () =>
+    applyWorkspaceAgentsMdForMode(modeId, workspacePath)
+  );
+  const resolvedCodexRunConfig = await time("resolve_session_options.resolve_knowledge_sets", () =>
+    resolveKnowledgeSetRunConfig({
+      currentUser,
+      workspacePath,
+      knowledgeSetIds: input.knowledge_set_ids,
+      codexRunConfig: sourceCodexRunConfig
+    }),
+    { selectedKnowledgeSetCount: input.knowledge_set_ids?.length ?? 0 }
+  );
+  const materializedCodexHome = await time("resolve_session_options.materialize_codex_home", () =>
+    materializeUserAgentCodexHomeForRunConfig({
+      currentUser,
+      modeId,
+      codexRunConfig: resolvedCodexRunConfig
+    }),
+    { enabledSkillCount: enabledSkills.length }
+  );
   return {
     userId: currentUser.id,
     organizationId: currentUser.organizationId,
@@ -3539,37 +3605,60 @@ async function ensureThreadSession(
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
     force_run_profile_controls?: boolean;
-  }
+  },
+  timing?: RuntimeStartupTimer
 ) {
-  const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+  const time = async <T>(
+    name: string,
+    action: () => Promise<T>,
+    metadata?: Record<string, unknown>
+  ): Promise<T> => (timing ? timing.time(name, action, metadata) : action());
+  const thread = await time("ensure_thread_session.load_thread", () =>
+    threads.getOwned(threadId, currentUser.id, currentUser.organizationId)
+  );
   if (!thread) throw new Error("Thread does not exist");
-  const active = thread.sessionId ? await sessions.get(thread.sessionId) : undefined;
+  timing?.updateContext({
+    threadId: thread.id,
+    sessionId: thread.sessionId ?? undefined,
+    model: thread.model ?? undefined
+  });
+  const existingSessionId = thread.sessionId;
+  const active = existingSessionId
+    ? await time("ensure_thread_session.load_active_session", () => sessions.get(existingSessionId))
+    : undefined;
   const [providerSnapshot, publishedSystemSettings] = await Promise.all([
-    resolveProviderSnapshot({
-      existingSnapshot: active?.providerSnapshot,
-      fallbackToLocalAuth: Boolean(active && !active.providerSnapshot)
-    }),
-    codexProviders.getPublishedSystemSettings()
+    time("ensure_thread_session.resolve_provider_snapshot", () =>
+      resolveProviderSnapshot({
+        existingSnapshot: active?.providerSnapshot,
+        fallbackToLocalAuth: Boolean(active && !active.providerSnapshot)
+      })
+    ),
+    time("ensure_thread_session.load_system_settings", () => codexProviders.getPublishedSystemSettings())
   ]);
 
   const sourceCodexRunConfig = withoutRuntimeCapabilityMetadata(patch?.codex_run_config ?? thread.codexRunConfig);
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
-  const modeSelection = await resolveModeSelection({
-    currentUser,
-    modeHint
-  });
+  const modeSelection = await time("ensure_thread_session.resolve_mode_selection", () =>
+    resolveModeSelection({
+      currentUser,
+      modeHint
+    }),
+    { modeHint }
+  );
   const workspacePath =
     trimOrUndefined(thread.workspace) ||
     userAgentWorkspacePathForSelection({
       currentUser,
       selection: modeSelection
     });
-  await fs.mkdir(workspacePath, { recursive: true });
-  const enabledSkills = await resolveEnabledSkillsForMode({
-    currentUser,
-    modeId: modeSelection.modeId,
-    codexRunConfig: sourceCodexRunConfig
-  });
+  await time("ensure_thread_session.prepare_workspace", () => fs.mkdir(workspacePath, { recursive: true }));
+  const enabledSkills = await time("ensure_thread_session.resolve_enabled_skills", () =>
+    resolveEnabledSkillsForMode({
+      currentUser,
+      modeId: modeSelection.modeId,
+      codexRunConfig: sourceCodexRunConfig
+    })
+  );
   const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
     withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
     enabledSkills
@@ -3583,19 +3672,27 @@ async function ensureThreadSession(
     model: patch?.model || thread.model,
     reasoningEffort: patch?.reasoning_effort || thread.reasoningEffort
   });
-  const desiredBaseCodexRunConfig = await resolveKnowledgeSetRunConfig({
-    currentUser,
-    workspacePath,
-    knowledgeSetIds: patch?.knowledge_set_ids,
-    codexRunConfig: boundedSourceCodexRunConfig
-  });
-  await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
+  const desiredBaseCodexRunConfig = await time("ensure_thread_session.resolve_knowledge_sets", () =>
+    resolveKnowledgeSetRunConfig({
+      currentUser,
+      workspacePath,
+      knowledgeSetIds: patch?.knowledge_set_ids,
+      codexRunConfig: boundedSourceCodexRunConfig
+    }),
+    { selectedKnowledgeSetCount: patch?.knowledge_set_ids?.length ?? 0 }
+  );
+  await time("ensure_thread_session.apply_workspace_agents_md", () =>
+    applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath)
+  );
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
-  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
-    currentUser,
-    modeId: modeSelection.modeId,
-    codexRunConfig: desiredCodexRunConfig
-  });
+  const materializedCodexHome = await time("ensure_thread_session.materialize_codex_home", () =>
+    materializeUserAgentCodexHomeForRunConfig({
+      currentUser,
+      modeId: modeSelection.modeId,
+      codexRunConfig: desiredCodexRunConfig
+    }),
+    { enabledSkillCount: enabledSkills.length }
+  );
 
   const desired: SessionOptions = {
     organizationId: currentUser.organizationId,
@@ -3621,12 +3718,14 @@ async function ensureThreadSession(
     patch?.codex_run_config ||
     shouldPersistNormalizedThread
   ) {
-    await threads.update(threadId, {
-      model: desired.model,
-      reasoningEffort: desired.reasoningEffort,
-      workspace: desired.workspace,
-      codexRunConfig: desiredBaseCodexRunConfig
-    });
+    await time("ensure_thread_session.persist_normalized_thread", () =>
+      threads.update(threadId, {
+        model: desired.model,
+        reasoningEffort: desired.reasoningEffort,
+        workspace: desired.workspace,
+        codexRunConfig: desiredBaseCodexRunConfig
+      })
+    );
   }
 
   let activeForComparison = active;
@@ -3634,16 +3733,26 @@ async function ensureThreadSession(
   if (active) {
     if (liveRuntimeThreads.has(active.sessionId)) {
       hasLiveRuntime = true;
+      timing?.mark("ensure_thread_session.live_runtime_cache_hit", { sessionId: active.sessionId });
     } else {
-      hasLiveRuntime = Boolean(await restoreLiveRuntimeThread(active));
+      timing?.mark("ensure_thread_session.live_runtime_cache_miss", { sessionId: active.sessionId });
+      hasLiveRuntime = Boolean(await time("ensure_thread_session.restore_live_runtime", () =>
+        restoreLiveRuntimeThread(active, timing)
+      ));
       if (hasLiveRuntime) {
-        activeForComparison = await sessions.peek(active.sessionId) ?? active;
+        activeForComparison = await time("ensure_thread_session.peek_restored_session", () =>
+          sessions.peek(active.sessionId)
+        ) ?? active;
       }
     }
   }
-  const runtimeCapabilitiesCurrent = activeForComparison
-    ? await sessionRuntimeCapabilitiesAreCurrent(activeForComparison, desired.userId)
-    : true;
+  let runtimeCapabilitiesCurrent = true;
+  if (activeForComparison) {
+    const sessionForCapabilities = activeForComparison;
+    runtimeCapabilitiesCurrent = await time("ensure_thread_session.check_runtime_capabilities", () =>
+      sessionRuntimeCapabilitiesAreCurrent(sessionForCapabilities, desired.userId)
+    );
+  }
   const baseRuntimeChanged = Boolean(
     activeForComparison &&
     (
@@ -3656,10 +3765,15 @@ async function ensureThreadSession(
   );
   let refreshedRuntimeCapabilitiesCurrent = runtimeCapabilitiesCurrent;
   if (activeForComparison && hasLiveRuntime && !baseRuntimeChanged && !runtimeCapabilitiesCurrent) {
-    const refreshed = await refreshLiveRuntimeThread(activeForComparison);
+    const sessionToRefresh = activeForComparison;
+    const refreshed = await time("ensure_thread_session.refresh_live_runtime", () =>
+      refreshLiveRuntimeThread(sessionToRefresh)
+    );
     if (refreshed) {
       activeForComparison = refreshed;
-      refreshedRuntimeCapabilitiesCurrent = await sessionRuntimeCapabilitiesAreCurrent(refreshed, desired.userId);
+      refreshedRuntimeCapabilitiesCurrent = await time("ensure_thread_session.recheck_runtime_capabilities", () =>
+        sessionRuntimeCapabilitiesAreCurrent(refreshed, desired.userId)
+      );
     }
   }
   const changed =
@@ -3673,20 +3787,25 @@ async function ensureThreadSession(
     !refreshedRuntimeCapabilitiesCurrent;
 
   if (!changed && activeForComparison) {
+    timing?.mark("ensure_thread_session.reuse_active_session", { sessionId: activeForComparison.sessionId });
     return activeForComparison;
   }
 
-  await assertChatAllowsNewSession({
-    currentUser,
-    model: desired.model,
-    featureType: "chat"
-  });
+  await time("ensure_thread_session.assert_chat_access", () =>
+    assertChatAllowsNewSession({
+      currentUser,
+      model: desired.model,
+      featureType: "chat"
+    })
+  );
 
   if (active?.sessionId) {
-    await sessions.remove(active.sessionId);
+    await time("ensure_thread_session.remove_stale_session", () => sessions.remove(active.sessionId));
     liveRuntimeThreads.delete(active.sessionId);
   }
-  return createSession(desired, threadId);
+  const session = await time("ensure_thread_session.create_session", () => createSession(desired, threadId, timing));
+  timing?.updateContext({ sessionId: session.sessionId, model: session.model });
+  return session;
 }
 
 type DingTalkBotActor = {
@@ -7113,51 +7232,78 @@ app.get("/api/threads", async (req: Request, res: Response) => {
 });
 
 app.post("/api/threads", async (req: Request, res: Response) => {
+  const timing = createRuntimeStartupTimer({
+    traceId: randomUUID(),
+    source: "portal",
+    operation: "create_thread",
+    route: "POST /api/threads"
+  });
   try {
+    timing.mark("request_received");
     const currentUser = currentActorFromRequest(req);
+    timing.updateContext({ organizationType: currentUser.organizationType });
     const input = createThreadSchema.parse(req.body || {});
     const threadId = randomUUID().replace(/-/g, "");
+    timing.updateContext({ threadId });
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
-    const allocated = await allocateUserAgentWorkspacePath({
-      currentUser,
-      modeHint
-    });
-    const options = await resolveSessionOptions(
-      {
-        model: input.model,
-        reasoning_effort: input.reasoning_effort,
-        knowledge_set_ids: input.knowledge_set_ids,
-        codex_run_config: input.codex_run_config
-      },
-      currentUser,
-      allocated.workspacePath,
-      allocated.modeId,
-      allocated.runtimeProfile
+    const allocated = await timing.time("create_thread.allocate_workspace", () =>
+      allocateUserAgentWorkspacePath({
+        currentUser,
+        modeHint
+      }),
+      { modeHint }
     );
-    await assertChatAllowsNewSession({
-      currentUser,
-      model: options.model,
-      featureType: "chat"
-    });
-    const createdThread = await threads.create({
-      id: threadId,
-      organizationId: currentUser.organizationId,
-      userId: currentUser.id,
-      title: input.title?.trim() || undefined,
-      externalId: input.external_id?.trim() || undefined,
-      model: options.model,
-      reasoningEffort: options.reasoningEffort,
-      workspace: options.workspace,
-      codexRunConfig: options.codexRunConfig
-    });
-    const session = await createSession(options, createdThread.id);
-    const updated = (await threads.get(createdThread.id, currentUser.organizationId)) ?? createdThread;
+    const options = await timing.time("create_thread.resolve_session_options", () =>
+      resolveSessionOptions(
+        {
+          model: input.model,
+          reasoning_effort: input.reasoning_effort,
+          knowledge_set_ids: input.knowledge_set_ids,
+          codex_run_config: input.codex_run_config
+        },
+        currentUser,
+        allocated.workspacePath,
+        allocated.modeId,
+        allocated.runtimeProfile,
+        timing
+      )
+    );
+    timing.updateContext({ model: options.model });
+    await timing.time("create_thread.assert_chat_access", () =>
+      assertChatAllowsNewSession({
+        currentUser,
+        model: options.model,
+        featureType: "chat"
+      })
+    );
+    const createdThread = await timing.time("create_thread.persist_thread", () =>
+      threads.create({
+        id: threadId,
+        organizationId: currentUser.organizationId,
+        userId: currentUser.id,
+        title: input.title?.trim() || undefined,
+        externalId: input.external_id?.trim() || undefined,
+        model: options.model,
+        reasoningEffort: options.reasoningEffort,
+        workspace: options.workspace,
+        codexRunConfig: options.codexRunConfig
+      })
+    );
+    const session = await timing.time("create_thread.create_session", () =>
+      createSession(options, createdThread.id, timing)
+    );
+    timing.updateContext({ sessionId: session.sessionId });
+    const updated = (await timing.time("create_thread.reload_thread", () =>
+      threads.get(createdThread.id, currentUser.organizationId)
+    )) ?? createdThread;
 
     res.json({
       thread: threadOut(updated),
       session: sessionOut(session)
     });
+    timing.finish("success", { modeId: allocated.modeId });
   } catch (error) {
+    timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
     res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to create thread"));
   }
 });
@@ -7250,13 +7396,25 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
 });
 
 app.post("/api/threads/:threadId/session", async (req: Request, res: Response) => {
+  const threadId = String(req.params.threadId || "").trim();
+  const timing = createRuntimeStartupTimer({
+    traceId: randomUUID(),
+    source: "portal",
+    operation: "ensure_thread_session",
+    route: "POST /api/threads/:threadId/session",
+    threadId
+  });
   try {
+    timing.mark("request_received");
     const currentUser = currentActorFromRequest(req);
-    const threadId = String(req.params.threadId || "").trim();
+    timing.updateContext({ organizationType: currentUser.organizationType });
     const input = ensureThreadSessionSchema.parse(req.body || {});
-    const session = await ensureThreadSession(currentUser, threadId, input);
+    const session = await ensureThreadSession(currentUser, threadId, input, timing);
+    timing.updateContext({ sessionId: session.sessionId, model: session.model });
     res.json({ session: sessionOut(session) });
+    timing.finish("success");
   } catch (error) {
+    timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
     res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to ensure thread session"));
   }
 });
@@ -7414,29 +7572,58 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
 });
 
 app.post("/api/chat/stream", async (req: Request, res: Response) => {
+  const timing = createRuntimeStartupTimer({
+    traceId: randomUUID(),
+    source: "portal",
+    operation: "chat_stream",
+    route: "POST /api/chat/stream"
+  });
+  let timingFinished = false;
+  const finishTiming = (status: "success" | "error", metadata?: Record<string, unknown>) => {
+    if (timingFinished) return;
+    timing.finish(status, metadata);
+    timingFinished = true;
+  };
+  timing.mark("request_received");
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
 
   try {
     const currentUser = currentActorFromRequest(req);
+    timing.updateContext({ organizationType: currentUser.organizationType });
     const input = streamSchema.parse(req.body || {});
-    const drainReason = await getDeploymentDrainReason();
+    timing.updateContext({ sessionId: input.session_id, threadId: input.thread_id });
+    const drainReason = await timing.time("chat_stream.check_deploy_drain", () => getDeploymentDrainReason());
     if (drainReason) {
       sendSSE(res, "error", { detail: drainReason });
+      finishTiming("error", { reason: "deployment_drain" });
       res.end();
       return;
     }
-    let session = await sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId);
+    let session = await timing.time("chat_stream.load_session", () =>
+      sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId)
+    );
+    timing.updateContext({
+      sessionId: session?.sessionId,
+      threadId: session?.threadId ?? input.thread_id,
+      model: session?.model
+    });
     let liveThread = session ? liveRuntimeThreads.get(session.sessionId) : undefined;
+    timing.mark(liveThread ? "chat_stream.live_runtime_cache_hit" : "chat_stream.live_runtime_cache_miss", {
+      hasSession: Boolean(session)
+    });
     if (!liveThread && session) {
-      liveThread = await restoreLiveRuntimeThread(session);
+      liveThread = await timing.time("chat_stream.restore_live_runtime", () =>
+        restoreLiveRuntimeThread(session, timing)
+      );
     }
     if (!session || !liveThread) {
       if (session?.sessionId) {
-        await sessions.remove(session.sessionId);
+        await timing.time("chat_stream.remove_invalid_session", () => sessions.remove(session.sessionId));
         liveRuntimeThreads.delete(session.sessionId);
       }
       sendSSE(res, "error", { detail: "Session does not exist or has expired" });
+      finishTiming("error", { reason: "session_missing_or_expired" });
       res.end();
       return;
     }
@@ -7447,11 +7634,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       const boundThreadId = String(currentSession.threadId || "").trim();
       if (!boundThreadId) {
         sendSSE(res, "error", { detail: "Session is not bound to a thread. Refresh and try again." });
+        finishTiming("error", { reason: "session_not_bound_to_thread" });
         res.end();
         return;
       }
       if (boundThreadId !== requestedThreadId) {
         sendSSE(res, "error", { detail: "Session does not match the requested thread. Please try again." });
+        finishTiming("error", { reason: "session_thread_mismatch" });
         res.end();
         return;
       }
@@ -7459,13 +7648,15 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
     // Each streamed turn is a new costly action. Gate it before execution without
     // terminating any turn that is already in flight.
-    await assertChatAllowsNewSession({
-      currentUser,
-      model: currentSession.model,
-      threadId: currentSession.threadId ?? undefined,
-      sessionId: currentSession.sessionId,
-      featureType: "chat"
-    });
+    await timing.time("chat_stream.assert_chat_access", () =>
+      assertChatAllowsNewSession({
+        currentUser,
+        model: currentSession.model,
+        threadId: currentSession.threadId ?? undefined,
+        sessionId: currentSession.sessionId,
+        featureType: "chat"
+      })
+    );
 
     sendSSE(res, "meta", {
       session_id: currentSession.sessionId,
@@ -7475,14 +7666,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       workspace: currentSession.workspace,
       started_at: new Date().toISOString()
     });
+    timing.mark("chat_stream.meta_sent");
 
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
+    let firstCodexEventSeen = false;
     await codexExecution.streamFromRuntime({
       runtime,
       thread: ensuredLiveThread,
       prompt: withSkillActivationPrompts(input.message, currentSession.codexRunConfig),
       onEvent(event) {
+        if (!firstCodexEventSeen) {
+          firstCodexEventSeen = true;
+          timing.mark("chat_stream.first_codex_event", { eventType: event.type });
+        }
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
@@ -7493,14 +7690,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sendSSE(res, "codex", event);
       },
       async onDone(payload) {
+        timing.mark("chat_stream.on_done_started");
         try {
-          const artifacts = await registerGeneratedArtifactsForSession({
-            currentUser,
-            session: currentSession,
-            changes: runtimeFileChanges,
-            answerText: payload.answer,
-            changedAfter: artifactScanStartedAt
-          });
+          const artifacts = await timing.time("chat_stream.register_artifacts", () =>
+            registerGeneratedArtifactsForSession({
+              currentUser,
+              session: currentSession,
+              changes: runtimeFileChanges,
+              answerText: payload.answer,
+              changedAfter: artifactScanStartedAt
+            })
+          );
           if (artifacts.length > 0) {
             const policy = await resolveArtifactPolicyForActor(currentUser);
             sendSSE(res, "artifacts", {
@@ -7523,6 +7723,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           answer: payload.answer,
           completed_at: new Date().toISOString()
         });
+        timing.mark("chat_stream.done_sent");
+        finishTiming("success", { firstCodexEventSeen });
       },
       async recordUsage(usage, resultStatus = "success") {
         const departmentIdSnapshot =
@@ -7556,6 +7758,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
   } catch (error) {
     sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
+    finishTiming("error", { error: error instanceof Error ? error.message : String(error) });
   } finally {
     clearInterval(heartbeat);
     res.end();
