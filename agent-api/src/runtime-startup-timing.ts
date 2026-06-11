@@ -11,6 +11,24 @@ export type RuntimeStartupTimingContext = {
   model?: string;
 };
 
+export type RuntimeStartupTimingOptions = {
+  successEnabled: boolean;
+  slowMs: number;
+  sampleRate: number;
+  logErrors: boolean;
+  random: () => number;
+};
+
+type RuntimeStartupTimingEnv = Partial<
+  Record<
+    | "RUNTIME_STARTUP_TIMING_ENABLED"
+    | "RUNTIME_STARTUP_TIMING_SLOW_MS"
+    | "RUNTIME_STARTUP_TIMING_SAMPLE_RATE"
+    | "RUNTIME_STARTUP_TIMING_LOG_ERRORS",
+    string | undefined
+  >
+>;
+
 type TimingMetadata = Record<string, unknown>;
 
 type RuntimeStartupTimingStep = {
@@ -19,6 +37,30 @@ type RuntimeStartupTimingStep = {
   durationMs?: number;
   metadata?: TimingMetadata;
 };
+
+const DEFAULT_SLOW_MS = 1000;
+const CHAT_STARTUP_STEP_NAME = "chat_stream.first_codex_event";
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function parsePositiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+function parseSampleRate(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  if (parsed >= 1) return 1;
+  return parsed;
+}
 
 function roundMs(value: number): number {
   return Math.round(value * 10) / 10;
@@ -58,13 +100,27 @@ function sanitizeMetadata(metadata: TimingMetadata | undefined): TimingMetadata 
   return output;
 }
 
+export function resolveRuntimeStartupTimingOptions(
+  env: RuntimeStartupTimingEnv = process.env
+): RuntimeStartupTimingOptions {
+  return {
+    successEnabled: parseBoolean(env.RUNTIME_STARTUP_TIMING_ENABLED, true),
+    slowMs: parsePositiveNumber(env.RUNTIME_STARTUP_TIMING_SLOW_MS, DEFAULT_SLOW_MS),
+    sampleRate: parseSampleRate(env.RUNTIME_STARTUP_TIMING_SAMPLE_RATE),
+    logErrors: parseBoolean(env.RUNTIME_STARTUP_TIMING_LOG_ERRORS, true),
+    random: Math.random
+  };
+}
+
 export class RuntimeStartupTimer {
   private readonly startedAt = performance.now();
   private readonly steps: RuntimeStartupTimingStep[] = [];
   private context: RuntimeStartupTimingContext;
+  private readonly options: RuntimeStartupTimingOptions;
 
-  constructor(context: RuntimeStartupTimingContext) {
+  constructor(context: RuntimeStartupTimingContext, options: RuntimeStartupTimingOptions = resolveRuntimeStartupTimingOptions()) {
     this.context = context;
+    this.options = options;
   }
 
   updateContext(context: Partial<RuntimeStartupTimingContext>): void {
@@ -114,6 +170,10 @@ export class RuntimeStartupTimer {
   }
 
   finish(status: "success" | "error", metadata?: TimingMetadata): void {
+    const totalMs = roundMs(performance.now() - this.startedAt);
+    const startupMs = this.startupMs(totalMs);
+    const logReason = this.resolveLogReason(status, startupMs);
+    if (!logReason) return;
     const payload = {
       event: "agent_studio_runtime_startup_timing",
       trace_id: this.context.traceId,
@@ -121,7 +181,9 @@ export class RuntimeStartupTimer {
       operation: this.context.operation,
       route: trimOrUndefined(this.context.route),
       status,
-      total_ms: roundMs(performance.now() - this.startedAt),
+      total_ms: totalMs,
+      startup_ms: startupMs,
+      log_reason: logReason,
       thread_id: trimOrUndefined(this.context.threadId),
       session_id: trimOrUndefined(this.context.sessionId),
       organization_type: trimOrUndefined(this.context.organizationType),
@@ -131,8 +193,30 @@ export class RuntimeStartupTimer {
     };
     console.info(JSON.stringify(payload));
   }
+
+  private startupMs(totalMs: number): number {
+    const firstCodexEvent = this.steps.find((step) => step.name === CHAT_STARTUP_STEP_NAME);
+    return firstCodexEvent?.atMs ?? totalMs;
+  }
+
+  private resolveLogReason(status: "success" | "error", startupMs: number): "error" | "sampled" | "slow_startup" | undefined {
+    if (status === "error") {
+      return this.options.logErrors ? "error" : undefined;
+    }
+    if (!this.options.successEnabled) return undefined;
+    if (this.options.sampleRate > 0 && this.options.random() < this.options.sampleRate) {
+      return "sampled";
+    }
+    if (startupMs >= this.options.slowMs) {
+      return "slow_startup";
+    }
+    return undefined;
+  }
 }
 
-export function createRuntimeStartupTimer(context: RuntimeStartupTimingContext): RuntimeStartupTimer {
-  return new RuntimeStartupTimer(context);
+export function createRuntimeStartupTimer(
+  context: RuntimeStartupTimingContext,
+  options?: RuntimeStartupTimingOptions
+): RuntimeStartupTimer {
+  return new RuntimeStartupTimer(context, options);
 }
