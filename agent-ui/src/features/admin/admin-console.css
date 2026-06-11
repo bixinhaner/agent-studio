@@ -297,7 +297,21 @@
 }
 
 .codex-memory-overview-grid {
-  grid-template-columns: minmax(360px, 0.85fr) minmax(0, 1.85fr);
+  grid-template-columns: minmax(380px, 0.78fr) minmax(420px, 1.22fr);
+}
+
+.codex-memory-overview-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.codex-memory-spaces-card {
+  min-width: 0;
+}
+
+.codex-memory-spaces-card .ant-table-cell {
+  vertical-align: top;
 }
 
 .codex-memory-scope-grid {
@@ -327,6 +341,12 @@
 
   .codex-memory-scroll-list {
     max-height: 360px;
+  }
+}
+
+@media (max-width: 760px) {
+  .codex-memory-overview-metrics {
+    grid-template-columns: 1fr;
   }
 }
 

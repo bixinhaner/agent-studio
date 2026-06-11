@@ -545,14 +545,14 @@ export function CodexMemoryManagementView() {
       title: "智能体",
       key: "agent",
       width: "14%",
-      render: (_: unknown, scope: CodexMemoryScope) => <Typography.Text>{agentLabel(scope)}</Typography.Text>
+      render: (_: unknown, scope: CodexMemoryScope) => <Typography.Text ellipsis>{agentLabel(scope)}</Typography.Text>
     },
     {
       title: "内容",
       key: "content",
       width: 140,
       render: (_: unknown, scope: CodexMemoryScope) => (
-        <Space direction="vertical" size={2}>
+        <Space direction="vertical" size={2} style={{ whiteSpace: "nowrap" }}>
           <Typography.Text>{scope.fileCount} 个文件</Typography.Text>
           <Typography.Text type="secondary">{formatBytes(scope.totalBytes)}</Typography.Text>
         </Space>
@@ -810,84 +810,75 @@ export function CodexMemoryManagementView() {
 
   function renderOverview() {
     return (
-      <div className="codex-memory-overview-grid" style={{ marginTop: 16 }}>
-        <div className="codex-memory-grid-cell">
-          {renderSettingsPanel()}
-        </div>
-        <div className="codex-memory-grid-cell">
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <Row gutter={[12, 12]}>
-              <Col xs={12} md={6}>
-                <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
-              </Col>
-              <Col xs={12} md={6}>
-                <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
-              </Col>
-              <Col xs={12} md={6}>
-                <MemoryMetric label="占用空间" value={formatBytes(scopeStats.totalBytes)} hint="仅 memory 文件" />
-              </Col>
-              <Col xs={12} md={6}>
-                <MemoryMetric
-                  label="发布状态"
-                  value={publishedSettings?.enabled ? "已启用" : "未启用"}
-                  hint={publishedVersion}
-                />
-              </Col>
-            </Row>
-
-            <div className="admin-card" style={{ padding: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16 }}>
-                <div>
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    记忆空间
-                  </Typography.Title>
-                  <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
-                </div>
-                <Space wrap>
-                  <Segmented
-                    value={scopeKind}
-                    onChange={(value) => {
-                      const next = value as CodexMemoryScopeKind | "all";
-                      setScopeKind(next);
-                      void loadScopes(scopeQuery, next);
-                    }}
-                    options={[
-                      { label: "全部", value: "all" },
-                      { label: "用户", value: "user_agent" },
-                      { label: "集成", value: "integration_agent" },
-                      { label: "旧会话", value: "legacy_thread" }
-                    ]}
-                  />
-                  <Input
-                    allowClear
-                    prefix={<Search size={14} />}
-                    placeholder="搜索用户、智能体或集成"
-                    value={scopeQuery}
-                    onChange={(event) => setScopeQuery(event.target.value)}
-                    onPressEnter={() => void loadScopes()}
-                    style={{ width: 260 }}
-                  />
-                  <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
-                </Space>
-              </div>
-
-              {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
-              <Table
-                rowKey="id"
-                loading={scopesLoading}
-                columns={scopeColumns}
-                dataSource={scopes}
-                pagination={{ pageSize: 8, showSizeChanger: false }}
-                locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
-                onRow={(scope) => ({
-                  onClick: () => openScope(scope),
-                  style: { cursor: "pointer" }
-                })}
+      <Space direction="vertical" size={16} style={{ width: "100%", marginTop: 16 }}>
+        <div className="codex-memory-overview-grid">
+          <div className="codex-memory-grid-cell">{renderSettingsPanel()}</div>
+          <div className="codex-memory-grid-cell">
+            <div className="codex-memory-overview-metrics">
+              <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
+              <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
+              <MemoryMetric label="占用空间" value={formatBytes(scopeStats.totalBytes)} hint="仅 memory 文件" />
+              <MemoryMetric
+                label="发布状态"
+                value={publishedSettings?.enabled ? "已启用" : "未启用"}
+                hint={publishedVersion}
               />
             </div>
-          </Space>
+          </div>
         </div>
-      </div>
+
+        <div className="admin-card codex-memory-spaces-card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+            <div>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                记忆空间
+              </Typography.Title>
+              <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
+            </div>
+            <Space wrap>
+              <Segmented
+                value={scopeKind}
+                onChange={(value) => {
+                  const next = value as CodexMemoryScopeKind | "all";
+                  setScopeKind(next);
+                  void loadScopes(scopeQuery, next);
+                }}
+                options={[
+                  { label: "全部", value: "all" },
+                  { label: "用户", value: "user_agent" },
+                  { label: "集成", value: "integration_agent" },
+                  { label: "旧会话", value: "legacy_thread" }
+                ]}
+              />
+              <Input
+                allowClear
+                prefix={<Search size={14} />}
+                placeholder="搜索用户、智能体或集成"
+                value={scopeQuery}
+                onChange={(event) => setScopeQuery(event.target.value)}
+                onPressEnter={() => void loadScopes()}
+                style={{ width: 260, maxWidth: "100%" }}
+              />
+              <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
+            </Space>
+          </div>
+
+          {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
+          <Table
+            rowKey="id"
+            loading={scopesLoading}
+            columns={scopeColumns}
+            dataSource={scopes}
+            scroll={{ x: 960 }}
+            pagination={{ pageSize: 8, showSizeChanger: false }}
+            locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
+            onRow={(scope) => ({
+              onClick: () => openScope(scope),
+              style: { cursor: "pointer" }
+            })}
+          />
+        </div>
+      </Space>
     );
   }
 
