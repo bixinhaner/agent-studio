@@ -209,6 +209,11 @@ import { createResourcesAdminRouter } from "./resources/admin-router.js";
 import { createModeAdminRouter } from "./resources/mode-admin-router.js";
 import { createResourcesPortalRouter } from "./resources/portal-router.js";
 import { RuntimeKnowledgeSetService } from "./resources/runtime-knowledge-set-service.js";
+import {
+  buildSharedCodexHomeScope,
+  buildUserAgentWorkspacePath,
+  isUserAgentWorkspacePath
+} from "./runtime-scope-resolver.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
@@ -1325,10 +1330,17 @@ async function restoreLiveRuntimeThread(session: SessionRecord): Promise<LiveRun
   }
 
   try {
-    const materializedCodexHome = await materializeCodexHomeForRunConfig({
-      scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
-      codexRunConfig: withoutRuntimeCapabilityMetadata(session.codexRunConfig)
-    });
+    const sourceCodexRunConfig = withoutRuntimeCapabilityMetadata(session.codexRunConfig);
+    const existingCodexHome = codexHomeFromRunConfig(session.codexRunConfig);
+    const materializedCodexHome = existingCodexHome
+      ? {
+          codexHome: existingCodexHome,
+          codexRunConfig: withRunConfigCodexHome(sourceCodexRunConfig, existingCodexHome)
+        }
+      : await materializeCodexHomeForRunConfig({
+          scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
+          codexRunConfig: sourceCodexRunConfig
+        });
     const runtimeLaunch = await resolveRuntimeLaunchConfig({
       userId: session.userId,
       workspace: session.workspace,
@@ -2448,13 +2460,6 @@ function sanitizePathSegment(value: string, fallback: string): string {
   return normalized || fallback;
 }
 
-function formatSessionDateSegment(value: Date = new Date()): string {
-  const year = String(value.getFullYear()).padStart(4, "0");
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function resolveSessionWorkspaceRoot(input: string | null | undefined): string | undefined {
   const raw = trimOrUndefined(input);
   if (!raw) return undefined;
@@ -2472,38 +2477,6 @@ async function resolveEffectiveSessionWorkspaceRootPath(): Promise<string> {
     // Fall back to static config when system settings are unavailable.
   }
   return appConfig.sessionWorkspaceRoot;
-}
-
-function buildThreadWorkspacePath(
-  rootPath: string,
-  organizationKey: string,
-  userId: string,
-  threadId: string,
-  createdAt?: string
-): string {
-  const parsedCreatedAt = createdAt ? new Date(createdAt) : undefined;
-  const dateSegment = formatSessionDateSegment(
-    parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime()) ? parsedCreatedAt : new Date()
-  );
-  return path.join(
-    rootPath,
-    sanitizePathSegment(organizationKey, "organization"),
-    sanitizePathSegment(userId, "user"),
-    dateSegment,
-    `thread-${sanitizePathSegment(threadId, "thread")}`
-  );
-}
-
-function buildDetachedSessionWorkspacePath(rootPath: string, organizationKey: string, userId: string): string {
-  const suffix = `${Date.now()}-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const dateSegment = formatSessionDateSegment();
-  return path.join(
-    rootPath,
-    sanitizePathSegment(organizationKey, "organization"),
-    sanitizePathSegment(userId, "user"),
-    dateSegment,
-    `session-${suffix}`
-  );
 }
 
 function currentActorFromRequest(req: Request): CurrentActor {
@@ -2539,9 +2512,8 @@ async function ensureCrestChatThread(input: {
   }
 
   const threadId = randomUUID().replace(/-/g, "");
-  const allocated = await allocateThreadWorkspacePath({
-    currentUser: input.currentUser,
-    threadId
+  const allocated = await allocateUserAgentWorkspacePath({
+    currentUser: input.currentUser
   });
   const codexRunConfig = withRunProfileRuntimeControls({
     mode: allocated.modeId,
@@ -2617,7 +2589,8 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
 
     const preparedAttachments = await materializeCrestAttachments({
       input,
-      workspacePath: currentSession.workspace
+      workspacePath: currentSession.workspace,
+      threadId: thread.id
     });
 
     sendSSE(res, "thought", {
@@ -2870,11 +2843,12 @@ type PreparedCrestAttachment = {
 async function materializeCrestAttachments(input: {
   input: z.infer<typeof crestChatStreamSchema>;
   workspacePath: string;
+  threadId: string;
 }): Promise<PreparedCrestAttachment[]> {
   const attachments = input.input.attachments ?? [];
   if (attachments.length === 0) return [];
   const config = await assertCrestClient(input.input);
-  const uploadDir = getThreadWorkspaceUploadDir(input.workspacePath);
+  const uploadDir = getThreadWorkspaceUploadDir(input.workspacePath, input.threadId);
   await fs.mkdir(uploadDir, { recursive: true });
 
   const out: PreparedCrestAttachment[] = [];
@@ -3139,12 +3113,14 @@ async function resolveEnabledSkillsForMode(input: {
 }
 
 async function materializeCodexHomeForRunConfig(input: {
-  scopeId: string;
+  scopeId?: string;
+  scopeSegments?: string[];
   codexRunConfig?: Record<string, unknown>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
   const enabledSkills = enabledSkillSelectionsFromRunConfig(input.codexRunConfig);
   const codexHome = await nativeCodexSkills.materializeSessionHome({
     scopeId: input.scopeId,
+    scopeSegments: input.scopeSegments,
     enabledSkills: enabledSkills.map((skill) => ({
       name: skill.name,
       sourcePath: skill.sourcePath
@@ -3156,21 +3132,43 @@ async function materializeCodexHomeForRunConfig(input: {
   };
 }
 
-async function allocateThreadWorkspacePath(input: {
+async function materializeSharedCodexHomeForRunConfig(input: {
   currentUser: CurrentActor;
-  threadId: string;
+  modeId: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
+  const scope = buildSharedCodexHomeScope({
+    actor: {
+      organizationId: input.currentUser.organizationId,
+      organizationSlug: input.currentUser.organizationSlug,
+      userId: input.currentUser.id
+    },
+    modeId: input.modeId,
+    codexRunConfig: input.codexRunConfig
+  });
+  return materializeCodexHomeForRunConfig({
+    scopeSegments: scope.scopeSegments,
+    codexRunConfig: input.codexRunConfig
+  });
+}
+
+async function allocateUserAgentWorkspacePath(input: {
+  currentUser: CurrentActor;
   modeHint?: string;
 }): Promise<ModeSelection & { workspacePath: string }> {
   const selection = await resolveModeSelection({
     currentUser: input.currentUser,
     modeHint: input.modeHint
   });
-  const workspacePath = buildThreadWorkspacePath(
-    selection.workspaceRootPath,
-    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
-    input.currentUser.id,
-    input.threadId
-  );
+  const workspacePath = buildUserAgentWorkspacePath({
+    rootPath: selection.workspaceRootPath,
+    actor: {
+      organizationId: input.currentUser.organizationId,
+      organizationSlug: input.currentUser.organizationSlug,
+      userId: input.currentUser.id
+    },
+    modeId: selection.modeId
+  });
   await fs.mkdir(workspacePath, { recursive: true });
   return {
     ...selection,
@@ -3178,24 +3176,70 @@ async function allocateThreadWorkspacePath(input: {
   };
 }
 
-async function allocateDetachedSessionWorkspacePath(input: {
+function isSharedUserAgentWorkspace(input: {
+  rootPath: string;
   currentUser: CurrentActor;
-  modeHint?: string;
-}): Promise<ModeSelection & { workspacePath: string }> {
-  const selection = await resolveModeSelection({
-    currentUser: input.currentUser,
-    modeHint: input.modeHint
+  modeId: string;
+  workspacePath: string;
+}): boolean {
+  return isUserAgentWorkspacePath({
+    rootPath: input.rootPath,
+    actor: {
+      organizationId: input.currentUser.organizationId,
+      organizationSlug: input.currentUser.organizationSlug,
+      userId: input.currentUser.id
+    },
+    modeId: input.modeId,
+    workspacePath: input.workspacePath
   });
-  const workspacePath = buildDetachedSessionWorkspacePath(
-    selection.workspaceRootPath,
-    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
-    input.currentUser.id
-  );
-  await fs.mkdir(workspacePath, { recursive: true });
-  return {
-    ...selection,
-    workspacePath
-  };
+}
+
+function userAgentWorkspacePathForSelection(input: {
+  currentUser: CurrentActor;
+  selection: ModeSelection;
+}): string {
+  return buildUserAgentWorkspacePath({
+    rootPath: input.selection.workspaceRootPath,
+    actor: {
+      organizationId: input.currentUser.organizationId,
+      organizationSlug: input.currentUser.organizationSlug,
+      userId: input.currentUser.id
+    },
+    modeId: input.selection.modeId
+  });
+}
+
+async function materializeCodexHomeForWorkspaceScope(input: {
+  currentUser: CurrentActor;
+  modeId: string;
+  workspaceRootPath: string;
+  workspacePath: string;
+  threadId?: string;
+  sessionId?: string;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> }> {
+  if (
+    isSharedUserAgentWorkspace({
+      rootPath: input.workspaceRootPath,
+      currentUser: input.currentUser,
+      modeId: input.modeId,
+      workspacePath: input.workspacePath
+    })
+  ) {
+    return materializeSharedCodexHomeForRunConfig({
+      currentUser: input.currentUser,
+      modeId: input.modeId,
+      codexRunConfig: input.codexRunConfig
+    });
+  }
+  return materializeCodexHomeForRunConfig({
+    scopeId: input.threadId
+      ? `thread-${input.threadId}`
+      : input.sessionId
+        ? `session-${input.sessionId}`
+        : `workspace-${path.basename(input.workspacePath)}`,
+    codexRunConfig: input.codexRunConfig
+  });
 }
 
 function getThreadUploadTempDir(threadId: string): string {
@@ -3203,8 +3247,26 @@ function getThreadUploadTempDir(threadId: string): string {
   return path.join(appConfig.uploadTempRoot, safeThreadId);
 }
 
-function getThreadWorkspaceUploadDir(workspacePath: string): string {
+function getLegacyThreadWorkspaceUploadDir(workspacePath: string): string {
   return path.join(workspacePath, ".uploads");
+}
+
+function getThreadWorkspaceUploadDir(workspacePath: string, threadId?: string): string {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  if (!normalizedThreadId) {
+    return getLegacyThreadWorkspaceUploadDir(workspacePath);
+  }
+  return path.join(
+    workspacePath,
+    ".agent-studio",
+    "uploads",
+    sanitizePathSegment(normalizedThreadId, "thread")
+  );
+}
+
+function getThreadWorkspaceUploadDirs(workspacePath: string, threadId?: string): string[] {
+  const dirs = [getThreadWorkspaceUploadDir(workspacePath, threadId), getLegacyThreadWorkspaceUploadDir(workspacePath)];
+  return [...new Set(dirs)];
 }
 
 function ensureThreadUploadDirsInRunConfig(
@@ -3212,13 +3274,13 @@ function ensureThreadUploadDirsInRunConfig(
   threadId: string,
   workspacePath: string
 ): Record<string, unknown> {
-  const withWorkspaceUpload = ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath));
+  const withWorkspaceUpload = ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath, threadId));
   return ensureThreadUploadInRunConfig(withWorkspaceUpload, getThreadUploadTempDir(threadId));
 }
 
 async function createSession(options: SessionOptions, threadId?: string) {
   if (threadId) {
-    await fs.mkdir(getThreadWorkspaceUploadDir(options.workspace), { recursive: true });
+    await fs.mkdir(getThreadWorkspaceUploadDir(options.workspace, threadId), { recursive: true });
   }
 
   const sessionCodexRunConfig = withoutRuntimeCapabilityMetadata(
@@ -3283,9 +3345,17 @@ async function replaceCrestLiveRuntimeSession(input: {
   const codexRunConfig = withoutRuntimeCapabilityMetadata(
     ensureThreadUploadDirsInRunConfig(input.session.codexRunConfig, input.threadId, input.session.workspace)
   );
-  await fs.mkdir(getThreadWorkspaceUploadDir(input.session.workspace), { recursive: true });
-  const materializedCodexHome = await materializeCodexHomeForRunConfig({
-    scopeId: `thread-${input.threadId}`,
+  await fs.mkdir(getThreadWorkspaceUploadDir(input.session.workspace, input.threadId), { recursive: true });
+  const modeSelection = await resolveModeSelection({
+    currentUser: input.currentUser,
+    modeHint: modeIdFromRunConfig(codexRunConfig)
+  });
+  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+    currentUser: input.currentUser,
+    modeId: modeSelection.modeId,
+    workspaceRootPath: modeSelection.workspaceRootPath,
+    workspacePath: input.session.workspace,
+    threadId: input.threadId,
     codexRunConfig
   });
   const providerSnapshot = await resolveProviderSnapshot({
@@ -3420,8 +3490,12 @@ async function resolveSessionOptions(
     knowledgeSetIds: input.knowledge_set_ids,
     codexRunConfig: sourceCodexRunConfig
   });
-  const materializedCodexHome = await materializeCodexHomeForRunConfig({
-    scopeId: `workspace-${path.basename(workspacePath)}`,
+  const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
+  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+    currentUser,
+    modeId,
+    workspaceRootPath,
+    workspacePath,
     codexRunConfig: resolvedCodexRunConfig
   });
   return {
@@ -3509,13 +3583,10 @@ async function ensureThreadSession(
   });
   const workspacePath =
     trimOrUndefined(thread.workspace) ||
-    buildThreadWorkspacePath(
-      modeSelection.workspaceRootPath,
-      currentUser.organizationSlug ?? currentUser.organizationId,
-      currentUser.id,
-      threadId,
-      thread.createdAt
-    );
+    userAgentWorkspacePathForSelection({
+      currentUser,
+      selection: modeSelection
+    });
   await fs.mkdir(workspacePath, { recursive: true });
   const enabledSkills = await resolveEnabledSkillsForMode({
     currentUser,
@@ -3543,8 +3614,12 @@ async function ensureThreadSession(
   });
   await applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath);
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
-  const materializedCodexHome = await materializeCodexHomeForRunConfig({
-    scopeId: `thread-${threadId}`,
+  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+    currentUser,
+    modeId: modeSelection.modeId,
+    workspaceRootPath: modeSelection.workspaceRootPath,
+    workspacePath,
+    threadId,
     codexRunConfig: desiredCodexRunConfig
   });
 
@@ -4546,7 +4621,7 @@ async function materializeZendeskRuntimeConfig(input: ZendeskRuntimeSessionInput
   codexHome: string;
   codexRunConfig?: Record<string, unknown>;
 }> {
-  await fs.mkdir(getThreadWorkspaceUploadDir(input.runtimeOptions.workspace), { recursive: true });
+  await fs.mkdir(getThreadWorkspaceUploadDir(input.runtimeOptions.workspace, thread.id), { recursive: true });
   return await materializeCodexHomeForRunConfig({
     scopeId: `thread-${thread.id}`,
     codexRunConfig: zendeskDesiredRuntimeConfig(input, thread)
@@ -4919,15 +4994,19 @@ async function ensureDingTalkBotThreadSession(input: {
   thread: ThreadRecord;
   instance: DingTalkBotInstance;
 }): Promise<SessionRecord> {
+  const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
+  const agentModeId = trimOrUndefined(input.instance.robot.agentModeId) ?? "default";
   const workspacePath =
     trimOrUndefined(input.thread.workspace) ||
-    buildThreadWorkspacePath(
-      await resolveEffectiveSessionWorkspaceRootPath(),
-      input.currentUser.organizationSlug ?? input.currentUser.organizationId,
-      input.currentUser.id,
-      input.thread.id,
-      input.thread.createdAt
-    );
+    buildUserAgentWorkspacePath({
+      rootPath: workspaceRootPath,
+      actor: {
+        organizationId: input.currentUser.organizationId,
+        organizationSlug: input.currentUser.organizationSlug,
+        userId: input.currentUser.id
+      },
+      modeId: agentModeId
+    });
   await fs.mkdir(workspacePath, { recursive: true });
   const desired = await resolveDingTalkBotSessionOptions({
     currentUser: input.currentUser,
@@ -4950,8 +5029,12 @@ async function ensureDingTalkBotThreadSession(input: {
   }
 
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desired.baseCodexRunConfig, input.thread.id, workspacePath);
-  const materializedCodexHome = await materializeCodexHomeForRunConfig({
-    scopeId: `thread-${input.thread.id}`,
+  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+    currentUser: input.currentUser,
+    modeId: agentModeId,
+    workspaceRootPath,
+    workspacePath,
+    threadId: input.thread.id,
     codexRunConfig: desiredCodexRunConfig
   });
   const desiredSession: SessionOptions = {
@@ -5032,12 +5115,16 @@ async function createDingTalkBotThread(input: {
 }): Promise<ThreadRecord> {
   const threadId = randomUUID().replace(/-/g, "");
   const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
-  const workspacePath = buildThreadWorkspacePath(
-    workspaceRoot,
-    input.currentUser.organizationSlug ?? input.currentUser.organizationId,
-    input.currentUser.id,
-    threadId
-  );
+  const agentModeId = trimOrUndefined(input.instance.robot.agentModeId) ?? "default";
+  const workspacePath = buildUserAgentWorkspacePath({
+    rootPath: workspaceRoot,
+    actor: {
+      organizationId: input.currentUser.organizationId,
+      organizationSlug: input.currentUser.organizationSlug,
+      userId: input.currentUser.id
+    },
+    modeId: agentModeId
+  });
   await fs.mkdir(workspacePath, { recursive: true });
   const options = await resolveDingTalkBotSessionOptions({
     currentUser: input.currentUser,
@@ -5055,7 +5142,20 @@ async function createDingTalkBotThread(input: {
     workspace: options.workspace,
     codexRunConfig: options.baseCodexRunConfig
   });
-  await createSession(options, thread.id);
+  const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(options.baseCodexRunConfig, thread.id, workspacePath);
+  const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+    currentUser: input.currentUser,
+    modeId: agentModeId,
+    workspaceRootPath: workspaceRoot,
+    workspacePath,
+    threadId: thread.id,
+    codexRunConfig: desiredCodexRunConfig
+  });
+  await createSession({
+    ...options,
+    codexRunConfig: materializedCodexHome.codexRunConfig,
+    codexHome: materializedCodexHome.codexHome
+  }, thread.id);
   return (await threads.get(thread.id, input.currentUser.organizationId)) ?? thread;
 }
 
@@ -5490,6 +5590,40 @@ function resolveThreadFileAbsolutePath(input: {
     throw new Error("File path is outside the thread workspace");
   }
   return candidate;
+}
+
+async function resolveExistingThreadFileAbsolutePath(input: {
+  workspacePath: string;
+  threadId: string;
+  relativePath?: string;
+  filePath?: string;
+}): Promise<string> {
+  if (!trimOrUndefined(input.relativePath)) {
+    return resolveThreadFileAbsolutePath({
+      workspacePath: input.workspacePath,
+      uploadDir: getThreadWorkspaceUploadDir(input.workspacePath, input.threadId),
+      filePath: input.filePath
+    });
+  }
+
+  let firstCandidate: string | undefined;
+  for (const uploadDir of getThreadWorkspaceUploadDirs(input.workspacePath, input.threadId)) {
+    const candidate = resolveThreadFileAbsolutePath({
+      workspacePath: input.workspacePath,
+      uploadDir,
+      relativePath: input.relativePath
+    });
+    firstCandidate ??= candidate;
+    const stat = await fs.stat(candidate).catch(() => null);
+    if (stat?.isFile()) {
+      return candidate;
+    }
+  }
+  return firstCandidate ?? resolveThreadFileAbsolutePath({
+    workspacePath: input.workspacePath,
+    uploadDir: getThreadWorkspaceUploadDir(input.workspacePath, input.threadId),
+    relativePath: input.relativePath
+  });
 }
 
 type RuntimeFileChange = {
@@ -6164,7 +6298,7 @@ app.locals.resolveCodexSkillThreadPath = async (input: {
   }
   return resolveThreadFileAbsolutePath({
     workspacePath,
-    uploadDir: getThreadWorkspaceUploadDir(workspacePath),
+    uploadDir: getThreadWorkspaceUploadDir(workspacePath, input.threadId),
     filePath: input.requestedPath
   });
 };
@@ -6405,18 +6539,16 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
 
     let workspacePath = trimOrUndefined(thread.workspace);
     if (!workspacePath) {
-      const workspaceRootPath = await resolveEffectiveSessionWorkspaceRootPath();
-      workspacePath = buildThreadWorkspacePath(
-        workspaceRootPath,
-        currentUser.organizationSlug ?? currentUser.organizationId,
-        currentUser.id,
-        threadId,
-        thread.createdAt
-      );
+      const allocated = await allocateUserAgentWorkspacePath({
+        currentUser,
+        modeHint: modeIdFromRunConfig(thread.codexRunConfig)
+      });
+      workspacePath = allocated.workspacePath;
+      await applyWorkspaceAgentsMdForMode(allocated.modeId, workspacePath);
       await threads.update(threadId, { workspace: workspacePath });
     }
 
-    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
+    const uploadDir = getThreadWorkspaceUploadDir(workspacePath, threadId);
     await fs.mkdir(uploadDir, { recursive: true });
 
     const id = createUploadAttachmentId();
@@ -6482,10 +6614,9 @@ app.get("/api/threads/:threadId/attachments/:attachmentId/content", async (req: 
       return;
     }
 
-    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
-    const absolutePath = resolveThreadFileAbsolutePath({
+    const absolutePath = await resolveExistingThreadFileAbsolutePath({
       workspacePath,
-      uploadDir,
+      threadId,
       relativePath: query.relative_path
     });
 
@@ -6542,10 +6673,9 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
       return;
     }
 
-    const uploadDir = getThreadWorkspaceUploadDir(workspacePath);
-    const absolutePath = resolveThreadFileAbsolutePath({
+    const absolutePath = await resolveExistingThreadFileAbsolutePath({
       workspacePath,
-      uploadDir,
+      threadId,
       relativePath: query.relative_path,
       filePath: query.path
     });
@@ -6731,6 +6861,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
           let workspace = existingForComparison.workspace;
           let modeId = modeHint;
           let runtimeProfile: PortalRuntimeOptionRunProfile | undefined;
+          let workspaceRootPath: string | undefined;
           if (existingForComparison.threadId) {
             const selection = await resolveModeSelection({
               currentUser,
@@ -6738,6 +6869,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             modeId = selection.modeId;
             runtimeProfile = selection.runtimeProfile;
+            workspaceRootPath = selection.workspaceRootPath;
             const ownedThread = await threads.getOwned(
               existingForComparison.threadId,
               currentUser.id,
@@ -6746,25 +6878,23 @@ app.post("/api/session", async (req: Request, res: Response) => {
             workspace =
               trimOrUndefined(ownedThread?.workspace) ||
               trimOrUndefined(workspace) ||
-              buildThreadWorkspacePath(
-                selection.workspaceRootPath,
-                currentUser.organizationSlug ?? currentUser.organizationId,
-                currentUser.id,
-                existingForComparison.threadId,
-                ownedThread?.createdAt
-              );
+              userAgentWorkspacePathForSelection({
+                currentUser,
+                selection
+              });
             await fs.mkdir(workspace, { recursive: true });
             if (ownedThread && trimOrUndefined(ownedThread.workspace) !== workspace) {
               await threads.update(existingForComparison.threadId, { workspace });
             }
           } else if (input.codex_run_config || !workspace || !modeId) {
-            const allocated = await allocateDetachedSessionWorkspacePath({
+            const allocated = await allocateUserAgentWorkspacePath({
               currentUser,
               modeHint
             });
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
             runtimeProfile = allocated.runtimeProfile;
+            workspaceRootPath = allocated.workspaceRootPath;
           }
 
           if (!modeId || !runtimeProfile) {
@@ -6774,6 +6904,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             modeId = fallback.modeId;
             runtimeProfile = fallback.runtimeProfile;
+            workspaceRootPath ??= fallback.workspaceRootPath;
           }
 
           if (modeId && workspace) {
@@ -6803,14 +6934,18 @@ app.post("/api/session", async (req: Request, res: Response) => {
             existingForComparison.threadId && trimOrUndefined(workspace)
               ? ensureThreadUploadDirsInRunConfig(nextCodexRunConfig, existingForComparison.threadId, workspace)
               : nextCodexRunConfig;
-          const materializedCodexHome = await materializeCodexHomeForRunConfig({
-            scopeId: existingForComparison.threadId
-              ? `thread-${existingForComparison.threadId}`
-              : `session-${existingForComparison.sessionId}`,
+          const materializedWorkspaceRootPath = workspaceRootPath ?? (await resolveEffectiveSessionWorkspaceRootPath());
+          const materializedCodexHome = await materializeCodexHomeForWorkspaceScope({
+            currentUser,
+            modeId,
+            workspaceRootPath: materializedWorkspaceRootPath,
+            workspacePath: workspace,
+            threadId: existingForComparison.threadId ?? undefined,
+            sessionId: existingForComparison.sessionId,
             codexRunConfig: runtimeCodexRunConfig
           });
           if (existingForComparison.threadId && trimOrUndefined(workspace)) {
-            await fs.mkdir(getThreadWorkspaceUploadDir(workspace), { recursive: true });
+            await fs.mkdir(getThreadWorkspaceUploadDir(workspace, existingForComparison.threadId), { recursive: true });
           }
           await assertChatAllowsNewSession({
             currentUser,
@@ -6865,7 +7000,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
     }
 
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
-    const allocated = await allocateDetachedSessionWorkspacePath({
+    const allocated = await allocateUserAgentWorkspacePath({
       currentUser,
       modeHint
     });
@@ -6976,9 +7111,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     const input = createThreadSchema.parse(req.body || {});
     const threadId = randomUUID().replace(/-/g, "");
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
-    const allocated = await allocateThreadWorkspacePath({
+    const allocated = await allocateUserAgentWorkspacePath({
       currentUser,
-      threadId,
       modeHint
     });
     const options = await resolveSessionOptions(

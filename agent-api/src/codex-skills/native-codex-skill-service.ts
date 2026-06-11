@@ -38,6 +38,25 @@ function sanitizePathSegment(value: string, fallback: string): string {
   return normalized || fallback;
 }
 
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? null, (_key, currentValue) => {
+      if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
+        const record = currentValue as Record<string, unknown>;
+        return Object.keys(record)
+          .sort((left, right) => left.localeCompare(right))
+          .reduce<Record<string, unknown>>((acc, key) => {
+            acc[key] = record[key];
+            return acc;
+          }, {});
+      }
+      return currentValue;
+    });
+  } catch {
+    return String(value);
+  }
+}
+
 function parseFrontmatterValue(raw: string | undefined): string | undefined {
   const value = trimOrUndefined(raw);
   if (!value) return undefined;
@@ -97,6 +116,45 @@ async function chmodDirectories(rootPath: string, mode: number): Promise<void> {
   }
 }
 
+async function readJsonFile(filePath: string): Promise<unknown | undefined> {
+  const content = await fs.readFile(filePath, "utf8").catch(() => undefined);
+  if (content === undefined) return undefined;
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+async function withDirectoryLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
+  const staleAfterMs = 10 * 60 * 1000;
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      await fs.mkdir(lockPath);
+      break;
+    } catch (error) {
+      const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
+      if (code !== "EEXIST") throw error;
+      const stat = await fs.stat(lockPath).catch(() => undefined);
+      if (stat && Date.now() - stat.mtimeMs > staleAfterMs) {
+        await fs.rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
+        continue;
+      }
+      if (Date.now() - startedAt > staleAfterMs) {
+        throw new Error(`Timed out waiting for Codex home materialization lock: ${lockPath}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  try {
+    return await run();
+  } finally {
+    await fs.rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 async function linkFileIfPresent(sourcePath: string, destinationPath: string): Promise<void> {
   if (!(await pathExists(sourcePath))) return;
   await fs.rm(destinationPath, { recursive: true, force: true });
@@ -144,14 +202,15 @@ export class NativeCodexSkillService {
   }
 
   async materializeSessionHome(input: {
-    scopeId: string;
+    scopeId?: string;
+    scopeSegments?: string[];
     enabledSkills: MaterializedCodexSkillInput[];
   }): Promise<string> {
-    const scopeId = sanitizePathSegment(input.scopeId, "session");
-    const sessionHome = path.join(this.sessionHomeRoot, scopeId);
+    const scopeSegments = input.scopeSegments?.length
+      ? input.scopeSegments.map((segment, index) => sanitizePathSegment(segment, index === 0 ? "scope" : "segment"))
+      : [sanitizePathSegment(input.scopeId ?? "", "session")];
+    const sessionHome = path.join(this.sessionHomeRoot, ...scopeSegments);
     const sessionSkillsRoot = path.join(sessionHome, "skills");
-    const catalog = await this.list();
-    const byName = new Map(catalog.map((skill) => [skill.name, skill] as const));
     const enabled: Array<{ name: string; sourcePath?: string; relativePath?: string; system: boolean }> = [];
     for (const skill of input.enabledSkills) {
       const name = trimOrUndefined(skill.name);
@@ -165,40 +224,66 @@ export class NativeCodexSkillService {
     }
 
     await fs.mkdir(sessionHome, { recursive: true });
-    await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
-    await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
-    await chmodDirectories(sessionSkillsRoot, 0o755);
-    await fs.rm(sessionSkillsRoot, { recursive: true, force: true });
-    await fs.mkdir(sessionSkillsRoot, { recursive: true });
+    await withDirectoryLock(path.join(sessionHome, ".materialize.lock"), async () => {
+      const catalog = await this.list();
+      const byName = new Map(catalog.map((skill) => [skill.name, skill] as const));
+      const manifest = {
+        version: 1,
+        scopeSegments,
+        enabledSkills: enabled
+          .map((skill) => ({
+            name: skill.name,
+            sourcePath: skill.sourcePath,
+            relativePath: skill.relativePath,
+            system: skill.system
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name))
+      };
+      const metadataDir = path.join(sessionHome, ".agent-studio");
+      const manifestPath = path.join(metadataDir, "manifest.json");
+      const currentManifest = await readJsonFile(manifestPath);
 
-    for (const requestedSkill of enabled) {
-      if (requestedSkill.sourcePath) {
-        const relativePath = requestedSkill.relativePath ?? sanitizePathSegment(requestedSkill.name, "skill");
-        const visibleRelativePath = requestedSkill.system ? sanitizePathSegment(requestedSkill.name, "skill") : relativePath;
-        await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
-        if (requestedSkill.system && relativePath !== visibleRelativePath) {
-          await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, relativePath));
+      await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
+      await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
+      if (stableJson(currentManifest) === stableJson(manifest) && (await pathExists(sessionSkillsRoot))) {
+        return;
+      }
+
+      await chmodDirectories(sessionSkillsRoot, 0o755);
+      await fs.rm(sessionSkillsRoot, { recursive: true, force: true });
+      await fs.mkdir(sessionSkillsRoot, { recursive: true });
+
+      for (const requestedSkill of enabled) {
+        if (requestedSkill.sourcePath) {
+          const relativePath = requestedSkill.relativePath ?? sanitizePathSegment(requestedSkill.name, "skill");
+          const visibleRelativePath = requestedSkill.system ? sanitizePathSegment(requestedSkill.name, "skill") : relativePath;
+          await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
+          if (requestedSkill.system && relativePath !== visibleRelativePath) {
+            await replaceSymlinkOrCopy(requestedSkill.sourcePath, path.join(sessionSkillsRoot, relativePath));
+          }
+          continue;
         }
-        continue;
+
+        const skill = byName.get(requestedSkill.name);
+        if (!skill) continue;
+        const visibleRelativePath = skill.system ? sanitizePathSegment(skill.name, "skill") : skill.relativePath;
+        await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
+        if (skill.system && skill.relativePath !== visibleRelativePath) {
+          await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, skill.relativePath));
+        }
       }
 
-      const skill = byName.get(requestedSkill.name);
-      if (!skill) continue;
-      const visibleRelativePath = skill.system ? sanitizePathSegment(skill.name, "skill") : skill.relativePath;
-      await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, visibleRelativePath));
-      if (skill.system && skill.relativePath !== visibleRelativePath) {
-        await replaceSymlinkOrCopy(skill.sourcePath, path.join(sessionSkillsRoot, skill.relativePath));
-      }
-    }
+      const systemSkillsRoot = path.join(sessionSkillsRoot, ".system");
+      await fs.mkdir(systemSkillsRoot, { recursive: true });
 
-    const systemSkillsRoot = path.join(sessionSkillsRoot, ".system");
-    await fs.mkdir(systemSkillsRoot, { recursive: true });
-
-    // Codex auto-installs built-in .system skills into writable CODEX_HOME roots.
-    // Keep the parent locked so custom skills still come only from Agent Studio,
-    // while leaving .system writable for the Codex runtime's own bootstrap.
-    await chmodDirectories(sessionSkillsRoot, 0o555);
-    await chmodDirectories(systemSkillsRoot, 0o755);
+      // Codex auto-installs built-in .system skills into writable CODEX_HOME roots.
+      // Keep the parent locked so custom skills still come only from Agent Studio,
+      // while leaving .system writable for the Codex runtime's own bootstrap.
+      await chmodDirectories(sessionSkillsRoot, 0o555);
+      await chmodDirectories(systemSkillsRoot, 0o755);
+      await fs.mkdir(metadataDir, { recursive: true });
+      await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    });
     return sessionHome;
   }
 
