@@ -6,6 +6,7 @@ import {
   type IntegrationRepositoryDb
 } from "../../persistence/integration-repository.js";
 import type {
+  ZendeskDingTalkGroupFallbackRule,
   ZendeskIntegrationSettings,
   ZendeskPublicSettings,
   ZendeskValidatedUser
@@ -57,6 +58,35 @@ function normalizeIdList(value: string[] | undefined): string[] {
     const trimmed = String(item || "").trim();
     if (!trimmed || result.includes(trimmed)) continue;
     result.push(trimmed);
+  }
+  return result;
+}
+
+function normalizeGroupFallbacks(value: unknown): ZendeskDingTalkGroupFallbackRule[] {
+  if (!Array.isArray(value)) return [];
+  const result: ZendeskDingTalkGroupFallbackRule[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const groupId = String(record.groupId ?? record.group_id ?? "").trim();
+    const groupName = String(record.groupName ?? record.group_name ?? "").trim();
+    const userIds = normalizeIdList(
+      Array.isArray(record.userIds)
+        ? record.userIds.map((entry) => String(entry || ""))
+        : Array.isArray(record.user_ids)
+          ? record.user_ids.map((entry) => String(entry || ""))
+          : []
+    );
+    if ((!groupId && !groupName) || userIds.length === 0) continue;
+    const key = groupId ? `id:${groupId}` : `name:${groupName.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      ...(groupId ? { groupId } : {}),
+      ...(groupName ? { groupName } : {}),
+      userIds
+    });
   }
   return result;
 }
@@ -241,6 +271,7 @@ function defaultSettings(): ZendeskIntegrationSettings {
     dingtalkNotificationWebhookUrl: "",
     dingtalkNotificationRobotSecret: "",
     dingtalkNotificationFallbackUserIds: [],
+    dingtalkNotificationGroupFallbacks: [],
     dingtalkNotificationTemplate: defaultDingTalkNotificationTemplate(),
     dingtalkReviewRequiredEnabled: false,
     dingtalkReviewDueHours: 24,
@@ -417,6 +448,7 @@ export class ZendeskSettingsStore {
       dingtalkNotificationWebhookUrl: String(input.dingtalkNotificationWebhookUrl || "").trim(),
       dingtalkNotificationRobotSecret: String(input.dingtalkNotificationRobotSecret || "").trim(),
       dingtalkNotificationFallbackUserIds: normalizeIdList(input.dingtalkNotificationFallbackUserIds),
+      dingtalkNotificationGroupFallbacks: normalizeGroupFallbacks(input.dingtalkNotificationGroupFallbacks),
       dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(input.dingtalkNotificationTemplate),
       dingtalkReviewRequiredEnabled:
         input.dingtalkReviewRequiredEnabled === undefined

@@ -35,6 +35,7 @@ const settings: ZendeskIntegrationSettings = {
   dingtalkNotificationWebhookUrl: "",
   dingtalkNotificationRobotSecret: "",
   dingtalkNotificationFallbackUserIds: [],
+  dingtalkNotificationGroupFallbacks: [],
   dingtalkNotificationTemplate: "",
   dingtalkReviewRequiredEnabled: false,
   dingtalkReviewDueHours: 24,

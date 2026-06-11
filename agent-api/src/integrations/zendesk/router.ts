@@ -67,6 +67,11 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         dingtalkNotificationRobotSecret:
           input.dingtalk_notification_robot_secret === undefined ? undefined : String(input.dingtalk_notification_robot_secret || "").trim(),
         dingtalkNotificationFallbackUserIds: normalizeStringArray(input.dingtalk_notification_fallback_user_ids),
+        dingtalkNotificationGroupFallbacks: input.dingtalk_notification_group_fallbacks?.map((item) => ({
+          groupId: item.group_id === undefined ? undefined : String(item.group_id || "").trim(),
+          groupName: item.group_name === undefined ? undefined : String(item.group_name || "").trim(),
+          userIds: normalizeStringArray(item.user_ids) ?? []
+        })),
         dingtalkNotificationTemplate: input.dingtalk_notification_template,
         dingtalkReviewRequiredEnabled: input.dingtalk_review_required_enabled,
         dingtalkReviewDueHours: input.dingtalk_review_due_hours,

@@ -145,6 +145,16 @@ export type IntegrationZendeskAiReviewEmailReminderResponse = {
   };
 };
 
+export type ZendeskGroupOption = {
+  id: number;
+  name: string;
+  deleted?: boolean;
+};
+
+export type IntegrationZendeskGroupsResponse = {
+  groups: ZendeskGroupOption[];
+};
+
 export type CreateIntegrationInstanceInput = {
   type: IntegrationType;
   slug: string;
@@ -286,6 +296,7 @@ export type ZendeskConfigInput = {
   dingtalkNotificationEnabled?: boolean;
   dingtalkNotificationManualRunsEnabled?: boolean;
   dingtalkNotificationFallbackUserIds?: string[];
+  dingtalkNotificationGroupFallbacks?: ZendeskDingTalkGroupFallbackRule[];
   dingtalkNotificationTemplate?: string;
   dingtalkReviewRequiredEnabled?: boolean;
   dingtalkReviewDueHours?: number;
@@ -294,6 +305,12 @@ export type ZendeskConfigInput = {
   aiReviewEmailReminderTimezone?: string;
   aiReviewEmailReminderCcEmails?: string[];
   systemPrompt?: string;
+};
+
+export type ZendeskDingTalkGroupFallbackRule = {
+  groupId?: string;
+  groupName?: string;
+  userIds: string[];
 };
 
 export type ZendeskSecretInput = {
@@ -455,6 +472,7 @@ export type ZendeskConfigDraft = {
   dingtalkNotificationWebhookUrlDraft: string;
   dingtalkNotificationRobotSecretDraft: string;
   dingtalkNotificationFallbackUserIds: string[];
+  dingtalkNotificationGroupFallbacks: ZendeskDingTalkGroupFallbackRule[];
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;

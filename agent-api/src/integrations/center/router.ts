@@ -124,6 +124,19 @@ export function createIntegrationCenterRouter(options: IntegrationCenterRouterOp
     }
   });
 
+  router.get("/integrations/:instanceId/zendesk/groups", requireRead, async (req: Request, res: Response) => {
+    try {
+      res.json(
+        await options.service.listZendeskGroups({
+          currentUserId: req.currentUser!.id,
+          instanceId: req.params.instanceId
+        })
+      );
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : isForbiddenError(error) ? 403 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.get("/integrations/:instanceId/zendesk/cache-cleanup", requireRead, async (req: Request, res: Response) => {
     try {
       const query = integrationZendeskCacheCleanupQuerySchema.parse(req.query ?? {});

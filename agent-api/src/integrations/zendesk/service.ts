@@ -29,6 +29,8 @@ import type {
   ZendeskAgentDecision,
   ZendeskBindingRecord,
   ZendeskCommentPayload,
+  ZendeskDingTalkGroupFallbackRule,
+  ZendeskGroupPayload,
   ZendeskIntegrationSettings,
   ZendeskCacheCleanupResult,
   ZendeskCacheCleanupItem,
@@ -910,6 +912,33 @@ function dingtalkMentionText(atUserIds: string[]): string {
     .join(" ");
 }
 
+function normalizeGroupNameForMatch(value: string | undefined): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function findZendeskGroupFallback(
+  settings: ZendeskIntegrationSettings,
+  context: ZendeskTicketContext
+): ZendeskDingTalkGroupFallbackRule | undefined {
+  const groupId = context.ticket.groupId ? String(context.ticket.groupId) : "";
+  const groupName = normalizeGroupNameForMatch(context.ticket.groupName);
+  return settings.dingtalkNotificationGroupFallbacks.find((rule) => {
+    const ruleGroupId = String(rule.groupId || "").trim();
+    if (groupId && ruleGroupId && groupId === ruleGroupId) return true;
+    const ruleGroupName = normalizeGroupNameForMatch(rule.groupName);
+    return Boolean(groupName && ruleGroupName && groupName === ruleGroupName);
+  });
+}
+
+function zendeskGroupFallbackLabel(rule: ZendeskDingTalkGroupFallbackRule, context: ZendeskTicketContext): string {
+  return (
+    String(context.ticket.groupName || "").trim() ||
+    String(rule.groupName || "").trim() ||
+    (context.ticket.groupId ? `Group #${context.ticket.groupId}` : "") ||
+    (rule.groupId ? `Group #${rule.groupId}` : "Zendesk group")
+  );
+}
+
 function isRecoverableCodexResumeError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");
   return /thread\/resume failed|no rollout found for thread id/i.test(message);
@@ -1102,6 +1131,8 @@ export class ZendeskIntegrationService {
         context: ZendeskTicketContext;
         instanceId?: string;
         ticketId: string;
+        fallbackUserIds?: string[];
+        fallbackDetail?: string;
       }) => Promise<ZendeskDingTalkMentionTarget | undefined>;
       requestDingTalkAiReviews?: (input: {
         settings: ZendeskIntegrationSettings;
@@ -1292,6 +1323,19 @@ export class ZendeskIntegrationService {
       ok: true,
       overview: await this.getOverview(instanceId)
     };
+  }
+
+  async listGroups(instanceId?: string): Promise<{ groups: ZendeskGroupPayload[] }> {
+    const settings = await this.loadSettings(instanceId);
+    const missing = findZendeskReadinessGaps(settings).filter(
+      (item) => !["public_base_url", "agent_mode_id", "webhook_signing_secret"].includes(item)
+    );
+    if (missing.length > 0) {
+      throw new Error(`Zendesk 配置不完整: ${missing.join(", ")}`);
+    }
+
+    const client = new ZendeskClient(settings);
+    return { groups: await client.listGroups() };
   }
 
   async previewCacheCleanup(options: Omit<ZendeskCacheCleanupOptions, "execute">): Promise<ZendeskCacheCleanupResult> {
@@ -1811,7 +1855,8 @@ export class ZendeskIntegrationService {
     }
 
     try {
-      const resolvedMention = this.dependencies.resolveDingTalkMentionTarget
+      const resolvedMention =
+        input.context.ticket.assignee && this.dependencies.resolveDingTalkMentionTarget
         ? await this.dependencies.resolveDingTalkMentionTarget({
             zendeskUser: input.context.ticket.assignee,
             settings: input.settings,
@@ -1823,13 +1868,22 @@ export class ZendeskIntegrationService {
       const assigneeUserIds = (resolvedMention?.userIds ?? [])
         .map((item) => String(item || "").trim())
         .filter((item, index, array) => item && array.indexOf(item) === index);
+      const groupFallback =
+        assigneeUserIds.length === 0 ? findZendeskGroupFallback(input.settings, input.context) : undefined;
+      const groupFallbackLabel = groupFallback ? zendeskGroupFallbackLabel(groupFallback, input.context) : "";
       const fallbackMention =
         assigneeUserIds.length === 0 && this.dependencies.resolveDingTalkMentionTarget
           ? await this.dependencies.resolveDingTalkMentionTarget({
               settings: input.settings,
               context: input.context,
               instanceId: input.instanceId,
-              ticketId: input.ticketId
+              ticketId: input.ticketId,
+              ...(groupFallback
+                ? {
+                    fallbackUserIds: groupFallback.userIds,
+                    fallbackDetail: `Using ${groupFallback.userIds.length} Zendesk group fallback user(s) for ${groupFallbackLabel}.`
+                  }
+                : {})
             })
           : undefined;
       const atUserIds = (assigneeUserIds.length > 0 ? assigneeUserIds : fallbackMention?.userIds ?? [])

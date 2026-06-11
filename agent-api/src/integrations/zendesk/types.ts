@@ -68,6 +68,7 @@ export type ZendeskIntegrationSettings = {
   dingtalkNotificationWebhookUrl: string;
   dingtalkNotificationRobotSecret: string;
   dingtalkNotificationFallbackUserIds: string[];
+  dingtalkNotificationGroupFallbacks: ZendeskDingTalkGroupFallbackRule[];
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;
@@ -78,6 +79,12 @@ export type ZendeskIntegrationSettings = {
   systemPrompt: string;
   lastValidatedAt?: string;
   lastValidatedUser?: ZendeskValidatedUser;
+};
+
+export type ZendeskDingTalkGroupFallbackRule = {
+  groupId?: string;
+  groupName?: string;
+  userIds: string[];
 };
 
 export type ZendeskPublicSettings = Omit<
@@ -177,7 +184,15 @@ export type ZendeskTicketPayload = {
   requester?: ZendeskRequesterPayload;
   assigneeId?: number;
   assignee?: ZendeskRequesterPayload;
+  groupId?: number;
+  groupName?: string;
   updatedAt?: string;
+};
+
+export type ZendeskGroupPayload = {
+  id: number;
+  name: string;
+  deleted?: boolean;
 };
 
 export type ZendeskRequesterPayload = {
@@ -264,6 +279,15 @@ export const zendeskSettingsUpdateSchema = z.object({
   dingtalk_notification_webhook_url: optionalStringSchema,
   dingtalk_notification_robot_secret: optionalStringSchema,
   dingtalk_notification_fallback_user_ids: optionalStringArraySchema,
+  dingtalk_notification_group_fallbacks: z
+    .array(
+      z.object({
+        group_id: z.union([z.string(), z.number()]).optional(),
+        group_name: z.string().optional(),
+        user_ids: optionalStringArraySchema
+      })
+    )
+    .optional(),
   dingtalk_notification_template: optionalStringSchema,
   dingtalk_review_required_enabled: z.boolean().optional(),
   dingtalk_review_due_hours: z.number().int().min(1).max(168).optional(),

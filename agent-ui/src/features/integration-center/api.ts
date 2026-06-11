@@ -13,6 +13,7 @@ import type {
   IntegrationPolicyInput,
   IntegrationZendeskAiReviewEmailReminderResponse,
   IntegrationZendeskCacheCleanupResponse,
+  IntegrationZendeskGroupsResponse,
   IntegrationType,
   IntegrationZendeskRunResult,
   IntegrationValidationResult,
@@ -100,6 +101,10 @@ export async function sendZendeskAiReviewEmailReminder(
       json: { mode }
     }
   );
+}
+
+export async function fetchZendeskGroups(instanceId: string): Promise<IntegrationZendeskGroupsResponse> {
+  return api<IntegrationZendeskGroupsResponse>(`${integrationPath(instanceId)}/zendesk/groups`);
 }
 
 export async function fetchDingTalkBotStatus(instanceId: string): Promise<DingTalkBotStatusResponse> {

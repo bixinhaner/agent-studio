@@ -19,6 +19,7 @@ import {
   type IntegrationZendeskAiReviewEmailReminderResult,
   type IntegrationValidationItem,
   type IntegrationZendeskCacheCleanupResult,
+  type IntegrationZendeskGroupsResult,
   type IntegrationZendeskRunResult,
   type IntegrationValidationResult,
   sanitizeIntegrationConfigForRead
@@ -99,6 +100,10 @@ export type IntegrationCenterService = {
     instanceId: string;
     ticketId: string | number;
   }): Promise<IntegrationZendeskRunResult>;
+  listZendeskGroups(input: {
+    currentUserId: string;
+    instanceId: string;
+  }): Promise<IntegrationZendeskGroupsResult>;
   previewZendeskCacheCleanup(input: {
     currentUserId: string;
     instanceId: string;
@@ -452,6 +457,7 @@ export function createIntegrationCenterService(options: {
       requesterCommentId?: number;
       decision?: string;
     }>;
+    listGroups(instanceId?: string): Promise<IntegrationZendeskGroupsResult>;
     previewCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
     runCacheCleanup(input: { instanceId: string; retentionDays?: number; limit?: number; execute?: boolean }): Promise<IntegrationZendeskCacheCleanupResult["result"]>;
   };
@@ -971,6 +977,18 @@ export function createIntegrationCenterService(options: {
         result,
         detail: await readDetail(instance.id, input.currentUserId)
       };
+    },
+
+    async listZendeskGroups(input) {
+      const instance = await requireAuthorizedInstance(input.instanceId, input.currentUserId);
+      if (instance.type !== "zendesk") {
+        throw new Error("当前集成实例不是 Zendesk。");
+      }
+      if (!options.zendesk) {
+        throw new Error("Zendesk 集成功能未启用");
+      }
+
+      return await options.zendesk.listGroups(instance.id);
     },
 
     async previewZendeskCacheCleanup(input) {

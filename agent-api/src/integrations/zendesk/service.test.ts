@@ -41,6 +41,7 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkNotificationWebhookUrl: "",
   dingtalkNotificationRobotSecret: "",
   dingtalkNotificationFallbackUserIds: [],
+  dingtalkNotificationGroupFallbacks: [],
   dingtalkNotificationTemplate: "",
   dingtalkReviewRequiredEnabled: false,
   dingtalkReviewDueHours: 24,
@@ -867,6 +868,192 @@ describe("ZendeskIntegrationService", () => {
           )
         )
       ).resolves.toBeTruthy();
+      expect(runUpdates.some((item) => item.patch.status === "noted")).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("routes DingTalk fallback notifications by Zendesk group before the global fallback", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(process.cwd(), "temp", "zendesk-group-fallback-"));
+    const dingtalkPayloads: Array<Record<string, unknown>> = [];
+    const runUpdates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/777.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 777,
+              subject: "US team ticket",
+              description: "Customer needs help.",
+              status: "open",
+              requester_id: 9001,
+              group_id: 42,
+              updated_at: "2026-05-20T02:00:00Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/777/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 701,
+                author_id: 9001,
+                body: "Please check this US ticket.",
+                public: true,
+                created_at: "2026-05-20T02:01:00Z",
+                attachments: []
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 9001,
+              name: "Requester",
+              email: "requester@example.com",
+              role: "end-user"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/groups/42.json")) {
+        return new Response(
+          JSON.stringify({
+            group: {
+              id: 42,
+              name: "US Support Team (Level 1)"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/777.json") && init?.method === "PUT") {
+        return new Response(JSON.stringify({ audit: { events: [{ id: 9000000000777, type: "Comment" }] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/robot/send")) {
+        dingtalkPayloads.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = {
+      startThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-group-fallback" })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-group-fallback", resumed: true })),
+      runStreamed: vi.fn(async function* () {
+        yield {
+          type: "message",
+          text: JSON.stringify({
+            decision: "internal_note",
+            internalNote: "Handle through the US team fallback reviewer.",
+            confidence: 0.8,
+            reasons: ["group fallback"]
+          })
+        };
+      })
+    };
+    const settings = {
+      ...baseSettings,
+      publicBaseUrl: "https://agent.example.com",
+      zendeskBaseUrl: "https://example.zendesk.com",
+      zendeskEmail: "agent@example.com",
+      zendeskApiToken: "token",
+      dingtalkNotificationEnabled: true,
+      dingtalkNotificationManualRunsEnabled: true,
+      dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token",
+      dingtalkNotificationFallbackUserIds: ["ding-global"],
+      dingtalkNotificationGroupFallbacks: [
+        {
+          groupId: "42",
+          groupName: "US Support Team (Level 1)",
+          userIds: ["ding-jesse"]
+        }
+      ]
+    };
+    const settingsStore = {
+      get: vi.fn(async () => settings),
+      getForInstance: vi.fn(async () => settings)
+    };
+    const bindingStore = {
+      get: vi.fn(async () => undefined),
+      upsert: vi.fn(async () => ({
+        ticketId: "777",
+        instanceId: "zendesk-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }))
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-group-fallback",
+        instanceId: "zendesk-1",
+        ticketId: "777",
+        source: "manual" as const,
+        status: "received" as const,
+        detail: "received",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>) => {
+        runUpdates.push({ runId, patch });
+      }),
+      listForInstance: vi.fn(async () => [])
+    };
+    const resolveDingTalkMentionTarget = vi.fn(async ({ fallbackUserIds, fallbackDetail }) => ({
+      userIds: fallbackUserIds ?? ["ding-global"],
+      label: "Jesse Raasch",
+      detail: fallbackDetail || "global fallback"
+    }));
+    const service = new ZendeskIntegrationService(
+      {
+        resolveAgentRuntime: vi.fn(async () => ({
+          runtime: runtime as never,
+          workspace: tempRoot,
+          model: "gpt-5.5",
+          reasoningEffort: "high" as const,
+          codexRunConfig: {}
+        })),
+        resolveDingTalkMentionTarget
+      },
+      settingsStore as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    try {
+      await service.runTicket("777", "zendesk-1");
+
+      expect(resolveDingTalkMentionTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fallbackUserIds: ["ding-jesse"],
+          fallbackDetail: "Using 1 Zendesk group fallback user(s) for US Support Team (Level 1)."
+        })
+      );
+      expect(dingtalkPayloads).toHaveLength(1);
+      expect(dingtalkPayloads[0]).toMatchObject({
+        at: {
+          atUserIds: ["ding-jesse"],
+          isAtAll: false
+        }
+      });
       expect(runUpdates.some((item) => item.patch.status === "noted")).toBe(true);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

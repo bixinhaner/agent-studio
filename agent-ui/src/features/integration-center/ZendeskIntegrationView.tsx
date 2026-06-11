@@ -10,6 +10,7 @@ import { fetchKnowledgeSets } from "../resources-center/api";
 import type { KnowledgeSetRecord } from "../resources-center/types";
 import {
   fetchIntegrationDetail,
+  fetchZendeskGroups,
   previewZendeskCacheCleanup,
   runZendeskCacheCleanup,
   runZendeskIntegrationTicket,
@@ -21,6 +22,7 @@ import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { IntegrationDetail, ZendeskCacheCleanupResult, ZendeskConfigDraft } from "./types";
+import type { ZendeskDingTalkGroupFallbackRule, ZendeskGroupOption } from "./types";
 import type { ZendeskRunRecord } from "../zendesk/types";
 import "../zendesk/zendesk.css";
 
@@ -304,6 +306,37 @@ function normalizeAiReviewEmailReminderTimezone(value: unknown) {
   return asString(value).trim() || DEFAULT_AI_REVIEW_EMAIL_REMINDER_TIMEZONE;
 }
 
+function normalizeGroupFallbackRules(value: unknown): ZendeskDingTalkGroupFallbackRule[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+      return {
+        groupId: String(record.groupId ?? record.group_id ?? "").trim(),
+        groupName: asString(record.groupName ?? record.group_name).trim(),
+        userIds: asStringArray(record.userIds ?? record.user_ids)
+      };
+    })
+    .filter((item) => (item.groupId || item.groupName) && item.userIds.length > 0);
+}
+
+function prepareGroupFallbackRules(value: ZendeskDingTalkGroupFallbackRule[]): ZendeskDingTalkGroupFallbackRule[] {
+  const seen = new Set<string>();
+  return value
+    .map((item) => ({
+      groupId: asString(item.groupId).trim(),
+      groupName: asString(item.groupName).trim(),
+      userIds: asStringArray(item.userIds)
+    }))
+    .filter((item) => {
+      if ((!item.groupId && !item.groupName) || item.userIds.length === 0) return false;
+      const key = item.groupId ? `id:${item.groupId}` : `name:${item.groupName.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function renderDingTalkTemplatePreview(template: string) {
   return normalizeDingTalkNotificationTemplate(template).replace(
     DINGTALK_TEMPLATE_PLACEHOLDER_RE,
@@ -340,6 +373,7 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     dingtalkNotificationWebhookUrlDraft: "",
     dingtalkNotificationRobotSecretDraft: "",
     dingtalkNotificationFallbackUserIds: asStringArray(detail.config.dingtalkNotificationFallbackUserIds),
+    dingtalkNotificationGroupFallbacks: normalizeGroupFallbackRules(detail.config.dingtalkNotificationGroupFallbacks),
     dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(detail.config.dingtalkNotificationTemplate),
     dingtalkReviewRequiredEnabled:
       detail.config.dingtalkReviewRequiredEnabled === undefined
@@ -373,6 +407,16 @@ function optionsWithCurrentValues(options: Array<{ label: string; value: string 
     .filter((value) => value && !known.has(value))
     .map((value) => ({ label: value, value }));
   return [...extras, ...options];
+}
+
+function zendeskGroupOptionsWithCurrent(
+  options: Array<{ label: string; value: string }>,
+  rule: ZendeskDingTalkGroupFallbackRule
+) {
+  const value = asString(rule.groupId).trim();
+  if (!value || options.some((item) => item.value === value)) return options;
+  const label = rule.groupName ? `${rule.groupName} (#${value})` : value;
+  return [{ label, value }, ...options];
 }
 
 function adminUserDingTalkLabel(user: AdminUser) {
@@ -441,9 +485,11 @@ export function ZendeskIntegrationView(props: {
   const [successText, setSuccessText] = useState("");
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [optionsErrorText, setOptionsErrorText] = useState("");
+  const [zendeskGroupsLoading, setZendeskGroupsLoading] = useState(false);
   const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
   const [knowledgeSets, setKnowledgeSets] = useState<KnowledgeSetRecord[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [zendeskGroups, setZendeskGroups] = useState<ZendeskGroupOption[]>([]);
 
   useEffect(() => {
     setName(props.detail.instance.name);
@@ -489,6 +535,33 @@ export function ZendeskIntegrationView(props: {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    async function loadZendeskGroups() {
+      if (!props.detail.instance.id || !asString(props.detail.config.zendeskBaseUrl).trim()) {
+        setZendeskGroups([]);
+        return;
+      }
+      setZendeskGroupsLoading(true);
+      try {
+        const response = await fetchZendeskGroups(props.detail.instance.id);
+        if (!active) return;
+        setZendeskGroups(response.groups.filter((item) => !item.deleted));
+      } catch (error) {
+        if (active) {
+          setOptionsErrorText(error instanceof Error ? error.message : "加载 Zendesk Groups 失败");
+        }
+      } finally {
+        if (active) setZendeskGroupsLoading(false);
+      }
+    }
+
+    void loadZendeskGroups();
+    return () => {
+      active = false;
+    };
+  }, [props.detail.instance.id, props.detail.instance.updatedAt, props.detail.config.zendeskBaseUrl]);
+
   const agentModeOptions = useMemo(
     () => agentModes.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
     [agentModes]
@@ -507,6 +580,14 @@ export function ZendeskIntegrationView(props: {
         }))
         .filter((item) => Boolean(item.value)),
     [adminUsers]
+  );
+  const zendeskGroupOptions = useMemo(
+    () =>
+      zendeskGroups.map((item) => ({
+        label: `${item.name} (#${item.id})`,
+        value: String(item.id)
+      })),
+    [zendeskGroups]
   );
   const dingtalkTemplatePreview = useMemo(
     () => renderDingTalkTemplatePreview(draft.dingtalkNotificationTemplate),
@@ -549,6 +630,7 @@ export function ZendeskIntegrationView(props: {
           dingtalkNotificationEnabled: draft.dingtalkNotificationEnabled,
           dingtalkNotificationManualRunsEnabled: draft.dingtalkNotificationManualRunsEnabled,
           dingtalkNotificationFallbackUserIds: asStringArray(draft.dingtalkNotificationFallbackUserIds),
+          dingtalkNotificationGroupFallbacks: prepareGroupFallbackRules(draft.dingtalkNotificationGroupFallbacks),
           dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(draft.dingtalkNotificationTemplate),
           dingtalkReviewRequiredEnabled: draft.dingtalkReviewRequiredEnabled,
           dingtalkReviewDueHours: Math.max(1, Math.min(168, Number(draft.dingtalkReviewDueHours) || 24)),
@@ -1102,6 +1184,109 @@ export function ZendeskIntegrationView(props: {
                             </Popconfirm>
                           </div>
                         </div>
+                      </div>
+                      <div className="field resource-center-form-span-2 zendesk-group-fallback-panel">
+                        <div className="zendesk-group-fallback-head">
+                          <div>
+                            <span className="field-label">Team fallback routing</span>
+                            <span className="field-help">
+                              当 assignee 为空或无法映射钉钉用户时，先按 Zendesk Group 指派评分人；未命中的 ticket 再走全局 fallback。
+                            </span>
+                          </div>
+                          <Button
+                            size="small"
+                            disabled={saving || !draft.dingtalkNotificationEnabled}
+                            onClick={() =>
+                              setDraft((current) => ({
+                                ...current,
+                                dingtalkNotificationGroupFallbacks: [
+                                  ...current.dingtalkNotificationGroupFallbacks,
+                                  { groupId: "", groupName: "", userIds: [] }
+                                ]
+                              }))
+                            }
+                          >
+                            添加规则
+                          </Button>
+                        </div>
+                        <div className="zendesk-group-fallback-flow">
+                          Assignee match → Zendesk Group fallback → Global fallback
+                        </div>
+                        {draft.dingtalkNotificationGroupFallbacks.length === 0 ? (
+                          <div className="zendesk-group-fallback-empty">
+                            暂未配置团队兜底。US team 未分配或无法映射 assignee 的 ticket 会继续走全局 fallback。
+                          </div>
+                        ) : (
+                          <div className="zendesk-group-fallback-list">
+                            {draft.dingtalkNotificationGroupFallbacks.map((rule, index) => (
+                              <div className="zendesk-group-fallback-row" key={`${rule.groupId || rule.groupName || "rule"}-${index}`}>
+                                <label className="field">
+                                  <span className="field-label">Zendesk Group</span>
+                                  <Select
+                                    showSearch
+                                    allowClear
+                                    value={rule.groupId || undefined}
+                                    options={zendeskGroupOptionsWithCurrent(zendeskGroupOptions, rule)}
+                                    loading={zendeskGroupsLoading}
+                                    optionFilterProp="label"
+                                    disabled={saving || !draft.dingtalkNotificationEnabled}
+                                    placeholder="选择 US / Global support group"
+                                    onChange={(value) => {
+                                      const selected = zendeskGroups.find((item) => String(item.id) === value);
+                                      setDraft((current) => ({
+                                        ...current,
+                                        dingtalkNotificationGroupFallbacks: current.dingtalkNotificationGroupFallbacks.map((item, itemIndex) =>
+                                          itemIndex === index
+                                            ? {
+                                                ...item,
+                                                groupId: value || "",
+                                                groupName: selected?.name || item.groupName || ""
+                                              }
+                                            : item
+                                        )
+                                      }));
+                                    }}
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span className="field-label">评分接收人</span>
+                                  <Select
+                                    mode="multiple"
+                                    showSearch
+                                    value={rule.userIds}
+                                    options={optionsWithCurrentValues(dingtalkUserOptions, rule.userIds)}
+                                    loading={optionsLoading}
+                                    optionFilterProp="label"
+                                    disabled={saving || !draft.dingtalkNotificationEnabled}
+                                    placeholder="搜索姓名、邮箱或钉钉 ID"
+                                    onChange={(value) =>
+                                      setDraft((current) => ({
+                                        ...current,
+                                        dingtalkNotificationGroupFallbacks: current.dingtalkNotificationGroupFallbacks.map((item, itemIndex) =>
+                                          itemIndex === index ? { ...item, userIds: value } : item
+                                        )
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <Button
+                                  danger
+                                  disabled={saving || !draft.dingtalkNotificationEnabled}
+                                  onClick={() =>
+                                    setDraft((current) => ({
+                                      ...current,
+                                      dingtalkNotificationGroupFallbacks: current.dingtalkNotificationGroupFallbacks.filter(
+                                        (_item, itemIndex) => itemIndex !== index
+                                      )
+                                    }))
+                                  }
+                                >
+                                  删除
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <label className="field resource-center-form-span-2">
                         <span className="field-label">Fallback @ Users</span>
