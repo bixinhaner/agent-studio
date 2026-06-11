@@ -516,8 +516,9 @@ export function CodexMemoryManagementView() {
     {
       title: "记忆空间",
       key: "scope",
+      width: "30%",
       render: (_: unknown, scope: CodexMemoryScope) => (
-        <Space direction="vertical" size={2} style={{ maxWidth: 420 }}>
+        <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
           <Space size={8} wrap>
             <Typography.Text strong>{scopeTitle(scope)}</Typography.Text>
             <Tag color={KIND_COLORS[scope.kind]}>{KIND_LABELS[scope.kind]}</Tag>
@@ -532,9 +533,9 @@ export function CodexMemoryManagementView() {
     {
       title: "归属",
       key: "owner",
-      width: 210,
+      width: "22%",
       render: (_: unknown, scope: CodexMemoryScope) => (
-        <Space direction="vertical" size={2}>
+        <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
           <Typography.Text>{ownerLabel(scope)}</Typography.Text>
           {scope.ownerEmail ? <Typography.Text type="secondary">{scope.ownerEmail}</Typography.Text> : null}
         </Space>
@@ -543,7 +544,7 @@ export function CodexMemoryManagementView() {
     {
       title: "智能体",
       key: "agent",
-      width: 180,
+      width: "14%",
       render: (_: unknown, scope: CodexMemoryScope) => <Typography.Text>{agentLabel(scope)}</Typography.Text>
     },
     {
@@ -561,13 +562,13 @@ export function CodexMemoryManagementView() {
       title: "更新时间",
       dataIndex: "latestModifiedAt",
       key: "latestModifiedAt",
-      width: 190,
+      width: 170,
       render: (value: string | null) => formatLocalTime(value)
     },
     {
       title: "操作",
       key: "actions",
-      width: 110,
+      width: 96,
       render: (_: unknown, scope: CodexMemoryScope) => (
         <Button size="small" icon={<Eye size={14} />} onClick={() => openScope(scope)}>
           查看
@@ -581,9 +582,9 @@ export function CodexMemoryManagementView() {
       title: "文件",
       key: "file",
       render: (_: unknown, file: CodexMemoryFile) => (
-        <Space size={8}>
+        <Space size={8} style={{ minWidth: 0 }}>
           <FileText size={15} />
-          <Space direction="vertical" size={0}>
+          <Space direction="vertical" size={0} style={{ minWidth: 0 }}>
             <Typography.Text strong>{fileDisplayName(file)}</Typography.Text>
             <Typography.Text type="secondary">{fileExtension(file).toUpperCase()} · {formatBytes(file.bytes)}</Typography.Text>
           </Space>
@@ -594,13 +595,13 @@ export function CodexMemoryManagementView() {
       title: "更新时间",
       dataIndex: "modifiedAt",
       key: "modifiedAt",
-      width: 180,
+      width: 160,
       render: (value: string) => formatLocalTime(value)
     },
     {
       title: "操作",
       key: "actions",
-      width: 170,
+      width: 140,
       render: (_: unknown, file: CodexMemoryFile) => (
         <Space>
           <Button size="small" icon={<PencilLine size={14} />} onClick={() => openFile(file)}>
@@ -809,11 +810,11 @@ export function CodexMemoryManagementView() {
 
   function renderOverview() {
     return (
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} xl={8}>
+      <div className="codex-memory-overview-grid" style={{ marginTop: 16 }}>
+        <div className="codex-memory-grid-cell">
           {renderSettingsPanel()}
-        </Col>
-        <Col xs={24} xl={16}>
+        </div>
+        <div className="codex-memory-grid-cell">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Row gutter={[12, 12]}>
               <Col xs={12} md={6}>
@@ -885,8 +886,8 @@ export function CodexMemoryManagementView() {
               />
             </div>
           </Space>
-        </Col>
-      </Row>
+        </div>
+      </div>
     );
   }
 
@@ -900,8 +901,8 @@ export function CodexMemoryManagementView() {
     }
 
     return (
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} xl={7}>
+      <div className="codex-memory-scope-grid" style={{ marginTop: 16 }}>
+        <div className="codex-memory-grid-cell">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <div className="admin-card" style={{ padding: 20 }}>
               <Space direction="vertical" size={14} style={{ width: "100%" }}>
@@ -980,9 +981,9 @@ export function CodexMemoryManagementView() {
               </Popconfirm>
             </div>
           </Space>
-        </Col>
+        </div>
 
-        <Col xs={24} xl={17}>
+        <div className="codex-memory-grid-cell">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <div className="admin-card" style={{ padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
@@ -1048,8 +1049,8 @@ export function CodexMemoryManagementView() {
               )}
             </div>
           </Space>
-        </Col>
-      </Row>
+        </div>
+      </div>
     );
   }
 
@@ -1078,13 +1079,13 @@ export function CodexMemoryManagementView() {
     );
 
     return (
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={6}>
+      <div className="codex-memory-file-grid" style={{ marginTop: 16 }}>
+        <div className="codex-memory-grid-cell">
           <div className="admin-card" style={{ padding: 16 }}>
             <Typography.Title level={5} style={{ marginTop: 0 }}>
               当前空间文件
             </Typography.Title>
-            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space className="codex-memory-scroll-list" direction="vertical" size={8} style={{ width: "100%" }}>
               {files.map((file) => (
                 <Button
                   key={file.path}
@@ -1100,8 +1101,8 @@ export function CodexMemoryManagementView() {
               ))}
             </Space>
           </div>
-        </Col>
-        <Col xs={24} lg={13}>
+        </div>
+        <div className="codex-memory-grid-cell">
           <div className="admin-card" style={{ padding: 20, minHeight: 620 }}>
             {fileLoading ? (
               <div style={{ padding: 48, textAlign: "center" }}>
@@ -1145,8 +1146,8 @@ export function CodexMemoryManagementView() {
               />
             )}
           </div>
-        </Col>
-        <Col xs={24} lg={5}>
+        </div>
+        <div className="codex-memory-grid-cell">
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <div className="admin-card" style={{ padding: 20 }}>
               <Typography.Title level={5} style={{ marginTop: 0 }}>
@@ -1210,8 +1211,8 @@ export function CodexMemoryManagementView() {
               </Space>
             </div>
           </Space>
-        </Col>
-      </Row>
+        </div>
+      </div>
     );
   }
 

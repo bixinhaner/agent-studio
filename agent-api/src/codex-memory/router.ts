@@ -53,6 +53,8 @@ type CodexMemoryScope = {
 const MAX_SCAN_DEPTH = 8;
 const MAX_SCOPE_COUNT = 2000;
 const MAX_FILE_CONTENT_BYTES = 1024 * 1024;
+const MEMORY_ROOT_FILE_NAMES = new Set(["MEMORY.md", "raw_memories.md", "memory_summary.md"]);
+const MEMORY_CONTENT_ROOTS = new Set(["rollout_summaries", "skills", "extensions"]);
 
 const writeMemoryFileSchema = z
   .object({
@@ -90,6 +92,42 @@ function safeRelativePath(value: string, label: string): string {
   return normalized;
 }
 
+function splitUnixPath(value: string): string[] {
+  return value.split("/").filter(Boolean);
+}
+
+function isHiddenPathSegment(value: string): boolean {
+  return value.startsWith(".");
+}
+
+function isMemoryManagedFile(relativeFilePath: string): boolean {
+  const parts = splitUnixPath(toUnixRelative(relativeFilePath));
+  if (!parts.length || parts.some(isHiddenPathSegment)) return false;
+  if (parts.length === 1) return MEMORY_ROOT_FILE_NAMES.has(parts[0]);
+  if (parts[0] === "rollout_summaries" || parts[0] === "skills") return true;
+  return parts[0] === "extensions" && parts[1] === "ad_hoc";
+}
+
+function shouldWalkMemoryDirectory(relativeDirectoryPath: string): boolean {
+  const parts = splitUnixPath(toUnixRelative(relativeDirectoryPath));
+  if (!parts.length) return true;
+  if (parts.some(isHiddenPathSegment)) return false;
+  if (!MEMORY_CONTENT_ROOTS.has(parts[0])) return false;
+  if (parts[0] !== "extensions") return true;
+  return parts.length === 1 || parts[1] === "ad_hoc";
+}
+
+function memoryFileSortRank(relativeFilePath: string): number {
+  const normalized = toUnixRelative(relativeFilePath);
+  if (normalized === "MEMORY.md") return 0;
+  if (normalized === "raw_memories.md") return 1;
+  if (normalized === "memory_summary.md") return 2;
+  if (normalized.startsWith("rollout_summaries/")) return 3;
+  if (normalized.startsWith("skills/")) return 4;
+  if (normalized.startsWith("extensions/ad_hoc/")) return 5;
+  return 9;
+}
+
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized || undefined;
@@ -112,6 +150,9 @@ function resolveMemoryFile(input: {
   const scope = resolveScopeHome(input.sessionHomeRoot, input.scopeId);
   const memoriesPath = path.resolve(scope.codexHome, "memories");
   const relativeFilePath = safeRelativePath(input.memoryFilePath, "memory file path");
+  if (!isMemoryManagedFile(relativeFilePath)) {
+    throw new Error("memory file path is not a managed memory file");
+  }
   const absoluteFilePath = path.resolve(memoriesPath, relativeFilePath);
   if (!isPathInside(memoriesPath, absoluteFilePath)) {
     throw new Error("memory file path is outside the memories directory");
@@ -286,10 +327,14 @@ async function summarizeMemoryDirectory(memoriesPath: string): Promise<{
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        const relativeDirectoryPath = toUnixRelative(path.relative(memoriesPath, absolutePath));
+        if (!shouldWalkMemoryDirectory(relativeDirectoryPath)) continue;
         await walk(absolutePath, depth + 1);
         continue;
       }
       if (!entry.isFile()) continue;
+      const relativePath = toUnixRelative(path.relative(memoriesPath, absolutePath));
+      if (!isMemoryManagedFile(relativePath)) continue;
       try {
         const stat = await fs.stat(absolutePath);
         fileCount += 1;
@@ -323,12 +368,15 @@ async function listMemoryFiles(memoriesPath: string): Promise<Array<{
     for (const entry of entries) {
       const absolutePath = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        const relativeDirectoryPath = toUnixRelative(path.relative(memoriesPath, absolutePath));
+        if (!shouldWalkMemoryDirectory(relativeDirectoryPath)) continue;
         await walk(absolutePath, depth + 1);
         continue;
       }
       if (!entry.isFile()) continue;
       const stat = await fs.stat(absolutePath);
       const relativePath = toUnixRelative(path.relative(memoriesPath, absolutePath));
+      if (!isMemoryManagedFile(relativePath)) continue;
       files.push({
         path: relativePath,
         name: entry.name,
@@ -339,8 +387,18 @@ async function listMemoryFiles(memoriesPath: string): Promise<Array<{
   }
 
   await walk(memoriesPath, 0);
-  files.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.path.localeCompare(right.path));
+  files.sort(
+    (left, right) =>
+      memoryFileSortRank(left.path) - memoryFileSortRank(right.path) ||
+      left.path.localeCompare(right.path) ||
+      right.modifiedAt.localeCompare(left.modifiedAt)
+  );
   return files;
+}
+
+async function clearManagedMemoryFiles(memoriesPath: string): Promise<void> {
+  const files = await listMemoryFiles(memoriesPath);
+  await Promise.all(files.map((file) => fs.rm(path.resolve(memoriesPath, file.path), { force: true })));
 }
 
 async function listMemoryScopes(sessionHomeRoot: string): Promise<CodexMemoryScope[]> {
@@ -567,8 +625,7 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         res.status(204).end();
         return;
       }
-      await fs.rm(memoriesPath, { recursive: true, force: true });
-      await fs.mkdir(memoriesPath, { recursive: true });
+      await clearManagedMemoryFiles(memoriesPath);
       res.status(204).end();
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });

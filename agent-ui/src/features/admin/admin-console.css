@@ -286,6 +286,50 @@
   box-shadow: var(--admin-shadow-md);
 }
 
+.codex-memory-overview-grid,
+.codex-memory-scope-grid,
+.codex-memory-file-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+  width: 100%;
+}
+
+.codex-memory-overview-grid {
+  grid-template-columns: minmax(360px, 0.85fr) minmax(0, 1.85fr);
+}
+
+.codex-memory-scope-grid {
+  grid-template-columns: minmax(300px, 0.64fr) minmax(0, 2.36fr);
+}
+
+.codex-memory-file-grid {
+  grid-template-columns: minmax(260px, 0.58fr) minmax(0, 2.12fr) minmax(240px, 0.52fr);
+}
+
+.codex-memory-grid-cell {
+  min-width: 0;
+}
+
+.codex-memory-scroll-list {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 1280px) {
+  .codex-memory-overview-grid,
+  .codex-memory-scope-grid,
+  .codex-memory-file-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .codex-memory-scroll-list {
+    max-height: 360px;
+  }
+}
+
 .ant-breadcrumb {
   font-size: 13px;
 }
