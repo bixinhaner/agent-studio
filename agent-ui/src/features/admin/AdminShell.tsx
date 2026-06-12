@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   ClipboardList,
   Component,
+  CreditCard,
   Crown,
   Database,
   FileUser,
@@ -43,6 +44,9 @@ const ConversationAuditViewLazy = lazy(() =>
 );
 const SubscriptionWorkspaceLazy = lazy(() =>
   import("./SubscriptionWorkspace").then((module) => ({ default: module.SubscriptionWorkspace }))
+);
+const BillingWorkspaceLazy = lazy(() =>
+  import("./BillingWorkspace").then((module) => ({ default: module.BillingWorkspace }))
 );
 const AccessRequestsWorkspaceLazy = lazy(() =>
   import("../access-requests/AccessRequestsWorkspace").then((module) => ({ default: module.AccessRequestsWorkspace }))
@@ -108,6 +112,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "analytics",
   "conversations",
   "subscriptions",
+  "billing",
   "access-requests",
   "broadcasts",
   "users",
@@ -151,6 +156,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "operations",
     keywords: ["订阅", "额度", "套餐", "到期"],
     icon: <Crown size={18} />
+  },
+  billing: {
+    id: "billing",
+    title: "计费与续费",
+    description: "管理外部客户付款、自动续费、优惠码、赠送时长和邮件提醒。",
+    scope: "订单与续费",
+    cadence: "建议每日巡检",
+    group: "operations",
+    keywords: ["billing", "stripe", "支付", "续费", "优惠码", "邮件"],
+    icon: <CreditCard size={18} />
   },
   "access-requests": {
     id: "access-requests",
@@ -351,6 +366,12 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <SubscriptionWorkspaceLazy />
+        </Suspense>
+      );
+    case "billing":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <BillingWorkspaceLazy />
         </Suspense>
       );
     case "access-requests":

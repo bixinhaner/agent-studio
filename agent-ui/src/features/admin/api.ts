@@ -6,6 +6,7 @@ import type {
   AdminApiAuditListResponse,
   AdminAiResponseReviewListInput,
   AdminAiResponseReviewListResponse,
+  AdminBillingOverviewResponse,
   AdminConversationDetailResponse,
   AdminConversationListInput,
   AdminConversationListResponse,
@@ -115,6 +116,122 @@ export async function deleteAdminOrganizationSubscriptionGrant(organizationId: s
 
 export async function fetchAdminSubscriptionDenials(): Promise<AdminSubscriptionDenialsResponse> {
   return api<AdminSubscriptionDenialsResponse>("/api/admin/subscriptions/denials");
+}
+
+export async function fetchAdminBillingOverview(): Promise<AdminBillingOverviewResponse> {
+  return api<AdminBillingOverviewResponse>("/api/admin/billing/overview");
+}
+
+export async function createAdminPromotionCode(input: {
+  code: string;
+  name?: string;
+  description?: string;
+  type: string;
+  value: number;
+  currency?: string;
+  status?: string;
+  maxRedemptions?: number | null;
+  perCustomerLimit?: number | null;
+  startsAt?: string | null;
+  expiresAt?: string | null;
+  eligiblePlanIds?: string[];
+  eligibleOrganizationIds?: string[];
+  eligibleEmailDomains?: string[];
+  eligibleSnValues?: string[];
+  ownerUserId?: string | null;
+  note?: string | null;
+}): Promise<AdminBillingOverviewResponse["promotionCodes"][number]> {
+  const response = await api<{ promotionCode: AdminBillingOverviewResponse["promotionCodes"][number] }>(
+    "/api/admin/billing/promotion-codes",
+    {
+      method: "POST",
+      json: input
+    }
+  );
+  return response.promotionCode;
+}
+
+export async function patchAdminPromotionCode(
+  promotionCodeId: string,
+  input: {
+    name?: string | null;
+    description?: string | null;
+    status?: string | null;
+    maxRedemptions?: number | null;
+    perCustomerLimit?: number | null;
+    expiresAt?: string | null;
+    note?: string | null;
+  }
+): Promise<AdminBillingOverviewResponse["promotionCodes"][number]> {
+  const response = await api<{ promotionCode: AdminBillingOverviewResponse["promotionCodes"][number] }>(
+    `/api/admin/billing/promotion-codes/${encodeURIComponent(promotionCodeId)}`,
+    {
+      method: "PATCH",
+      json: input
+    }
+  );
+  return response.promotionCode;
+}
+
+export async function createAdminBillingPaymentLink(input: {
+  organizationId: string;
+  planId: string;
+  promotionCode?: string;
+  autoRenew: boolean;
+}): Promise<{ checkoutUrl: string | null; order: AdminBillingOverviewResponse["orders"][number] }> {
+  return api<{ checkoutUrl: string | null; order: AdminBillingOverviewResponse["orders"][number] }>(
+    "/api/admin/billing/payment-links",
+    {
+      method: "POST",
+      json: input
+    }
+  );
+}
+
+export async function grantAdminBillingGiftDays(input: {
+  organizationId: string;
+  planId: string;
+  days: number;
+  reason?: string;
+  promotionCodeId?: string;
+}): Promise<{ order: AdminBillingOverviewResponse["orders"][number]; grant: AdminBillingOverviewResponse["customers"][number]["grant"] }> {
+  return api<{ order: AdminBillingOverviewResponse["orders"][number]; grant: AdminBillingOverviewResponse["customers"][number]["grant"] }>(
+    "/api/admin/billing/gift-days",
+    {
+      method: "POST",
+      json: input
+    }
+  );
+}
+
+export async function patchAdminBillingEmailRule(
+  ruleId: string,
+  input: {
+    status?: string;
+    audience?: unknown;
+    subject?: string;
+    bodyText?: string;
+    bodyHtml?: string | null;
+  }
+): Promise<AdminBillingOverviewResponse["emailRules"][number]> {
+  const response = await api<{ emailRule: AdminBillingOverviewResponse["emailRules"][number] }>(
+    `/api/admin/billing/email-rules/${encodeURIComponent(ruleId)}`,
+    {
+      method: "PATCH",
+      json: input
+    }
+  );
+  return response.emailRule;
+}
+
+export async function runAdminBillingEmailReminderSweep(input: { testEmail?: string } = {}): Promise<{
+  ok: true;
+  results: Array<{ ruleId: string; sent: number; skipped: number; failed: number }>;
+}> {
+  return api("/api/admin/billing/email-reminders/run", {
+    method: "POST",
+    json: input
+  });
 }
 
 export async function fetchAdminConversationAuditList(

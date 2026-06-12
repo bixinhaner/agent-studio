@@ -2,6 +2,7 @@ export type AdminSection =
   | "analytics"
   | "conversations"
   | "subscriptions"
+  | "billing"
   | "access-requests"
   | "users"
   | "resources"
@@ -41,6 +42,200 @@ export type AdminAiResponseReviewFilter =
   | "todo_failed"
   | "cancelled";
 export type AdminAiResponseReviewSort = "auto" | "created_desc" | "due_asc" | "overdue_desc" | "submitted_desc" | "score_asc";
+
+export type AdminBillingPlan = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  featureType: string;
+  monthlyCompletedTurnLimit?: number | null;
+  monthlyTokenLimit?: number | null;
+  billingCurrency: string;
+  billingInterval: string;
+  billingIntervalCount: number;
+  billingPriceCents: number | null;
+  billingStatus: string;
+  durationDays: number;
+};
+
+export type AdminBillingCustomer = {
+  id: string;
+  organizationId: string;
+  businessEmail?: string | null;
+  companyName?: string | null;
+  contactName?: string | null;
+  countryRegion?: string | null;
+  sn?: string | null;
+  salesContact?: string | null;
+  billingEmail?: string | null;
+  stripeCustomerId?: string | null;
+  defaultAutoRenew: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingGrant = {
+  id: string;
+  principalType: string;
+  principalId: string;
+  planId?: string | null;
+  planName?: string | null;
+  status: string;
+  startsAt?: string | null;
+  expiresAt?: string | null;
+  cycleAnchorAt?: string | null;
+  note?: string | null;
+};
+
+export type AdminBillingAutoRenewal = {
+  id: string;
+  organizationId: string;
+  billingCustomerId?: string | null;
+  planId?: string | null;
+  status: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  paymentMethodStatus: string;
+  currentPeriodStartsAt?: string | null;
+  currentPeriodEndsAt?: string | null;
+  nextRenewalAt?: string | null;
+  lastPaymentFailedAt?: string | null;
+  cancelAtPeriodEnd: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingOrder = {
+  id: string;
+  orderNumber: string;
+  organizationId: string;
+  billingCustomerId?: string | null;
+  planId?: string | null;
+  planName?: string | null;
+  status: string;
+  source: string;
+  checkoutMode: string;
+  currency: string;
+  amountSubtotalCents: number;
+  discountCents: number;
+  amountTotalCents: number;
+  durationDays: number;
+  giftDays: number;
+  autoRenew: boolean;
+  promotionCodeId?: string | null;
+  stripeCheckoutSessionId?: string | null;
+  stripeInvoiceId?: string | null;
+  stripeSubscriptionId?: string | null;
+  entitlementStartsAt?: string | null;
+  entitlementExpiresAt?: string | null;
+  paidAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminPromotionCode = {
+  id: string;
+  code: string;
+  name?: string | null;
+  description?: string | null;
+  type: string;
+  value: number;
+  currency: string;
+  status: string;
+  maxRedemptions?: number | null;
+  perCustomerLimit: number;
+  startsAt?: string | null;
+  expiresAt?: string | null;
+  eligiblePlanIds: string[];
+  eligibleOrganizationIds: string[];
+  eligibleEmailDomains: string[];
+  eligibleSnValues: string[];
+  ownerUserId?: string | null;
+  note?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingEmailRule = {
+  id: string;
+  triggerType: string;
+  offsetDays: number;
+  status: string;
+  audience?: unknown;
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string | null;
+  lastRunAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingStripeEvent = {
+  id: string;
+  stripeEventId: string;
+  eventType: string;
+  status: string;
+  livemode: boolean;
+  errorMessage?: string | null;
+  processedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingNotificationRecord = {
+  id: string;
+  organizationId?: string | null;
+  targetRef: string;
+  eventType: string;
+  status: string;
+  payload?: unknown;
+  errorMessage?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type AdminBillingCustomerAccount = {
+  organization: {
+    id: string;
+    slug: string;
+    name: string;
+    type: string;
+    status: string;
+  };
+  billingCustomer: AdminBillingCustomer | null;
+  grant: AdminBillingGrant | null;
+  autoRenewal: AdminBillingAutoRenewal | null;
+  latestOrder: AdminBillingOrder | null;
+  nextAction: string;
+};
+
+export type AdminBillingOverviewResponse = {
+  summary: {
+    revenueCents: number;
+    currency: string;
+    activeSubscriptions: number;
+    expiringIn14Days: number;
+    failedRenewals: number;
+    activeAutoRenewals: number;
+    promotionCodes: number;
+  };
+  customers: AdminBillingCustomerAccount[];
+  plans: AdminBillingPlan[];
+  orders: AdminBillingOrder[];
+  autoRenewals: AdminBillingAutoRenewal[];
+  promotionCodes: AdminPromotionCode[];
+  emailRules: AdminBillingEmailRule[];
+  stripeEvents: AdminBillingStripeEvent[];
+  notifications: AdminBillingNotificationRecord[];
+  stripe: {
+    secretKeyConfigured: boolean;
+    webhookSigningSecretConfigured: boolean;
+    successUrlConfigured: boolean;
+    cancelUrlConfigured: boolean;
+  };
+};
 
 export type AdminConversationUser = {
   id: string;
@@ -490,6 +685,11 @@ export type AdminSubscriptionPlan = {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  billingCurrency?: string | null;
+  billingInterval?: string | null;
+  billingIntervalCount?: number | null;
+  billingPriceCents?: number | null;
+  billingStatus?: string | null;
   createdAt: string;
   updatedAt: string;
   assignmentCount: {
@@ -509,6 +709,11 @@ export type AdminSubscriptionPlanInput = {
   status?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  billingCurrency?: string | null;
+  billingInterval?: string | null;
+  billingIntervalCount?: number | null;
+  billingPriceCents?: number | null;
+  billingStatus?: string | null;
 };
 
 export type AdminSubscriptionPlanDetailResponse = {

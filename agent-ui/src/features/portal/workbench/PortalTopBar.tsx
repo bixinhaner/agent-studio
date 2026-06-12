@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Button, Drawer, Space, Tooltip } from "antd";
 import {
   Ellipsis,
+  CreditCard,
   LayoutPanelLeft,
   MessageSquareText,
   PanelRightClose,
@@ -20,6 +21,7 @@ export function PortalTopBar(props: {
   onToggleDrawer(): void;
   onOpenAdmin?: () => void;
   onOpenFeedback?: () => void;
+  onOpenBilling?: () => void;
   runtimeSummary?: string;
   drawerOpen?: boolean;
   showRuntimeSummary?: boolean;
@@ -35,7 +37,7 @@ export function PortalTopBar(props: {
   const isMobile = props.mobile ?? false;
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const hasOverflowActions = Boolean(
-    props.onOpenFeedback || props.onOpenAdmin || showAdvancedSettings || (showRuntimeSummary && props.runtimeSummary)
+    props.onOpenBilling || props.onOpenFeedback || props.onOpenAdmin || showAdvancedSettings || (showRuntimeSummary && props.runtimeSummary)
   );
   const mobileActionItems = useMemo(
     () => [
@@ -47,6 +49,17 @@ export function PortalTopBar(props: {
             onClick: () => {
               setMobileActionsOpen(false);
               props.onOpenFeedback?.();
+            }
+          }
+        : null,
+      props.onOpenBilling
+        ? {
+            key: "billing",
+            label: "Subscription & billing",
+            icon: <CreditCard size={18} />,
+            onClick: () => {
+              setMobileActionsOpen(false);
+              props.onOpenBilling?.();
             }
           }
         : null,
@@ -78,7 +91,7 @@ export function PortalTopBar(props: {
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenFeedback, showAdvancedSettings]
+    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings]
   );
 
   return (
@@ -136,6 +149,18 @@ export function PortalTopBar(props: {
                   onClick={props.onOpenFeedback}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
                   aria-label="Send feedback"
+                />
+              </Tooltip>
+            ) : null}
+            {!isMobile && props.onOpenBilling ? (
+              <Tooltip title="Subscription & billing" placement="bottom">
+                <Button
+                  type="text"
+                  className="portal-topbar-ghost-btn"
+                  icon={<CreditCard size={18} />}
+                  onClick={props.onOpenBilling}
+                  style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+                  aria-label="Subscription and billing"
                 />
               </Tooltip>
             ) : null}

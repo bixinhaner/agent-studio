@@ -65,7 +65,8 @@ import {
   PackageIcon,
   ClipboardListIcon,
   BotIcon,
-  ZapIcon
+  ZapIcon,
+  CreditCardIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -81,7 +82,7 @@ import {
   type ThreadHistoryAdapter
 } from "@assistant-ui/core";
 import { AuiProvider, Derived, useAuiState } from "@assistant-ui/store";
-import { ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
+import { Button, ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
 import type { MenuProps } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
@@ -115,6 +116,7 @@ import {
   MarkdownTable
 } from "../markdown/markdown-rendering";
 import { PortalTopBar } from "./workbench/PortalTopBar";
+import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
 import {
   createPortalSkillDraftNewVersion,
@@ -3058,7 +3060,32 @@ const AssistantErrorNoticeCard: FC<{ notice: string; rawDetail?: string }> = ({ 
   </div>
 );
 
-const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus }> = ({ status }) => (
+function daysUntilSubscriptionExpiry(status: PortalSubscriptionStatus | null): number | null {
+  if (!status?.expiresAt) return null;
+  const date = new Date(status.expiresAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.ceil((date.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
+function shouldShowPortalSubscriptionReminder(status: PortalSubscriptionStatus | null): boolean {
+  if (!status) return false;
+  if (status.accessState === "blocked") return true;
+  const days = daysUntilSubscriptionExpiry(status);
+  return days !== null && days >= 0 && days <= 14;
+}
+
+function portalSubscriptionReminderKey(status: PortalSubscriptionStatus | null): string {
+  if (!shouldShowPortalSubscriptionReminder(status)) return "";
+  return [status?.reasonCode ?? "expiring", status?.expiresAt ?? status?.title ?? "unknown"].join(":");
+}
+
+function formatPortalLocalTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.toLocaleString()} local time`;
+}
+
+const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus; onOpenBilling?: () => void }> = ({ status, onOpenBilling }) => (
   <div className="thread-access-banner" role="alert" aria-live="polite">
     <div className="thread-access-banner-head">
       <AlertCircleIcon size={18} aria-hidden="true" />
@@ -3070,8 +3097,29 @@ const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus }> = ({ s
         {[buildSubscriptionResetLine(status), status.actionLabel].filter(Boolean).join(" ")}
       </p>
     ) : null}
+    {onOpenBilling ? (
+      <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
+        Renew access
+      </Button>
+    ) : null}
   </div>
 );
+
+const PortalSubscriptionReminderBanner: FC<{ status: PortalSubscriptionStatus; onOpenBilling: () => void }> = ({ status, onOpenBilling }) => {
+  const days = daysUntilSubscriptionExpiry(status);
+  return (
+    <div className="thread-access-banner thread-access-banner-subscription" role="status" aria-live="polite">
+      <div className="thread-access-banner-head">
+        <CreditCardIcon size={18} aria-hidden="true" />
+        <strong>{days === null ? status.title : days <= 0 ? "Access expires today" : `Trial ends in ${days} days`}</strong>
+      </div>
+      <p>{status.expiresAt ? `Your current access ends ${formatPortalLocalTime(status.expiresAt)}.` : status.summary}</p>
+      <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
+        Review renewal
+      </Button>
+    </div>
+  );
+};
 
 const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
   const normalized = message.trim();
@@ -5745,6 +5793,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   }, [activeThreadIdentity.remoteId]);
 
   const isExternalPortalUser = props.currentUser?.userType === "external_user";
+  const [billingPanelOpen, setBillingPanelOpen] = useState(false);
+  const [subscriptionReminderModalOpen, setSubscriptionReminderModalOpen] = useState(false);
+  const [dismissedSubscriptionReminderKey, setDismissedSubscriptionReminderKey] = useState("");
 
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
@@ -7661,7 +7712,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     [subscriptionStatus, subscriptionStatusError, subscriptionStatusLoading]
   );
   const blockedSubscriptionStatus = isSubscriptionAccessBlocked(subscriptionStatus) ? subscriptionStatus : null;
+  const subscriptionReminderStatus = !blockedSubscriptionStatus && shouldShowPortalSubscriptionReminder(subscriptionStatus)
+    ? subscriptionStatus
+    : null;
+  const subscriptionReminderKey = portalSubscriptionReminderKey(blockedSubscriptionStatus ?? subscriptionReminderStatus);
   const externalInlineErrorText = isExternalPortalUser && !blockedSubscriptionStatus ? errorText : "";
+
+  useEffect(() => {
+    if (!isExternalPortalUser) return;
+    if (!subscriptionReminderKey || subscriptionReminderKey === dismissedSubscriptionReminderKey) return;
+    setSubscriptionReminderModalOpen(true);
+  }, [dismissedSubscriptionReminderKey, isExternalPortalUser, subscriptionReminderKey]);
 
   const threadContent = (
     <div
@@ -7676,7 +7737,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </div>
       ) : null}
       {blockedSubscriptionStatus ? (
-        <PortalAccessBlockedBanner status={blockedSubscriptionStatus} />
+        <PortalAccessBlockedBanner status={blockedSubscriptionStatus} onOpenBilling={() => setBillingPanelOpen(true)} />
+      ) : subscriptionReminderStatus ? (
+        <PortalSubscriptionReminderBanner status={subscriptionReminderStatus} onOpenBilling={() => setBillingPanelOpen(true)} />
       ) : (
         <PortalInlineErrorBanner message={externalInlineErrorText} />
       )}
@@ -7785,6 +7848,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
                 onOpenAdmin={props.onOpenAdmin}
                 onOpenFeedback={openProductFeedbackModal}
+                onOpenBilling={() => setBillingPanelOpen(true)}
                 runtimeSummary={topbarRuntimeSummaryText}
                 showRuntimeSummary={!isExternalPortalUser}
                 showAdvancedSettings={!isExternalPortalUser}
@@ -8125,6 +8189,47 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   alt={productFeedbackPreviewImage.file.name || "Feedback screenshot preview"}
                 />
               ) : null}
+            </Modal>
+
+            <Drawer
+              placement="right"
+              title={null}
+              open={billingPanelOpen}
+              onClose={() => setBillingPanelOpen(false)}
+              width={isMobile ? "100%" : 440}
+              styles={{ body: { padding: 0 } }}
+              destroyOnHidden
+            >
+              <PortalBillingPanel
+                subscriptionStatus={subscriptionStatus}
+                onSubscriptionStatusChange={(nextStatus) => {
+                  if (nextStatus) setSubscriptionStatus(nextStatus);
+                }}
+                onClose={() => setBillingPanelOpen(false)}
+              />
+            </Drawer>
+
+            <Modal
+              open={subscriptionReminderModalOpen}
+              title={blockedSubscriptionStatus ? "Access expired" : "Review renewal"}
+              okText={blockedSubscriptionStatus ? "Renew now" : "Review renewal"}
+              cancelText="Later"
+              onOk={() => {
+                setSubscriptionReminderModalOpen(false);
+                setBillingPanelOpen(true);
+              }}
+              onCancel={() => {
+                setDismissedSubscriptionReminderKey(subscriptionReminderKey);
+                setSubscriptionReminderModalOpen(false);
+              }}
+              destroyOnHidden
+            >
+              <div className="portal-billing-reminder-modal">
+                <p>{(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.detail || (blockedSubscriptionStatus ?? subscriptionReminderStatus)?.summary}</p>
+                {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
+                  <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
+                ) : null}
+              </div>
             </Modal>
 
             {!isExternalPortalUser ? (
