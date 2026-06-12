@@ -63,3 +63,52 @@ export type CodexMemoryLlmSecretState = {
   rotatedAt?: string;
   updatedAt?: string;
 };
+
+export type CodexMemoryRunStatus = "written" | "skipped_no_durable_memory" | "skipped_missing_input" | "failed";
+
+export type CodexMemoryRunLog = {
+  id: string;
+  status: CodexMemoryRunStatus;
+  reason: string;
+  channel: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  promptChars: number;
+  answerChars: number;
+  relativeHome?: string;
+  codexThreadId?: string;
+  sessionId?: string;
+  threadId?: string;
+  organizationId?: string;
+  userId?: string;
+  model?: string;
+  hasExternalContext?: boolean;
+  llmProvider?: string;
+  llmApiMode?: string;
+  llmModel?: string;
+  category?: string;
+  confidence?: number;
+  memoryChars?: number;
+  error?: string;
+  scope?: Pick<
+    CodexMemoryScope,
+    | "id"
+    | "kind"
+    | "displayLabel"
+    | "displaySubtitle"
+    | "ownerName"
+    | "ownerEmail"
+    | "agentName"
+    | "agentSlug"
+    | "integrationName"
+    | "integrationType"
+    | "integrationSlug"
+  >;
+};
+
+export type CodexMemoryRunLogResponse = {
+  total: number;
+  summary: Record<CodexMemoryRunStatus, number>;
+  runs: CodexMemoryRunLog[];
+};

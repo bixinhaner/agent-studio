@@ -53,6 +53,7 @@ import {
   fetchCodexMemoryFileContent,
   fetchCodexMemoryFiles,
   fetchCodexMemoryLlmSecretState,
+  fetchCodexMemoryRuns,
   fetchCodexMemoryScopes,
   saveCodexMemoryLlmSecret,
   saveCodexMemoryFileContent
@@ -61,6 +62,8 @@ import type {
   CodexMemoryFile,
   CodexMemoryFileContent,
   CodexMemoryLlmSecretState,
+  CodexMemoryRunLog,
+  CodexMemoryRunStatus,
   CodexMemoryScope,
   CodexMemoryScopeKind,
   CodexMemorySettings
@@ -96,6 +99,36 @@ const KIND_COLORS: Record<CodexMemoryScopeKind, string> = {
   integration_agent: "purple",
   legacy_thread: "orange",
   unknown: "default"
+};
+
+const RUN_STATUS_LABELS: Record<CodexMemoryRunStatus, string> = {
+  written: "已写入",
+  skipped_no_durable_memory: "无长期记忆",
+  skipped_missing_input: "输入不足",
+  failed: "失败"
+};
+
+const RUN_STATUS_COLORS: Record<CodexMemoryRunStatus, string> = {
+  written: "green",
+  skipped_no_durable_memory: "default",
+  skipped_missing_input: "orange",
+  failed: "red"
+};
+
+const RUN_REASON_LABELS: Record<string, string> = {
+  memory_written: "已写入记忆",
+  model_declined: "模型判断无需沉淀",
+  empty_memory: "模型返回空记忆",
+  missing_prompt: "缺少用户输入",
+  missing_answer: "缺少助手回复",
+  missing_codex_home: "缺少 Codex home",
+  memory_disabled: "Memory 未启用",
+  generation_disabled: "自动生成未启用",
+  codex_native_generation: "当前使用 Codex 原生生成",
+  external_context_disabled: "外部上下文暂停生成",
+  missing_llm_config: "缺少 LLM 配置",
+  invalid_llm_response: "LLM 返回格式无效",
+  exception: "执行异常"
 };
 
 type MemoryView = "overview" | "scope" | "file";
@@ -328,6 +361,20 @@ export function CodexMemoryManagementView() {
   const [selectedScopeId, setSelectedScopeId] = useState("");
   const [scopeDetail, setScopeDetail] = useState<CodexMemoryScope | null>(null);
 
+  const [activeOverviewTab, setActiveOverviewTab] = useState("policy");
+  const [runs, setRuns] = useState<CodexMemoryRunLog[]>([]);
+  const [runsSummary, setRunsSummary] = useState<Record<CodexMemoryRunStatus, number>>({
+    written: 0,
+    skipped_no_durable_memory: 0,
+    skipped_missing_input: 0,
+    failed: 0
+  });
+  const [runsQuery, setRunsQuery] = useState("");
+  const [runsStatus, setRunsStatus] = useState<CodexMemoryRunStatus | "all">("all");
+  const [runsChannel, setRunsChannel] = useState("");
+  const [runsLoading, setRunsLoading] = useState(true);
+  const [runsError, setRunsError] = useState("");
+
   const [files, setFiles] = useState<CodexMemoryFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState("");
@@ -393,6 +440,18 @@ export function CodexMemoryManagementView() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function runReasonLabel(reason: string): string {
+    return RUN_REASON_LABELS[reason] ?? reason;
+  }
+
+  function runScopeLabel(run: CodexMemoryRunLog): string {
+    return run.scope?.displayLabel || run.scope?.ownerName || run.scope?.integrationName || "未归类空间";
+  }
+
+  function runScopeSubtitle(run: CodexMemoryRunLog): string {
+    return run.scope?.displaySubtitle || run.scope?.agentName || run.relativeHome || "未记录归属";
+  }
+
   async function loadSettings() {
     setSettingsLoading(true);
     setSettingsError("");
@@ -437,6 +496,30 @@ export function CodexMemoryManagementView() {
       setScopesError(error instanceof Error ? error.message : "加载记忆空间失败");
     } finally {
       setScopesLoading(false);
+    }
+  }
+
+  async function loadRuns(nextQuery = runsQuery, nextStatus = runsStatus, nextChannel = runsChannel) {
+    setRunsLoading(true);
+    setRunsError("");
+    try {
+      const response = await fetchCodexMemoryRuns({
+        query: nextQuery.trim(),
+        status: nextStatus,
+        channel: nextChannel.trim(),
+        limit: 300
+      });
+      setRuns(response.runs);
+      setRunsSummary({
+        written: response.summary.written ?? 0,
+        skipped_no_durable_memory: response.summary.skipped_no_durable_memory ?? 0,
+        skipped_missing_input: response.summary.skipped_missing_input ?? 0,
+        failed: response.summary.failed ?? 0
+      });
+    } catch (error) {
+      setRunsError(error instanceof Error ? error.message : "加载记忆统计日志失败");
+    } finally {
+      setRunsLoading(false);
     }
   }
 
@@ -494,6 +577,7 @@ export function CodexMemoryManagementView() {
   useEffect(() => {
     void loadSettings();
     void loadScopes();
+    void loadRuns();
   }, []);
 
   useEffect(() => {
@@ -708,6 +792,94 @@ export function CodexMemoryManagementView() {
     }
   ];
 
+  const runColumns: ColumnsType<CodexMemoryRunLog> = [
+    {
+      title: "时间",
+      dataIndex: "completedAt",
+      key: "completedAt",
+      width: 170,
+      defaultSortOrder: "descend",
+      sorter: (a, b) => compareTime(a.completedAt, b.completedAt),
+      render: (value: string) => formatLocalTime(value)
+    },
+    {
+      title: "结果",
+      key: "status",
+      width: 150,
+      filters: (Object.keys(RUN_STATUS_LABELS) as CodexMemoryRunStatus[]).map((status) => ({
+        text: RUN_STATUS_LABELS[status],
+        value: status
+      })),
+      onFilter: (value, run) => run.status === value,
+      sorter: (a, b) => compareText(RUN_STATUS_LABELS[a.status], RUN_STATUS_LABELS[b.status]),
+      render: (_: unknown, run: CodexMemoryRunLog) => (
+        <Space direction="vertical" size={2}>
+          <Tag color={RUN_STATUS_COLORS[run.status]}>{RUN_STATUS_LABELS[run.status]}</Tag>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {runReasonLabel(run.reason)}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: "记忆空间",
+      key: "scope",
+      sorter: (a, b) => compareText(runScopeLabel(a), runScopeLabel(b)),
+      render: (_: unknown, run: CodexMemoryRunLog) => (
+        <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
+          <Typography.Text strong ellipsis>
+            {runScopeLabel(run)}
+          </Typography.Text>
+          <Typography.Text type="secondary" ellipsis>
+            {runScopeSubtitle(run)}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: "渠道",
+      dataIndex: "channel",
+      key: "channel",
+      width: 120,
+      sorter: (a, b) => compareText(a.channel, b.channel),
+      render: (value: string) => <Tag>{value}</Tag>
+    },
+    {
+      title: "模型",
+      key: "model",
+      width: 170,
+      sorter: (a, b) => compareText(a.llmModel || a.model || "", b.llmModel || b.model || ""),
+      render: (_: unknown, run: CodexMemoryRunLog) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text>{run.llmModel || run.model || "未记录"}</Typography.Text>
+          {run.llmProvider ? <Typography.Text type="secondary">{run.llmProvider}</Typography.Text> : null}
+        </Space>
+      )
+    },
+    {
+      title: "耗时",
+      dataIndex: "durationMs",
+      key: "durationMs",
+      width: 100,
+      sorter: (a, b) => a.durationMs - b.durationMs,
+      render: (value: number) => `${Math.round(value)} ms`
+    },
+    {
+      title: "输入/输出",
+      key: "chars",
+      width: 120,
+      sorter: (a, b) => (a.promptChars + a.answerChars) - (b.promptChars + b.answerChars),
+      render: (_: unknown, run: CodexMemoryRunLog) => `${run.promptChars}/${run.answerChars}`
+    },
+    {
+      title: "错误",
+      dataIndex: "error",
+      key: "error",
+      width: 220,
+      render: (value?: string) => value ? <Typography.Text type="danger" ellipsis>{value}</Typography.Text> : <Typography.Text type="secondary">-</Typography.Text>
+    }
+  ];
+
   function renderHeader() {
     return (
       <div className="admin-page-header">
@@ -742,6 +914,7 @@ export function CodexMemoryManagementView() {
             onClick={() => {
               void loadSettings();
               void loadScopes();
+              void loadRuns();
               if (selectedScopeId) void loadFiles(selectedScopeId);
             }}
           >
@@ -1015,13 +1188,135 @@ export function CodexMemoryManagementView() {
     );
   }
 
+  function renderSpacesPanel() {
+    return (
+      <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+          <div>
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              记忆空间
+            </Typography.Title>
+            <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
+          </div>
+          <Space wrap>
+            <Segmented
+              value={scopeKind}
+              onChange={(value) => {
+                const next = value as CodexMemoryScopeKind | "all";
+                setScopeKind(next);
+                void loadScopes(scopeQuery, next);
+              }}
+              options={[
+                { label: "全部", value: "all" },
+                { label: "用户", value: "user_agent" },
+                { label: "集成", value: "integration_agent" },
+                { label: "旧会话", value: "legacy_thread" }
+              ]}
+            />
+            <Input
+              allowClear
+              prefix={<Search size={14} />}
+              placeholder="搜索用户、智能体或集成"
+              value={scopeQuery}
+              onChange={(event) => setScopeQuery(event.target.value)}
+              onPressEnter={() => void loadScopes()}
+              style={{ width: 280, maxWidth: "100%" }}
+            />
+            <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
+          </Space>
+        </div>
+
+        {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
+        <Table
+          rowKey="id"
+          loading={scopesLoading}
+          columns={scopeColumns}
+          dataSource={scopes}
+          scroll={{ x: 560 }}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
+          onRow={(scope) => ({
+            onClick: () => openScope(scope),
+            style: { cursor: "pointer" }
+          })}
+        />
+      </div>
+    );
+  }
+
+  function renderRunLogsPanel() {
+    return (
+      <div className="admin-card" style={{ padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+          <div>
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              统计日志
+            </Typography.Title>
+            <Typography.Text type="secondary">每轮 Codex 回复完成后的 memory 任务结果，用于判断为什么写入或跳过。</Typography.Text>
+          </div>
+          <Space wrap>
+            <Select
+              value={runsStatus}
+              onChange={(value) => {
+                const next = value as CodexMemoryRunStatus | "all";
+                setRunsStatus(next);
+                void loadRuns(runsQuery, next, runsChannel);
+              }}
+              options={[
+                { label: "全部结果", value: "all" },
+                ...Object.entries(RUN_STATUS_LABELS).map(([value, label]) => ({ value, label }))
+              ]}
+              style={{ width: 170 }}
+            />
+            <Input
+              allowClear
+              placeholder="渠道，如 portal / zendesk"
+              value={runsChannel}
+              onChange={(event) => setRunsChannel(event.target.value)}
+              onPressEnter={() => void loadRuns()}
+              style={{ width: 190, maxWidth: "100%" }}
+            />
+            <Input
+              allowClear
+              prefix={<Search size={14} />}
+              placeholder="搜索用户、智能体、原因或线程"
+              value={runsQuery}
+              onChange={(event) => setRunsQuery(event.target.value)}
+              onPressEnter={() => void loadRuns()}
+              style={{ width: 300, maxWidth: "100%" }}
+            />
+            <Button icon={<RefreshCcw size={16} />} onClick={() => void loadRuns()} />
+          </Space>
+        </div>
+
+        <div className="codex-memory-overview-metrics" style={{ marginBottom: 16 }}>
+          <MemoryMetric label="已写入" value={String(runsSummary.written)} hint="written" />
+          <MemoryMetric label="无长期记忆" value={String(runsSummary.skipped_no_durable_memory)} hint="skipped_no_durable_memory" />
+          <MemoryMetric label="输入不足" value={String(runsSummary.skipped_missing_input)} hint="skipped_missing_input" />
+          <MemoryMetric label="失败" value={String(runsSummary.failed)} hint="failed" />
+        </div>
+
+        {runsError ? <Alert type="error" showIcon message={runsError} style={{ marginBottom: 12 }} /> : null}
+        <Table
+          rowKey="id"
+          loading={runsLoading}
+          columns={runColumns}
+          dataSource={runs}
+          scroll={{ x: 1180 }}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          locale={{ emptyText: <Empty description="暂无 memory 任务日志" /> }}
+        />
+      </div>
+    );
+  }
+
   function renderOverview() {
     return (
       <div style={{ width: "100%", marginTop: 16 }}>
         <div className="codex-memory-overview-metrics" style={{ marginBottom: 16 }}>
           <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
           <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
-          <MemoryMetric label="占用空间" value={formatBytes(scopeStats.totalBytes)} hint="仅 memory 文件" />
+          <MemoryMetric label="最近写入" value={String(runsSummary.written)} hint="memory 任务写入数" />
           <MemoryMetric
             label="发布状态"
             value={publishedSettings?.enabled ? "已启用" : "未启用"}
@@ -1029,62 +1324,15 @@ export function CodexMemoryManagementView() {
           />
         </div>
 
-        <div className="codex-memory-overview-grid">
-          <div className="codex-memory-grid-cell">{renderSettingsPanel()}</div>
-          <div className="codex-memory-grid-cell">
-            <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, height: "100%", display: "flex", flexDirection: "column" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
-                <div>
-                  <Typography.Title level={4} style={{ margin: 0 }}>
-                    记忆空间
-                  </Typography.Title>
-                  <Typography.Text type="secondary">按用户、智能体和集成归属查看，不暴露底层目录。</Typography.Text>
-                </div>
-                <Space wrap>
-                  <Segmented
-                    value={scopeKind}
-                    onChange={(value) => {
-                      const next = value as CodexMemoryScopeKind | "all";
-                      setScopeKind(next);
-                      void loadScopes(scopeQuery, next);
-                    }}
-                    options={[
-                      { label: "全部", value: "all" },
-                      { label: "用户", value: "user_agent" },
-                      { label: "集成", value: "integration_agent" },
-                      { label: "旧会话", value: "legacy_thread" }
-                    ]}
-                  />
-                  <Input
-                    allowClear
-                    prefix={<Search size={14} />}
-                    placeholder="搜索用户、智能体或集成"
-                    value={scopeQuery}
-                    onChange={(event) => setScopeQuery(event.target.value)}
-                    onPressEnter={() => void loadScopes()}
-                    style={{ width: 260, maxWidth: "100%" }}
-                  />
-                  <Button icon={<RefreshCcw size={16} />} onClick={() => void loadScopes()} />
-                </Space>
-              </div>
-
-              {scopesError ? <Alert type="error" showIcon message={scopesError} style={{ marginBottom: 12 }} /> : null}
-              <Table
-                rowKey="id"
-                loading={scopesLoading}
-                columns={scopeColumns}
-                dataSource={scopes}
-                scroll={{ x: 640 }}
-                pagination={{ pageSize: 8, showSizeChanger: false }}
-                locale={{ emptyText: <Empty description="暂无记忆空间" /> }}
-                onRow={(scope) => ({
-                  onClick: () => openScope(scope),
-                  style: { cursor: "pointer" }
-                })}
-              />
-            </div>
-          </div>
-        </div>
+        <Tabs
+          activeKey={activeOverviewTab}
+          onChange={setActiveOverviewTab}
+          items={[
+            { key: "policy", label: "全局记忆策略", children: renderSettingsPanel() },
+            { key: "spaces", label: "记忆空间", children: renderSpacesPanel() },
+            { key: "runs", label: "统计日志", children: renderRunLogsPanel() }
+          ]}
+        />
       </div>
     );
   }

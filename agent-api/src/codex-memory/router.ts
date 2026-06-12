@@ -54,11 +54,55 @@ type CodexMemoryScope = {
   integrationSlug?: string;
 };
 
+type CodexMemoryRunLogItem = {
+  id: string;
+  status: "written" | "skipped_no_durable_memory" | "skipped_missing_input" | "failed";
+  reason: string;
+  channel: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  promptChars: number;
+  answerChars: number;
+  relativeHome?: string;
+  codexThreadId?: string;
+  sessionId?: string;
+  threadId?: string;
+  organizationId?: string;
+  userId?: string;
+  model?: string;
+  hasExternalContext?: boolean;
+  llmProvider?: string;
+  llmApiMode?: string;
+  llmModel?: string;
+  category?: string;
+  confidence?: number;
+  memoryChars?: number;
+  error?: string;
+  scope?: Pick<
+    CodexMemoryScope,
+    | "id"
+    | "kind"
+    | "displayLabel"
+    | "displaySubtitle"
+    | "ownerName"
+    | "ownerEmail"
+    | "agentName"
+    | "agentSlug"
+    | "integrationName"
+    | "integrationType"
+    | "integrationSlug"
+  >;
+};
+
 const MAX_SCAN_DEPTH = 8;
 const MAX_SCOPE_COUNT = 2000;
 const MAX_FILE_CONTENT_BYTES = 1024 * 1024;
+const MAX_RUN_LOG_ITEMS = 1000;
 const MEMORY_ROOT_FILE_NAMES = new Set(["MEMORY.md", "raw_memories.md", "memory_summary.md"]);
 const MEMORY_CONTENT_ROOTS = new Set(["rollout_summaries", "skills", "extensions"]);
+const MEMORY_RUN_LOG_PATH = path.join(".agent-studio", "memory-runs.jsonl");
+const MEMORY_RUN_STATUSES = new Set(["written", "skipped_no_durable_memory", "skipped_missing_input", "failed"]);
 
 const writeMemoryFileSchema = z
   .object({
@@ -142,6 +186,22 @@ function memoryFileSortRank(relativeFilePath: string): number {
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized || undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? trimOrUndefined(value) : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function resolveScopeHome(sessionHomeRoot: string, scopeId: string): { relativeHome: string; codexHome: string } {
@@ -305,6 +365,110 @@ async function enrichMemoryScopes(
       ...scope,
       displayLabel: "未识别记忆空间",
       displaySubtitle: "目录结构无法归类，建议排查来源"
+    };
+  });
+}
+
+function normalizeRunLogEntry(value: unknown): CodexMemoryRunLogItem | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const status = asString(record.status);
+  const completedAt = asString(record.completedAt);
+  if (!status || !MEMORY_RUN_STATUSES.has(status) || !completedAt) return undefined;
+  return {
+    id: asString(record.id) ?? `${completedAt}-${Math.random().toString(36).slice(2)}`,
+    status: status as CodexMemoryRunLogItem["status"],
+    reason: asString(record.reason) ?? "unknown",
+    channel: asString(record.channel) ?? "unknown",
+    startedAt: asString(record.startedAt) ?? completedAt,
+    completedAt,
+    durationMs: asNumber(record.durationMs) ?? 0,
+    promptChars: asNumber(record.promptChars) ?? 0,
+    answerChars: asNumber(record.answerChars) ?? 0,
+    relativeHome: asString(record.relativeHome),
+    codexThreadId: asString(record.codexThreadId),
+    sessionId: asString(record.sessionId),
+    threadId: asString(record.threadId),
+    organizationId: asString(record.organizationId),
+    userId: asString(record.userId),
+    model: asString(record.model),
+    hasExternalContext: asBoolean(record.hasExternalContext),
+    llmProvider: asString(record.llmProvider),
+    llmApiMode: asString(record.llmApiMode),
+    llmModel: asString(record.llmModel),
+    category: asString(record.category),
+    confidence: asNumber(record.confidence),
+    memoryChars: asNumber(record.memoryChars),
+    error: asString(record.error)
+  };
+}
+
+async function listMemoryRunLogs(sessionHomeRoot: string): Promise<CodexMemoryRunLogItem[]> {
+  const logPath = path.join(sessionHomeRoot, MEMORY_RUN_LOG_PATH);
+  let content = "";
+  try {
+    content = await fs.readFile(logPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return content
+    .split(/\n/)
+    .filter(Boolean)
+    .slice(-MAX_RUN_LOG_ITEMS)
+    .map((line) => {
+      try {
+        return normalizeRunLogEntry(JSON.parse(line));
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((entry): entry is CodexMemoryRunLogItem => Boolean(entry))
+    .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
+}
+
+async function enrichMemoryRunLogs(
+  runs: CodexMemoryRunLogItem[],
+  options: CodexMemoryAdminRouterOptions,
+  sessionHomeRoot: string
+): Promise<CodexMemoryRunLogItem[]> {
+  const scopes: CodexMemoryScope[] = [];
+  for (const run of runs) {
+    const relativeHome = trimOrUndefined(run.relativeHome);
+    if (!relativeHome) continue;
+    const codexHome = path.resolve(sessionHomeRoot, relativeHome);
+    scopes.push({
+      id: encodeScopeId(relativeHome),
+      relativeHome,
+      codexHome,
+      memoriesPath: path.join(codexHome, "memories"),
+      fileCount: 0,
+      totalBytes: 0,
+      latestModifiedAt: null,
+      ...classifyScope(relativeHome)
+    });
+  }
+  const enrichedByRelativeHome = new Map(
+    (await enrichMemoryScopes(scopes, options)).map((scope) => [scope.relativeHome, scope] as const)
+  );
+  return runs.map((run) => {
+    const scope = run.relativeHome ? enrichedByRelativeHome.get(run.relativeHome) : undefined;
+    if (!scope) return run;
+    return {
+      ...run,
+      scope: {
+        id: scope.id,
+        kind: scope.kind,
+        displayLabel: scope.displayLabel,
+        displaySubtitle: scope.displaySubtitle,
+        ownerName: scope.ownerName,
+        ownerEmail: scope.ownerEmail,
+        agentName: scope.agentName,
+        agentSlug: scope.agentSlug,
+        integrationName: scope.integrationName,
+        integrationType: scope.integrationType,
+        integrationSlug: scope.integrationSlug
+      }
     };
   });
 }
@@ -535,6 +699,61 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         return;
       }
       res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/codex-memory/runs", requireRead, async (req: Request, res: Response) => {
+    try {
+      const status = String(req.query.status ?? "").trim();
+      const channel = String(req.query.channel ?? "").trim().toLowerCase();
+      const query = String(req.query.query ?? "").trim().toLowerCase();
+      const limitInput = Number.parseInt(String(req.query.limit ?? "200"), 10);
+      const limit = Number.isFinite(limitInput) && limitInput > 0 ? Math.min(limitInput, 500) : 200;
+      const allRuns = await enrichMemoryRunLogs(await listMemoryRunLogs(sessionHomeRoot), options, sessionHomeRoot);
+      const summary = allRuns.reduce<Record<CodexMemoryRunLogItem["status"], number>>(
+        (acc, run) => {
+          acc[run.status] += 1;
+          return acc;
+        },
+        {
+          written: 0,
+          skipped_no_durable_memory: 0,
+          skipped_missing_input: 0,
+          failed: 0
+        }
+      );
+      const runs = allRuns
+        .filter((run) => !status || run.status === status)
+        .filter((run) => !channel || run.channel.toLowerCase() === channel)
+        .filter((run) => {
+          if (!query) return true;
+          return [
+            run.channel,
+            run.reason,
+            run.model,
+            run.llmProvider,
+            run.llmModel,
+            run.category,
+            run.scope?.displayLabel,
+            run.scope?.displaySubtitle,
+            run.scope?.ownerName,
+            run.scope?.ownerEmail,
+            run.scope?.agentName,
+            run.scope?.integrationName,
+            run.threadId,
+            run.sessionId,
+            run.codexThreadId
+          ]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query));
+        });
+      res.json({
+        total: runs.length,
+        summary,
+        runs: runs.slice(0, limit)
+      });
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
     }
   });
 

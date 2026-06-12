@@ -4,6 +4,8 @@ import type {
   CodexMemoryFileContentResponse,
   CodexMemoryFilesResponse,
   CodexMemoryLlmSecretState,
+  CodexMemoryRunLogResponse,
+  CodexMemoryRunStatus,
   CodexMemoryScopeKind,
   CodexMemoryScopeListResponse
 } from "./types";
@@ -80,4 +82,19 @@ export async function saveCodexMemoryLlmSecret(input: {
     method: "PUT",
     json: input
   });
+}
+
+export async function fetchCodexMemoryRuns(input: {
+  query?: string;
+  status?: CodexMemoryRunStatus | "all";
+  channel?: string;
+  limit?: number;
+} = {}): Promise<CodexMemoryRunLogResponse> {
+  const query = new URLSearchParams();
+  if (input.query) query.set("query", input.query);
+  if (input.status && input.status !== "all") query.set("status", input.status);
+  if (input.channel) query.set("channel", input.channel);
+  if (input.limit) query.set("limit", String(input.limit));
+  const suffix = query.toString();
+  return api<CodexMemoryRunLogResponse>(`/api/admin/codex-memory/runs${suffix ? `?${suffix}` : ""}`);
 }

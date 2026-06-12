@@ -44,9 +44,53 @@ type MemoryExtraction = {
   slug?: string;
 };
 
+export type CodexMemoryRunStatus = "written" | "skipped_no_durable_memory" | "skipped_missing_input" | "failed";
+
+export type CodexMemoryRunLogEntry = {
+  id: string;
+  status: CodexMemoryRunStatus;
+  reason: string;
+  channel: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  promptChars: number;
+  answerChars: number;
+  codexHome?: string;
+  relativeHome?: string;
+  codexThreadId?: string;
+  sessionId?: string;
+  threadId?: string;
+  organizationId?: string;
+  userId?: string;
+  model?: string;
+  hasExternalContext?: boolean;
+  llmProvider?: string;
+  llmApiMode?: string;
+  llmModel?: string;
+  category?: string;
+  confidence?: number;
+  memoryChars?: number;
+  error?: string;
+};
+
+type CodexMemoryRunOutcome = {
+  status: CodexMemoryRunStatus;
+  reason: string;
+  llmProvider?: string;
+  llmApiMode?: string;
+  llmModel?: string;
+  category?: string;
+  confidence?: number;
+  memoryChars?: number;
+  error?: string;
+};
+
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_PROMPT_CHARS = 8000;
 const MAX_ANSWER_CHARS = 12000;
+const MAX_RUN_LOG_ENTRIES = 1000;
+const RUN_LOG_RELATIVE_PATH = path.join(".agent-studio", "memory-runs.jsonl");
 
 function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -308,6 +352,15 @@ async function readTextIfExists(filePath: string): Promise<string> {
   }
 }
 
+function relativeHomeFromRoot(sessionHomeRoot: string | undefined, codexHome: string | undefined): string | undefined {
+  const root = trimOrUndefined(sessionHomeRoot);
+  const home = trimOrUndefined(codexHome);
+  if (!root || !home) return undefined;
+  const relative = path.relative(path.resolve(root), path.resolve(home));
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+  return relative.split(path.sep).join("/");
+}
+
 export class CodexMemoryEngine implements CodexMemoryRunRecorder {
   private queue: Promise<void> = Promise.resolve();
 
@@ -315,12 +368,13 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
     getSettings(): Promise<SystemSettingsCodexMemory | undefined>;
     resolveProviderSnapshot(): Promise<ManagedCodexProviderSnapshot>;
     getLlmSecretState?(): Promise<{ apiKey?: string } | undefined>;
+    sessionHomeRoot?: string;
     logger?: Pick<typeof console, "warn" | "info">;
   }) {}
 
   enqueueRun(input: CodexMemoryRunInput): void {
     this.queue = this.queue
-      .then(() => this.processRun(input))
+      .then(() => this.processRunWithLog(input))
       .catch((error) => {
         this.dependencies.logger?.warn?.("codex memory generation failed", {
           channel: input.channel,
@@ -331,15 +385,88 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       });
   }
 
-  private async processRun(input: CodexMemoryRunInput): Promise<void> {
+  private async processRunWithLog(input: CodexMemoryRunInput): Promise<void> {
+    const startedAt = new Date();
+    try {
+      const outcome = await this.processRun(input);
+      await this.recordRunLog(input, startedAt, outcome);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.recordRunLog(input, startedAt, {
+        status: "failed",
+        reason: "exception",
+        error: detail
+      }).catch((logError) => {
+        this.dependencies.logger?.warn?.("codex memory run log write failed", {
+          detail: logError instanceof Error ? logError.message : String(logError)
+        });
+      });
+      this.dependencies.logger?.warn?.("codex memory generation failed", {
+        channel: input.channel,
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        detail
+      });
+    }
+  }
+
+  private async recordRunLog(input: CodexMemoryRunInput, startedAt: Date, outcome: CodexMemoryRunOutcome): Promise<void> {
+    const sessionHomeRoot = trimOrUndefined(this.dependencies.sessionHomeRoot);
+    if (!sessionHomeRoot) return;
+    const completedAt = new Date();
+    const entry: CodexMemoryRunLogEntry = {
+      id: randomUUID(),
+      status: outcome.status,
+      reason: outcome.reason,
+      channel: input.channel,
+      startedAt: startedAt.toISOString(),
+      completedAt: completedAt.toISOString(),
+      durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+      promptChars: trimOrUndefined(input.prompt)?.length ?? 0,
+      answerChars: trimOrUndefined(input.answerText)?.length ?? 0,
+      codexHome: trimOrUndefined(input.codexHome),
+      relativeHome: relativeHomeFromRoot(sessionHomeRoot, input.codexHome),
+      codexThreadId: trimOrUndefined(input.codexThreadId),
+      sessionId: trimOrUndefined(input.sessionId),
+      threadId: trimOrUndefined(input.threadId),
+      organizationId: trimOrUndefined(input.organizationId),
+      userId: trimOrUndefined(input.userId),
+      model: trimOrUndefined(input.model),
+      hasExternalContext: Boolean(input.hasExternalContext),
+      llmProvider: outcome.llmProvider,
+      llmApiMode: outcome.llmApiMode,
+      llmModel: outcome.llmModel,
+      category: outcome.category,
+      confidence: outcome.confidence,
+      memoryChars: outcome.memoryChars,
+      error: outcome.error
+    };
+    const logPath = path.join(sessionHomeRoot, RUN_LOG_RELATIVE_PATH);
+    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    const existing = await readTextIfExists(logPath);
+    const lines = existing.split(/\n/).filter(Boolean).slice(-MAX_RUN_LOG_ENTRIES + 1);
+    lines.push(JSON.stringify(entry));
+    await fs.writeFile(logPath, `${lines.join("\n")}\n`, "utf8");
+  }
+
+  private async processRun(input: CodexMemoryRunInput): Promise<CodexMemoryRunOutcome> {
     const prompt = trimOrUndefined(input.prompt);
     const answer = trimOrUndefined(input.answerText);
     const codexHome = trimOrUndefined(input.codexHome);
-    if (!prompt || !answer || !codexHome) return;
+    if (!prompt || !answer || !codexHome) {
+      return {
+        status: "skipped_missing_input",
+        reason: !prompt ? "missing_prompt" : !answer ? "missing_answer" : "missing_codex_home"
+      };
+    }
 
     const settings = await this.dependencies.getSettings();
-    if (!settings?.enabled || !settings.generateMemories || settings.generationEngine !== "agent_studio") return;
-    if (settings.disableOnExternalContext && input.hasExternalContext) return;
+    if (!settings?.enabled) return { status: "skipped_no_durable_memory", reason: "memory_disabled" };
+    if (!settings.generateMemories) return { status: "skipped_no_durable_memory", reason: "generation_disabled" };
+    if (settings.generationEngine !== "agent_studio") return { status: "skipped_no_durable_memory", reason: "codex_native_generation" };
+    if (settings.disableOnExternalContext && input.hasExternalContext) {
+      return { status: "skipped_no_durable_memory", reason: "external_context_disabled" };
+    }
 
     const snapshot = await this.dependencies.resolveProviderSnapshot();
     const secretState = await this.dependencies.getLlmSecretState?.();
@@ -350,18 +477,53 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
         apiMode: settings.llmApiMode,
         apiKeyEnv: settings.llmApiKeyEnv
       });
-      return;
+      return {
+        status: "failed",
+        reason: "missing_llm_config",
+        llmProvider: settings.llmProvider,
+        llmApiMode: settings.llmApiMode,
+        llmModel: trimOrUndefined(settings.llmModel) || snapshot.config.defaultModel || DEFAULT_MODEL
+      };
     }
 
     const llmText = await callLlm(llmConfig, buildExtractionPrompt(input));
     const extraction = normalizeExtraction(parseJsonObject(llmText));
     const memory = trimOrUndefined(extraction?.memory);
-    if (!extraction?.shouldRemember || !memory) return;
+    if (!extraction) {
+      return {
+        status: "failed",
+        reason: "invalid_llm_response",
+        llmProvider: llmConfig.provider,
+        llmApiMode: llmConfig.apiMode,
+        llmModel: llmConfig.model
+      };
+    }
+    if (!extraction.shouldRemember || !memory) {
+      return {
+        status: "skipped_no_durable_memory",
+        reason: !extraction.shouldRemember ? "model_declined" : "empty_memory",
+        llmProvider: llmConfig.provider,
+        llmApiMode: llmConfig.apiMode,
+        llmModel: llmConfig.model,
+        category: extraction.category,
+        confidence: extraction.confidence
+      };
+    }
 
     await this.writeMemoryFiles(codexHome, input, {
       ...extraction,
       memory
     });
+    return {
+      status: "written",
+      reason: "memory_written",
+      llmProvider: llmConfig.provider,
+      llmApiMode: llmConfig.apiMode,
+      llmModel: llmConfig.model,
+      category: extraction.category,
+      confidence: extraction.confidence,
+      memoryChars: memory.length
+    };
   }
 
   private async writeMemoryFiles(codexHome: string, input: CodexMemoryRunInput, extraction: MemoryExtraction & { memory: string }): Promise<void> {

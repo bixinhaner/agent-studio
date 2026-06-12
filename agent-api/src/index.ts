@@ -350,6 +350,7 @@ codexMemoryEngine = new CodexMemoryEngine({
     createDefaultSystemSettingsPayload().codexMemory,
   resolveProviderSnapshot: () => codexProviders.resolveActiveProviderSnapshot(),
   getLlmSecretState: getCodexMemoryLlmSecretState,
+  sessionHomeRoot: appConfig.codex.sessionHomeRoot,
   logger: console
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);

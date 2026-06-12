@@ -73,6 +73,111 @@ describe("CodexMemoryEngine", () => {
     expect(rolloutFiles).toHaveLength(1);
   });
 
+  it("records memory run outcomes for written and skipped tasks", async () => {
+    const sessionHomeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-root-"));
+    const codexHome = path.join(sessionHomeRoot, "internal", "user-1", "agent-mode-1");
+    const settings = {
+      ...createDefaultSystemSettingsPayload().codexMemory,
+      disableOnExternalContext: false
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          shouldRemember: true,
+          confidence: 0.92,
+          category: "preference",
+          memory: "用户偏好测试记忆统计日志。",
+          summary: "测试统计日志写入。",
+          slug: "memory-log"
+        })
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          shouldRemember: false,
+          confidence: 0.2,
+          category: "transient",
+          memory: "",
+          summary: "",
+          slug: "skip"
+        })
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = new CodexMemoryEngine({
+      getSettings: async () => settings,
+      resolveProviderSnapshot: async () => providerSnapshot,
+      sessionHomeRoot,
+      logger: console
+    });
+
+    engine.enqueueRun({
+      channel: "portal",
+      prompt: "记住统计日志。",
+      answerText: "已记录。",
+      codexHome,
+      hasExternalContext: false
+    });
+    engine.enqueueRun({
+      channel: "portal",
+      prompt: "今天随便问一下天气。",
+      answerText: "这是一次性问题。",
+      codexHome,
+      hasExternalContext: false
+    });
+    await (engine as unknown as { queue: Promise<void> }).queue;
+
+    const log = await fs.readFile(path.join(sessionHomeRoot, ".agent-studio", "memory-runs.jsonl"), "utf8");
+    const entries = log.trim().split("\n").map((line) => JSON.parse(line) as { status: string; reason: string; relativeHome?: string });
+    expect(entries).toMatchObject([
+      { status: "written", reason: "memory_written", relativeHome: "internal/user-1/agent-mode-1" },
+      { status: "skipped_no_durable_memory", reason: "model_declined", relativeHome: "internal/user-1/agent-mode-1" }
+    ]);
+  });
+
+  it("records missing input and failed memory run outcomes", async () => {
+    const sessionHomeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-root-"));
+    const codexHome = path.join(sessionHomeRoot, "internal", "user-1", "agent-mode-1");
+    const settings = {
+      ...createDefaultSystemSettingsPayload().codexMemory,
+      llmProvider: "openai_compatible" as const,
+      llmBaseUrl: "https://api.example.test",
+      disableOnExternalContext: false
+    };
+    const engine = new CodexMemoryEngine({
+      getSettings: async () => settings,
+      resolveProviderSnapshot: async () => ({
+        ...providerSnapshot,
+        secrets: {}
+      }),
+      getLlmSecretState: async () => ({}),
+      sessionHomeRoot,
+      logger: console
+    });
+
+    engine.enqueueRun({
+      channel: "portal",
+      prompt: "",
+      answerText: "无输入。",
+      codexHome,
+      hasExternalContext: false
+    });
+    engine.enqueueRun({
+      channel: "portal",
+      prompt: "记住一条偏好。",
+      answerText: "好的。",
+      codexHome,
+      hasExternalContext: false
+    });
+    await (engine as unknown as { queue: Promise<void> }).queue;
+
+    const log = await fs.readFile(path.join(sessionHomeRoot, ".agent-studio", "memory-runs.jsonl"), "utf8");
+    const entries = log.trim().split("\n").map((line) => JSON.parse(line) as { status: string; reason: string; error?: string });
+    expect(entries).toMatchObject([
+      { status: "skipped_missing_input", reason: "missing_prompt" },
+      { status: "failed", reason: "missing_llm_config" }
+    ]);
+  });
+
   it("skips Agent Studio generation when Codex native generation is selected", async () => {
     const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-"));
     const settings = {
