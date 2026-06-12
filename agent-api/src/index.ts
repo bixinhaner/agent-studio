@@ -39,6 +39,8 @@ import { InboxProjectionService } from "./collaboration/inbox-projection-service
 import { createCollaborationRouter } from "./collaboration/router.js";
 import { ThreadCollaborationService } from "./collaboration/thread-collaboration-service.js";
 import { appConfig, resolveWorkspace } from "./config.js";
+import { createAdminBillingRouter, createPortalBillingRouter } from "./billing/router.js";
+import { BillingService } from "./billing/service.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
 import {
@@ -511,6 +513,12 @@ async function sendActiveDingTalkWorkNotice(input: { userIds?: string[]; message
 }
 
 const authEmailSender = createAuthEmailSender(appConfig.authEmail);
+const billingService = new BillingService({
+  db,
+  config: appConfig.billing,
+  emailSender: authEmailSender,
+  notifications: notificationRecords
+});
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({
   requests: accessRequests,
@@ -6533,6 +6541,22 @@ app.post(
     await handleZendeskWebhookRequest(zendesk, req, res);
   }
 );
+app.post(
+  "/api/integrations/stripe/webhook",
+  express.raw({
+    type: () => true,
+    limit: "1mb"
+  }),
+  async (req: Request, res: Response) => {
+    try {
+      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? "");
+      const result = await billingService.handleStripeWebhook(rawBody, req.header("stripe-signature") ?? undefined);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ detail: error instanceof Error ? error.message : "Stripe webhook failed" });
+    }
+  }
+);
 app.use(express.json({ limit: "1mb" }));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
@@ -6740,6 +6764,14 @@ registerCommonApiRoutes(app, {
   zendeskRouter: createZendeskAdminRouter(zendesk),
   crestRouter: crestIntegrationRouter
 });
+
+app.use("/api/admin", createAdminBillingRouter(billingService));
+app.use(
+  "/api/portal",
+  createPortalBillingRouter(billingService, {
+    subscriptionEntitlements
+  })
+);
 
 app.use(
   "/api/admin/access-requests",
@@ -7975,6 +8007,12 @@ async function cleanupExpiredSessions() {
 setInterval(() => {
   void cleanupExpiredSessions();
 }, 60_000).unref();
+
+setInterval(() => {
+  void billingService.runReminderSweep().catch((error) => {
+    console.warn("billing reminder sweep failed", error instanceof Error ? error.message : String(error));
+  });
+}, 60 * 60_000).unref();
 
 async function bootstrap() {
   await db.$connect();

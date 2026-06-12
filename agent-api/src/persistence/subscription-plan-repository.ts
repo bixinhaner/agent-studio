@@ -7,6 +7,11 @@ export type SubscriptionPlanRecord = {
   featureType: string;
   monthlyCompletedTurnLimit?: number;
   monthlyTokenLimit?: number;
+  billingCurrency?: string;
+  billingInterval?: string;
+  billingIntervalCount?: number;
+  billingPriceCents?: number;
+  billingStatus?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -19,6 +24,11 @@ export type CreateSubscriptionPlanInput = {
   featureType?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  billingCurrency?: string | null;
+  billingInterval?: string | null;
+  billingIntervalCount?: number | null;
+  billingPriceCents?: number | null;
+  billingStatus?: string | null;
 };
 
 export type UpdateSubscriptionPlanInput = {
@@ -29,6 +39,11 @@ export type UpdateSubscriptionPlanInput = {
   featureType?: string;
   monthlyCompletedTurnLimit?: number | null;
   monthlyTokenLimit?: number | null;
+  billingCurrency?: string | null;
+  billingInterval?: string | null;
+  billingIntervalCount?: number | null;
+  billingPriceCents?: number | null;
+  billingStatus?: string | null;
 };
 
 type SubscriptionPlanRow = {
@@ -40,6 +55,11 @@ type SubscriptionPlanRow = {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  billingCurrency: string;
+  billingInterval: string;
+  billingIntervalCount: number;
+  billingPriceCents: number | null;
+  billingStatus: string;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -58,6 +78,11 @@ type SubscriptionPlanTable = {
       featureType: string;
       monthlyCompletedTurnLimit: number | null;
       monthlyTokenLimit: number | null;
+      billingCurrency?: string;
+      billingInterval?: string;
+      billingIntervalCount?: number;
+      billingPriceCents?: number | null;
+      billingStatus?: string;
     };
   }): Promise<SubscriptionPlanRow>;
   update(args: {
@@ -70,6 +95,11 @@ type SubscriptionPlanTable = {
       featureType?: string;
       monthlyCompletedTurnLimit?: number | null;
       monthlyTokenLimit?: number | null;
+      billingCurrency?: string;
+      billingInterval?: string;
+      billingIntervalCount?: number;
+      billingPriceCents?: number | null;
+      billingStatus?: string;
     };
   }): Promise<SubscriptionPlanRow>;
 };
@@ -100,6 +130,11 @@ function mapPlan(row: {
   featureType: string;
   monthlyCompletedTurnLimit: number | null;
   monthlyTokenLimit: number | null;
+  billingCurrency: string;
+  billingInterval: string;
+  billingIntervalCount: number;
+  billingPriceCents: number | null;
+  billingStatus: string;
   createdAt: Date | string;
   updatedAt: Date | string;
 }): SubscriptionPlanRecord {
@@ -112,6 +147,11 @@ function mapPlan(row: {
     featureType: row.featureType,
     monthlyCompletedTurnLimit: row.monthlyCompletedTurnLimit ?? undefined,
     monthlyTokenLimit: row.monthlyTokenLimit ?? undefined,
+    billingCurrency: row.billingCurrency,
+    billingInterval: row.billingInterval,
+    billingIntervalCount: row.billingIntervalCount,
+    billingPriceCents: row.billingPriceCents ?? undefined,
+    billingStatus: row.billingStatus,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
   };
@@ -151,7 +191,12 @@ export class SubscriptionPlanRepository {
         status: trimOrUndefined(input.status) ?? "active",
         featureType: trimOrUndefined(input.featureType) ?? "chat",
         monthlyCompletedTurnLimit: input.monthlyCompletedTurnLimit ?? null,
-        monthlyTokenLimit: input.monthlyTokenLimit ?? null
+        monthlyTokenLimit: input.monthlyTokenLimit ?? null,
+        billingCurrency: trimOrUndefined(input.billingCurrency)?.toLowerCase() ?? "usd",
+        billingInterval: trimOrUndefined(input.billingInterval) ?? "month",
+        billingIntervalCount: input.billingIntervalCount ?? 1,
+        billingPriceCents: input.billingPriceCents ?? null,
+        billingStatus: trimOrUndefined(input.billingStatus) ?? "not_configured"
       }
     });
     return mapPlan(row);
@@ -172,7 +217,12 @@ export class SubscriptionPlanRepository {
         status: input.status === undefined ? undefined : trimOrUndefined(input.status),
         featureType: input.featureType === undefined ? undefined : trimOrUndefined(input.featureType),
         monthlyCompletedTurnLimit: input.monthlyCompletedTurnLimit === undefined ? undefined : input.monthlyCompletedTurnLimit,
-        monthlyTokenLimit: input.monthlyTokenLimit === undefined ? undefined : input.monthlyTokenLimit
+        monthlyTokenLimit: input.monthlyTokenLimit === undefined ? undefined : input.monthlyTokenLimit,
+        billingCurrency: input.billingCurrency === undefined ? undefined : trimOrUndefined(input.billingCurrency)?.toLowerCase(),
+        billingInterval: input.billingInterval === undefined ? undefined : trimOrUndefined(input.billingInterval),
+        billingIntervalCount: input.billingIntervalCount === undefined || input.billingIntervalCount === null ? undefined : input.billingIntervalCount,
+        billingPriceCents: input.billingPriceCents === undefined ? undefined : input.billingPriceCents,
+        billingStatus: input.billingStatus === undefined ? undefined : trimOrUndefined(input.billingStatus)
       }
     });
     return mapPlan(row);

@@ -381,6 +381,71 @@ function ensureBusinessEmail(email: string, blockedDomains: string[]): void {
   }
 }
 
+const OPEN_TRIAL_STATUSES = new Set<AccessRequestStatus>([
+  "submitted",
+  "under_review",
+  "needs_info",
+  "review_conflict",
+  "approved_pending_provision",
+  "provisioned",
+  "invited",
+  "activated"
+]);
+
+const PROVISIONED_TRIAL_STATUSES = new Set<AccessRequestStatus>([
+  "approved_pending_provision",
+  "provisioned",
+  "invited",
+  "activated"
+]);
+
+function normalizedTrialFingerprint(value: string | null | undefined): string {
+  return trimOrUndefined(value)?.toLowerCase() ?? "";
+}
+
+function accessRequestStatus(value: string): AccessRequestStatus {
+  return ([
+    "submitted",
+    "under_review",
+    "needs_info",
+    "review_conflict",
+    "approved_pending_provision",
+    "provisioned",
+    "invited",
+    "activated",
+    "rejected",
+    "closed"
+  ] as string[]).includes(value) ? value as AccessRequestStatus : "submitted";
+}
+
+async function ensureTrialNotRepeated(options: {
+  requests: AccessRequestRepository;
+  applicantEmail: string;
+  applicantEmailDomain: string;
+  snNumber: string;
+}) {
+  const applicantEmail = normalizedTrialFingerprint(options.applicantEmail);
+  const applicantEmailDomain = normalizedTrialFingerprint(options.applicantEmailDomain);
+  const snNumber = normalizedTrialFingerprint(options.snNumber);
+  const existingRequests = await options.requests.list();
+  const conflict = existingRequests.find((request) => {
+    if (request.requestType !== "trial") return false;
+    const status = accessRequestStatus(request.status);
+    if (!OPEN_TRIAL_STATUSES.has(status)) return false;
+    if (normalizedTrialFingerprint(request.applicantEmail) === applicantEmail) return true;
+    if (snNumber && normalizedTrialFingerprint(request.snNumber) === snNumber) return true;
+    return PROVISIONED_TRIAL_STATUSES.has(status) && normalizedTrialFingerprint(request.applicantEmailDomain) === applicantEmailDomain;
+  });
+  if (!conflict) return;
+  if (normalizedTrialFingerprint(conflict.applicantEmail) === applicantEmail) {
+    throw new Error("This business email already has a trial request. Sign in or renew from the Portal instead of opening another trial.");
+  }
+  if (snNumber && normalizedTrialFingerprint(conflict.snNumber) === snNumber) {
+    throw new Error("This device SN already has trial access history. Sign in or renew from the Portal instead of opening another trial.");
+  }
+  throw new Error("This company domain already has trial access history. Sign in or renew from the Portal instead of opening another trial.");
+}
+
 function ensureInternalReviewerEmail(email: string, allowedDomains: string[]): void {
   const domain = emailDomain(email).toLowerCase();
   if (!domain || !allowedDomains.includes(domain)) {
@@ -945,6 +1010,12 @@ export function createAccessRequestService(options: AccessRequestServiceOptions)
       if (!purchaseProofFiles.length) {
         throw new Error("Purchase proof file is required");
       }
+      await ensureTrialNotRepeated({
+        requests: options.requests,
+        applicantEmail,
+        applicantEmailDomain: emailDomain(applicantEmail),
+        snNumber
+      });
 
       const rawToken = issuePublicToken();
       const request = await options.requests.create({

@@ -37,6 +37,12 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   AUTH_EMAIL_FROM: z.string().optional(),
   AUTH_EMAIL_DEBUG: z.string().optional(),
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SIGNING_SECRET: z.string().optional(),
+  BILLING_SUCCESS_URL: z.string().optional(),
+  BILLING_CANCEL_URL: z.string().optional(),
+  BILLING_DEFAULT_CURRENCY: z.string().default("usd"),
+  BILLING_DEFAULT_AUTO_RENEW: z.string().optional(),
   ACCESS_REQUEST_INTERNAL_EMAIL_DOMAINS: z.string().optional(),
   ACCESS_REQUEST_PUBLIC_EMAIL_BLOCKLIST_EXTRA: z.string().optional(),
   ACCESS_REQUEST_DEFAULT_TRIAL_DAYS: z.string().optional(),
@@ -191,6 +197,14 @@ export const appConfig = {
     pass: (env.SMTP_PASS || "").trim(),
     from: (env.AUTH_EMAIL_FROM || "").trim(),
     debug: parseBooleanWithDefault(env.AUTH_EMAIL_DEBUG, false)
+  },
+  billing: {
+    stripeSecretKey: (env.STRIPE_SECRET_KEY || "").trim(),
+    stripeWebhookSigningSecret: (env.STRIPE_WEBHOOK_SIGNING_SECRET || "").trim(),
+    successUrl: (env.BILLING_SUCCESS_URL || "").trim(),
+    cancelUrl: (env.BILLING_CANCEL_URL || "").trim(),
+    defaultCurrency: ((env.BILLING_DEFAULT_CURRENCY || "").trim() || "usd").toLowerCase(),
+    defaultAutoRenew: parseBooleanWithDefault(env.BILLING_DEFAULT_AUTO_RENEW, true)
   },
   accessRequests: {
     internalEmailDomains: ((env.ACCESS_REQUEST_INTERNAL_EMAIL_DOMAINS || "").trim() || "baicells.com")
