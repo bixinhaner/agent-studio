@@ -6,6 +6,10 @@ import { z } from "zod";
 type CodexMemoryAdminRouterOptions = {
   sessionHomeRoot: string;
   requirePermission(permissionKey: string): RequestHandler;
+  llmSecretStore?: {
+    getState(): Promise<{ hasApiKey: boolean; rotatedAt?: string; updatedAt?: string }>;
+    update(input: { apiKey?: string; clearApiKey?: boolean; currentUserId?: string }): Promise<{ hasApiKey: boolean; rotatedAt?: string; updatedAt?: string }>;
+  };
   users?: {
     getById(id: string): Promise<{ displayName?: string; email?: string } | undefined>;
   };
@@ -60,6 +64,13 @@ const writeMemoryFileSchema = z
   .object({
     path: z.string().trim().min(1).max(500),
     content: z.string().max(MAX_FILE_CONTENT_BYTES)
+  })
+  .strict();
+
+const updateLlmSecretSchema = z
+  .object({
+    apiKey: z.string().trim().max(2000).optional(),
+    clearApiKey: z.boolean().optional()
   })
   .strict();
 
@@ -496,6 +507,36 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   const sessionHomeRoot = path.resolve(options.sessionHomeRoot);
   const requireRead = options.requirePermission("system_settings.read");
   const requireWrite = options.requirePermission("system_settings.write");
+
+  router.get("/codex-memory/llm-secret", requireRead, async (_req: Request, res: Response) => {
+    try {
+      res.json(options.llmSecretStore ? await options.llmSecretStore.getState() : { hasApiKey: false });
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/codex-memory/llm-secret", requireWrite, async (req: Request, res: Response) => {
+    if (!options.llmSecretStore) {
+      res.status(501).json({ detail: "LLM secret store is not configured" });
+      return;
+    }
+    try {
+      const parsed = updateLlmSecretSchema.parse(req.body ?? {});
+      const currentUserId = trimOrUndefined((req as Request & { currentUser?: { id?: string } }).currentUser?.id);
+      res.json(await options.llmSecretStore.update({
+        apiKey: parsed.apiKey,
+        clearApiKey: parsed.clearApiKey,
+        currentUserId
+      }));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ detail: error.issues.map((issue) => issue.message).join("; ") });
+        return;
+      }
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
 
   router.get("/codex-memory/scopes", requireRead, async (req: Request, res: Response) => {
     try {

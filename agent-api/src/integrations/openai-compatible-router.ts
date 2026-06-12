@@ -8,6 +8,10 @@ import { resolveWorkspaceAgentsMdContent } from "../agent-mode/workspace-agents-
 import type { ReasoningEffort } from "../model-config.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "../model-config.js";
 import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
+import {
+  codexHomeFromRunConfig,
+  codexRunConfigHasExternalContext
+} from "../codex-memory/engine.js";
 import type { CodexExecutionService } from "../operations/codex-execution-service.js";
 import type { RecordCodexUsageInput } from "../operations/usage-recorder.js";
 import { buildIntegrationAgentWorkspacePath } from "../runtime-scope-resolver.js";
@@ -674,6 +678,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
     let recordedUsage = false;
     let errorMessage: string | undefined;
     let requestRuntime = options.runtime;
+    let codexHome: string | undefined;
 
     const markResponseStarted = (statusCode: number) => {
       responseStarted = true;
@@ -825,6 +830,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           modeId: selectedAgentModeId,
           codexRunConfig
         });
+        codexHome = materializedCodexHome.codexHome;
         codexRunConfig = materializedCodexHome.codexRunConfig;
         requestRuntime = options.createRuntimeForRequest
           ? await options.createRuntimeForRequest({ codexHome: materializedCodexHome.codexHome })
@@ -867,6 +873,23 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           runtime: requestRuntime,
           thread,
           prompt,
+          memory: {
+            channel: "openai_compatible_api",
+            prompt,
+            codexHome: codexHome ?? codexHomeFromRunConfig(codexRunConfig),
+            codexThreadId: runtimeCodexThreadId,
+            sessionId: completionId,
+            organizationId: trimOrUndefined(authenticated.instance.organizationId),
+            model: selectedModel,
+            hasExternalContext: codexRunConfigHasExternalContext(codexRunConfig) || selectedKnowledgeSetIds.length > 0,
+            metadata: {
+              integrationInstanceId: authenticated.instance.id,
+              integrationSlug: authenticated.instance.slug,
+              agentModeId: selectedAgentModeId,
+              knowledgeSetIds: selectedKnowledgeSetIds,
+              stream: true
+            }
+          },
           onTextDelta(delta) {
             outputChars += delta.length;
             writeOpenAIStreamChunk(res, {
@@ -909,7 +932,24 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       const completion = await options.codexExecution.collectFromRuntime({
         runtime: requestRuntime,
         thread,
-        prompt
+        prompt,
+        memory: {
+          channel: "openai_compatible_api",
+          prompt,
+          codexHome: codexHome ?? codexHomeFromRunConfig(codexRunConfig),
+          codexThreadId: runtimeCodexThreadId,
+          sessionId: completionId,
+          organizationId: trimOrUndefined(authenticated.instance.organizationId),
+          model: selectedModel,
+          hasExternalContext: codexRunConfigHasExternalContext(codexRunConfig) || selectedKnowledgeSetIds.length > 0,
+          metadata: {
+            integrationInstanceId: authenticated.instance.id,
+            integrationSlug: authenticated.instance.slug,
+            agentModeId: selectedAgentModeId,
+            knowledgeSetIds: selectedKnowledgeSetIds,
+            stream: false
+          }
+        }
       });
       const answer = completion.answer;
       usage = completion.usage;

@@ -3,6 +3,7 @@ import { api } from "../../lib/api";
 import type {
   CodexMemoryFileContentResponse,
   CodexMemoryFilesResponse,
+  CodexMemoryLlmSecretState,
   CodexMemoryScopeKind,
   CodexMemoryScopeListResponse
 } from "./types";
@@ -64,5 +65,19 @@ export async function deleteCodexMemoryFile(scopeId: string, filePath: string): 
 export async function clearCodexMemoryScope(scopeId: string): Promise<void> {
   await api<Record<string, never>>(`/api/admin/codex-memory/scopes/${encodeURIComponent(scopeId)}`, {
     method: "DELETE"
+  });
+}
+
+export async function fetchCodexMemoryLlmSecretState(): Promise<CodexMemoryLlmSecretState> {
+  return api<CodexMemoryLlmSecretState>("/api/admin/codex-memory/llm-secret");
+}
+
+export async function saveCodexMemoryLlmSecret(input: {
+  apiKey?: string;
+  clearApiKey?: boolean;
+}): Promise<CodexMemoryLlmSecretState> {
+  return api<CodexMemoryLlmSecretState>("/api/admin/codex-memory/llm-secret", {
+    method: "PUT",
+    json: input
   });
 }

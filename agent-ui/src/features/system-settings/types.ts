@@ -84,6 +84,13 @@ export type SystemSettingsCodexMemory = {
   enabled: boolean;
   useMemories: boolean;
   generateMemories: boolean;
+  generationEngine: "agent_studio" | "codex_native";
+  llmProvider: "active_codex_provider" | "openai_responses" | "openai_compatible" | "azure_openai";
+  llmApiMode: "auto" | "responses" | "chat_completions";
+  llmModel: string;
+  llmBaseUrl: string;
+  llmApiKeyEnv: string;
+  llmAzureApiVersion: string;
   disableOnExternalContext: boolean;
   minRateLimitRemainingPercent: number;
   minRolloutIdleHours: number;

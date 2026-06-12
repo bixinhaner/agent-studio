@@ -50,6 +50,39 @@ describe("CodexExecutionService", () => {
     });
   });
 
+  it("enqueues memory generation from the common runtime completion path", async () => {
+    const enqueueRun = vi.fn();
+    const service = new CodexExecutionService({ memory: { enqueueRun } });
+    const runtime = {
+      async *runStreamed(_thread: { id: string }, message: string) {
+        yield {
+          type: "message.delta",
+          delta: message
+        };
+      }
+    };
+
+    await service.collectFromRuntime({
+      runtime,
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      memory: {
+        channel: "portal",
+        prompt: "question",
+        codexHome: "/tmp/codex-home",
+        sessionId: "session-1"
+      }
+    });
+
+    expect(enqueueRun).toHaveBeenCalledWith(expect.objectContaining({
+      channel: "portal",
+      prompt: "question",
+      answerText: "answer",
+      codexHome: "/tmp/codex-home",
+      sessionId: "session-1"
+    }));
+  });
+
   it("projects runtime reasoning and tool events into common trace rows", () => {
     const reasoning = projectCodexRuntimeEvent({
       type: "item.completed",

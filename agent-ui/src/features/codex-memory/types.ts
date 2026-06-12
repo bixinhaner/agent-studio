@@ -57,3 +57,9 @@ export type CodexMemoryFileContentResponse = {
 };
 
 export type CodexMemorySettings = SystemSettingsCodexMemory;
+
+export type CodexMemoryLlmSecretState = {
+  hasApiKey: boolean;
+  rotatedAt?: string;
+  updatedAt?: string;
+};

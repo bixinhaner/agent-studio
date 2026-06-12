@@ -47,7 +47,7 @@ export function buildCodexMemoryConfigOverrides(
     },
     memories: {
       use_memories: settings.useMemories,
-      generate_memories: settings.generateMemories,
+      generate_memories: settings.generateMemories && settings.generationEngine === "codex_native",
       disable_on_external_context: settings.disableOnExternalContext,
       min_rate_limit_remaining_percent: settings.minRateLimitRemainingPercent,
       min_rollout_idle_hours: settings.minRolloutIdleHours,

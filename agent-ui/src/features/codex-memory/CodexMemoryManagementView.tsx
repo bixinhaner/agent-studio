@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Checkbox,
   Col,
   Empty,
   Input,
@@ -9,6 +10,7 @@ import {
   Popconfirm,
   Row,
   Segmented,
+  Select,
   Space,
   Spin,
   Switch,
@@ -50,12 +52,15 @@ import {
   deleteCodexMemoryFile,
   fetchCodexMemoryFileContent,
   fetchCodexMemoryFiles,
+  fetchCodexMemoryLlmSecretState,
   fetchCodexMemoryScopes,
+  saveCodexMemoryLlmSecret,
   saveCodexMemoryFileContent
 } from "./api";
 import type {
   CodexMemoryFile,
   CodexMemoryFileContent,
+  CodexMemoryLlmSecretState,
   CodexMemoryScope,
   CodexMemoryScopeKind,
   CodexMemorySettings
@@ -65,6 +70,13 @@ const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
   enabled: true,
   useMemories: true,
   generateMemories: true,
+  generationEngine: "agent_studio",
+  llmProvider: "active_codex_provider",
+  llmApiMode: "auto",
+  llmModel: "",
+  llmBaseUrl: "",
+  llmApiKeyEnv: "CODEX_API_KEY",
+  llmAzureApiVersion: "",
   disableOnExternalContext: true,
   minRateLimitRemainingPercent: 25,
   minRolloutIdleHours: 6,
@@ -304,6 +316,9 @@ export function CodexMemoryManagementView() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
+  const [llmSecretState, setLlmSecretState] = useState<CodexMemoryLlmSecretState>({ hasApiKey: false });
+  const [llmApiKeyDraft, setLlmApiKeyDraft] = useState("");
+  const [clearLlmApiKey, setClearLlmApiKey] = useState(false);
 
   const [scopes, setScopes] = useState<CodexMemoryScope[]>([]);
   const [scopeQuery, setScopeQuery] = useState("");
@@ -382,11 +397,17 @@ export function CodexMemoryManagementView() {
     setSettingsLoading(true);
     setSettingsError("");
     try {
-      const response = await fetchSystemSettings();
+      const [response, secretState] = await Promise.all([
+        fetchSystemSettings(),
+        fetchCodexMemoryLlmSecretState()
+      ]);
       const nextSettings = response.draft.payload.codexMemory ?? DEFAULT_MEMORY_SETTINGS;
       setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...nextSettings });
       setPublishedSettings(response.published?.payload.codexMemory ? { ...DEFAULT_MEMORY_SETTINGS, ...response.published.payload.codexMemory } : null);
       setPublishedMeta(response.publishedMeta);
+      setLlmSecretState(secretState);
+      setLlmApiKeyDraft("");
+      setClearLlmApiKey(false);
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : "加载记忆配置失败");
     } finally {
@@ -490,6 +511,15 @@ export function CodexMemoryManagementView() {
       const current = await fetchSystemSettings();
       const payload = clonePayload(current.draft.payload);
       payload.codexMemory = { ...settings };
+      if (clearLlmApiKey || llmApiKeyDraft.trim()) {
+        const nextSecretState = await saveCodexMemoryLlmSecret({
+          apiKey: llmApiKeyDraft.trim() || undefined,
+          clearApiKey: clearLlmApiKey
+        });
+        setLlmSecretState(nextSecretState);
+        setLlmApiKeyDraft("");
+        setClearLlmApiKey(false);
+      }
       const saved = await saveSystemSettingsDraft(payload);
       if (publishAfterSave) {
         const published = await publishSystemSettings();
@@ -776,10 +806,25 @@ export function CodexMemoryManagementView() {
               />
               <SettingSwitch
                 title="自动生成记忆"
-                description="Codex 在合适时机把稳定偏好写入 memory 文件。"
+                description="由统一生成引擎把稳定偏好写入 Codex-compatible memory 文件。"
                 checked={settings.generateMemories}
                 onChange={(generateMemories) => updateSetting("generateMemories", generateMemories)}
               />
+              <div style={{ padding: "14px 0", borderBottom: "1px solid var(--admin-color-border-subtle, rgba(15, 23, 42, 0.08))" }}>
+                <Typography.Text strong>生成方式</Typography.Text>
+                <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                  Agent Studio 异步生成不依赖 Codex 原生 rollout eligibility；Codex 原生模式只保留官方后台生成。
+                </Typography.Text>
+                <Select
+                  value={settings.generationEngine}
+                  onChange={(value) => updateSetting("generationEngine", value as CodexMemorySettings["generationEngine"])}
+                  options={[
+                    { label: "Agent Studio 异步生成", value: "agent_studio" },
+                    { label: "Codex 原生生成", value: "codex_native" }
+                  ]}
+                  style={{ width: "100%", marginTop: 10 }}
+                />
+              </div>
               <SettingSwitch
                 title="外部上下文时暂停生成"
                 description="带知识库、工单或文件上下文时避免把临时信息沉淀为长期记忆。"
@@ -787,6 +832,115 @@ export function CodexMemoryManagementView() {
                 onChange={(disableOnExternalContext) => updateSetting("disableOnExternalContext", disableOnExternalContext)}
               />
             </div>
+
+            {settings.generationEngine === "agent_studio" ? (
+              <div
+                style={{
+                  border: "1px solid var(--admin-color-border)",
+                  borderRadius: 12,
+                  padding: 14,
+                  background: "var(--admin-color-bg-subtle, #f8fafc)"
+                }}
+              >
+                <Typography.Text strong>LLM API 配置</Typography.Text>
+                <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                  默认复用当前 Codex Provider；如果当前是本地 ChatGPT 登录，需要配置 API key 环境变量才会生成记忆。
+                </Typography.Text>
+                <Row gutter={[12, 12]} style={{ marginTop: 10 }}>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>Provider</Typography.Text>
+                    <Select
+                      value={settings.llmProvider}
+                      onChange={(value) => updateSetting("llmProvider", value as CodexMemorySettings["llmProvider"])}
+                      options={[
+                        { label: "复用当前 Codex Provider", value: "active_codex_provider" },
+                        { label: "OpenAI Responses API", value: "openai_responses" },
+                        { label: "OpenAI-compatible API", value: "openai_compatible" },
+                        { label: "Azure OpenAI", value: "azure_openai" }
+                      ]}
+                      style={{ width: "100%", marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>API 模式</Typography.Text>
+                    <Select
+                      value={settings.llmApiMode}
+                      onChange={(value) => updateSetting("llmApiMode", value as CodexMemorySettings["llmApiMode"])}
+                      options={[
+                        { label: "自动选择", value: "auto" },
+                        { label: "Responses API", value: "responses" },
+                        { label: "Chat Completions", value: "chat_completions" }
+                      ]}
+                      style={{ width: "100%", marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>模型 / Azure 部署名</Typography.Text>
+                    <Input
+                      value={settings.llmModel}
+                      placeholder="gpt-5.4"
+                      onChange={(event) => updateSetting("llmModel", event.target.value)}
+                      style={{ marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>Base URL</Typography.Text>
+                    <Input
+                      value={settings.llmBaseUrl}
+                      placeholder="留空则使用当前 Provider 或 OpenAI 默认地址"
+                      onChange={(event) => updateSetting("llmBaseUrl", event.target.value)}
+                      style={{ marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>API key</Typography.Text>
+                    <Input.Password
+                      value={llmApiKeyDraft}
+                      placeholder={llmSecretState.hasApiKey ? "已保存，留空则不修改" : "请输入 API key"}
+                      disabled={clearLlmApiKey}
+                      onChange={(event) => setLlmApiKeyDraft(event.target.value)}
+                      style={{ marginTop: 8 }}
+                    />
+                    <Typography.Text type="secondary" style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+                      {llmSecretState.hasApiKey
+                        ? `已保存 API key${llmSecretState.rotatedAt ? `，更新时间 ${formatLocalTime(llmSecretState.rotatedAt)}` : ""}`
+                        : "尚未保存 API key"}
+                    </Typography.Text>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Typography.Text strong>API key 环境变量</Typography.Text>
+                    <Input
+                      value={settings.llmApiKeyEnv}
+                      placeholder="CODEX_API_KEY"
+                      onChange={(event) => updateSetting("llmApiKeyEnv", event.target.value)}
+                      style={{ marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24}>
+                    <Checkbox
+                      checked={clearLlmApiKey}
+                      onChange={(event) => {
+                        setClearLlmApiKey(event.target.checked);
+                        if (event.target.checked) setLlmApiKeyDraft("");
+                      }}
+                    >
+                      清空当前保存的 API key
+                    </Checkbox>
+                  </Col>
+                  {settings.llmProvider === "azure_openai" ? (
+                    <Col xs={24} md={12}>
+                      <Typography.Text strong>Azure API Version</Typography.Text>
+                      <Input
+                        value={settings.llmAzureApiVersion}
+                        placeholder="2025-04-01-preview"
+                        onChange={(event) => updateSetting("llmAzureApiVersion", event.target.value)}
+                        style={{ marginTop: 8 }}
+                      />
+                    </Col>
+                  ) : null}
+                </Row>
+              </div>
+            ) : null}
 
             <Row gutter={[12, 12]}>
               <Col xs={24} md={12}>
@@ -838,8 +992,12 @@ export function CodexMemoryManagementView() {
             <Alert
               type={settings.enabled ? "success" : "warning"}
               showIcon
-              message={settings.enabled ? "发布后所有 Codex 渠道统一启用原生 memory" : "发布后所有 Codex 渠道统一关闭原生 memory"}
-              description="Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
+              message={settings.enabled ? "发布后所有 Codex 渠道统一启用 memory" : "发布后所有 Codex 渠道统一关闭 memory"}
+              description={
+                settings.generationEngine === "agent_studio"
+                  ? "读取仍走 Codex 原生 memory 文件，生成由 Agent Studio 统一异步完成。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
+                  : "读取和生成都交给 Codex 原生机制。Zendesk 等集成渠道按集成实例和智能体共享记忆，站内用户按用户和智能体共享记忆。"
+              }
             />
 
             <Space wrap>

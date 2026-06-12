@@ -217,7 +217,7 @@ describe("ManagedCodexProviderResolver", () => {
       },
       memories: {
         use_memories: true,
-        generate_memories: true
+        generate_memories: false
       }
     });
   });

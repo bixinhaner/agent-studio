@@ -5,10 +5,12 @@ import {
   type RuntimeUsageSnapshot,
   streamRuntimeCompletionWithBestEffortUsage
 } from "../live-runtime-session.js";
+import type { CodexMemoryRunInput, CodexMemoryRunRecorder } from "../codex-memory/engine.js";
 
 export type CodexStreamCompletionInput = Parameters<typeof streamRuntimeCompletionWithBestEffortUsage>[0];
 export type CodexCollectCompletionInput = Parameters<typeof collectRuntimeCompletion>[0];
 export type CodexCompletionResult = { answer: string; usage?: RuntimeUsageSnapshot };
+export type CodexCompletionMemoryInput = Omit<CodexMemoryRunInput, "answerText" | "completedAt">;
 export type CodexTraceKind = "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
 export type CodexTraceRow = {
   id?: string;
@@ -478,6 +480,26 @@ export class CodexRunProjection {
 }
 
 export class CodexExecutionService {
+  constructor(private readonly dependencies: { memory?: CodexMemoryRunRecorder } = {}) {}
+
+  private enqueueMemoryRun(input: CodexCompletionMemoryInput | undefined, result: CodexCompletionResult): void {
+    if (!input) return;
+    const answerText = trimOrUndefined(result.answer);
+    if (!answerText) return;
+    void Promise.resolve(this.dependencies.memory?.enqueueRun({
+      ...input,
+      answerText,
+      completedAt: new Date()
+    })).catch((error) => {
+      console.warn("codex memory enqueue failed", {
+        channel: input.channel,
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
+
   async streamCompletion(input: CodexStreamCompletionInput): Promise<void> {
     await streamRuntimeCompletionWithBestEffortUsage(input);
   }
@@ -486,11 +508,15 @@ export class CodexExecutionService {
     runtime: RuntimeStreamSource<TThread>;
     thread: TThread;
     prompt: string;
+    memory?: CodexCompletionMemoryInput;
   }): Promise<void> {
     await streamRuntimeCompletionWithBestEffortUsage({
       events: input.runtime.runStreamed(input.thread, input.prompt),
       onEvent: input.onEvent,
-      onDone: input.onDone,
+      onDone: async (payload) => {
+        await input.onDone?.(payload);
+        this.enqueueMemoryRun(input.memory, payload);
+      },
       recordUsage: input.recordUsage,
       onTelemetryError: input.onTelemetryError
     });
@@ -508,13 +534,16 @@ export class CodexExecutionService {
     onEvent?(event: RuntimeStreamEvent): void | Promise<void>;
     onUsage?(usage: RuntimeUsageSnapshot, event: RuntimeStreamEvent): void | Promise<void>;
     onTextDelta?(delta: string, event: RuntimeStreamEvent): void | Promise<void>;
+    memory?: CodexCompletionMemoryInput;
   }): Promise<CodexCompletionResult> {
-    return await collectRuntimeCompletion({
+    const result = await collectRuntimeCompletion({
       events: input.runtime.runStreamed(input.thread, input.prompt),
       textMode: input.textMode,
       onEvent: input.onEvent,
       onUsage: input.onUsage,
       onTextDelta: input.onTextDelta
     });
+    this.enqueueMemoryRun(input.memory, result);
+    return result;
   }
 }

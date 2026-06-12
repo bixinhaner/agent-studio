@@ -4,6 +4,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import path from "node:path";
 
 import { CodexRuntime } from "../../codex-runtime.js";
+import { codexHomeFromRunConfig } from "../../codex-memory/engine.js";
 import {
   stripInternalRunConfigMetadata,
   type RuntimeUsageSnapshot
@@ -2190,6 +2191,22 @@ export class ZendeskIntegrationService {
         thread: currentThread,
         prompt,
         textMode: "first",
+        memory: {
+          channel: "zendesk",
+          prompt: basePrompt,
+          codexHome: codexHomeFromRunConfig(runtimeOptions.codexRunConfig),
+          sessionId: runtimeSessionLease?.sessionId,
+          threadId: runtimeSessionInput.audit?.threadId,
+          model: runtimeOptions.model,
+          hasExternalContext: true,
+          metadata: {
+            instanceId: run.instanceId,
+            ticketId: run.ticketId,
+            runId: run.runId,
+            source: run.source,
+            inputKind: run.inputKind
+          }
+        },
         onEvent: async (event) => {
           const eventCodexThreadId = extractCodexThreadIdFromEvent(event);
           if (eventCodexThreadId) {

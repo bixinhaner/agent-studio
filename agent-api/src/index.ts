@@ -41,6 +41,11 @@ import { ThreadCollaborationService } from "./collaboration/thread-collaboration
 import { appConfig, resolveWorkspace } from "./config.js";
 import { CodexRuntime } from "./codex-runtime.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
+import {
+  CodexMemoryEngine,
+  codexHomeFromRunConfig as codexHomeFromMemoryRunConfig,
+  codexRunConfigHasExternalContext
+} from "./codex-memory/engine.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { getDbClient } from "./db/client.js";
 import {
@@ -236,7 +241,14 @@ import {
 
 const app = express();
 const runtime = new CodexRuntime();
-const codexExecution = new CodexExecutionService();
+let codexMemoryEngine: CodexMemoryEngine;
+const codexExecution = new CodexExecutionService({
+  memory: {
+    enqueueRun(input) {
+      codexMemoryEngine.enqueueRun(input);
+    }
+  }
+});
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const db = getDbClient();
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
@@ -332,8 +344,128 @@ const codexProviders = new ManagedCodexProviderResolver({
   },
   systemSettings
 });
+codexMemoryEngine = new CodexMemoryEngine({
+  getSettings: async () =>
+    (await codexProviders.getPublishedSystemSettings())?.payload.codexMemory ??
+    createDefaultSystemSettingsPayload().codexMemory,
+  resolveProviderSnapshot: () => codexProviders.resolveActiveProviderSnapshot(),
+  getLlmSecretState: getCodexMemoryLlmSecretState,
+  logger: console
+});
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const zendeskSettingsStore = new ZendeskSettingsStore();
+
+const CODEX_MEMORY_LLM_INTEGRATION_TYPE = "codex_memory_llm";
+const CODEX_MEMORY_LLM_INTEGRATION_SLUG = "default";
+
+async function findCodexMemoryLlmIntegrationInstance(): Promise<{ id: string } | undefined> {
+  return (await db.integrationInstance.findFirst({
+    where: {
+      type: CODEX_MEMORY_LLM_INTEGRATION_TYPE,
+      slug: CODEX_MEMORY_LLM_INTEGRATION_SLUG
+    },
+    select: { id: true }
+  })) ?? undefined;
+}
+
+async function ensureCodexMemoryLlmIntegrationInstance(): Promise<{ id: string }> {
+  return await db.integrationInstance.upsert({
+    where: {
+      type_slug: {
+        type: CODEX_MEMORY_LLM_INTEGRATION_TYPE,
+        slug: CODEX_MEMORY_LLM_INTEGRATION_SLUG
+      }
+    },
+    create: {
+      type: CODEX_MEMORY_LLM_INTEGRATION_TYPE,
+      slug: CODEX_MEMORY_LLM_INTEGRATION_SLUG,
+      name: "Codex Memory LLM Provider",
+      description: "System-level LLM credentials for Agent Studio memory generation.",
+      status: "active",
+      isSystemSingleton: true
+    },
+    update: {
+      name: "Codex Memory LLM Provider",
+      status: "active",
+      isSystemSingleton: true
+    },
+    select: { id: true }
+  });
+}
+
+async function getCodexMemoryLlmSecretState(): Promise<{ apiKey?: string }> {
+  const instance = await findCodexMemoryLlmIntegrationInstance();
+  if (!instance) return {};
+  const secretRow = await db.integrationInstanceSecret.findUnique({
+    where: { integrationInstanceId: instance.id }
+  });
+  const secret = asRecord(secretRow?.secretState);
+  return {
+    apiKey: asString(secret?.apiKey)
+  };
+}
+
+async function getCodexMemoryLlmSecretStatus(): Promise<{ hasApiKey: boolean; rotatedAt?: string; updatedAt?: string }> {
+  const instance = await findCodexMemoryLlmIntegrationInstance();
+  if (!instance) return { hasApiKey: false };
+  const secretRow = await db.integrationInstanceSecret.findUnique({
+    where: { integrationInstanceId: instance.id }
+  });
+  const secret = asRecord(secretRow?.secretState);
+  return {
+    hasApiKey: Boolean(asString(secret?.apiKey)),
+    rotatedAt: secretRow?.rotatedAt instanceof Date ? secretRow.rotatedAt.toISOString() : undefined,
+    updatedAt: secretRow?.updatedAt instanceof Date ? secretRow.updatedAt.toISOString() : undefined
+  };
+}
+
+async function updateCodexMemoryLlmSecret(input: {
+  apiKey?: string;
+  clearApiKey?: boolean;
+  currentUserId?: string;
+}): Promise<{ hasApiKey: boolean; rotatedAt?: string; updatedAt?: string }> {
+  const apiKey = trimOrUndefined(input.apiKey);
+  if (!apiKey && !input.clearApiKey) {
+    return await getCodexMemoryLlmSecretStatus();
+  }
+  const instance = await ensureCodexMemoryLlmIntegrationInstance();
+  if (input.clearApiKey) {
+    await db.integrationInstanceSecret.upsert({
+      where: { integrationInstanceId: instance.id },
+      create: {
+        integrationInstanceId: instance.id,
+        hasSecrets: false,
+        secretState: {},
+        rotatedAt: new Date(),
+        rotatedByUserId: trimOrUndefined(input.currentUserId) ?? null
+      },
+      update: {
+        hasSecrets: false,
+        secretState: {},
+        rotatedAt: new Date(),
+        rotatedByUserId: trimOrUndefined(input.currentUserId) ?? null
+      }
+    });
+    return await getCodexMemoryLlmSecretStatus();
+  }
+  await db.integrationInstanceSecret.upsert({
+    where: { integrationInstanceId: instance.id },
+    create: {
+      integrationInstanceId: instance.id,
+      hasSecrets: true,
+      secretState: { apiKey },
+      rotatedAt: new Date(),
+      rotatedByUserId: trimOrUndefined(input.currentUserId) ?? null
+    },
+    update: {
+      hasSecrets: true,
+      secretState: { apiKey },
+      rotatedAt: new Date(),
+      rotatedByUserId: trimOrUndefined(input.currentUserId) ?? null
+    }
+  });
+  return await getCodexMemoryLlmSecretStatus();
+}
 
 async function resolveActiveDingTalkWorkNoticeConfig(): Promise<DingTalkConfig> {
   const instance = await db.integrationInstance.findFirst({
@@ -2297,8 +2429,7 @@ function withSkillActivationPrompts(message: string, codexRunConfig?: Record<str
 }
 
 function codexHomeFromRunConfig(codexRunConfig?: Record<string, unknown>): string | undefined {
-  const raw = codexRunConfig?._agentStudioCodexHome;
-  return typeof raw === "string" ? trimOrUndefined(raw) : undefined;
+  return codexHomeFromMemoryRunConfig(codexRunConfig);
 }
 
 function withRunConfigMode(
@@ -2649,13 +2780,29 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     let runProjection = new CodexRunProjection({ streamAnswerDeltas: false });
     let runtimeSideEffectStarted = false;
     const runRuntimeCompletion = async () => {
+      const runtimePrompt = withSkillActivationPrompts(
+        crestRuntimePrompt(input, preparedAttachments),
+        currentSession.codexRunConfig
+      );
       await codexExecution.streamFromRuntime({
         runtime,
         thread: liveThread,
-        prompt: withSkillActivationPrompts(
-          crestRuntimePrompt(input, preparedAttachments),
-          currentSession.codexRunConfig
-        ),
+        prompt: runtimePrompt,
+        memory: {
+          channel: "crest",
+          prompt: input.message,
+          codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
+          codexThreadId: currentSession.codexThreadId,
+          sessionId: currentSession.sessionId,
+          threadId: thread.id,
+          organizationId: currentUser.organizationId,
+          userId: currentUser.id,
+          model: currentSession.model,
+          hasExternalContext: preparedAttachments.length > 0 || codexRunConfigHasExternalContext(currentSession.codexRunConfig),
+          metadata: {
+            conversationId: input.conversationId
+          }
+        },
         onEvent(event) {
           const projection = runProjection.push(event);
           runtimeFileChanges.push(...extractRuntimeFileChanges(event));
@@ -5449,10 +5596,28 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   let streamingCardFinalized = false;
   const runProjection = new CodexRunProjection();
   try {
+    const runtimeMessage = withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig);
     await codexExecution.streamFromRuntime({
       runtime,
       thread: liveThread,
-      prompt: withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig),
+      prompt: runtimeMessage,
+      memory: {
+        channel: DINGTALK_BOT_CHANNEL,
+        prompt: input.text,
+        codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
+        codexThreadId: currentSession.codexThreadId,
+        sessionId: currentSession.sessionId,
+        threadId: thread?.id,
+        organizationId: actor.currentUser.organizationId,
+        userId: actor.currentUser.id,
+        model: currentSession.model,
+        hasExternalContext: codexRunConfigHasExternalContext(currentSession.codexRunConfig),
+        metadata: {
+          integrationInstanceId: input.instance.id,
+          externalConversationKey,
+          conversationType: scope
+        }
+      },
       onEvent(event) {
         runProjection.push(event);
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
@@ -6536,6 +6701,10 @@ registerCommonApiRoutes(app, {
   codexMemoryAdminRouter: createCodexMemoryAdminRouter({
     sessionHomeRoot: appConfig.codex.sessionHomeRoot,
     requirePermission,
+    llmSecretStore: {
+      getState: getCodexMemoryLlmSecretStatus,
+      update: updateCodexMemoryLlmSecret
+    },
     users,
     agentModes,
     listIntegrationInstancesByIds: async (ids) => {
@@ -7685,10 +7854,26 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
     let firstCodexEventSeen = false;
+    const runtimeMessage = withSkillActivationPrompts(input.message, currentSession.codexRunConfig);
     await codexExecution.streamFromRuntime({
       runtime,
       thread: ensuredLiveThread,
-      prompt: withSkillActivationPrompts(input.message, currentSession.codexRunConfig),
+      prompt: runtimeMessage,
+      memory: {
+        channel: "portal",
+        prompt: input.message,
+        codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
+        codexThreadId: currentSession.codexThreadId,
+        sessionId: currentSession.sessionId,
+        threadId: currentSession.threadId ?? undefined,
+        organizationId: currentUser.organizationId,
+        userId: currentUser.id,
+        model: currentSession.model,
+        hasExternalContext: codexRunConfigHasExternalContext(currentSession.codexRunConfig),
+        metadata: {
+          route: "chat_stream"
+        }
+      },
       onEvent(event) {
         if (!firstCodexEventSeen) {
           firstCodexEventSeen = true;
