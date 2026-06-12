@@ -29,6 +29,16 @@ function parseInteger(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
 }
 
+function parseOptionalNullableInteger(value: unknown, fieldLabel: string): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${fieldLabel} must be a number`);
+  }
+  return Math.floor(parsed);
+}
+
 function currentBillingUser(req: Request) {
   return {
     id: req.currentUser?.id ?? "system",
@@ -77,6 +87,41 @@ export function createAdminBillingRouter(service: BillingService): Router {
       res.json(await service.getAdminOverview());
     } catch (error) {
       res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.patch("/billing/stripe-settings", async (req: Request, res: Response) => {
+    try {
+      const stripe = await service.updateStripeSettings({
+        mode: req.body?.mode,
+        stripeSecretKey: req.body?.stripeSecretKey,
+        webhookSigningSecret: req.body?.webhookSigningSecret,
+        successUrl: req.body?.successUrl,
+        cancelUrl: req.body?.cancelUrl,
+        defaultCurrency: req.body?.defaultCurrency,
+        defaultAutoRenew: typeof req.body?.defaultAutoRenew === "boolean" ? req.body.defaultAutoRenew : undefined,
+        clearStripeSecretKey: req.body?.clearStripeSecretKey === true,
+        clearWebhookSigningSecret: req.body?.clearWebhookSigningSecret === true,
+        userId: req.currentUser?.id ?? null
+      });
+      res.json({ stripe });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.patch("/billing/plans/:planId", async (req: Request, res: Response) => {
+    try {
+      const plan = await service.updatePlanBilling(req.params.planId, {
+        billingCurrency: req.body?.billingCurrency,
+        billingInterval: req.body?.billingInterval,
+        billingIntervalCount: parseOptionalNullableInteger(req.body?.billingIntervalCount, "billingIntervalCount") ?? undefined,
+        billingPriceCents: parseOptionalNullableInteger(req.body?.billingPriceCents, "billingPriceCents"),
+        billingStatus: req.body?.billingStatus
+      });
+      res.json({ plan });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
     }
   });
 

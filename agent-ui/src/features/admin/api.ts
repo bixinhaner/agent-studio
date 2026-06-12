@@ -188,6 +188,44 @@ export async function createAdminBillingPaymentLink(input: {
   );
 }
 
+export async function patchAdminBillingPlan(
+  planId: string,
+  input: {
+    billingCurrency?: string | null;
+    billingInterval?: string | null;
+    billingIntervalCount?: number | null;
+    billingPriceCents?: number | null;
+    billingStatus?: string | null;
+  }
+): Promise<AdminBillingOverviewResponse["plans"][number]> {
+  const response = await api<{ plan: AdminBillingOverviewResponse["plans"][number] }>(
+    `/api/admin/billing/plans/${encodeURIComponent(planId)}`,
+    {
+      method: "PATCH",
+      json: input
+    }
+  );
+  return response.plan;
+}
+
+export async function patchAdminBillingStripeSettings(input: {
+  mode?: string | null;
+  stripeSecretKey?: string | null;
+  webhookSigningSecret?: string | null;
+  successUrl?: string | null;
+  cancelUrl?: string | null;
+  defaultCurrency?: string | null;
+  defaultAutoRenew?: boolean | null;
+  clearStripeSecretKey?: boolean;
+  clearWebhookSigningSecret?: boolean;
+}): Promise<AdminBillingOverviewResponse["stripe"]> {
+  const response = await api<{ stripe: AdminBillingOverviewResponse["stripe"] }>("/api/admin/billing/stripe-settings", {
+    method: "PATCH",
+    json: input
+  });
+  return response.stripe;
+}
+
 export async function grantAdminBillingGiftDays(input: {
   organizationId: string;
   planId: string;

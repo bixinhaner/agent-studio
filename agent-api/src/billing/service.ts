@@ -13,6 +13,17 @@ type BillingConfig = {
   defaultAutoRenew: boolean;
 };
 
+type BillingConfigSource = "admin" | "environment";
+
+type BillingResolvedConfig = BillingConfig & {
+  source: BillingConfigSource;
+  mode: "test" | "live" | "unknown";
+  secretKeyPreview: string | null;
+  webhookSigningSecretPreview: string | null;
+  updatedAt: string | null;
+  rotatedAt: string | null;
+};
+
 type BillingOrganizationInput = {
   id: string;
   name?: string | null;
@@ -90,6 +101,16 @@ type PromotionPreview = {
 };
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
+const STRIPE_BILLING_INTEGRATION_TYPE = "stripe";
+const STRIPE_BILLING_INTEGRATION_SLUG = "billing-stripe";
+const STRIPE_WEBHOOK_ENDPOINT_PATH = "/api/integrations/stripe/webhook";
+const STRIPE_REQUIRED_WEBHOOK_EVENTS = [
+  "checkout.session.completed",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "customer.subscription.updated",
+  "customer.subscription.deleted"
+];
 const BILLING_EVENT_TYPES = {
   expiring: "billing.subscription.expiring_email",
   expired: "billing.subscription.expired_email",
@@ -105,6 +126,71 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 function normalizeEmail(value: string | null | undefined): string | undefined {
   const email = trimOrUndefined(value)?.toLowerCase();
   return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? trimOrUndefined(value) : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeCurrency(value: string | null | undefined, fallback = "usd"): string {
+  const currency = trimOrUndefined(value)?.toLowerCase() ?? fallback;
+  if (!/^[a-z]{3}$/.test(currency)) {
+    throw new Error("currency must be a 3-letter ISO code");
+  }
+  return currency;
+}
+
+function normalizeStripeMode(value: string | null | undefined): "test" | "live" | undefined {
+  const mode = trimOrUndefined(value)?.toLowerCase();
+  if (!mode) return undefined;
+  if (mode === "test" || mode === "live") return mode;
+  throw new Error("Stripe mode must be test or live");
+}
+
+function inferStripeMode(secretKey: string | null | undefined): "test" | "live" | "unknown" {
+  const key = trimOrUndefined(secretKey) ?? "";
+  if (/^(sk|rk)_live_/.test(key)) return "live";
+  if (/^(sk|rk)_test_/.test(key)) return "test";
+  return "unknown";
+}
+
+function assertStripeSecretKey(value: string): void {
+  if (!/^(sk|rk)_(test|live)_/.test(value)) {
+    throw new Error("Stripe secret key must start with sk_test_, sk_live_, rk_test_, or rk_live_");
+  }
+}
+
+function assertWebhookSigningSecret(value: string): void {
+  if (!value.startsWith("whsec_")) {
+    throw new Error("Stripe webhook signing secret must start with whsec_");
+  }
+}
+
+function assertHttpUrl(value: string, fieldLabel: string): void {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("invalid protocol");
+    }
+  } catch {
+    throw new Error(`${fieldLabel} must be a valid http(s) URL`);
+  }
+}
+
+function previewSecret(value: string | null | undefined): string | null {
+  const secret = trimOrUndefined(value);
+  if (!secret) return null;
+  const prefix = secret.slice(0, Math.min(8, secret.length));
+  const suffix = secret.length > 4 ? secret.slice(-4) : "";
+  return suffix ? `${prefix}...${suffix}` : `${prefix}...`;
 }
 
 function normalizeCode(value: string | null | undefined): string | undefined {
@@ -186,6 +272,37 @@ function stripeInterval(value: string): "day" | "week" | "month" | "year" {
   return "month";
 }
 
+function normalizeBillingInterval(value: string | null | undefined): "day" | "week" | "month" | "year" | undefined {
+  const interval = trimOrUndefined(value)?.toLowerCase();
+  if (!interval) return undefined;
+  if (interval === "day" || interval === "week" || interval === "month" || interval === "year") return interval;
+  throw new Error("billing interval must be day, week, month, or year");
+}
+
+function normalizeBillingStatus(value: string | null | undefined): "active" | "not_configured" | "disabled" | undefined {
+  const status = trimOrUndefined(value)?.toLowerCase();
+  if (!status) return undefined;
+  if (status === "active" || status === "not_configured" || status === "disabled") return status;
+  throw new Error("billing status must be active, not_configured, or disabled");
+}
+
+function parseNullableNonNegativeInteger(value: number | null | undefined, fieldLabel: string): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${fieldLabel} must be 0 or a positive integer`);
+  }
+  return value;
+}
+
+function parsePositiveInteger(value: number | null | undefined, fieldLabel: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${fieldLabel} must be a positive integer`);
+  }
+  return value;
+}
+
 function encodeStripeForm(input: Record<string, string | number | boolean | null | undefined>): URLSearchParams {
   const form = new URLSearchParams();
   Object.entries(input).forEach(([key, value]) => {
@@ -241,17 +358,220 @@ export class BillingService {
     return this.options.db;
   }
 
-  stripeConfigStatus() {
+  private async resolveBillingConfig(): Promise<BillingResolvedConfig> {
+    const fallback: BillingConfig = {
+      stripeSecretKey: trimOrUndefined(this.options.config.stripeSecretKey) ?? "",
+      stripeWebhookSigningSecret: trimOrUndefined(this.options.config.stripeWebhookSigningSecret) ?? "",
+      successUrl: trimOrUndefined(this.options.config.successUrl) ?? "",
+      cancelUrl: trimOrUndefined(this.options.config.cancelUrl) ?? "",
+      defaultCurrency: normalizeCurrency(this.options.config.defaultCurrency || "usd"),
+      defaultAutoRenew: this.options.config.defaultAutoRenew !== false
+    };
+
+    const instance = await this.db.integrationInstance.findUnique({
+      where: {
+        type_slug: {
+          type: STRIPE_BILLING_INTEGRATION_TYPE,
+          slug: STRIPE_BILLING_INTEGRATION_SLUG
+        }
+      },
+      include: {
+        config: true,
+        secret: true
+      }
+    });
+
+    const config = asRecord(instance?.config?.config);
+    const secret = asRecord(instance?.secret?.secretState);
+    const stripeSecretKey = asString(secret.stripeSecretKey) ?? fallback.stripeSecretKey;
+    const webhookSigningSecret = asString(secret.webhookSigningSecret) ?? fallback.stripeWebhookSigningSecret;
+    const configuredMode = normalizeStripeMode(asString(config.mode) ?? undefined);
+    const inferredMode = inferStripeMode(stripeSecretKey);
+    const mode = configuredMode && (inferredMode === "unknown" || configuredMode === inferredMode)
+      ? configuredMode
+      : inferredMode;
+
     return {
-      secretKeyConfigured: Boolean(this.options.config.stripeSecretKey),
-      webhookSigningSecretConfigured: Boolean(this.options.config.stripeWebhookSigningSecret),
-      successUrlConfigured: Boolean(trimOrUndefined(this.options.config.successUrl)),
-      cancelUrlConfigured: Boolean(trimOrUndefined(this.options.config.cancelUrl))
+      stripeSecretKey,
+      stripeWebhookSigningSecret: webhookSigningSecret,
+      successUrl: asString(config.successUrl) ?? fallback.successUrl,
+      cancelUrl: asString(config.cancelUrl) ?? fallback.cancelUrl,
+      defaultCurrency: normalizeCurrency(asString(config.defaultCurrency), fallback.defaultCurrency),
+      defaultAutoRenew: asBoolean(config.defaultAutoRenew) ?? fallback.defaultAutoRenew,
+      source: instance ? "admin" : "environment",
+      mode: mode === "test" || mode === "live" ? mode : "unknown",
+      secretKeyPreview: previewSecret(stripeSecretKey),
+      webhookSigningSecretPreview: previewSecret(webhookSigningSecret),
+      updatedAt: toIsoString(instance?.config?.updatedAt ?? instance?.updatedAt),
+      rotatedAt: toIsoString(instance?.secret?.rotatedAt)
     };
   }
 
-  verifyStripeSignature(rawBody: Buffer, signatureHeader: string | undefined): void {
-    const secret = trimOrUndefined(this.options.config.stripeWebhookSigningSecret);
+  async stripeConfigStatus() {
+    const config = await this.resolveBillingConfig();
+    return {
+      source: config.source,
+      mode: config.mode,
+      secretKeyConfigured: Boolean(config.stripeSecretKey),
+      webhookSigningSecretConfigured: Boolean(config.stripeWebhookSigningSecret),
+      successUrlConfigured: Boolean(trimOrUndefined(config.successUrl)),
+      cancelUrlConfigured: Boolean(trimOrUndefined(config.cancelUrl)),
+      successUrl: config.successUrl,
+      cancelUrl: config.cancelUrl,
+      defaultCurrency: config.defaultCurrency,
+      defaultAutoRenew: config.defaultAutoRenew,
+      secretKeyPreview: config.secretKeyPreview,
+      webhookSigningSecretPreview: config.webhookSigningSecretPreview,
+      webhookEndpointPath: STRIPE_WEBHOOK_ENDPOINT_PATH,
+      requiredWebhookEvents: STRIPE_REQUIRED_WEBHOOK_EVENTS,
+      updatedAt: config.updatedAt,
+      rotatedAt: config.rotatedAt
+    };
+  }
+
+  async updateStripeSettings(input: {
+    mode?: string | null;
+    stripeSecretKey?: string | null;
+    webhookSigningSecret?: string | null;
+    successUrl?: string | null;
+    cancelUrl?: string | null;
+    defaultCurrency?: string | null;
+    defaultAutoRenew?: boolean | null;
+    clearStripeSecretKey?: boolean;
+    clearWebhookSigningSecret?: boolean;
+    userId?: string | null;
+  }) {
+    const current = await this.db.integrationInstance.findUnique({
+      where: {
+        type_slug: {
+          type: STRIPE_BILLING_INTEGRATION_TYPE,
+          slug: STRIPE_BILLING_INTEGRATION_SLUG
+        }
+      },
+      include: {
+        config: true,
+        secret: true
+      }
+    });
+
+    const currentConfig = asRecord(current?.config?.config);
+    const currentSecret = asRecord(current?.secret?.secretState);
+    const nextConfig: Record<string, unknown> = { ...currentConfig };
+    const nextSecret: Record<string, unknown> = { ...currentSecret };
+
+    if (input.mode !== undefined && input.mode !== null) {
+      nextConfig.mode = normalizeStripeMode(input.mode) ?? "test";
+    }
+    if (input.successUrl !== undefined && input.successUrl !== null) {
+      const successUrl = trimOrUndefined(input.successUrl) ?? "";
+      if (successUrl) assertHttpUrl(successUrl, "successUrl");
+      nextConfig.successUrl = successUrl;
+    }
+    if (input.cancelUrl !== undefined && input.cancelUrl !== null) {
+      const cancelUrl = trimOrUndefined(input.cancelUrl) ?? "";
+      if (cancelUrl) assertHttpUrl(cancelUrl, "cancelUrl");
+      nextConfig.cancelUrl = cancelUrl;
+    }
+    if (input.defaultCurrency !== undefined && input.defaultCurrency !== null) {
+      nextConfig.defaultCurrency = normalizeCurrency(input.defaultCurrency);
+    }
+    if (input.defaultAutoRenew !== undefined && input.defaultAutoRenew !== null) {
+      nextConfig.defaultAutoRenew = input.defaultAutoRenew;
+    }
+
+    let secretChanged = false;
+    if (input.clearStripeSecretKey) {
+      delete nextSecret.stripeSecretKey;
+      secretChanged = true;
+    } else {
+      const stripeSecretKey = asString(input.stripeSecretKey);
+      if (stripeSecretKey) {
+        assertStripeSecretKey(stripeSecretKey);
+        nextSecret.stripeSecretKey = stripeSecretKey;
+        secretChanged = true;
+      }
+    }
+    if (input.clearWebhookSigningSecret) {
+      delete nextSecret.webhookSigningSecret;
+      secretChanged = true;
+    } else {
+      const webhookSigningSecret = asString(input.webhookSigningSecret);
+      if (webhookSigningSecret) {
+        assertWebhookSigningSecret(webhookSigningSecret);
+        nextSecret.webhookSigningSecret = webhookSigningSecret;
+        secretChanged = true;
+      }
+    }
+
+    const configuredMode = normalizeStripeMode(asString(nextConfig.mode) ?? undefined);
+    const effectiveSecretKey = asString(nextSecret.stripeSecretKey) ?? trimOrUndefined(this.options.config.stripeSecretKey);
+    const keyMode = inferStripeMode(effectiveSecretKey);
+    if (configuredMode && keyMode !== "unknown" && configuredMode !== keyMode) {
+      throw new Error("Stripe mode does not match the secret key prefix");
+    }
+
+    const instance = await this.db.integrationInstance.upsert({
+      where: {
+        type_slug: {
+          type: STRIPE_BILLING_INTEGRATION_TYPE,
+          slug: STRIPE_BILLING_INTEGRATION_SLUG
+        }
+      },
+      update: {
+        name: "Stripe Billing",
+        description: "Agent Studio billing checkout and auto-renewal settings.",
+        status: "active",
+        isSystemSingleton: true
+      },
+      create: {
+        type: STRIPE_BILLING_INTEGRATION_TYPE,
+        slug: STRIPE_BILLING_INTEGRATION_SLUG,
+        name: "Stripe Billing",
+        description: "Agent Studio billing checkout and auto-renewal settings.",
+        status: "active",
+        isSystemSingleton: true
+      }
+    });
+
+    await this.db.integrationInstanceConfig.upsert({
+      where: { integrationInstanceId: instance.id },
+      create: {
+        integrationInstanceId: instance.id,
+        config: nextConfig as Prisma.InputJsonValue
+      },
+      update: {
+        config: nextConfig as Prisma.InputJsonValue
+      }
+    });
+
+    const hasSecrets = Object.keys(nextSecret).length > 0;
+    await this.db.integrationInstanceSecret.upsert({
+      where: { integrationInstanceId: instance.id },
+      create: {
+        integrationInstanceId: instance.id,
+        hasSecrets,
+        secretState: nextSecret as Prisma.InputJsonValue,
+        rotatedAt: secretChanged ? new Date() : null,
+        rotatedByUserId: secretChanged ? trimOrUndefined(input.userId) ?? null : null
+      },
+      update: {
+        hasSecrets,
+        secretState: nextSecret as Prisma.InputJsonValue,
+        ...(secretChanged
+          ? {
+              rotatedAt: new Date(),
+              rotatedByUserId: trimOrUndefined(input.userId) ?? null
+            }
+          : {})
+      }
+    });
+
+    return this.stripeConfigStatus();
+  }
+
+  async verifyStripeSignature(rawBody: Buffer, signatureHeader: string | undefined): Promise<void> {
+    const config = await this.resolveBillingConfig();
+    const secret = trimOrUndefined(config.stripeWebhookSigningSecret);
     if (!secret) {
       throw new Error("Stripe webhook signing secret is not configured");
     }
@@ -289,7 +609,8 @@ export class BillingService {
       promotionCodes,
       emailRules,
       stripeEvents,
-      notifications
+      notifications,
+      stripe
     ] = await Promise.all([
       this.db.organization.findMany({
         where: { type: "customer" },
@@ -312,7 +633,8 @@ export class BillingService {
         where: { channelType: "email" },
         orderBy: { createdAt: "desc" },
         take: 80
-      })
+      }),
+      this.stripeConfigStatus()
     ]);
 
     const customerByOrg = new Map(customers.map((customer) => [customer.organizationId, customer]));
@@ -337,7 +659,7 @@ export class BillingService {
     return {
       summary: {
         revenueCents,
-        currency: this.options.config.defaultCurrency || "usd",
+        currency: stripe.defaultCurrency || "usd",
         activeSubscriptions: grants.filter((grant) => grant.status === "active" && (!grant.expiresAt || new Date(grant.expiresAt) > now)).length,
         expiringIn14Days: expiringGrantCount,
         failedRenewals: failedAutoRenewals.length,
@@ -376,13 +698,13 @@ export class BillingService {
         createdAt: toIsoString(item.createdAt),
         updatedAt: toIsoString(item.updatedAt)
       })),
-      stripe: this.stripeConfigStatus()
+      stripe
     };
   }
 
   async getPortalSummary(input: { organization: BillingOrganizationInput; user: BillingUserInput }) {
     const customer = await this.ensureBillingCustomerForOrganization(input);
-    const [plans, grant, autoRenewal, orders, redemptions] = await Promise.all([
+    const [plans, grant, autoRenewal, orders, redemptions, stripe] = await Promise.all([
       this.listBillablePlans(),
       this.db.subscriptionGrant.findUnique({
         where: {
@@ -403,7 +725,8 @@ export class BillingService {
         where: { organizationId: input.organization.id },
         orderBy: { createdAt: "desc" },
         take: 20
-      })
+      }),
+      this.stripeConfigStatus()
     ]);
 
     return {
@@ -428,7 +751,7 @@ export class BillingService {
       })),
       defaults: {
         autoRenew: customer.defaultAutoRenew,
-        stripeReady: this.stripeConfigStatus().secretKeyConfigured
+        stripeReady: stripe.secretKeyConfigured
       }
     };
   }
@@ -437,10 +760,46 @@ export class BillingService {
     return this.db.subscriptionPlan.findMany({
       where: {
         status: "active",
-        billingStatus: { in: ["active", "not_configured"] }
+        billingStatus: "active",
+        billingPriceCents: { not: null }
       },
       orderBy: [{ billingStatus: "asc" }, { billingPriceCents: "asc" }, { name: "asc" }]
     });
+  }
+
+  async updatePlanBilling(planId: string, input: {
+    billingCurrency?: string | null;
+    billingInterval?: string | null;
+    billingIntervalCount?: number | null;
+    billingPriceCents?: number | null;
+    billingStatus?: string | null;
+  }) {
+    const plan = await this.db.subscriptionPlan.findUnique({ where: { id: planId } });
+    if (!plan) throw new Error("plan does not exist");
+
+    const billingCurrency = input.billingCurrency === undefined ? undefined : normalizeCurrency(input.billingCurrency);
+    const billingInterval = input.billingInterval === undefined ? undefined : normalizeBillingInterval(input.billingInterval);
+    const billingIntervalCount = parsePositiveInteger(input.billingIntervalCount, "billingIntervalCount");
+    const billingPriceCents = parseNullableNonNegativeInteger(input.billingPriceCents, "billingPriceCents");
+    const billingStatus = input.billingStatus === undefined ? undefined : normalizeBillingStatus(input.billingStatus);
+
+    const nextStatus = billingStatus ?? plan.billingStatus;
+    const nextPrice = billingPriceCents === undefined ? plan.billingPriceCents : billingPriceCents;
+    if (nextStatus === "active" && nextPrice === null) {
+      throw new Error("Active billing products must have a price");
+    }
+
+    const updated = await this.db.subscriptionPlan.update({
+      where: { id: plan.id },
+      data: {
+        billingCurrency,
+        billingInterval,
+        billingIntervalCount,
+        billingPriceCents,
+        billingStatus
+      }
+    });
+    return this.mapPlan(updated);
   }
 
   async createPromotionCode(input: {
@@ -463,6 +822,7 @@ export class BillingService {
     createdByUserId?: string | null;
     note?: string | null;
   }) {
+    const config = await this.resolveBillingConfig();
     const code = normalizeCode(input.code);
     if (!code) throw new Error("promotion code is required");
     if (!["gift_days", "percent_off", "amount_off", "free_access"].includes(input.type)) {
@@ -475,7 +835,7 @@ export class BillingService {
         description: trimOrUndefined(input.description) ?? null,
         type: input.type,
         value: Math.max(0, Math.floor(input.value || 0)),
-        currency: trimOrUndefined(input.currency)?.toLowerCase() ?? this.options.config.defaultCurrency ?? "usd",
+        currency: trimOrUndefined(input.currency)?.toLowerCase() ?? config.defaultCurrency ?? "usd",
         status: trimOrUndefined(input.status) ?? "active",
         maxRedemptions: input.maxRedemptions ?? null,
         perCustomerLimit: Math.max(1, input.perCustomerLimit ?? 1),
@@ -586,6 +946,7 @@ export class BillingService {
     userId?: string | null;
     promotionCodeId?: string | null;
   }) {
+    const config = await this.resolveBillingConfig();
     const organization = await this.db.organization.findUnique({
       where: { id: input.organizationId },
       select: { id: true, name: true, slug: true, type: true }
@@ -607,7 +968,7 @@ export class BillingService {
         status: "draft",
         source: "admin_gift",
         checkoutMode: "manual",
-        currency: plan.billingCurrency || this.options.config.defaultCurrency || "usd",
+        currency: plan.billingCurrency || config.defaultCurrency || "usd",
         amountSubtotalCents: 0,
         discountCents: 0,
         amountTotalCents: 0,
@@ -664,7 +1025,7 @@ export class BillingService {
   }
 
   async handleStripeWebhook(rawBody: Buffer, signatureHeader: string | undefined) {
-    this.verifyStripeSignature(rawBody, signatureHeader);
+    await this.verifyStripeSignature(rawBody, signatureHeader);
     const event = JSON.parse(rawBody.toString("utf8")) as StripeEvent;
     const stored = await this.db.billingStripeEvent.upsert({
       where: { stripeEventId: event.id },
@@ -713,9 +1074,13 @@ export class BillingService {
     autoRenew: boolean;
     source: string;
   }) {
+    const config = await this.resolveBillingConfig();
     const plan = await this.db.subscriptionPlan.findUnique({ where: { id: input.planId } });
     if (!plan) throw new Error("套餐不存在");
     if (plan.status !== "active") throw new Error("套餐未启用");
+    if (plan.billingStatus !== "active" || plan.billingPriceCents === null) {
+      throw new Error("套餐还没有在 Billing Products 中配置可售价格");
+    }
     const basePrice = Math.max(0, plan.billingPriceCents ?? 0);
     const durationDays = durationDaysForPlan(plan);
     const preview = await this.calculatePromotionPreview({
@@ -736,7 +1101,7 @@ export class BillingService {
         status: checkoutMode === "manual" ? "draft" : "pending_payment",
         source: input.source,
         checkoutMode,
-        currency: plan.billingCurrency || this.options.config.defaultCurrency || "usd",
+        currency: plan.billingCurrency || config.defaultCurrency || "usd",
         amountSubtotalCents: basePrice,
         discountCents: preview.discountCents,
         amountTotalCents: total,
@@ -758,7 +1123,7 @@ export class BillingService {
         checkoutUrl: null,
         order: fulfilled.order,
         promotion: preview,
-        stripe: this.stripeConfigStatus()
+        stripe: await this.stripeConfigStatus()
       };
     }
 
@@ -785,7 +1150,7 @@ export class BillingService {
       checkoutUrl: session.url ?? null,
       order: this.mapOrder(updated, plan),
       promotion: preview,
-      stripe: this.stripeConfigStatus()
+      stripe: await this.stripeConfigStatus()
     };
   }
 
@@ -883,6 +1248,7 @@ export class BillingService {
     organization: BillingOrganizationInput;
     user: BillingUserInput;
   }) {
+    const config = await this.resolveBillingConfig();
     const existing = await this.db.billingCustomer.findUnique({ where: { organizationId: input.organization.id } });
     const latestAccessRequest = await this.db.accessRequest.findFirst({
       where: {
@@ -910,7 +1276,7 @@ export class BillingService {
         sn: existing?.sn ? undefined : sn ?? null,
         salesContact: existing?.salesContact ? undefined : salesContact ?? null,
         billingEmail: existing?.billingEmail ? undefined : businessEmail ?? null,
-        defaultAutoRenew: existing?.defaultAutoRenew ?? this.options.config.defaultAutoRenew,
+        defaultAutoRenew: existing?.defaultAutoRenew ?? config.defaultAutoRenew,
         metadataJson: existing?.metadataJson ?? {
           inferredFrom: latestAccessRequest ? "access_request" : "current_user"
         }
@@ -924,7 +1290,7 @@ export class BillingService {
         sn: sn ?? null,
         salesContact: salesContact ?? null,
         billingEmail: businessEmail ?? null,
-        defaultAutoRenew: this.options.config.defaultAutoRenew,
+        defaultAutoRenew: config.defaultAutoRenew,
         metadataJson: {
           inferredFrom: latestAccessRequest ? "access_request" : "current_user"
         }
@@ -940,11 +1306,12 @@ export class BillingService {
     user: BillingUserInput;
     mode: string;
   }): Promise<StripeCheckoutSession> {
-    if (!this.options.config.stripeSecretKey) {
+    const config = await this.resolveBillingConfig();
+    if (!config.stripeSecretKey) {
       throw new Error("Stripe is not configured");
     }
-    const successUrl = this.resolveSuccessUrl();
-    const cancelUrl = this.resolveCancelUrl();
+    const successUrl = this.resolveSuccessUrl(config);
+    const cancelUrl = this.resolveCancelUrl(config);
     if (!successUrl || !cancelUrl) {
       throw new Error("Billing success/cancel URLs are not configured");
     }
@@ -977,7 +1344,7 @@ export class BillingService {
           "setup_intent_data[metadata][agent_studio_order_id]": input.order.id,
           "setup_intent_data[metadata][organization_id]": input.organization.id
         });
-    return this.stripeRequest<StripeCheckoutSession>("/checkout/sessions", form);
+    return this.stripeRequest<StripeCheckoutSession>("/checkout/sessions", form, config);
   }
 
   private async createStripeSubscription(input: {
@@ -986,7 +1353,8 @@ export class BillingService {
     customerId: string;
     trialEnd: Date;
   }): Promise<StripeSubscription> {
-    if (!this.options.config.stripeSecretKey) {
+    const config = await this.resolveBillingConfig();
+    if (!config.stripeSecretKey) {
       throw new Error("Stripe is not configured");
     }
     const trialEnd = Math.max(Math.floor(input.trialEnd.getTime() / 1000), Math.floor(Date.now() / 1000) + 60);
@@ -1002,14 +1370,14 @@ export class BillingService {
       "metadata[organization_id]": input.order.organizationId,
       "metadata[plan_id]": input.plan.id
     });
-    return this.stripeRequest<StripeSubscription>("/subscriptions", form);
+    return this.stripeRequest<StripeSubscription>("/subscriptions", form, config);
   }
 
-  private async stripeRequest<T>(path: string, body: URLSearchParams): Promise<T> {
+  private async stripeRequest<T>(path: string, body: URLSearchParams, config: BillingResolvedConfig): Promise<T> {
     const response = await fetch(`${STRIPE_API_BASE}${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.options.config.stripeSecretKey}`,
+        Authorization: `Bearer ${config.stripeSecretKey}`,
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body
@@ -1337,6 +1705,7 @@ export class BillingService {
     if (rule.triggerType === "auto_renew_failed") {
       return this.runAutoRenewFailedReminderRule(rule, input);
     }
+    const config = await this.resolveBillingConfig();
     const windowStart = rule.triggerType === "expired"
       ? addDays(input.now, -1)
       : addDays(input.now, rule.offsetDays);
@@ -1384,7 +1753,7 @@ export class BillingService {
           company_name: organization?.name ?? customer?.companyName ?? "your organization",
           plan_name: grant.plan?.name ?? "Agent Studio",
           expires_at_local: `${expiresAtLocal} UTC`,
-          renew_url: this.resolveSuccessUrl() || this.options.config.successUrl || "",
+          renew_url: this.resolveSuccessUrl(config),
           amount_due: grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : ""
         };
         const notification = await this.db.notificationRecord.create({
@@ -1441,6 +1810,7 @@ export class BillingService {
     rule: Awaited<ReturnType<PrismaClient["billingEmailRule"]["findMany"]>>[number],
     input: { now: Date; testEmail?: string | null }
   ) {
+    const config = await this.resolveBillingConfig();
     const failedSince = addDays(input.now, -1);
     const renewals = await this.db.billingAutoRenewal.findMany({
       where: {
@@ -1478,7 +1848,7 @@ export class BillingService {
           company_name: organization?.name ?? customer?.companyName ?? "your organization",
           plan_name: plan?.name ?? "Agent Studio",
           expires_at_local: renewal.nextRenewalAt ? `${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(renewal.nextRenewalAt)} UTC` : "",
-          renew_url: this.resolveSuccessUrl(),
+          renew_url: this.resolveSuccessUrl(config),
           amount_due: plan?.billingPriceCents ? centsLabel(plan.billingPriceCents, plan.billingCurrency) : ""
         };
         const notification = await this.db.notificationRecord.create({
@@ -1561,12 +1931,12 @@ export class BillingService {
     return recipients;
   }
 
-  private resolveSuccessUrl(): string {
-    return trimOrUndefined(this.options.config.successUrl) || "";
+  private resolveSuccessUrl(config: BillingResolvedConfig): string {
+    return trimOrUndefined(config.successUrl) || "";
   }
 
-  private resolveCancelUrl(): string {
-    return trimOrUndefined(this.options.config.cancelUrl) || "";
+  private resolveCancelUrl(config: BillingResolvedConfig): string {
+    return trimOrUndefined(config.cancelUrl) || "";
   }
 
   private nextActionForAccount(input: {

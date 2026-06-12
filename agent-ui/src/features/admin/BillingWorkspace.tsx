@@ -20,13 +20,16 @@ import type { ColumnsType } from "antd/es/table";
 import {
   BadgeDollarSign,
   CalendarClock,
+  Copy,
   CreditCard,
   Gift,
+  KeyRound,
   Link2,
   Mail,
   Plus,
   RefreshCw,
   Search,
+  Save,
   ShieldCheck,
   TicketPercent,
   Zap
@@ -38,7 +41,9 @@ import {
   createAdminPromotionCode,
   fetchAdminBillingOverview,
   grantAdminBillingGiftDays,
+  patchAdminBillingPlan,
   patchAdminBillingEmailRule,
+  patchAdminBillingStripeSettings,
   patchAdminPromotionCode,
   runAdminBillingEmailReminderSweep
 } from "./api";
@@ -79,6 +84,26 @@ type PaymentLinkFormState = {
   planId: string;
   promotionCode: string;
   autoRenew: boolean;
+};
+
+type PlanBillingFormState = {
+  billingStatus: string;
+  billingCurrency: string;
+  billingInterval: string;
+  billingIntervalCount: number;
+  billingPriceCents: number | null;
+};
+
+type StripeSettingsFormState = {
+  mode: string;
+  stripeSecretKey: string;
+  webhookSigningSecret: string;
+  successUrl: string;
+  cancelUrl: string;
+  defaultCurrency: string;
+  defaultAutoRenew: boolean;
+  clearStripeSecretKey: boolean;
+  clearWebhookSigningSecret: boolean;
 };
 
 function formatLocalTime(value?: string | null): string {
@@ -195,6 +220,36 @@ function createPaymentLinkFormState(account?: AdminBillingCustomerAccount | null
     promotionCode: "",
     autoRenew: true
   };
+}
+
+function createPlanBillingFormState(plan?: AdminBillingPlan | null): PlanBillingFormState {
+  return {
+    billingStatus: plan?.billingStatus ?? "not_configured",
+    billingCurrency: plan?.billingCurrency ?? "usd",
+    billingInterval: plan?.billingInterval ?? "month",
+    billingIntervalCount: plan?.billingIntervalCount ?? 1,
+    billingPriceCents: plan?.billingPriceCents ?? null
+  };
+}
+
+function createStripeSettingsFormState(stripe?: AdminBillingOverviewResponse["stripe"] | null): StripeSettingsFormState {
+  return {
+    mode: stripe?.mode && stripe.mode !== "unknown" ? stripe.mode : "test",
+    stripeSecretKey: "",
+    webhookSigningSecret: "",
+    successUrl: stripe?.successUrl ?? "",
+    cancelUrl: stripe?.cancelUrl ?? "",
+    defaultCurrency: stripe?.defaultCurrency ?? "usd",
+    defaultAutoRenew: stripe?.defaultAutoRenew ?? true,
+    clearStripeSecretKey: false,
+    clearWebhookSigningSecret: false
+  };
+}
+
+function stripeWebhookUrl(stripe?: AdminBillingOverviewResponse["stripe"] | null): string {
+  const path = stripe?.webhookEndpointPath ?? "/api/integrations/stripe/webhook";
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${path}`;
 }
 
 function OrderDetailPanel(props: { order: AdminBillingOrder; organizationName: string }) {
@@ -318,6 +373,9 @@ export function BillingWorkspace() {
   const [createdPaymentLink, setCreatedPaymentLink] = useState<string | null>(null);
   const [editingPromotion, setEditingPromotion] = useState<AdminPromotionCode | null>(null);
   const [editingEmailRule, setEditingEmailRule] = useState<AdminBillingEmailRule | null>(null);
+  const [editingPlan, setEditingPlan] = useState<AdminBillingPlan | null>(null);
+  const [planBillingForm, setPlanBillingForm] = useState<PlanBillingFormState>(createPlanBillingFormState());
+  const [stripeForm, setStripeForm] = useState<StripeSettingsFormState>(createStripeSettingsFormState());
   const [selectedOrder, setSelectedOrder] = useState<AdminBillingOrder | null>(null);
   const [selectedAutoRenewalId, setSelectedAutoRenewalId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -329,6 +387,7 @@ export function BillingWorkspace() {
     try {
       const next = await fetchAdminBillingOverview();
       setData(next);
+      setStripeForm(createStripeSettingsFormState(next.stripe));
       setSelectedOrganizationId((current) => current || next.customers[0]?.organization.id || "");
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "加载计费数据失败");
@@ -619,6 +678,52 @@ export function BillingWorkspace() {
     }
   }
 
+  async function handleSavePlanBilling() {
+    if (!editingPlan) return;
+    setSaving(true);
+    setErrorText("");
+    try {
+      await patchAdminBillingPlan(editingPlan.id, {
+        billingStatus: planBillingForm.billingStatus,
+        billingCurrency: planBillingForm.billingCurrency,
+        billingInterval: planBillingForm.billingInterval,
+        billingIntervalCount: planBillingForm.billingIntervalCount,
+        billingPriceCents: planBillingForm.billingPriceCents
+      });
+      setEditingPlan(null);
+      setSuccessText("套餐售卖配置已更新");
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "更新套餐售卖配置失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveStripeSettings() {
+    setSaving(true);
+    setErrorText("");
+    try {
+      await patchAdminBillingStripeSettings({
+        mode: stripeForm.mode,
+        stripeSecretKey: stripeForm.clearStripeSecretKey ? undefined : stripeForm.stripeSecretKey.trim() || undefined,
+        webhookSigningSecret: stripeForm.clearWebhookSigningSecret ? undefined : stripeForm.webhookSigningSecret.trim() || undefined,
+        successUrl: stripeForm.successUrl,
+        cancelUrl: stripeForm.cancelUrl,
+        defaultCurrency: stripeForm.defaultCurrency,
+        defaultAutoRenew: stripeForm.defaultAutoRenew,
+        clearStripeSecretKey: stripeForm.clearStripeSecretKey,
+        clearWebhookSigningSecret: stripeForm.clearWebhookSigningSecret
+      });
+      setSuccessText("Stripe 配置已保存");
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "保存 Stripe 配置失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveEmailRule() {
     if (!editingEmailRule) return;
     setSaving(true);
@@ -812,11 +917,27 @@ export function BillingWorkspace() {
                 columns={[
                   { title: "Plan", dataIndex: "name" },
                   { title: "Slug", dataIndex: "slug" },
-                  { title: "Billing", render: (_, record) => planBillingLabel(record) },
+                  { title: "Price", render: (_, record) => planBillingLabel(record) },
                   { title: "Duration", render: (_, record) => `${record.durationDays} days` },
                   { title: "Status", dataIndex: "billingStatus", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
                   { title: "AI request limit", dataIndex: "monthlyCompletedTurnLimit", render: (value) => value ?? "不限" },
-                  { title: "Token limit", dataIndex: "monthlyTokenLimit", render: (value) => value ?? "不限" }
+                  { title: "Token limit", dataIndex: "monthlyTokenLimit", render: (value) => value ?? "不限" },
+                  {
+                    title: "Action",
+                    width: 130,
+                    render: (_, record) => (
+                      <Button
+                        size="small"
+                        icon={<CreditCard size={14} />}
+                        onClick={() => {
+                          setEditingPlan(record);
+                          setPlanBillingForm(createPlanBillingFormState(record));
+                        }}
+                      >
+                        配置售卖
+                      </Button>
+                    )
+                  }
                 ]}
               />
             )
@@ -951,8 +1072,71 @@ export function BillingWorkspace() {
             label: "Stripe",
             children: (
               <div className="admin-billing-tab-stack">
+                <section className="admin-billing-config-panel">
+                  <div className="admin-billing-config-head">
+                    <div>
+                      <span className="admin-billing-kicker">Runtime settings</span>
+                      <h3>Stripe 收款配置</h3>
+                      <p>保存后立即用于 checkout、自动续费和 webhook 校验；密钥留空表示保持当前值。</p>
+                    </div>
+                    <Button type="primary" icon={<Save size={16} />} loading={saving} onClick={() => void handleSaveStripeSettings()}>
+                      保存 Stripe 配置
+                    </Button>
+                  </div>
+                  <Form layout="vertical" className="admin-billing-config-form">
+                    <Form.Item label="Mode">
+                      <Select
+                        value={stripeForm.mode}
+                        onChange={(mode) => setStripeForm((current) => ({ ...current, mode }))}
+                        options={[
+                          { value: "test", label: "Test mode" },
+                          { value: "live", label: "Live mode" }
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item label={`Secret key${data?.stripe.secretKeyPreview ? ` · ${data.stripe.secretKeyPreview}` : ""}`}>
+                      <Input.Password
+                        prefix={<KeyRound size={14} />}
+                        value={stripeForm.stripeSecretKey}
+                        disabled={stripeForm.clearStripeSecretKey}
+                        placeholder={data?.stripe.secretKeyConfigured ? "留空保持当前 key" : "sk_test_... / sk_live_..."}
+                        onChange={(event) => setStripeForm((current) => ({ ...current, stripeSecretKey: event.target.value }))}
+                      />
+                    </Form.Item>
+                    <Form.Item label={`Webhook signing secret${data?.stripe.webhookSigningSecretPreview ? ` · ${data.stripe.webhookSigningSecretPreview}` : ""}`}>
+                      <Input.Password
+                        prefix={<ShieldCheck size={14} />}
+                        value={stripeForm.webhookSigningSecret}
+                        disabled={stripeForm.clearWebhookSigningSecret}
+                        placeholder={data?.stripe.webhookSigningSecretConfigured ? "留空保持当前 whsec" : "whsec_..."}
+                        onChange={(event) => setStripeForm((current) => ({ ...current, webhookSigningSecret: event.target.value }))}
+                      />
+                    </Form.Item>
+                    <Form.Item label="Success URL">
+                      <Input value={stripeForm.successUrl} onChange={(event) => setStripeForm((current) => ({ ...current, successUrl: event.target.value }))} />
+                    </Form.Item>
+                    <Form.Item label="Cancel URL">
+                      <Input value={stripeForm.cancelUrl} onChange={(event) => setStripeForm((current) => ({ ...current, cancelUrl: event.target.value }))} />
+                    </Form.Item>
+                    <Form.Item label="Default currency">
+                      <Input value={stripeForm.defaultCurrency} onChange={(event) => setStripeForm((current) => ({ ...current, defaultCurrency: event.target.value.toLowerCase() }))} maxLength={3} />
+                    </Form.Item>
+                    <Form.Item label="Default auto renew">
+                      <Switch checked={stripeForm.defaultAutoRenew} onChange={(defaultAutoRenew) => setStripeForm((current) => ({ ...current, defaultAutoRenew }))} />
+                    </Form.Item>
+                    <Form.Item label="Clear stored secret key">
+                      <Switch checked={stripeForm.clearStripeSecretKey} onChange={(clearStripeSecretKey) => setStripeForm((current) => ({ ...current, clearStripeSecretKey }))} />
+                    </Form.Item>
+                    <Form.Item label="Clear webhook secret">
+                      <Switch checked={stripeForm.clearWebhookSigningSecret} onChange={(clearWebhookSigningSecret) => setStripeForm((current) => ({ ...current, clearWebhookSigningSecret }))} />
+                    </Form.Item>
+                  </Form>
+                </section>
+
                 <section className="admin-billing-stripe-health">
                   {[
+                    ["Config source", data?.stripe.source ?? "environment"],
+                    ["Mode", data?.stripe.mode ?? "unknown"],
                     ["Secret key", data?.stripe.secretKeyConfigured],
                     ["Webhook signing secret", data?.stripe.webhookSigningSecretConfigured],
                     ["Success URL", data?.stripe.successUrlConfigured],
@@ -961,9 +1145,31 @@ export function BillingWorkspace() {
                     <div key={String(label)}>
                       <ShieldCheck size={18} />
                       <span>{label}</span>
-                      <Tag color={ready ? "success" : "error"}>{ready ? "configured" : "missing"}</Tag>
+                      <Tag color={typeof ready === "boolean" ? (ready ? "success" : "error") : "processing"}>
+                        {typeof ready === "boolean" ? (ready ? "configured" : "missing") : String(ready)}
+                      </Tag>
                     </div>
                   ))}
+                </section>
+                <section className="admin-billing-config-panel compact">
+                  <div className="admin-billing-webhook-row">
+                    <div>
+                      <span className="admin-billing-kicker">Webhook endpoint</span>
+                      <strong>{stripeWebhookUrl(data?.stripe)}</strong>
+                    </div>
+                    <Button
+                      icon={<Copy size={16} />}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(stripeWebhookUrl(data?.stripe));
+                        setSuccessText("Webhook URL 已复制");
+                      }}
+                    >
+                      复制
+                    </Button>
+                  </div>
+                  <div className="admin-billing-webhook-events">
+                    {(data?.stripe.requiredWebhookEvents ?? []).map((eventName) => <Tag key={eventName}>{eventName}</Tag>)}
+                  </div>
                 </section>
                 <Table
                   rowKey="id"
@@ -1123,6 +1329,66 @@ export function BillingWorkspace() {
           </div>
         ) : null}
       </Drawer>
+
+      <Modal
+        open={Boolean(editingPlan)}
+        title={editingPlan ? `${editingPlan.name} · 售卖配置` : "售卖配置"}
+        okText="保存"
+        confirmLoading={saving}
+        onOk={() => void handleSavePlanBilling()}
+        onCancel={() => setEditingPlan(null)}
+        destroyOnHidden
+      >
+        <Form layout="vertical">
+          <Form.Item label="Billing status">
+            <Select
+              value={planBillingForm.billingStatus}
+              onChange={(billingStatus) => setPlanBillingForm((current) => ({ ...current, billingStatus }))}
+              options={[
+                { value: "active", label: "active · Portal 可购买" },
+                { value: "not_configured", label: "not_configured · 暂不售卖" },
+                { value: "disabled", label: "disabled · 停止售卖" }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="Price cents">
+            <InputNumber
+              min={0}
+              value={planBillingForm.billingPriceCents}
+              placeholder="例如 19900 表示 199.00"
+              onChange={(billingPriceCents) => setPlanBillingForm((current) => ({ ...current, billingPriceCents: billingPriceCents ?? null }))}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+          <Form.Item label="Currency">
+            <Input
+              value={planBillingForm.billingCurrency}
+              maxLength={3}
+              onChange={(event) => setPlanBillingForm((current) => ({ ...current, billingCurrency: event.target.value.toLowerCase() }))}
+            />
+          </Form.Item>
+          <Form.Item label="Billing interval">
+            <Select
+              value={planBillingForm.billingInterval}
+              onChange={(billingInterval) => setPlanBillingForm((current) => ({ ...current, billingInterval }))}
+              options={[
+                { value: "month", label: "month" },
+                { value: "year", label: "year" },
+                { value: "week", label: "week" },
+                { value: "day", label: "day" }
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="Interval count">
+            <InputNumber
+              min={1}
+              value={planBillingForm.billingIntervalCount}
+              onChange={(billingIntervalCount) => setPlanBillingForm((current) => ({ ...current, billingIntervalCount: Number(billingIntervalCount ?? 1) }))}
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Drawer
         title="订单详情"

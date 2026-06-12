@@ -230,10 +230,22 @@ export type AdminBillingOverviewResponse = {
   stripeEvents: AdminBillingStripeEvent[];
   notifications: AdminBillingNotificationRecord[];
   stripe: {
+    source: "admin" | "environment";
+    mode: "test" | "live" | "unknown";
     secretKeyConfigured: boolean;
     webhookSigningSecretConfigured: boolean;
     successUrlConfigured: boolean;
     cancelUrlConfigured: boolean;
+    successUrl: string;
+    cancelUrl: string;
+    defaultCurrency: string;
+    defaultAutoRenew: boolean;
+    secretKeyPreview: string | null;
+    webhookSigningSecretPreview: string | null;
+    webhookEndpointPath: string;
+    requiredWebhookEvents: string[];
+    updatedAt?: string | null;
+    rotatedAt?: string | null;
   };
 };
 
