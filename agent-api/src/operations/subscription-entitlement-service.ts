@@ -11,7 +11,7 @@ import type {
 import type { SubscriptionPlanRecord, SubscriptionPlanRepository } from "../persistence/subscription-plan-repository.js";
 import { usageTotalTokens } from "./usage-metrics.js";
 
-type PrincipalLabel = "当前账号" | "所属组织";
+type PrincipalLabel = "Your account" | "Your workspace";
 
 type CurrentActor = {
   id: string;
@@ -158,39 +158,39 @@ function makeGrantCopy(
   status: SubscriptionGrantEvaluation["access"]["status"],
   reasonCode: string | null
 ): { title: string; description: string } {
-  const subject: PrincipalLabel = principalType === "user" ? "当前账号" : "所属组织";
+  const subject: PrincipalLabel = principalType === "user" ? "Your account" : "Your workspace";
   switch (status) {
     case "paused":
       return {
-        title: "已暂停",
-        description: `${subject}的可用期已暂停，请联系管理员恢复后再继续提问。`
+        title: "Access is paused",
+        description: `${subject} access is paused. Ask your admin to resume access before sending a new AI request.`
       };
     case "scheduled":
       return {
-        title: "待生效",
-        description: `${subject}的可用期尚未开始，请在生效后再试。`
+        title: "Access starts soon",
+        description: `${subject} access has not started yet. Try again after the start time.`
       };
     case "expired":
       return {
-        title: "已到期",
-        description: `${subject}的可用期已结束，请联系管理员续期后再继续提问。`
+        title: "Access has ended",
+        description: `${subject} access has ended. Ask your admin to renew access before sending a new AI request.`
       };
     case "exhausted":
       if (reasonCode?.includes("token_limit")) {
         return {
-          title: "额度用尽",
-          description: `${subject}本周期的服务额度已用完，请等待下个周期或联系管理员调整。`
+          title: "Service capacity reached",
+          description: `${subject} service capacity has been used for this cycle. Wait for the next cycle or ask your admin to adjust the plan.`
         };
       }
       return {
-        title: "额度用尽",
-        description: `${subject}本周期的 AI Request 已用完，请等待下个周期或联系管理员调整。`
+        title: "AI request limit reached",
+        description: `${subject} AI requests have been used for this cycle. Wait for the next cycle or ask your admin to adjust the plan.`
       };
     case "available":
     default:
       return {
-        title: "可用",
-        description: `${subject}当前仍可继续发起新问题。`
+        title: "Access is active",
+        description: `${subject} can send new AI requests.`
       };
   }
 }
@@ -200,7 +200,7 @@ function defaultDecision(organizationType: string | null | undefined): ChatAcces
     return {
       allowed: true,
       reasonCode: null,
-      message: "内部组织未单独配置时默认不限制使用。",
+      message: "Internal workspaces are unrestricted unless a separate plan is configured.",
       userGrant: null,
       organizationGrant: null,
       defaultPolicy: "internal_unlimited"
@@ -210,7 +210,7 @@ function defaultDecision(organizationType: string | null | undefined): ChatAcces
   return {
     allowed: false,
     reasonCode: "external_subscription_required",
-    message: "当前账号尚未开通可用套餐，请联系管理员开通后再继续提问。",
+    message: "Your workspace has not enabled access yet. Ask your admin to assign a plan before sending a new AI request.",
     userGrant: null,
     organizationGrant: null,
     defaultPolicy: "external_requires_subscription"
@@ -719,7 +719,7 @@ export class SubscriptionEntitlementService {
     return {
       allowed: true,
       reasonCode: null,
-      message: "套餐可用。",
+      message: "Plan is available.",
       userGrant: userEvaluation,
       organizationGrant: organizationEvaluation,
       defaultPolicy: null
@@ -778,7 +778,7 @@ export class SubscriptionEntitlementService {
           failingEvaluation?.grant.principalId ??
           (decision.defaultPolicy === "external_requires_subscription" ? input.currentUser.organizationId : input.currentUser.id),
         reasonCode: decision.reasonCode ?? "subscription_denied",
-        title: failingEvaluation?.access.title ?? "未开通",
+        title: failingEvaluation?.access.title ?? "Access is not enabled",
         detail: decision.message,
         model: input.model,
         metadata: {

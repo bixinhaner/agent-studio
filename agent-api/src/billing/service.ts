@@ -968,7 +968,7 @@ export class BillingService {
     sn?: string | null;
   }): Promise<PromotionPreview> {
     const plan = await this.db.subscriptionPlan.findUnique({ where: { id: input.planId } });
-    if (!plan) throw new Error("套餐不存在");
+    if (!plan) throw new Error("Plan does not exist");
     return this.calculatePromotionPreview({
       code: input.code,
       plan,
@@ -1163,10 +1163,10 @@ export class BillingService {
   }) {
     const config = await this.resolveBillingConfig();
     const plan = await this.db.subscriptionPlan.findUnique({ where: { id: input.planId } });
-    if (!plan) throw new Error("套餐不存在");
-    if (plan.status !== "active") throw new Error("套餐未启用");
+    if (!plan) throw new Error("Plan does not exist");
+    if (plan.status !== "active") throw new Error("Plan is not active");
     if (plan.billingStatus !== "active" || plan.billingPriceCents === null) {
-      throw new Error("套餐还没有在 Billing Products 中配置可售价格");
+      throw new Error("This plan is not configured for secure checkout yet");
     }
     const basePrice = Math.max(0, plan.billingPriceCents ?? 0);
     const durationDays = durationDaysForPlan(plan);
@@ -1254,34 +1254,34 @@ export class BillingService {
       return { promotion: null, discountCents: 0, giftDays: 0, amountTotalCents: basePrice, message: null };
     }
     const promotion = await this.db.promotionCode.findUnique({ where: { code: normalizedCode } });
-    if (!promotion) throw new Error("优惠码不存在");
+    if (!promotion) throw new Error("Promotion code does not exist");
     const now = new Date();
-    if (promotion.status !== "active") throw new Error("优惠码未启用");
-    if (promotion.startsAt && promotion.startsAt > now) throw new Error("优惠码尚未生效");
-    if (promotion.expiresAt && promotion.expiresAt <= now) throw new Error("优惠码已过期");
+    if (promotion.status !== "active") throw new Error("Promotion code is not active");
+    if (promotion.startsAt && promotion.startsAt > now) throw new Error("Promotion code is not active yet");
+    if (promotion.expiresAt && promotion.expiresAt <= now) throw new Error("Promotion code has expired");
     const eligiblePlanIds = jsonStringArray(promotion.eligiblePlanIds);
     if (eligiblePlanIds.length && !eligiblePlanIds.includes(input.plan.id)) {
-      throw new Error("优惠码不适用于当前套餐");
+      throw new Error("Promotion code is not available for this plan");
     }
     const eligibleOrgIds = jsonStringArray(promotion.eligibleOrganizationIds);
     if (eligibleOrgIds.length && !eligibleOrgIds.includes(input.organizationId)) {
-      throw new Error("优惠码不适用于当前组织");
+      throw new Error("Promotion code is not available for this organization");
     }
     const domain = normalizeEmail(input.businessEmail)?.split("@")[1];
     const eligibleDomains = jsonStringArray(promotion.eligibleEmailDomains).map((item) => item.toLowerCase());
     if (eligibleDomains.length && (!domain || !eligibleDomains.includes(domain))) {
-      throw new Error("优惠码不适用于当前邮箱域名");
+      throw new Error("Promotion code is not available for this email domain");
     }
     const eligibleSnValues = jsonStringArray(promotion.eligibleSnValues).map((item) => item.toLowerCase());
     const sn = trimOrUndefined(input.sn)?.toLowerCase();
     if (eligibleSnValues.length && (!sn || !eligibleSnValues.includes(sn))) {
-      throw new Error("优惠码不适用于当前 SN");
+      throw new Error("Promotion code is not available for this SN");
     }
     const redeemedCount = await this.db.promotionRedemption.count({
       where: { promotionCodeId: promotion.id, status: "redeemed" }
     });
     if (promotion.maxRedemptions !== null && redeemedCount >= promotion.maxRedemptions) {
-      throw new Error("优惠码已达到总兑换次数");
+      throw new Error("Promotion code redemption limit has been reached");
     }
     const customerRedeemedCount = await this.db.promotionRedemption.count({
       where: {
@@ -1291,7 +1291,7 @@ export class BillingService {
       }
     });
     if (customerRedeemedCount >= promotion.perCustomerLimit) {
-      throw new Error("当前组织已使用过该优惠码");
+      throw new Error("This organization has already used this promotion code");
     }
 
     let discountCents = 0;
@@ -1324,11 +1324,11 @@ export class BillingService {
   }
 
   private promotionMessage(type: string, value: number, discountCents: number, currency: string): string {
-    if (type === "gift_days") return `赠送 ${value} 天订阅时长`;
-    if (type === "percent_off") return `本次支付优惠 ${value}%`;
-    if (type === "amount_off") return `本次支付优惠 ${centsLabel(discountCents, currency)}`;
-    if (type === "free_access") return value > 0 ? `本次免费并赠送 ${value} 天` : "本次免费";
-    return "优惠已应用";
+    if (type === "gift_days") return `Adds ${value} days of access`;
+    if (type === "percent_off") return `Discounts this payment by ${value}%`;
+    if (type === "amount_off") return `Discounts this payment by ${centsLabel(discountCents, currency)}`;
+    if (type === "free_access") return value > 0 ? `This payment is free and includes ${value} extra days` : "This payment is free";
+    return "Promotion applied";
   }
 
   private async ensureBillingCustomerForOrganization(input: {

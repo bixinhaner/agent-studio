@@ -10,7 +10,7 @@ function trimOrUndefined(value: string | null | undefined): string | undefined {
 }
 
 function detailFromError(error: unknown): string {
-  return error instanceof Error ? error.message : "请求失败";
+  return error instanceof Error ? error.message : "Request failed";
 }
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {

@@ -8229,7 +8229,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
                   <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
                 ) : null}
-                <p>Plus Class includes 300 AI requests per month. PRO includes 1000 AI requests per month. Annual prepaid plans reduce the total yearly payment.</p>
+                <p>Plus includes 300 AI requests per month. Pro includes 1000 AI requests per month. Annual prepaid plans reduce the total yearly payment.</p>
               </div>
             </Modal>
 

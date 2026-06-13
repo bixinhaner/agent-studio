@@ -56,7 +56,7 @@ function standardTierKey(plan: PortalBillingPlan): { key: string; title: string;
   if (input.includes("plus")) {
     return {
       key: "plus",
-      title: "Plus Class",
+      title: "Plus",
       subtitle: "For teams starting recurring AI operations.",
       sortOrder: 1
     };
@@ -64,7 +64,7 @@ function standardTierKey(plan: PortalBillingPlan): { key: string; title: string;
   if (input.includes("pro")) {
     return {
       key: "pro",
-      title: "PRO",
+      title: "Pro",
       subtitle: "For heavier monthly automation and support volume.",
       sortOrder: 2
     };
@@ -138,6 +138,21 @@ function usageLabel(limit?: number | null): string {
   return limit ? `${limit.toLocaleString()} AI requests / month` : "Usage limit configured by agreement";
 }
 
+function displayPlanName(value?: string | null): string {
+  const normalized = value?.trim();
+  if (!normalized) return "No paid plan";
+  return normalized.replace(/\bPlus Class\b/g, "Plus").replace(/\bPRO\b/g, "Pro");
+}
+
+function planDescription(group: PortalPlanGroup, plan: PortalBillingPlan | null): string {
+  if (!plan) return group.subtitle;
+  if (group.key === "plus" || group.key === "pro") {
+    const interval = plan.billingInterval === "year" ? "annual" : plan.billingInterval === "month" ? "monthly" : planCycleLabel(plan);
+    return `${group.title} · ${usageLabel(group.limit)} · ${interval} prepaid access`;
+  }
+  return plan.description || group.subtitle;
+}
+
 function statusTone(status?: string | null): string {
   switch (status) {
     case "active":
@@ -184,7 +199,7 @@ export function PortalBillingPanel(props: {
       const nextDefault = defaultSelection(response.billing);
       setSelectedTier((current) => current || nextDefault.tier);
       setBillingCycle((current) => current || nextDefault.cycle);
-      setAutoRenew((current) => current || response.billing.defaults.autoRenew);
+      setAutoRenew(true);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "Failed to load billing details");
     } finally {
@@ -315,7 +330,7 @@ export function PortalBillingPanel(props: {
         <div className="portal-billing-facts">
           <div>
             <span>Plan</span>
-            <strong>{summary.currentGrant?.planName ?? "No paid plan"}</strong>
+            <strong>{displayPlanName(summary.currentGrant?.planName)}</strong>
           </div>
           <div>
             <span>Expires</span>
@@ -382,7 +397,7 @@ export function PortalBillingPanel(props: {
                   {plan ? <small> / {planCycleLabel(plan)}</small> : null}
                 </span>
                 <span className="portal-billing-plan-card-copy">{usageLabel(group.limit)}</span>
-                <span className="portal-billing-plan-card-copy">{plan?.description || group.subtitle}</span>
+                <span className="portal-billing-plan-card-copy">{planDescription(group, plan)}</span>
                 {savings ? <span className="portal-billing-plan-saving">{savings}</span> : null}
               </button>
             );
@@ -448,7 +463,7 @@ export function PortalBillingPanel(props: {
           <Switch size="small" checked={autoRenew} onChange={setAutoRenew} />
           <span>
             <strong>Keep access active</strong>
-            <small>Stripe securely saves the card and renews this same plan after the prepaid period.</small>
+            <small>Auto-renew is enabled by default. Stripe securely saves the card and renews this same plan after the prepaid period.</small>
           </span>
         </label>
         <Button type="primary" size="large" block loading={checkingOut} disabled={!selectedPlan || paidCheckoutUnavailable} onClick={() => void handleCheckout()}>
