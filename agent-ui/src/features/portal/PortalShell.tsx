@@ -3111,11 +3111,11 @@ const PortalSubscriptionReminderBanner: FC<{ status: PortalSubscriptionStatus; o
     <div className="thread-access-banner thread-access-banner-subscription" role="status" aria-live="polite">
       <div className="thread-access-banner-head">
         <CreditCardIcon size={18} aria-hidden="true" />
-        <strong>{days === null ? status.title : days <= 0 ? "Access expires today" : `Trial ends in ${days} days`}</strong>
+        <strong>{days === null ? status.title : days <= 0 ? "Access expires today" : `Access expires in ${days} days`}</strong>
       </div>
       <p>{status.expiresAt ? `Your current access ends ${formatPortalLocalTime(status.expiresAt)}.` : status.summary}</p>
       <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
-        Review renewal
+        Choose renewal
       </Button>
     </div>
   );
@@ -8211,8 +8211,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
             <Modal
               open={subscriptionReminderModalOpen}
-              title={blockedSubscriptionStatus ? "Access expired" : "Review renewal"}
-              okText={blockedSubscriptionStatus ? "Renew now" : "Review renewal"}
+              title={blockedSubscriptionStatus ? "Access expired" : "Renew Agent Studio"}
+              okText={blockedSubscriptionStatus ? "Renew now" : "Choose renewal"}
               cancelText="Later"
               onOk={() => {
                 setSubscriptionReminderModalOpen(false);
@@ -8229,6 +8229,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
                   <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
                 ) : null}
+                <p>Plus Class includes 300 AI requests per month. PRO includes 1000 AI requests per month. Annual prepaid plans reduce the total yearly payment.</p>
               </div>
             </Modal>
 

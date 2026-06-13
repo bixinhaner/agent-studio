@@ -399,6 +399,113 @@
   gap: 12px;
 }
 
+.admin-billing-product-matrix {
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  background: var(--admin-color-surface-solid);
+  overflow: hidden;
+}
+
+.admin-billing-product-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border-bottom: 1px solid var(--admin-color-border);
+}
+
+.admin-billing-product-head h3,
+.admin-billing-email-master h3 {
+  margin: 2px 0 4px;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.admin-billing-product-head p,
+.admin-billing-email-master p {
+  margin: 0;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.admin-billing-product-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-billing-product-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.1fr) minmax(180px, 1fr) minmax(180px, 1fr) minmax(150px, 0.8fr);
+  gap: 0;
+  border-top: 1px solid var(--admin-color-border);
+}
+
+.admin-billing-product-row:first-child {
+  border-top: 0;
+}
+
+.admin-billing-product-row.official {
+  background: rgba(15, 118, 110, 0.035);
+}
+
+.admin-billing-product-name,
+.admin-billing-product-price,
+.admin-billing-product-portal {
+  min-width: 0;
+  padding: 12px;
+  border-left: 1px solid var(--admin-color-border);
+}
+
+.admin-billing-product-name {
+  border-left: 0;
+}
+
+.admin-billing-product-name strong,
+.admin-billing-product-price strong,
+.admin-billing-product-portal strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.admin-billing-product-name span,
+.admin-billing-product-price span,
+.admin-billing-product-price small,
+.admin-billing-product-portal span,
+.admin-billing-product-portal small {
+  display: block;
+  margin-top: 4px;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.admin-billing-product-price > div {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-billing-product-price.missing strong {
+  color: #b91c1c;
+}
+
+.admin-billing-email-master {
+  padding: 14px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  background: var(--admin-color-surface-solid);
+}
+
 .admin-billing-config-panel {
   padding: 14px;
   border: 1px solid var(--admin-color-border);
@@ -538,12 +645,24 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .admin-billing-product-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-billing-product-price,
+  .admin-billing-product-portal {
+    border-left: 0;
+    border-top: 1px solid var(--admin-color-border);
+  }
+
   .admin-billing-config-form {
     grid-template-columns: 1fr;
   }
 
   .admin-billing-config-head,
-  .admin-billing-webhook-row {
+  .admin-billing-webhook-row,
+  .admin-billing-product-head,
+  .admin-billing-email-master {
     flex-direction: column;
     align-items: stretch;
   }

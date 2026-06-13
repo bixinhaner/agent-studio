@@ -41,6 +41,7 @@ import {
   createAdminPromotionCode,
   fetchAdminBillingOverview,
   grantAdminBillingGiftDays,
+  patchAdminBillingEmailSettings,
   patchAdminBillingPlan,
   patchAdminBillingEmailRule,
   patchAdminBillingStripeSettings,
@@ -92,6 +93,19 @@ type PlanBillingFormState = {
   billingInterval: string;
   billingIntervalCount: number;
   billingPriceCents: number | null;
+};
+
+type BillingCycle = "month" | "year";
+
+type AdminPlanGroup = {
+  key: string;
+  title: string;
+  subtitle: string;
+  monthly: AdminBillingPlan | null;
+  annual: AdminBillingPlan | null;
+  other: AdminBillingPlan[];
+  limit: number | null;
+  sortOrder: number;
 };
 
 type StripeSettingsFormState = {
@@ -187,6 +201,71 @@ function planBillingLabel(plan?: AdminBillingPlan | null): string {
   if (!plan) return "未设置";
   const interval = plan.billingIntervalCount > 1 ? `${plan.billingIntervalCount} ${plan.billingInterval}s` : plan.billingInterval;
   return `${formatMoney(plan.billingPriceCents, plan.billingCurrency)} / ${interval}`;
+}
+
+function planCycleKey(plan?: AdminBillingPlan | null): BillingCycle | null {
+  if (!plan) return null;
+  if (plan.billingInterval === "month" && plan.billingIntervalCount === 1) return "month";
+  if (plan.billingInterval === "year" && plan.billingIntervalCount === 1) return "year";
+  return null;
+}
+
+function standardPlanTier(plan: AdminBillingPlan): { key: string; title: string; subtitle: string; sortOrder: number } {
+  const input = `${plan.slug} ${plan.name}`.toLowerCase();
+  if (input.includes("plus")) {
+    return {
+      key: "plus",
+      title: "Plus Class",
+      subtitle: "300 AI requests / month",
+      sortOrder: 1
+    };
+  }
+  if (input.includes("pro")) {
+    return {
+      key: "pro",
+      title: "PRO",
+      subtitle: "1000 AI requests / month",
+      sortOrder: 2
+    };
+  }
+  return {
+    key: plan.id,
+    title: plan.name,
+    subtitle: plan.description || "Custom billing product",
+    sortOrder: 20
+  };
+}
+
+function groupAdminPlans(plans: AdminBillingPlan[]): AdminPlanGroup[] {
+  const groups = new Map<string, AdminPlanGroup>();
+  for (const plan of plans) {
+    const tier = standardPlanTier(plan);
+    const current = groups.get(tier.key) ?? {
+      key: tier.key,
+      title: tier.title,
+      subtitle: tier.subtitle,
+      monthly: null,
+      annual: null,
+      other: [],
+      limit: null,
+      sortOrder: tier.sortOrder
+    };
+    current.limit = current.limit ?? plan.monthlyCompletedTurnLimit ?? null;
+    const cycle = planCycleKey(plan);
+    if (cycle === "month") current.monthly = plan;
+    else if (cycle === "year") current.annual = plan;
+    else current.other.push(plan);
+    groups.set(tier.key, current);
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function planStatusTag(plan?: AdminBillingPlan | null) {
+  if (!plan) return <Tag color="error">missing</Tag>;
+  return <Tag color={statusColor(plan.billingStatus)}>{plan.billingStatus}</Tag>;
 }
 
 function createPromotionFormState(): PromotionFormState {
@@ -426,6 +505,8 @@ export function BillingWorkspace() {
     () => (data?.plans ?? []).map((plan) => ({ label: `${plan.name} · ${planBillingLabel(plan)}`, value: plan.id })),
     [data?.plans]
   );
+
+  const planGroups = useMemo(() => groupAdminPlans(data?.plans ?? []), [data?.plans]);
 
   const selectedAutoRenewal = useMemo(() => {
     const renewals = data?.autoRenewals ?? [];
@@ -744,19 +825,63 @@ export function BillingWorkspace() {
     }
   }
 
+  async function handleToggleBillingEmails(enabled: boolean) {
+    setSaving(true);
+    setErrorText("");
+    try {
+      await patchAdminBillingEmailSettings({ enabled });
+      setSuccessText(enabled ? "计费邮件总开关已开启" : "计费邮件总开关已关闭，不会真实发送客户邮件");
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "更新计费邮件总开关失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleRunEmailSweep() {
     setSaving(true);
     try {
       const result = await runAdminBillingEmailReminderSweep();
       const sent = result.results.reduce((sum, item) => sum + item.sent, 0);
       const failed = result.results.reduce((sum, item) => sum + item.failed, 0);
-      setSuccessText(`邮件提醒扫描完成：发送 ${sent}，失败 ${failed}`);
+      setSuccessText(result.disabled ? "计费邮件总开关关闭，本次扫描未真实发送客户邮件" : `邮件提醒扫描完成：发送 ${sent}，失败 ${failed}`);
       await loadData(true);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "执行邮件提醒失败");
     } finally {
       setSaving(false);
     }
+  }
+
+  function openPlanBillingModal(plan: AdminBillingPlan) {
+    setEditingPlan(plan);
+    setPlanBillingForm(createPlanBillingFormState(plan));
+  }
+
+  function renderPlanMatrixPrice(plan: AdminBillingPlan | null, label: string) {
+    if (!plan) {
+      return (
+        <div className="admin-billing-product-price missing">
+          <span>{label}</span>
+          <strong>Missing</strong>
+          <small>Migration did not create this price item.</small>
+        </div>
+      );
+    }
+    return (
+      <div className="admin-billing-product-price">
+        <span>{label}</span>
+        <strong>{formatMoney(plan.billingPriceCents, plan.billingCurrency)}</strong>
+        <small>{plan.durationDays} days · {plan.slug}</small>
+        <div>
+          {planStatusTag(plan)}
+          <Button size="small" icon={<CreditCard size={14} />} onClick={() => openPlanBillingModal(plan)}>
+            配置
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const detailPanel = selectedAccount ? (
@@ -909,37 +1034,60 @@ export function BillingWorkspace() {
             key: "products",
             label: "Products",
             children: (
-              <Table
-                rowKey="id"
-                size="small"
-                dataSource={data?.plans ?? []}
-                pagination={false}
-                columns={[
-                  { title: "Plan", dataIndex: "name" },
-                  { title: "Slug", dataIndex: "slug" },
-                  { title: "Price", render: (_, record) => planBillingLabel(record) },
-                  { title: "Duration", render: (_, record) => `${record.durationDays} days` },
-                  { title: "Status", dataIndex: "billingStatus", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                  { title: "AI request limit", dataIndex: "monthlyCompletedTurnLimit", render: (value) => value ?? "不限" },
-                  { title: "Token limit", dataIndex: "monthlyTokenLimit", render: (value) => value ?? "不限" },
-                  {
-                    title: "Action",
-                    width: 130,
-                    render: (_, record) => (
-                      <Button
-                        size="small"
-                        icon={<CreditCard size={14} />}
-                        onClick={() => {
-                          setEditingPlan(record);
-                          setPlanBillingForm(createPlanBillingFormState(record));
-                        }}
-                      >
-                        配置售卖
-                      </Button>
-                    )
-                  }
-                ]}
-              />
+              <div className="admin-billing-tab-stack">
+                <section className="admin-billing-product-matrix">
+                  <div className="admin-billing-product-head">
+                    <div>
+                      <span className="admin-billing-kicker">Production catalog</span>
+                      <h3>Plus / PRO 正式售卖矩阵</h3>
+                      <p>生产部署会幂等创建四个价格项；客户侧聚合展示为两个套餐，并在这里维护售卖状态和价格。</p>
+                    </div>
+                    <Tag color={data?.stripe.mode === "live" ? "success" : "processing"}>{data?.stripe.mode ?? "unknown"} mode</Tag>
+                  </div>
+                  <div className="admin-billing-product-grid">
+                    {planGroups.map((group) => (
+                      <div key={group.key} className={group.key === "plus" || group.key === "pro" ? "admin-billing-product-row official" : "admin-billing-product-row"}>
+                        <div className="admin-billing-product-name">
+                          <strong>{group.title}</strong>
+                          <span>{group.limit ? `${group.limit.toLocaleString()} AI requests / month` : group.subtitle}</span>
+                        </div>
+                        {renderPlanMatrixPrice(group.monthly, "Monthly")}
+                        {renderPlanMatrixPrice(group.annual, "Annual")}
+                        <div className="admin-billing-product-portal">
+                          <span>Portal status</span>
+                          <strong>{[group.monthly, group.annual].some((plan) => plan?.billingStatus === "active") ? "Visible" : "Hidden"}</strong>
+                          <small>{group.monthly?.billingStatus === "active" && group.annual?.billingStatus === "active" ? "Both cycles available" : "Check inactive cycle before launch"}</small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <Table
+                  rowKey="id"
+                  size="small"
+                  title={() => "Raw price items"}
+                  dataSource={data?.plans ?? []}
+                  pagination={false}
+                  columns={[
+                    { title: "Plan", dataIndex: "name" },
+                    { title: "Slug", dataIndex: "slug" },
+                    { title: "Price", render: (_, record) => planBillingLabel(record) },
+                    { title: "Duration", render: (_, record) => `${record.durationDays} days` },
+                    { title: "Status", dataIndex: "billingStatus", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+                    { title: "AI request limit", dataIndex: "monthlyCompletedTurnLimit", render: (value) => value ?? "不限" },
+                    {
+                      title: "Action",
+                      width: 110,
+                      render: (_, record) => (
+                        <Button size="small" icon={<CreditCard size={14} />} onClick={() => openPlanBillingModal(record)}>
+                          配置
+                        </Button>
+                      )
+                    }
+                  ]}
+                />
+              </div>
             )
           },
           {
@@ -1029,12 +1177,28 @@ export function BillingWorkspace() {
             label: "Email automations",
             children: (
               <div className="admin-billing-tab-stack">
-                <div className="admin-billing-inline-actions">
-                  <Alert type="info" showIcon message="临期、过期和扣款失败邮件使用 NotificationRecord 做幂等记录。" />
-                  <Button icon={<Mail size={16} />} loading={saving} onClick={() => void handleRunEmailSweep()}>
-                    立即扫描发送
-                  </Button>
+                <div className="admin-billing-email-master">
+                  <div>
+                    <span className="admin-billing-kicker">Delivery guard</span>
+                    <h3>Billing emails {data?.emailSettings.enabled ? "on" : "off"}</h3>
+                    <p>
+                      总开关关闭时，临期、过期和扣款失败扫描不会真实发送客户邮件；测试收件人仍可用于模板验证。
+                    </p>
+                  </div>
+                  <Space>
+                    <Switch
+                      checked={data?.emailSettings.enabled ?? false}
+                      loading={saving}
+                      onChange={(enabled) => void handleToggleBillingEmails(enabled)}
+                    />
+                    <Button icon={<Mail size={16} />} loading={saving} onClick={() => void handleRunEmailSweep()}>
+                      立即扫描发送
+                    </Button>
+                  </Space>
                 </div>
+                {!data?.emailSettings.enabled ? (
+                  <Alert type="warning" showIcon message="计费邮件总开关关闭，生产不会向客户真实发送提醒。" />
+                ) : null}
                 <Table
                   rowKey="id"
                   size="small"

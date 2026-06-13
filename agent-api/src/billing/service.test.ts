@@ -10,7 +10,8 @@ function createBillingConfig() {
     successUrl: "https://example.com/billing/success",
     cancelUrl: "https://example.com/billing/cancel",
     defaultCurrency: "usd",
-    defaultAutoRenew: true
+    defaultAutoRenew: true,
+    billingEmailEnabled: false
   };
 }
 
@@ -54,6 +55,9 @@ function createDbMock() {
       })
     },
     subscriptionPlan: {
+      findMany: vi.fn(async () => [])
+    },
+    billingEmailRule: {
       findMany: vi.fn(async () => [])
     }
   };
@@ -117,6 +121,25 @@ describe("BillingService Stripe admin settings", () => {
     });
     expect(JSON.stringify(status)).not.toContain("sk_live_admin_5678");
     expect(JSON.stringify(status)).not.toContain("whsec_admin_5678");
+  });
+
+  it("keeps billing emails globally disabled until admin enables them", async () => {
+    const { db, raw } = createDbMock();
+    const service = new BillingService({ db, config: createBillingConfig() });
+
+    await expect(service.emailSettingsStatus()).resolves.toMatchObject({
+      enabled: false,
+      source: "environment"
+    });
+
+    const disabledSweep = await service.runReminderSweep();
+    expect(disabledSweep).toMatchObject({ ok: true, disabled: true, results: [] });
+    expect(raw.billingEmailRule.findMany).not.toHaveBeenCalled();
+
+    await expect(service.updateEmailSettings({ enabled: true })).resolves.toMatchObject({
+      enabled: true,
+      source: "admin"
+    });
   });
 
   it("only lists active priced plans as billable", async () => {

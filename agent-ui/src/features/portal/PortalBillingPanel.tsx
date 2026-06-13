@@ -1,5 +1,5 @@
 import { Alert, Button, Input, Radio, Space, Spin, Switch, Tag } from "antd";
-import { CheckCircle2, CreditCard, Gift, RefreshCw, TicketPercent } from "lucide-react";
+import { CheckCircle2, CreditCard, Gift, RefreshCw, ShieldCheck, TicketPercent, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -26,9 +26,116 @@ function formatMoney(cents: number | null | undefined, currency?: string | null)
   }).format((cents ?? 0) / 100);
 }
 
-function planCycle(plan: PortalBillingPlan): string {
+type BillingCycle = "month" | "year";
+
+type PortalPlanGroup = {
+  key: string;
+  title: string;
+  subtitle: string;
+  monthly: PortalBillingPlan | null;
+  annual: PortalBillingPlan | null;
+  other: PortalBillingPlan[];
+  limit: number | null;
+  sortOrder: number;
+};
+
+function planCycleLabel(plan: PortalBillingPlan): string {
   const count = plan.billingIntervalCount > 1 ? `${plan.billingIntervalCount} ` : "";
   return `${count}${plan.billingInterval}${plan.billingIntervalCount > 1 ? "s" : ""}`;
+}
+
+function planCycleKey(plan?: PortalBillingPlan | null): BillingCycle | null {
+  if (!plan) return null;
+  if (plan.billingInterval === "year" && plan.billingIntervalCount === 1) return "year";
+  if (plan.billingInterval === "month" && plan.billingIntervalCount === 1) return "month";
+  return null;
+}
+
+function standardTierKey(plan: PortalBillingPlan): { key: string; title: string; subtitle: string; sortOrder: number } {
+  const input = `${plan.slug} ${plan.name}`.toLowerCase();
+  if (input.includes("plus")) {
+    return {
+      key: "plus",
+      title: "Plus Class",
+      subtitle: "For teams starting recurring AI operations.",
+      sortOrder: 1
+    };
+  }
+  if (input.includes("pro")) {
+    return {
+      key: "pro",
+      title: "PRO",
+      subtitle: "For heavier monthly automation and support volume.",
+      sortOrder: 2
+    };
+  }
+  return {
+    key: plan.id,
+    title: plan.name,
+    subtitle: plan.description || `${plan.durationDays} days prepaid access`,
+    sortOrder: 20
+  };
+}
+
+function groupPortalPlans(plans: PortalBillingPlan[]): PortalPlanGroup[] {
+  const groups = new Map<string, PortalPlanGroup>();
+  for (const plan of plans) {
+    const tier = standardTierKey(plan);
+    const current = groups.get(tier.key) ?? {
+      key: tier.key,
+      title: tier.title,
+      subtitle: tier.subtitle,
+      monthly: null,
+      annual: null,
+      other: [],
+      limit: null,
+      sortOrder: tier.sortOrder
+    };
+    current.limit = current.limit ?? plan.monthlyCompletedTurnLimit ?? null;
+    const cycle = planCycleKey(plan);
+    if (cycle === "month") current.monthly = plan;
+    else if (cycle === "year") current.annual = plan;
+    else current.other.push(plan);
+    groups.set(tier.key, current);
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    const aPrice = a.monthly?.billingPriceCents ?? a.annual?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
+    const bPrice = b.monthly?.billingPriceCents ?? b.annual?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
+    return aPrice - bPrice;
+  });
+}
+
+function planForCycle(group: PortalPlanGroup | null | undefined, cycle: BillingCycle): PortalBillingPlan | null {
+  if (!group) return null;
+  return cycle === "year"
+    ? group.annual ?? group.monthly ?? group.other[0] ?? null
+    : group.monthly ?? group.annual ?? group.other[0] ?? null;
+}
+
+function defaultSelection(summary: PortalBillingSummary | null): { tier: string; cycle: BillingCycle } {
+  const groups = groupPortalPlans(summary?.plans ?? []);
+  const currentPlanId = summary?.currentGrant?.planId;
+  if (currentPlanId) {
+    const currentGroup = groups.find((group) =>
+      [group.monthly, group.annual, ...group.other].some((plan) => plan?.id === currentPlanId)
+    );
+    const currentPlan = currentGroup ? [currentGroup.monthly, currentGroup.annual, ...currentGroup.other].find((plan) => plan?.id === currentPlanId) : null;
+    if (currentGroup) return { tier: currentGroup.key, cycle: planCycleKey(currentPlan ?? null) ?? "year" };
+  }
+  const plus = groups.find((group) => group.key === "plus");
+  const preferred = plus ?? groups[0];
+  return { tier: preferred?.key ?? "", cycle: preferred?.annual ? "year" : "month" };
+}
+
+function annualSavingsLabel(group: PortalPlanGroup | null | undefined): string {
+  if (!group?.monthly || !group.annual) return "";
+  const savings = (group.monthly.billingPriceCents ?? 0) * 12 - (group.annual.billingPriceCents ?? 0);
+  return savings > 0 ? `${formatMoney(savings, group.annual.billingCurrency)} less than monthly` : "";
+}
+
+function usageLabel(limit?: number | null): string {
+  return limit ? `${limit.toLocaleString()} AI requests / month` : "Usage limit configured by agreement";
 }
 
 function statusTone(status?: string | null): string {
@@ -48,20 +155,14 @@ function statusTone(status?: string | null): string {
   }
 }
 
-function defaultPlanId(summary: PortalBillingSummary | null): string {
-  if (!summary) return "";
-  const currentPlanId = summary.currentGrant?.planId;
-  if (currentPlanId && summary.plans.some((plan) => plan.id === currentPlanId)) return currentPlanId;
-  return summary.plans[0]?.id ?? "";
-}
-
 export function PortalBillingPanel(props: {
   subscriptionStatus: PortalSubscriptionStatus | null;
   onSubscriptionStatusChange?: (status: PortalSubscriptionStatus | null) => void;
   onClose?: () => void;
 }) {
   const [summary, setSummary] = useState<PortalBillingSummary | null>(null);
-  const [selectedPlanId, setSelectedPlanId] = useState("");
+  const [selectedTier, setSelectedTier] = useState("");
+  const [billingCycle, setBillingCycle] = useState<BillingCycle | "">("");
   const [autoRenew, setAutoRenew] = useState(true);
   const [promotionCode, setPromotionCode] = useState("");
   const [promotionPreview, setPromotionPreview] = useState<PortalPromotionPreview | null>(null);
@@ -80,7 +181,9 @@ export function PortalBillingPanel(props: {
       const response = await fetchPortalBillingSummary();
       setSummary(response.billing);
       props.onSubscriptionStatusChange?.(response.subscriptionStatus);
-      setSelectedPlanId((current) => current || defaultPlanId(response.billing));
+      const nextDefault = defaultSelection(response.billing);
+      setSelectedTier((current) => current || nextDefault.tier);
+      setBillingCycle((current) => current || nextDefault.cycle);
       setAutoRenew((current) => current || response.billing.defaults.autoRenew);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "Failed to load billing details");
@@ -94,12 +197,23 @@ export function PortalBillingPanel(props: {
     void loadSummary();
   }, []);
 
-  const selectedPlan = useMemo(() => summary?.plans.find((plan) => plan.id === selectedPlanId) ?? null, [selectedPlanId, summary?.plans]);
+  const planGroups = useMemo(() => groupPortalPlans(summary?.plans ?? []), [summary?.plans]);
+  const activeCycle: BillingCycle = billingCycle || "year";
+  const selectedGroup = useMemo(() => {
+    return planGroups.find((group) => group.key === selectedTier) ?? planGroups[0] ?? null;
+  }, [planGroups, selectedTier]);
+  const selectedPlan = useMemo(() => planForCycle(selectedGroup, activeCycle), [activeCycle, selectedGroup]);
   const payableNow = Math.max(0, (selectedPlan?.billingPriceCents ?? 0) - (promotionPreview?.discountCents ?? 0));
   const giftDays = promotionPreview?.giftDays ?? 0;
   const nextRenewalDate = selectedPlan
     ? new Date(Date.now() + (selectedPlan.durationDays + giftDays) * 24 * 60 * 60 * 1000).toISOString()
     : null;
+  const annualSavings = activeCycle === "year" ? annualSavingsLabel(selectedGroup) : "";
+  const completedLimit = props.subscriptionStatus?.completedTurnLimit ?? selectedPlan?.monthlyCompletedTurnLimit ?? null;
+  const remainingTurns = props.subscriptionStatus?.remainingCompletedTurns ?? null;
+  const usedTurns = completedLimit !== null && remainingTurns !== null ? Math.max(0, completedLimit - remainingTurns) : null;
+  const usagePercent = completedLimit && usedTurns !== null ? Math.min(100, Math.round((usedTurns / completedLimit) * 100)) : 0;
+  const paidCheckoutUnavailable = payableNow > 0 && !summary?.defaults.stripeReady;
 
   async function handlePreviewPromotion() {
     if (!selectedPlan || !promotionCode.trim()) {
@@ -122,6 +236,10 @@ export function PortalBillingPanel(props: {
 
   async function handleCheckout() {
     if (!selectedPlan) return;
+    if (paidCheckoutUnavailable) {
+      setErrorText("Secure payment is not ready yet. Please contact your Agent Studio owner.");
+      return;
+    }
     setCheckingOut(true);
     setErrorText("");
     try {
@@ -188,7 +306,7 @@ export function PortalBillingPanel(props: {
       {errorText ? <Alert type="error" showIcon message={errorText} closable onClose={() => setErrorText("")} /> : null}
       {successText ? <Alert type="success" showIcon message={successText} closable onClose={() => setSuccessText("")} /> : null}
 
-      <section className="portal-billing-section">
+      <section className="portal-billing-section portal-billing-current">
         <div className="portal-billing-section-title">
           <CheckCircle2 size={16} />
           <span>Current access</span>
@@ -208,38 +326,69 @@ export function PortalBillingPanel(props: {
             <strong>{summary.autoRenewal?.status ?? "not enabled"}</strong>
           </div>
         </div>
+        {completedLimit ? (
+          <div className="portal-billing-usage">
+            <div>
+              <span>Usage this month</span>
+              <strong>{usedTurns ?? 0} / {completedLimit}</strong>
+            </div>
+            <div className="portal-billing-usage-track" aria-hidden="true">
+              <span style={{ width: `${usagePercent}%` }} />
+            </div>
+          </div>
+        ) : null}
       </section>
 
-      <section className="portal-billing-section">
+      <section className="portal-billing-section portal-billing-plan-picker">
         <div className="portal-billing-section-title">
           <CreditCard size={16} />
-          <span>Choose plan</span>
+          <span>Choose access</span>
         </div>
-        <Radio.Group className="portal-billing-plan-list" value={selectedPlanId} onChange={(event) => {
-          setSelectedPlanId(event.target.value);
-          setPromotionPreview(null);
-        }}>
-          {summary.plans.map((plan) => (
-            <Radio.Button key={plan.id} value={plan.id} className="portal-billing-plan-option">
-              <span>
-                <strong>{plan.name}</strong>
-                <small>{plan.description || `${plan.durationDays} days prepaid access`}</small>
-              </span>
-              <b>{formatMoney(plan.billingPriceCents, plan.billingCurrency)} / {planCycle(plan)}</b>
-            </Radio.Button>
-          ))}
+        <Radio.Group
+          className="portal-billing-cycle-toggle"
+          optionType="button"
+          buttonStyle="solid"
+          value={activeCycle}
+          onChange={(event) => {
+            setBillingCycle(event.target.value as BillingCycle);
+            setPromotionPreview(null);
+          }}
+        >
+          <Radio.Button value="month">Monthly</Radio.Button>
+          <Radio.Button value="year">Annual</Radio.Button>
         </Radio.Group>
-      </section>
 
-      <section className="portal-billing-section">
-        <div className="portal-billing-section-title">
-          <RefreshCw size={16} />
-          <span>Automatic renewal</span>
-          <Switch checked={autoRenew} onChange={setAutoRenew} />
+        <div className="portal-billing-plan-grid">
+          {planGroups.map((group) => {
+            const plan = planForCycle(group, activeCycle);
+            const isSelected = selectedGroup?.key === group.key;
+            const savings = activeCycle === "year" ? annualSavingsLabel(group) : "";
+            return (
+              <button
+                key={group.key}
+                type="button"
+                className={isSelected ? "portal-billing-plan-card selected" : "portal-billing-plan-card"}
+                onClick={() => {
+                  setSelectedTier(group.key);
+                  setPromotionPreview(null);
+                }}
+              >
+                <span className="portal-billing-plan-card-head">
+                  <strong>{group.title}</strong>
+                  <Tag color={group.key === "pro" ? "processing" : "success"}>{group.key === "pro" ? "Higher volume" : "Core"}</Tag>
+                </span>
+                <span className="portal-billing-plan-card-price">
+                  {plan ? formatMoney(plan.billingPriceCents, plan.billingCurrency) : "Not configured"}
+                  {plan ? <small> / {planCycleLabel(plan)}</small> : null}
+                </span>
+                <span className="portal-billing-plan-card-copy">{usageLabel(group.limit)}</span>
+                <span className="portal-billing-plan-card-copy">{plan?.description || group.subtitle}</span>
+                {savings ? <span className="portal-billing-plan-saving">{savings}</span> : null}
+              </button>
+            );
+          })}
         </div>
-        <p className="portal-billing-muted">
-          When enabled, Stripe securely saves the payment method and renews the same plan after the prepaid period. You can use one-time prepaid access by turning it off before checkout.
-        </p>
+        {!planGroups.length ? <Alert type="warning" showIcon message="No active billing plan is available yet." /> : null}
       </section>
 
       <section className="portal-billing-section">
@@ -261,13 +410,32 @@ export function PortalBillingPanel(props: {
 
       <section className="portal-billing-section portal-billing-checkout">
         <div className="portal-billing-section-title">
-          <CreditCard size={16} />
+          <ShieldCheck size={16} />
           <span>Checkout summary</span>
+        </div>
+        {paidCheckoutUnavailable ? (
+          <Alert type="warning" showIcon message="Secure payment is not configured for this workspace yet." />
+        ) : null}
+        <div className="portal-billing-summary-row">
+          <span>Selected plan</span>
+          <strong>{selectedGroup?.title ?? "No plan"} · {activeCycle === "year" ? "Annual" : "Monthly"}</strong>
         </div>
         <div className="portal-billing-summary-row">
           <span>Pay now</span>
           <strong>{formatMoney(payableNow, selectedPlan?.billingCurrency)}</strong>
         </div>
+        {promotionPreview?.discountCents ? (
+          <div className="portal-billing-summary-row positive">
+            <span>Promotion</span>
+            <strong>-{formatMoney(promotionPreview.discountCents, selectedPlan?.billingCurrency)}</strong>
+          </div>
+        ) : null}
+        {annualSavings ? (
+          <div className="portal-billing-summary-row positive">
+            <span>Annual value</span>
+            <strong>{annualSavings}</strong>
+          </div>
+        ) : null}
         <div className="portal-billing-summary-row">
           <span>Included access</span>
           <strong>{(selectedPlan?.durationDays ?? 0) + giftDays} days</strong>
@@ -276,15 +444,24 @@ export function PortalBillingPanel(props: {
           <span>Next renewal</span>
           <strong>{autoRenew ? formatLocalTime(nextRenewalDate) : "Off"}</strong>
         </div>
-        <Button type="primary" size="large" block loading={checkingOut} disabled={!selectedPlan} onClick={() => void handleCheckout()}>
+        <label className="portal-billing-auto-renew-line">
+          <Switch size="small" checked={autoRenew} onChange={setAutoRenew} />
+          <span>
+            <strong>Keep access active</strong>
+            <small>Stripe securely saves the card and renews this same plan after the prepaid period.</small>
+          </span>
+        </label>
+        <Button type="primary" size="large" block loading={checkingOut} disabled={!selectedPlan || paidCheckoutUnavailable} onClick={() => void handleCheckout()}>
           Continue to secure payment
         </Button>
       </section>
 
-      <section className="portal-billing-section">
+      <section className="portal-billing-section portal-billing-account">
         <div className="portal-billing-section-title">
+          <TrendingUp size={16} />
           <span>Identified account</span>
         </div>
+        <p className="portal-billing-muted">We use the trial account information already on file for renewal and internal sales tracking.</p>
         <div className="portal-billing-identity-grid">
           <span>Company</span><strong>{summary.billingCustomer.companyName || summary.organization.name}</strong>
           <span>Contact</span><strong>{summary.billingCustomer.contactName || "Not recorded"}</strong>

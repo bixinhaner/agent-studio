@@ -110,6 +110,18 @@ export function createAdminBillingRouter(service: BillingService): Router {
     }
   });
 
+  router.patch("/billing/email-settings", async (req: Request, res: Response) => {
+    try {
+      const emailSettings = await service.updateEmailSettings({
+        enabled: typeof req.body?.enabled === "boolean" ? req.body.enabled : undefined,
+        userId: req.currentUser?.id ?? null
+      });
+      res.json({ emailSettings });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.patch("/billing/plans/:planId", async (req: Request, res: Response) => {
     try {
       const plan = await service.updatePlanBilling(req.params.planId, {

@@ -292,6 +292,10 @@ body.portal-workbench-mode {
   margin-left: auto;
 }
 
+.portal-billing-current {
+  border-color: rgba(15, 118, 110, 0.22);
+}
+
 .portal-billing-facts {
   display: grid;
   grid-template-columns: 1fr;
@@ -312,45 +316,118 @@ body.portal-workbench-mode {
   overflow-wrap: anywhere;
 }
 
-.portal-billing-plan-list {
+.portal-billing-usage {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f7;
+}
+
+.portal-billing-usage div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.portal-billing-usage-track {
+  margin-top: 8px;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e5e7eb;
+}
+
+.portal-billing-usage-track span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: #0f766e;
+}
+
+.portal-billing-cycle-toggle {
+  width: 100%;
+  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-billing-cycle-toggle .ant-radio-button-wrapper {
+  text-align: center;
+}
+
+.portal-billing-plan-grid {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.portal-billing-plan-option.ant-radio-button-wrapper {
-  height: auto;
-  min-height: 76px;
+.portal-billing-plan-card {
+  width: 100%;
+  min-height: 150px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 12px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  white-space: normal;
-}
-
-.portal-billing-plan-option.ant-radio-button-wrapper::before {
-  display: none;
-}
-
-.portal-billing-plan-option span {
-  display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 7px;
   min-width: 0;
+  text-align: left;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
-.portal-billing-plan-option small {
+.portal-billing-plan-card:hover,
+.portal-billing-plan-card.selected {
+  border-color: #0f766e;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
+}
+
+.portal-billing-plan-card.selected {
+  background: #f0fdfa;
+}
+
+.portal-billing-plan-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.portal-billing-plan-card-head strong {
+  font-size: 15px;
+}
+
+.portal-billing-plan-card-price {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 760;
+  color: #111827;
+}
+
+.portal-billing-plan-card-price small {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.portal-billing-plan-card-copy {
   color: #6b7280;
   font-size: 12px;
   line-height: 1.35;
 }
 
-.portal-billing-plan-option b {
-  flex: 0 0 auto;
-  margin-left: 12px;
+.portal-billing-plan-saving {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #047857;
+  background: #dcfce7;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .portal-billing-promotion-applied {
@@ -364,6 +441,34 @@ body.portal-workbench-mode {
 
 .portal-billing-checkout {
   border-color: rgba(255, 70, 20, 0.24);
+}
+
+.portal-billing-summary-row.positive strong {
+  color: #047857;
+}
+
+.portal-billing-auto-renew-line {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #ffffff;
+}
+
+.portal-billing-auto-renew-line span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.portal-billing-auto-renew-line small {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .portal-billing-checkout .ant-btn-primary {
@@ -382,6 +487,10 @@ body.portal-workbench-mode {
 .portal-billing-identity-grid strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.portal-billing-account .portal-billing-muted {
+  margin-bottom: 10px;
 }
 
 .portal-billing-reminder-modal p {

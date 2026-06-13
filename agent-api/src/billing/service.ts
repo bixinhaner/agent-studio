@@ -11,6 +11,7 @@ type BillingConfig = {
   cancelUrl: string;
   defaultCurrency: string;
   defaultAutoRenew: boolean;
+  billingEmailEnabled?: boolean;
 };
 
 type BillingConfigSource = "admin" | "environment";
@@ -22,6 +23,7 @@ type BillingResolvedConfig = BillingConfig & {
   webhookSigningSecretPreview: string | null;
   updatedAt: string | null;
   rotatedAt: string | null;
+  billingEmailEnabled: boolean;
 };
 
 type BillingOrganizationInput = {
@@ -376,7 +378,8 @@ export class BillingService {
       successUrl: trimOrUndefined(this.options.config.successUrl) ?? "",
       cancelUrl: trimOrUndefined(this.options.config.cancelUrl) ?? "",
       defaultCurrency: normalizeCurrency(this.options.config.defaultCurrency || "usd"),
-      defaultAutoRenew: this.options.config.defaultAutoRenew !== false
+      defaultAutoRenew: this.options.config.defaultAutoRenew !== false,
+      billingEmailEnabled: this.options.config.billingEmailEnabled === true
     };
 
     const instance = await this.db.integrationInstance.findUnique({
@@ -409,6 +412,7 @@ export class BillingService {
       cancelUrl: asString(config.cancelUrl) ?? fallback.cancelUrl,
       defaultCurrency: normalizeCurrency(asString(config.defaultCurrency), fallback.defaultCurrency),
       defaultAutoRenew: asBoolean(config.defaultAutoRenew) ?? fallback.defaultAutoRenew,
+      billingEmailEnabled: asBoolean(config.billingEmailEnabled) ?? fallback.billingEmailEnabled === true,
       source: instance ? "admin" : "environment",
       mode: mode === "test" || mode === "live" ? mode : "unknown",
       secretKeyPreview: previewSecret(stripeSecretKey),
@@ -438,6 +442,71 @@ export class BillingService {
       updatedAt: config.updatedAt,
       rotatedAt: config.rotatedAt
     };
+  }
+
+  async emailSettingsStatus() {
+    const config = await this.resolveBillingConfig();
+    return {
+      enabled: config.billingEmailEnabled,
+      source: config.source,
+      updatedAt: config.updatedAt
+    };
+  }
+
+  async updateEmailSettings(input: { enabled?: boolean | null; userId?: string | null }) {
+    const current = await this.db.integrationInstance.findUnique({
+      where: {
+        type_slug: {
+          type: STRIPE_BILLING_INTEGRATION_TYPE,
+          slug: STRIPE_BILLING_INTEGRATION_SLUG
+        }
+      },
+      include: {
+        config: true
+      }
+    });
+
+    const currentConfig = asRecord(current?.config?.config);
+    const nextConfig: Record<string, unknown> = { ...currentConfig };
+    if (input.enabled !== undefined && input.enabled !== null) {
+      nextConfig.billingEmailEnabled = input.enabled;
+    }
+
+    const instance = await this.db.integrationInstance.upsert({
+      where: {
+        type_slug: {
+          type: STRIPE_BILLING_INTEGRATION_TYPE,
+          slug: STRIPE_BILLING_INTEGRATION_SLUG
+        }
+      },
+      update: {
+        name: "Stripe Billing",
+        description: "Agent Studio billing checkout, auto-renewal, and billing email settings.",
+        status: "active",
+        isSystemSingleton: true
+      },
+      create: {
+        type: STRIPE_BILLING_INTEGRATION_TYPE,
+        slug: STRIPE_BILLING_INTEGRATION_SLUG,
+        name: "Stripe Billing",
+        description: "Agent Studio billing checkout, auto-renewal, and billing email settings.",
+        status: "active",
+        isSystemSingleton: true
+      }
+    });
+
+    await this.db.integrationInstanceConfig.upsert({
+      where: { integrationInstanceId: instance.id },
+      create: {
+        integrationInstanceId: instance.id,
+        config: nextConfig as Prisma.InputJsonValue
+      },
+      update: {
+        config: nextConfig as Prisma.InputJsonValue
+      }
+    });
+
+    return this.emailSettingsStatus();
   }
 
   async updateStripeSettings(input: {
@@ -621,7 +690,8 @@ export class BillingService {
       emailRules,
       stripeEvents,
       notifications,
-      stripe
+      stripe,
+      emailSettings
     ] = await Promise.all([
       this.db.organization.findMany({
         where: { type: "customer" },
@@ -645,7 +715,8 @@ export class BillingService {
         orderBy: { createdAt: "desc" },
         take: 80
       }),
-      this.stripeConfigStatus()
+      this.stripeConfigStatus(),
+      this.emailSettingsStatus()
     ]);
 
     const customerByOrg = new Map(customers.map((customer) => [customer.organizationId, customer]));
@@ -709,7 +780,8 @@ export class BillingService {
         createdAt: toIsoString(item.createdAt),
         updatedAt: toIsoString(item.updatedAt)
       })),
-      stripe
+      stripe,
+      emailSettings
     };
   }
 
@@ -1024,6 +1096,10 @@ export class BillingService {
 
   async runReminderSweep(input: { now?: Date; testEmail?: string | null } = {}) {
     const now = input.now ?? new Date();
+    const config = await this.resolveBillingConfig();
+    if (!config.billingEmailEnabled && !trimOrUndefined(input.testEmail)) {
+      return { ok: true, disabled: true, results: [] };
+    }
     const rules = await this.db.billingEmailRule.findMany({
       where: { status: "enabled" },
       orderBy: [{ triggerType: "asc" }, { offsetDays: "desc" }]

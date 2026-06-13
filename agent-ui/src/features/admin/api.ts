@@ -226,6 +226,16 @@ export async function patchAdminBillingStripeSettings(input: {
   return response.stripe;
 }
 
+export async function patchAdminBillingEmailSettings(input: {
+  enabled: boolean;
+}): Promise<AdminBillingOverviewResponse["emailSettings"]> {
+  const response = await api<{ emailSettings: AdminBillingOverviewResponse["emailSettings"] }>("/api/admin/billing/email-settings", {
+    method: "PATCH",
+    json: input
+  });
+  return response.emailSettings;
+}
+
 export async function grantAdminBillingGiftDays(input: {
   organizationId: string;
   planId: string;
@@ -264,6 +274,7 @@ export async function patchAdminBillingEmailRule(
 
 export async function runAdminBillingEmailReminderSweep(input: { testEmail?: string } = {}): Promise<{
   ok: true;
+  disabled?: boolean;
   results: Array<{ ruleId: string; sent: number; skipped: number; failed: number }>;
 }> {
   return api("/api/admin/billing/email-reminders/run", {

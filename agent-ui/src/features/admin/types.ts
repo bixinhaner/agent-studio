@@ -229,6 +229,11 @@ export type AdminBillingOverviewResponse = {
   emailRules: AdminBillingEmailRule[];
   stripeEvents: AdminBillingStripeEvent[];
   notifications: AdminBillingNotificationRecord[];
+  emailSettings: {
+    enabled: boolean;
+    source: "admin" | "environment";
+    updatedAt?: string | null;
+  };
   stripe: {
     source: "admin" | "environment";
     mode: "test" | "live" | "unknown";
