@@ -58,6 +58,12 @@ type StripeSubscription = {
   current_period_end?: number | null;
 };
 
+type StripeProduct = {
+  id: string;
+  name?: string | null;
+  active?: boolean | null;
+};
+
 type StripeInvoice = {
   id: string;
   customer?: string | null;
@@ -270,6 +276,11 @@ function jsonAudience(value: Prisma.JsonValue | null | undefined): {
 function stripeInterval(value: string): "day" | "week" | "month" | "year" {
   if (value === "day" || value === "week" || value === "year") return value;
   return "month";
+}
+
+function stripeProductIdForPlan(planId: string): string {
+  const normalized = planId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  return `as_plan_${normalized}`;
 }
 
 function normalizeBillingInterval(value: string | null | undefined): "day" | "week" | "month" | "year" | undefined {
@@ -1358,11 +1369,12 @@ export class BillingService {
       throw new Error("Stripe is not configured");
     }
     const trialEnd = Math.max(Math.floor(input.trialEnd.getTime() / 1000), Math.floor(Date.now() / 1000) + 60);
+    const product = await this.ensureStripeProductForPlan(input.plan, config);
     const form = encodeStripeForm({
       customer: input.customerId,
       "items[0][price_data][currency]": input.order.currency,
       "items[0][price_data][unit_amount]": Math.max(1, input.order.amountSubtotalCents),
-      "items[0][price_data][product_data][name]": input.plan.name,
+      "items[0][price_data][product]": product.id,
       "items[0][price_data][recurring][interval]": stripeInterval(input.plan.billingInterval),
       "items[0][price_data][recurring][interval_count]": Math.max(1, input.plan.billingIntervalCount || 1),
       trial_end: trialEnd,
@@ -1371,6 +1383,40 @@ export class BillingService {
       "metadata[plan_id]": input.plan.id
     });
     return this.stripeRequest<StripeSubscription>("/subscriptions", form, config);
+  }
+
+  private async ensureStripeProductForPlan(
+    plan: Awaited<ReturnType<PrismaClient["subscriptionPlan"]["findUnique"]>> extends infer T ? NonNullable<T> : never,
+    config: BillingResolvedConfig
+  ): Promise<StripeProduct> {
+    const productId = stripeProductIdForPlan(plan.id);
+    const existing = await this.stripeGet<StripeProduct>(`/products/${encodeURIComponent(productId)}`, config);
+    if (existing) return existing;
+    const form = encodeStripeForm({
+      id: productId,
+      name: plan.name,
+      "metadata[agent_studio_plan_id]": plan.id,
+      "metadata[agent_studio_plan_slug]": plan.slug
+    });
+    return this.stripeRequest<StripeProduct>("/products", form, config);
+  }
+
+  private async stripeGet<T>(path: string, config: BillingResolvedConfig): Promise<T | null> {
+    const response = await fetch(`${STRIPE_API_BASE}${path}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${config.stripeSecretKey}`
+      }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const message = payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error?: { message?: string } }).error?.message ?? "Stripe request failed")
+        : "Stripe request failed";
+      throw new Error(message);
+    }
+    return payload as T;
   }
 
   private async stripeRequest<T>(path: string, body: URLSearchParams, config: BillingResolvedConfig): Promise<T> {

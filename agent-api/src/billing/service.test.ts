@@ -134,4 +134,57 @@ describe("BillingService Stripe admin settings", () => {
       orderBy: [{ billingStatus: "asc" }, { billingPriceCents: "asc" }, { name: "asc" }]
     });
   });
+
+  it("creates auto-renewal subscriptions with a reusable Stripe product id", async () => {
+    const { db } = createDbMock();
+    const service = new BillingService({ db, config: createBillingConfig() });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "No such product" } }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "as_plan_plan_123", name: "Test Plan" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "sub_test_123", customer: "cus_test_123" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await (service as unknown as {
+        createStripeSubscription(input: {
+          order: Record<string, unknown>;
+          plan: Record<string, unknown>;
+          customerId: string;
+          trialEnd: Date;
+        }): Promise<unknown>;
+      }).createStripeSubscription({
+        order: {
+          id: "order_123",
+          organizationId: "org_123",
+          currency: "usd",
+          amountSubtotalCents: 100
+        },
+        plan: {
+          id: "plan.123",
+          slug: "test",
+          name: "Test Plan",
+          billingInterval: "month",
+          billingIntervalCount: 1
+        },
+        customerId: "cus_test_123",
+        trialEnd: new Date("2026-07-12T00:00:00.000Z")
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.stripe.com/v1/products/as_plan_plan_123",
+      expect.objectContaining({ method: "GET" })
+    );
+    const productBody = fetchMock.mock.calls[1]?.[1]?.body as URLSearchParams;
+    expect(productBody.get("id")).toBe("as_plan_plan_123");
+    expect(productBody.get("name")).toBe("Test Plan");
+    expect(productBody.get("metadata[agent_studio_plan_id]")).toBe("plan.123");
+
+    const subscriptionBody = fetchMock.mock.calls[2]?.[1]?.body as URLSearchParams;
+    expect(subscriptionBody.get("items[0][price_data][product]")).toBe("as_plan_plan_123");
+    expect(subscriptionBody.has("items[0][price_data][product_data][name]")).toBe(false);
+  });
 });
