@@ -1,7 +1,17 @@
 import fs from "node:fs/promises";
+import { existsSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
+
+import {
+  AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
+  AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES,
+  agentStudioMemorySourcePath,
+  codexMemoryProjectionPath,
+  ensureAgentStudioMemorySource,
+  syncAgentStudioMemoryProjection
+} from "./engine.js";
 
 type CodexMemoryAdminRouterOptions = {
   sessionHomeRoot: string;
@@ -99,8 +109,6 @@ const MAX_SCAN_DEPTH = 8;
 const MAX_SCOPE_COUNT = 2000;
 const MAX_FILE_CONTENT_BYTES = 1024 * 1024;
 const MAX_RUN_LOG_ITEMS = 1000;
-const MEMORY_ROOT_FILE_NAMES = new Set(["MEMORY.md", "raw_memories.md", "memory_summary.md"]);
-const MEMORY_CONTENT_ROOTS = new Set(["rollout_summaries", "skills", "extensions"]);
 const MEMORY_RUN_LOG_PATH = path.join(".agent-studio", "memory-runs.jsonl");
 const MEMORY_RUN_STATUSES = new Set(["written", "skipped_no_durable_memory", "skipped_missing_input", "failed"]);
 
@@ -158,7 +166,7 @@ function isHiddenPathSegment(value: string): boolean {
 function isMemoryManagedFile(relativeFilePath: string): boolean {
   const parts = splitUnixPath(toUnixRelative(relativeFilePath));
   if (!parts.length || parts.some(isHiddenPathSegment)) return false;
-  if (parts.length === 1) return MEMORY_ROOT_FILE_NAMES.has(parts[0]);
+  if (parts.length === 1) return AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES.has(parts[0]);
   if (parts[0] === "rollout_summaries" || parts[0] === "skills") return true;
   return parts[0] === "extensions" && parts[1] === "ad_hoc";
 }
@@ -167,7 +175,7 @@ function shouldWalkMemoryDirectory(relativeDirectoryPath: string): boolean {
   const parts = splitUnixPath(toUnixRelative(relativeDirectoryPath));
   if (!parts.length) return true;
   if (parts.some(isHiddenPathSegment)) return false;
-  if (!MEMORY_CONTENT_ROOTS.has(parts[0])) return false;
+  if (!AGENT_STUDIO_MEMORY_CONTENT_ROOTS.has(parts[0])) return false;
   if (parts[0] !== "extensions") return true;
   return parts.length === 1 || parts[1] === "ad_hoc";
 }
@@ -213,13 +221,18 @@ function resolveScopeHome(sessionHomeRoot: string, scopeId: string): { relativeH
   return { relativeHome: toUnixRelative(path.relative(sessionHomeRoot, codexHome)), codexHome };
 }
 
+function adminMemoryPathForCodexHome(codexHome: string): string {
+  const sourcePath = agentStudioMemorySourcePath(codexHome);
+  return existsSync(sourcePath) ? sourcePath : codexMemoryProjectionPath(codexHome);
+}
+
 function resolveMemoryFile(input: {
   sessionHomeRoot: string;
   scopeId: string;
   memoryFilePath: string;
 }): { relativeHome: string; codexHome: string; memoriesPath: string; relativeFilePath: string; absoluteFilePath: string } {
   const scope = resolveScopeHome(input.sessionHomeRoot, input.scopeId);
-  const memoriesPath = path.resolve(scope.codexHome, "memories");
+  const memoriesPath = path.resolve(adminMemoryPathForCodexHome(scope.codexHome));
   const relativeFilePath = safeRelativePath(input.memoryFilePath, "memory file path");
   if (!isMemoryManagedFile(relativeFilePath)) {
     throw new Error("memory file path is not a managed memory file");
@@ -493,7 +506,7 @@ async function summarizeMemoryDirectory(memoriesPath: string): Promise<{
 
   async function walk(current: string, depth: number): Promise<void> {
     if (depth > MAX_SCAN_DEPTH) return;
-    let entries: Array<import("node:fs").Dirent>;
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(current, { withFileTypes: true });
     } catch {
@@ -582,7 +595,7 @@ async function listMemoryScopes(sessionHomeRoot: string): Promise<CodexMemorySco
 
   async function walk(current: string, depth: number): Promise<void> {
     if (depth > MAX_SCAN_DEPTH || scopes.length >= MAX_SCOPE_COUNT) return;
-    let entries: Array<import("node:fs").Dirent>;
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(current, { withFileTypes: true });
     } catch {
@@ -594,12 +607,13 @@ async function listMemoryScopes(sessionHomeRoot: string): Promise<CodexMemorySco
       if (entry.name === "memories") {
         const codexHome = path.dirname(absolutePath);
         const relativeHome = toUnixRelative(path.relative(sessionHomeRoot, codexHome));
-        const summary = await summarizeMemoryDirectory(absolutePath);
+        const memoriesPath = adminMemoryPathForCodexHome(codexHome);
+        const summary = await summarizeMemoryDirectory(memoriesPath);
         scopes.push({
           id: encodeScopeId(relativeHome),
           relativeHome,
           codexHome,
-          memoriesPath: absolutePath,
+          memoriesPath,
           ...classifyScope(relativeHome),
           ...summary
         });
@@ -801,7 +815,7 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   router.get("/codex-memory/scopes/:scopeId/files", requireRead, async (req: Request, res: Response) => {
     try {
       const scope = resolveScopeHome(sessionHomeRoot, req.params.scopeId);
-      const memoriesPath = path.resolve(scope.codexHome, "memories");
+      const memoriesPath = path.resolve(adminMemoryPathForCodexHome(scope.codexHome));
       if (!(await pathExists(memoriesPath))) {
         res.status(404).json({ detail: "memories directory does not exist" });
         return;
@@ -840,6 +854,8 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   router.put("/codex-memory/scopes/:scopeId/files/content", requireWrite, async (req: Request, res: Response) => {
     try {
       const parsed = writeMemoryFileSchema.parse(req.body ?? {});
+      const scope = resolveScopeHome(sessionHomeRoot, req.params.scopeId);
+      await ensureAgentStudioMemorySource(scope.codexHome);
       const resolved = resolveMemoryFile({
         sessionHomeRoot,
         scopeId: req.params.scopeId,
@@ -847,6 +863,7 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
       });
       await fs.mkdir(path.dirname(resolved.absoluteFilePath), { recursive: true });
       await fs.writeFile(resolved.absoluteFilePath, parsed.content, "utf8");
+      await syncAgentStudioMemoryProjection(resolved.codexHome);
       req.query.path = parsed.path;
       await sendMemoryFileContent(req, res, sessionHomeRoot);
     } catch (error) {
@@ -871,6 +888,7 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         memoryFilePath
       });
       await fs.rm(resolved.absoluteFilePath, { force: true });
+      await syncAgentStudioMemoryProjection(resolved.codexHome);
       res.status(204).end();
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });
@@ -880,12 +898,14 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
   router.delete("/codex-memory/scopes/:scopeId", requireWrite, async (req: Request, res: Response) => {
     try {
       const scope = resolveScopeHome(sessionHomeRoot, req.params.scopeId);
-      const memoriesPath = path.resolve(scope.codexHome, "memories");
-      if (!(await pathExists(memoriesPath))) {
-        res.status(204).end();
-        return;
+      const sourcePath = agentStudioMemorySourcePath(scope.codexHome);
+      const projectionPath = codexMemoryProjectionPath(scope.codexHome);
+      if (await pathExists(sourcePath)) {
+        await clearManagedMemoryFiles(sourcePath);
       }
-      await clearManagedMemoryFiles(memoriesPath);
+      if (await pathExists(projectionPath)) {
+        await clearManagedMemoryFiles(projectionPath);
+      }
       res.status(204).end();
     } catch (error) {
       res.status(400).json({ detail: detailFromError(error) });

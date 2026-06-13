@@ -46,7 +46,8 @@ import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-me
 import {
   CodexMemoryEngine,
   codexHomeFromRunConfig as codexHomeFromMemoryRunConfig,
-  codexRunConfigHasExternalContext
+  codexRunConfigHasExternalContext,
+  syncAgentStudioMemoryProjection
 } from "./codex-memory/engine.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { getDbClient } from "./db/client.js";
@@ -3309,6 +3310,7 @@ async function materializeCodexHomeForRunConfig(input: {
       sourcePath: skill.sourcePath
     }))
   });
+  await syncAgentStudioMemoryProjection(codexHome);
   return {
     codexHome,
     codexRunConfig: withRunConfigCodexHome(input.codexRunConfig, codexHome)
