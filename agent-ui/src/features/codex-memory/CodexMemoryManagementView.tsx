@@ -24,20 +24,27 @@ import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeft,
   BrainCircuit,
+  Building2,
   CheckCircle2,
   Eraser,
   Eye,
   FileText,
+  GitBranch,
   PencilLine,
   RefreshCcw,
   Save,
   Search,
   Send,
+  ShieldCheck,
   Trash2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { fetchAdminUsers } from "../admin/api";
+import type { AdminUser } from "../admin/types";
+import { fetchAgentModes } from "../capability-center/api";
+import type { AgentModeRecord } from "../capability-center/types";
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -55,6 +62,7 @@ import {
   fetchCodexMemoryLlmSecretState,
   fetchCodexMemoryRuns,
   fetchCodexMemoryScopes,
+  previewEnterpriseContext,
   saveCodexMemoryLlmSecret,
   saveCodexMemoryFileContent
 } from "./api";
@@ -66,7 +74,11 @@ import type {
   CodexMemoryRunStatus,
   CodexMemoryScope,
   CodexMemoryScopeKind,
-  CodexMemorySettings
+  CodexMemorySettings,
+  EnterpriseContextChannel,
+  EnterpriseContextFieldKey,
+  EnterpriseContextPreviewResponse,
+  EnterpriseContextSettings
 } from "./types";
 
 const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
@@ -85,6 +97,47 @@ const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
   minRolloutIdleHours: 6,
   maxRolloutAgeDays: 30,
   maxUnusedDays: 30
+};
+
+const DEFAULT_ENTERPRISE_CONTEXT_SETTINGS: EnterpriseContextSettings = {
+  enabled: false,
+  failOpen: true,
+  maxPromptChars: 1200,
+  channels: {
+    portal: true,
+    dingtalk: true,
+    crest: true,
+    zendesk: false,
+    openaiCompatibleApi: false
+  },
+  fields: {
+    identity: true,
+    organization: true,
+    departmentPosition: true,
+    employeeNo: true,
+    workPlace: true,
+    manager: true,
+    contact: false
+  },
+  agentOverrides: []
+};
+
+const ENTERPRISE_CHANNEL_LABELS: Record<EnterpriseContextChannel, string> = {
+  portal: "Portal",
+  dingtalk: "钉钉",
+  crest: "CREST",
+  zendesk: "Zendesk",
+  openai_compatible_api: "外部 API"
+};
+
+const ENTERPRISE_FIELD_LABELS: Record<EnterpriseContextFieldKey, { title: string; description: string }> = {
+  identity: { title: "基础身份", description: "姓名、邮箱等用于识别当前用户。" },
+  organization: { title: "组织", description: "用户所在组织名称，不包含内部组织 ID。" },
+  departmentPosition: { title: "部门岗位", description: "部门、职位、负责人标记等工作背景。" },
+  employeeNo: { title: "工号", description: "仅在需要企业内部识别时注入。" },
+  workPlace: { title: "工作地", description: "办公地点或区域信息。" },
+  manager: { title: "汇报关系", description: "直属主管姓名或邮箱。" },
+  contact: { title: "联系方式", description: "手机号、电话。默认关闭，开启需确认隐私边界。" }
 };
 
 const KIND_LABELS: Record<CodexMemoryScopeKind, string> = {
@@ -135,6 +188,15 @@ const RUN_REASON_LABELS: Record<string, string> = {
   exception: "执行异常"
 };
 
+const ENTERPRISE_PREVIEW_REASON_LABELS: Record<string, string> = {
+  enterprise_context_disabled: "企业上下文注入未启用",
+  channel_disabled: "当前渠道未启用",
+  agent_override_disabled: "当前智能体被单独关闭",
+  missing_user: "未选择用户",
+  user_not_found: "用户不存在",
+  resolution_failed: "企业上下文解析失败"
+};
+
 type MemoryView = "overview" | "scope" | "file";
 
 function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
@@ -173,6 +235,18 @@ function settingsChanged(left: CodexMemorySettings | null, right: CodexMemorySet
   return JSON.stringify(left) !== JSON.stringify(right);
 }
 
+function enterpriseSettingsChanged(
+  left: EnterpriseContextSettings | null,
+  right: EnterpriseContextSettings | null
+): boolean {
+  if (!left || !right) return Boolean(left || right);
+  return JSON.stringify(left) !== JSON.stringify(right);
+}
+
+function enterpriseChannelKey(channel: EnterpriseContextChannel): keyof EnterpriseContextSettings["channels"] {
+  return channel === "openai_compatible_api" ? "openaiCompatibleApi" : channel;
+}
+
 function scopeTitle(scope: CodexMemoryScope): string {
   return scope.displayLabel || scope.label || "未命名记忆空间";
 }
@@ -193,6 +267,18 @@ function ownerLabel(scope: CodexMemoryScope): string {
 
 function agentLabel(scope: CodexMemoryScope): string {
   return scope.agentName || scope.agentSlug || "默认智能体";
+}
+
+function userLabel(user: AdminUser): string {
+  return user.synced.displayName || user.synced.email || "未命名用户";
+}
+
+function userSubtitle(user: AdminUser): string {
+  return [user.synced.email, user.enterprise.title, user.enterprise.workPlace].filter(Boolean).join(" · ") || "无补充信息";
+}
+
+function agentModeLabel(mode?: AgentModeRecord | null): string {
+  return mode?.name || mode?.slug || "默认智能体";
 }
 
 function fileDisplayName(file: Pick<CodexMemoryFile, "path" | "name">): string {
@@ -349,6 +435,8 @@ export function CodexMemoryManagementView() {
 
   const [settings, setSettings] = useState<CodexMemorySettings>(DEFAULT_MEMORY_SETTINGS);
   const [publishedSettings, setPublishedSettings] = useState<CodexMemorySettings | null>(null);
+  const [enterpriseSettings, setEnterpriseSettings] = useState<EnterpriseContextSettings>(DEFAULT_ENTERPRISE_CONTEXT_SETTINGS);
+  const [publishedEnterpriseSettings, setPublishedEnterpriseSettings] = useState<EnterpriseContextSettings | null>(null);
   const [publishedMeta, setPublishedMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -365,7 +453,7 @@ export function CodexMemoryManagementView() {
   const [selectedScopeId, setSelectedScopeId] = useState("");
   const [scopeDetail, setScopeDetail] = useState<CodexMemoryScope | null>(null);
 
-  const [activeOverviewTab, setActiveOverviewTab] = useState("policy");
+  const [activeOverviewTab, setActiveOverviewTab] = useState("overview");
   const [runs, setRuns] = useState<CodexMemoryRunLog[]>([]);
   const [runsSummary, setRunsSummary] = useState<Record<CodexMemoryRunStatus, number>>({
     written: 0,
@@ -379,6 +467,14 @@ export function CodexMemoryManagementView() {
   const [runsLoading, setRunsLoading] = useState(true);
   const [runsError, setRunsError] = useState("");
 
+  const [previewUsers, setPreviewUsers] = useState<AdminUser[]>([]);
+  const [previewAgentModes, setPreviewAgentModes] = useState<AgentModeRecord[]>([]);
+  const [previewUserId, setPreviewUserId] = useState("");
+  const [previewAgentModeId, setPreviewAgentModeId] = useState("");
+  const [previewChannel, setPreviewChannel] = useState<EnterpriseContextChannel>("portal");
+  const [enterprisePreview, setEnterprisePreview] = useState<EnterpriseContextPreviewResponse | null>(null);
+  const [enterprisePreviewLoading, setEnterprisePreviewLoading] = useState(false);
+
   const [files, setFiles] = useState<CodexMemoryFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState("");
@@ -390,7 +486,9 @@ export function CodexMemoryManagementView() {
   const selectedScopeFromList = scopes.find((scope) => scope.id === selectedScopeId) ?? null;
   const selectedScope = scopeDetail?.id === selectedScopeId ? scopeDetail : selectedScopeFromList;
   const selectedFile = files.find((file) => file.path === selectedFilePath) ?? null;
-  const isSettingsDirty = settingsChanged(settings, publishedSettings);
+  const isMemorySettingsDirty = settingsChanged(settings, publishedSettings);
+  const isEnterpriseSettingsDirty = enterpriseSettingsChanged(enterpriseSettings, publishedEnterpriseSettings);
+  const isSettingsDirty = isMemorySettingsDirty || isEnterpriseSettingsDirty;
   const publishedVersion = publishedMeta ? `v${publishedMeta.versionNumber}` : "未发布";
 
   const isFileDirty = useMemo(() => {
@@ -444,6 +542,47 @@ export function CodexMemoryManagementView() {
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
+  function updateEnterpriseSetting<K extends keyof EnterpriseContextSettings>(
+    key: K,
+    value: EnterpriseContextSettings[K]
+  ) {
+    setEnterpriseSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateEnterpriseChannel(channel: EnterpriseContextChannel, enabled: boolean) {
+    const key = enterpriseChannelKey(channel);
+    setEnterpriseSettings((current) => ({
+      ...current,
+      channels: {
+        ...current.channels,
+        [key]: enabled
+      }
+    }));
+  }
+
+  function updateEnterpriseField(field: EnterpriseContextFieldKey, enabled: boolean) {
+    setEnterpriseSettings((current) => ({
+      ...current,
+      fields: {
+        ...current.fields,
+        [field]: enabled
+      }
+    }));
+  }
+
+  function updateAgentOverride(agentModeId: string, enabled: boolean | null) {
+    setEnterpriseSettings((current) => {
+      const withoutCurrent = current.agentOverrides.filter((item) => item.agentModeId !== agentModeId);
+      if (enabled === null) {
+        return { ...current, agentOverrides: withoutCurrent };
+      }
+      return {
+        ...current,
+        agentOverrides: [...withoutCurrent, { agentModeId, enabled }]
+      };
+    });
+  }
+
   function runReasonLabel(reason: string): string {
     return RUN_REASON_LABELS[reason] ?? reason;
   }
@@ -465,8 +604,31 @@ export function CodexMemoryManagementView() {
         fetchCodexMemoryLlmSecretState()
       ]);
       const nextSettings = response.draft.payload.codexMemory ?? DEFAULT_MEMORY_SETTINGS;
+      const nextEnterpriseSettings = response.draft.payload.enterpriseContext ?? DEFAULT_ENTERPRISE_CONTEXT_SETTINGS;
       setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...nextSettings });
+      setEnterpriseSettings({
+        ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS,
+        ...nextEnterpriseSettings,
+        channels: { ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS.channels, ...nextEnterpriseSettings.channels },
+        fields: { ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS.fields, ...nextEnterpriseSettings.fields },
+        agentOverrides: nextEnterpriseSettings.agentOverrides ?? []
+      });
       setPublishedSettings(response.published?.payload.codexMemory ? { ...DEFAULT_MEMORY_SETTINGS, ...response.published.payload.codexMemory } : null);
+      setPublishedEnterpriseSettings(response.published?.payload.enterpriseContext
+        ? {
+            ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS,
+            ...response.published.payload.enterpriseContext,
+            channels: {
+              ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS.channels,
+              ...response.published.payload.enterpriseContext.channels
+            },
+            fields: {
+              ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS.fields,
+              ...response.published.payload.enterpriseContext.fields
+            },
+            agentOverrides: response.published.payload.enterpriseContext.agentOverrides ?? []
+          }
+        : null);
       setPublishedMeta(response.publishedMeta);
       setLlmSecretState(secretState);
       setLlmApiKeyDraft("");
@@ -527,6 +689,39 @@ export function CodexMemoryManagementView() {
     }
   }
 
+  async function loadPreviewOptions() {
+    try {
+      const [userResponse, agentModeResponse] = await Promise.all([
+        fetchAdminUsers(),
+        fetchAgentModes()
+      ]);
+      setPreviewUsers(userResponse.users);
+      setPreviewAgentModes(agentModeResponse.agentModes);
+      setPreviewUserId((current) => current || userResponse.users[0]?.id || "");
+      setPreviewAgentModeId((current) => current || agentModeResponse.agentModes[0]?.id || "");
+    } catch (error) {
+      void message.warning(error instanceof Error ? error.message : "加载企业上下文预览选项失败");
+    }
+  }
+
+  async function loadEnterprisePreview() {
+    setEnterprisePreviewLoading(true);
+    try {
+      const response = await previewEnterpriseContext({
+        channel: previewChannel,
+        userId: previewUserId || undefined,
+        agentModeId: previewAgentModeId || undefined,
+        settings: enterpriseSettings
+      });
+      setEnterprisePreview(response);
+    } catch (error) {
+      setEnterprisePreview(null);
+      void message.error(error instanceof Error ? error.message : "生成企业上下文预览失败");
+    } finally {
+      setEnterprisePreviewLoading(false);
+    }
+  }
+
   async function loadFiles(scopeId: string) {
     if (!scopeId) {
       setScopeDetail(null);
@@ -582,6 +777,7 @@ export function CodexMemoryManagementView() {
     void loadSettings();
     void loadScopes();
     void loadRuns();
+    void loadPreviewOptions();
   }, []);
 
   useEffect(() => {
@@ -599,6 +795,7 @@ export function CodexMemoryManagementView() {
       const current = await fetchSystemSettings();
       const payload = clonePayload(current.draft.payload);
       payload.codexMemory = { ...settings };
+      payload.enterpriseContext = { ...enterpriseSettings };
       if (clearLlmApiKey || llmApiKeyDraft.trim()) {
         const nextSecretState = await saveCodexMemoryLlmSecret({
           apiKey: llmApiKeyDraft.trim() || undefined,
@@ -612,14 +809,23 @@ export function CodexMemoryManagementView() {
       if (publishAfterSave) {
         const published = await publishSystemSettings();
         setPublishedSettings({ ...DEFAULT_MEMORY_SETTINGS, ...published.published!.payload.codexMemory });
+        setPublishedEnterpriseSettings({
+          ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS,
+          ...published.published!.payload.enterpriseContext
+        });
         setPublishedMeta(published.publishedMeta);
         setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...published.draft.payload.codexMemory });
-        void message.success("记忆配置已保存并发布");
+        setEnterpriseSettings({ ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...published.draft.payload.enterpriseContext });
+        void message.success("上下文与记忆配置已保存并发布");
       } else {
         setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...saved.draft.payload.codexMemory });
+        setEnterpriseSettings({ ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...saved.draft.payload.enterpriseContext });
         setPublishedSettings(saved.published?.payload.codexMemory ? { ...DEFAULT_MEMORY_SETTINGS, ...saved.published.payload.codexMemory } : null);
+        setPublishedEnterpriseSettings(saved.published?.payload.enterpriseContext
+          ? { ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...saved.published.payload.enterpriseContext }
+          : null);
         setPublishedMeta(saved.publishedMeta);
-        void message.success("记忆配置草稿已保存");
+        void message.success("上下文与记忆配置草稿已保存");
       }
     } catch (error) {
       setSettingsError(error instanceof Error ? error.message : "保存记忆配置失败");
@@ -894,6 +1100,9 @@ export function CodexMemoryManagementView() {
                 {view === "file" ? "返回空间" : "返回列表"}
               </Button>
             ) : null}
+            <Tag color={publishedEnterpriseSettings?.enabled ? "green" : "orange"}>
+              {publishedEnterpriseSettings?.enabled ? "Enterprise Context 已启用" : "Enterprise Context 未启用"}
+            </Tag>
             <Tag color={publishedSettings?.enabled ? "green" : "orange"}>
               {publishedSettings?.enabled ? "Memory 已启用" : "Memory 未启用"}
             </Tag>
@@ -901,14 +1110,14 @@ export function CodexMemoryManagementView() {
             {isSettingsDirty ? <Tag color="orange">有未发布草稿</Tag> : <Tag color="green">与发布态一致</Tag>}
           </Space>
           <h1 className="admin-page-title">
-            {view === "file" && selectedFile ? fileDisplayName(selectedFile) : view === "scope" && selectedScope ? scopeTitle(selectedScope) : "记忆管理"}
+            {view === "file" && selectedFile ? fileDisplayName(selectedFile) : view === "scope" && selectedScope ? scopeTitle(selectedScope) : "上下文与记忆"}
           </h1>
           <p className="admin-page-desc">
             {view === "file" && selectedScope
               ? `${scopeTitle(selectedScope)} 的 memory 文件`
               : view === "scope" && selectedScope
                 ? scopeSubtitle(selectedScope)
-                : "统一管理 Codex 原生 memory 的全局策略、记忆空间和实际 memory 文件。"}
+                : "统一管理模型运行时上下文、企业资料注入和 Codex memory。"}
           </p>
         </div>
         <Space>
@@ -1192,6 +1401,263 @@ export function CodexMemoryManagementView() {
     );
   }
 
+  function renderEnterpriseContextPanel() {
+    const selectedPreviewUser = previewUsers.find((user) => user.id === previewUserId) ?? null;
+    const selectedPreviewAgent = previewAgentModes.find((mode) => mode.id === previewAgentModeId) ?? null;
+    const overrideByAgent = new Map(enterpriseSettings.agentOverrides.map((item) => [item.agentModeId, item.enabled]));
+    const overrideColumns: ColumnsType<AgentModeRecord> = [
+      {
+        title: "智能体",
+        key: "agent",
+        sorter: (a, b) => compareText(agentModeLabel(a), agentModeLabel(b)),
+        render: (_: unknown, mode: AgentModeRecord) => (
+          <Space direction="vertical" size={2}>
+            <Typography.Text strong>{agentModeLabel(mode)}</Typography.Text>
+            <Typography.Text type="secondary">{mode.status === "active" ? "启用中" : "停用"}</Typography.Text>
+          </Space>
+        )
+      },
+      {
+        title: "企业上下文",
+        key: "override",
+        width: 180,
+        render: (_: unknown, mode: AgentModeRecord) => (
+          <Select
+            value={overrideByAgent.has(mode.id) ? String(overrideByAgent.get(mode.id)) : "inherit"}
+            onChange={(value) => updateAgentOverride(mode.id, value === "inherit" ? null : value === "true")}
+            options={[
+              { label: "继承全局", value: "inherit" },
+              { label: "单独启用", value: "true" },
+              { label: "单独关闭", value: "false" }
+            ]}
+            style={{ width: "100%" }}
+          />
+        )
+      }
+    ];
+
+    return (
+      <div style={{ width: "100%", marginTop: 16 }}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} xl={10}>
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div className="admin-card" style={{ padding: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <Building2 size={20} />
+                  <div>
+                    <Typography.Title level={4} style={{ margin: 0 }}>
+                      企业上下文策略
+                    </Typography.Title>
+                    <Typography.Text type="secondary">发布后对选中 Codex 渠道生效，运行失败时默认跳过。</Typography.Text>
+                  </div>
+                </div>
+                <SettingSwitch
+                  title="启用企业上下文注入"
+                  description="开启后，系统会把当前用户的企业身份、部门和岗位作为隐藏运行时上下文传给 Codex。"
+                  checked={enterpriseSettings.enabled}
+                  onChange={(enabled) => updateEnterpriseSetting("enabled", enabled)}
+                />
+                <SettingSwitch
+                  title="注入失败时跳过"
+                  description="企业资料缺失或解析失败时继续问答，不阻塞用户请求。"
+                  checked={enterpriseSettings.failOpen}
+                  onChange={(failOpen) => updateEnterpriseSetting("failOpen", failOpen)}
+                />
+                <div style={{ padding: "12px 0" }}>
+                  <Typography.Text strong>最大注入长度</Typography.Text>
+                  <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                    控制额外 prompt 体积，避免企业资料挤占上下文窗口。
+                  </Typography.Text>
+                  <InputNumber
+                    min={300}
+                    max={4000}
+                    value={enterpriseSettings.maxPromptChars}
+                    addonAfter="字符"
+                    onChange={(value) => updateEnterpriseSetting("maxPromptChars", Number(value ?? 1200))}
+                    style={{ width: 180, marginTop: 8 }}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-card" style={{ padding: 20 }}>
+                <Typography.Title level={5} style={{ marginTop: 0 }}>
+                  渠道范围
+                </Typography.Title>
+                <Typography.Text type="secondary">Zendesk 和外部 API 默认关闭，避免共享渠道误注入个人资料。</Typography.Text>
+                <div style={{ marginTop: 12 }}>
+                  {(Object.keys(ENTERPRISE_CHANNEL_LABELS) as EnterpriseContextChannel[]).map((channel) => (
+                    <SettingSwitch
+                      key={channel}
+                      title={ENTERPRISE_CHANNEL_LABELS[channel]}
+                      description={
+                        channel === "zendesk" || channel === "openai_compatible_api"
+                          ? "仅在运行时能识别具体用户时才会注入。"
+                          : "当前用户明确可识别时注入。"
+                      }
+                      checked={enterpriseSettings.channels[enterpriseChannelKey(channel)]}
+                      onChange={(enabled) => updateEnterpriseChannel(channel, enabled)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </Space>
+          </Col>
+
+          <Col xs={24} xl={14}>
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div className="admin-card" style={{ padding: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <ShieldCheck size={20} />
+                  <div>
+                    <Typography.Title level={4} style={{ margin: 0 }}>
+                      字段范围
+                    </Typography.Title>
+                    <Typography.Text type="secondary">只注入用户友好的企业信息，不注入内部 ID、目录路径或原始 JSON。</Typography.Text>
+                  </div>
+                </div>
+                <Row gutter={[12, 12]}>
+                  {(Object.keys(ENTERPRISE_FIELD_LABELS) as EnterpriseContextFieldKey[]).map((field) => (
+                    <Col xs={24} md={12} key={field}>
+                      <div
+                        style={{
+                          border: "1px solid var(--admin-color-border)",
+                          borderRadius: 10,
+                          padding: 12,
+                          minHeight: 92,
+                          background: enterpriseSettings.fields[field] ? "rgba(22, 119, 255, 0.04)" : "var(--admin-color-surface)"
+                        }}
+                      >
+                        <Checkbox
+                          checked={enterpriseSettings.fields[field]}
+                          onChange={(event) => updateEnterpriseField(field, event.target.checked)}
+                        >
+                          <Typography.Text strong>{ENTERPRISE_FIELD_LABELS[field].title}</Typography.Text>
+                        </Checkbox>
+                        <Typography.Text type="secondary" style={{ display: "block", marginTop: 6, paddingLeft: 24 }}>
+                          {ENTERPRISE_FIELD_LABELS[field].description}
+                        </Typography.Text>
+                      </div>
+                    </Col>
+                  ))}
+                </Row>
+              </div>
+
+              <div className="admin-card" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 16 }}>
+                  <div>
+                    <Typography.Title level={4} style={{ margin: 0 }}>
+                      预览最终注入内容
+                    </Typography.Title>
+                    <Typography.Text type="secondary">使用当前页面草稿生成预览，不需要先发布。</Typography.Text>
+                  </div>
+                  <Button icon={<RefreshCcw size={16} />} onClick={() => void loadEnterprisePreview()} loading={enterprisePreviewLoading}>
+                    生成预览
+                  </Button>
+                </div>
+                <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+                  <Col xs={24} md={8}>
+                    <Typography.Text strong>渠道</Typography.Text>
+                    <Select
+                      value={previewChannel}
+                      onChange={(value) => setPreviewChannel(value as EnterpriseContextChannel)}
+                      options={(Object.keys(ENTERPRISE_CHANNEL_LABELS) as EnterpriseContextChannel[]).map((channel) => ({
+                        label: ENTERPRISE_CHANNEL_LABELS[channel],
+                        value: channel
+                      }))}
+                      style={{ width: "100%", marginTop: 8 }}
+                    />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Typography.Text strong>用户</Typography.Text>
+                    <Select
+                      showSearch
+                      value={previewUserId || undefined}
+                      placeholder="选择用户"
+                      onChange={(value) => setPreviewUserId(value)}
+                      optionFilterProp="label"
+                      options={previewUsers.map((user) => ({
+                        value: user.id,
+                        label: `${userLabel(user)} ${user.synced.email ?? ""}`.trim()
+                      }))}
+                      style={{ width: "100%", marginTop: 8 }}
+                    />
+                    {selectedPreviewUser ? (
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }} ellipsis>
+                        {userSubtitle(selectedPreviewUser)}
+                      </Typography.Text>
+                    ) : null}
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Typography.Text strong>智能体</Typography.Text>
+                    <Select
+                      showSearch
+                      value={previewAgentModeId || undefined}
+                      placeholder="选择智能体"
+                      onChange={(value) => setPreviewAgentModeId(value)}
+                      optionFilterProp="label"
+                      options={previewAgentModes.map((mode) => ({
+                        value: mode.id,
+                        label: agentModeLabel(mode)
+                      }))}
+                      style={{ width: "100%", marginTop: 8 }}
+                    />
+                    {selectedPreviewAgent ? (
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }} ellipsis>
+                        {selectedPreviewAgent.status === "active" ? "启用中" : "停用"}
+                      </Typography.Text>
+                    ) : null}
+                  </Col>
+                </Row>
+                {enterprisePreview?.enabled ? (
+                  <Alert
+                    type="success"
+                    showIcon
+                    message={`会注入企业上下文${enterprisePreview.hash ? ` · ${enterprisePreview.hash}` : ""}`}
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : enterprisePreview ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={ENTERPRISE_PREVIEW_REASON_LABELS[enterprisePreview.reason || ""] ?? enterprisePreview.reason ?? "不会注入"}
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : (
+                  <Alert type="info" showIcon message="点击“生成预览”查看 Codex 实际收到的企业上下文。" style={{ marginBottom: 12 }} />
+                )}
+                <RawTextPreview
+                  text={enterprisePreview?.markdown || "尚未生成预览。"}
+                  maxHeight={320}
+                  style={{ minHeight: 220 }}
+                />
+              </div>
+            </Space>
+          </Col>
+        </Row>
+
+        <div className="admin-card" style={{ padding: 20, marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <GitBranch size={20} />
+            <div>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                智能体覆盖
+              </Typography.Title>
+              <Typography.Text type="secondary">默认继承全局策略；仅在某个智能体不适合注入企业资料时单独关闭。</Typography.Text>
+            </div>
+          </div>
+          <Table
+            rowKey="id"
+            columns={overrideColumns}
+            dataSource={previewAgentModes}
+            pagination={{ pageSize: 6, showSizeChanger: false }}
+            scroll={{ x: 560 }}
+            locale={{ emptyText: <Empty description="暂无智能体" /> }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   function renderSpacesPanel() {
     return (
       <div className="admin-card codex-memory-spaces-card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
@@ -1315,15 +1781,85 @@ export function CodexMemoryManagementView() {
   }
 
   function renderOverview() {
+    const enabledChannels = (Object.keys(ENTERPRISE_CHANNEL_LABELS) as EnterpriseContextChannel[])
+      .filter((channel) => enterpriseSettings.channels[enterpriseChannelKey(channel)])
+      .map((channel) => ENTERPRISE_CHANNEL_LABELS[channel]);
+
+    const overviewPanel = (
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <div className="admin-card" style={{ padding: 20, height: "100%" }}>
+            <Space direction="vertical" size={14} style={{ width: "100%" }}>
+              <Space>
+                <Building2 size={20} />
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  企业上下文
+                </Typography.Title>
+                <Tag color={enterpriseSettings.enabled ? "green" : "orange"}>
+                  {enterpriseSettings.enabled ? "草稿启用" : "草稿关闭"}
+                </Tag>
+              </Space>
+              <Typography.Text type="secondary">
+                为 Codex 注入当前用户的企业身份、部门岗位和汇报关系；默认不注入手机号、电话。
+              </Typography.Text>
+              <Space wrap>
+                {enabledChannels.map((channel) => <Tag key={channel}>{channel}</Tag>)}
+                {enabledChannels.length === 0 ? <Tag>未选择渠道</Tag> : null}
+              </Space>
+              <Alert
+                type={enterpriseSettings.enabled ? "success" : "info"}
+                showIcon
+                message={enterpriseSettings.enabled ? "发布后选中渠道会注入企业上下文" : "当前草稿关闭企业上下文注入"}
+                description="真正运行时只读取发布态；预览可以使用当前草稿提前确认注入文本。"
+              />
+            </Space>
+          </div>
+        </Col>
+        <Col xs={24} lg={12}>
+          <div className="admin-card" style={{ padding: 20, height: "100%" }}>
+            <Space direction="vertical" size={14} style={{ width: "100%" }}>
+              <Space>
+                <BrainCircuit size={20} />
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  长期记忆
+                </Typography.Title>
+                <Tag color={settings.enabled ? "green" : "orange"}>
+                  {settings.enabled ? "草稿启用" : "草稿关闭"}
+                </Tag>
+              </Space>
+              <Typography.Text type="secondary">
+                Codex-compatible memory 继续用于稳定偏好和长期流程；不会自动沉淀企业目录里的动态岗位资料。
+              </Typography.Text>
+              <Space wrap>
+                <Tag>{settings.generationEngine === "agent_studio" ? "Agent Studio 生成" : "Codex 原生生成"}</Tag>
+                <Tag>{settings.useMemories ? "读取已有记忆" : "不读取记忆"}</Tag>
+                <Tag>{settings.generateMemories ? "允许生成" : "不生成"}</Tag>
+              </Space>
+              <Alert
+                type={settings.enabled ? "success" : "info"}
+                showIcon
+                message={settings.enabled ? "发布后 Codex 渠道会读取 memory" : "当前草稿关闭 memory"}
+                description="企业上下文和长期记忆是两个独立能力，配置入口合并但运行结构分离。"
+              />
+            </Space>
+          </div>
+        </Col>
+      </Row>
+    );
+
     return (
       <div style={{ width: "100%", marginTop: 16 }}>
         <div className="codex-memory-overview-metrics" style={{ marginBottom: 16 }}>
+          <MemoryMetric
+            label="企业上下文"
+            value={publishedEnterpriseSettings?.enabled ? "已启用" : "未启用"}
+            hint={`${enabledChannels.length} 个渠道草稿启用`}
+          />
           <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
           <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
-          <MemoryMetric label="最近写入" value={String(runsSummary.written)} hint="memory 任务写入数" />
           <MemoryMetric
             label="发布状态"
-            value={publishedSettings?.enabled ? "已启用" : "未启用"}
+            value={isSettingsDirty ? "有草稿" : "一致"}
             hint={publishedVersion}
           />
         </div>
@@ -1332,7 +1868,9 @@ export function CodexMemoryManagementView() {
           activeKey={activeOverviewTab}
           onChange={setActiveOverviewTab}
           items={[
-            { key: "policy", label: "全局记忆策略", children: renderSettingsPanel() },
+            { key: "overview", label: "概览", children: overviewPanel },
+            { key: "enterprise", label: "企业上下文", children: renderEnterpriseContextPanel() },
+            { key: "memory", label: "长期记忆", children: renderSettingsPanel() },
             { key: "spaces", label: "记忆空间", children: renderSpacesPanel() },
             { key: "runs", label: "统计日志", children: renderRunLogsPanel() }
           ]}

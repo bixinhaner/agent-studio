@@ -146,6 +146,46 @@ export const systemSettingsCodexMemorySchema = z
   })
   .strict();
 
+export const systemSettingsEnterpriseContextChannelsSchema = z
+  .object({
+    portal: z.boolean(),
+    dingtalk: z.boolean(),
+    crest: z.boolean(),
+    zendesk: z.boolean(),
+    openaiCompatibleApi: z.boolean()
+  })
+  .strict();
+
+export const systemSettingsEnterpriseContextFieldsSchema = z
+  .object({
+    identity: z.boolean(),
+    organization: z.boolean(),
+    departmentPosition: z.boolean(),
+    employeeNo: z.boolean(),
+    workPlace: z.boolean(),
+    manager: z.boolean(),
+    contact: z.boolean()
+  })
+  .strict();
+
+export const systemSettingsEnterpriseContextAgentOverrideSchema = z
+  .object({
+    agentModeId: z.string().trim().min(1).max(120),
+    enabled: z.boolean().nullable()
+  })
+  .strict();
+
+export const systemSettingsEnterpriseContextSchema = z
+  .object({
+    enabled: z.boolean(),
+    failOpen: z.boolean(),
+    maxPromptChars: z.number().int().min(300).max(4000),
+    channels: systemSettingsEnterpriseContextChannelsSchema,
+    fields: systemSettingsEnterpriseContextFieldsSchema,
+    agentOverrides: z.array(systemSettingsEnterpriseContextAgentOverrideSchema).max(200)
+  })
+  .strict();
+
 export const systemSettingsAnswerFeedbackSchema = z.object({
   enabledForExternalUsers: z.boolean().default(true),
   enabledForInternalUsers: z.boolean().default(false),
@@ -179,6 +219,7 @@ export const systemSettingsPayloadSchema = z
     safety: systemSettingsSafetySchema,
     organizationDefaults: systemSettingsOrganizationDefaultsSchema,
     codexMemory: systemSettingsCodexMemorySchema,
+    enterpriseContext: systemSettingsEnterpriseContextSchema,
     behavior: systemSettingsBehaviorSchema
   })
   .strict();
@@ -191,6 +232,12 @@ export const systemSettingsArtifactAccessPatchSchema = systemSettingsArtifactAcc
 export const systemSettingsSafetyPatchSchema = systemSettingsSafetySchema.partial();
 export const systemSettingsOrganizationDefaultsPatchSchema = systemSettingsOrganizationDefaultsSchema.partial();
 export const systemSettingsCodexMemoryPatchSchema = systemSettingsCodexMemorySchema.partial();
+export const systemSettingsEnterpriseContextPatchSchema = systemSettingsEnterpriseContextSchema
+  .extend({
+    channels: systemSettingsEnterpriseContextChannelsSchema.partial().optional(),
+    fields: systemSettingsEnterpriseContextFieldsSchema.partial().optional()
+  })
+  .partial();
 export const systemSettingsBehaviorPatchSchema = systemSettingsBehaviorSchema.partial();
 
 export const systemSettingsPayloadPatchSchema = z
@@ -203,6 +250,7 @@ export const systemSettingsPayloadPatchSchema = z
     safety: systemSettingsSafetyPatchSchema.optional(),
     organizationDefaults: systemSettingsOrganizationDefaultsPatchSchema.optional(),
     codexMemory: systemSettingsCodexMemoryPatchSchema.optional(),
+    enterpriseContext: systemSettingsEnterpriseContextPatchSchema.optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
   })
   .strict();
@@ -216,6 +264,9 @@ export type SystemSettingsArtifactAccessRule = z.infer<typeof systemSettingsArti
 export type SystemSettingsSafety = z.infer<typeof systemSettingsSafetySchema>;
 export type SystemSettingsOrganizationDefaults = z.infer<typeof systemSettingsOrganizationDefaultsSchema>;
 export type SystemSettingsCodexMemory = z.infer<typeof systemSettingsCodexMemorySchema>;
+export type SystemSettingsEnterpriseContext = z.infer<typeof systemSettingsEnterpriseContextSchema>;
+export type SystemSettingsEnterpriseContextChannels = z.infer<typeof systemSettingsEnterpriseContextChannelsSchema>;
+export type SystemSettingsEnterpriseContextFields = z.infer<typeof systemSettingsEnterpriseContextFieldsSchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
@@ -334,6 +385,28 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     minRolloutIdleHours: 6,
     maxRolloutAgeDays: 30,
     maxUnusedDays: 30
+  },
+  enterpriseContext: {
+    enabled: false,
+    failOpen: true,
+    maxPromptChars: 1200,
+    channels: {
+      portal: true,
+      dingtalk: true,
+      crest: true,
+      zendesk: false,
+      openaiCompatibleApi: false
+    },
+    fields: {
+      identity: true,
+      organization: true,
+      departmentPosition: true,
+      employeeNo: true,
+      workPlace: true,
+      manager: true,
+      contact: false
+    },
+    agentOverrides: []
   },
   behavior: {
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",

@@ -90,6 +90,9 @@ describe("resolvePublicBranding", () => {
       defaultPublicBehavior().portalWelcomeSuggestions
     );
     expect(normalized.behavior.answerFeedback).toEqual(defaultPublicBehavior().answerFeedback);
+    expect(normalized.enterpriseContext.enabled).toBe(false);
+    expect(normalized.enterpriseContext.channels.portal).toBe(true);
+    expect(normalized.enterpriseContext.fields.contact).toBe(false);
     expect("welcomeSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
     expect("usageSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
   });

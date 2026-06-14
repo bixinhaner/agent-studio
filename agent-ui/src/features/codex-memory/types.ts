@@ -1,4 +1,8 @@
-import type { SystemSettingsCodexMemory } from "../system-settings/types";
+import type {
+  SystemSettingsCodexMemory,
+  SystemSettingsEnterpriseContext,
+  SystemSettingsEnterpriseContextFields
+} from "../system-settings/types";
 
 export type CodexMemoryScopeKind = "user_agent" | "integration_agent" | "legacy_thread" | "unknown";
 
@@ -57,6 +61,42 @@ export type CodexMemoryFileContentResponse = {
 };
 
 export type CodexMemorySettings = SystemSettingsCodexMemory;
+export type EnterpriseContextSettings = SystemSettingsEnterpriseContext;
+export type EnterpriseContextChannel = "portal" | "dingtalk" | "crest" | "zendesk" | "openai_compatible_api";
+
+export type EnterpriseContextPreviewUser = {
+  name?: string;
+  email?: string;
+  organization?: string;
+  title?: string;
+  employeeNo?: string;
+  workPlace?: string;
+  manager?: string;
+  departments?: Array<{
+    name: string;
+    position?: string;
+    isPrimary?: boolean;
+    isLeader?: boolean;
+  }>;
+  mobile?: string;
+  telephone?: string;
+  lastSyncedAt?: string;
+};
+
+export type EnterpriseContextPreviewResponse = {
+  enabled: boolean;
+  reason?: string;
+  markdown?: string;
+  hash?: string;
+  snapshot?: {
+    source: "agent_studio_enterprise_directory";
+    channel: EnterpriseContextChannel;
+    generatedAt: string;
+    user?: EnterpriseContextPreviewUser;
+  };
+};
+
+export type EnterpriseContextFieldKey = keyof SystemSettingsEnterpriseContextFields;
 
 export type CodexMemoryLlmSecretState = {
   hasApiKey: boolean;

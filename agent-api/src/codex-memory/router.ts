@@ -4,6 +4,8 @@ import path from "node:path";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 
+import type { EnterpriseContextService } from "../enterprise-context-service.js";
+import { systemSettingsEnterpriseContextSchema } from "../system-settings/types.js";
 import {
   AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
   AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES,
@@ -27,6 +29,7 @@ type CodexMemoryAdminRouterOptions = {
   agentModes?: {
     get(id: string): Promise<{ name: string; slug: string } | undefined>;
   };
+  enterpriseContext?: Pick<EnterpriseContextService, "resolveForRun">;
   listIntegrationInstancesByIds?: (ids: string[]) => Promise<Array<{
     id: string;
     type: string;
@@ -124,6 +127,15 @@ const updateLlmSecretSchema = z
   .object({
     apiKey: z.string().trim().max(2000).optional(),
     clearApiKey: z.boolean().optional()
+  })
+  .strict();
+
+const enterpriseContextPreviewSchema = z
+  .object({
+    channel: z.enum(["portal", "dingtalk", "crest", "zendesk", "openai_compatible_api"]),
+    userId: z.string().trim().max(120).optional(),
+    agentModeId: z.string().trim().max(120).optional(),
+    settings: systemSettingsEnterpriseContextSchema.optional()
   })
   .strict();
 
@@ -708,6 +720,29 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         clearApiKey: parsed.clearApiKey,
         currentUserId
       }));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ detail: error.issues.map((issue) => issue.message).join("; ") });
+        return;
+      }
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-memory/enterprise-context/preview", requireRead, async (req: Request, res: Response) => {
+    if (!options.enterpriseContext) {
+      res.status(501).json({ detail: "enterprise context service is not configured" });
+      return;
+    }
+    try {
+      const parsed = enterpriseContextPreviewSchema.parse(req.body ?? {});
+      const result = await options.enterpriseContext.resolveForRun({
+        channel: parsed.channel,
+        userId: parsed.userId,
+        agentModeId: parsed.agentModeId,
+        settings: parsed.settings
+      });
+      res.json(result);
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ detail: error.issues.map((issue) => issue.message).join("; ") });

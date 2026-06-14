@@ -50,6 +50,43 @@ describe("CodexExecutionService", () => {
     });
   });
 
+  it("prepends enterprise context only to the runtime prompt", async () => {
+    const enqueueRun = vi.fn();
+    const service = new CodexExecutionService({ memory: { enqueueRun } });
+    const runtime = {
+      async *runStreamed(_thread: { id: string }, message: string) {
+        yield {
+          type: "message.delta",
+          delta: message
+        };
+      }
+    };
+
+    const result = await service.collectFromRuntime({
+      runtime,
+      thread: { id: "thread-1" },
+      prompt: "user question",
+      enterpriseContext: {
+        enabled: true,
+        markdown: "<enterprise_context>\n- 姓名：李可\n</enterprise_context>",
+        hash: "ctx-1"
+      },
+      memory: {
+        channel: "portal",
+        prompt: "user question",
+        codexHome: "/tmp/codex-home",
+        sessionId: "session-1"
+      }
+    });
+
+    expect(result.answer).toContain("<enterprise_context>");
+    expect(result.answer).toContain("user question");
+    expect(enqueueRun).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "user question",
+      answerText: expect.stringContaining("<enterprise_context>")
+    }));
+  });
+
   it("enqueues memory generation from the common runtime completion path", async () => {
     const enqueueRun = vi.fn();
     const service = new CodexExecutionService({ memory: { enqueueRun } });

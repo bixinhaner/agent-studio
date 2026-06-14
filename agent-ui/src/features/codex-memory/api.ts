@@ -7,7 +7,10 @@ import type {
   CodexMemoryRunLogResponse,
   CodexMemoryRunStatus,
   CodexMemoryScopeKind,
-  CodexMemoryScopeListResponse
+  CodexMemoryScopeListResponse,
+  EnterpriseContextChannel,
+  EnterpriseContextPreviewResponse,
+  EnterpriseContextSettings
 } from "./types";
 
 export async function fetchCodexMemoryScopes(input: {
@@ -97,4 +100,16 @@ export async function fetchCodexMemoryRuns(input: {
   if (input.limit) query.set("limit", String(input.limit));
   const suffix = query.toString();
   return api<CodexMemoryRunLogResponse>(`/api/admin/codex-memory/runs${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function previewEnterpriseContext(input: {
+  channel: EnterpriseContextChannel;
+  userId?: string;
+  agentModeId?: string;
+  settings: EnterpriseContextSettings;
+}): Promise<EnterpriseContextPreviewResponse> {
+  return api<EnterpriseContextPreviewResponse>("/api/admin/codex-memory/enterprise-context/preview", {
+    method: "POST",
+    json: input
+  });
 }

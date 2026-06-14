@@ -98,6 +98,38 @@ export type SystemSettingsCodexMemory = {
   maxUnusedDays: number;
 };
 
+export type SystemSettingsEnterpriseContextChannels = {
+  portal: boolean;
+  dingtalk: boolean;
+  crest: boolean;
+  zendesk: boolean;
+  openaiCompatibleApi: boolean;
+};
+
+export type SystemSettingsEnterpriseContextFields = {
+  identity: boolean;
+  organization: boolean;
+  departmentPosition: boolean;
+  employeeNo: boolean;
+  workPlace: boolean;
+  manager: boolean;
+  contact: boolean;
+};
+
+export type SystemSettingsEnterpriseContextAgentOverride = {
+  agentModeId: string;
+  enabled: boolean | null;
+};
+
+export type SystemSettingsEnterpriseContext = {
+  enabled: boolean;
+  failOpen: boolean;
+  maxPromptChars: number;
+  channels: SystemSettingsEnterpriseContextChannels;
+  fields: SystemSettingsEnterpriseContextFields;
+  agentOverrides: SystemSettingsEnterpriseContextAgentOverride[];
+};
+
 export type SystemSettingsBehavior = {
   markdown: string;
   portalWelcomeMessageDesktop: string;
@@ -136,6 +168,7 @@ export type SystemSettingsPayload = {
   safety: SystemSettingsSafety;
   organizationDefaults: SystemSettingsOrganizationDefaults;
   codexMemory: SystemSettingsCodexMemory;
+  enterpriseContext: SystemSettingsEnterpriseContext;
   behavior: SystemSettingsBehavior;
 };
 

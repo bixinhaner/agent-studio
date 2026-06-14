@@ -50,6 +50,7 @@ import {
   syncAgentStudioMemoryProjection
 } from "./codex-memory/engine.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
+import { EnterpriseContextService } from "./enterprise-context-service.js";
 import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
@@ -309,6 +310,14 @@ const runProfiles = new RunProfileRepository(db as unknown as RunProfileReposito
 const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRepositoryDb);
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const codexSkills = new CodexSkillRepository(db as unknown as CodexSkillRepositoryDb);
+const systemSettings = new SystemSettingsRepository(db as never);
+const enterpriseContext = new EnterpriseContextService({
+  db: db as never,
+  getSettings: async () =>
+    (await systemSettings.getCurrentPublished())?.payload.enterpriseContext ??
+    createDefaultSystemSettingsPayload().enterpriseContext,
+  logger: console
+});
 const codexSkillService = new CodexSkillService(
   {
     repository: codexSkills,
@@ -320,7 +329,6 @@ const codexSkillService = new CodexSkillService(
     publishedSkillsRoot: nativeCodexSkills.getSkillsRoot()
   }
 );
-const systemSettings = new SystemSettingsRepository(db as never);
 const codexProviders = new ManagedCodexProviderResolver({
   integrations: {
     async listOpenAICodexInstances(): Promise<ManagedCodexProviderInstance[]> {
@@ -2797,10 +2805,16 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         crestRuntimePrompt(input, preparedAttachments),
         currentSession.codexRunConfig
       );
+      const enterpriseRunContext = await enterpriseContext.resolveForRun({
+        channel: "crest",
+        userId: currentUser.id,
+        agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
+      });
       await codexExecution.streamFromRuntime({
         runtime,
         thread: liveThread,
         prompt: runtimePrompt,
+        enterpriseContext: enterpriseRunContext,
         memory: {
           channel: "crest",
           prompt: input.message,
@@ -5611,10 +5625,16 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   const runProjection = new CodexRunProjection();
   try {
     const runtimeMessage = withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig);
+    const enterpriseRunContext = await enterpriseContext.resolveForRun({
+      channel: "dingtalk",
+      userId: actor.currentUser.id,
+      agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
+    });
     await codexExecution.streamFromRuntime({
       runtime,
       thread: liveThread,
       prompt: runtimeMessage,
+      enterpriseContext: enterpriseRunContext,
       memory: {
         channel: DINGTALK_BOT_CHANNEL,
         prompt: input.text,
@@ -6735,6 +6755,7 @@ registerCommonApiRoutes(app, {
       getState: getCodexMemoryLlmSecretStatus,
       update: updateCodexMemoryLlmSecret
     },
+    enterpriseContext,
     users,
     agentModes,
     listIntegrationInstancesByIds: async (ids) => {
@@ -7893,10 +7914,16 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const runtimeFileChanges: RuntimeFileChange[] = [];
     let firstCodexEventSeen = false;
     const runtimeMessage = withSkillActivationPrompts(input.message, currentSession.codexRunConfig);
+    const enterpriseRunContext = await enterpriseContext.resolveForRun({
+      channel: "portal",
+      userId: currentUser.id,
+      agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
+    });
     await codexExecution.streamFromRuntime({
       runtime,
       thread: ensuredLiveThread,
       prompt: runtimeMessage,
+      enterpriseContext: enterpriseRunContext,
       memory: {
         channel: "portal",
         prompt: input.message,

@@ -184,6 +184,7 @@ describe("ManagedCodexProviderResolver", () => {
                 orgSyncIntervalMinutes: 60
               },
               codexMemory: createDefaultSystemSettingsPayload().codexMemory,
+              enterpriseContext: createDefaultSystemSettingsPayload().enterpriseContext,
               behavior: {
                 markdown: "test",
                 portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
@@ -331,6 +332,7 @@ describe("resolveManagedCodexDefaults", () => {
             orgSyncIntervalMinutes: 60
           },
           codexMemory: createDefaultSystemSettingsPayload().codexMemory,
+          enterpriseContext: createDefaultSystemSettingsPayload().enterpriseContext,
           behavior: {
             markdown: "test",
             portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",

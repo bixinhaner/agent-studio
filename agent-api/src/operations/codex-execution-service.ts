@@ -6,6 +6,7 @@ import {
   streamRuntimeCompletionWithBestEffortUsage
 } from "../live-runtime-session.js";
 import type { CodexMemoryRunInput, CodexMemoryRunRecorder } from "../codex-memory/engine.js";
+import { applyEnterpriseContextToPrompt, type EnterpriseContextResolution } from "../enterprise-context-service.js";
 
 export type CodexStreamCompletionInput = Parameters<typeof streamRuntimeCompletionWithBestEffortUsage>[0];
 export type CodexCollectCompletionInput = Parameters<typeof collectRuntimeCompletion>[0];
@@ -508,10 +509,11 @@ export class CodexExecutionService {
     runtime: RuntimeStreamSource<TThread>;
     thread: TThread;
     prompt: string;
+    enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
   }): Promise<void> {
     await streamRuntimeCompletionWithBestEffortUsage({
-      events: input.runtime.runStreamed(input.thread, input.prompt),
+      events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
       onEvent: input.onEvent,
       onDone: async (payload) => {
         await input.onDone?.(payload);
@@ -534,10 +536,11 @@ export class CodexExecutionService {
     onEvent?(event: RuntimeStreamEvent): void | Promise<void>;
     onUsage?(usage: RuntimeUsageSnapshot, event: RuntimeStreamEvent): void | Promise<void>;
     onTextDelta?(delta: string, event: RuntimeStreamEvent): void | Promise<void>;
+    enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
   }): Promise<CodexCompletionResult> {
     const result = await collectRuntimeCompletion({
-      events: input.runtime.runStreamed(input.thread, input.prompt),
+      events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
       textMode: input.textMode,
       onEvent: input.onEvent,
       onUsage: input.onUsage,

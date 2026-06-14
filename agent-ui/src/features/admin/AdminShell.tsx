@@ -239,12 +239,12 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   "codex-memory": {
     id: "codex-memory",
-    title: "记忆管理",
-    description: "统一管理 Codex 原生 memory 的开关、生成策略和记忆文件。",
-    scope: "Codex Memory",
+    title: "上下文与记忆",
+    description: "统一管理企业上下文注入、Codex memory 开关和记忆文件。",
+    scope: "运行上下文",
     cadence: "按运行策略维护",
     group: "runtime",
-    keywords: ["memory", "memories", "记忆", "codex"],
+    keywords: ["memory", "memories", "记忆", "codex", "上下文", "企业上下文"],
     icon: <BrainCircuit size={18} />
   },
   "skill-drafts": {

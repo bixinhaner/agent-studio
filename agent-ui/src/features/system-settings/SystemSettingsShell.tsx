@@ -48,6 +48,12 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
     safety: { ...payload.safety },
     organizationDefaults: { ...payload.organizationDefaults },
     codexMemory: { ...payload.codexMemory },
+    enterpriseContext: {
+      ...payload.enterpriseContext,
+      channels: { ...payload.enterpriseContext.channels },
+      fields: { ...payload.enterpriseContext.fields },
+      agentOverrides: payload.enterpriseContext.agentOverrides.map((item) => ({ ...item }))
+    },
     behavior: {
       ...payload.behavior,
       portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item })),
