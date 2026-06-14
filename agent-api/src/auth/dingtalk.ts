@@ -32,9 +32,30 @@ export type DingTalkOrganizationUser = {
   corpId?: string;
   displayName: string;
   email?: string;
+  avatarUrl?: string;
+  mobile?: string;
+  telephone?: string;
+  jobNumber?: string;
+  title?: string;
+  workPlace?: string;
+  hiredAt?: string;
+  managerDingTalkUserId?: string;
+  isAdmin?: boolean;
+  isBoss?: boolean;
+  isLeader?: boolean;
+  extension?: Record<string, unknown>;
   departmentExternalIds: string[];
   primaryDepartmentExternalId?: string;
+  departmentPositions?: DingTalkDepartmentPosition[];
   lifecycleState: "active" | "disabled" | "departed";
+};
+
+export type DingTalkDepartmentPosition = {
+  departmentExternalId: string;
+  position?: string;
+  isPrimary?: boolean;
+  sortOrder?: number;
+  isLeader?: boolean;
 };
 
 export type DingTalkTodoDetailUrl = {
@@ -261,6 +282,91 @@ function getPrimaryDepartmentExternalId(record: Record<string, unknown> | null):
   return undefined;
 }
 
+function getDepartmentPositions(record: Record<string, unknown> | null): DingTalkDepartmentPosition[] {
+  const positions: DingTalkDepartmentPosition[] = [];
+  const orderByDepartment = new Map<string, number>();
+  for (const item of asArray(record?.dept_order_list)) {
+    const entry = asRecord(item);
+    const departmentExternalId = getString(entry, ["dept_id", "deptId", "departmentId"]);
+    const sortOrder = getNumber(entry, ["order", "dept_order", "deptOrder", "sortOrder"]);
+    if (departmentExternalId && sortOrder !== undefined) {
+      orderByDepartment.set(departmentExternalId, sortOrder);
+    }
+  }
+
+  for (const item of asArray(record?.dept_position_list)) {
+    const entry = asRecord(item);
+    const departmentExternalId = getString(entry, ["dept_id", "deptId", "departmentId"]);
+    if (!departmentExternalId) continue;
+    positions.push({
+      departmentExternalId,
+      position: getString(entry, ["position", "title", "job_title", "jobTitle"]),
+      isPrimary: entry?.is_main === true || entry?.is_main === 1 || entry?.is_main === "1",
+      sortOrder:
+        getNumber(entry, ["dept_order", "deptOrder", "order", "sortOrder"]) ??
+        orderByDepartment.get(departmentExternalId),
+      isLeader: getBoolean(entry, ["leader", "isLeader", "is_leader"])
+    });
+  }
+
+  for (const departmentExternalId of getDepartmentExternalIds(record)) {
+    if (positions.some((item) => item.departmentExternalId === departmentExternalId)) continue;
+    positions.push({
+      departmentExternalId,
+      isPrimary: departmentExternalId === getPrimaryDepartmentExternalId(record),
+      sortOrder: orderByDepartment.get(departmentExternalId)
+    });
+  }
+
+  return positions;
+}
+
+function normalizeTimestamp(value: unknown): string | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value > 10_000_000_000 ? value : value * 1000);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return normalizeTimestamp(numeric);
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  return undefined;
+}
+
+function getLeaderFlag(record: Record<string, unknown> | null): boolean | undefined {
+  const direct = getBoolean(record, ["leader", "isLeader", "is_leader"]);
+  if (direct !== undefined) return direct;
+  const leaderInDept = asRecord(record?.leader_in_dept);
+  if (leaderInDept) {
+    const values = Object.values(leaderInDept);
+    if (values.some((value) => value === true || value === "true" || value === 1 || value === "1")) {
+      return true;
+    }
+  }
+  const positions = getDepartmentPositions(record);
+  if (positions.some((position) => position.isLeader)) {
+    return true;
+  }
+  return undefined;
+}
+
+function getExtension(record: Record<string, unknown> | null): Record<string, unknown> | undefined {
+  const extension = asRecord(record?.extension);
+  const extensionI18n = asRecord(record?.extension_i18n);
+  if (!extension && !extensionI18n) return undefined;
+  return {
+    ...(extension ? { extension } : {}),
+    ...(extensionI18n ? { extension_i18n: extensionI18n } : {})
+  };
+}
+
 function normalizeDepartment(payload: unknown): DingTalkDepartment | null {
   const record = asRecord(payload);
   const externalId = getString(record, ["externalId", "dept_id", "deptId", "id"]);
@@ -303,6 +409,43 @@ function normalizeOrganizationUser(payload: unknown): DingTalkOrganizationUser |
   }
   if (getString(record, ["email", "org_email"])) {
     normalized.email = getString(record, ["email", "org_email"]);
+  }
+  if (getString(record, ["avatar", "avatarUrl", "avatar_url"])) {
+    normalized.avatarUrl = getString(record, ["avatar", "avatarUrl", "avatar_url"]);
+  }
+  if (getString(record, ["mobile"])) {
+    normalized.mobile = getString(record, ["mobile"]);
+  }
+  if (getString(record, ["telephone", "tel"])) {
+    normalized.telephone = getString(record, ["telephone", "tel"]);
+  }
+  if (getString(record, ["job_number", "jobNumber", "employee_no", "employeeNo"])) {
+    normalized.jobNumber = getString(record, ["job_number", "jobNumber", "employee_no", "employeeNo"]);
+  }
+  if (getString(record, ["title", "position"])) {
+    normalized.title = getString(record, ["title", "position"]);
+  }
+  if (getString(record, ["work_place", "workPlace"])) {
+    normalized.workPlace = getString(record, ["work_place", "workPlace"]);
+  }
+  const hiredAt = normalizeTimestamp(record?.hired_date ?? record?.hiredDate);
+  if (hiredAt) {
+    normalized.hiredAt = hiredAt;
+  }
+  if (getString(record, ["manager_userid", "managerUserid", "managerUserId"])) {
+    normalized.managerDingTalkUserId = getString(record, ["manager_userid", "managerUserid", "managerUserId"]);
+  }
+  const isAdmin = getBoolean(record, ["admin", "isAdmin", "is_admin"]);
+  if (isAdmin !== undefined) normalized.isAdmin = isAdmin;
+  const isBoss = getBoolean(record, ["boss", "isBoss", "is_boss"]);
+  if (isBoss !== undefined) normalized.isBoss = isBoss;
+  const isLeader = getLeaderFlag(record);
+  if (isLeader !== undefined) normalized.isLeader = isLeader;
+  const extension = getExtension(record);
+  if (extension) normalized.extension = extension;
+  const departmentPositions = getDepartmentPositions(record);
+  if (departmentPositions.length > 0) {
+    normalized.departmentPositions = departmentPositions;
   }
   if (primaryDepartmentExternalId && departmentExternalIds.includes(primaryDepartmentExternalId)) {
     normalized.primaryDepartmentExternalId = primaryDepartmentExternalId;

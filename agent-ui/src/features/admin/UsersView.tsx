@@ -39,6 +39,24 @@ function userSource(user: AdminUser) {
   };
 }
 
+function userEnterprise(user: AdminUser): AdminUser["enterprise"] {
+  return user.enterprise ?? {
+    title: null,
+    employeeNo: null,
+    mobileMasked: null,
+    telephoneMasked: null,
+    avatarUrl: null,
+    workPlace: null,
+    hiredAt: null,
+    manager: null,
+    isAdmin: null,
+    isBoss: null,
+    isLeader: null,
+    departmentPositions: [],
+    lastSyncedAt: null
+  };
+}
+
 function formatLocalTime(value: string | null): string {
   if (!value) return "未同步";
   const parsed = new Date(value);
@@ -98,7 +116,7 @@ function membershipTypeLabel(membershipType: string): string {
 }
 
 function userDisplayTitle(user: AdminUser): string {
-  return user.synced.displayName || user.synced.email || user.id;
+  return user.synced.displayName || user.synced.email || "未命名用户";
 }
 
 function userContact(user: AdminUser): string {
@@ -106,7 +124,6 @@ function userContact(user: AdminUser): string {
   return (
     user.synced.email ||
     source.identities.find((identity) => identity.email)?.email ||
-    user.synced.dingtalkUserId ||
     "未绑定邮箱"
   );
 }
@@ -203,7 +220,7 @@ function userOrganizationSummary(user: AdminUser): string {
     return "未加入组织";
   }
   const visible = source.organizations.slice(0, 2).map((membership) => {
-    const organizationName = membership.organizationName || membership.organizationId;
+    const organizationName = membership.organizationName || (membership.organizationType === "internal" ? "内部组织" : "未命名组织");
     return `${organizationName} · ${membershipTypeLabel(membership.membershipType)}`;
   });
   const extra = source.organizations.length - visible.length;
@@ -211,7 +228,7 @@ function userOrganizationSummary(user: AdminUser): string {
 }
 
 function organizationLabel(organization: AdminCustomerOrganization): string {
-  return `${organization.name} (${organization.slug})`;
+  return organization.name || "未命名组织";
 }
 
 function upsertOrganization(
@@ -225,12 +242,7 @@ function upsertOrganization(
 }
 
 function departmentDisplayLabel(department: AdminDepartmentNode): string {
-  const name = department.name.trim() || department.externalId.trim() || department.id.trim() || "未命名部门";
-  const externalId = department.externalId.trim();
-  if (!externalId || externalId === department.id.trim()) {
-    return name;
-  }
-  return `${name} (${externalId})`;
+  return department.name.trim() || "未命名部门";
 }
 
 function buildDepartmentDisplayMap(
@@ -260,7 +272,7 @@ function resolveDepartmentLabel(
 ): string {
   const normalizedDepartmentId = departmentId?.trim();
   if (!normalizedDepartmentId) return "未设置";
-  return departmentDisplayMap.get(normalizedDepartmentId) || normalizedDepartmentId;
+  return departmentDisplayMap.get(normalizedDepartmentId) || "未知部门";
 }
 
 function formatDepartmentList(
@@ -276,6 +288,44 @@ function formatDepartmentList(
     )
   ];
   return labels.length ? labels.join(" / ") : "未设置";
+}
+
+function userManagerLabel(user: AdminUser): string {
+  const manager = userEnterprise(user).manager;
+  return manager?.displayName || manager?.email || "未同步上级";
+}
+
+function userEnterpriseTags(user: AdminUser): string[] {
+  const enterprise = userEnterprise(user);
+  return [
+    enterprise.isAdmin ? "钉钉管理员" : null,
+    enterprise.isBoss ? "主管" : null,
+    enterprise.isLeader ? "部门负责人" : null
+  ].filter((item): item is string => Boolean(item));
+}
+
+function formatDepartmentPosition(
+  position: AdminUser["enterprise"]["departmentPositions"][number],
+  resolveLabel: (departmentId: string | null | undefined) => string
+): string {
+  const departmentName = resolveLabel(position.departmentId);
+  const role = position.position?.trim();
+  const prefix = position.isPrimary ? "主部门" : "部门";
+  const leaderSuffix = position.isLeader ? " · 负责人" : "";
+  return `${prefix}: ${departmentName}${role ? ` · ${role}` : ""}${leaderSuffix}`;
+}
+
+function userPrimaryDepartmentPosition(
+  user: AdminUser,
+  resolveLabel: (departmentId: string | null | undefined) => string
+): string {
+  const enterprise = userEnterprise(user);
+  const primaryPosition =
+    enterprise.departmentPositions.find((position) => position.isPrimary) ?? enterprise.departmentPositions[0];
+  if (primaryPosition) {
+    return formatDepartmentPosition(primaryPosition, resolveLabel);
+  }
+  return `主部门: ${resolveLabel(user.synced.primaryDepartmentId)}`;
 }
 
 function collectDepartmentFilterOptions(departments: AdminDepartmentNode[]): Array<{ value: string; label: string }> {
@@ -315,7 +365,7 @@ function collectOrganizationFilterOptions(
   for (const user of users) {
     for (const membership of userSource(user).organizations) {
       if (!options.has(membership.organizationId)) {
-        const name = membership.organizationName || membership.organizationSlug || membership.organizationId;
+        const name = membership.organizationName || (membership.organizationType === "internal" ? "内部组织" : "未命名组织");
         options.set(membership.organizationId, `组织 · ${name}`);
       }
     }
@@ -357,6 +407,7 @@ export function UsersView() {
   const [editingOrganizationStatus, setEditingOrganizationStatus] = useState("active");
   const [savingOrganization, setSavingOrganization] = useState(false);
   const isNarrowScreen = useIsNarrowScreen(980);
+  const tableScrollY = typeof window === "undefined" ? 520 : Math.max(360, window.innerHeight - 380);
 
   useEffect(() => {
     let active = true;
@@ -444,17 +495,24 @@ export function UsersView() {
       if (!matchesStatusFilter(user, statusFilter)) return false;
       if (!query) return true;
       const source = userSource(user);
+      const enterprise = userEnterprise(user);
       const haystack = [
-        user.id,
         source.userType,
         user.synced.displayName ?? "",
         user.synced.email ?? "",
-        user.synced.dingtalkUserId ?? "",
-        ...user.synced.departmentIds,
+        enterprise.title ?? "",
+        enterprise.employeeNo ?? "",
+        enterprise.workPlace ?? "",
+        enterprise.manager?.displayName ?? "",
+        enterprise.manager?.email ?? "",
+        enterprise.mobileMasked ?? "",
+        enterprise.telephoneMasked ?? "",
+        ...enterprise.departmentPositions.map((position) => position.position ?? ""),
+        ...enterprise.departmentPositions.map((position) => resolveDepartmentLabelFromMap(position.departmentId)),
         ...user.synced.departmentIds.map((departmentId) => resolveDepartmentLabelFromMap(departmentId)),
         ...source.identities.map((identity) => `${identity.provider} ${identity.email ?? ""}`),
         ...source.organizations.map((membership) =>
-          `${membership.organizationName ?? ""} ${membership.organizationSlug ?? ""} ${membership.membershipType}`
+          `${membership.organizationName ?? ""} ${membership.membershipType}`
         )
       ]
         .join(" ")
@@ -463,6 +521,12 @@ export function UsersView() {
     });
   }, [filterText, loginFilter, ownershipFilter, resolveDepartmentLabelFromMap, scopedUsers, statusFilter]);
 
+  const editingEnterprise = editingUser ? userEnterprise(editingUser) : null;
+  const editingDepartmentPositionLabels = editingUser
+    ? userEnterprise(editingUser).departmentPositions
+        .map((position) => formatDepartmentPosition(position, resolveDepartmentLabelFromMap))
+        .filter(Boolean)
+    : [];
 
   function openEditor(user: AdminUser) {
     setEditingUserId(user.id);
@@ -555,7 +619,7 @@ export function UsersView() {
         )
       );
       setInviteEmail("");
-      setSuccessText(`已向 ${invite.email} 发送邀请，归属组织为 ${targetOrganization?.name ?? invite.organizationId}。`);
+      setSuccessText(`已向 ${invite.email} 发送邀请，归属组织为 ${targetOrganization?.name ?? "目标组织"}。`);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "发送邀请失败");
     } finally {
@@ -594,52 +658,73 @@ export function UsersView() {
       title: "用户信息",
       dataIndex: "info",
       key: "info",
-      width: 280,
-      render: (_: unknown, record: AdminUser) => (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <strong style={{ color: "var(--admin-color-text)", fontSize: 14 }}>{userDisplayTitle(record)}</strong>
-          <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>{userContact(record)}</span>
-          <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>{userTypeLabel(userSource(record).userType)}</span>
-        </div>
-      )
-    },
-    {
-      title: "身份源",
-      dataIndex: "identity",
-      key: "identity",
-      width: 220,
+      width: 260,
       render: (_: unknown, record: AdminUser) => (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <strong style={{ color: "var(--admin-color-text)", fontSize: 14 }}>{userDisplayTitle(record)}</strong>
+          <span style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>{userContact(record)}</span>
           <Space size={[4, 4]} wrap>
-            {userIdentitySources(record).length ? (
-              userIdentitySources(record).map((label) => (
-                <Tag key={label} color="blue" style={{ borderRadius: 12, margin: 0 }}>
-                  {label}
-                </Tag>
-              ))
-            ) : (
-              <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>未绑定登录源</span>
-            )}
+            <Tag color="blue" style={{ borderRadius: 12, margin: 0 }}>
+              {userTypeLabel(userSource(record).userType)}
+            </Tag>
+            {userIdentitySources(record).map((label) => (
+              <Tag key={label} color="geekblue" style={{ borderRadius: 12, margin: 0 }}>
+                {label}
+              </Tag>
+            ))}
             <Tag color={hasUserLoggedIn(record) ? "green" : "default"} style={{ borderRadius: 12, margin: 0 }}>
               {loginStateLabel(record)}
             </Tag>
           </Space>
-          {record.synced.dingtalkUserId ? (
-            <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>钉钉 ID: {record.synced.dingtalkUserId}</span>
-          ) : null}
         </div>
       )
+    },
+    {
+      title: "企业资料",
+      dataIndex: "enterprise",
+      key: "enterprise",
+      width: 240,
+      render: (_: unknown, record: AdminUser) => {
+        const enterprise = userEnterprise(record);
+        const tags = userEnterpriseTags(record);
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ color: "var(--admin-color-text)", fontSize: 13 }}>
+              {enterprise.title || "未同步岗位"}
+            </span>
+            <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>上级: {userManagerLabel(record)}</span>
+            {enterprise.workPlace ? (
+              <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>地点: {enterprise.workPlace}</span>
+            ) : null}
+            <Space size={[4, 4]} wrap>
+              {tags.map((label) => (
+                <Tag key={label} color="cyan" style={{ borderRadius: 12, margin: 0 }}>
+                  {label}
+                </Tag>
+              ))}
+              {enterprise.employeeNo ? (
+                <Tag color="default" style={{ borderRadius: 12, margin: 0 }}>
+                  工号 {enterprise.employeeNo}
+                </Tag>
+              ) : null}
+            </Space>
+          </div>
+        );
+      }
     },
     {
       title: "组织 / 部门",
       dataIndex: "organizations",
       key: "organizations",
-      width: 260,
+      width: 280,
       render: (_: unknown, record: AdminUser) => (
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ color: "var(--admin-color-text)", fontSize: 13 }}>{userOrganizationSummary(record)}</span>
           <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
-            部门: {formatDepartmentList(record.synced.departmentIds, resolveDepartmentLabelFromMap)}
+            {userPrimaryDepartmentPosition(record, resolveDepartmentLabelFromMap)}
+          </span>
+          <span style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
+            全部部门: {formatDepartmentList(record.synced.departmentIds, resolveDepartmentLabelFromMap)}
           </span>
         </div>
       )
@@ -955,7 +1040,7 @@ export function UsersView() {
             />
             <Input
               prefix={<Search size={15} style={{ color: "var(--admin-color-subtle)" }} />}
-              placeholder="搜索姓名/邮箱/钉钉ID..."
+              placeholder="搜索姓名/邮箱/部门/岗位..."
               value={filterText}
               onChange={(event) => setFilterText(event.target.value)}
               allowClear
@@ -1036,8 +1121,16 @@ export function UsersView() {
                         <strong>{userTypeLabel(userSource(user).userType)}</strong>
                       </div>
                       <div>
+                        <div className="admin-entity-card-subtle">岗位</div>
+                        <strong>{userEnterprise(user).title || "未同步岗位"}</strong>
+                      </div>
+                      <div>
+                        <div className="admin-entity-card-subtle">直属上级</div>
+                        <strong>{userManagerLabel(user)}</strong>
+                      </div>
+                      <div>
                         <div className="admin-entity-card-subtle">身份源</div>
-                        <strong>{`${userIdentitySources(user).join(" / ") || "未绑定"} · ${loginStateLabel(user)}`}</strong>
+                        <strong>{`${userIdentitySources(user).join(" / ") || "未绑定登录源"} · ${loginStateLabel(user)}`}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">组织成员</div>
@@ -1048,8 +1141,8 @@ export function UsersView() {
                         <strong>{userPrimaryRole(user)}</strong>
                       </div>
                       <div>
-                        <div className="admin-entity-card-subtle">全部部门</div>
-                        <strong>{formatDepartmentList(user.synced.departmentIds, resolveDepartmentLabelFromMap)}</strong>
+                        <div className="admin-entity-card-subtle">主部门</div>
+                        <strong>{userPrimaryDepartmentPosition(user, resolveDepartmentLabelFromMap)}</strong>
                       </div>
                       <div>
                         <div className="admin-entity-card-subtle">最后同步</div>
@@ -1081,7 +1174,7 @@ export function UsersView() {
               rowKey="id"
               pagination={false}
               loading={loading}
-              scroll={{ y: "calc(100vh - 380px)", x: 1260 }}
+              scroll={{ y: tableScrollY, x: 1250 }}
               virtual
               size="middle"
               rowClassName={() => "admin-table-row-hover"}
@@ -1126,6 +1219,53 @@ export function UsersView() {
                     </Tag>
                   ))}
                 </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>企业资料</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>岗位</div>
+                    <strong>{editingEnterprise?.title || "未同步岗位"}</strong>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>直属上级</div>
+                    <strong>{editingUser ? userManagerLabel(editingUser) : "未同步上级"}</strong>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>工号</div>
+                    <strong>{editingEnterprise?.employeeNo || "未同步"}</strong>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>工作地点</div>
+                    <strong>{editingEnterprise?.workPlace || "未同步"}</strong>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>联系方式</div>
+                    <strong>{editingEnterprise?.mobileMasked || editingEnterprise?.telephoneMasked || "未同步"}</strong>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>入职时间</div>
+                    <strong>{formatLocalTime(editingEnterprise?.hiredAt ?? null)}</strong>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {(editingDepartmentPositionLabels.length ? editingDepartmentPositionLabels : [
+                    `主部门: ${resolveDepartmentLabelFromMap(editingUser.synced.primaryDepartmentId)}`
+                  ]).map((label) => (
+                    <span key={label} style={{ color: "var(--admin-color-subtle)", fontSize: 12 }}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+                {editingUser ? (
+                  <Space size={[4, 4]} wrap style={{ marginTop: 10 }}>
+                    {userEnterpriseTags(editingUser).map((label) => (
+                      <Tag key={label} color="cyan" style={{ borderRadius: 12, margin: 0 }}>
+                        {label}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : null}
               </div>
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>基础角色</div>
               <Select

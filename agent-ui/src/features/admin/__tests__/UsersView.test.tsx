@@ -143,7 +143,7 @@ describe("UsersView", () => {
 
     const userRow = await screen.findByText("John Doe");
     expect(userRow).toBeTruthy();
-    expect(await screen.findByText(/部门: 研发部 .* 交付部/)).toBeTruthy();
+    expect(await screen.findByText(/全部部门: 研发部 .* 交付部/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("tab", { name: "客户组织与邀请" }));
     expect(await screen.findByRole("button", { name: "创建客户组织" })).toBeTruthy();
   });

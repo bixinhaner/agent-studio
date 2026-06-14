@@ -3,6 +3,9 @@ type DepartmentMembershipRow = {
   userId: string;
   departmentId: string;
   isPrimary?: boolean;
+  position?: string | null;
+  sortOrder?: number | null;
+  isLeader?: boolean | null;
   source?: string;
   lastSyncedAt?: Date | string | null;
   createdAt: Date | string;
@@ -25,6 +28,14 @@ type DepartmentMembershipTable = {
 export type DepartmentMembershipRepositoryDb = {
   departmentMembership: DepartmentMembershipTable;
   $transaction<T>(callback: (tx: DepartmentMembershipRepositoryDb) => Promise<T>): Promise<T>;
+};
+
+type SyncedMembershipInput = {
+  departmentId: string;
+  isPrimary: boolean;
+  position?: string | null;
+  sortOrder?: number | null;
+  isLeader?: boolean | null;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -70,7 +81,7 @@ export class DepartmentMembershipRepository {
 
   async replaceSyncedMemberships(input: {
     userId: string;
-    memberships: Array<{ departmentId: string; isPrimary: boolean }>;
+    memberships: SyncedMembershipInput[];
     syncedAt?: Date;
     replaceDepartmentIds?: string[];
   }): Promise<void> {
@@ -100,7 +111,7 @@ export class DepartmentMembershipRepository {
     );
     const scopedReplace = replaceDepartmentIds.size > 0;
 
-    const incomingByDepartmentId = new Map<string, { departmentId: string; isPrimary: boolean }>();
+    const incomingByDepartmentId = new Map<string, SyncedMembershipInput>();
     for (const membership of input.memberships) {
       const departmentId = trimOrUndefined(membership.departmentId);
       if (!departmentId) {
@@ -109,14 +120,33 @@ export class DepartmentMembershipRepository {
       const existing = incomingByDepartmentId.get(departmentId);
       incomingByDepartmentId.set(departmentId, {
         departmentId,
-        isPrimary: Boolean(existing?.isPrimary) || membership.isPrimary
+        isPrimary: Boolean(existing?.isPrimary) || membership.isPrimary,
+        position: trimOrUndefined(membership.position ?? undefined) ?? existing?.position ?? null,
+        sortOrder: membership.sortOrder ?? existing?.sortOrder ?? null,
+        isLeader: membership.isLeader ?? existing?.isLeader ?? null
       });
     }
 
     const finalMemberships = new Map<
       string,
-      | { kind: "preserved"; row: DepartmentMembershipRow; isPrimary: boolean; lastSyncedAt: Date | string | null }
-      | { kind: "sync"; departmentId: string; isPrimary: boolean; lastSyncedAt: Date | null }
+      | {
+          kind: "preserved";
+          row: DepartmentMembershipRow;
+          isPrimary: boolean;
+          position: string | null;
+          sortOrder: number | null;
+          isLeader: boolean | null;
+          lastSyncedAt: Date | string | null;
+        }
+      | {
+          kind: "sync";
+          departmentId: string;
+          isPrimary: boolean;
+          position: string | null;
+          sortOrder: number | null;
+          isLeader: boolean | null;
+          lastSyncedAt: Date | null;
+        }
     >();
     const incomingHasPrimary = [...incomingByDepartmentId.values()].some((membership) => membership.isPrimary);
 
@@ -131,6 +161,9 @@ export class DepartmentMembershipRepository {
             kind: "preserved",
             row: membership,
             isPrimary: incomingHasPrimary ? false : Boolean(membership.isPrimary),
+            position: trimOrUndefined(membership.position ?? undefined) ?? null,
+            sortOrder: membership.sortOrder ?? null,
+            isLeader: membership.isLeader ?? null,
             lastSyncedAt: membership.lastSyncedAt ?? null
           });
           continue;
@@ -142,6 +175,9 @@ export class DepartmentMembershipRepository {
         kind: "preserved",
         row: membership,
         isPrimary: Boolean(membership.isPrimary) || Boolean(incoming?.isPrimary),
+        position: trimOrUndefined(incoming?.position ?? membership.position ?? undefined) ?? null,
+        sortOrder: incoming?.sortOrder ?? membership.sortOrder ?? null,
+        isLeader: incoming?.isLeader ?? membership.isLeader ?? null,
         lastSyncedAt: incoming ? input.syncedAt ?? membership.lastSyncedAt ?? null : membership.lastSyncedAt ?? null
       });
       if (incoming) {
@@ -154,6 +190,9 @@ export class DepartmentMembershipRepository {
         kind: "sync",
         departmentId: membership.departmentId,
         isPrimary: membership.isPrimary,
+        position: trimOrUndefined(membership.position ?? undefined) ?? null,
+        sortOrder: membership.sortOrder ?? null,
+        isLeader: membership.isLeader ?? null,
         lastSyncedAt: input.syncedAt ?? null
       });
     }
@@ -178,6 +217,9 @@ export class DepartmentMembershipRepository {
             where: { id: membership.row.id },
             data: {
               isPrimary: membership.isPrimary,
+              position: membership.position,
+              sortOrder: membership.sortOrder,
+              isLeader: membership.isLeader,
               lastSyncedAt: membership.lastSyncedAt,
               updatedAt: new Date()
             }
@@ -190,6 +232,9 @@ export class DepartmentMembershipRepository {
             userId: normalizedUserId,
             departmentId: membership.departmentId,
             isPrimary: membership.isPrimary,
+            position: membership.position,
+            sortOrder: membership.sortOrder,
+            isLeader: membership.isLeader,
             source: "sync",
             lastSyncedAt: membership.lastSyncedAt
           }

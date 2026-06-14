@@ -32,11 +32,8 @@ function toTreeData(node: AdminDepartmentNode, searchValue: string): TreeDataNod
           <Typography.Text strong style={{ fontSize: 14 }}>{title}</Typography.Text>
         </div>
         <div className="admin-tree-node-meta">
-          <Typography.Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-            {node.externalId}
-          </Typography.Text>
           <Tag icon={<Users size={12} />} style={{ border: 'none', background: 'var(--admin-color-bg)' }}>
-            {node.memberCount}
+            {node.memberCount} 人
           </Tag>
         </div>
       </div>
@@ -137,7 +134,7 @@ export function DepartmentTreeView() {
           部门结构树
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ margin: '0 0 16px 0', fontSize: 13 }}>
-          展示从身份提供商（如钉钉、飞书）同步的最新组织架构。支持拼音或汉字搜索。
+          展示从身份提供商同步的最新组织架构，支持按部门名称搜索。
         </Typography.Paragraph>
         <Input 
           placeholder="搜索部门名称..." 

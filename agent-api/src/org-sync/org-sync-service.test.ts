@@ -84,8 +84,22 @@ describe("OrgSyncService", () => {
           corpId: "corp-1",
           displayName: "Alice",
           email: "alice@example.com",
+          title: "Support Engineer",
+          jobNumber: "E001",
+          mobile: "13800138000",
+          workPlace: "Xi'an",
+          managerDingTalkUserId: "manager-1",
           departmentExternalIds: ["dept-1"],
           primaryDepartmentExternalId: "dept-1",
+          departmentPositions: [
+            {
+              departmentExternalId: "dept-1",
+              position: "Support Engineer",
+              isPrimary: true,
+              sortOrder: 1,
+              isLeader: false
+            }
+          ],
           lifecycleState: "active"
         }
       ]
@@ -134,6 +148,9 @@ describe("OrgSyncService", () => {
             providerSubject: "union-1"
           }
         ])
+      },
+      enterpriseUserProfile: {
+        upsert: vi.fn(async (args: Record<string, unknown>) => args)
       },
       syncJob: {
         findMany: vi.fn(async () => [])
@@ -215,7 +232,15 @@ describe("OrgSyncService", () => {
     });
     expect(replaceSyncedMemberships).toHaveBeenCalledWith({
       userId: "login-user",
-      memberships: [{ departmentId: "dept-row-1", isPrimary: true }],
+      memberships: [
+        expect.objectContaining({
+          departmentId: "dept-row-1",
+          isPrimary: true,
+          position: "Support Engineer",
+          sortOrder: 1,
+          isLeader: false
+        })
+      ],
       syncedAt: expect.any(Date)
     });
     expect(organizationMemberships.upsert).toHaveBeenCalledWith({
@@ -223,7 +248,25 @@ describe("OrgSyncService", () => {
       userId: "login-user",
       membershipType: "employee",
       status: "active",
+      title: "Support Engineer",
       joinedAt: expect.any(Date)
+    });
+    expect(db.enterpriseUserProfile.upsert).toHaveBeenCalledWith({
+      where: { userId: "login-user" },
+      create: expect.objectContaining({
+        userId: "login-user",
+        employeeNo: "E001",
+        title: "Support Engineer",
+        mobile: "13800138000",
+        workPlace: "Xi'an",
+        managerDingTalkUserId: "manager-1"
+      }),
+      update: expect.objectContaining({
+        userId: "login-user",
+        employeeNo: "E001",
+        title: "Support Engineer",
+        updatedAt: expect.any(Date)
+      })
     });
     expect(users).toHaveLength(1);
   });
@@ -413,6 +456,7 @@ describe("OrgSyncService", () => {
       userId: "active-user",
       membershipType: "employee",
       status: "active",
+      title: null,
       joinedAt: expect.any(Date)
     });
     expect(organizationMemberships.upsert).toHaveBeenCalledWith({
@@ -420,6 +464,7 @@ describe("OrgSyncService", () => {
       userId: "stale-user",
       membershipType: "employee",
       status: "disabled",
+      title: null,
       joinedAt: expect.any(Date)
     });
     expect(users.find((user) => user.id === "stale-user")).toMatchObject({

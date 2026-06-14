@@ -2231,8 +2231,7 @@ function ProductFeedbackDetail(props: {
         <div style={{ marginBottom: 24 }}>
           <Typography.Title level={5} style={{ fontSize: 14 }}>提交信息</Typography.Title>
           <div style={{ background: '#fff', padding: 16, borderRadius: 8, border: '1px solid var(--admin-color-border)', display: 'grid', gap: 8, fontSize: 13 }}>
-            <div>用户 ID: {feedback.userId || "未记录"}</div>
-            <div>组织 ID: {feedback.organizationId || "未记录"}</div>
+            <div>提交人: {displayUserLabel(feedback.user)}</div>
             <div>创建时间: {formatLocalDateTime(feedback.createdAt)}</div>
             <div>更新时间: {formatLocalDateTime(feedback.updatedAt)}</div>
           </div>

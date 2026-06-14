@@ -76,20 +76,22 @@ const CHANGE_LABELS: Record<string, string> = {
 const USER_FIELD_LABELS: Record<string, string> = {
   displayName: "姓名",
   email: "邮箱",
-  userId: "钉钉 UserID",
-  unionId: "钉钉 UnionID",
-  openId: "钉钉 OpenID",
-  corpId: "Corp ID",
   status: "账号状态",
   statusSource: "状态来源",
   syncState: "钉钉状态",
   manualDisabled: "手动禁用",
   departmentExternalIds: "所属部门",
-  primaryDepartmentExternalId: "主部门"
+  primaryDepartmentExternalId: "主部门",
+  title: "岗位",
+  jobNumber: "工号",
+  workPlace: "工作地点",
+  isAdmin: "钉钉管理员",
+  isBoss: "主管",
+  isLeader: "部门负责人",
+  lifecycleState: "在职状态"
 };
 
 const DEPARTMENT_FIELD_LABELS: Record<string, string> = {
-  externalId: "部门 ID",
   name: "部门名称",
   parentExternalId: "上级部门",
   sortOrder: "排序",
@@ -99,20 +101,23 @@ const DEPARTMENT_FIELD_LABELS: Record<string, string> = {
 const USER_VISIBLE_FIELDS = [
   "displayName",
   "email",
-  "userId",
+  "title",
+  "jobNumber",
+  "workPlace",
   "status",
   "syncState",
   "statusSource",
   "manualDisabled",
   "departmentExternalIds",
   "primaryDepartmentExternalId",
-  "openId",
-  "corpId",
-  "unionId"
+  "isAdmin",
+  "isBoss",
+  "isLeader",
+  "lifecycleState"
 ];
 
-const DEPARTMENT_VISIBLE_FIELDS = ["name", "externalId", "parentExternalId", "sortOrder", "status"];
-const USER_SYSTEM_FIELDS = new Set(["openId", "corpId", "unionId"]);
+const DEPARTMENT_VISIBLE_FIELDS = ["name", "parentExternalId", "sortOrder", "status"];
+const USER_SYSTEM_FIELDS = new Set(["userId", "openId", "corpId", "unionId", "managerDingTalkUserId"]);
 const PREVIEW_DIFF_LIMIT = 8;
 
 function formatLocalTime(value: string | null | undefined): string {
@@ -173,8 +178,8 @@ function getJobStatusTagColor(status: string | undefined): string {
 }
 
 function formatScope(job: OrgSyncJob): string {
-  if (job.scopeType === "department") return `部门 ${job.scopeExternalId || "未指定"}`;
-  if (job.scopeType === "user") return `用户 ${job.scopeExternalId || "未指定"}`;
+  if (job.scopeType === "department") return job.scopeExternalId ? "指定部门增量同步" : "部门增量同步";
+  if (job.scopeType === "user") return job.scopeExternalId ? "指定员工增量同步" : "员工增量同步";
   return "全部通讯录";
 }
 
@@ -292,11 +297,10 @@ function formatDepartmentReference(
 ): string {
   const externalId = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
   if (!externalId) return formatValue(value);
-  if (externalId === "1") return "根部门（1）";
+  if (externalId === "1") return "根部门";
   const department = departmentLookup?.[externalId];
-  if (!department) return externalId;
-  const label = department.path || department.name;
-  return `${label}（${externalId}）`;
+  if (!department) return "未知部门";
+  return department.path || department.name || "未命名部门";
 }
 
 function formatUserReference(
@@ -306,15 +310,9 @@ function formatUserReference(
   const key = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
   if (!key) return formatValue(value);
   const user = userLookup?.[key];
-  if (!user) return key;
-  const label = user.displayName || user.email || user.userId || user.unionId || key;
-  const detail = user.email && user.email !== label
-    ? user.email
-    : user.userId && user.userId !== label
-      ? `钉钉 ${user.userId}`
-      : user.unionId && user.unionId !== label
-        ? user.unionId
-        : undefined;
+  if (!user) return "未知员工";
+  const label = user.displayName || user.email || "未命名员工";
+  const detail = user.email && user.email !== label ? user.email : undefined;
   return detail ? `${label}（${detail}）` : label;
 }
 
@@ -323,13 +321,10 @@ function formatUserMeta(
   userLookup: Record<string, OrgSyncUserLookupEntry> | undefined
 ): string {
   const key = typeof value === "number" && Number.isFinite(value) ? String(value) : asString(value);
-  if (!key) return "未记录用户标识";
+  if (!key) return "未匹配员工资料";
   const user = userLookup?.[key];
-  if (!user) return `用户标识 ${key}`;
-  return [
-    user.userId ? `钉钉 UserID ${user.userId}` : undefined,
-    user.unionId ? `UnionID ${user.unionId}` : undefined
-  ].filter(Boolean).join(" · ") || `用户标识 ${key}`;
+  if (!user) return "未匹配员工资料";
+  return user.displayName || user.email ? "已匹配员工资料" : "员工资料待补全";
 }
 
 function isDepartmentField(entityType: string, field: string): boolean {
@@ -485,7 +480,7 @@ function resolveDiffTarget(
   const before = asRecord(diff.beforePayload);
   const after = asRecord(diff.afterPayload);
   if (diff.entityType === "department") {
-    return asString(after?.name) ?? asString(before?.name) ?? asString(after?.externalId) ?? asString(diff.entityExternalId) ?? "未知部门";
+    return asString(after?.name) ?? asString(before?.name) ?? "未知部门";
   }
   if (diff.entityType === "membership") {
     return formatUserReference(
@@ -498,9 +493,6 @@ function resolveDiffTarget(
     asString(before?.displayName) ??
     asString(after?.email) ??
     asString(before?.email) ??
-    asString(after?.userId) ??
-    asString(before?.userId) ??
-    asString(diff.entityExternalId) ??
     "未知员工"
   );
 }
@@ -517,7 +509,7 @@ function formatDiff(
   const target = resolveDiffTarget(diff, userLookup);
   const idText = diff.entityType === "membership"
     ? formatUserMeta(asString(after?.userId) ?? asString(before?.userId) ?? asString(diff.entityExternalId), userLookup)
-    : diff.entityExternalId ? `ID ${diff.entityExternalId}` : "未记录外部 ID";
+    : "来自组织同步";
 
   let rows: FieldChangeRows;
   if (diff.entityType === "membership") {
@@ -780,7 +772,7 @@ export function OrgSyncView() {
                     </div>
                     <Space.Compact style={{ width: "100%" }}>
                       <Input
-                        placeholder="输入部门 External ID (如 dept-rd)"
+                        placeholder="输入钉钉后台中的部门编号"
                         value={departmentId}
                         onChange={(event) => setDepartmentId(event.target.value)}
                       />
@@ -797,7 +789,7 @@ export function OrgSyncView() {
                     </div>
                     <Space.Compact style={{ width: "100%" }}>
                       <Input
-                        placeholder="输入用户 External ID (如 ding-u1)"
+                        placeholder="输入钉钉后台中的员工账号"
                         value={userId}
                         onChange={(event) => setUserId(event.target.value)}
                       />
@@ -860,8 +852,7 @@ export function OrgSyncView() {
                       </div>
 
                       <div className="admin-sync-job-meta-row">
-                        <span>Task ID: <span className="admin-sync-job-code">{job.id}</span></span>
-                        <span>Target: {formatScope(job)}</span>
+                        <span>同步范围: {formatScope(job)}</span>
                       </div>
 
                       <div className="admin-sync-job-actions">

@@ -89,7 +89,29 @@ describe("createDingTalkClient", () => {
                 {
                   userid: "user-1",
                   name: "Alice",
-                  dept_id_list: [66894063]
+                  dept_id_list: [66894063],
+                  title: "Support Engineer",
+                  job_number: "E001",
+                  mobile: "13800138000",
+                  telephone: "029-100000",
+                  avatar: "https://example.com/avatar.png",
+                  work_place: "Xi'an",
+                  hired_date: 1770000000000,
+                  manager_userid: "manager-1",
+                  admin: true,
+                  boss: false,
+                  dept_position_list: [
+                    {
+                      dept_id: 66894063,
+                      position: "Support Engineer",
+                      is_main: true,
+                      dept_order: 12,
+                      leader: true
+                    }
+                  ],
+                  extension: {
+                    location: "office"
+                  }
                 }
               ]
             }
@@ -128,6 +150,33 @@ describe("createDingTalkClient", () => {
       }
     ]);
     expect(users.map((user) => user.userId)).toEqual(["user-1", "user-2"]);
+    expect(users[0]).toMatchObject({
+      title: "Support Engineer",
+      jobNumber: "E001",
+      mobile: "13800138000",
+      telephone: "029-100000",
+      avatarUrl: "https://example.com/avatar.png",
+      workPlace: "Xi'an",
+      hiredAt: "2026-02-02T02:40:00.000Z",
+      managerDingTalkUserId: "manager-1",
+      isAdmin: true,
+      isBoss: false,
+      isLeader: true,
+      extension: {
+        extension: {
+          location: "office"
+        }
+      },
+      departmentPositions: [
+        {
+          departmentExternalId: "66894063",
+          position: "Support Engineer",
+          isPrimary: true,
+          sortOrder: 12,
+          isLeader: true
+        }
+      ]
+    });
   });
 
   it("refreshes the cached app access token after it expires", async () => {

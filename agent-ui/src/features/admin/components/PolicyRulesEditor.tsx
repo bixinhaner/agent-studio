@@ -106,19 +106,19 @@ function flattenDepartmentOptions(
   for (const node of nodes) {
     const id = String(node.id || "").trim();
     const externalId = String(node.externalId || "").trim();
-    const name = String(node.name || "").trim() || externalId || id;
+    const name = String(node.name || "").trim() || "未命名部门";
     const prefix = depth > 0 ? `${"  ".repeat(depth)}↳ ` : "";
     const baseLabel = `${prefix}${name}`;
     if (id) {
       bucket.push({
         value: id,
-        label: buildOptionLabel(baseLabel, externalId && externalId !== id ? `ID ${id} / external ${externalId}` : `ID ${id}`)
+        label: baseLabel
       });
     }
     if (externalId && externalId !== id) {
       bucket.push({
         value: externalId,
-        label: buildOptionLabel(baseLabel, `external ${externalId}`)
+        label: baseLabel
       });
     }
     if (Array.isArray(node.children) && node.children.length > 0) {
@@ -167,18 +167,18 @@ async function resolveSubjectDirectory(): Promise<SubjectDirectory> {
         const roleSlug = String(role.slug || "").trim();
         const roleName = String(role.name || "").trim() || roleSlug || roleId;
         if (roleSlug) {
-          upsertOption(roleMap, roleSlug, buildOptionLabel(roleName, `slug ${roleSlug}`));
+          upsertOption(roleMap, roleSlug, roleName);
         }
         if (roleId && roleId !== roleSlug) {
-          upsertOption(roleMap, roleId, buildOptionLabel(roleName, `id ${roleId}`));
+          upsertOption(roleMap, roleId, roleName);
         }
       }
 
       for (const user of usersResp.users || []) {
         const userId = String(user.id || "").trim();
         if (userId) {
-          const displayName = user.synced?.displayName || user.synced?.email || user.synced?.dingtalkUserId || userId;
-          upsertOption(userMap, userId, buildOptionLabel(displayName, `id ${userId}`));
+          const displayName = user.synced?.displayName || user.synced?.email || "未命名用户";
+          upsertOption(userMap, userId, displayName);
         }
         const localRole = String(user.local?.role || "").trim();
         if (localRole) {

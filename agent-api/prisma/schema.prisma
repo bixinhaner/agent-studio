@@ -63,6 +63,7 @@ model User {
   accessRequestReviewAssignments AccessRequestReviewer[] @relation("AccessRequestReviewerUser")
   accessRequestEvents AccessRequestEvent[] @relation("AccessRequestEventActorUser")
   crestDelegationCredential CrestDelegationCredential?
+  enterpriseProfile EnterpriseUserProfile?
 
   @@index([email])
   @@index([status, role])
@@ -518,6 +519,9 @@ model DepartmentMembership {
   userId       String      @map("user_id")
   departmentId String      @map("department_id")
   isPrimary    Boolean     @default(false) @map("is_primary")
+  position     String?
+  sortOrder    Int?        @map("sort_order")
+  isLeader     Boolean?    @map("is_leader")
   source       String      @default("sync")
   lastSyncedAt DateTime?   @map("last_synced_at")
   createdAt    DateTime    @default(now()) @map("created_at")
@@ -530,6 +534,34 @@ model DepartmentMembership {
   @@index([departmentId, createdAt])
   @@unique([userId, departmentId])
   @@map("department_memberships")
+}
+
+model EnterpriseUserProfile {
+  id                    String    @id @default(cuid())
+  userId                String    @unique @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeNo            String?   @map("employee_no")
+  title                 String?
+  mobile                String?
+  telephone             String?
+  avatarUrl             String?   @map("avatar_url")
+  workPlace             String?   @map("work_place")
+  hiredAt               DateTime? @map("hired_at")
+  managerDingTalkUserId String?   @map("manager_dingtalk_user_id")
+  managerUserId         String?   @map("manager_user_id")
+  isAdmin               Boolean?  @map("is_admin")
+  isBoss                Boolean?  @map("is_boss")
+  isLeader              Boolean?  @map("is_leader")
+  extensionJson         Json?     @map("extension_json")
+  departmentPositionsJson Json?   @map("department_positions_json")
+  source                String    @default("dingtalk")
+  lastSyncedAt          DateTime? @map("last_synced_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([managerDingTalkUserId])
+  @@index([title])
+  @@map("enterprise_user_profiles")
 }
 
 model SyncJob {

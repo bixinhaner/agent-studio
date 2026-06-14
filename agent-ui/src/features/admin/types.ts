@@ -874,6 +874,29 @@ export type AdminUser = {
     departmentIds: string[];
     primaryDepartmentId: string | null;
   };
+  enterprise: {
+    title: string | null;
+    employeeNo: string | null;
+    mobileMasked: string | null;
+    telephoneMasked: string | null;
+    avatarUrl: string | null;
+    workPlace: string | null;
+    hiredAt: string | null;
+    manager: {
+      displayName: string | null;
+      email: string | null;
+    } | null;
+    isAdmin: boolean | null;
+    isBoss: boolean | null;
+    isLeader: boolean | null;
+    departmentPositions: Array<{
+      departmentId: string;
+      position: string | null;
+      isPrimary: boolean;
+      isLeader: boolean | null;
+    }>;
+    lastSyncedAt: string | null;
+  };
   local: {
     role: string;
     manualDisabled: boolean;

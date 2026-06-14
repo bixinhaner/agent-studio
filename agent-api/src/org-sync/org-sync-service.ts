@@ -48,6 +48,14 @@ type OrgSyncDb = {
       where?: { userId?: string; departmentId?: { in: string[] } };
     }): Promise<Array<Record<string, unknown>>>;
   };
+  enterpriseUserProfile?: {
+    findFirst(args?: { where?: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+    upsert(args: {
+      where: { userId: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }): Promise<Record<string, unknown>>;
+  };
   authIdentity?: {
     findMany(args?: { where?: Record<string, unknown> }): Promise<Array<Record<string, unknown>>>;
   };
@@ -117,6 +125,9 @@ type MembershipRow = {
   userId: string;
   departmentId: string;
   isPrimary: boolean;
+  position: string | null;
+  sortOrder: number | null;
+  isLeader: boolean | null;
   source: string;
   lastSyncedAt: Date | string | null;
   createdAt: Date | string;
@@ -279,6 +290,13 @@ function normalizeUserPayload(user: UserSnapshot) {
     email: user.email ?? null,
     departmentExternalIds: user.departmentExternalIds,
     primaryDepartmentExternalId: user.primaryDepartmentExternalId ?? null,
+    title: user.title ?? null,
+    jobNumber: user.jobNumber ?? null,
+    workPlace: user.workPlace ?? null,
+    managerDingTalkUserId: user.managerDingTalkUserId ?? null,
+    isAdmin: user.isAdmin ?? null,
+    isBoss: user.isBoss ?? null,
+    isLeader: user.isLeader ?? null,
     lifecycleState: user.lifecycleState
   };
 }
@@ -287,11 +305,43 @@ function normalizeMembershipPayload(input: {
   userId: string;
   departmentExternalIds: string[];
   primaryDepartmentExternalId?: string;
+  departmentPositions?: UserSnapshot["departmentPositions"];
 }) {
   return {
     userId: input.userId,
     departmentExternalIds: input.departmentExternalIds,
-    primaryDepartmentExternalId: input.primaryDepartmentExternalId ?? null
+    primaryDepartmentExternalId: input.primaryDepartmentExternalId ?? null,
+    departmentPositions:
+      input.departmentPositions?.map((position) => ({
+        departmentExternalId: position.departmentExternalId,
+        position: position.position ?? null,
+        isPrimary: position.isPrimary ?? null,
+        sortOrder: position.sortOrder ?? null,
+        isLeader: position.isLeader ?? null
+      })) ?? []
+  };
+}
+
+function profileDataFromUser(user: UserSnapshot, userId: string, now: Date) {
+  const hiredAt = user.hiredAt ? new Date(user.hiredAt) : null;
+  return {
+    userId,
+    employeeNo: trimOrUndefined(user.jobNumber) ?? null,
+    title: trimOrUndefined(user.title) ?? null,
+    mobile: trimOrUndefined(user.mobile) ?? null,
+    telephone: trimOrUndefined(user.telephone) ?? null,
+    avatarUrl: trimOrUndefined(user.avatarUrl) ?? null,
+    workPlace: trimOrUndefined(user.workPlace) ?? null,
+    hiredAt: hiredAt && !Number.isNaN(hiredAt.getTime()) ? hiredAt : null,
+    managerDingTalkUserId: trimOrUndefined(user.managerDingTalkUserId) ?? null,
+    managerUserId: null,
+    isAdmin: user.isAdmin ?? null,
+    isBoss: user.isBoss ?? null,
+    isLeader: user.isLeader ?? null,
+    extensionJson: user.extension ?? null,
+    departmentPositionsJson: user.departmentPositions ?? null,
+    source: "dingtalk",
+    lastSyncedAt: now
   };
 }
 
@@ -478,17 +528,27 @@ function compareMissingFullSyncUser(before: UserRow): UserDiff | null {
 }
 
 function compareMembership(
-  before: Array<{ departmentId: string; isPrimary: boolean }>,
-  after: Array<{ departmentId: string; isPrimary: boolean }>,
+  before: Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }>,
+  after: Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }>,
   userKey: string
 ): MembershipDiff | null {
-  const sortMemberships = (items: Array<{ departmentId: string; isPrimary: boolean }>) =>
-    [...items].sort((left, right) => {
-      if (left.departmentId !== right.departmentId) {
-        return left.departmentId.localeCompare(right.departmentId);
-      }
-      return Number(right.isPrimary) - Number(left.isPrimary);
-    });
+  const sortMemberships = (
+    items: Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }>
+  ) =>
+    [...items]
+      .map((item) => ({
+        departmentId: item.departmentId,
+        isPrimary: item.isPrimary,
+        position: trimOrUndefined(item.position ?? undefined) ?? null,
+        sortOrder: item.sortOrder ?? null,
+        isLeader: item.isLeader ?? null
+      }))
+      .sort((left, right) => {
+        if (left.departmentId !== right.departmentId) {
+          return left.departmentId.localeCompare(right.departmentId);
+        }
+        return Number(right.isPrimary) - Number(left.isPrimary);
+      });
 
   const normalizedBefore = sortMemberships(before);
   const normalizedAfter = sortMemberships(after);
@@ -530,6 +590,19 @@ function compareMembership(
     };
   }
   return null;
+}
+
+function membershipComparableFromRow(
+  membership: MembershipRow,
+  departmentRowsById: Map<string, DepartmentRow>
+): { departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null } {
+  return {
+    departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
+    isPrimary: Boolean(membership.isPrimary),
+    position: trimOrUndefined(membership.position ?? undefined) ?? null,
+    sortOrder: membership.sortOrder ?? null,
+    isLeader: membership.isLeader ?? null
+  };
 }
 
 function buildDiffSummary(diffs: SyncDiff[]) {
@@ -597,6 +670,7 @@ export class OrgSyncService {
     organizationId: string;
     userId: string;
     status: string;
+    title?: string | null;
     joinedAt: Date;
   }): Promise<void> {
     if (!this.dependencies.organizationMemberships) {
@@ -607,7 +681,28 @@ export class OrgSyncService {
       userId: input.userId,
       membershipType: INTERNAL_ORGANIZATION_MEMBERSHIP_TYPE,
       status: input.status,
+      title: trimOrUndefined(input.title ?? undefined) ?? null,
       joinedAt: input.joinedAt
+    });
+  }
+
+  private async upsertEnterpriseProfile(
+    db: OrgSyncDb,
+    user: UserSnapshot,
+    userId: string,
+    syncedAt: Date
+  ): Promise<void> {
+    if (!db.enterpriseUserProfile?.upsert) {
+      return;
+    }
+    const data = profileDataFromUser(user, userId, syncedAt);
+    await db.enterpriseUserProfile.upsert({
+      where: { userId },
+      create: data,
+      update: {
+        ...data,
+        updatedAt: new Date()
+      }
     });
   }
 
@@ -717,7 +812,8 @@ export class OrgSyncService {
             normalizeMembershipPayload({
               userId: user.userId,
               departmentExternalIds: user.departmentExternalIds,
-              primaryDepartmentExternalId: user.primaryDepartmentExternalId
+              primaryDepartmentExternalId: user.primaryDepartmentExternalId,
+              departmentPositions: user.departmentPositions
             })
           )
         }
@@ -884,7 +980,8 @@ export class OrgSyncService {
             afterPayload: normalizeMembershipPayload({
               userId: getSnapshotUserKey(user),
               departmentExternalIds: user.departmentExternalIds,
-              primaryDepartmentExternalId: user.primaryDepartmentExternalId
+              primaryDepartmentExternalId: user.primaryDepartmentExternalId,
+              departmentPositions: user.departmentPositions
             })
           });
         }
@@ -892,10 +989,7 @@ export class OrgSyncService {
       }
       processedUserIds.add(beforeUser.id);
       const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: beforeUser.id } })) as MembershipRow[];
-      const current = currentMemberships.map((membership) => ({
-        departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
-        isPrimary: Boolean(membership.isPrimary)
-      }));
+      const current = currentMemberships.map((membership) => membershipComparableFromRow(membership, departmentRowsById));
       const target = this.resolveTargetMembershipsByExternalId(
         user,
         currentMemberships,
@@ -917,16 +1011,10 @@ export class OrgSyncService {
         if (userDiff) diffs.push(userDiff);
 
         const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: staleUser.id } })) as MembershipRow[];
-        const current = currentMemberships.map((membership) => ({
-          departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
-          isPrimary: Boolean(membership.isPrimary)
-        }));
+        const current = currentMemberships.map((membership) => membershipComparableFromRow(membership, departmentRowsById));
         const target = currentMemberships
           .filter((membership) => membership.source !== "sync")
-          .map((membership) => ({
-            departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
-            isPrimary: Boolean(membership.isPrimary)
-          }));
+          .map((membership) => membershipComparableFromRow(membership, departmentRowsById));
         const membershipDiff = compareMembership(current, target, getUserRowKey(staleUser));
         if (membershipDiff) diffs.push(membershipDiff);
       }
@@ -953,10 +1041,7 @@ export class OrgSyncService {
         }
 
         const currentMemberships = (await db.departmentMembership.findMany({ where: { userId: staleUserId } })) as MembershipRow[];
-        const current = currentMemberships.map((membership) => ({
-          departmentId: departmentRowsById.get(membership.departmentId)?.externalId ?? membership.departmentId,
-          isPrimary: Boolean(membership.isPrimary)
-        }));
+        const current = currentMemberships.map((membership) => membershipComparableFromRow(membership, departmentRowsById));
         const target = currentMemberships
           .map((membership) => {
             const departmentExternalId = departmentRowsById.get(membership.departmentId)?.externalId;
@@ -968,10 +1053,21 @@ export class OrgSyncService {
             }
             return {
               departmentId: departmentExternalId,
-              isPrimary: Boolean(membership.isPrimary)
+              isPrimary: Boolean(membership.isPrimary),
+              position: trimOrUndefined(membership.position ?? undefined) ?? null,
+              sortOrder: membership.sortOrder ?? null,
+              isLeader: membership.isLeader ?? null
             };
           })
-          .filter((membership): membership is { departmentId: string; isPrimary: boolean } => Boolean(membership))
+          .filter(
+            (membership): membership is {
+              departmentId: string;
+              isPrimary: boolean;
+              position: string | null;
+              sortOrder: number | null;
+              isLeader: boolean | null;
+            } => Boolean(membership)
+          )
           .sort((left, right) => left.departmentId.localeCompare(right.departmentId));
         const diff = compareMembership(current, target, staleUserKey);
         if (diff) diffs.push(diff);
@@ -1051,10 +1147,12 @@ export class OrgSyncService {
           data: record
         })) as UserRow;
         indexUserRowByStableKeys(persistedUserRowsByKey, saved);
+        await this.upsertEnterpriseProfile(db, user, saved.id, now);
         await this.upsertInternalOrganizationMembership({
           organizationId: internalOrganizationId,
           userId: saved.id,
           status: status.status === "active" ? "active" : "disabled",
+          title: user.title ?? null,
           joinedAt: now
         });
       } else {
@@ -1062,10 +1160,12 @@ export class OrgSyncService {
           data: record
         })) as UserRow;
         indexUserRowByStableKeys(persistedUserRowsByKey, saved);
+        await this.upsertEnterpriseProfile(db, user, saved.id, now);
         await this.upsertInternalOrganizationMembership({
           organizationId: internalOrganizationId,
           userId: saved.id,
           status: status.status === "active" ? "active" : "disabled",
+          title: user.title ?? null,
           joinedAt: now
         });
       }
@@ -1139,20 +1239,25 @@ export class OrgSyncService {
   private resolveTargetMemberships(
     user: UserSnapshot,
     departmentRowsByExternalId: Map<string, string | DepartmentRow>
-  ): Array<{ departmentId: string; isPrimary: boolean }> {
+  ): Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }> {
     const membershipExternalIds = new Set(user.departmentExternalIds);
     if (user.primaryDepartmentExternalId) {
       membershipExternalIds.add(user.primaryDepartmentExternalId);
     }
+    const positionByDepartment = new Map((user.departmentPositions ?? []).map((position) => [position.departmentExternalId, position] as const));
 
-    const memberships: Array<{ departmentId: string; isPrimary: boolean }> = [];
+    const memberships: Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }> = [];
     for (const departmentExternalId of membershipExternalIds) {
       const department = departmentRowsByExternalId.get(departmentExternalId);
       const departmentId = typeof department === "string" ? department : department?.id;
       if (!departmentId) continue;
+      const position = positionByDepartment.get(departmentExternalId);
       memberships.push({
         departmentId,
-        isPrimary: departmentExternalId === user.primaryDepartmentExternalId
+        isPrimary: departmentExternalId === user.primaryDepartmentExternalId || Boolean(position?.isPrimary),
+        position: trimOrUndefined(position?.position ?? undefined) ?? null,
+        sortOrder: position?.sortOrder ?? null,
+        isLeader: position?.isLeader ?? null
       });
     }
 
@@ -1169,16 +1274,23 @@ export class OrgSyncService {
     departmentRowsById: Map<string, DepartmentRow>,
     scopeType: OrgSyncScopeType,
     scopedDepartmentExternalIds: Set<string>
-  ): Array<{ departmentId: string; isPrimary: boolean }> {
+  ): Array<{ departmentId: string; isPrimary: boolean; position?: string | null; sortOrder?: number | null; isLeader?: boolean | null }> {
     const membershipExternalIds = new Set(user.departmentExternalIds);
     if (user.primaryDepartmentExternalId) {
       membershipExternalIds.add(user.primaryDepartmentExternalId);
     }
+    const positionByDepartment = new Map((user.departmentPositions ?? []).map((position) => [position.departmentExternalId, position] as const));
 
-    const memberships = [...membershipExternalIds].map((departmentExternalId) => ({
-      departmentId: departmentExternalId,
-      isPrimary: departmentExternalId === user.primaryDepartmentExternalId
-    }));
+    const memberships = [...membershipExternalIds].map((departmentExternalId) => {
+      const position = positionByDepartment.get(departmentExternalId);
+      return {
+        departmentId: departmentExternalId,
+        isPrimary: departmentExternalId === user.primaryDepartmentExternalId || Boolean(position?.isPrimary),
+        position: trimOrUndefined(position?.position ?? undefined) ?? null,
+        sortOrder: position?.sortOrder ?? null,
+        isLeader: position?.isLeader ?? null
+      };
+    });
 
     if (scopeType === "department") {
       const incomingHasPrimary = memberships.some((membership) => membership.isPrimary);
@@ -1195,7 +1307,10 @@ export class OrgSyncService {
         }
         memberships.push({
           departmentId: departmentExternalId,
-          isPrimary: currentMembership.source === "sync" && incomingHasPrimary ? false : Boolean(currentMembership.isPrimary)
+          isPrimary: currentMembership.source === "sync" && incomingHasPrimary ? false : Boolean(currentMembership.isPrimary),
+          position: trimOrUndefined(currentMembership.position ?? undefined) ?? null,
+          sortOrder: currentMembership.sortOrder ?? null,
+          isLeader: currentMembership.isLeader ?? null
         });
       }
     }

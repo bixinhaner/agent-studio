@@ -2,6 +2,7 @@ import {
   DINGTALK_ROOT_DEPARTMENT_ID,
   type DingTalkClient,
   type DingTalkDepartment,
+  type DingTalkDepartmentPosition,
   type DingTalkOrganizationUser
 } from "../auth/dingtalk.js";
 
@@ -19,8 +20,21 @@ export type NormalizedOrgUser = {
   corpId?: string;
   displayName: string;
   email?: string;
+  avatarUrl?: string;
+  mobile?: string;
+  telephone?: string;
+  jobNumber?: string;
+  title?: string;
+  workPlace?: string;
+  hiredAt?: string;
+  managerDingTalkUserId?: string;
+  isAdmin?: boolean;
+  isBoss?: boolean;
+  isLeader?: boolean;
+  extension?: Record<string, unknown>;
   departmentExternalIds: string[];
   primaryDepartmentExternalId?: string;
+  departmentPositions?: DingTalkDepartmentPosition[];
   lifecycleState: "active" | "disabled" | "departed";
 };
 
@@ -55,6 +69,54 @@ function normalizeDepartment(department: DingTalkDepartment): NormalizedOrgDepar
   };
 }
 
+function mergeDepartmentPositions(
+  existing: DingTalkDepartmentPosition[] | undefined,
+  incoming: DingTalkDepartmentPosition[] | undefined,
+  sourceDepartmentId?: string
+): DingTalkDepartmentPosition[] | undefined {
+  const byDepartment = new Map<string, DingTalkDepartmentPosition>();
+  for (const position of [...(existing ?? []), ...(incoming ?? [])]) {
+    if (!position.departmentExternalId) continue;
+    const current = byDepartment.get(position.departmentExternalId);
+    byDepartment.set(position.departmentExternalId, {
+      departmentExternalId: position.departmentExternalId,
+      position: current?.position ?? position.position,
+      isPrimary: Boolean(current?.isPrimary) || Boolean(position.isPrimary),
+      sortOrder: current?.sortOrder ?? position.sortOrder,
+      isLeader: current?.isLeader ?? position.isLeader
+    });
+  }
+  if (sourceDepartmentId && !byDepartment.has(sourceDepartmentId)) {
+    byDepartment.set(sourceDepartmentId, { departmentExternalId: sourceDepartmentId });
+  }
+  const values = [...byDepartment.values()].sort((left, right) => left.departmentExternalId.localeCompare(right.departmentExternalId));
+  return values.length > 0 ? values : undefined;
+}
+
+function copyEnterpriseFields(
+  target: NormalizedOrgUser,
+  existing: NormalizedOrgUser | undefined,
+  incoming: DingTalkOrganizationUser
+): void {
+  if (existing?.avatarUrl ?? incoming.avatarUrl) target.avatarUrl = existing?.avatarUrl ?? incoming.avatarUrl;
+  if (existing?.mobile ?? incoming.mobile) target.mobile = existing?.mobile ?? incoming.mobile;
+  if (existing?.telephone ?? incoming.telephone) target.telephone = existing?.telephone ?? incoming.telephone;
+  if (existing?.jobNumber ?? incoming.jobNumber) target.jobNumber = existing?.jobNumber ?? incoming.jobNumber;
+  if (existing?.title ?? incoming.title) target.title = existing?.title ?? incoming.title;
+  if (existing?.workPlace ?? incoming.workPlace) target.workPlace = existing?.workPlace ?? incoming.workPlace;
+  if (existing?.hiredAt ?? incoming.hiredAt) target.hiredAt = existing?.hiredAt ?? incoming.hiredAt;
+  if (existing?.managerDingTalkUserId ?? incoming.managerDingTalkUserId) {
+    target.managerDingTalkUserId = existing?.managerDingTalkUserId ?? incoming.managerDingTalkUserId;
+  }
+  const isAdmin = existing?.isAdmin ?? incoming.isAdmin;
+  if (isAdmin !== undefined) target.isAdmin = isAdmin;
+  const isBoss = existing?.isBoss ?? incoming.isBoss;
+  if (isBoss !== undefined) target.isBoss = isBoss;
+  const isLeader = existing?.isLeader ?? incoming.isLeader;
+  if (isLeader !== undefined) target.isLeader = isLeader;
+  if (existing?.extension ?? incoming.extension) target.extension = existing?.extension ?? incoming.extension;
+}
+
 function mergeUser(
   existing: NormalizedOrgUser | undefined,
   incoming: DingTalkOrganizationUser,
@@ -76,6 +138,9 @@ function mergeUser(
     if (incoming.openId) created.openId = incoming.openId;
     if (incoming.corpId) created.corpId = incoming.corpId;
     if (incoming.email) created.email = incoming.email;
+    copyEnterpriseFields(created, undefined, incoming);
+    const departmentPositions = mergeDepartmentPositions(undefined, incoming.departmentPositions, sourceDepartmentId);
+    if (departmentPositions) created.departmentPositions = departmentPositions;
     if (
       incoming.primaryDepartmentExternalId &&
       incomingDepartmentIds.includes(incoming.primaryDepartmentExternalId)
@@ -102,6 +167,9 @@ function mergeUser(
   if (existing.openId ?? incoming.openId) merged.openId = existing.openId ?? incoming.openId;
   if (existing.corpId ?? incoming.corpId) merged.corpId = existing.corpId ?? incoming.corpId;
   if (existing.email ?? incoming.email) merged.email = existing.email ?? incoming.email;
+  copyEnterpriseFields(merged, existing, incoming);
+  const departmentPositions = mergeDepartmentPositions(existing.departmentPositions, incoming.departmentPositions, sourceDepartmentId);
+  if (departmentPositions) merged.departmentPositions = departmentPositions;
 
   const primaryDepartmentExternalId =
     existing.primaryDepartmentExternalId && mergedDepartmentIds.includes(existing.primaryDepartmentExternalId)

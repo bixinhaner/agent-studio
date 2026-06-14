@@ -31,7 +31,11 @@ type AdminDb =
   DepartmentMembershipRepositoryDb &
   SyncJobRepositoryDb &
   OrganizationRepositoryDb &
-  OrganizationMembershipRepositoryDb;
+  OrganizationMembershipRepositoryDb & {
+    enterpriseUserProfile?: {
+      findFirst(args?: { where?: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+    };
+  };
 
 type AdminRouterWithExtensions = Router & {
   systemSettingsRouter?: Router;
@@ -130,10 +134,31 @@ type DepartmentMembershipRow = {
   userId: string;
   departmentId: string;
   isPrimary: boolean;
+  position: string | null;
+  sortOrder: number | null;
+  isLeader: boolean | null;
   source: string;
   lastSyncedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
+};
+
+type EnterpriseUserProfileRow = {
+  userId: string;
+  employeeNo: string | null;
+  title: string | null;
+  mobile: string | null;
+  telephone: string | null;
+  avatarUrl: string | null;
+  workPlace: string | null;
+  hiredAt: Date | string | null;
+  managerDingTalkUserId: string | null;
+  managerUserId: string | null;
+  isAdmin: boolean | null;
+  isBoss: boolean | null;
+  isLeader: boolean | null;
+  departmentPositionsJson?: unknown;
+  lastSyncedAt: Date | string | null;
 };
 
 type OrganizationMembershipCountRow = {
@@ -184,6 +209,29 @@ type AdminDetailUser = {
     dingtalkCorpId: string | null;
     departmentIds: string[];
     primaryDepartmentId: string | null;
+  };
+  enterprise: {
+    title: string | null;
+    employeeNo: string | null;
+    mobileMasked: string | null;
+    telephoneMasked: string | null;
+    avatarUrl: string | null;
+    workPlace: string | null;
+    hiredAt: string | null;
+    manager: {
+      displayName: string | null;
+      email: string | null;
+    } | null;
+    isAdmin: boolean | null;
+    isBoss: boolean | null;
+    isLeader: boolean | null;
+    departmentPositions: Array<{
+      departmentId: string;
+      position: string | null;
+      isPrimary: boolean;
+      isLeader: boolean | null;
+    }>;
+    lastSyncedAt: string | null;
   };
   local: {
     role: string;
@@ -361,12 +409,54 @@ async function resolveDepartmentExternalId(db: AdminDb, departmentId: string): P
   return row?.externalId ?? departmentId;
 }
 
+function maskPhone(value: string | null | undefined): string | null {
+  const normalized = trimOrUndefined(value ?? undefined);
+  if (!normalized) return null;
+  const digits = normalized.replace(/\D/g, "");
+  if (digits.length >= 7) {
+    return `${digits.slice(0, 3)}****${digits.slice(-4)}`;
+  }
+  if (normalized.length <= 2) return "*".repeat(normalized.length);
+  return `${normalized.slice(0, 1)}${"*".repeat(Math.max(normalized.length - 2, 1))}${normalized.slice(-1)}`;
+}
+
+async function getEnterpriseProfileForUser(db: AdminDb, userId: string): Promise<EnterpriseUserProfileRow | null> {
+  if (typeof db.enterpriseUserProfile?.findFirst !== "function") {
+    return null;
+  }
+  return (await db.enterpriseUserProfile.findFirst({ where: { userId } })) as EnterpriseUserProfileRow | null;
+}
+
+async function resolveEnterpriseManager(
+  db: AdminDb,
+  profile: EnterpriseUserProfileRow | null
+): Promise<{ displayName: string | null; email: string | null } | null> {
+  if (!profile) return null;
+  const managerUserId = trimOrUndefined(profile.managerUserId ?? undefined);
+  const managerDingTalkUserId = trimOrUndefined(profile.managerDingTalkUserId ?? undefined);
+  if (!managerUserId && !managerDingTalkUserId) return null;
+
+  const userClient = db.user as unknown as {
+    findUnique(args: { where: Record<string, unknown> }): Promise<UserRow | null>;
+  };
+  const manager = managerUserId
+    ? await userClient.findUnique({ where: { id: managerUserId } })
+    : managerDingTalkUserId
+      ? await userClient.findUnique({ where: { dingtalkUserId: managerDingTalkUserId } })
+      : null;
+  if (!manager) return null;
+  return {
+    displayName: trimOrUndefined(manager.displayName) ?? null,
+    email: trimOrUndefined(manager.email) ?? null
+  };
+}
+
 async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUser> {
   const memberships = (await db.departmentMembership.findMany({
     where: { userId: row.id },
     orderBy: { createdAt: "asc" }
   })) as DepartmentMembershipRow[];
-  const departmentIds = [];
+  const departmentIds: string[] = [];
   let primaryDepartmentId: string | null = null;
   for (const membership of memberships) {
     const externalId = await resolveDepartmentExternalId(db, membership.departmentId);
@@ -375,6 +465,12 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       primaryDepartmentId = externalId;
     }
   }
+  const departmentPositions = memberships.map((membership, index) => ({
+    departmentId: departmentIds[index] ?? membership.departmentId,
+    position: trimOrUndefined(membership.position) ?? null,
+    isPrimary: Boolean(membership.isPrimary),
+    isLeader: membership.isLeader ?? null
+  }));
 
   const roleAssignments = typeof (db as AdminDb & { userRole?: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole?.findMany === "function"
     ? await (db as AdminDb & { userRole: { findMany(args: unknown): Promise<UserRoleDbRow[]> } }).userRole.findMany({
@@ -408,6 +504,8 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
           orderBy: { createdAt: "asc" }
         })
       : [];
+  const enterpriseProfile = await getEnterpriseProfileForUser(db, row.id);
+  const enterpriseManager = await resolveEnterpriseManager(db, enterpriseProfile);
 
   return {
     id: row.id,
@@ -436,6 +534,21 @@ async function buildUserDetail(db: AdminDb, row: UserRow): Promise<AdminDetailUs
       dingtalkCorpId: trimOrUndefined(row.dingtalkCorpId) ?? null,
       departmentIds,
       primaryDepartmentId
+    },
+    enterprise: {
+      title: trimOrUndefined(enterpriseProfile?.title) ?? null,
+      employeeNo: trimOrUndefined(enterpriseProfile?.employeeNo) ?? null,
+      mobileMasked: maskPhone(enterpriseProfile?.mobile),
+      telephoneMasked: maskPhone(enterpriseProfile?.telephone),
+      avatarUrl: trimOrUndefined(enterpriseProfile?.avatarUrl) ?? null,
+      workPlace: trimOrUndefined(enterpriseProfile?.workPlace) ?? null,
+      hiredAt: toIsoString(enterpriseProfile?.hiredAt),
+      manager: enterpriseManager,
+      isAdmin: enterpriseProfile?.isAdmin ?? null,
+      isBoss: enterpriseProfile?.isBoss ?? null,
+      isLeader: enterpriseProfile?.isLeader ?? null,
+      departmentPositions,
+      lastSyncedAt: toIsoString(enterpriseProfile?.lastSyncedAt)
     },
     local: {
       role: trimOrUndefined(row.role) ?? "employee",
