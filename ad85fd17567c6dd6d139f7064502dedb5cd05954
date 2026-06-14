@@ -1,0 +1,5 @@
+记忆运行配置可观测性修复说明
+
+1. provider snapshot 归一化会保留 memories runtime config，避免 session 更新后丢失 memory 启用状态。
+2. 新增 session repository 回归测试，确保只更新 codexThreadId 不会覆盖 providerSnapshot.runtimeOptions。
+3. 验证覆盖相关单测、memory engine 测试、后端构建和 diff 检查。
