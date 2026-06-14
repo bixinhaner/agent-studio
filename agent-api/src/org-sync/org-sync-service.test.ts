@@ -100,6 +100,9 @@ describe("OrgSyncService", () => {
               isLeader: false
             }
           ],
+          detailAttemptedAt: "2026-06-14T00:00:00.000Z",
+          detailSyncedAt: "2026-06-14T00:00:00.000Z",
+          detailSyncStatus: "success",
           lifecycleState: "active"
         }
       ]
@@ -259,7 +262,10 @@ describe("OrgSyncService", () => {
         title: "Support Engineer",
         mobile: "13800138000",
         workPlace: "Xi'an",
-        managerDingTalkUserId: "manager-1"
+        managerDingTalkUserId: "manager-1",
+        detailAttemptedAt: new Date("2026-06-14T00:00:00.000Z"),
+        detailSyncedAt: new Date("2026-06-14T00:00:00.000Z"),
+        detailSyncStatus: "success"
       }),
       update: expect.objectContaining({
         userId: "login-user",

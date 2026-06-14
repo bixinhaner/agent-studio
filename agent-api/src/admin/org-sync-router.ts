@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from "express";
 import { createDingTalkClient } from "../auth/dingtalk.js";
 import { appConfig } from "../config.js";
 import { getDbClient } from "../db/client.js";
+import { createDingTalkDetailCacheLoader, type DingTalkDetailCacheDb } from "../org-sync/dingtalk-detail-cache.js";
 import { DingTalkOrgProvider } from "../org-sync/dingtalk-org-provider.js";
 import { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import { OrgSyncService, type OrgSyncRunInput } from "../org-sync/org-sync-service.js";
@@ -128,7 +129,9 @@ function createDefaultDependencies(db?: OrgSyncJobDb): OrgSyncRouterDependencies
   const quotaDb = currentDb as unknown as OrgSyncQuotaDb;
   const alertDb = currentDb as unknown as OrgSyncAlertDb;
   const syncService = new OrgSyncService({
-    provider: new DingTalkOrgProvider(createDingTalkClient(appConfig.dingtalk)),
+    provider: new DingTalkOrgProvider(createDingTalkClient(appConfig.dingtalk), {
+      loadUserDetailCache: createDingTalkDetailCacheLoader(currentDb as unknown as DingTalkDetailCacheDb)
+    }),
     departments,
     users,
     memberships,

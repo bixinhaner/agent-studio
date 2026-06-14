@@ -35,6 +35,9 @@ export type NormalizedOrgUser = {
   departmentExternalIds: string[];
   primaryDepartmentExternalId?: string;
   departmentPositions?: DingTalkDepartmentPosition[];
+  detailAttemptedAt?: string;
+  detailSyncedAt?: string;
+  detailSyncStatus?: "success" | "not_found" | "failed";
   lifecycleState: "active" | "disabled" | "departed";
 };
 
@@ -42,6 +45,39 @@ export type NormalizedOrgSnapshot = {
   departments: NormalizedOrgDepartment[];
   users: NormalizedOrgUser[];
 };
+
+export type DingTalkUserDetailCacheEntry = {
+  detailAttemptedAt?: Date | string | null;
+  detailSyncedAt?: Date | string | null;
+  detail?: Partial<Pick<
+    DingTalkOrganizationUser,
+    | "avatarUrl"
+    | "mobile"
+    | "telephone"
+    | "jobNumber"
+    | "title"
+    | "workPlace"
+    | "hiredAt"
+    | "managerDingTalkUserId"
+    | "isAdmin"
+    | "isBoss"
+    | "isLeader"
+    | "extension"
+    | "departmentPositions"
+  >>;
+};
+
+export type DingTalkOrgProviderOptions = {
+  detailRefreshIntervalMs?: number;
+  detailFetchConcurrency?: number;
+  loadUserDetailCache?: (
+    userIds: string[]
+  ) => Promise<Map<string, DingTalkUserDetailCacheEntry> | Record<string, DingTalkUserDetailCacheEntry | undefined>>;
+  now?: () => Date;
+};
+
+const DEFAULT_DETAIL_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_DETAIL_FETCH_CONCURRENCY = 3;
 
 const LIFECYCLE_PRIORITY: Record<NormalizedOrgUser["lifecycleState"], number> = {
   active: 0,
@@ -91,6 +127,70 @@ function mergeDepartmentPositions(
   }
   const values = [...byDepartment.values()].sort((left, right) => left.departmentExternalId.localeCompare(right.departmentExternalId));
   return values.length > 0 ? values : undefined;
+}
+
+function toValidDate(value: Date | string | null | undefined): Date | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function toIsoString(value: Date | string | null | undefined): string | undefined {
+  return toValidDate(value)?.toISOString();
+}
+
+function normalizeCacheResult(
+  input: Map<string, DingTalkUserDetailCacheEntry> | Record<string, DingTalkUserDetailCacheEntry | undefined>
+): Map<string, DingTalkUserDetailCacheEntry> {
+  if (input instanceof Map) return input;
+  return new Map(
+    Object.entries(input).flatMap(([userId, entry]) => (entry ? [[userId, entry] as const] : []))
+  );
+}
+
+function isDetailRefreshDue(
+  entry: DingTalkUserDetailCacheEntry | undefined,
+  now: Date,
+  intervalMs: number
+): boolean {
+  const lastAttempt = toValidDate(entry?.detailAttemptedAt) ?? toValidDate(entry?.detailSyncedAt);
+  if (!lastAttempt) return true;
+  return now.getTime() - lastAttempt.getTime() >= intervalMs;
+}
+
+function applyEnterpriseDetail(
+  user: NormalizedOrgUser,
+  detail: DingTalkUserDetailCacheEntry["detail"] | undefined
+): NormalizedOrgUser {
+  if (!detail) return user;
+
+  const merged: NormalizedOrgUser = { ...user };
+  if (detail.avatarUrl) merged.avatarUrl = detail.avatarUrl;
+  if (detail.mobile) merged.mobile = detail.mobile;
+  if (detail.telephone) merged.telephone = detail.telephone;
+  if (detail.jobNumber) merged.jobNumber = detail.jobNumber;
+  if (detail.title) merged.title = detail.title;
+  if (detail.workPlace) merged.workPlace = detail.workPlace;
+  if (detail.hiredAt) merged.hiredAt = detail.hiredAt;
+  if (detail.managerDingTalkUserId) merged.managerDingTalkUserId = detail.managerDingTalkUserId;
+  if (detail.isAdmin !== undefined) merged.isAdmin = detail.isAdmin;
+  if (detail.isBoss !== undefined) merged.isBoss = detail.isBoss;
+  if (detail.isLeader !== undefined) merged.isLeader = detail.isLeader;
+  if (detail.extension) merged.extension = detail.extension;
+
+  const activeDepartmentIds = new Set(merged.departmentExternalIds);
+  if (merged.primaryDepartmentExternalId) {
+    activeDepartmentIds.add(merged.primaryDepartmentExternalId);
+  }
+  const detailPositions = detail.departmentPositions?.filter((position) =>
+    activeDepartmentIds.has(position.departmentExternalId)
+  );
+  const departmentPositions = mergeDepartmentPositions(detailPositions, merged.departmentPositions);
+  if (departmentPositions) {
+    merged.departmentPositions = departmentPositions;
+  }
+
+  return merged;
 }
 
 function copyEnterpriseFields(
@@ -221,12 +321,22 @@ function sortSnapshot(snapshot: NormalizedOrgSnapshot): NormalizedOrgSnapshot {
 }
 
 export class DingTalkOrgProvider {
-  constructor(private readonly client: DingTalkClient) {}
+  private readonly detailRefreshIntervalMs: number;
+  private readonly detailFetchConcurrency: number;
+
+  constructor(
+    private readonly client: DingTalkClient,
+    private readonly options: DingTalkOrgProviderOptions = {}
+  ) {
+    this.detailRefreshIntervalMs = options.detailRefreshIntervalMs ?? DEFAULT_DETAIL_REFRESH_INTERVAL_MS;
+    this.detailFetchConcurrency = Math.max(1, Math.floor(options.detailFetchConcurrency ?? DEFAULT_DETAIL_FETCH_CONCURRENCY));
+  }
 
   async fetchFullOrganization(): Promise<NormalizedOrgSnapshot> {
     const departments = await this.collectDepartmentTree(DINGTALK_ROOT_DEPARTMENT_ID);
     const departmentIds = new Set(departments.map((department) => department.externalId));
     const users = await this.collectUsersForDepartments(departments.map((department) => department.externalId));
+    await this.enrichUsersWithCachedAndFreshDetails(users);
 
     return sortSnapshot({
       departments: departments.map(normalizeDepartment),
@@ -239,6 +349,7 @@ export class DingTalkOrgProvider {
     const subtree = this.selectDepartmentSubtree(departments, externalDepartmentId);
     const departmentIds = new Set(subtree.map((department) => department.externalId));
     const users = await this.collectUsersForDepartments(subtree.map((department) => department.externalId));
+    await this.enrichUsersWithCachedAndFreshDetails(users);
 
     return sortSnapshot({
       departments: subtree.map(normalizeDepartment),
@@ -256,8 +367,14 @@ export class DingTalkOrgProvider {
     const requestedDepartmentIds = new Set(uniqueStrings(user.departmentExternalIds));
     const linkedDepartments = departments.filter((department) => requestedDepartmentIds.has(department.externalId));
     const linkedDepartmentIds = new Set(linkedDepartments.map((department) => department.externalId));
+    const detailSyncedAt = this.now().toISOString();
     const normalizedUser = filterUserToDepartmentSet(
-      mergeUser(undefined, user),
+      {
+        ...mergeUser(undefined, user),
+        detailAttemptedAt: detailSyncedAt,
+        detailSyncedAt,
+        detailSyncStatus: "success"
+      },
       linkedDepartmentIds
     );
 
@@ -312,6 +429,85 @@ export class DingTalkOrgProvider {
 
     visit(rootDepartmentId);
     return selected;
+  }
+
+  private now(): Date {
+    return this.options.now?.() ?? new Date();
+  }
+
+  private async loadDetailCache(userIds: string[]): Promise<Map<string, DingTalkUserDetailCacheEntry>> {
+    if (!this.options.loadUserDetailCache || userIds.length === 0) {
+      return new Map();
+    }
+    const cache = await this.options.loadUserDetailCache(userIds);
+    return normalizeCacheResult(cache);
+  }
+
+  private async enrichUsersWithCachedAndFreshDetails(users: Map<string, NormalizedOrgUser>): Promise<void> {
+    if (!this.options.loadUserDetailCache || users.size === 0) {
+      return;
+    }
+
+    const now = this.now();
+    const cache = await this.loadDetailCache([...users.keys()]);
+    const dueUserIds: string[] = [];
+
+    for (const [userId, user] of users) {
+      const cached = cache.get(userId);
+      const cachedUser = applyEnterpriseDetail(user, cached?.detail);
+      if (cached?.detailAttemptedAt) cachedUser.detailAttemptedAt = toIsoString(cached.detailAttemptedAt);
+      if (cached?.detailSyncedAt) cachedUser.detailSyncedAt = toIsoString(cached.detailSyncedAt);
+      users.set(userId, cachedUser);
+      if (isDetailRefreshDue(cached, now, this.detailRefreshIntervalMs)) {
+        dueUserIds.push(userId);
+      }
+    }
+
+    await this.fetchFreshDetails(users, dueUserIds, now);
+  }
+
+  private async fetchFreshDetails(users: Map<string, NormalizedOrgUser>, userIds: string[], attemptedAt: Date): Promise<void> {
+    if (userIds.length === 0) {
+      return;
+    }
+
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(this.detailFetchConcurrency, userIds.length) }, async () => {
+      for (;;) {
+        const userId = userIds[cursor];
+        cursor += 1;
+        if (!userId) return;
+
+        const existing = users.get(userId);
+        if (!existing) continue;
+
+        try {
+          const detail = await this.client.getUser({ userId });
+          if (!detail) {
+            users.set(userId, {
+              ...existing,
+              detailAttemptedAt: attemptedAt.toISOString(),
+              detailSyncStatus: "not_found"
+            });
+            continue;
+          }
+          users.set(userId, {
+            ...applyEnterpriseDetail(existing, detail),
+            detailAttemptedAt: attemptedAt.toISOString(),
+            detailSyncedAt: attemptedAt.toISOString(),
+            detailSyncStatus: "success"
+          });
+        } catch {
+          users.set(userId, {
+            ...existing,
+            detailAttemptedAt: attemptedAt.toISOString(),
+            detailSyncStatus: "failed"
+          });
+        }
+      }
+    });
+
+    await Promise.all(workers);
   }
 
   private async collectUsersForDepartments(departmentIds: string[]): Promise<Map<string, NormalizedOrgUser>> {

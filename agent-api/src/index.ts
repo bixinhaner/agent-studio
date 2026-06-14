@@ -200,6 +200,7 @@ import { AlertEvaluationService } from "./operations/alert-evaluation-service.js
 import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
 import { OrgSyncScheduler } from "./org-sync/org-sync-scheduler.js";
 import { OrgSyncService } from "./org-sync/org-sync-service.js";
+import { createDingTalkDetailCacheLoader, type DingTalkDetailCacheDb } from "./org-sync/dingtalk-detail-cache.js";
 import { resolveWorkspaceAgentsMdContent } from "./agent-mode/workspace-agents-md.js";
 import { ResourceAccessLogService } from "./operations/resource-access-log-service.js";
 import { QuotaEvaluationService } from "./operations/quota-evaluation-service.js";
@@ -1383,7 +1384,9 @@ const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
   resourceAccessLogs,
   securityAlerts: alertEvaluation
 });
-const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient);
+const dingtalkOrgProvider = new DingTalkOrgProvider(dingtalkClient, {
+  loadUserDetailCache: createDingTalkDetailCacheLoader(db as unknown as DingTalkDetailCacheDb)
+});
 const orgSyncService = new OrgSyncService({
   provider: dingtalkOrgProvider,
   departments,

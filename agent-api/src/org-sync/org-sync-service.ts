@@ -324,6 +324,8 @@ function normalizeMembershipPayload(input: {
 
 function profileDataFromUser(user: UserSnapshot, userId: string, now: Date) {
   const hiredAt = user.hiredAt ? new Date(user.hiredAt) : null;
+  const detailAttemptedAt = user.detailAttemptedAt ? new Date(user.detailAttemptedAt) : null;
+  const detailSyncedAt = user.detailSyncedAt ? new Date(user.detailSyncedAt) : null;
   return {
     userId,
     employeeNo: trimOrUndefined(user.jobNumber) ?? null,
@@ -340,6 +342,9 @@ function profileDataFromUser(user: UserSnapshot, userId: string, now: Date) {
     isLeader: user.isLeader ?? null,
     extensionJson: user.extension ?? null,
     departmentPositionsJson: user.departmentPositions ?? null,
+    detailAttemptedAt: detailAttemptedAt && !Number.isNaN(detailAttemptedAt.getTime()) ? detailAttemptedAt : undefined,
+    detailSyncedAt: detailSyncedAt && !Number.isNaN(detailSyncedAt.getTime()) ? detailSyncedAt : undefined,
+    detailSyncStatus: user.detailSyncStatus ?? undefined,
     source: "dingtalk",
     lastSyncedAt: now
   };

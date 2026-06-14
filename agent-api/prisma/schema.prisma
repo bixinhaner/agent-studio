@@ -554,6 +554,9 @@ model EnterpriseUserProfile {
   isLeader              Boolean?  @map("is_leader")
   extensionJson         Json?     @map("extension_json")
   departmentPositionsJson Json?   @map("department_positions_json")
+  detailAttemptedAt     DateTime? @map("detail_attempted_at")
+  detailSyncedAt        DateTime? @map("detail_synced_at")
+  detailSyncStatus      String?   @map("detail_sync_status")
   source                String    @default("dingtalk")
   lastSyncedAt          DateTime? @map("last_synced_at")
   createdAt             DateTime  @default(now()) @map("created_at")
@@ -561,6 +564,7 @@ model EnterpriseUserProfile {
 
   @@index([managerDingTalkUserId])
   @@index([title])
+  @@index([detailAttemptedAt])
   @@map("enterprise_user_profiles")
 }
 
