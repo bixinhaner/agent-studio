@@ -96,7 +96,7 @@ describe("OrgSyncService", () => {
               departmentExternalId: "dept-1",
               position: "Support Engineer",
               isPrimary: true,
-              sortOrder: 1,
+              sortOrder: 177917621779460500,
               isLeader: false
             }
           ],
@@ -240,7 +240,7 @@ describe("OrgSyncService", () => {
           departmentId: "dept-row-1",
           isPrimary: true,
           position: "Support Engineer",
-          sortOrder: 1,
+          sortOrder: null,
           isLeader: false
         })
       ],

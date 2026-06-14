@@ -365,6 +365,16 @@ function toTimestamp(value: unknown): number | null {
   return null;
 }
 
+function toNullableInt32(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  if (!Number.isInteger(value) || value < -2147483648 || value > 2147483647) {
+    return null;
+  }
+  return value;
+}
+
 function isStaleRunningJob(job: Record<string, unknown>, now = Date.now()): boolean {
   if (String(job.status ?? "") !== "running") {
     return false;
@@ -1261,7 +1271,7 @@ export class OrgSyncService {
         departmentId,
         isPrimary: departmentExternalId === user.primaryDepartmentExternalId || Boolean(position?.isPrimary),
         position: trimOrUndefined(position?.position ?? undefined) ?? null,
-        sortOrder: position?.sortOrder ?? null,
+        sortOrder: toNullableInt32(position?.sortOrder),
         isLeader: position?.isLeader ?? null
       });
     }
@@ -1292,7 +1302,7 @@ export class OrgSyncService {
         departmentId: departmentExternalId,
         isPrimary: departmentExternalId === user.primaryDepartmentExternalId || Boolean(position?.isPrimary),
         position: trimOrUndefined(position?.position ?? undefined) ?? null,
-        sortOrder: position?.sortOrder ?? null,
+        sortOrder: toNullableInt32(position?.sortOrder),
         isLeader: position?.isLeader ?? null
       };
     });
@@ -1314,7 +1324,7 @@ export class OrgSyncService {
           departmentId: departmentExternalId,
           isPrimary: currentMembership.source === "sync" && incomingHasPrimary ? false : Boolean(currentMembership.isPrimary),
           position: trimOrUndefined(currentMembership.position ?? undefined) ?? null,
-          sortOrder: currentMembership.sortOrder ?? null,
+          sortOrder: toNullableInt32(currentMembership.sortOrder),
           isLeader: currentMembership.isLeader ?? null
         });
       }
