@@ -111,6 +111,41 @@ describe("normalizeManagedCodexProviderSnapshot", () => {
       }
     });
   });
+
+  it("preserves persisted memory runtime config during normalization", () => {
+    const snapshot = normalizeManagedCodexProviderSnapshot({
+      version: 1,
+      kind: "chatgpt",
+      source: "local_auth",
+      config: {
+        providerKind: "chatgpt",
+        defaultModel: "gpt-5.4",
+        defaultReasoningEffort: "high"
+      },
+      secrets: {},
+      runtimeOptions: {
+        config: {
+          features: {
+            memories: true
+          },
+          memories: {
+            use_memories: true,
+            generate_memories: false
+          }
+        }
+      }
+    });
+
+    expect(snapshot?.runtimeOptions.config).toMatchObject({
+      features: {
+        memories: true
+      },
+      memories: {
+        use_memories: true,
+        generate_memories: false
+      }
+    });
+  });
 });
 
 describe("ManagedCodexProviderResolver", () => {

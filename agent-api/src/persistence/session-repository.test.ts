@@ -1,0 +1,123 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  createLocalAuthProviderSnapshot,
+  type ManagedCodexProviderSnapshot
+} from "../managed-codex-provider.js";
+import { SessionRepository, type SessionRepositoryDb } from "./session-repository.js";
+
+type RuntimeSessionRow = {
+  id: string;
+  organizationId: string | null;
+  threadId: string | null;
+  userId: string | null;
+  externalId: string | null;
+  metadata: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function memoryEnabledSnapshot(): ManagedCodexProviderSnapshot {
+  const snapshot = createLocalAuthProviderSnapshot();
+  return {
+    ...snapshot,
+    runtimeOptions: {
+      config: {
+        features: {
+          memories: true
+        },
+        memories: {
+          use_memories: true,
+          generate_memories: false
+        }
+      }
+    }
+  };
+}
+
+function createMemoryDb() {
+  const rows = new Map<string, RuntimeSessionRow>();
+  const db: SessionRepositoryDb = {
+    runtimeSession: {
+      async count() {
+        return rows.size;
+      },
+      async findUnique(args) {
+        return rows.get(args.where.externalId) ?? null;
+      },
+      async findMany() {
+        return [...rows.values()];
+      },
+      async create(args) {
+        const externalId = String(args.data.externalId);
+        const now = new Date();
+        const row: RuntimeSessionRow = {
+          id: "row-1",
+          organizationId: typeof args.data.organizationId === "string" ? args.data.organizationId : null,
+          threadId: typeof args.data.threadId === "string" ? args.data.threadId : null,
+          userId: typeof args.data.userId === "string" ? args.data.userId : null,
+          externalId,
+          metadata: args.data.metadata,
+          createdAt: now,
+          updatedAt: now
+        };
+        rows.set(externalId, row);
+        return row;
+      },
+      async update(args) {
+        const existing = rows.get(args.where.externalId);
+        if (!existing) throw new Error("missing row");
+        const updated: RuntimeSessionRow = {
+          ...existing,
+          metadata: args.data.metadata ?? existing.metadata,
+          updatedAt: new Date()
+        };
+        rows.set(args.where.externalId, updated);
+        return updated;
+      },
+      async deleteMany() {
+        rows.clear();
+        return { count: 0 };
+      }
+    }
+  };
+  return { db, rows };
+}
+
+describe("SessionRepository", () => {
+  it("preserves provider runtime memory config when only codexThreadId changes", async () => {
+    const { db, rows } = createMemoryDb();
+    const repository = new SessionRepository(db, null);
+
+    const created = await repository.create({
+      organizationId: "org-1",
+      userId: "user-1",
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: "/tmp/workspace",
+      providerSnapshot: memoryEnabledSnapshot()
+    });
+
+    await repository.update(created.sessionId, {
+      codexThreadId: "codex-thread-1"
+    });
+
+    const stored = rows.get(created.sessionId);
+    expect(stored?.metadata).toMatchObject({
+      providerSnapshot: {
+        runtimeOptions: {
+          config: {
+            features: {
+              memories: true
+            },
+            memories: {
+              use_memories: true,
+              generate_memories: false
+            }
+          }
+        }
+      }
+    });
+  });
+});

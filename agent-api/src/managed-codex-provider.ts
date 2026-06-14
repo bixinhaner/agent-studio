@@ -95,6 +95,36 @@ function requireField(condition: unknown, message: string): asserts condition {
   }
 }
 
+function mergeRuntimeConfig(
+  base: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!base && !override) return undefined;
+  if (!base) return override ? structuredClone(override) : undefined;
+  if (!override) return structuredClone(base);
+  const merged: Record<string, unknown> = structuredClone(base);
+  for (const [key, value] of Object.entries(override)) {
+    const current = merged[key];
+    merged[key] =
+      asRecord(current) && asRecord(value)
+        ? mergeRuntimeConfig(asRecord(current), asRecord(value))
+        : structuredClone(value);
+  }
+  return merged;
+}
+
+function persistedRuntimeConfigOverrides(value: unknown): Record<string, unknown> | undefined {
+  const config = asRecord(value);
+  if (!config) return undefined;
+  const picked: Record<string, unknown> = {};
+  for (const key of ["features", "memories"]) {
+    if (asRecord(config[key])) {
+      picked[key] = structuredClone(config[key]);
+    }
+  }
+  return Object.keys(picked).length > 0 ? picked : undefined;
+}
+
 export function createLocalAuthProviderSnapshot(input?: {
   integrationInstanceId?: string;
   integrationSlug?: string;
@@ -228,7 +258,7 @@ export function normalizeManagedCodexProviderSnapshot(
       fallbackModel: appConfig.defaultModel,
       fallbackReasoningEffort: appConfig.defaultReasoningEffort
     });
-    return createManagedCodexProviderSnapshot({
+    const normalized = createManagedCodexProviderSnapshot({
       config,
       secrets: {
         apiKey: asString(asRecord(snapshot.secrets)?.apiKey)
@@ -238,6 +268,15 @@ export function normalizeManagedCodexProviderSnapshot(
       integrationUpdatedAt: asString(snapshot.integrationUpdatedAt),
       source: snapshot.source === "integration" ? "integration" : "local_auth"
     });
+    const persistedConfig = persistedRuntimeConfigOverrides(asRecord(snapshot.runtimeOptions)?.config);
+    if (!persistedConfig) return normalized;
+    return {
+      ...normalized,
+      runtimeOptions: {
+        ...normalized.runtimeOptions,
+        config: mergeRuntimeConfig(normalized.runtimeOptions.config, persistedConfig)
+      }
+    };
   } catch {
     return undefined;
   }
