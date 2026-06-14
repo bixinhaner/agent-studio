@@ -172,9 +172,12 @@ const KIND_COLORS: Record<CodexMemoryScopeKind, string> = {
 const RUN_STATUS_LABELS: Record<CodexMemoryRunStatus, string> = {
   written: "已写入",
   skipped_no_durable_memory: "无长期记忆",
-  skipped_missing_input: "输入不足",
+  skipped_missing_input: "不可检测",
   failed: "失败"
 };
+
+const MISSING_INPUT_HELP =
+  "不可检测表示该历史轮次缺少回填必须的信息，例如用户问题为空、助手回答为空、助手回复未完成，或旧数据无法定位到对应记忆空间；这类轮次不会调用 LLM，也不会写入 memory。";
 
 const RUN_STATUS_COLORS: Record<CodexMemoryRunStatus, string> = {
   written: "green",
@@ -1331,7 +1334,7 @@ export function CodexMemoryManagementView() {
         <Space size={6} wrap>
           <Tag color="green">写入 {run.writtenItems}</Tag>
           <Tag>跳过 {run.skippedNoDurableItems}</Tag>
-          <Tag color="orange">输入不足 {run.skippedMissingInputItems}</Tag>
+          <Tag color="orange">不可检测 {run.skippedMissingInputItems}</Tag>
           {run.failedItems > 0 ? <Tag color="red">失败 {run.failedItems}</Tag> : null}
         </Space>
       )
@@ -2095,6 +2098,13 @@ export function CodexMemoryManagementView() {
                 description="不会按渠道各自写入，Portal、Zendesk、钉钉、CREST 都走同一套判断、候选和写入逻辑。"
               />
 
+              <Alert
+                type="warning"
+                showIcon
+                message="不可检测的轮次会自动跳过"
+                description={MISSING_INPUT_HELP}
+              />
+
               <Space wrap>
                 <Button icon={<Search size={16} />} loading={backfillPreviewLoading} onClick={() => void handlePreviewBackfill()}>
                   预估影响
@@ -2141,7 +2151,7 @@ export function CodexMemoryManagementView() {
             <div className="codex-memory-backfill-metrics">
               <MemoryMetric label="可检测轮次" value={String(backfillPreview?.readyItems ?? 0)} hint="预计调用 LLM" />
               <MemoryMetric label="已回填过" value={String(backfillPreview?.alreadyProcessed ?? 0)} hint="不会重复处理" />
-              <MemoryMetric label="输入不足" value={String(backfillPreview?.skippedMissingInput ?? 0)} hint="缺少回复或记忆空间" />
+              <MemoryMetric label="不可检测" value={String(backfillPreview?.skippedMissingInput ?? 0)} hint="自动跳过" />
               <MemoryMetric label="最近写入" value={String(latestRun?.writtenItems ?? 0)} hint={latestRun ? BACKFILL_STATUS_LABELS[latestRun.status] : "暂无任务"} />
             </div>
 
@@ -2188,7 +2198,7 @@ export function CodexMemoryManagementView() {
                       <Space size={6} wrap>
                         <Tag color="blue">可检测 {row.readyItems}</Tag>
                         <Tag>已回填 {row.alreadyProcessed}</Tag>
-                        <Tag color="orange">输入不足 {row.skippedMissingInput}</Tag>
+                        <Tag color="orange">不可检测 {row.skippedMissingInput}</Tag>
                       </Space>
                     </div>
                   ))}
@@ -2206,7 +2216,9 @@ export function CodexMemoryManagementView() {
               <Typography.Title level={4} style={{ margin: 0 }}>
                 回填任务
               </Typography.Title>
-              <Typography.Text type="secondary">任务按历史轮次顺序执行，结果也会进入统计日志。</Typography.Text>
+              <Typography.Text type="secondary">
+                任务按历史轮次顺序在后台执行，页面或浏览器关闭后也会继续；回来刷新即可查看进度，结果也会进入统计日志。
+              </Typography.Text>
             </div>
             <Button icon={<RefreshCcw size={16} />} loading={backfillRunsLoading} onClick={() => void loadBackfillRuns()}>
               刷新
@@ -2228,7 +2240,7 @@ export function CodexMemoryManagementView() {
 
   function renderRunLogsPanel() {
     return (
-      <div className="admin-card" style={{ padding: 20 }}>
+      <div className="admin-card codex-memory-run-log-card" style={{ padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
           <div>
             <Typography.Title level={4} style={{ margin: 0 }}>
@@ -2274,7 +2286,7 @@ export function CodexMemoryManagementView() {
         <div className="codex-memory-overview-metrics" style={{ marginBottom: 16 }}>
           <MemoryMetric label="已写入" value={String(runsSummary.written)} hint="written" />
           <MemoryMetric label="无长期记忆" value={String(runsSummary.skipped_no_durable_memory)} hint="skipped_no_durable_memory" />
-          <MemoryMetric label="输入不足" value={String(runsSummary.skipped_missing_input)} hint="skipped_missing_input" />
+          <MemoryMetric label="不可检测" value={String(runsSummary.skipped_missing_input)} hint="skipped_missing_input" />
           <MemoryMetric label="失败" value={String(runsSummary.failed)} hint="failed" />
         </div>
 
@@ -2288,6 +2300,7 @@ export function CodexMemoryManagementView() {
           pagination={{ pageSize: 10, showSizeChanger: false }}
           locale={{ emptyText: <Empty description="暂无 memory 任务日志" /> }}
         />
+        <Alert type="info" showIcon message="不可检测说明" description={MISSING_INPUT_HELP} style={{ marginTop: 12 }} />
       </div>
     );
   }
@@ -2377,6 +2390,7 @@ export function CodexMemoryManagementView() {
         </div>
 
         <Tabs
+          className="codex-memory-main-tabs"
           activeKey={activeOverviewTab}
           onChange={setActiveOverviewTab}
           items={[

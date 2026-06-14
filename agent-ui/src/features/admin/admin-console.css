@@ -750,6 +750,27 @@
   max-width: none;
 }
 
+.codex-memory-main-tabs {
+  width: 100%;
+  min-width: 0;
+}
+
+.codex-memory-main-tabs > .ant-tabs-content-holder,
+.codex-memory-main-tabs .ant-tabs-content,
+.codex-memory-main-tabs .ant-tabs-tabpane {
+  width: 100%;
+  min-width: 0;
+}
+
+.codex-memory-main-tabs .ant-tabs-tabpane > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.codex-memory-main-tabs .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
 .codex-memory-overview-grid {
   grid-template-columns: minmax(min(100%, 360px), 0.75fr) minmax(0, 1.25fr);
 }
@@ -852,9 +873,19 @@
 
 .codex-memory-backfill-grid {
   display: grid;
-  grid-template-columns: minmax(min(100%, 380px), 0.85fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(min(100%, 420px), 0.9fr) minmax(min(100%, 520px), 1.1fr);
   gap: 16px;
   align-items: start;
+  min-width: 0;
+}
+
+.codex-memory-run-log-card {
+  width: 100%;
+  min-width: 0;
+}
+
+.codex-memory-run-log-card .ant-table-wrapper {
+  width: 100%;
   min-width: 0;
 }
 
