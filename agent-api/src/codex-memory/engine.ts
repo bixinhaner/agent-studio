@@ -37,11 +37,43 @@ type LlmClientConfig = {
 
 type MemoryExtraction = {
   shouldRemember: boolean;
+  action: "create" | "update" | "merge" | "skip";
   confidence?: number;
   category?: string;
   memory?: string;
   summary?: string;
   slug?: string;
+  target?: string;
+  reason?: string;
+  candidateMemory?: string;
+  candidateSummary?: string;
+};
+
+type MemoryCandidateStatus = "pending" | "promoted" | "rejected";
+
+type MemoryCandidate = {
+  id: string;
+  key: string;
+  status: MemoryCandidateStatus;
+  memory: string;
+  summary?: string;
+  category?: string;
+  confidence?: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  seenCount: number;
+  lastDecision?: string;
+  lastReason?: string;
+  promotedAt?: string;
+  sources: Array<{
+    channel: string;
+    observedAt: string;
+    sessionId?: string;
+    threadId?: string;
+    codexThreadId?: string;
+    promptExcerpt?: string;
+    answerExcerpt?: string;
+  }>;
 };
 
 export type CodexMemoryRunStatus = "written" | "skipped_no_durable_memory" | "skipped_missing_input" | "failed";
@@ -89,9 +121,15 @@ type CodexMemoryRunOutcome = {
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_PROMPT_CHARS = 8000;
 const MAX_ANSWER_CHARS = 12000;
+const MAX_MEMORY_CONTEXT_CHARS = 6000;
+const MAX_CANDIDATE_CONTEXT_ITEMS = 6;
+const MAX_MEMORY_CANDIDATES = 200;
+const MAX_CANDIDATE_SOURCE_ITEMS = 10;
+const MAX_CANDIDATE_EXCERPT_CHARS = 240;
 const MAX_RUN_LOG_ENTRIES = 1000;
 const RUN_LOG_RELATIVE_PATH = path.join(".agent-studio", "memory-runs.jsonl");
 const CODEX_MEMORY_DIR_NAME = "memories";
+const MEMORY_CANDIDATES_FILE_NAME = "memory_candidates.json";
 export const AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH = path.join(".agent-studio", "memory-source");
 export const AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES = new Set(["MEMORY.md", "raw_memories.md", "memory_summary.md"]);
 export const AGENT_STUDIO_MEMORY_CONTENT_ROOTS = new Set(["rollout_summaries", "skills", "extensions"]);
@@ -152,17 +190,40 @@ function normalizeExtraction(value: unknown): MemoryExtraction | undefined {
   if (!record) return undefined;
   const memory = trimOrUndefined(record.memory);
   const summary = trimOrUndefined(record.summary);
+  const rawAction = trimOrUndefined(record.action)?.toLowerCase();
+  const action = rawAction === "create" || rawAction === "update" || rawAction === "merge" || rawAction === "skip"
+    ? rawAction
+    : undefined;
+  const shouldRemember =
+    record.shouldRemember === true ||
+    record.should_remember === true ||
+    action === "create" ||
+    action === "update" ||
+    action === "merge";
   return {
-    shouldRemember: record.shouldRemember === true || record.should_remember === true,
+    shouldRemember,
+    action: action ?? (shouldRemember ? "create" : "skip"),
     confidence: typeof record.confidence === "number" ? record.confidence : undefined,
     category: trimOrUndefined(record.category),
     memory,
     summary,
-    slug: trimOrUndefined(record.slug)
+    slug: trimOrUndefined(record.slug),
+    target: trimOrUndefined(record.target),
+    reason: trimOrUndefined(record.reason),
+    candidateMemory:
+      trimOrUndefined(record.candidateMemory) ??
+      trimOrUndefined(record.candidate_memory) ??
+      trimOrUndefined(record.candidate),
+    candidateSummary:
+      trimOrUndefined(record.candidateSummary) ??
+      trimOrUndefined(record.candidate_summary)
   };
 }
 
-function buildExtractionPrompt(input: CodexMemoryRunInput): string {
+function buildExtractionPrompt(input: CodexMemoryRunInput, context?: {
+  existingMemories?: string[];
+  relatedCandidates?: MemoryCandidate[];
+}): string {
   const metadata = {
     channel: input.channel,
     sessionId: input.sessionId,
@@ -173,14 +234,23 @@ function buildExtractionPrompt(input: CodexMemoryRunInput): string {
     hasExternalContext: input.hasExternalContext,
     metadata: input.metadata ?? {}
   };
+  const existingMemoryContext = buildExistingMemoryContext(context?.existingMemories ?? []);
+  const candidateContext = buildCandidateContext(context?.relatedCandidates ?? []);
   return [
     "You are Agent Studio's memory extraction worker. Extract only durable, reusable memory for future Codex runs.",
     "Remember stable user preferences, recurring workflow conventions, reusable project facts, or long-lived integration behavior.",
     "Do not remember one-off ticket facts, uploaded document contents, secrets, credentials, private personal data, or transient troubleshooting details.",
     "When external context is present, be conservative: only remember explicit stable user preference or workspace convention.",
-    "Return strict JSON only with this shape: {\"shouldRemember\": boolean, \"confidence\": number, \"category\": string, \"memory\": string, \"summary\": string, \"slug\": string}.",
-    "If nothing should be remembered, set shouldRemember=false and keep memory empty.",
+    "Compare the current run against the existing memory list. If the information is already represented, skip or update/merge instead of creating a duplicate.",
+    "Related candidates are not official memories. Use their seen_count and prior reasons only as evidence that a pattern may be recurring.",
+    "Use action=create only for new durable memory, update when replacing one existing memory, merge when combining overlapping memories or candidates, and skip when nothing should become official memory now.",
+    "For update or merge, set target to the closest existing memory id such as M1, or to a candidate id when promoting a candidate.",
+    "If there is a useful but not-yet-durable candidate, return action=skip with candidateMemory so Agent Studio can count it for a future run.",
+    "Return strict JSON only with this shape: {\"action\": \"create|update|merge|skip\", \"shouldRemember\": boolean, \"confidence\": number, \"category\": string, \"memory\": string, \"summary\": string, \"slug\": string, \"target\": string, \"reason\": string, \"candidateMemory\": string, \"candidateSummary\": string}.",
+    "Set shouldRemember=true only when action is create, update, or merge. For action=skip, keep memory empty unless you need candidateMemory for future recurrence tracking.",
     `Metadata:\n${JSON.stringify(metadata)}`,
+    `Existing Agent Studio memories:\n${existingMemoryContext}`,
+    `Related non-authoritative candidate history:\n${candidateContext}`,
     `User/request text:\n${truncate(input.prompt, MAX_PROMPT_CHARS)}`,
     `Assistant answer:\n${truncate(input.answerText, MAX_ANSWER_CHARS)}`
   ].join("\n\n");
@@ -387,8 +457,350 @@ function buildMemorySummary(memories: string[]): string {
   ].join("\n");
 }
 
+function uniqueMemoryItems(items: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    const normalized = trimOrUndefined(item);
+    if (!normalized) continue;
+    const key = normalizedMemoryKey(normalized);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function tokenizeForSimilarity(value: string): Set<string> {
+  const normalized = value.toLowerCase();
+  const tokens = new Set<string>();
+  for (const match of normalized.match(/[a-z0-9][a-z0-9_-]{1,}/g) ?? []) {
+    tokens.add(match);
+  }
+  const cjk = (normalized.match(/[\u3400-\u9fff]/g) ?? []).join("");
+  if (cjk.length > 0) {
+    if (cjk.length <= 2) {
+      tokens.add(cjk);
+    } else {
+      for (let index = 0; index < cjk.length - 1; index += 1) {
+        tokens.add(cjk.slice(index, index + 2));
+      }
+    }
+  }
+  return tokens;
+}
+
+function similarityScore(left: string, right: string): number {
+  const leftTokens = tokenizeForSimilarity(left);
+  const rightTokens = tokenizeForSimilarity(right);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+  return overlap / Math.min(leftTokens.size, rightTokens.size);
+}
+
+function normalizedMemoryKey(value: string): string {
+  const tokens = [...tokenizeForSimilarity(value)].sort();
+  if (tokens.length > 0) return tokens.slice(0, 18).join("-");
+  return safeFileSegment(value.toLowerCase(), "memory");
+}
+
+function candidateKeyFor(value: { slug?: string; category?: string; memory?: string; summary?: string }): string {
+  const basis = trimOrUndefined(value.slug) ?? trimOrUndefined(value.memory) ?? trimOrUndefined(value.summary) ?? "memory";
+  return [
+    safeFileSegment(trimOrUndefined(value.category) ?? "general", "general"),
+    normalizedMemoryKey(basis)
+  ].join(":");
+}
+
+function buildExistingMemoryContext(memories: string[]): string {
+  const items = uniqueMemoryItems(memories).map((memory, index) => ({
+    id: `M${index + 1}`,
+    memory
+  }));
+  if (items.length === 0) return "[]";
+  return truncate(JSON.stringify(items, null, 2), MAX_MEMORY_CONTEXT_CHARS);
+}
+
+function buildCandidateContext(candidates: MemoryCandidate[]): string {
+  const items = candidates.map((candidate) => ({
+    id: candidate.id,
+    status: candidate.status,
+    seen_count: candidate.seenCount,
+    first_seen_at: candidate.firstSeenAt,
+    last_seen_at: candidate.lastSeenAt,
+    last_decision: candidate.lastDecision,
+    last_reason: candidate.lastReason,
+    category: candidate.category,
+    confidence: candidate.confidence,
+    memory: candidate.memory,
+    summary: candidate.summary
+  }));
+  if (items.length === 0) return "[]";
+  return truncate(JSON.stringify(items, null, 2), MAX_MEMORY_CONTEXT_CHARS);
+}
+
+function normalizeMemoryCandidate(value: unknown): MemoryCandidate | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const id = trimOrUndefined(record.id);
+  const key = trimOrUndefined(record.key);
+  const memory = trimOrUndefined(record.memory);
+  const status = trimOrUndefined(record.status);
+  const firstSeenAt = trimOrUndefined(record.firstSeenAt);
+  const lastSeenAt = trimOrUndefined(record.lastSeenAt);
+  const seenCount = typeof record.seenCount === "number" && Number.isFinite(record.seenCount)
+    ? Math.max(1, Math.floor(record.seenCount))
+    : 1;
+  if (!id || !key || !memory || !firstSeenAt || !lastSeenAt) return undefined;
+  const sources = Array.isArray(record.sources)
+    ? record.sources
+      .map((source): MemoryCandidate["sources"][number] | undefined => {
+        const sourceRecord = asRecord(source);
+        const channel = trimOrUndefined(sourceRecord?.channel);
+        const observedAt = trimOrUndefined(sourceRecord?.observedAt);
+        if (!channel || !observedAt) return undefined;
+        return {
+          channel,
+          observedAt,
+          sessionId: trimOrUndefined(sourceRecord?.sessionId),
+          threadId: trimOrUndefined(sourceRecord?.threadId),
+          codexThreadId: trimOrUndefined(sourceRecord?.codexThreadId),
+          promptExcerpt: trimOrUndefined(sourceRecord?.promptExcerpt),
+          answerExcerpt: trimOrUndefined(sourceRecord?.answerExcerpt)
+        };
+      })
+      .filter((source): source is MemoryCandidate["sources"][number] => Boolean(source))
+    : [];
+  return {
+    id,
+    key,
+    status: status === "promoted" || status === "rejected" ? status : "pending",
+    memory,
+    summary: trimOrUndefined(record.summary),
+    category: trimOrUndefined(record.category),
+    confidence: typeof record.confidence === "number" && Number.isFinite(record.confidence) ? record.confidence : undefined,
+    firstSeenAt,
+    lastSeenAt,
+    seenCount,
+    lastDecision: trimOrUndefined(record.lastDecision),
+    lastReason: trimOrUndefined(record.lastReason),
+    promotedAt: trimOrUndefined(record.promotedAt),
+    sources
+  };
+}
+
+async function readMemoryCandidates(sourceDir: string): Promise<MemoryCandidate[]> {
+  const content = await readTextIfExists(path.join(sourceDir, MEMORY_CANDIDATES_FILE_NAME));
+  if (!trimOrUndefined(content)) return [];
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    const items = Array.isArray(parsed) ? parsed : [];
+    return items
+      .map(normalizeMemoryCandidate)
+      .filter((candidate): candidate is MemoryCandidate => Boolean(candidate));
+  } catch {
+    return [];
+  }
+}
+
+async function writeMemoryCandidates(sourceDir: string, candidates: MemoryCandidate[]): Promise<void> {
+  const sorted = candidates
+    .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
+    .slice(0, MAX_MEMORY_CANDIDATES);
+  await fs.writeFile(path.join(sourceDir, MEMORY_CANDIDATES_FILE_NAME), `${JSON.stringify(sorted, null, 2)}\n`, "utf8");
+}
+
+function selectRelatedMemoryCandidates(input: CodexMemoryRunInput, candidates: MemoryCandidate[]): MemoryCandidate[] {
+  const query = [input.prompt, input.answerText].join("\n");
+  return candidates
+    .filter((candidate) => candidate.status === "pending")
+    .map((candidate) => ({
+      candidate,
+      score: Math.max(
+        similarityScore(query, candidate.memory),
+        candidate.summary ? similarityScore(query, candidate.summary) : 0
+      )
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.candidate.seenCount - left.candidate.seenCount ||
+      right.candidate.lastSeenAt.localeCompare(left.candidate.lastSeenAt)
+    )
+    .slice(0, MAX_CANDIDATE_CONTEXT_ITEMS)
+    .map(({ candidate }) => candidate);
+}
+
+async function readCanonicalMemoryItems(sourceDir: string): Promise<string[]> {
+  const memoryContent =
+    await readTextIfExists(path.join(sourceDir, "MEMORY.md")) ||
+    await readTextIfExists(path.join(sourceDir, "memory_summary.md"));
+  const summaryItems = memorySummaryItemsFromContent(memoryContent);
+  if (summaryItems.length > 0) return uniqueMemoryItems(summaryItems);
+  const rawItems = rawMemoriesFromContent(await readTextIfExists(path.join(sourceDir, "raw_memories.md")));
+  if (rawItems.length > 0) return uniqueMemoryItems(rawItems);
+  const plainMemory = trimOrUndefined(memoryContent);
+  if (plainMemory && !/^# Memory Summary\s+No consolidated memories yet\.\s*$/is.test(plainMemory)) {
+    return [plainMemory];
+  }
+  return [];
+}
+
+function findMemoryIndex(memories: string[], extraction: MemoryExtraction & { memory: string }): number {
+  const target = trimOrUndefined(extraction.target);
+  if (target) {
+    const match = target.match(/^M(\d+)$/i);
+    if (match) {
+      const index = Number.parseInt(match[1], 10) - 1;
+      if (index >= 0 && index < memories.length) return index;
+    }
+    const normalizedTarget = target.toLowerCase();
+    const exactIndex = memories.findIndex((memory) => memory.toLowerCase() === normalizedTarget);
+    if (exactIndex >= 0) return exactIndex;
+    const containsIndex = memories.findIndex((memory) =>
+      memory.toLowerCase().includes(normalizedTarget) || normalizedTarget.includes(memory.toLowerCase())
+    );
+    if (containsIndex >= 0) return containsIndex;
+  }
+
+  let bestIndex = -1;
+  let bestScore = 0;
+  memories.forEach((memory, index) => {
+    const score = similarityScore(memory, extraction.memory);
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+  if (extraction.action === "update" || extraction.action === "merge") {
+    return bestScore >= 0.35 ? bestIndex : -1;
+  }
+  return bestScore >= 0.75 ? bestIndex : -1;
+}
+
+function mergeCanonicalMemoryItems(memories: string[], extraction: MemoryExtraction & { memory: string }): string[] {
+  const current = uniqueMemoryItems(memories);
+  const index = findMemoryIndex(current, extraction);
+  if (index >= 0) {
+    current[index] = extraction.memory;
+    return uniqueMemoryItems(current);
+  }
+  return uniqueMemoryItems([...current, extraction.memory]);
+}
+
+function candidateSourceFromInput(input: CodexMemoryRunInput, observedAt: string): MemoryCandidate["sources"][number] {
+  return {
+    channel: input.channel,
+    observedAt,
+    sessionId: trimOrUndefined(input.sessionId),
+    threadId: trimOrUndefined(input.threadId),
+    codexThreadId: trimOrUndefined(input.codexThreadId),
+    promptExcerpt: truncate(trimOrUndefined(input.prompt) ?? "", MAX_CANDIDATE_EXCERPT_CHARS),
+    answerExcerpt: truncate(trimOrUndefined(input.answerText) ?? "", MAX_CANDIDATE_EXCERPT_CHARS)
+  };
+}
+
+function findCandidateIndex(candidates: MemoryCandidate[], key: string, memory: string): number {
+  const exact = candidates.findIndex((candidate) => candidate.key === key);
+  if (exact >= 0) return exact;
+  let bestIndex = -1;
+  let bestScore = 0;
+  candidates.forEach((candidate, index) => {
+    if (candidate.status !== "pending") return;
+    const score = similarityScore(candidate.memory, memory);
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+  return bestScore >= 0.65 ? bestIndex : -1;
+}
+
+async function recordSkippedMemoryCandidate(
+  sourceDir: string,
+  input: CodexMemoryRunInput,
+  extraction: MemoryExtraction
+): Promise<boolean> {
+  const memory = trimOrUndefined(extraction.candidateMemory) ?? trimOrUndefined(extraction.memory);
+  if (!memory) return false;
+  const candidates = await readMemoryCandidates(sourceDir);
+  const observedAt = (input.completedAt ?? new Date()).toISOString();
+  const key = candidateKeyFor({
+    slug: extraction.slug,
+    category: extraction.category,
+    memory,
+    summary: extraction.candidateSummary ?? extraction.summary
+  });
+  const index = findCandidateIndex(candidates, key, memory);
+  const source = candidateSourceFromInput(input, observedAt);
+  if (index >= 0) {
+    const existing = candidates[index];
+    candidates[index] = {
+      ...existing,
+      memory,
+      summary: trimOrUndefined(extraction.candidateSummary) ?? trimOrUndefined(extraction.summary) ?? existing.summary,
+      category: trimOrUndefined(extraction.category) ?? existing.category,
+      confidence: extraction.confidence ?? existing.confidence,
+      status: "pending",
+      seenCount: existing.seenCount + 1,
+      lastSeenAt: observedAt,
+      lastDecision: extraction.action,
+      lastReason: extraction.reason,
+      sources: [...existing.sources, source].slice(-MAX_CANDIDATE_SOURCE_ITEMS)
+    };
+  } else {
+    candidates.push({
+      id: `candidate-${randomUUID().slice(0, 12)}`,
+      key,
+      status: "pending",
+      memory,
+      summary: trimOrUndefined(extraction.candidateSummary) ?? trimOrUndefined(extraction.summary),
+      category: trimOrUndefined(extraction.category),
+      confidence: extraction.confidence,
+      firstSeenAt: observedAt,
+      lastSeenAt: observedAt,
+      seenCount: 1,
+      lastDecision: extraction.action,
+      lastReason: extraction.reason,
+      sources: [source]
+    });
+  }
+  await writeMemoryCandidates(sourceDir, candidates);
+  return true;
+}
+
+async function markPromotedMemoryCandidates(
+  sourceDir: string,
+  extraction: MemoryExtraction & { memory: string }
+): Promise<void> {
+  const candidates = await readMemoryCandidates(sourceDir);
+  if (candidates.length === 0) return;
+  let changed = false;
+  const target = trimOrUndefined(extraction.target);
+  const promotedAt = new Date().toISOString();
+  for (const candidate of candidates) {
+    if (candidate.status !== "pending") continue;
+    const isTarget = Boolean(target && target === candidate.id);
+    const isSimilar = similarityScore(candidate.memory, extraction.memory) >= 0.65;
+    if (!isTarget && !isSimilar) continue;
+    candidate.status = "promoted";
+    candidate.promotedAt = promotedAt;
+    candidate.lastDecision = extraction.action;
+    candidate.lastReason = extraction.reason ?? "promoted_to_memory";
+    changed = true;
+  }
+  if (changed) await writeMemoryCandidates(sourceDir, candidates);
+}
+
 export function agentStudioMemorySourcePath(codexHome: string): string {
   return path.join(codexHome, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH);
+}
+
+export function agentStudioMemoryCandidatesPath(codexHome: string): string {
+  return path.join(agentStudioMemorySourcePath(codexHome), MEMORY_CANDIDATES_FILE_NAME);
 }
 
 export function codexMemoryProjectionPath(codexHome: string): string {
@@ -609,7 +1021,14 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       };
     }
 
-    const llmText = await callLlm(llmConfig, buildExtractionPrompt(input));
+    const memoriesDir = await ensureAgentStudioMemorySource(codexHome);
+    const existingMemories = await readCanonicalMemoryItems(memoriesDir);
+    const relatedCandidates = selectRelatedMemoryCandidates(input, await readMemoryCandidates(memoriesDir));
+
+    const llmText = await callLlm(llmConfig, buildExtractionPrompt(input, {
+      existingMemories,
+      relatedCandidates
+    }));
     const extraction = normalizeExtraction(parseJsonObject(llmText));
     const memory = trimOrUndefined(extraction?.memory);
     if (!extraction) {
@@ -621,10 +1040,17 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
         llmModel: llmConfig.model
       };
     }
-    if (!extraction.shouldRemember || !memory) {
+    if (!extraction.shouldRemember || extraction.action === "skip" || !memory) {
+      const candidateRecorded = extraction
+        ? await recordSkippedMemoryCandidate(memoriesDir, input, extraction)
+        : false;
       return {
         status: "skipped_no_durable_memory",
-        reason: !extraction.shouldRemember ? "model_declined" : "empty_memory",
+        reason: candidateRecorded
+          ? "candidate_recorded"
+          : !extraction.shouldRemember || extraction.action === "skip"
+            ? "model_declined"
+            : "empty_memory",
         llmProvider: llmConfig.provider,
         llmApiMode: llmConfig.apiMode,
         llmModel: llmConfig.model,
@@ -637,9 +1063,13 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       ...extraction,
       memory
     });
+    await markPromotedMemoryCandidates(memoriesDir, {
+      ...extraction,
+      memory
+    });
     return {
       status: "written",
-      reason: "memory_written",
+      reason: `memory_${extraction.action}`,
       llmProvider: llmConfig.provider,
       llmApiMode: llmConfig.apiMode,
       llmModel: llmConfig.model,
@@ -663,11 +1093,14 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       `# Memory rollout ${iso}`,
       "",
       `- channel: ${input.channel}`,
+      `- action: ${extraction.action}`,
       input.sessionId ? `- session_id: ${input.sessionId}` : "",
       input.threadId ? `- thread_id: ${input.threadId}` : "",
       input.codexThreadId ? `- codex_thread_id: ${input.codexThreadId}` : "",
       extraction.category ? `- category: ${extraction.category}` : "",
       typeof extraction.confidence === "number" ? `- confidence: ${extraction.confidence}` : "",
+      extraction.target ? `- target: ${extraction.target}` : "",
+      extraction.reason ? `- reason: ${extraction.reason}` : "",
       "",
       "## Summary",
       summary,
@@ -686,8 +1119,11 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       "",
       `## ${iso}`,
       `- source: ${input.channel}`,
+      `- action: ${extraction.action}`,
       extraction.category ? `- category: ${extraction.category}` : "",
       typeof extraction.confidence === "number" ? `- confidence: ${extraction.confidence}` : "",
+      extraction.target ? `- target: ${extraction.target}` : "",
+      extraction.reason ? `- reason: ${extraction.reason}` : "",
       `- memory: ${extraction.memory}`,
       input.threadId ? `- thread_id: ${input.threadId}` : "",
       input.codexThreadId ? `- codex_thread_id: ${input.codexThreadId}` : "",
@@ -695,7 +1131,7 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
     ].filter((line) => line !== "").join("\n");
     await fs.writeFile(rawPath, `${nextRaw}\n`, "utf8");
 
-    const memories = rawMemoriesFromContent(nextRaw).slice(-50);
+    const memories = mergeCanonicalMemoryItems(await readCanonicalMemoryItems(memoriesDir), extraction).slice(-50);
     const memorySummary = buildMemorySummary(memories);
     await fs.writeFile(path.join(memoriesDir, "memory_summary.md"), memorySummary, "utf8");
     await fs.writeFile(path.join(memoriesDir, "MEMORY.md"), memorySummary, "utf8");

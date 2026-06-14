@@ -117,6 +117,10 @@ const RUN_STATUS_COLORS: Record<CodexMemoryRunStatus, string> = {
 
 const RUN_REASON_LABELS: Record<string, string> = {
   memory_written: "已写入记忆",
+  memory_create: "新增记忆",
+  memory_update: "更新记忆",
+  memory_merge: "合并记忆",
+  candidate_recorded: "已记录候选",
   model_declined: "模型判断无需沉淀",
   empty_memory: "模型返回空记忆",
   missing_prompt: "缺少用户输入",

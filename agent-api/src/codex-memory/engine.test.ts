@@ -10,6 +10,7 @@ import type { ManagedCodexProviderSnapshot } from "../managed-codex-provider.js"
 import {
   AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH,
   CodexMemoryEngine,
+  agentStudioMemoryCandidatesPath,
   syncAgentStudioMemoryProjection
 } from "./engine.js";
 
@@ -103,6 +104,151 @@ describe("CodexMemoryEngine", () => {
     );
   });
 
+  it("records skipped memory candidates and feeds related candidates into the next extraction", async () => {
+    const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-"));
+    const settings = {
+      ...createDefaultSystemSettingsPayload().codexMemory,
+      disableOnExternalContext: false
+    };
+    const prompts: string[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { input?: string };
+      prompts.push(String(body.input ?? ""));
+      if (prompts.length === 1) {
+        return new Response(JSON.stringify({
+          output_text: JSON.stringify({
+            action: "skip",
+            shouldRemember: false,
+            confidence: 0.72,
+            category: "workflow",
+            memory: "",
+            summary: "",
+            candidateMemory: "用户反复要求对生产问题先给结论，再说明影响范围。",
+            candidateSummary: "生产问题沟通偏好：结论先行并说明影响范围。",
+            slug: "production-answer-style",
+            reason: "first_observation"
+          })
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: "create",
+          shouldRemember: true,
+          confidence: 0.9,
+          category: "workflow",
+          memory: "用户处理生产问题时偏好结论先行，并明确说明影响范围。",
+          summary: "生产问题沟通偏好：结论先行并说明影响范围。",
+          slug: "production-answer-style",
+          target: "production-answer-style",
+          reason: "recurring_candidate"
+        })
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = new CodexMemoryEngine({
+      getSettings: async () => settings,
+      resolveProviderSnapshot: async () => providerSnapshot,
+      logger: console
+    });
+
+    await (engine as unknown as { processRun(input: unknown): Promise<void> }).processRun({
+      channel: "portal",
+      prompt: "生产问题先给结论。",
+      answerText: "我会先说明结论和影响范围。",
+      codexHome,
+      hasExternalContext: false
+    });
+
+    const candidatesAfterFirstRun = JSON.parse(await fs.readFile(agentStudioMemoryCandidatesPath(codexHome), "utf8")) as Array<{
+      status: string;
+      seenCount: number;
+      memory: string;
+    }>;
+    expect(candidatesAfterFirstRun).toMatchObject([
+      {
+        status: "pending",
+        seenCount: 1,
+        memory: "用户反复要求对生产问题先给结论，再说明影响范围。"
+      }
+    ]);
+
+    await (engine as unknown as { processRun(input: unknown): Promise<void> }).processRun({
+      channel: "portal",
+      prompt: "还是生产故障，先讲结论和影响。",
+      answerText: "结论是当前影响范围有限。",
+      codexHome,
+      hasExternalContext: false
+    });
+
+    expect(prompts[1]).toContain("Related non-authoritative candidate history");
+    expect(prompts[1]).toContain("\"seen_count\": 1");
+    expect(prompts[1]).toContain("用户反复要求对生产问题先给结论");
+    await expect(fs.readFile(path.join(codexHome, "memories", "MEMORY.md"), "utf8")).resolves.toContain(
+      "用户处理生产问题时偏好结论先行，并明确说明影响范围。"
+    );
+  });
+
+  it("updates existing memory summaries instead of duplicating similar entries", async () => {
+    const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-"));
+    const settings = {
+      ...createDefaultSystemSettingsPayload().codexMemory,
+      disableOnExternalContext: false
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: "create",
+          shouldRemember: true,
+          confidence: 0.88,
+          category: "preference",
+          memory: "用户偏好用中文回答。",
+          summary: "中文回答偏好。",
+          slug: "language-preference"
+        })
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          action: "update",
+          shouldRemember: true,
+          confidence: 0.93,
+          category: "preference",
+          memory: "用户偏好用中文、结论先行回答。",
+          summary: "中文且结论先行的回答偏好。",
+          slug: "language-preference",
+          target: "M1",
+          reason: "refined_existing_memory"
+        })
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = new CodexMemoryEngine({
+      getSettings: async () => settings,
+      resolveProviderSnapshot: async () => providerSnapshot,
+      logger: console
+    });
+
+    await (engine as unknown as { processRun(input: unknown): Promise<void> }).processRun({
+      channel: "portal",
+      prompt: "以后用中文。",
+      answerText: "好的，我会用中文。",
+      codexHome,
+      hasExternalContext: false
+    });
+    await (engine as unknown as { processRun(input: unknown): Promise<void> }).processRun({
+      channel: "portal",
+      prompt: "以后也先说结论。",
+      answerText: "好的，我会中文且结论先行。",
+      codexHome,
+      hasExternalContext: false
+    });
+
+    const summary = await fs.readFile(path.join(codexHome, AGENT_STUDIO_MEMORY_SOURCE_RELATIVE_PATH, "memory_summary.md"), "utf8");
+    expect(summary).toContain("用户偏好用中文、结论先行回答。");
+    expect(summary).not.toContain("- 用户偏好用中文回答。");
+    expect(summary.match(/^- 用户偏好/gm)).toHaveLength(1);
+  });
+
   it("records memory run outcomes for written and skipped tasks", async () => {
     const sessionHomeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-memory-root-"));
     const codexHome = path.join(sessionHomeRoot, "internal", "user-1", "agent-mode-1");
@@ -159,7 +305,7 @@ describe("CodexMemoryEngine", () => {
     const log = await fs.readFile(path.join(sessionHomeRoot, ".agent-studio", "memory-runs.jsonl"), "utf8");
     const entries = log.trim().split("\n").map((line) => JSON.parse(line) as { status: string; reason: string; relativeHome?: string });
     expect(entries).toMatchObject([
-      { status: "written", reason: "memory_written", relativeHome: "internal/user-1/agent-mode-1" },
+      { status: "written", reason: "memory_create", relativeHome: "internal/user-1/agent-mode-1" },
       { status: "skipped_no_durable_memory", reason: "model_declined", relativeHome: "internal/user-1/agent-mode-1" }
     ]);
   });

@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
   AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES,
+  agentStudioMemoryCandidatesPath,
   agentStudioMemorySourcePath,
   codexMemoryProjectionPath,
   ensureAgentStudioMemorySource,
@@ -902,6 +903,7 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
       const projectionPath = codexMemoryProjectionPath(scope.codexHome);
       if (await pathExists(sourcePath)) {
         await clearManagedMemoryFiles(sourcePath);
+        await fs.rm(agentStudioMemoryCandidatesPath(scope.codexHome), { force: true });
       }
       if (await pathExists(projectionPath)) {
         await clearManagedMemoryFiles(projectionPath);
