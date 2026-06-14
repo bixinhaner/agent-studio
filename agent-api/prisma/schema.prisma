@@ -768,6 +768,65 @@ model RuntimeSession {
   @@map("runtime_sessions")
 }
 
+model CodexMemoryBackfillRun {
+  id                       String                    @id @default(cuid())
+  status                   String                    @default("queued")
+  name                     String?
+  requestedByUserId        String?                   @map("requested_by_user_id")
+  filters                  Json
+  dryRun                   Boolean                   @default(false) @map("dry_run")
+  totalItems               Int                       @default(0) @map("total_items")
+  processedItems           Int                       @default(0) @map("processed_items")
+  writtenItems             Int                       @default(0) @map("written_items")
+  skippedNoDurableItems    Int                       @default(0) @map("skipped_no_durable_items")
+  skippedMissingInputItems Int                       @default(0) @map("skipped_missing_input_items")
+  failedItems              Int                       @default(0) @map("failed_items")
+  alreadyProcessedItems    Int                       @default(0) @map("already_processed_items")
+  startedAt                DateTime?                 @map("started_at")
+  completedAt              DateTime?                 @map("completed_at")
+  lastError                String?                   @map("last_error")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  items                    CodexMemoryBackfillItem[]
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("codex_memory_backfill_runs")
+}
+
+model CodexMemoryBackfillItem {
+  id                 String                 @id @default(cuid())
+  runId              String                 @map("run_id")
+  threadId           String                 @map("thread_id")
+  userMessageId      String                 @map("user_message_id")
+  assistantMessageId String                 @map("assistant_message_id")
+  organizationId     String?                @map("organization_id")
+  userId             String?                @map("user_id")
+  channel            String
+  status             String                 @default("pending")
+  reason             String?
+  codexHome          String?                @map("codex_home")
+  relativeHome       String?                @map("relative_home")
+  codexThreadId      String?                @map("codex_thread_id")
+  sessionId          String?                @map("session_id")
+  model              String?
+  promptChars        Int                    @default(0) @map("prompt_chars")
+  answerChars        Int                    @default(0) @map("answer_chars")
+  hasExternalContext Boolean                @default(false) @map("has_external_context")
+  memoryRunLogId     String?                @map("memory_run_log_id")
+  error              String?
+  processedAt        DateTime?              @map("processed_at")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  run                CodexMemoryBackfillRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([userMessageId, assistantMessageId])
+  @@index([runId, status])
+  @@index([threadId])
+  @@index([channel, status])
+  @@map("codex_memory_backfill_items")
+}
+
 model ThreadShare {
   id              String    @id @default(cuid())
   organizationId  String?   @map("organization_id")

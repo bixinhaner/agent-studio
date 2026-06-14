@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Progress,
   Row,
   Segmented,
   Select,
@@ -26,10 +27,14 @@ import {
   BrainCircuit,
   Building2,
   CheckCircle2,
+  CirclePause,
+  CirclePlay,
+  CircleStop,
   Eraser,
   Eye,
   FileText,
   GitBranch,
+  History,
   PencilLine,
   RefreshCcw,
   Save,
@@ -55,18 +60,28 @@ import {
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "../system-settings/api";
 import type { SystemSettingsPayload, SystemSettingsVersionMeta } from "../system-settings/types";
 import {
+  cancelCodexMemoryBackfillRun,
   clearCodexMemoryScope,
+  createCodexMemoryBackfillRun,
   deleteCodexMemoryFile,
+  fetchCodexMemoryBackfillRuns,
   fetchCodexMemoryFileContent,
   fetchCodexMemoryFiles,
   fetchCodexMemoryLlmSecretState,
   fetchCodexMemoryRuns,
   fetchCodexMemoryScopes,
+  pauseCodexMemoryBackfillRun,
+  previewCodexMemoryBackfill,
   previewEnterpriseContext,
+  resumeCodexMemoryBackfillRun,
   saveCodexMemoryLlmSecret,
   saveCodexMemoryFileContent
 } from "./api";
 import type {
+  CodexMemoryBackfillFilters,
+  CodexMemoryBackfillPreview,
+  CodexMemoryBackfillRun,
+  CodexMemoryBackfillRunStatus,
   CodexMemoryFile,
   CodexMemoryFileContent,
   CodexMemoryLlmSecretState,
@@ -168,6 +183,40 @@ const RUN_STATUS_COLORS: Record<CodexMemoryRunStatus, string> = {
   failed: "red"
 };
 
+const BACKFILL_CHANNEL_OPTIONS = [
+  { label: "Portal", value: "portal" },
+  { label: "Zendesk", value: "zendesk" },
+  { label: "钉钉", value: "dingtalk" },
+  { label: "CREST", value: "crest" },
+  { label: "外部 API", value: "openai_compatible_api" }
+];
+
+const BACKFILL_CHANNEL_LABELS: Record<string, string> = {
+  portal: "Portal",
+  zendesk: "Zendesk",
+  dingtalk: "钉钉",
+  crest: "CREST",
+  openai_compatible_api: "外部 API"
+};
+
+const BACKFILL_STATUS_LABELS: Record<CodexMemoryBackfillRunStatus, string> = {
+  queued: "排队中",
+  running: "运行中",
+  paused: "已暂停",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消"
+};
+
+const BACKFILL_STATUS_COLORS: Record<CodexMemoryBackfillRunStatus, string> = {
+  queued: "blue",
+  running: "processing",
+  paused: "orange",
+  completed: "green",
+  failed: "red",
+  cancelled: "default"
+};
+
 const RUN_REASON_LABELS: Record<string, string> = {
   memory_written: "已写入记忆",
   memory_create: "新增记忆",
@@ -179,6 +228,7 @@ const RUN_REASON_LABELS: Record<string, string> = {
   missing_prompt: "缺少用户输入",
   missing_answer: "缺少助手回复",
   missing_codex_home: "缺少 Codex home",
+  assistant_incomplete: "助手回复未完成",
   memory_disabled: "Memory 未启用",
   generation_disabled: "自动生成未启用",
   codex_native_generation: "当前使用 Codex 原生生成",
@@ -220,6 +270,14 @@ function formatLocalTime(value?: string | null): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "未记录";
   return parsed.toLocaleString();
+}
+
+function normalizeDatetimeInput(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
 }
 
 function compareText(a: string, b: string): number {
@@ -281,6 +339,10 @@ function agentModeLabel(mode?: AgentModeRecord | null): string {
   return mode?.name || mode?.slug || "默认智能体";
 }
 
+function channelDisplayName(channel: string): string {
+  return BACKFILL_CHANNEL_LABELS[channel] ?? channel;
+}
+
 function fileDisplayName(file: Pick<CodexMemoryFile, "path" | "name">): string {
   return file.name || file.path.split("/").filter(Boolean).at(-1) || file.path;
 }
@@ -298,6 +360,21 @@ function isMarkdownFile(file?: Pick<CodexMemoryFile, "path" | "name"> | null): b
 
 function scopeHealth(scope: CodexMemoryScope): "empty" | "active" {
   return scope.fileCount > 0 ? "active" : "empty";
+}
+
+function backfillProgress(run: CodexMemoryBackfillRun): number {
+  if (run.totalItems <= 0) return 100;
+  return Math.min(100, Math.round((run.processedItems / run.totalItems) * 100));
+}
+
+function backfillRangeLabel(filters: CodexMemoryBackfillFilters): string {
+  const channels = filters.channels?.length
+    ? filters.channels.map(channelDisplayName).join("、")
+    : "全部渠道";
+  const from = filters.createdFrom ? formatLocalTime(filters.createdFrom) : "";
+  const to = filters.createdTo ? formatLocalTime(filters.createdTo) : "";
+  const range = from || to ? `${from || "最早"} - ${to || "现在"}` : "全部时间";
+  return `${channels} · ${range}`;
 }
 
 function CodexMemoryMarkdownPreview(props: { text: string; maxHeight?: number; style?: React.CSSProperties }) {
@@ -467,6 +544,19 @@ export function CodexMemoryManagementView() {
   const [runsLoading, setRunsLoading] = useState(true);
   const [runsError, setRunsError] = useState("");
 
+  const [backfillChannels, setBackfillChannels] = useState<string[]>(["portal", "zendesk", "dingtalk", "crest"]);
+  const [backfillCreatedFrom, setBackfillCreatedFrom] = useState("");
+  const [backfillCreatedTo, setBackfillCreatedTo] = useState("");
+  const [backfillLimit, setBackfillLimit] = useState<number | null>(8000);
+  const [backfillDryRun, setBackfillDryRun] = useState(false);
+  const [backfillPreview, setBackfillPreview] = useState<CodexMemoryBackfillPreview | null>(null);
+  const [backfillPreviewLoading, setBackfillPreviewLoading] = useState(false);
+  const [backfillRuns, setBackfillRuns] = useState<CodexMemoryBackfillRun[]>([]);
+  const [backfillRunsLoading, setBackfillRunsLoading] = useState(true);
+  const [backfillStarting, setBackfillStarting] = useState(false);
+  const [backfillActionRunId, setBackfillActionRunId] = useState("");
+  const [backfillError, setBackfillError] = useState("");
+
   const [previewUsers, setPreviewUsers] = useState<AdminUser[]>([]);
   const [previewAgentModes, setPreviewAgentModes] = useState<AgentModeRecord[]>([]);
   const [previewUserId, setPreviewUserId] = useState("");
@@ -595,6 +685,15 @@ export function CodexMemoryManagementView() {
     return run.scope?.displaySubtitle || run.scope?.agentName || run.relativeHome || "未记录归属";
   }
 
+  function buildBackfillFilters(): CodexMemoryBackfillFilters {
+    return {
+      ...(backfillChannels.length ? { channels: backfillChannels } : {}),
+      ...(normalizeDatetimeInput(backfillCreatedFrom) ? { createdFrom: normalizeDatetimeInput(backfillCreatedFrom) } : {}),
+      ...(normalizeDatetimeInput(backfillCreatedTo) ? { createdTo: normalizeDatetimeInput(backfillCreatedTo) } : {}),
+      ...(backfillLimit ? { limit: backfillLimit } : {})
+    };
+  }
+
   async function loadSettings() {
     setSettingsLoading(true);
     setSettingsError("");
@@ -689,6 +788,75 @@ export function CodexMemoryManagementView() {
     }
   }
 
+  async function loadBackfillRuns() {
+    setBackfillRunsLoading(true);
+    setBackfillError("");
+    try {
+      const response = await fetchCodexMemoryBackfillRuns({ limit: 80 });
+      setBackfillRuns(response.runs);
+    } catch (error) {
+      setBackfillError(error instanceof Error ? error.message : "加载历史回填任务失败");
+    } finally {
+      setBackfillRunsLoading(false);
+    }
+  }
+
+  async function handlePreviewBackfill() {
+    setBackfillPreviewLoading(true);
+    setBackfillError("");
+    try {
+      const preview = await previewCodexMemoryBackfill(buildBackfillFilters());
+      setBackfillPreview(preview);
+      void message.success("已完成历史会话回填预估");
+    } catch (error) {
+      setBackfillPreview(null);
+      setBackfillError(error instanceof Error ? error.message : "预估历史回填失败");
+    } finally {
+      setBackfillPreviewLoading(false);
+    }
+  }
+
+  async function handleStartBackfill() {
+    setBackfillStarting(true);
+    setBackfillError("");
+    try {
+      await createCodexMemoryBackfillRun({
+        filters: buildBackfillFilters(),
+        dryRun: backfillDryRun,
+        name: backfillDryRun ? "历史记忆回填演练" : "历史记忆回填"
+      });
+      void message.success(backfillDryRun ? "已创建回填演练记录" : "历史记忆回填任务已启动");
+      await loadBackfillRuns();
+      await loadRuns();
+    } catch (error) {
+      setBackfillError(error instanceof Error ? error.message : "启动历史回填失败");
+    } finally {
+      setBackfillStarting(false);
+    }
+  }
+
+  async function handleBackfillAction(run: CodexMemoryBackfillRun, action: "pause" | "resume" | "cancel") {
+    setBackfillActionRunId(run.id);
+    setBackfillError("");
+    try {
+      if (action === "pause") {
+        await pauseCodexMemoryBackfillRun(run.id);
+        void message.success("回填任务已暂停");
+      } else if (action === "resume") {
+        await resumeCodexMemoryBackfillRun(run.id);
+        void message.success("回填任务已继续");
+      } else {
+        await cancelCodexMemoryBackfillRun(run.id);
+        void message.success("回填任务已取消");
+      }
+      await loadBackfillRuns();
+    } catch (error) {
+      setBackfillError(error instanceof Error ? error.message : "回填任务操作失败");
+    } finally {
+      setBackfillActionRunId("");
+    }
+  }
+
   async function loadPreviewOptions() {
     try {
       const [userResponse, agentModeResponse] = await Promise.all([
@@ -777,8 +945,18 @@ export function CodexMemoryManagementView() {
     void loadSettings();
     void loadScopes();
     void loadRuns();
+    void loadBackfillRuns();
     void loadPreviewOptions();
   }, []);
+
+  useEffect(() => {
+    if (!backfillRuns.some((run) => run.status === "queued" || run.status === "running")) return undefined;
+    const timer = window.setInterval(() => {
+      void loadBackfillRuns();
+      void loadRuns();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [backfillRuns]);
 
   useEffect(() => {
     void loadFiles(selectedScopeId);
@@ -1090,6 +1268,126 @@ export function CodexMemoryManagementView() {
     }
   ];
 
+  const backfillColumns: ColumnsType<CodexMemoryBackfillRun> = [
+    {
+      title: "创建时间",
+      dataIndex: "createdAt",
+      key: "createdAt",
+      width: 170,
+      defaultSortOrder: "descend",
+      sorter: (a, b) => compareTime(a.createdAt, b.createdAt),
+      render: (value: string) => formatLocalTime(value)
+    },
+    {
+      title: "范围",
+      key: "range",
+      sorter: (a, b) => compareText(backfillRangeLabel(a.filters), backfillRangeLabel(b.filters)),
+      render: (_: unknown, run: CodexMemoryBackfillRun) => (
+        <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
+          <Space size={6} wrap>
+            <Typography.Text strong>{run.name || (run.dryRun ? "历史回填演练" : "历史回填")}</Typography.Text>
+            {run.dryRun ? <Tag>演练</Tag> : null}
+          </Space>
+          <Typography.Text type="secondary" ellipsis>
+            {backfillRangeLabel(run.filters)}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: "状态",
+      key: "status",
+      width: 130,
+      filters: (Object.keys(BACKFILL_STATUS_LABELS) as CodexMemoryBackfillRunStatus[]).map((status) => ({
+        text: BACKFILL_STATUS_LABELS[status],
+        value: status
+      })),
+      onFilter: (value, run) => run.status === value,
+      sorter: (a, b) => compareText(BACKFILL_STATUS_LABELS[a.status], BACKFILL_STATUS_LABELS[b.status]),
+      render: (_: unknown, run: CodexMemoryBackfillRun) => (
+        <Tag color={BACKFILL_STATUS_COLORS[run.status]}>{BACKFILL_STATUS_LABELS[run.status]}</Tag>
+      )
+    },
+    {
+      title: "进度",
+      key: "progress",
+      width: 180,
+      sorter: (a, b) => backfillProgress(a) - backfillProgress(b),
+      render: (_: unknown, run: CodexMemoryBackfillRun) => (
+        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+          <Progress percent={backfillProgress(run)} size="small" status={run.status === "failed" ? "exception" : undefined} />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {run.processedItems} / {run.totalItems}
+          </Typography.Text>
+        </Space>
+      )
+    },
+    {
+      title: "结果",
+      key: "result",
+      width: 220,
+      sorter: (a, b) => (a.writtenItems + a.failedItems) - (b.writtenItems + b.failedItems),
+      render: (_: unknown, run: CodexMemoryBackfillRun) => (
+        <Space size={6} wrap>
+          <Tag color="green">写入 {run.writtenItems}</Tag>
+          <Tag>跳过 {run.skippedNoDurableItems}</Tag>
+          <Tag color="orange">输入不足 {run.skippedMissingInputItems}</Tag>
+          {run.failedItems > 0 ? <Tag color="red">失败 {run.failedItems}</Tag> : null}
+        </Space>
+      )
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: 190,
+      render: (_: unknown, run: CodexMemoryBackfillRun) => (
+        <Space wrap>
+          {run.status === "queued" || run.status === "running" ? (
+            <Button
+              size="small"
+              icon={<CirclePause size={14} />}
+              loading={backfillActionRunId === run.id}
+              onClick={() => void handleBackfillAction(run, "pause")}
+            >
+              暂停
+            </Button>
+          ) : null}
+          {run.status === "paused" || run.status === "failed" ? (
+            <Button
+              size="small"
+              icon={<CirclePlay size={14} />}
+              loading={backfillActionRunId === run.id}
+              onClick={() => void handleBackfillAction(run, "resume")}
+            >
+              继续
+            </Button>
+          ) : null}
+          {run.status === "queued" || run.status === "running" || run.status === "paused" ? (
+            <Popconfirm
+              title="取消这个回填任务？"
+              description="取消后未处理的历史轮次不会继续检测。"
+              okText="取消任务"
+              cancelText="返回"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void handleBackfillAction(run, "cancel")}
+            >
+              <Button
+                size="small"
+                danger
+                icon={<CircleStop size={14} />}
+                loading={backfillActionRunId === run.id}
+              >
+                取消
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Typography.Text type="secondary">-</Typography.Text>
+          )}
+        </Space>
+      )
+    }
+  ];
+
   function renderHeader() {
     return (
       <div className="admin-page-header">
@@ -1128,6 +1426,7 @@ export function CodexMemoryManagementView() {
               void loadSettings();
               void loadScopes();
               void loadRuns();
+              void loadBackfillRuns();
               if (selectedScopeId) void loadFiles(selectedScopeId);
             }}
           >
@@ -1714,6 +2013,219 @@ export function CodexMemoryManagementView() {
     );
   }
 
+  function renderBackfillPanel() {
+    const latestRun = backfillRuns[0] ?? null;
+    const runningRun = backfillRuns.find((run) => run.status === "running" || run.status === "queued") ?? null;
+    const previewRows = backfillPreview?.byChannel ?? [];
+    return (
+      <div className="codex-memory-backfill-panel">
+        <div className="codex-memory-backfill-grid">
+          <div className="admin-card" style={{ padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <History size={20} />
+              <div>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  回填范围
+                </Typography.Title>
+                <Typography.Text type="secondary">
+                  对历史 user/assistant 对话轮次做记忆检测，符合长期记忆标准时才写入。
+                </Typography.Text>
+              </div>
+            </div>
+
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div>
+                <Typography.Text strong>渠道</Typography.Text>
+                <Checkbox.Group
+                  value={backfillChannels}
+                  options={BACKFILL_CHANNEL_OPTIONS}
+                  onChange={(values) => setBackfillChannels(values.map(String))}
+                  style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginTop: 10 }}
+                />
+              </div>
+
+              <Row gutter={[12, 12]}>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>开始时间</Typography.Text>
+                  <Input
+                    type="datetime-local"
+                    value={backfillCreatedFrom}
+                    onChange={(event) => setBackfillCreatedFrom(event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>结束时间</Typography.Text>
+                  <Input
+                    type="datetime-local"
+                    value={backfillCreatedTo}
+                    onChange={(event) => setBackfillCreatedTo(event.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
+                </Col>
+              </Row>
+
+              <Row gutter={[12, 12]}>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>单次上限</Typography.Text>
+                  <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                    控制本次最多检测多少个历史轮次。
+                  </Typography.Text>
+                  <InputNumber
+                    min={1}
+                    max={20000}
+                    value={backfillLimit}
+                    onChange={(value) => setBackfillLimit(value === null ? null : Number(value))}
+                    style={{ width: "100%", marginTop: 8 }}
+                  />
+                </Col>
+                <Col xs={24} md={12}>
+                  <Typography.Text strong>演练模式</Typography.Text>
+                  <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                    只创建演练记录，不调用 LLM、不写 memory。
+                  </Typography.Text>
+                  <Switch checked={backfillDryRun} onChange={setBackfillDryRun} style={{ marginTop: 10 }} />
+                </Col>
+              </Row>
+
+              <Alert
+                type="info"
+                showIcon
+                message="回填使用公共记忆引擎"
+                description="不会按渠道各自写入，Portal、Zendesk、钉钉、CREST 都走同一套判断、候选和写入逻辑。"
+              />
+
+              <Space wrap>
+                <Button icon={<Search size={16} />} loading={backfillPreviewLoading} onClick={() => void handlePreviewBackfill()}>
+                  预估影响
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<CirclePlay size={16} />}
+                  loading={backfillStarting}
+                  onClick={() => {
+                    if (!backfillDryRun && (backfillPreview?.estimatedLlmCalls ?? 0) > 0) {
+                      Modal.confirm({
+                        title: "启动历史记忆回填？",
+                        content: `预计调用 LLM 检测 ${backfillPreview?.estimatedLlmCalls ?? 0} 个历史轮次。任务将在后台顺序执行，可暂停或取消。`,
+                        okText: "启动回填",
+                        cancelText: "取消",
+                        onOk: () => void handleStartBackfill()
+                      });
+                      return;
+                    }
+                    void handleStartBackfill();
+                  }}
+                >
+                  启动回填
+                </Button>
+              </Space>
+            </Space>
+          </div>
+
+          <div className="admin-card" style={{ padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+              <div>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  回填进度
+                </Typography.Title>
+                <Typography.Text type="secondary">先看预估，再看最近后台任务的真实进度。</Typography.Text>
+              </div>
+              <Button icon={<RefreshCcw size={16} />} loading={backfillRunsLoading} onClick={() => void loadBackfillRuns()}>
+                刷新任务
+              </Button>
+            </div>
+
+            {backfillError ? <Alert type="error" showIcon message={backfillError} style={{ marginBottom: 12 }} /> : null}
+
+            <div className="codex-memory-backfill-metrics">
+              <MemoryMetric label="可检测轮次" value={String(backfillPreview?.readyItems ?? 0)} hint="预计调用 LLM" />
+              <MemoryMetric label="已回填过" value={String(backfillPreview?.alreadyProcessed ?? 0)} hint="不会重复处理" />
+              <MemoryMetric label="输入不足" value={String(backfillPreview?.skippedMissingInput ?? 0)} hint="缺少回复或记忆空间" />
+              <MemoryMetric label="最近写入" value={String(latestRun?.writtenItems ?? 0)} hint={latestRun ? BACKFILL_STATUS_LABELS[latestRun.status] : "暂无任务"} />
+            </div>
+
+            {runningRun ? (
+              <div
+                style={{
+                  border: "1px solid var(--admin-color-border)",
+                  borderRadius: 10,
+                  padding: 14,
+                  marginTop: 16,
+                  background: "rgba(22, 119, 255, 0.04)"
+                }}
+              >
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Space wrap>
+                    <Tag color={BACKFILL_STATUS_COLORS[runningRun.status]}>{BACKFILL_STATUS_LABELS[runningRun.status]}</Tag>
+                    <Typography.Text strong>{runningRun.name || "历史回填"}</Typography.Text>
+                    <Typography.Text type="secondary">{backfillRangeLabel(runningRun.filters)}</Typography.Text>
+                  </Space>
+                  <Progress percent={backfillProgress(runningRun)} status="active" />
+                  <Typography.Text type="secondary">
+                    已处理 {runningRun.processedItems} / {runningRun.totalItems}，写入 {runningRun.writtenItems}，失败 {runningRun.failedItems}
+                  </Typography.Text>
+                </Space>
+              </div>
+            ) : (
+              <Alert type="success" showIcon message="当前没有运行中的回填任务" style={{ marginTop: 16 }} />
+            )}
+
+            <div style={{ marginTop: 16 }}>
+              <Typography.Title level={5} style={{ marginTop: 0 }}>
+                渠道预估
+              </Typography.Title>
+              {previewRows.length > 0 ? (
+                <div className="codex-memory-backfill-channel-list">
+                  {previewRows.map((row) => (
+                    <div key={row.channel} className="codex-memory-backfill-channel-row">
+                      <div>
+                        <Typography.Text strong>{channelDisplayName(row.channel)}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ display: "block" }}>
+                          共 {row.totalPairs} 轮
+                        </Typography.Text>
+                      </div>
+                      <Space size={6} wrap>
+                        <Tag color="blue">可检测 {row.readyItems}</Tag>
+                        <Tag>已回填 {row.alreadyProcessed}</Tag>
+                        <Tag color="orange">输入不足 {row.skippedMissingInput}</Tag>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty description="先点击“预估影响”" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="admin-card codex-memory-spaces-card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap" }}>
+            <div>
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                回填任务
+              </Typography.Title>
+              <Typography.Text type="secondary">任务按历史轮次顺序执行，结果也会进入统计日志。</Typography.Text>
+            </div>
+            <Button icon={<RefreshCcw size={16} />} loading={backfillRunsLoading} onClick={() => void loadBackfillRuns()}>
+              刷新
+            </Button>
+          </div>
+          <Table
+            rowKey="id"
+            loading={backfillRunsLoading}
+            columns={backfillColumns}
+            dataSource={backfillRuns}
+            scroll={{ x: 980 }}
+            pagination={{ pageSize: 8, showSizeChanger: false }}
+            locale={{ emptyText: <Empty description="暂无历史回填任务" /> }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   function renderRunLogsPanel() {
     return (
       <div className="admin-card" style={{ padding: 20 }}>
@@ -1872,6 +2384,7 @@ export function CodexMemoryManagementView() {
             { key: "enterprise", label: "企业上下文", children: renderEnterpriseContextPanel() },
             { key: "memory", label: "长期记忆", children: renderSettingsPanel() },
             { key: "spaces", label: "记忆空间", children: renderSpacesPanel() },
+            { key: "backfill", label: "历史回填", children: renderBackfillPanel() },
             { key: "runs", label: "统计日志", children: renderRunLogsPanel() }
           ]}
         />

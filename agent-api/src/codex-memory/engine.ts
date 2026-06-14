@@ -118,6 +118,8 @@ type CodexMemoryRunOutcome = {
   error?: string;
 };
 
+export type CodexMemoryRunResult = CodexMemoryRunLogEntry;
+
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_PROMPT_CHARS = 8000;
 const MAX_ANSWER_CHARS = 12000;
@@ -920,14 +922,14 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       });
   }
 
-  private async processRunWithLog(input: CodexMemoryRunInput): Promise<void> {
+  async processRunAndLog(input: CodexMemoryRunInput): Promise<CodexMemoryRunResult> {
     const startedAt = new Date();
     try {
       const outcome = await this.processRun(input);
-      await this.recordRunLog(input, startedAt, outcome);
+      return await this.recordRunLog(input, startedAt, outcome);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      await this.recordRunLog(input, startedAt, {
+      const entry = await this.recordRunLog(input, startedAt, {
         status: "failed",
         reason: "exception",
         error: detail
@@ -935,6 +937,27 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
         this.dependencies.logger?.warn?.("codex memory run log write failed", {
           detail: logError instanceof Error ? logError.message : String(logError)
         });
+        const completedAt = new Date();
+        return {
+          id: randomUUID(),
+          status: "failed" as const,
+          reason: "exception",
+          channel: input.channel,
+          startedAt: startedAt.toISOString(),
+          completedAt: completedAt.toISOString(),
+          durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+          promptChars: trimOrUndefined(input.prompt)?.length ?? 0,
+          answerChars: trimOrUndefined(input.answerText)?.length ?? 0,
+          codexHome: trimOrUndefined(input.codexHome),
+          codexThreadId: trimOrUndefined(input.codexThreadId),
+          sessionId: trimOrUndefined(input.sessionId),
+          threadId: trimOrUndefined(input.threadId),
+          organizationId: trimOrUndefined(input.organizationId),
+          userId: trimOrUndefined(input.userId),
+          model: trimOrUndefined(input.model),
+          hasExternalContext: Boolean(input.hasExternalContext),
+          error: detail
+        };
       });
       this.dependencies.logger?.warn?.("codex memory generation failed", {
         channel: input.channel,
@@ -942,12 +965,16 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
         threadId: input.threadId,
         detail
       });
+      return entry;
     }
   }
 
-  private async recordRunLog(input: CodexMemoryRunInput, startedAt: Date, outcome: CodexMemoryRunOutcome): Promise<void> {
+  private async processRunWithLog(input: CodexMemoryRunInput): Promise<void> {
+    await this.processRunAndLog(input);
+  }
+
+  private async recordRunLog(input: CodexMemoryRunInput, startedAt: Date, outcome: CodexMemoryRunOutcome): Promise<CodexMemoryRunLogEntry> {
     const sessionHomeRoot = trimOrUndefined(this.dependencies.sessionHomeRoot);
-    if (!sessionHomeRoot) return;
     const completedAt = new Date();
     const entry: CodexMemoryRunLogEntry = {
       id: randomUUID(),
@@ -976,12 +1003,14 @@ export class CodexMemoryEngine implements CodexMemoryRunRecorder {
       memoryChars: outcome.memoryChars,
       error: outcome.error
     };
+    if (!sessionHomeRoot) return entry;
     const logPath = path.join(sessionHomeRoot, RUN_LOG_RELATIVE_PATH);
     await fs.mkdir(path.dirname(logPath), { recursive: true });
     const existing = await readTextIfExists(logPath);
     const lines = existing.split(/\n/).filter(Boolean).slice(-MAX_RUN_LOG_ENTRIES + 1);
     lines.push(JSON.stringify(entry));
     await fs.writeFile(logPath, `${lines.join("\n")}\n`, "utf8");
+    return entry;
   }
 
   private async processRun(input: CodexMemoryRunInput): Promise<CodexMemoryRunOutcome> {

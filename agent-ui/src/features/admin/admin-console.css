@@ -751,7 +751,7 @@
 }
 
 .codex-memory-overview-grid {
-  grid-template-columns: minmax(420px, 520px) minmax(0, 1fr);
+  grid-template-columns: minmax(min(100%, 360px), 0.75fr) minmax(0, 1.25fr);
 }
 
 .codex-memory-overview-metrics {
@@ -770,11 +770,11 @@
 }
 
 .codex-memory-scope-grid {
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(min(100%, 280px), 340px) minmax(0, 1fr);
 }
 
 .codex-memory-file-grid {
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(220px, 260px);
+  grid-template-columns: minmax(min(100%, 220px), 280px) minmax(0, 1fr) minmax(min(100%, 220px), 260px);
 }
 
 .codex-memory-grid-cell {
@@ -842,6 +842,52 @@
   flex-direction: column;
 }
 
+.codex-memory-backfill-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+.codex-memory-backfill-grid {
+  display: grid;
+  grid-template-columns: minmax(min(100%, 380px), 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.codex-memory-backfill-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.codex-memory-backfill-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.codex-memory-backfill-channel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--admin-color-bg-subtle, #f8fafc);
+}
+
+.dark .codex-memory-backfill-channel-row {
+  background: var(--admin-color-bg-subtle, #09090b);
+}
+
 @media (max-width: 1400px) {
   .codex-memory-file-grid {
     grid-template-columns: 240px minmax(0, 1fr);
@@ -855,10 +901,14 @@
   .codex-memory-overview-grid {
     grid-template-columns: 1fr;
   }
+  .codex-memory-backfill-grid {
+    grid-template-columns: 1fr;
+  }
   .codex-memory-scope-grid {
     grid-template-columns: 1fr;
   }
-  .codex-memory-overview-metrics {
+  .codex-memory-overview-metrics,
+  .codex-memory-backfill-metrics {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -867,8 +917,13 @@
   .codex-memory-file-grid {
     grid-template-columns: 1fr;
   }
-  .codex-memory-overview-metrics {
+  .codex-memory-overview-metrics,
+  .codex-memory-backfill-metrics {
     grid-template-columns: 1fr;
+  }
+  .codex-memory-backfill-channel-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .codex-memory-scroll-list {
     max-height: 300px;

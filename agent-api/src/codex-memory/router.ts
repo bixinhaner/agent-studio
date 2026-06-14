@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import type { EnterpriseContextService } from "../enterprise-context-service.js";
 import { systemSettingsEnterpriseContextSchema } from "../system-settings/types.js";
+import type { CodexMemoryBackfillService } from "./backfill-service.js";
 import {
   AGENT_STUDIO_MEMORY_CONTENT_ROOTS,
   AGENT_STUDIO_MEMORY_ROOT_FILE_NAMES,
@@ -30,6 +31,10 @@ type CodexMemoryAdminRouterOptions = {
     get(id: string): Promise<{ name: string; slug: string } | undefined>;
   };
   enterpriseContext?: Pick<EnterpriseContextService, "resolveForRun">;
+  backfill?: Pick<
+    CodexMemoryBackfillService,
+    "preview" | "createRun" | "listRuns" | "pauseRun" | "resumeRun" | "cancelRun"
+  >;
   listIntegrationInstancesByIds?: (ids: string[]) => Promise<Array<{
     id: string;
     type: string;
@@ -136,6 +141,23 @@ const enterpriseContextPreviewSchema = z
     userId: z.string().trim().max(120).optional(),
     agentModeId: z.string().trim().max(120).optional(),
     settings: systemSettingsEnterpriseContextSchema.optional()
+  })
+  .strict();
+
+const codexMemoryBackfillFiltersSchema = z
+  .object({
+    channels: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
+    createdFrom: z.string().trim().max(80).optional(),
+    createdTo: z.string().trim().max(80).optional(),
+    limit: z.number().int().min(1).max(20000).optional()
+  })
+  .strict();
+
+const codexMemoryBackfillCreateSchema = z
+  .object({
+    filters: codexMemoryBackfillFiltersSchema.optional(),
+    dryRun: z.boolean().optional(),
+    name: z.string().trim().max(120).optional()
   })
   .strict();
 
@@ -750,6 +772,99 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
       }
       res.status(400).json({ detail: detailFromError(error) });
     }
+  });
+
+  router.post("/codex-memory/backfills/preview", requireRead, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    try {
+      const parsed = codexMemoryBackfillFiltersSchema.parse(req.body ?? {});
+      res.json(await options.backfill.preview(parsed));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ detail: error.issues.map((issue) => issue.message).join("; ") });
+        return;
+      }
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/codex-memory/backfills", requireRead, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    try {
+      const limitInput = Number.parseInt(String(req.query.limit ?? "50"), 10);
+      const limit = Number.isFinite(limitInput) && limitInput > 0 ? Math.min(limitInput, 200) : 50;
+      res.json(await options.backfill.listRuns(limit));
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-memory/backfills", requireWrite, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    try {
+      const parsed = codexMemoryBackfillCreateSchema.parse(req.body ?? {});
+      const currentUserId = trimOrUndefined((req as Request & { currentUser?: { id?: string } }).currentUser?.id);
+      res.status(202).json(await options.backfill.createRun({
+        filters: parsed.filters,
+        dryRun: parsed.dryRun,
+        name: parsed.name,
+        requestedByUserId: currentUserId
+      }));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ detail: error.issues.map((issue) => issue.message).join("; ") });
+        return;
+      }
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/codex-memory/backfills/:runId/pause", requireWrite, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    const run = await options.backfill.pauseRun(req.params.runId);
+    if (!run) {
+      res.status(404).json({ detail: "backfill run not found" });
+      return;
+    }
+    res.json(run);
+  });
+
+  router.post("/codex-memory/backfills/:runId/resume", requireWrite, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    const run = await options.backfill.resumeRun(req.params.runId);
+    if (!run) {
+      res.status(404).json({ detail: "backfill run not found" });
+      return;
+    }
+    res.json(run);
+  });
+
+  router.post("/codex-memory/backfills/:runId/cancel", requireWrite, async (req: Request, res: Response) => {
+    if (!options.backfill) {
+      res.status(501).json({ detail: "memory backfill service is not configured" });
+      return;
+    }
+    const run = await options.backfill.cancelRun(req.params.runId);
+    if (!run) {
+      res.status(404).json({ detail: "backfill run not found" });
+      return;
+    }
+    res.json(run);
   });
 
   router.get("/codex-memory/runs", requireRead, async (req: Request, res: Response) => {

@@ -49,6 +49,7 @@ import {
   codexRunConfigHasExternalContext,
   syncAgentStudioMemoryProjection
 } from "./codex-memory/engine.js";
+import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
 import { EnterpriseContextService } from "./enterprise-context-service.js";
 import { getDbClient } from "./db/client.js";
@@ -364,6 +365,17 @@ codexMemoryEngine = new CodexMemoryEngine({
   getLlmSecretState: getCodexMemoryLlmSecretState,
   sessionHomeRoot: appConfig.codex.sessionHomeRoot,
   logger: console
+});
+const codexMemoryBackfill = new CodexMemoryBackfillService({
+  db,
+  memoryEngine: codexMemoryEngine,
+  sessionHomeRoot: appConfig.codex.sessionHomeRoot,
+  logger: console
+});
+void codexMemoryBackfill.resumePendingRuns().catch((error) => {
+  console.warn("codex memory backfill resume failed", {
+    detail: error instanceof Error ? error.message : String(error)
+  });
 });
 const dingtalkClient = createDingTalkClient(appConfig.dingtalk);
 const zendeskSettingsStore = new ZendeskSettingsStore();
@@ -6756,6 +6768,7 @@ registerCommonApiRoutes(app, {
       update: updateCodexMemoryLlmSecret
     },
     enterpriseContext,
+    backfill: codexMemoryBackfill,
     users,
     agentModes,
     listIntegrationInstancesByIds: async (ids) => {

@@ -152,3 +152,54 @@ export type CodexMemoryRunLogResponse = {
   summary: Record<CodexMemoryRunStatus, number>;
   runs: CodexMemoryRunLog[];
 };
+
+export type CodexMemoryBackfillRunStatus = "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+
+export type CodexMemoryBackfillFilters = {
+  channels?: string[];
+  createdFrom?: string;
+  createdTo?: string;
+  limit?: number;
+};
+
+export type CodexMemoryBackfillChannelSummary = {
+  channel: string;
+  totalPairs: number;
+  readyItems: number;
+  skippedMissingInput: number;
+  alreadyProcessed: number;
+};
+
+export type CodexMemoryBackfillPreview = {
+  totalPairs: number;
+  readyItems: number;
+  skippedMissingInput: number;
+  alreadyProcessed: number;
+  estimatedLlmCalls: number;
+  byChannel: CodexMemoryBackfillChannelSummary[];
+};
+
+export type CodexMemoryBackfillRun = {
+  id: string;
+  status: CodexMemoryBackfillRunStatus;
+  name?: string;
+  filters: CodexMemoryBackfillFilters;
+  dryRun: boolean;
+  totalItems: number;
+  processedItems: number;
+  writtenItems: number;
+  skippedNoDurableItems: number;
+  skippedMissingInputItems: number;
+  failedItems: number;
+  alreadyProcessedItems: number;
+  startedAt?: string;
+  completedAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CodexMemoryBackfillRunListResponse = {
+  total: number;
+  runs: CodexMemoryBackfillRun[];
+};

@@ -1,6 +1,10 @@
 import { api } from "../../lib/api";
 
 import type {
+  CodexMemoryBackfillFilters,
+  CodexMemoryBackfillPreview,
+  CodexMemoryBackfillRun,
+  CodexMemoryBackfillRunListResponse,
   CodexMemoryFileContentResponse,
   CodexMemoryFilesResponse,
   CodexMemoryLlmSecretState,
@@ -100,6 +104,49 @@ export async function fetchCodexMemoryRuns(input: {
   if (input.limit) query.set("limit", String(input.limit));
   const suffix = query.toString();
   return api<CodexMemoryRunLogResponse>(`/api/admin/codex-memory/runs${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function previewCodexMemoryBackfill(filters: CodexMemoryBackfillFilters): Promise<CodexMemoryBackfillPreview> {
+  return api<CodexMemoryBackfillPreview>("/api/admin/codex-memory/backfills/preview", {
+    method: "POST",
+    json: filters
+  });
+}
+
+export async function fetchCodexMemoryBackfillRuns(input: { limit?: number } = {}): Promise<CodexMemoryBackfillRunListResponse> {
+  const query = new URLSearchParams();
+  if (input.limit) query.set("limit", String(input.limit));
+  const suffix = query.toString();
+  return api<CodexMemoryBackfillRunListResponse>(`/api/admin/codex-memory/backfills${suffix ? `?${suffix}` : ""}`);
+}
+
+export async function createCodexMemoryBackfillRun(input: {
+  filters: CodexMemoryBackfillFilters;
+  dryRun?: boolean;
+  name?: string;
+}): Promise<CodexMemoryBackfillRun> {
+  return api<CodexMemoryBackfillRun>("/api/admin/codex-memory/backfills", {
+    method: "POST",
+    json: input
+  });
+}
+
+export async function pauseCodexMemoryBackfillRun(runId: string): Promise<CodexMemoryBackfillRun> {
+  return api<CodexMemoryBackfillRun>(`/api/admin/codex-memory/backfills/${encodeURIComponent(runId)}/pause`, {
+    method: "POST"
+  });
+}
+
+export async function resumeCodexMemoryBackfillRun(runId: string): Promise<CodexMemoryBackfillRun> {
+  return api<CodexMemoryBackfillRun>(`/api/admin/codex-memory/backfills/${encodeURIComponent(runId)}/resume`, {
+    method: "POST"
+  });
+}
+
+export async function cancelCodexMemoryBackfillRun(runId: string): Promise<CodexMemoryBackfillRun> {
+  return api<CodexMemoryBackfillRun>(`/api/admin/codex-memory/backfills/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST"
+  });
 }
 
 export async function previewEnterpriseContext(input: {
