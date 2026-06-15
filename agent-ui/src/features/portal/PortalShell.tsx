@@ -3092,9 +3092,9 @@ const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus; onOpenBi
       <strong>{status.title || "AI request limit reached"}</strong>
     </div>
     <p>{status.detail || "You can keep reading earlier chats, but new AI requests are blocked for now."}</p>
-    {status.cycleEndsAt || status.actionLabel ? (
+    {status.cycleEndsAt || (onOpenBilling && status.actionLabel) ? (
       <p className="thread-access-banner-meta">
-        {[buildSubscriptionResetLine(status), status.actionLabel].filter(Boolean).join(" ")}
+        {[buildSubscriptionResetLine(status), onOpenBilling ? status.actionLabel : null].filter(Boolean).join(" ")}
       </p>
     ) : null}
     {onOpenBilling ? (
@@ -5796,6 +5796,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [billingPanelOpen, setBillingPanelOpen] = useState(false);
   const [subscriptionReminderModalOpen, setSubscriptionReminderModalOpen] = useState(false);
   const [dismissedSubscriptionReminderKey, setDismissedSubscriptionReminderKey] = useState("");
+  const canUseCustomerBilling = isExternalPortalUser && auth.activeOrganization?.type === "customer";
+  const openCustomerBillingPanel = useCallback(() => {
+    if (!canUseCustomerBilling) return;
+    setBillingPanelOpen(true);
+  }, [canUseCustomerBilling]);
+
+  useEffect(() => {
+    if (canUseCustomerBilling) return;
+    setBillingPanelOpen(false);
+    setSubscriptionReminderModalOpen(false);
+  }, [canUseCustomerBilling]);
 
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
@@ -7712,17 +7723,19 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     [subscriptionStatus, subscriptionStatusError, subscriptionStatusLoading]
   );
   const blockedSubscriptionStatus = isSubscriptionAccessBlocked(subscriptionStatus) ? subscriptionStatus : null;
-  const subscriptionReminderStatus = !blockedSubscriptionStatus && shouldShowPortalSubscriptionReminder(subscriptionStatus)
+  const subscriptionReminderStatus = canUseCustomerBilling && !blockedSubscriptionStatus && shouldShowPortalSubscriptionReminder(subscriptionStatus)
     ? subscriptionStatus
     : null;
-  const subscriptionReminderKey = portalSubscriptionReminderKey(blockedSubscriptionStatus ?? subscriptionReminderStatus);
+  const subscriptionReminderKey = canUseCustomerBilling
+    ? portalSubscriptionReminderKey(blockedSubscriptionStatus ?? subscriptionReminderStatus)
+    : "";
   const externalInlineErrorText = isExternalPortalUser && !blockedSubscriptionStatus ? errorText : "";
 
   useEffect(() => {
-    if (!isExternalPortalUser) return;
+    if (!canUseCustomerBilling) return;
     if (!subscriptionReminderKey || subscriptionReminderKey === dismissedSubscriptionReminderKey) return;
     setSubscriptionReminderModalOpen(true);
-  }, [dismissedSubscriptionReminderKey, isExternalPortalUser, subscriptionReminderKey]);
+  }, [canUseCustomerBilling, dismissedSubscriptionReminderKey, subscriptionReminderKey]);
 
   const threadContent = (
     <div
@@ -7737,9 +7750,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </div>
       ) : null}
       {blockedSubscriptionStatus ? (
-        <PortalAccessBlockedBanner status={blockedSubscriptionStatus} onOpenBilling={() => setBillingPanelOpen(true)} />
+        <PortalAccessBlockedBanner
+          status={blockedSubscriptionStatus}
+          onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
+        />
       ) : subscriptionReminderStatus ? (
-        <PortalSubscriptionReminderBanner status={subscriptionReminderStatus} onOpenBilling={() => setBillingPanelOpen(true)} />
+        <PortalSubscriptionReminderBanner status={subscriptionReminderStatus} onOpenBilling={openCustomerBillingPanel} />
       ) : (
         <PortalInlineErrorBanner message={externalInlineErrorText} />
       )}
@@ -7848,7 +7864,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }
                 onOpenAdmin={props.onOpenAdmin}
                 onOpenFeedback={openProductFeedbackModal}
-                onOpenBilling={() => setBillingPanelOpen(true)}
+                onOpenBilling={canUseCustomerBilling ? openCustomerBillingPanel : undefined}
                 runtimeSummary={topbarRuntimeSummaryText}
                 showRuntimeSummary={!isExternalPortalUser}
                 showAdvancedSettings={!isExternalPortalUser}
@@ -8191,47 +8207,51 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               ) : null}
             </Modal>
 
-            <Drawer
-              placement="right"
-              title={null}
-              open={billingPanelOpen}
-              onClose={() => setBillingPanelOpen(false)}
-              width={isMobile ? "100%" : 440}
-              styles={{ body: { padding: 0 } }}
-              destroyOnHidden
-            >
-              <PortalBillingPanel
-                subscriptionStatus={subscriptionStatus}
-                onSubscriptionStatusChange={(nextStatus) => {
-                  if (nextStatus) setSubscriptionStatus(nextStatus);
-                }}
+            {canUseCustomerBilling ? (
+              <Drawer
+                placement="right"
+                title={null}
+                open={billingPanelOpen}
                 onClose={() => setBillingPanelOpen(false)}
-              />
-            </Drawer>
+                width={isMobile ? "100%" : 440}
+                styles={{ body: { padding: 0 } }}
+                destroyOnHidden
+              >
+                <PortalBillingPanel
+                  subscriptionStatus={subscriptionStatus}
+                  onSubscriptionStatusChange={(nextStatus) => {
+                    if (nextStatus) setSubscriptionStatus(nextStatus);
+                  }}
+                  onClose={() => setBillingPanelOpen(false)}
+                />
+              </Drawer>
+            ) : null}
 
-            <Modal
-              open={subscriptionReminderModalOpen}
-              title={blockedSubscriptionStatus ? "Access expired" : "Renew Agent Studio"}
-              okText={blockedSubscriptionStatus ? "Renew now" : "Choose renewal"}
-              cancelText="Later"
-              onOk={() => {
-                setSubscriptionReminderModalOpen(false);
-                setBillingPanelOpen(true);
-              }}
-              onCancel={() => {
-                setDismissedSubscriptionReminderKey(subscriptionReminderKey);
-                setSubscriptionReminderModalOpen(false);
-              }}
-              destroyOnHidden
-            >
-              <div className="portal-billing-reminder-modal">
-                <p>{(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.detail || (blockedSubscriptionStatus ?? subscriptionReminderStatus)?.summary}</p>
-                {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
-                  <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
-                ) : null}
-                <p>Plus includes 300 AI requests per month. Pro includes 1000 AI requests per month. Annual prepaid plans reduce the total yearly payment.</p>
-              </div>
-            </Modal>
+            {canUseCustomerBilling ? (
+              <Modal
+                open={subscriptionReminderModalOpen}
+                title={blockedSubscriptionStatus ? "Access expired" : "Renew Agent Studio"}
+                okText={blockedSubscriptionStatus ? "Renew now" : "Choose renewal"}
+                cancelText="Later"
+                onOk={() => {
+                  setSubscriptionReminderModalOpen(false);
+                  openCustomerBillingPanel();
+                }}
+                onCancel={() => {
+                  setDismissedSubscriptionReminderKey(subscriptionReminderKey);
+                  setSubscriptionReminderModalOpen(false);
+                }}
+                destroyOnHidden
+              >
+                <div className="portal-billing-reminder-modal">
+                  <p>{(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.detail || (blockedSubscriptionStatus ?? subscriptionReminderStatus)?.summary}</p>
+                  {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
+                    <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
+                  ) : null}
+                  <p>Plus includes 300 AI requests per month. Pro includes 1000 AI requests per month. Annual prepaid plans reduce the total yearly payment.</p>
+                </div>
+              </Modal>
+            ) : null}
 
             {!isExternalPortalUser ? (
               <AdvancedSettingsPanel

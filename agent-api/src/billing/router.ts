@@ -60,6 +60,26 @@ function currentBillingOrganization(req: Request) {
   };
 }
 
+function requirePortalBillingCustomer(req: Request, res: Response) {
+  const organization = req.currentOrganization;
+  if (!req.currentUser) {
+    res.status(401).json({ detail: "Unauthorized" });
+    return null;
+  }
+  if (!organization?.id) {
+    res.status(403).json({ detail: "Organization context is required" });
+    return null;
+  }
+  if (req.currentUser.userType !== "external_user" || organization.type !== "customer") {
+    res.status(403).json({ detail: "Customer billing is only available to external customer organizations" });
+    return null;
+  }
+  return {
+    organization: currentBillingOrganization(req),
+    user: currentBillingUser(req)
+  };
+}
+
 function portalSubscriptionStatusPayload(status: Awaited<ReturnType<SubscriptionEntitlementService["getPortalSubscriptionStatus"]>>) {
   return {
     accessState: status.accessState,
@@ -265,8 +285,9 @@ export function createPortalBillingRouter(
 
   router.get("/billing/summary", async (req: Request, res: Response) => {
     try {
-      const organization = currentBillingOrganization(req);
-      const user = currentBillingUser(req);
+      const actor = requirePortalBillingCustomer(req, res);
+      if (!actor) return;
+      const { organization, user } = actor;
       const [billing, subscriptionStatus] = await Promise.all([
         service.getPortalSummary({ organization, user }),
         options.subscriptionEntitlements
@@ -291,8 +312,9 @@ export function createPortalBillingRouter(
 
   router.post("/billing/promotion/preview", async (req: Request, res: Response) => {
     try {
-      const organization = currentBillingOrganization(req);
-      const user = currentBillingUser(req);
+      const actor = requirePortalBillingCustomer(req, res);
+      if (!actor) return;
+      const { organization, user } = actor;
       const billing = await service.getPortalSummary({ organization, user });
       const planId = trimOrUndefined(req.body?.planId);
       if (!planId) {
@@ -314,14 +336,16 @@ export function createPortalBillingRouter(
 
   router.post("/billing/checkout", async (req: Request, res: Response) => {
     try {
+      const actor = requirePortalBillingCustomer(req, res);
+      if (!actor) return;
       const planId = trimOrUndefined(req.body?.planId);
       if (!planId) {
         res.status(400).json({ detail: "planId is required" });
         return;
       }
       const result = await service.createPortalCheckout({
-        organization: currentBillingOrganization(req),
-        user: currentBillingUser(req),
+        organization: actor.organization,
+        user: actor.user,
         planId,
         promotionCode: req.body?.promotionCode,
         autoRenew: parseBoolean(req.body?.autoRenew, true)
