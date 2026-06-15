@@ -1597,8 +1597,20 @@ async function materializeSharedCodexHomeForSessionRecord(input: {
   session: SessionRecord;
   codexRunConfig?: Record<string, unknown>;
 }): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> } | undefined> {
-  const organizationId = trimOrUndefined(input.session.organizationId);
-  const userId = trimOrUndefined(input.session.userId);
+  return materializeSharedCodexHomeForRuntimeOwner({
+    organizationId: input.session.organizationId,
+    userId: input.session.userId,
+    codexRunConfig: input.codexRunConfig
+  });
+}
+
+async function materializeSharedCodexHomeForRuntimeOwner(input: {
+  organizationId?: string | null;
+  userId?: string | null;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> } | undefined> {
+  const organizationId = trimOrUndefined(input.organizationId);
+  const userId = trimOrUndefined(input.userId);
   if (!organizationId || !userId) {
     return undefined;
   }
@@ -3522,16 +3534,26 @@ async function createSession(options: SessionOptions, threadId?: string, timing?
       ? ensureThreadUploadDirsInRunConfig(options.codexRunConfig, threadId, options.workspace)
       : options.codexRunConfig
   );
+  const existingCodexHome = options.codexHome ?? codexHomeFromRunConfig(sessionCodexRunConfig);
   const materializedCodexHome =
-    options.codexHome
-      ? { codexHome: options.codexHome, codexRunConfig: withRunConfigCodexHome(sessionCodexRunConfig, options.codexHome) }
-      : await time("create_session.materialize_codex_home", () =>
+    existingCodexHome
+      ? { codexHome: existingCodexHome, codexRunConfig: withRunConfigCodexHome(sessionCodexRunConfig, existingCodexHome) }
+      : (
+          await time("create_session.materialize_shared_codex_home", () =>
+            materializeSharedCodexHomeForRuntimeOwner({
+              organizationId: options.organizationId,
+              userId: options.userId,
+              codexRunConfig: sessionCodexRunConfig
+            })
+          )
+        ) ??
+        await time("create_session.materialize_codex_home", () =>
           materializeCodexHomeForRunConfig({
             scopeId: threadId ? `thread-${threadId}` : `session-${randomUUID()}`,
             codexRunConfig: sessionCodexRunConfig
           })
         );
-  if (options.codexHome) {
+  if (existingCodexHome) {
     timing?.mark("create_session.reuse_codex_home", { threadId });
   }
 
@@ -3920,12 +3942,16 @@ async function ensureThreadSession(
     codexRunConfig: materializedCodexHome.codexRunConfig,
     codexHome: materializedCodexHome.codexHome
   };
+  const persistedThreadCodexRunConfig = withRunConfigCodexHome(
+    desiredBaseCodexRunConfig,
+    materializedCodexHome.codexHome
+  );
 
   const shouldPersistNormalizedThread =
     thread.model !== desired.model ||
     thread.reasoningEffort !== desired.reasoningEffort ||
     thread.workspace !== desired.workspace ||
-    stableJson(thread.codexRunConfig) !== stableJson(desiredBaseCodexRunConfig);
+    stableJson(thread.codexRunConfig) !== stableJson(persistedThreadCodexRunConfig);
 
   if (
     patch?.model ||
@@ -3939,7 +3965,7 @@ async function ensureThreadSession(
         model: desired.model,
         reasoningEffort: desired.reasoningEffort,
         workspace: desired.workspace,
-        codexRunConfig: desiredBaseCodexRunConfig
+        codexRunConfig: persistedThreadCodexRunConfig
       })
     );
   }
@@ -4612,6 +4638,17 @@ async function ensureZendeskAuditThread(input: {
     ticketId: input.ticketId,
     externalConversationKey
   });
+  const existingThreadCodexHome = codexHomeFromRunConfig(runConfig);
+  const persistedRunConfig = existingThreadCodexHome
+    ? withRunConfigCodexHome(runConfig, existingThreadCodexHome)
+    : (
+        await materializeSharedIntegrationCodexHomeForRunConfig({
+          provider: ZENDESK_CHANNEL,
+          integrationInstanceId: instanceId,
+          modeId: agentModeId,
+          codexRunConfig: runConfig
+        })
+      ).codexRunConfig;
   const title = zendeskConversationTitle(input.context);
   if (!thread) {
     const threadId = randomUUID().replace(/-/g, "");
@@ -4623,7 +4660,7 @@ async function ensureZendeskAuditThread(input: {
       model: input.runtime.model,
       reasoningEffort: input.runtime.reasoningEffort,
       workspace: input.runtime.workspace,
-      codexRunConfig: runConfig
+      codexRunConfig: persistedRunConfig
     });
   } else {
     const shouldUpdateThread =
@@ -4631,14 +4668,14 @@ async function ensureZendeskAuditThread(input: {
       thread.model !== input.runtime.model ||
       thread.reasoningEffort !== input.runtime.reasoningEffort ||
       thread.workspace !== input.runtime.workspace ||
-      stableJson(thread.codexRunConfig) !== stableJson(runConfig);
+      stableJson(thread.codexRunConfig) !== stableJson(persistedRunConfig);
     if (shouldUpdateThread) {
       thread = await threads.update(thread.id, {
         title,
         model: input.runtime.model,
         reasoningEffort: input.runtime.reasoningEffort,
         workspace: input.runtime.workspace,
-        codexRunConfig: runConfig
+        codexRunConfig: persistedRunConfig
       });
     }
   }
@@ -5322,27 +5359,31 @@ async function ensureDingTalkBotThreadSession(input: {
     instance: input.instance,
     workspacePath
   });
-
-  const shouldPersistThread =
-    input.thread.model !== desired.model ||
-    input.thread.reasoningEffort !== desired.reasoningEffort ||
-    input.thread.workspace !== desired.workspace ||
-    stableJson(input.thread.codexRunConfig) !== stableJson(desired.baseCodexRunConfig);
-  if (shouldPersistThread) {
-    await threads.update(input.thread.id, {
-      model: desired.model,
-      reasoningEffort: desired.reasoningEffort,
-      workspace: desired.workspace,
-      codexRunConfig: desired.baseCodexRunConfig
-    });
-  }
-
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desired.baseCodexRunConfig, input.thread.id, workspacePath);
   const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
     currentUser: input.currentUser,
     modeId: agentModeId,
     codexRunConfig: desiredCodexRunConfig
   });
+  const persistedThreadCodexRunConfig = withRunConfigCodexHome(
+    desired.baseCodexRunConfig,
+    materializedCodexHome.codexHome
+  );
+
+  const shouldPersistThread =
+    input.thread.model !== desired.model ||
+    input.thread.reasoningEffort !== desired.reasoningEffort ||
+    input.thread.workspace !== desired.workspace ||
+    stableJson(input.thread.codexRunConfig) !== stableJson(persistedThreadCodexRunConfig);
+  if (shouldPersistThread) {
+    await threads.update(input.thread.id, {
+      model: desired.model,
+      reasoningEffort: desired.reasoningEffort,
+      workspace: desired.workspace,
+      codexRunConfig: persistedThreadCodexRunConfig
+    });
+  }
+
   const desiredSession: SessionOptions = {
     ...desired,
     codexRunConfig: materializedCodexHome.codexRunConfig,
@@ -5437,6 +5478,16 @@ async function createDingTalkBotThread(input: {
     instance: input.instance,
     workspacePath
   });
+  const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(options.baseCodexRunConfig, threadId, workspacePath);
+  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
+    currentUser: input.currentUser,
+    modeId: agentModeId,
+    codexRunConfig: desiredCodexRunConfig
+  });
+  const persistedThreadCodexRunConfig = withRunConfigCodexHome(
+    options.baseCodexRunConfig,
+    materializedCodexHome.codexHome
+  );
   const thread = await threads.create({
     id: threadId,
     organizationId: input.currentUser.organizationId,
@@ -5446,13 +5497,7 @@ async function createDingTalkBotThread(input: {
     model: options.model,
     reasoningEffort: options.reasoningEffort,
     workspace: options.workspace,
-    codexRunConfig: options.baseCodexRunConfig
-  });
-  const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(options.baseCodexRunConfig, thread.id, workspacePath);
-  const materializedCodexHome = await materializeUserAgentCodexHomeForRunConfig({
-    currentUser: input.currentUser,
-    modeId: agentModeId,
-    codexRunConfig: desiredCodexRunConfig
+    codexRunConfig: persistedThreadCodexRunConfig
   });
   await createSession({
     ...options,
