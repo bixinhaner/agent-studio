@@ -317,7 +317,6 @@ async function main(): Promise<void> {
         or (
           ${options.includeMissingHome}::boolean
           and rs.provider = 'codex'
-          and rs.metadata->>'codexThreadId' is not null
           and rs.metadata->'codexRunConfig' is not null
           and not ((rs.metadata->'codexRunConfig')::jsonb ? '_agentStudioCodexHome')
         )
