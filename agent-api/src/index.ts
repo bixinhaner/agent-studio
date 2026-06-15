@@ -1528,7 +1528,15 @@ async function restoreLiveRuntimeThread(
           codexHome: existingCodexHome,
           codexRunConfig: withRunConfigCodexHome(sourceCodexRunConfig, existingCodexHome)
         }
-      : await time("restore_runtime.materialize_codex_home", () =>
+      : (
+          await time("restore_runtime.materialize_shared_codex_home", () =>
+            materializeSharedCodexHomeForSessionRecord({
+              session,
+              codexRunConfig: sourceCodexRunConfig
+            })
+          )
+        ) ??
+        await time("restore_runtime.materialize_codex_home", () =>
           materializeCodexHomeForRunConfig({
             scopeId: session.threadId ? `thread-${session.threadId}` : `session-${session.sessionId}`,
             codexRunConfig: sourceCodexRunConfig
@@ -1583,6 +1591,28 @@ async function restoreLiveRuntimeThread(
     });
     return undefined;
   }
+}
+
+async function materializeSharedCodexHomeForSessionRecord(input: {
+  session: SessionRecord;
+  codexRunConfig?: Record<string, unknown>;
+}): Promise<{ codexHome: string; codexRunConfig?: Record<string, unknown> } | undefined> {
+  const organizationId = trimOrUndefined(input.session.organizationId);
+  const userId = trimOrUndefined(input.session.userId);
+  if (!organizationId || !userId) {
+    return undefined;
+  }
+  const organization = await organizations.getById(organizationId).catch(() => undefined);
+  const modeId = modeIdFromRunConfig(input.codexRunConfig) ?? "default";
+  return await materializeSharedCodexHomeForRunConfig({
+    currentUser: {
+      id: userId,
+      organizationId,
+      organizationSlug: organization?.slug
+    },
+    modeId,
+    codexRunConfig: input.codexRunConfig
+  });
 }
 
 async function refreshLiveRuntimeThread(session: SessionRecord): Promise<SessionRecord | undefined> {

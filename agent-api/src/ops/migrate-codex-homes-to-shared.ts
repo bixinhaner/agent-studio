@@ -50,6 +50,7 @@ type CopyStats = {
 
 type CliOptions = {
   apply: boolean;
+  includeMissingHome: boolean;
   limit?: number;
   skipZendesk: boolean;
 };
@@ -58,16 +59,17 @@ const STATE_DIRECTORIES_TO_MERGE = ["sessions", "memories", "shell_snapshots"];
 
 function usage(): never {
   console.error([
-    "Usage: node dist/ops/migrate-codex-homes-to-shared.js [--dry-run|--apply] [--limit <n>] [--skip-zendesk]",
+    "Usage: node dist/ops/migrate-codex-homes-to-shared.js [--dry-run|--apply] [--include-missing-home] [--limit <n>] [--skip-zendesk]",
     "",
     "Migrates historical per-thread/per-workspace CODEX_HOME references to shared CODEX_HOME scopes.",
-    "Dry-run is the default. --apply materializes target homes, merges session state, and updates DB references."
+    "Dry-run is the default. --apply materializes target homes, merges session state, and updates DB references.",
+    "--include-missing-home also backfills old records that predate _agentStudioCodexHome metadata."
   ].join("\n"));
   process.exit(2);
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const out: CliOptions = { apply: false, skipZendesk: false };
+  const out: CliOptions = { apply: false, includeMissingHome: false, skipZendesk: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") {
@@ -76,6 +78,10 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--apply") {
       out.apply = true;
+      continue;
+    }
+    if (arg === "--include-missing-home") {
+      out.includeMissingHome = true;
       continue;
     }
     if (arg === "--skip-zendesk") {
@@ -306,7 +312,15 @@ async function main(): Promise<void> {
       from runtime_sessions rs
       left join threads t on t.id = rs.thread_id
       left join organizations o on o.id = coalesce(rs.organization_id, t.organization_id)
-      where (rs.metadata->'codexRunConfig')::jsonb ? '_agentStudioCodexHome'
+      where
+        (rs.metadata->'codexRunConfig')::jsonb ? '_agentStudioCodexHome'
+        or (
+          ${options.includeMissingHome}::boolean
+          and rs.provider = 'codex'
+          and rs.metadata->>'codexThreadId' is not null
+          and rs.metadata->'codexRunConfig' is not null
+          and not ((rs.metadata->'codexRunConfig')::jsonb ? '_agentStudioCodexHome')
+        )
       union all
       select
         'thread' as "source",
@@ -320,7 +334,13 @@ async function main(): Promise<void> {
         th.codex_run_config->>'_agentStudioCodexHome' as "currentHome"
       from threads th
       left join organizations o on o.id = th.organization_id
-      where th.codex_run_config::jsonb ? '_agentStudioCodexHome'
+      where
+        th.codex_run_config::jsonb ? '_agentStudioCodexHome'
+        or (
+          ${options.includeMissingHome}::boolean
+          and th.codex_run_config is not null
+          and not (th.codex_run_config::jsonb ? '_agentStudioCodexHome')
+        )
       order by "source", "recordId"
     `;
 
@@ -336,6 +356,7 @@ async function main(): Promise<void> {
       skippedMissingConfig: 0,
       skippedMissingTarget: 0,
       skippedZendesk: 0,
+      missingHomeBackfills: 0,
       plannedReferences: 0,
       updatedSessions: 0,
       updatedThreads: 0,
@@ -350,14 +371,17 @@ async function main(): Promise<void> {
 
       const currentHome = trimOrUndefined(row.currentHome);
       if (!currentHome) {
-        stats.skippedMissingHome += 1;
-        continue;
+        if (!options.includeMissingHome) {
+          stats.skippedMissingHome += 1;
+          continue;
+        }
+        stats.missingHomeBackfills += 1;
       }
-      if (!isLegacyTopLevelHome(rootPath, currentHome)) {
+      if (currentHome && !isLegacyTopLevelHome(rootPath, currentHome)) {
         stats.alreadyShared += 1;
         continue;
       }
-      if (!isUnderRoot(rootPath, currentHome)) {
+      if (currentHome && !isUnderRoot(rootPath, currentHome)) {
         stats.skippedNonLegacy += 1;
         continue;
       }
@@ -377,14 +401,16 @@ async function main(): Promise<void> {
         stats.skippedZendesk += 1;
         continue;
       }
-      if (path.resolve(currentHome) === path.resolve(target.targetHome)) {
+      if (currentHome && path.resolve(currentHome) === path.resolve(target.targetHome)) {
         stats.alreadyShared += 1;
         continue;
       }
 
       stats.plannedReferences += 1;
       targetHomes.add(target.targetHome);
-      oldSourceHomes.add(currentHome);
+      if (currentHome) {
+        oldSourceHomes.add(currentHome);
+      }
 
       if (!options.apply) continue;
 
@@ -399,14 +425,16 @@ async function main(): Promise<void> {
         materializedTargets.add(target.targetHome);
       }
 
-      const mergeKey = `${path.resolve(currentHome)}\n${path.resolve(target.targetHome)}`;
-      if (!mergedPairs.has(mergeKey)) {
-        const copyStats = await mergeCodexHomeState(currentHome, target.targetHome);
-        stats.mergeSources += 1;
-        stats.copyDirectoriesCreated += copyStats.directoriesCreated;
-        stats.copyFilesCopied += copyStats.filesCopied;
-        stats.copyFilesSkipped += copyStats.filesSkipped;
-        mergedPairs.add(mergeKey);
+      if (currentHome) {
+        const mergeKey = `${path.resolve(currentHome)}\n${path.resolve(target.targetHome)}`;
+        if (!mergedPairs.has(mergeKey)) {
+          const copyStats = await mergeCodexHomeState(currentHome, target.targetHome);
+          stats.mergeSources += 1;
+          stats.copyDirectoriesCreated += copyStats.directoriesCreated;
+          stats.copyFilesCopied += copyStats.filesCopied;
+          stats.copyFilesSkipped += copyStats.filesSkipped;
+          mergedPairs.add(mergeKey);
+        }
       }
 
       if (row.source === "session") {
@@ -434,6 +462,7 @@ async function main(): Promise<void> {
     printMetric("old_source_homes", oldSourceHomes.size);
     printMetric("already_shared_or_nonlegacy", stats.alreadyShared + stats.skippedNonLegacy);
     printMetric("skipped_missing_home", stats.skippedMissingHome);
+    printMetric("missing_home_backfills", stats.missingHomeBackfills);
     printMetric("skipped_missing_config", stats.skippedMissingConfig);
     printMetric("skipped_missing_target", stats.skippedMissingTarget);
     printMetric("skipped_zendesk", stats.skippedZendesk);
