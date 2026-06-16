@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireCurrentUser, userOut } from "./current-user.js";
 import { resolveDingTalkConfig, type DingTalkClient, type DingTalkConfig } from "./dingtalk.js";
+import { isInternalUserForEmail } from "./email-entry.js";
 import type { AuthEmailSender } from "./email.js";
 import {
   ensureInternalOrganization,
@@ -786,6 +787,24 @@ export function createAuthRouter(options: {
 
       if (invite && invite.email !== email) {
         res.status(400).json({ detail: "Invite email does not match" });
+        return;
+      }
+
+      const shouldUseInternalEntry =
+        !invite &&
+        (await isInternalUserForEmail({
+          users: options.users,
+          identities: options.identities,
+          memberships: options.memberships,
+          email
+        }));
+      if (shouldUseInternalEntry) {
+        res.json({
+          ok: true,
+          auth_entry: "internal",
+          redirect_path: "/login/internal",
+          email_hint: maskEmail(email)
+        });
         return;
       }
 

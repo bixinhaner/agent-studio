@@ -3,6 +3,11 @@ import { BuildingIcon } from "lucide-react";
 
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import { fetchInvite, type AuthInvite } from "./features/auth/api";
+import {
+  readPreferredAuthEntryMode,
+  rememberPreferredAuthEntryMode,
+  type AuthEntryMode
+} from "./features/auth/auth-entry-preference";
 import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import "./features/auth/auth.css";
@@ -23,7 +28,6 @@ const PublicSharePageLazy = lazy(() =>
 );
 
 type AppShellView = "portal" | "admin";
-type AuthEntryMode = "external" | "internal";
 
 const ADMIN_HASH_PREFIX = "#admin/";
 
@@ -65,6 +69,10 @@ function extractAiResponseReviewId(pathname: string): string | undefined {
 
 function isInternalLoginPath(pathname: string): boolean {
   return /^\/login\/internal\/?$/.test(pathname);
+}
+
+function isNeutralAuthEntryPath(pathname: string): boolean {
+  return /^\/?$/.test(pathname) || /^\/login\/?$/.test(pathname) || isInternalLoginPath(pathname);
 }
 
 function resolveAppShellView(hash: string, adminEligible: boolean): AppShellView {
@@ -126,6 +134,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   const [code, setCode] = useState("");
   const [emailHint, setEmailHint] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [entryNotice, setEntryNotice] = useState<string | null>(null);
   const [codeRequested, setCodeRequested] = useState(false);
   const [accessHelpOpen, setAccessHelpOpen] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
@@ -189,6 +198,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
 
   async function handleRequestEmailCode() {
     setFormError(null);
+    setEntryNotice(null);
     props.auth.clearError();
     if (!resolvedEmail) {
       setFormError("Enter your email address.");
@@ -201,6 +211,17 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
         email: resolvedEmail || undefined,
         inviteToken: activeInviteToken
       });
+      if (response.authEntry === "internal") {
+        rememberPreferredAuthEntryMode("internal");
+        setEmail(resolvedEmail);
+        setEmailHint(response.emailHint ?? null);
+        setCodeRequested(false);
+        setCode("");
+        setAccessHelpOpen(false);
+        setEntryNotice("This email belongs to an internal employee account. Use DingTalk single sign-on to continue.");
+        replaceLocationPath(response.redirectPath || "/login/internal");
+        return;
+      }
       if (resolvedEmail) {
         setEmail(resolvedEmail);
       }
@@ -288,7 +309,10 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               placeholder="Email address"
               autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEntryNotice(null);
+              }}
             />
 
             <button
@@ -314,7 +338,7 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
               Continue with DingTalk
             </button>
             <p className="auth-modern-hint">
-              Use DingTalk single sign-on to access the internal workspace and control console.
+              {entryNotice || "Use DingTalk single sign-on to access the internal workspace and control console."}
             </p>
           </div>
         ) : (
@@ -400,7 +424,13 @@ function AuthEntryCard(props: { auth: ReturnType<typeof useAuth>; inviteToken?: 
   );
 }
 
-function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aiResponseReviewId?: string; authMode: AuthEntryMode }) {
+function AppContent(props: {
+  pathname: string;
+  inviteToken?: string;
+  reviewRequestId?: string;
+  aiResponseReviewId?: string;
+  authMode: AuthEntryMode;
+}) {
   const auth = useAuth();
   const { branding } = useBranding();
   const adminEligible = useMemo(
@@ -456,6 +486,22 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aiR
     setView("portal");
   };
 
+  const effectiveAuthMode: AuthEntryMode =
+    !props.inviteToken &&
+    !props.reviewRequestId &&
+    !props.aiResponseReviewId &&
+    isNeutralAuthEntryPath(props.pathname) &&
+    readPreferredAuthEntryMode() === "internal"
+      ? "internal"
+      : props.authMode;
+
+  useEffect(() => {
+    if (auth.loading || auth.user) return;
+    if (effectiveAuthMode !== "internal") return;
+    if (!isNeutralAuthEntryPath(props.pathname) || isInternalLoginPath(props.pathname)) return;
+    replaceLocationPath("/login/internal");
+  }, [auth.loading, auth.user, effectiveAuthMode, props.pathname]);
+
   if (auth.loading) {
     return (
       <div className="auth-modern-screen" aria-live="polite">
@@ -469,7 +515,7 @@ function AppContent(props: { inviteToken?: string; reviewRequestId?: string; aiR
   }
 
   if (!auth.user) {
-    return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} mode={props.authMode} />;
+    return <AuthEntryCard auth={auth} inviteToken={props.inviteToken} mode={effectiveAuthMode} />;
   }
 
   if (props.reviewRequestId) {
@@ -524,7 +570,13 @@ function AppRoutes() {
   const accessRequestToken = extractAccessRequestToken(pathname);
   const reviewRequestId = extractAccessRequestReviewId(pathname);
   const aiResponseReviewId = extractAiResponseReviewId(pathname);
-  const authMode: AuthEntryMode = reviewRequestId || aiResponseReviewId || isInternalLoginPath(pathname) ? "internal" : "external";
+  const authMode: AuthEntryMode =
+    reviewRequestId ||
+    aiResponseReviewId ||
+    isInternalLoginPath(pathname) ||
+    (isNeutralAuthEntryPath(pathname) && readPreferredAuthEntryMode() === "internal")
+      ? "internal"
+      : "external";
 
   if (publicShareToken) {
     return (
@@ -545,6 +597,7 @@ function AppRoutes() {
   return (
     <AuthProvider>
       <AppContent
+        pathname={pathname}
         inviteToken={inviteToken}
         reviewRequestId={reviewRequestId}
         aiResponseReviewId={aiResponseReviewId}

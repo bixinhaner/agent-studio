@@ -21,6 +21,7 @@ import {
   type AuthUser,
   type EmailRequestResponse
 } from "./api";
+import { rememberPreferredAuthEntryMode, rememberSessionAuthEntryMode } from "./auth-entry-preference";
 
 type AuthContextValue = {
   loading: boolean;
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState<string | null>(null);
 
   function applySession(next: AuthSession | null) {
+    rememberSessionAuthEntryMode(next);
     setSession(next);
   }
 
@@ -158,6 +160,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setError(null);
     try {
       const { config } = await fetchDingTalkConfig();
+      rememberPreferredAuthEntryMode("internal");
       window.sessionStorage.setItem(DINGTALK_NONCE_KEY, config.nonce);
       window.sessionStorage.setItem(POST_AUTH_REDIRECT_KEY, `${window.location.pathname}${window.location.hash}`);
       redirectTo(buildDingTalkAuthorizeUrl(config));

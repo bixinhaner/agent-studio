@@ -116,12 +116,16 @@ type EmailRequestPayload = {
   ok: boolean;
   challenge_id?: string | null;
   email_hint?: string | null;
+  auth_entry?: "external" | "internal" | null;
+  redirect_path?: string | null;
 };
 
 export type EmailRequestResponse = {
   ok: boolean;
   challengeId?: string;
   emailHint?: string;
+  authEntry?: "external" | "internal";
+  redirectPath?: string;
 };
 
 type InvitePayload = {
@@ -239,7 +243,9 @@ function normalizeEmailRequest(payload: EmailRequestPayload): EmailRequestRespon
   return {
     ok: Boolean(payload.ok),
     challengeId: trimOrUndefined(payload.challenge_id),
-    emailHint: trimOrUndefined(payload.email_hint)
+    emailHint: trimOrUndefined(payload.email_hint),
+    authEntry: payload.auth_entry === "internal" || payload.auth_entry === "external" ? payload.auth_entry : undefined,
+    redirectPath: trimOrUndefined(payload.redirect_path)
   };
 }
 
