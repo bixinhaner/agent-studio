@@ -37,10 +37,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  bindAdminBillingStripeCustomer,
   createAdminBillingPaymentLink,
   createAdminPromotionCode,
   fetchAdminBillingOverview,
   grantAdminBillingGiftDays,
+  lookupAdminBillingStripeCustomer,
   patchAdminBillingEmailSettings,
   patchAdminBillingPlan,
   patchAdminBillingEmailRule,
@@ -174,6 +176,22 @@ function statusColor(status?: string | null): string {
       return "warning";
     case "canceled":
     case "disabled":
+      return "default";
+    default:
+      return "default";
+  }
+}
+
+function stripeLookupStatusColor(status?: string | null): string {
+  switch (status) {
+    case "matched":
+      return "success";
+    case "multiple":
+      return "warning";
+    case "error":
+      return "error";
+    case "not_found":
+    case "skipped":
       return "default";
     default:
       return "default";
@@ -457,6 +475,7 @@ export function BillingWorkspace() {
   const [stripeForm, setStripeForm] = useState<StripeSettingsFormState>(createStripeSettingsFormState());
   const [selectedOrder, setSelectedOrder] = useState<AdminBillingOrder | null>(null);
   const [selectedAutoRenewalId, setSelectedAutoRenewalId] = useState("");
+  const [manualStripeCustomerId, setManualStripeCustomerId] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function loadData(silent = false) {
@@ -500,6 +519,10 @@ export function BillingWorkspace() {
   const selectedAccount = useMemo(() => {
     return data?.customers.find((item) => item.organization.id === selectedOrganizationId) ?? filteredCustomers[0] ?? null;
   }, [data?.customers, filteredCustomers, selectedOrganizationId]);
+
+  useEffect(() => {
+    setManualStripeCustomerId(selectedAccount?.billingCustomer?.stripeCustomerId ?? "");
+  }, [selectedAccount?.billingCustomer?.id, selectedAccount?.billingCustomer?.stripeCustomerId]);
 
   const planOptions = useMemo(
     () => (data?.plans ?? []).map((plan) => ({ label: `${plan.name} · ${planBillingLabel(plan)}`, value: plan.id })),
@@ -854,6 +877,54 @@ export function BillingWorkspace() {
     }
   }
 
+  async function handleLookupStripeCustomer(account: AdminBillingCustomerAccount | null) {
+    const billingCustomerId = account?.billingCustomer?.id;
+    if (!billingCustomerId) {
+      setErrorText("请先创建该客户的计费档案，再执行 Stripe Customer 查找");
+      return;
+    }
+    setSaving(true);
+    setErrorText("");
+    try {
+      const billingCustomer = await lookupAdminBillingStripeCustomer(billingCustomerId);
+      const status = billingCustomer?.stripeCustomerLookup?.status ?? "unknown";
+      setSuccessText(
+        status === "matched"
+          ? `已绑定 Stripe Customer：${billingCustomer?.stripeCustomerId ?? billingCustomer?.stripeCustomerLookup?.stripeCustomerId ?? ""}`
+          : `Stripe Customer 查找完成：${status}`
+      );
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "查找 Stripe Customer 失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleBindStripeCustomer(account: AdminBillingCustomerAccount | null, stripeCustomerId: string) {
+    const billingCustomerId = account?.billingCustomer?.id;
+    const normalizedCustomerId = stripeCustomerId.trim();
+    if (!billingCustomerId) {
+      setErrorText("请先创建该客户的计费档案，再绑定 Stripe Customer");
+      return;
+    }
+    if (!normalizedCustomerId) {
+      setErrorText("请输入 Stripe Customer ID");
+      return;
+    }
+    setSaving(true);
+    setErrorText("");
+    try {
+      const billingCustomer = await bindAdminBillingStripeCustomer(billingCustomerId, normalizedCustomerId);
+      setSuccessText(`已绑定 Stripe Customer：${billingCustomer?.stripeCustomerId ?? normalizedCustomerId}`);
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "绑定 Stripe Customer 失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openPlanBillingModal(plan: AdminBillingPlan) {
     setEditingPlan(plan);
     setPlanBillingForm(createPlanBillingFormState(plan));
@@ -922,7 +993,60 @@ export function BillingWorkspace() {
       </div>
       <div className="admin-billing-detail-section">
         <h3>Stripe</h3>
-        <p>Customer：{selectedAccount.billingCustomer?.stripeCustomerId ?? "未绑定"}</p>
+        <div className="admin-billing-stripe-bind">
+          <div>
+            <span>Customer</span>
+            <strong>{selectedAccount.billingCustomer?.stripeCustomerId ?? "未绑定"}</strong>
+          </div>
+          <Button
+            size="small"
+            icon={<Search size={14} />}
+            disabled={saving || !selectedAccount.billingCustomer}
+            onClick={() => void handleLookupStripeCustomer(selectedAccount)}
+          >
+            Lookup
+          </Button>
+        </div>
+        {selectedAccount.billingCustomer?.stripeCustomerLookup ? (
+          <div className="admin-billing-stripe-lookup">
+            <Tag color={stripeLookupStatusColor(selectedAccount.billingCustomer.stripeCustomerLookup.status)}>
+              {selectedAccount.billingCustomer.stripeCustomerLookup.status}
+            </Tag>
+            <span>{selectedAccount.billingCustomer.stripeCustomerLookup.email ?? "no email"}</span>
+            <span>{formatLocalTime(selectedAccount.billingCustomer.stripeCustomerLookup.checkedAt)}</span>
+            {selectedAccount.billingCustomer.stripeCustomerLookup.message ? (
+              <p>{selectedAccount.billingCustomer.stripeCustomerLookup.message}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {selectedAccount.billingCustomer?.stripeCustomerLookup?.candidates?.length ? (
+          <div className="admin-billing-stripe-candidates">
+            {selectedAccount.billingCustomer.stripeCustomerLookup.candidates.map((candidate) => (
+              <div key={candidate.id} className="admin-billing-stripe-candidate">
+                <div>
+                  <strong>{candidate.id}</strong>
+                  <span>{[candidate.email, candidate.name, candidate.defaultPaymentMethod ? "has payment method" : ""].filter(Boolean).join(" · ")}</span>
+                </div>
+                <Button
+                  size="small"
+                  disabled={saving || selectedAccount.billingCustomer?.stripeCustomerId === candidate.id}
+                  onClick={() => void handleBindStripeCustomer(selectedAccount, candidate.id)}
+                >
+                  Bind
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <Input.Search
+          size="small"
+          value={manualStripeCustomerId}
+          placeholder="cus_..."
+          enterButton="Bind"
+          disabled={saving || !selectedAccount.billingCustomer}
+          onChange={(event) => setManualStripeCustomerId(event.target.value)}
+          onSearch={(value) => void handleBindStripeCustomer(selectedAccount, value)}
+        />
         <p>Subscription：{selectedAccount.autoRenewal?.stripeSubscriptionId ?? "未创建"}</p>
         <p>Next renewal：{formatLocalTime(selectedAccount.autoRenewal?.nextRenewalAt)}</p>
       </div>

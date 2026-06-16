@@ -15,11 +15,24 @@ function createBillingConfig() {
   };
 }
 
-function createDbMock() {
+function withoutUndefined(input: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+}
+
+function createDbMock(initialBillingCustomer: Record<string, unknown> | null = null) {
   const now = new Date("2026-06-12T00:00:00.000Z");
   let instance: Record<string, unknown> | null = null;
   let configRow: Record<string, unknown> | null = null;
   let secretRow: Record<string, unknown> | null = null;
+  let billingCustomer: Record<string, unknown> | null = initialBillingCustomer
+    ? {
+        createdAt: now,
+        updatedAt: now,
+        defaultAutoRenew: true,
+        metadataJson: null,
+        ...initialBillingCustomer
+      }
+    : null;
 
   const db = {
     integrationInstance: {
@@ -56,6 +69,53 @@ function createDbMock() {
     },
     subscriptionPlan: {
       findMany: vi.fn(async () => [])
+    },
+    accessRequest: {
+      findFirst: vi.fn(async () => null)
+    },
+    billingCustomer: {
+      findUnique: vi.fn(async (args: { where: { organizationId?: string; stripeCustomerId?: string; id?: string } }) => {
+        if (!billingCustomer) return null;
+        if (args.where.organizationId) return billingCustomer.organizationId === args.where.organizationId ? billingCustomer : null;
+        if (args.where.stripeCustomerId) return billingCustomer.stripeCustomerId === args.where.stripeCustomerId ? billingCustomer : null;
+        if (args.where.id) return billingCustomer.id === args.where.id ? billingCustomer : null;
+        return null;
+      }),
+      upsert: vi.fn(async (args: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        billingCustomer = billingCustomer
+          ? {
+              ...billingCustomer,
+              ...withoutUndefined(args.update),
+              updatedAt: now
+            }
+          : {
+              id: "billing-customer-1",
+              ...args.create,
+              createdAt: now,
+              updatedAt: now
+            };
+        return billingCustomer;
+      }),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        billingCustomer = {
+          id: args.where.id,
+          organizationId: "org-1",
+          businessEmail: "customer@example.com",
+          billingEmail: "customer@example.com",
+          companyName: null,
+          contactName: null,
+          countryRegion: null,
+          sn: null,
+          salesContact: null,
+          defaultAutoRenew: true,
+          metadataJson: null,
+          createdAt: now,
+          ...billingCustomer,
+          ...withoutUndefined(args.data),
+          updatedAt: now
+        };
+        return billingCustomer;
+      })
     },
     billingEmailRule: {
       findMany: vi.fn(async () => [])
@@ -209,5 +269,117 @@ describe("BillingService Stripe admin settings", () => {
     const subscriptionBody = fetchMock.mock.calls[2]?.[1]?.body as URLSearchParams;
     expect(subscriptionBody.get("items[0][price_data][product]")).toBe("as_plan_plan_123");
     expect(subscriptionBody.has("items[0][price_data][product_data][name]")).toBe(false);
+  });
+
+  it("links a unique existing Stripe customer before checkout", async () => {
+    const { db, raw } = createDbMock();
+    const service = new BillingService({ db, config: createBillingConfig() });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      data: [
+        {
+          id: "cus_existing_123",
+          email: "customer@example.com",
+          name: "Customer Inc",
+          invoice_settings: { default_payment_method: "pm_saved_123" },
+          created: 1781452800
+        }
+      ],
+      has_more: false
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const customer = await (service as unknown as {
+        ensureBillingCustomerForOrganization(input: {
+          organization: { id: string; name: string; slug: string; type: string };
+          user: { id: string; email: string; displayName: string };
+        }): Promise<Record<string, unknown>>;
+      }).ensureBillingCustomerForOrganization({
+        organization: { id: "org-1", name: "Customer Inc", slug: "customer", type: "customer" },
+        user: { id: "user-1", email: "customer@example.com", displayName: "Customer User" }
+      });
+
+      expect(customer.stripeCustomerId).toBe("cus_existing_123");
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/customers/search?");
+      const upsertArgs = raw.billingCustomer.upsert.mock.calls[0]?.[0] as unknown as { create: { metadataJson: Record<string, unknown> } };
+      expect(upsertArgs.create.metadataJson.stripeCustomerLookup).toMatchObject({
+        status: "matched",
+        email: "customer@example.com",
+        stripeCustomerId: "cus_existing_123"
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not auto-bind when Stripe has multiple customers for the same email", async () => {
+    const { db, raw } = createDbMock();
+    const service = new BillingService({ db, config: createBillingConfig() });
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      data: [
+        { id: "cus_existing_1", email: "customer@example.com", name: "Customer A" },
+        { id: "cus_existing_2", email: "customer@example.com", name: "Customer B" }
+      ],
+      has_more: false
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const customer = await (service as unknown as {
+        ensureBillingCustomerForOrganization(input: {
+          organization: { id: string; name: string; slug: string; type: string };
+          user: { id: string; email: string; displayName: string };
+        }): Promise<Record<string, unknown>>;
+      }).ensureBillingCustomerForOrganization({
+        organization: { id: "org-1", name: "Customer Inc", slug: "customer", type: "customer" },
+        user: { id: "user-1", email: "customer@example.com", displayName: "Customer User" }
+      });
+
+      expect(customer.stripeCustomerId).toBeNull();
+      const upsertArgs = raw.billingCustomer.upsert.mock.calls[0]?.[0] as unknown as { create: { metadataJson: Record<string, unknown> } };
+      expect(upsertArgs.create.metadataJson.stripeCustomerLookup).toMatchObject({
+        status: "multiple",
+        email: "customer@example.com"
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps an existing Agent Studio Stripe customer binding without lookup", async () => {
+    const { db } = createDbMock({
+      id: "billing-customer-1",
+      organizationId: "org-1",
+      businessEmail: "customer@example.com",
+      billingEmail: "customer@example.com",
+      companyName: "Customer Inc",
+      contactName: null,
+      countryRegion: null,
+      sn: null,
+      salesContact: null,
+      stripeCustomerId: "cus_already_bound",
+      defaultAutoRenew: true,
+      metadataJson: { inferredFrom: "current_user" }
+    });
+    const service = new BillingService({ db, config: createBillingConfig() });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const customer = await (service as unknown as {
+        ensureBillingCustomerForOrganization(input: {
+          organization: { id: string; name: string; slug: string; type: string };
+          user: { id: string; email: string; displayName: string };
+        }): Promise<Record<string, unknown>>;
+      }).ensureBillingCustomerForOrganization({
+        organization: { id: "org-1", name: "Customer Inc", slug: "customer", type: "customer" },
+        user: { id: "user-1", email: "customer@example.com", displayName: "Customer User" }
+      });
+
+      expect(customer.stripeCustomerId).toBe("cus_already_bound");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

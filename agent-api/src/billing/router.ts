@@ -223,6 +223,30 @@ export function createAdminBillingRouter(service: BillingService): Router {
     }
   });
 
+  router.post("/billing/customers/:billingCustomerId/stripe-customer/lookup", async (req: Request, res: Response) => {
+    try {
+      const billingCustomer = await service.lookupStripeCustomerForBillingCustomer({
+        billingCustomerId: req.params.billingCustomerId
+      });
+      res.json({ billingCustomer });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.patch("/billing/customers/:billingCustomerId/stripe-customer", async (req: Request, res: Response) => {
+    try {
+      const billingCustomer = await service.bindBillingCustomerToStripeCustomer({
+        billingCustomerId: req.params.billingCustomerId,
+        stripeCustomerId: String(req.body?.stripeCustomerId ?? ""),
+        userId: req.currentUser?.id ?? null
+      });
+      res.json({ billingCustomer });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/billing/gift-days", async (req: Request, res: Response) => {
     try {
       const organizationId = trimOrUndefined(req.body?.organizationId);

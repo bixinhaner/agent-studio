@@ -71,6 +71,20 @@ export type AdminBillingCustomer = {
   salesContact?: string | null;
   billingEmail?: string | null;
   stripeCustomerId?: string | null;
+  stripeCustomerLookup?: {
+    status: "skipped" | "matched" | "multiple" | "not_found" | "error" | string;
+    checkedAt?: string | null;
+    email?: string | null;
+    stripeCustomerId?: string | null;
+    message?: string | null;
+    candidates?: Array<{
+      id: string;
+      email?: string | null;
+      name?: string | null;
+      defaultPaymentMethod?: string | null;
+      createdAt?: string | null;
+    }>;
+  } | null;
   defaultAutoRenew: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;

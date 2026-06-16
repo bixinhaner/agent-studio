@@ -66,6 +66,25 @@ type StripeProduct = {
   active?: boolean | null;
 };
 
+type StripeCustomer = {
+  id: string;
+  email?: string | null;
+  name?: string | null;
+  deleted?: boolean | null;
+  created?: number | null;
+  invoice_settings?: {
+    default_payment_method?: string | null;
+  } | null;
+  default_source?: string | null;
+  metadata?: Record<string, string> | null;
+};
+
+type StripeListResult<T> = {
+  data?: T[];
+  has_more?: boolean;
+  next_page?: string | null;
+};
+
 type StripeInvoice = {
   id: string;
   customer?: string | null;
@@ -106,6 +125,23 @@ type PromotionPreview = {
   giftDays: number;
   amountTotalCents: number;
   message: string | null;
+};
+
+type StripeCustomerCandidate = {
+  id: string;
+  email: string | null;
+  name: string | null;
+  defaultPaymentMethod: string | null;
+  createdAt: string | null;
+};
+
+type StripeCustomerLookupResult = {
+  status: "skipped" | "matched" | "multiple" | "not_found" | "error";
+  checkedAt: string;
+  email: string | null;
+  stripeCustomerId?: string | null;
+  candidates?: StripeCustomerCandidate[];
+  message?: string | null;
 };
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
@@ -260,6 +296,61 @@ function isJsonArray(value: Prisma.JsonValue | null | undefined): value is Prism
 function jsonStringArray(value: Prisma.JsonValue | null | undefined): string[] {
   if (!isJsonArray(value)) return [];
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function mergeMetadataJson(value: Prisma.JsonValue | null | undefined, patch: Record<string, unknown>): Prisma.InputJsonValue {
+  return {
+    ...asRecord(value),
+    ...patch
+  } as Prisma.InputJsonValue;
+}
+
+function stripeSearchLiteral(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function stripeCustomerCandidate(customer: StripeCustomer): StripeCustomerCandidate {
+  return {
+    id: customer.id,
+    email: normalizeEmail(customer.email) ?? customer.email ?? null,
+    name: trimOrUndefined(customer.name) ?? null,
+    defaultPaymentMethod: trimOrUndefined(customer.invoice_settings?.default_payment_method) ?? trimOrUndefined(customer.default_source) ?? null,
+    createdAt: toIsoString(toDate(customer.created))
+  };
+}
+
+function stripeCustomerLookupFromMetadata(value: Prisma.JsonValue | null | undefined): StripeCustomerLookupResult | null {
+  const lookup = asRecord(asRecord(value).stripeCustomerLookup);
+  const status = asString(lookup.status);
+  if (!status || !["skipped", "matched", "multiple", "not_found", "error"].includes(status)) return null;
+  const rawCandidates = Array.isArray(lookup.candidates) ? lookup.candidates : [];
+  const candidates = rawCandidates.map((item) => {
+    const candidate = asRecord(item);
+    const id = asString(candidate.id);
+    if (!id) return null;
+    return {
+      id,
+      email: normalizeEmail(asString(candidate.email) ?? undefined) ?? asString(candidate.email) ?? null,
+      name: asString(candidate.name) ?? null,
+      defaultPaymentMethod: asString(candidate.defaultPaymentMethod) ?? null,
+      createdAt: asString(candidate.createdAt) ?? null
+    };
+  }).filter((item): item is StripeCustomerCandidate => Boolean(item));
+  return {
+    status: status as StripeCustomerLookupResult["status"],
+    checkedAt: asString(lookup.checkedAt) ?? "",
+    email: normalizeEmail(asString(lookup.email) ?? undefined) ?? asString(lookup.email) ?? null,
+    stripeCustomerId: asString(lookup.stripeCustomerId) ?? null,
+    candidates,
+    message: asString(lookup.message) ?? null
+  };
+}
+
+function stripeCustomerLookupIsFresh(lookup: StripeCustomerLookupResult | null, now = new Date()): boolean {
+  if (!lookup?.checkedAt) return false;
+  const checkedAt = new Date(lookup.checkedAt);
+  if (Number.isNaN(checkedAt.getTime())) return false;
+  return now.getTime() - checkedAt.getTime() < 24 * 60 * 60 * 1000;
 }
 
 function jsonAudience(value: Prisma.JsonValue | null | undefined): {
@@ -1021,6 +1112,64 @@ export class BillingService {
     });
   }
 
+  async lookupStripeCustomerForBillingCustomer(input: { billingCustomerId: string }) {
+    const customer = await this.db.billingCustomer.findUnique({ where: { id: input.billingCustomerId } });
+    if (!customer) throw new Error("billing customer does not exist");
+    const lookup = await this.lookupStripeCustomerByEmail(customer.billingEmail ?? customer.businessEmail);
+    let stripeCustomerId: string | undefined;
+    if (lookup.status === "matched" && lookup.stripeCustomerId) {
+      const linked = await this.db.billingCustomer.findUnique({ where: { stripeCustomerId: lookup.stripeCustomerId } });
+      if (!linked || linked.id === customer.id) {
+        stripeCustomerId = lookup.stripeCustomerId;
+      } else {
+        lookup.status = "multiple";
+        lookup.stripeCustomerId = null;
+        lookup.message = "The matched Stripe customer is already linked to another Agent Studio organization.";
+      }
+    }
+    const updated = await this.db.billingCustomer.update({
+      where: { id: customer.id },
+      data: {
+        stripeCustomerId: stripeCustomerId ?? undefined,
+        metadataJson: mergeMetadataJson(customer.metadataJson, { stripeCustomerLookup: lookup })
+      }
+    });
+    return this.mapBillingCustomer(updated);
+  }
+
+  async bindBillingCustomerToStripeCustomer(input: { billingCustomerId: string; stripeCustomerId: string; userId?: string | null }) {
+    const customerId = trimOrUndefined(input.stripeCustomerId);
+    if (!customerId || !customerId.startsWith("cus_")) {
+      throw new Error("Stripe customer id must start with cus_");
+    }
+    const config = await this.resolveBillingConfig();
+    if (!config.stripeSecretKey) {
+      throw new Error("Stripe is not configured");
+    }
+    const stripeCustomer = await this.stripeGet<StripeCustomer>(`/customers/${encodeURIComponent(customerId)}`, config);
+    if (!stripeCustomer || stripeCustomer.deleted) {
+      throw new Error("Stripe customer does not exist");
+    }
+    const billingCustomer = await this.db.billingCustomer.findUnique({ where: { id: input.billingCustomerId } });
+    if (!billingCustomer) throw new Error("billing customer does not exist");
+    const lookup: StripeCustomerLookupResult = {
+      status: "matched",
+      checkedAt: new Date().toISOString(),
+      email: normalizeEmail(billingCustomer.billingEmail ?? billingCustomer.businessEmail) ?? null,
+      stripeCustomerId: stripeCustomer.id,
+      candidates: [stripeCustomerCandidate(stripeCustomer)],
+      message: trimOrUndefined(input.userId) ? `Manually bound by ${input.userId}` : "Manually bound by admin"
+    };
+    const updated = await this.db.billingCustomer.update({
+      where: { id: billingCustomer.id },
+      data: {
+        stripeCustomerId: stripeCustomer.id,
+        metadataJson: mergeMetadataJson(billingCustomer.metadataJson, { stripeCustomerLookup: lookup })
+      }
+    });
+    return this.mapBillingCustomer(updated);
+  }
+
   async grantGiftDays(input: {
     organizationId: string;
     planId: string;
@@ -1353,6 +1502,31 @@ export class BillingService {
     const countryRegion = trimOrUndefined(existing?.countryRegion) ?? trimOrUndefined(latestAccessRequest?.countryRegion);
     const sn = trimOrUndefined(existing?.sn) ?? trimOrUndefined(latestAccessRequest?.snNumber);
     const salesContact = trimOrUndefined(existing?.salesContact) ?? trimOrUndefined(latestAccessRequest?.salesContactEmail);
+    let stripeCustomerLookup: StripeCustomerLookupResult | null = null;
+    let stripeCustomerId = trimOrUndefined(existing?.stripeCustomerId) ?? null;
+    if (!stripeCustomerId) {
+      const existingLookup = stripeCustomerLookupFromMetadata(existing?.metadataJson);
+      stripeCustomerLookup = stripeCustomerLookupIsFresh(existingLookup) ? null : await this.lookupStripeCustomerByEmail(businessEmail, config);
+      if (stripeCustomerLookup?.status === "matched" && stripeCustomerLookup.stripeCustomerId) {
+        const linked = await this.db.billingCustomer.findUnique({ where: { stripeCustomerId: stripeCustomerLookup.stripeCustomerId } });
+        if (!linked || linked.organizationId === input.organization.id) {
+          stripeCustomerId = stripeCustomerLookup.stripeCustomerId;
+        } else {
+          stripeCustomerLookup = {
+            ...stripeCustomerLookup,
+            status: "multiple",
+            stripeCustomerId: null,
+            message: "The matched Stripe customer is already linked to another Agent Studio organization."
+          };
+        }
+      }
+    }
+    const initialMetadata = existing?.metadataJson ?? {
+      inferredFrom: latestAccessRequest ? "access_request" : "current_user"
+    };
+    const metadataJson = stripeCustomerLookup
+      ? mergeMetadataJson(initialMetadata, { stripeCustomerLookup })
+      : initialMetadata as Prisma.InputJsonValue;
     return this.db.billingCustomer.upsert({
       where: { organizationId: input.organization.id },
       update: {
@@ -1363,10 +1537,9 @@ export class BillingService {
         sn: existing?.sn ? undefined : sn ?? null,
         salesContact: existing?.salesContact ? undefined : salesContact ?? null,
         billingEmail: existing?.billingEmail ? undefined : businessEmail ?? null,
+        stripeCustomerId: existing?.stripeCustomerId ? undefined : stripeCustomerId ?? undefined,
         defaultAutoRenew: existing?.defaultAutoRenew ?? config.defaultAutoRenew,
-        metadataJson: existing?.metadataJson ?? {
-          inferredFrom: latestAccessRequest ? "access_request" : "current_user"
-        }
+        metadataJson
       },
       create: {
         organizationId: input.organization.id,
@@ -1377,12 +1550,99 @@ export class BillingService {
         sn: sn ?? null,
         salesContact: salesContact ?? null,
         billingEmail: businessEmail ?? null,
+        stripeCustomerId,
         defaultAutoRenew: config.defaultAutoRenew,
-        metadataJson: {
-          inferredFrom: latestAccessRequest ? "access_request" : "current_user"
-        }
+        metadataJson
       }
     });
+  }
+
+  private async lookupStripeCustomerByEmail(email: string | null | undefined, config?: BillingResolvedConfig): Promise<StripeCustomerLookupResult> {
+    const checkedAt = new Date().toISOString();
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      return {
+        status: "skipped",
+        checkedAt,
+        email: null,
+        message: "No valid billing email is available for Stripe customer lookup."
+      };
+    }
+    const resolvedConfig = config ?? await this.resolveBillingConfig();
+    if (!resolvedConfig.stripeSecretKey) {
+      return {
+        status: "skipped",
+        checkedAt,
+        email: normalizedEmail,
+        message: "Stripe is not configured."
+      };
+    }
+    try {
+      const result = await this.findStripeCustomersByEmail(normalizedEmail, resolvedConfig);
+      const exactMatches = result.customers.filter((customer) =>
+        !customer.deleted && normalizeEmail(customer.email) === normalizedEmail
+      );
+      const candidates = exactMatches.slice(0, 10).map((customer) => stripeCustomerCandidate(customer));
+      if (exactMatches.length === 1 && !result.hasMore) {
+        return {
+          status: "matched",
+          checkedAt,
+          email: normalizedEmail,
+          stripeCustomerId: exactMatches[0].id,
+          candidates
+        };
+      }
+      if (exactMatches.length > 1 || result.hasMore) {
+        return {
+          status: "multiple",
+          checkedAt,
+          email: normalizedEmail,
+          candidates,
+          message: "Multiple Stripe customers use this email. Bind the correct customer manually in Admin."
+        };
+      }
+      return {
+        status: "not_found",
+        checkedAt,
+        email: normalizedEmail,
+        candidates: []
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        checkedAt,
+        email: normalizedEmail,
+        message: error instanceof Error ? error.message : "Stripe customer lookup failed."
+      };
+    }
+  }
+
+  private async findStripeCustomersByEmail(email: string, config: BillingResolvedConfig): Promise<{ customers: StripeCustomer[]; hasMore: boolean }> {
+    const searchParams = new URLSearchParams({
+      query: `email:'${stripeSearchLiteral(email)}'`,
+      limit: "10"
+    });
+    try {
+      const searchResult = await this.stripeGet<StripeListResult<StripeCustomer>>(`/customers/search?${searchParams.toString()}`, config);
+      return {
+        customers: searchResult?.data ?? [],
+        hasMore: searchResult?.has_more === true
+      };
+    } catch (searchError) {
+      const listParams = new URLSearchParams({
+        email,
+        limit: "10"
+      });
+      try {
+        const listResult = await this.stripeGet<StripeListResult<StripeCustomer>>(`/customers?${listParams.toString()}`, config);
+        return {
+          customers: listResult?.data ?? [],
+          hasMore: listResult?.has_more === true
+        };
+      } catch {
+        throw searchError;
+      }
+    }
   }
 
   private async createStripeCheckoutSession(input: {
@@ -2093,6 +2353,7 @@ export class BillingService {
       salesContact: customer.salesContact,
       billingEmail: customer.billingEmail,
       stripeCustomerId: customer.stripeCustomerId,
+      stripeCustomerLookup: stripeCustomerLookupFromMetadata(customer.metadataJson),
       defaultAutoRenew: customer.defaultAutoRenew,
       createdAt: toIsoString(customer.createdAt),
       updatedAt: toIsoString(customer.updatedAt)

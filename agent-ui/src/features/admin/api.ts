@@ -188,6 +188,32 @@ export async function createAdminBillingPaymentLink(input: {
   );
 }
 
+export async function lookupAdminBillingStripeCustomer(
+  billingCustomerId: string
+): Promise<AdminBillingOverviewResponse["customers"][number]["billingCustomer"]> {
+  const response = await api<{ billingCustomer: AdminBillingOverviewResponse["customers"][number]["billingCustomer"] }>(
+    `/api/admin/billing/customers/${encodeURIComponent(billingCustomerId)}/stripe-customer/lookup`,
+    {
+      method: "POST"
+    }
+  );
+  return response.billingCustomer;
+}
+
+export async function bindAdminBillingStripeCustomer(
+  billingCustomerId: string,
+  stripeCustomerId: string
+): Promise<AdminBillingOverviewResponse["customers"][number]["billingCustomer"]> {
+  const response = await api<{ billingCustomer: AdminBillingOverviewResponse["customers"][number]["billingCustomer"] }>(
+    `/api/admin/billing/customers/${encodeURIComponent(billingCustomerId)}/stripe-customer`,
+    {
+      method: "PATCH",
+      json: { stripeCustomerId }
+    }
+  );
+  return response.billingCustomer;
+}
+
 export async function patchAdminBillingPlan(
   planId: string,
   input: {

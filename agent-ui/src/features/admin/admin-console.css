@@ -364,6 +364,58 @@
   font-size: 13px;
 }
 
+.admin-billing-stripe-bind,
+.admin-billing-stripe-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-billing-stripe-bind {
+  margin-bottom: 8px;
+}
+
+.admin-billing-stripe-bind span,
+.admin-billing-stripe-candidate span,
+.admin-billing-stripe-lookup span {
+  display: block;
+  font-size: 11px;
+  color: var(--admin-color-subtle);
+}
+
+.admin-billing-stripe-bind strong,
+.admin-billing-stripe-candidate strong {
+  display: block;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.admin-billing-stripe-lookup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.admin-billing-stripe-lookup p {
+  flex-basis: 100%;
+}
+
+.admin-billing-stripe-candidates {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.admin-billing-stripe-candidate {
+  padding: 8px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.025);
+}
+
 .billing-table-link {
   border: 0;
   background: transparent;
