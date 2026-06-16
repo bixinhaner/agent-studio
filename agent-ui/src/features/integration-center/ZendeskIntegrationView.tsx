@@ -380,6 +380,11 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
         ? asBoolean(detail.config.dingtalkNotificationEnabled)
         : asBoolean(detail.config.dingtalkReviewRequiredEnabled),
     dingtalkReviewDueHours: Math.max(1, Math.min(168, asNumber(detail.config.dingtalkReviewDueHours, 24))),
+    dingtalkReviewCcRoutingEnabled: asBoolean(detail.config.dingtalkReviewCcRoutingEnabled),
+    dingtalkReviewAssigneeRoutingEnabled: detail.config.dingtalkReviewAssigneeRoutingEnabled !== false,
+    dingtalkReviewGroupFallbackEnabled: detail.config.dingtalkReviewGroupFallbackEnabled !== false,
+    dingtalkReviewGlobalFallbackEnabled: detail.config.dingtalkReviewGlobalFallbackEnabled !== false,
+    dingtalkReviewAllowedReviewerEmailsRaw: asListText(detail.config.dingtalkReviewAllowedReviewerEmails),
     aiReviewEmailReminderEnabled: asBoolean(detail.config.aiReviewEmailReminderEnabled),
     aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(detail.config.aiReviewEmailReminderTime),
     aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(detail.config.aiReviewEmailReminderTimezone),
@@ -634,6 +639,11 @@ export function ZendeskIntegrationView(props: {
           dingtalkNotificationTemplate: normalizeDingTalkNotificationTemplate(draft.dingtalkNotificationTemplate),
           dingtalkReviewRequiredEnabled: draft.dingtalkReviewRequiredEnabled,
           dingtalkReviewDueHours: Math.max(1, Math.min(168, Number(draft.dingtalkReviewDueHours) || 24)),
+          dingtalkReviewCcRoutingEnabled: draft.dingtalkReviewCcRoutingEnabled,
+          dingtalkReviewAssigneeRoutingEnabled: draft.dingtalkReviewAssigneeRoutingEnabled,
+          dingtalkReviewGroupFallbackEnabled: draft.dingtalkReviewGroupFallbackEnabled,
+          dingtalkReviewGlobalFallbackEnabled: draft.dingtalkReviewGlobalFallbackEnabled,
+          dingtalkReviewAllowedReviewerEmails: parseList(draft.dingtalkReviewAllowedReviewerEmailsRaw),
           aiReviewEmailReminderEnabled: draft.aiReviewEmailReminderEnabled,
           aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(draft.aiReviewEmailReminderTime),
           aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(draft.aiReviewEmailReminderTimezone),
@@ -1063,10 +1073,83 @@ export function ZendeskIntegrationView(props: {
                             setDraft((current) => ({ ...current, dingtalkReviewDueHours: Number(value) || 24 }))
                           }
                           style={{ width: "100%" }}
-                        />
-                        <span className="field-help">超时后进入后台逾期统计，并作为钉钉待办截止时间。</span>
-                      </label>
-                      <div className="field resource-center-form-span-2 zendesk-email-reminder-panel">
+	                        />
+	                        <span className="field-help">超时后进入后台逾期统计，并作为钉钉待办截止时间。</span>
+	                      </label>
+                      <div className="field resource-center-form-span-2 zendesk-review-routing-panel">
+                        <div className="zendesk-review-routing-head">
+                          <div>
+                            <span className="field-label">AI review recipient routing</span>
+                            <span className="field-help">
+                              评分任务按规则链选择接收人；处理人邮箱清单非空时，只允许这些邮箱通过 CC 或 assignee 匹配。
+                            </span>
+                          </div>
+                          <div className="zendesk-review-routing-flow">
+                            CC / follower → Assignee → Zendesk Group fallback → Global fallback
+                          </div>
+                        </div>
+                        <div className="zendesk-review-routing-switches">
+                          <label className="checkbox-field resource-center-toggle-row">
+                            <Switch
+                              checked={draft.dingtalkReviewCcRoutingEnabled}
+                              disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                              onChange={(checked) =>
+                                setDraft((current) => ({ ...current, dingtalkReviewCcRoutingEnabled: checked }))
+                              }
+                            />
+                            <span>CC / follower first</span>
+                          </label>
+                          <label className="checkbox-field resource-center-toggle-row">
+                            <Switch
+                              checked={draft.dingtalkReviewAssigneeRoutingEnabled}
+                              disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                              onChange={(checked) =>
+                                setDraft((current) => ({ ...current, dingtalkReviewAssigneeRoutingEnabled: checked }))
+                              }
+                            />
+                            <span>Assignee</span>
+                          </label>
+                          <label className="checkbox-field resource-center-toggle-row">
+                            <Switch
+                              checked={draft.dingtalkReviewGroupFallbackEnabled}
+                              disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                              onChange={(checked) =>
+                                setDraft((current) => ({ ...current, dingtalkReviewGroupFallbackEnabled: checked }))
+                              }
+                            />
+                            <span>Group fallback</span>
+                          </label>
+                          <label className="checkbox-field resource-center-toggle-row">
+                            <Switch
+                              checked={draft.dingtalkReviewGlobalFallbackEnabled}
+                              disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                              onChange={(checked) =>
+                                setDraft((current) => ({ ...current, dingtalkReviewGlobalFallbackEnabled: checked }))
+                              }
+                            />
+                            <span>Global fallback</span>
+                          </label>
+                        </div>
+                        <label className="field">
+                          <span className="field-label">Allowed reviewer emails</span>
+                          <Input.TextArea
+                            rows={3}
+                            value={draft.dingtalkReviewAllowedReviewerEmailsRaw}
+                            placeholder={"jesse@example.com\nheping@example.com"}
+                            disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                dingtalkReviewAllowedReviewerEmailsRaw: event.target.value
+                              }))
+                            }
+                          />
+                          <span className="field-help">
+                            可用换行或逗号分隔。CC / follower 必须命中此清单；assignee 在清单为空时保持原有匹配逻辑。
+                          </span>
+                        </label>
+                      </div>
+	                      <div className="field resource-center-form-span-2 zendesk-email-reminder-panel">
                         <div className="zendesk-email-reminder-head">
                           <label className="checkbox-field resource-center-toggle-row">
                             <Switch
@@ -1188,14 +1271,19 @@ export function ZendeskIntegrationView(props: {
                       <div className="field resource-center-form-span-2 zendesk-group-fallback-panel">
                         <div className="zendesk-group-fallback-head">
                           <div>
-                            <span className="field-label">Team fallback routing</span>
-                            <span className="field-help">
-                              当 assignee 为空或无法映射钉钉用户时，先按 Zendesk Group 指派评分人；未命中的 ticket 再走全局 fallback。
-                            </span>
-                          </div>
-                          <Button
-                            size="small"
-                            disabled={saving || !draft.dingtalkNotificationEnabled}
+	                            <span className="field-label">Team fallback routing</span>
+	                            <span className="field-help">
+	                              当前面规则没有找到接收人时，按 Zendesk Group 指派评分人；关闭 Group fallback 后这些规则不会生效。
+	                            </span>
+	                          </div>
+	                          <Button
+	                            size="small"
+	                            disabled={
+	                              saving ||
+	                              !draft.dingtalkNotificationEnabled ||
+	                              !draft.dingtalkReviewRequiredEnabled ||
+	                              !draft.dingtalkReviewGroupFallbackEnabled
+	                            }
                             onClick={() =>
                               setDraft((current) => ({
                                 ...current,
@@ -1205,17 +1293,17 @@ export function ZendeskIntegrationView(props: {
                                 ]
                               }))
                             }
-                          >
-                            添加规则
-                          </Button>
-                        </div>
-                        <div className="zendesk-group-fallback-flow">
-                          Assignee match → Zendesk Group fallback → Global fallback
-                        </div>
+	                          >
+	                            添加规则
+	                          </Button>
+	                        </div>
+	                        <div className="zendesk-group-fallback-flow">
+	                          {draft.dingtalkReviewGroupFallbackEnabled ? "Group fallback enabled" : "Group fallback disabled"}
+	                        </div>
                         {draft.dingtalkNotificationGroupFallbacks.length === 0 ? (
                           <div className="zendesk-group-fallback-empty">
-                            暂未配置团队兜底。US team 未分配或无法映射 assignee 的 ticket 会继续走全局 fallback。
-                          </div>
+	                            暂未配置团队兜底。前面规则未命中时，会继续按 Global fallback 设置处理。
+	                          </div>
                         ) : (
                           <div className="zendesk-group-fallback-list">
                             {draft.dingtalkNotificationGroupFallbacks.map((rule, index) => (
@@ -1229,7 +1317,12 @@ export function ZendeskIntegrationView(props: {
                                     options={zendeskGroupOptionsWithCurrent(zendeskGroupOptions, rule)}
                                     loading={zendeskGroupsLoading}
                                     optionFilterProp="label"
-                                    disabled={saving || !draft.dingtalkNotificationEnabled}
+	                                    disabled={
+	                                      saving ||
+	                                      !draft.dingtalkNotificationEnabled ||
+	                                      !draft.dingtalkReviewRequiredEnabled ||
+	                                      !draft.dingtalkReviewGroupFallbackEnabled
+	                                    }
                                     placeholder="选择 US / Global support group"
                                     onChange={(value) => {
                                       const selected = zendeskGroups.find((item) => String(item.id) === value);
@@ -1257,7 +1350,12 @@ export function ZendeskIntegrationView(props: {
                                     options={optionsWithCurrentValues(dingtalkUserOptions, rule.userIds)}
                                     loading={optionsLoading}
                                     optionFilterProp="label"
-                                    disabled={saving || !draft.dingtalkNotificationEnabled}
+	                                    disabled={
+	                                      saving ||
+	                                      !draft.dingtalkNotificationEnabled ||
+	                                      !draft.dingtalkReviewRequiredEnabled ||
+	                                      !draft.dingtalkReviewGroupFallbackEnabled
+	                                    }
                                     placeholder="搜索姓名、邮箱或钉钉 ID"
                                     onChange={(value) =>
                                       setDraft((current) => ({
@@ -1271,7 +1369,12 @@ export function ZendeskIntegrationView(props: {
                                 </label>
                                 <Button
                                   danger
-                                  disabled={saving || !draft.dingtalkNotificationEnabled}
+	                                  disabled={
+	                                    saving ||
+	                                    !draft.dingtalkNotificationEnabled ||
+	                                    !draft.dingtalkReviewRequiredEnabled ||
+	                                    !draft.dingtalkReviewGroupFallbackEnabled
+	                                  }
                                   onClick={() =>
                                     setDraft((current) => ({
                                       ...current,
@@ -1297,15 +1400,20 @@ export function ZendeskIntegrationView(props: {
                           options={optionsWithCurrentValues(dingtalkUserOptions, draft.dingtalkNotificationFallbackUserIds)}
                           loading={optionsLoading}
                           optionFilterProp="label"
-                          disabled={saving || !draft.dingtalkNotificationEnabled}
+	                          disabled={
+	                            saving ||
+	                            !draft.dingtalkNotificationEnabled ||
+	                            !draft.dingtalkReviewRequiredEnabled ||
+	                            !draft.dingtalkReviewGlobalFallbackEnabled
+	                          }
                           placeholder="搜索姓名、邮箱或钉钉 ID"
                           onChange={(value) =>
                             setDraft((current) => ({ ...current, dingtalkNotificationFallbackUserIds: value }))
                           }
                         />
                         <span className="field-help">
-                          仅当 ticket 没有 assignee，或 assignee 无法映射到钉钉用户时，才 @ 这些 fallback 用户。
-                        </span>
+	                          仅当前面规则没有找到接收人且 Global fallback 已开启时，才 @ 这些 fallback 用户。
+	                        </span>
                       </label>
                       <div className="field resource-center-form-span-2 zendesk-dingtalk-template-shell">
                         <div className="zendesk-dingtalk-template-head">

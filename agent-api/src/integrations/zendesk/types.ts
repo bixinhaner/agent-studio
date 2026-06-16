@@ -72,6 +72,11 @@ export type ZendeskIntegrationSettings = {
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;
+  dingtalkReviewCcRoutingEnabled: boolean;
+  dingtalkReviewAssigneeRoutingEnabled: boolean;
+  dingtalkReviewGroupFallbackEnabled: boolean;
+  dingtalkReviewGlobalFallbackEnabled: boolean;
+  dingtalkReviewAllowedReviewerEmails: string[];
   aiReviewEmailReminderEnabled: boolean;
   aiReviewEmailReminderTime: string;
   aiReviewEmailReminderTimezone: string;
@@ -186,6 +191,9 @@ export type ZendeskTicketPayload = {
   assignee?: ZendeskRequesterPayload;
   groupId?: number;
   groupName?: string;
+  emailCcIds?: number[];
+  collaboratorIds?: number[];
+  followerIds?: number[];
   updatedAt?: string;
 };
 
@@ -203,6 +211,12 @@ export type ZendeskRequesterPayload = {
   organizationId?: number;
   organizationName?: string;
   countryRegion?: string;
+};
+
+export type ZendeskReviewerCandidateSource = "email_cc" | "collaborator" | "follower";
+
+export type ZendeskReviewerCandidatePayload = ZendeskRequesterPayload & {
+  source: ZendeskReviewerCandidateSource;
 };
 
 export type ZendeskCommentPayload = {
@@ -232,6 +246,7 @@ export type ZendeskAttachmentPayload = {
 export type ZendeskTicketContext = {
   ticket: ZendeskTicketPayload;
   comments: ZendeskCommentPayload[];
+  reviewerCandidates?: ZendeskReviewerCandidatePayload[];
 };
 
 export type ZendeskAgentDecision = {
@@ -291,6 +306,11 @@ export const zendeskSettingsUpdateSchema = z.object({
   dingtalk_notification_template: optionalStringSchema,
   dingtalk_review_required_enabled: z.boolean().optional(),
   dingtalk_review_due_hours: z.number().int().min(1).max(168).optional(),
+  dingtalk_review_cc_routing_enabled: z.boolean().optional(),
+  dingtalk_review_assignee_routing_enabled: z.boolean().optional(),
+  dingtalk_review_group_fallback_enabled: z.boolean().optional(),
+  dingtalk_review_global_fallback_enabled: z.boolean().optional(),
+  dingtalk_review_allowed_reviewer_emails: optionalStringArraySchema,
   ai_review_email_reminder_enabled: z.boolean().optional(),
   ai_review_email_reminder_time: optionalStringSchema,
   ai_review_email_reminder_timezone: optionalStringSchema,

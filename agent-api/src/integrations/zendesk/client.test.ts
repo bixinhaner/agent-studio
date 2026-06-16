@@ -39,6 +39,11 @@ const settings: ZendeskIntegrationSettings = {
   dingtalkNotificationTemplate: "",
   dingtalkReviewRequiredEnabled: false,
   dingtalkReviewDueHours: 24,
+  dingtalkReviewCcRoutingEnabled: false,
+  dingtalkReviewAssigneeRoutingEnabled: true,
+  dingtalkReviewGroupFallbackEnabled: true,
+  dingtalkReviewGlobalFallbackEnabled: true,
+  dingtalkReviewAllowedReviewerEmails: [],
   aiReviewEmailReminderEnabled: false,
   aiReviewEmailReminderTime: "09:00",
   aiReviewEmailReminderTimezone: "Asia/Shanghai",
@@ -65,6 +70,9 @@ describe("ZendeskClient", () => {
               status: "open",
               requester_id: 100,
               assignee_id: 200,
+              email_cc_ids: [300, 100],
+              collaborator_ids: [200],
+              follower_ids: [400],
               tags: []
             }
           }),
@@ -135,6 +143,19 @@ describe("ZendeskClient", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
+      if (url.includes("/api/v2/users/400.json")) {
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: 400,
+              name: "Follower Agent",
+              email: "follower@example.com",
+              role: "agent"
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
       return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -158,5 +179,22 @@ describe("ZendeskClient", () => {
         role: "agent"
       }
     });
+    expect(context.reviewerCandidates).toEqual([
+      expect.objectContaining({
+        id: 300,
+        email: "customer@example.com",
+        source: "email_cc"
+      }),
+      expect.objectContaining({
+        id: 200,
+        email: "agent@example.com",
+        source: "collaborator"
+      }),
+      expect.objectContaining({
+        id: 400,
+        email: "follower@example.com",
+        source: "follower"
+      })
+    ]);
   });
 });

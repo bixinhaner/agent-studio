@@ -4,6 +4,8 @@ import type {
   ZendeskCommentPayload,
   ZendeskGroupPayload,
   ZendeskIntegrationSettings,
+  ZendeskReviewerCandidatePayload,
+  ZendeskReviewerCandidateSource,
   ZendeskRequesterPayload,
   ZendeskTicketContext,
   ZendeskTicketPayload,
@@ -41,6 +43,9 @@ type ZendeskTicketEnvelope = {
     requester_id?: number;
     assignee_id?: number | null;
     group_id?: number | null;
+    email_cc_ids?: number[];
+    collaborator_ids?: number[];
+    follower_ids?: number[];
     updated_at?: string;
     tags?: string[];
   };
@@ -117,8 +122,23 @@ function normalizeTicket(ticket: ZendeskTicketEnvelope["ticket"]): ZendeskTicket
     requesterId: typeof ticket?.requester_id === "number" ? ticket.requester_id : undefined,
     assigneeId: typeof ticket?.assignee_id === "number" ? ticket.assignee_id : undefined,
     groupId: typeof ticket?.group_id === "number" ? ticket.group_id : undefined,
+    emailCcIds: normalizeNumberIds(ticket?.email_cc_ids),
+    collaboratorIds: normalizeNumberIds(ticket?.collaborator_ids),
+    followerIds: normalizeNumberIds(ticket?.follower_ids),
     updatedAt: typeof ticket?.updated_at === "string" ? ticket.updated_at : undefined
   };
+}
+
+function normalizeNumberIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const result: number[] = [];
+  for (const item of value) {
+    const numeric = typeof item === "number" ? item : Number(item);
+    if (!Number.isFinite(numeric) || numeric <= 0) continue;
+    const id = Math.trunc(numeric);
+    if (!result.includes(id)) result.push(id);
+  }
+  return result;
 }
 
 function normalizeGroup(group: ZendeskGroupEnvelope["group"]): ZendeskGroupPayload | undefined {
@@ -289,6 +309,22 @@ function normalizeComments(comments: ZendeskCommentsEnvelope["comments"]): Zende
     : [];
 }
 
+function collectReviewerCandidateIds(ticket: ZendeskTicketPayload): Array<{ id: number; source: ZendeskReviewerCandidateSource }> {
+  const result: Array<{ id: number; source: ZendeskReviewerCandidateSource }> = [];
+  const seen = new Set<number>();
+  const append = (ids: number[], source: ZendeskReviewerCandidateSource) => {
+    for (const id of ids) {
+      if (id === ticket.requesterId || seen.has(id)) continue;
+      seen.add(id);
+      result.push({ id, source });
+    }
+  };
+  append(ticket.emailCcIds ?? [], "email_cc");
+  append(ticket.collaboratorIds ?? [], "collaborator");
+  append(ticket.followerIds ?? [], "follower");
+  return result;
+}
+
 export class ZendeskClient {
   constructor(private readonly settings: ZendeskIntegrationSettings) {}
 
@@ -366,6 +402,7 @@ export class ZendeskClient {
     if (requester) usersById.set(requester.id, requester);
     if (assignee) usersById.set(assignee.id, assignee);
 
+    const reviewerCandidateIds = collectReviewerCandidateIds(ticket);
     const authorIds = [
       ...new Set(
         comments
@@ -379,6 +416,14 @@ export class ZendeskClient {
         if (author) usersById.set(author.id, author);
       })
     );
+    const reviewerCandidates = (
+      await Promise.all(
+        reviewerCandidateIds.map(async (candidate): Promise<ZendeskReviewerCandidatePayload | undefined> => {
+          const user = usersById.get(candidate.id) || (await this.getUser(candidate.id).catch(() => undefined));
+          return user ? { ...user, source: candidate.source } : undefined;
+        })
+      )
+    ).filter((candidate): candidate is ZendeskReviewerCandidatePayload => Boolean(candidate));
 
     return {
       ticket: {
@@ -390,7 +435,8 @@ export class ZendeskClient {
       comments: comments.map((comment) => {
         const author = comment.authorId ? usersById.get(comment.authorId) : undefined;
         return author ? { ...comment, author } : comment;
-      })
+      }),
+      reviewerCandidates
     };
   }
 

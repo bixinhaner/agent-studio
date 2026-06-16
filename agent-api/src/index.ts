@@ -678,7 +678,7 @@ async function resolveZendeskDingTalkMentionTarget(input: {
     userIds: dingtalkUserId ? [dingtalkUserId] : [],
     label,
     detail: dingtalkUserId
-      ? `Matched Zendesk assignee email ${email} to DingTalk user.`
+      ? `Matched Zendesk user email ${email} to DingTalk user.`
       : `No active Agent Studio DingTalk user was found for ${email}.`
   };
 }

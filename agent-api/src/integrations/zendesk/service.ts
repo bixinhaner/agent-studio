@@ -259,6 +259,15 @@ type ZendeskDingTalkReviewRequestResult = {
   detail?: string;
 };
 
+type ZendeskDingTalkReviewerRouteSource = "none" | "cc_reviewer" | "assignee" | "group_fallback" | "global_fallback";
+
+type ZendeskDingTalkReviewerRoute = {
+  source: ZendeskDingTalkReviewerRouteSource;
+  userIds: string[];
+  mentionLabel?: string;
+  details: string[];
+};
+
 function sanitizeTicketId(value: string | number): string {
   const normalized = String(value || "").trim();
   if (!normalized) throw new Error("ticket_id 不能为空");
@@ -362,6 +371,14 @@ function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function normalizeEmailForMatch(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function uniqueNonEmptyStrings(value: string[]): string[] {
+  return value.map((item) => String(item || "").trim()).filter((item, index, array) => item && array.indexOf(item) === index);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -661,6 +678,7 @@ function attachmentDisplaySize(bytes: number | undefined): string {
 function cloneContext(context: ZendeskTicketContext): ZendeskTicketContext {
   return {
     ticket: { ...context.ticket, tags: [...context.ticket.tags] },
+    reviewerCandidates: (context.reviewerCandidates ?? []).map((candidate) => ({ ...candidate })),
     comments: context.comments.map((comment) => ({
       ...comment,
       attachments: (comment.attachments ?? []).map((attachment) => ({ ...attachment }))
@@ -929,6 +947,28 @@ function findZendeskGroupFallback(
     const ruleGroupName = normalizeGroupNameForMatch(rule.groupName);
     return Boolean(groupName && ruleGroupName && groupName === ruleGroupName);
   });
+}
+
+function zendeskAllowedReviewerEmails(settings: ZendeskIntegrationSettings): Set<string> {
+  return new Set(settings.dingtalkReviewAllowedReviewerEmails.map((email) => normalizeEmailForMatch(email)).filter(Boolean));
+}
+
+function isZendeskReviewerAllowed(input: {
+  allowedEmails: Set<string>;
+  user?: ZendeskRequesterPayload;
+  requireConfiguredAllowlist?: boolean;
+}): boolean {
+  const email = normalizeEmailForMatch(input.user?.email);
+  if (!email) return false;
+  if (input.allowedEmails.size === 0) return !input.requireConfiguredAllowlist;
+  return input.allowedEmails.has(email);
+}
+
+function zendeskReviewerSourceLabel(source: string | undefined): string {
+  if (source === "email_cc") return "email CC";
+  if (source === "collaborator") return "collaborator";
+  if (source === "follower") return "follower";
+  return "reviewer";
 }
 
 function zendeskGroupFallbackLabel(rule: ZendeskDingTalkGroupFallbackRule, context: ZendeskTicketContext): string {
@@ -1833,6 +1873,165 @@ export class ZendeskIntegrationService {
     }
   }
 
+  private async resolveDingTalkReviewRecipientRoute(input: {
+    settings: ZendeskIntegrationSettings;
+    context: ZendeskTicketContext;
+    instanceId?: string;
+    ticketId: string;
+  }): Promise<ZendeskDingTalkReviewerRoute> {
+    const details: string[] = [];
+    const resolver = this.dependencies.resolveDingTalkMentionTarget;
+    if (!resolver) {
+      return {
+        source: "none",
+        userIds: [],
+        details: ["DingTalk mention target resolver is not available."]
+      };
+    }
+
+    const allowedEmails = zendeskAllowedReviewerEmails(input.settings);
+    const resolveZendeskUser = async (
+      user: ZendeskRequesterPayload,
+      labelPrefix: string
+    ): Promise<ZendeskDingTalkMentionTarget | undefined> => {
+      const resolved = await resolver({
+        zendeskUser: user,
+        settings: input.settings,
+        context: input.context,
+        instanceId: input.instanceId,
+        ticketId: input.ticketId
+      });
+      if (resolved?.detail) details.push(`${labelPrefix}: ${resolved.detail}`);
+      return resolved;
+    };
+
+    if (input.settings.dingtalkReviewCcRoutingEnabled) {
+      if (allowedEmails.size === 0) {
+        details.push("cc_reviewer: skipped because allowed reviewer email list is empty.");
+      } else {
+        const candidates = (input.context.reviewerCandidates ?? []).filter((candidate) =>
+          isZendeskReviewerAllowed({
+            allowedEmails,
+            user: candidate,
+            requireConfiguredAllowlist: true
+          })
+        );
+        if (candidates.length === 0) {
+          details.push("cc_reviewer: no email CC, collaborator, or follower matched the allowed reviewer email list.");
+        } else {
+          const resolvedTargets = (
+            await Promise.all(
+              candidates.map(async (candidate) => {
+                const sourceLabel = zendeskReviewerSourceLabel(candidate.source);
+                return await resolveZendeskUser(candidate, `cc_reviewer:${sourceLabel}:${candidate.email || candidate.id}`);
+              })
+            )
+          ).filter((target): target is ZendeskDingTalkMentionTarget => Boolean(target));
+          const userIds = uniqueNonEmptyStrings(resolvedTargets.flatMap((target) => target.userIds));
+          if (userIds.length > 0) {
+            return {
+              source: "cc_reviewer",
+              userIds,
+              mentionLabel:
+                resolvedTargets
+                  .map((target) => trimOrUndefined(target.label))
+                  .filter((label): label is string => Boolean(label))
+                  .filter((label, index, array) => array.indexOf(label) === index)
+                  .join(", ") || "CC reviewers",
+              details
+            };
+          }
+        }
+      }
+    } else {
+      details.push("cc_reviewer: disabled by configuration.");
+    }
+
+    if (input.settings.dingtalkReviewAssigneeRoutingEnabled) {
+      const assignee = input.context.ticket.assignee;
+      if (!assignee) {
+        details.push("assignee: ticket has no assignee.");
+      } else if (
+        !isZendeskReviewerAllowed({
+          allowedEmails,
+          user: assignee,
+          requireConfiguredAllowlist: false
+        })
+      ) {
+        details.push(`assignee: ${assignee.email || assignee.id} is not in the allowed reviewer email list.`);
+      } else {
+        const resolved = await resolveZendeskUser(assignee, "assignee");
+        const userIds = uniqueNonEmptyStrings(resolved?.userIds ?? []);
+        if (userIds.length > 0) {
+          return {
+            source: "assignee",
+            userIds,
+            mentionLabel: trimOrUndefined(resolved?.label) || zendeskUserDisplay(assignee, "Assignee"),
+            details
+          };
+        }
+      }
+    } else {
+      details.push("assignee: disabled by configuration.");
+    }
+
+    if (input.settings.dingtalkReviewGroupFallbackEnabled) {
+      const groupFallback = findZendeskGroupFallback(input.settings, input.context);
+      if (!groupFallback) {
+        details.push("group_fallback: no matching Zendesk group fallback rule.");
+      } else {
+        const groupFallbackLabel = zendeskGroupFallbackLabel(groupFallback, input.context);
+        const resolved = await resolver({
+          settings: input.settings,
+          context: input.context,
+          instanceId: input.instanceId,
+          ticketId: input.ticketId,
+          fallbackUserIds: groupFallback.userIds,
+          fallbackDetail: `Using ${groupFallback.userIds.length} Zendesk group fallback user(s) for ${groupFallbackLabel}.`
+        });
+        if (resolved?.detail) details.push(`group_fallback: ${resolved.detail}`);
+        const userIds = uniqueNonEmptyStrings(resolved?.userIds ?? []);
+        if (userIds.length > 0) {
+          return {
+            source: "group_fallback",
+            userIds,
+            mentionLabel: trimOrUndefined(resolved?.label) || groupFallbackLabel,
+            details
+          };
+        }
+      }
+    } else {
+      details.push("group_fallback: disabled by configuration.");
+    }
+
+    if (input.settings.dingtalkReviewGlobalFallbackEnabled) {
+      const resolved = await resolver({
+        settings: input.settings,
+        context: input.context,
+        instanceId: input.instanceId,
+        ticketId: input.ticketId
+      });
+      if (resolved?.detail) details.push(`global_fallback: ${resolved.detail}`);
+      const userIds = uniqueNonEmptyStrings(resolved?.userIds ?? []);
+      if (userIds.length > 0) {
+        return {
+          source: "global_fallback",
+          userIds,
+          mentionLabel: trimOrUndefined(resolved?.label) || "Support team",
+          details
+        };
+      }
+    } else {
+      details.push("global_fallback: disabled by configuration.");
+    }
+
+    return {
+      source: "none",
+      userIds: [],
+      details
+    };
+  }
+
   private async sendDingTalkResultNotification(input: {
     settings: ZendeskIntegrationSettings;
     context: ZendeskTicketContext;
@@ -1856,45 +2055,14 @@ export class ZendeskIntegrationService {
     }
 
     try {
-      const resolvedMention =
-        input.context.ticket.assignee && this.dependencies.resolveDingTalkMentionTarget
-        ? await this.dependencies.resolveDingTalkMentionTarget({
-            zendeskUser: input.context.ticket.assignee,
-            settings: input.settings,
-            context: input.context,
-            instanceId: input.instanceId,
-            ticketId: input.ticketId
-          })
-        : undefined;
-      const assigneeUserIds = (resolvedMention?.userIds ?? [])
-        .map((item) => String(item || "").trim())
-        .filter((item, index, array) => item && array.indexOf(item) === index);
-      const groupFallback =
-        assigneeUserIds.length === 0 ? findZendeskGroupFallback(input.settings, input.context) : undefined;
-      const groupFallbackLabel = groupFallback ? zendeskGroupFallbackLabel(groupFallback, input.context) : "";
-      const fallbackMention =
-        assigneeUserIds.length === 0 && this.dependencies.resolveDingTalkMentionTarget
-          ? await this.dependencies.resolveDingTalkMentionTarget({
-              settings: input.settings,
-              context: input.context,
-              instanceId: input.instanceId,
-              ticketId: input.ticketId,
-              ...(groupFallback
-                ? {
-                    fallbackUserIds: groupFallback.userIds,
-                    fallbackDetail: `Using ${groupFallback.userIds.length} Zendesk group fallback user(s) for ${groupFallbackLabel}.`
-                  }
-                : {})
-            })
-          : undefined;
-      const atUserIds = (assigneeUserIds.length > 0 ? assigneeUserIds : fallbackMention?.userIds ?? [])
-        .map((item) => String(item || "").trim())
-        .filter((item, index, array) => item && array.indexOf(item) === index);
-      const mentionLabel =
-        (assigneeUserIds.length > 0
-          ? trimOrUndefined(resolvedMention?.label) || zendeskUserDisplay(input.context.ticket.assignee, "")
-          : trimOrUndefined(fallbackMention?.label)) ||
-        (atUserIds.length ? "Support team" : "");
+      const recipientRoute = await this.resolveDingTalkReviewRecipientRoute({
+        settings: input.settings,
+        context: input.context,
+        instanceId: input.instanceId,
+        ticketId: input.ticketId
+      });
+      const atUserIds = recipientRoute.userIds;
+      const mentionLabel = recipientRoute.mentionLabel || (atUserIds.length ? "Support team" : "");
       let reviewRequest: ZendeskDingTalkReviewRequestResult | undefined;
       let reviewError = "";
       if (input.settings.dingtalkReviewRequiredEnabled && atUserIds.length > 0 && this.dependencies.requestDingTalkAiReviews) {
@@ -1949,11 +2117,11 @@ export class ZendeskIntegrationService {
         [
           `at_user_ids: ${atUserIds.length}`,
           mentionLabel ? `mention_label: ${mentionLabel}` : "",
+          `recipient_route: ${recipientRoute.source}`,
           reviewRequest ? `ai_review_tasks: ${reviewRequest.reviewCount}` : "",
           reviewRequest?.detail ? `ai_review_detail: ${reviewRequest.detail}` : "",
           reviewError ? `ai_review_error: ${reviewError}` : "",
-          resolvedMention?.detail ? `assignee_mapping: ${resolvedMention.detail}` : "",
-          fallbackMention?.detail ? `fallback_mapping: ${fallbackMention.detail}` : ""
+          recipientRoute.details.length ? `route_detail:\n${recipientRoute.details.join("\n")}` : ""
         ]
           .filter(Boolean)
           .join("\n")

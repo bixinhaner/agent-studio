@@ -300,6 +300,11 @@ export type ZendeskConfigInput = {
   dingtalkNotificationTemplate?: string;
   dingtalkReviewRequiredEnabled?: boolean;
   dingtalkReviewDueHours?: number;
+  dingtalkReviewCcRoutingEnabled?: boolean;
+  dingtalkReviewAssigneeRoutingEnabled?: boolean;
+  dingtalkReviewGroupFallbackEnabled?: boolean;
+  dingtalkReviewGlobalFallbackEnabled?: boolean;
+  dingtalkReviewAllowedReviewerEmails?: string[];
   aiReviewEmailReminderEnabled?: boolean;
   aiReviewEmailReminderTime?: string;
   aiReviewEmailReminderTimezone?: string;
@@ -476,6 +481,11 @@ export type ZendeskConfigDraft = {
   dingtalkNotificationTemplate: string;
   dingtalkReviewRequiredEnabled: boolean;
   dingtalkReviewDueHours: number;
+  dingtalkReviewCcRoutingEnabled: boolean;
+  dingtalkReviewAssigneeRoutingEnabled: boolean;
+  dingtalkReviewGroupFallbackEnabled: boolean;
+  dingtalkReviewGlobalFallbackEnabled: boolean;
+  dingtalkReviewAllowedReviewerEmailsRaw: string;
   aiReviewEmailReminderEnabled: boolean;
   aiReviewEmailReminderTime: string;
   aiReviewEmailReminderTimezone: string;

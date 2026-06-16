@@ -334,6 +334,46 @@
   min-height: 180px;
 }
 
+.zendesk-review-routing-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(26, 23, 19, 0.08);
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(255, 255, 255, 0.78));
+}
+
+.zendesk-review-routing-head {
+  display: grid;
+  gap: 8px;
+}
+
+.zendesk-review-routing-flow {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: #0f766e;
+  background: rgba(204, 251, 241, 0.58);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.zendesk-review-routing-switches {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.zendesk-review-routing-switches .checkbox-field {
+  min-height: 40px;
+  border: 1px solid rgba(26, 23, 19, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
 .zendesk-group-fallback-panel {
   display: grid;
   gap: 12px;
@@ -527,6 +567,7 @@
 
   .zendesk-config-hero,
   .zendesk-launch-checklist,
+  .zendesk-review-routing-switches,
   .zendesk-dingtalk-template-grid,
   .zendesk-email-reminder-grid,
   .zendesk-group-fallback-row,

@@ -45,6 +45,11 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkNotificationTemplate: "",
   dingtalkReviewRequiredEnabled: false,
   dingtalkReviewDueHours: 24,
+  dingtalkReviewCcRoutingEnabled: false,
+  dingtalkReviewAssigneeRoutingEnabled: true,
+  dingtalkReviewGroupFallbackEnabled: true,
+  dingtalkReviewGlobalFallbackEnabled: true,
+  dingtalkReviewAllowedReviewerEmails: [],
   aiReviewEmailReminderEnabled: false,
   aiReviewEmailReminderTime: "09:00",
   aiReviewEmailReminderTimezone: "Asia/Shanghai",
@@ -1055,6 +1060,353 @@ describe("ZendeskIntegrationService", () => {
         }
       });
       expect(runUpdates.some((item) => item.patch.status === "noted")).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("routes DingTalk review mentions to allowed Zendesk CC reviewers before the shared assignee", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(process.cwd(), "temp", "zendesk-cc-reviewer-"));
+    const dingtalkPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/778.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 778,
+              subject: "Shared account ticket",
+              description: "Customer needs a firmware check.",
+              status: "open",
+              requester_id: 9001,
+              assignee_id: 200,
+              email_cc_ids: [300, 301],
+              updated_at: "2026-05-20T02:00:00Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/778/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 702,
+                author_id: 9001,
+                body: "Please check this ticket.",
+                public: true,
+                created_at: "2026-05-20T02:01:00Z",
+                attachments: []
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 9001, name: "Requester", email: "requester@example.com", role: "end-user" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/200.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 200, name: "Shared Support", email: "shared-support@baicells.com", role: "agent" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/300.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 300, name: "Jesse", email: "jesse@baicells.com", role: "agent" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/301.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 301, name: "Unrelated CC", email: "unrelated@example.com", role: "end-user" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/778.json") && init?.method === "PUT") {
+        return new Response(JSON.stringify({ audit: { events: [{ id: 9000000000778, type: "Comment" }] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/robot/send")) {
+        dingtalkPayloads.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = {
+      startThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-cc-reviewer" })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-cc-reviewer", resumed: true })),
+      runStreamed: vi.fn(async function* () {
+        yield {
+          type: "message",
+          text: JSON.stringify({
+            decision: "internal_note",
+            internalNote: "Route to the real CC handler.",
+            confidence: 0.8,
+            reasons: ["cc reviewer"]
+          })
+        };
+      })
+    };
+    const settings = {
+      ...baseSettings,
+      publicBaseUrl: "https://agent.example.com",
+      zendeskBaseUrl: "https://example.zendesk.com",
+      zendeskEmail: "agent@example.com",
+      zendeskApiToken: "token",
+      dingtalkNotificationEnabled: true,
+      dingtalkNotificationManualRunsEnabled: true,
+      dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token",
+      dingtalkNotificationFallbackUserIds: ["ding-global"],
+      dingtalkReviewCcRoutingEnabled: true,
+      dingtalkReviewAllowedReviewerEmails: ["jesse@baicells.com"]
+    };
+    const settingsStore = {
+      get: vi.fn(async () => settings),
+      getForInstance: vi.fn(async () => settings)
+    };
+    const bindingStore = {
+      get: vi.fn(async () => undefined),
+      upsert: vi.fn(async () => ({
+        ticketId: "778",
+        instanceId: "zendesk-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }))
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-cc-reviewer",
+        instanceId: "zendesk-1",
+        ticketId: "778",
+        source: "manual" as const,
+        status: "received" as const,
+        detail: "received",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async () => undefined),
+      listForInstance: vi.fn(async () => [])
+    };
+    const resolveDingTalkMentionTarget = vi.fn(async ({ zendeskUser, fallbackUserIds }) => {
+      if (zendeskUser?.email === "jesse@baicells.com") {
+        return { userIds: ["ding-jesse"], label: "Jesse", detail: "matched cc reviewer" };
+      }
+      if (zendeskUser?.email === "shared-support@baicells.com") {
+        return { userIds: ["ding-shared"], label: "Shared Support", detail: "matched shared assignee" };
+      }
+      return { userIds: fallbackUserIds ?? ["ding-global"], label: "Global", detail: "global fallback" };
+    });
+    const service = new ZendeskIntegrationService(
+      {
+        resolveAgentRuntime: vi.fn(async () => ({
+          runtime: runtime as never,
+          workspace: tempRoot,
+          model: "gpt-5.5",
+          reasoningEffort: "high" as const,
+          codexRunConfig: {}
+        })),
+        resolveDingTalkMentionTarget
+      },
+      settingsStore as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    try {
+      await service.runTicket("778", "zendesk-1");
+
+      expect(resolveDingTalkMentionTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          zendeskUser: expect.objectContaining({ email: "jesse@baicells.com" })
+        })
+      );
+      expect(resolveDingTalkMentionTarget).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          zendeskUser: expect.objectContaining({ email: "shared-support@baicells.com" })
+        })
+      );
+      expect(dingtalkPayloads).toHaveLength(1);
+      expect(dingtalkPayloads[0]).toMatchObject({
+        at: {
+          atUserIds: ["ding-jesse"],
+          isAtAll: false
+        }
+      });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not route DingTalk mentions through disabled group and global fallbacks", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(process.cwd(), "temp", "zendesk-disabled-fallback-"));
+    const dingtalkPayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/779.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 779,
+              subject: "No reviewer ticket",
+              description: "Customer needs help.",
+              status: "open",
+              requester_id: 9001,
+              group_id: 42,
+              updated_at: "2026-05-20T02:00:00Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/779/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 703,
+                author_id: 9001,
+                body: "Please check this ticket.",
+                public: true,
+                created_at: "2026-05-20T02:01:00Z",
+                attachments: []
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 9001, name: "Requester", email: "requester@example.com", role: "end-user" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/groups/42.json")) {
+        return new Response(
+          JSON.stringify({ group: { id: 42, name: "US Support Team (Level 1)" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/779.json") && init?.method === "PUT") {
+        return new Response(JSON.stringify({ audit: { events: [{ id: 9000000000779, type: "Comment" }] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.startsWith("https://oapi.dingtalk.com/robot/send")) {
+        dingtalkPayloads.push(JSON.parse(String(init?.body || "{}")));
+        return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runtime = {
+      startThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-disabled-fallback" })),
+      resumeThreadWithOptions: vi.fn(async () => ({ id: "codex-thread-disabled-fallback", resumed: true })),
+      runStreamed: vi.fn(async function* () {
+        yield {
+          type: "message",
+          text: JSON.stringify({
+            decision: "internal_note",
+            internalNote: "No reviewer should be mentioned.",
+            confidence: 0.8,
+            reasons: ["fallback disabled"]
+          })
+        };
+      })
+    };
+    const settings = {
+      ...baseSettings,
+      publicBaseUrl: "https://agent.example.com",
+      zendeskBaseUrl: "https://example.zendesk.com",
+      zendeskEmail: "agent@example.com",
+      zendeskApiToken: "token",
+      dingtalkNotificationEnabled: true,
+      dingtalkNotificationManualRunsEnabled: true,
+      dingtalkNotificationWebhookUrl: "https://oapi.dingtalk.com/robot/send?access_token=robot-token",
+      dingtalkNotificationFallbackUserIds: ["ding-global"],
+      dingtalkNotificationGroupFallbacks: [{ groupId: "42", groupName: "US Support Team (Level 1)", userIds: ["ding-jesse"] }],
+      dingtalkReviewGroupFallbackEnabled: false,
+      dingtalkReviewGlobalFallbackEnabled: false
+    };
+    const settingsStore = {
+      get: vi.fn(async () => settings),
+      getForInstance: vi.fn(async () => settings)
+    };
+    const bindingStore = {
+      get: vi.fn(async () => undefined),
+      upsert: vi.fn(async () => ({
+        ticketId: "779",
+        instanceId: "zendesk-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }))
+    };
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-disabled-fallback",
+        instanceId: "zendesk-1",
+        ticketId: "779",
+        source: "manual" as const,
+        status: "received" as const,
+        detail: "received",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async () => undefined),
+      listForInstance: vi.fn(async () => [])
+    };
+    const resolveDingTalkMentionTarget = vi.fn(async () => ({
+      userIds: ["ding-unexpected"],
+      label: "Unexpected",
+      detail: "unexpected mapping"
+    }));
+    const service = new ZendeskIntegrationService(
+      {
+        resolveAgentRuntime: vi.fn(async () => ({
+          runtime: runtime as never,
+          workspace: tempRoot,
+          model: "gpt-5.5",
+          reasoningEffort: "high" as const,
+          codexRunConfig: {}
+        })),
+        resolveDingTalkMentionTarget
+      },
+      settingsStore as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    try {
+      await service.runTicket("779", "zendesk-1");
+
+      expect(resolveDingTalkMentionTarget).not.toHaveBeenCalled();
+      expect(dingtalkPayloads).toHaveLength(1);
+      expect(dingtalkPayloads[0]).toMatchObject({
+        at: {
+          atUserIds: [],
+          isAtAll: false
+        }
+      });
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
