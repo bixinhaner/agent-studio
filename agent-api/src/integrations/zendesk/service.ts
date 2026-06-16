@@ -39,6 +39,7 @@ import type {
   ZendeskRequesterPayload,
   ZendeskSetupGuide,
   ZendeskTicketContext,
+  ZendeskRunRecord,
   ZendeskRunStatus
 } from "./types.js";
 import type { ReasoningEffort } from "../../model-config.js";
@@ -266,6 +267,13 @@ type ZendeskDingTalkReviewerRoute = {
   userIds: string[];
   mentionLabel?: string;
   details: string[];
+};
+
+type ZendeskDingTalkReviewReconcileResult = {
+  reviewedRunCount: number;
+  createdReviewCount: number;
+  skippedRunCount: number;
+  detail: string;
 };
 
 function sanitizeTicketId(value: string | number): string {
@@ -753,6 +761,61 @@ function resolveAction(
   };
 }
 
+function findZendeskCommentById(context: ZendeskTicketContext, commentId: number | undefined): ZendeskCommentPayload | undefined {
+  if (!commentId) return undefined;
+  return context.comments.find((comment) => comment.id === commentId);
+}
+
+function syntheticZendeskRequesterComment(context: ZendeskTicketContext, requesterCommentId: number | undefined): ZendeskCommentPayload {
+  return {
+    id: requesterCommentId ?? 0,
+    authorId: context.ticket.requesterId,
+    author: context.ticket.requester,
+    body: "",
+    public: true,
+    attachments: []
+  };
+}
+
+function buildZendeskReviewReconciliationPayload(
+  run: ZendeskRunRecord,
+  context: ZendeskTicketContext
+):
+  | {
+      requesterComment: ZendeskCommentPayload;
+      decision: ZendeskAgentDecision;
+      action: Extract<ResolvedAction, { mode: "comment" }>;
+    }
+  | undefined {
+  if (!run.commentId || !run.decision) return undefined;
+  const comment = findZendeskCommentById(context, run.commentId);
+  const body = normalizeMultilineBody(comment?.body || "");
+  if (!body) return undefined;
+
+  const sections = splitKnownZendeskCommentSections(body);
+  const publicReply = run.decision === "public_reply";
+  const decision: ZendeskAgentDecision = {
+    decision: run.decision,
+    body: publicReply ? body : "",
+    publicReplyPreview: sections.publicReplyPreview || undefined,
+    internalNote: publicReply ? undefined : sections.internalNote || body,
+    reasons: [],
+    confidence: undefined
+  };
+  return {
+    requesterComment: findZendeskCommentById(context, run.requesterCommentId) || syntheticZendeskRequesterComment(context, run.requesterCommentId),
+    decision,
+    action: {
+      mode: "comment",
+      publicReply,
+      body,
+      status: run.status,
+      detail: "补齐 Zendesk AI 评分任务",
+      decision: run.decision
+    }
+  };
+}
+
 const MAX_DINGTALK_MARKDOWN_CHARS = 12000;
 const DINGTALK_TEMPLATE_PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
@@ -1191,6 +1254,7 @@ export class ZendeskIntegrationService {
         mentionLabel?: string;
         auditThreadId?: string;
         assistantMessageExternalId?: string;
+        skipExistingReviews?: boolean;
       }) => Promise<ZendeskDingTalkReviewRequestResult>;
       conversationAudit?: ZendeskConversationAuditSync;
       runtimeSession?: ZendeskRuntimeSessionBridge;
@@ -1672,14 +1736,25 @@ export class ZendeskIntegrationService {
         binding?.lastProcessedRequesterCommentId &&
         binding.lastProcessedRequesterCommentId >= requesterComment.id
       ) {
+        const reconciliation = await this.reconcileDingTalkReviewTasksForTicketUpdate({
+          settings,
+          context,
+          instanceId,
+          ticketId,
+          ticketUrl: client.buildTicketUrl(ticketId)
+        });
+        const detail =
+          reconciliation && reconciliation.createdReviewCount > 0
+            ? `Zendesk 输入 ${requesterComment.id} 已处理，跳过 agent 执行；已补齐 ${reconciliation.createdReviewCount} 个 AI 评分任务`
+            : `Zendesk 输入 ${requesterComment.id} 已处理，跳过重复执行`;
         await this.runStore.update(runId, {
           status: "skipped",
-          detail: `Zendesk 输入 ${requesterComment.id} 已处理，跳过重复执行`,
+          detail,
           requesterCommentId: requesterComment.id
         });
         return {
           status: "skipped",
-          detail: "重复 webhook，已跳过",
+          detail: reconciliation?.detail ? `${detail}\n${reconciliation.detail}` : "重复 webhook，已跳过",
           runId,
           requesterCommentId: requesterComment.id
         };
@@ -2029,6 +2104,105 @@ export class ZendeskIntegrationService {
       source: "none",
       userIds: [],
       details
+    };
+  }
+
+  private async reconcileDingTalkReviewTasksForTicketUpdate(input: {
+    settings: ZendeskIntegrationSettings;
+    context: ZendeskTicketContext;
+    instanceId?: string;
+    ticketId: string;
+    ticketUrl: string;
+  }): Promise<ZendeskDingTalkReviewReconcileResult | undefined> {
+    if (!input.settings.dingtalkReviewRequiredEnabled || !input.settings.dingtalkReviewReconcileOnUpdateEnabled) {
+      return undefined;
+    }
+    if (!this.dependencies.requestDingTalkAiReviews) {
+      return undefined;
+    }
+
+    const recipientRoute = await this.resolveDingTalkReviewRecipientRoute({
+      settings: input.settings,
+      context: input.context,
+      instanceId: input.instanceId,
+      ticketId: input.ticketId
+    });
+    if (recipientRoute.userIds.length === 0) {
+      return {
+        reviewedRunCount: 0,
+        createdReviewCount: 0,
+        skippedRunCount: 0,
+        detail: [
+          "No review recipients matched the current Zendesk routing rules.",
+          recipientRoute.details.length ? `route_detail:\n${recipientRoute.details.join("\n")}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      };
+    }
+
+    const listReviewableForTicket = (this.runStore as ZendeskRunStore & {
+      listReviewableForTicket?: (query: { ticketId: string; instanceId?: string; limit?: number }) => Promise<ZendeskRunRecord[]>;
+    }).listReviewableForTicket;
+    if (!listReviewableForTicket) {
+      return undefined;
+    }
+
+    const runs = await listReviewableForTicket.call(this.runStore, {
+      ticketId: input.ticketId,
+      instanceId: input.instanceId,
+      limit: 10
+    });
+    let createdReviewCount = 0;
+    let reviewedRunCount = 0;
+    let skippedRunCount = 0;
+    const details: string[] = [];
+
+    for (const run of runs) {
+      const payload = buildZendeskReviewReconciliationPayload(run, input.context);
+      if (!payload) {
+        skippedRunCount += 1;
+        details.push(`run ${run.id}: skipped because the Zendesk AI comment body was not available in current comment history.`);
+        continue;
+      }
+      const result = await this.dependencies.requestDingTalkAiReviews({
+        settings: input.settings,
+        context: input.context,
+        requesterComment: payload.requesterComment,
+        instanceId: input.instanceId,
+        ticketId: input.ticketId,
+        runId: run.id,
+        source: run.source,
+        decision: payload.decision,
+        action: payload.action,
+        commentId: run.commentId,
+        ticketUrl: input.ticketUrl,
+        atUserIds: recipientRoute.userIds,
+        mentionLabel: recipientRoute.mentionLabel,
+        assistantMessageExternalId: `zendesk-agent-${run.id}`,
+        skipExistingReviews: true
+      });
+      reviewedRunCount += 1;
+      createdReviewCount += result.reviewCount;
+      details.push(`run ${run.id}: ${result.reviewCount} missing review task(s) created.`);
+    }
+
+    return {
+      reviewedRunCount,
+      createdReviewCount,
+      skippedRunCount,
+      detail: [
+        `recipient_route: ${recipientRoute.source}`,
+        recipientRoute.mentionLabel ? `mention_label: ${recipientRoute.mentionLabel}` : "",
+        `at_user_ids: ${recipientRoute.userIds.length}`,
+        `reviewed_runs: ${reviewedRunCount}`,
+        `created_reviews: ${createdReviewCount}`,
+        `skipped_runs: ${skippedRunCount}`,
+        recipientRoute.details.length ? `route_detail:\n${recipientRoute.details.join("\n")}` : "",
+        details.length ? `run_detail:\n${details.join("\n")}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n")
     };
   }
 

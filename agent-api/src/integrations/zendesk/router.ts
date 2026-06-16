@@ -80,6 +80,7 @@ export function createZendeskAdminRouter(service: ZendeskIntegrationService): Ro
         dingtalkReviewGroupFallbackEnabled: input.dingtalk_review_group_fallback_enabled,
         dingtalkReviewGlobalFallbackEnabled: input.dingtalk_review_global_fallback_enabled,
         dingtalkReviewAllowedReviewerEmails: normalizeStringArray(input.dingtalk_review_allowed_reviewer_emails),
+        dingtalkReviewReconcileOnUpdateEnabled: input.dingtalk_review_reconcile_on_update_enabled,
         aiReviewEmailReminderEnabled: input.ai_review_email_reminder_enabled,
         aiReviewEmailReminderTime: input.ai_review_email_reminder_time,
         aiReviewEmailReminderTimezone: input.ai_review_email_reminder_timezone,

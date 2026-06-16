@@ -77,6 +77,7 @@ export type ZendeskIntegrationSettings = {
   dingtalkReviewGroupFallbackEnabled: boolean;
   dingtalkReviewGlobalFallbackEnabled: boolean;
   dingtalkReviewAllowedReviewerEmails: string[];
+  dingtalkReviewReconcileOnUpdateEnabled: boolean;
   aiReviewEmailReminderEnabled: boolean;
   aiReviewEmailReminderTime: string;
   aiReviewEmailReminderTimezone: string;
@@ -311,6 +312,7 @@ export const zendeskSettingsUpdateSchema = z.object({
   dingtalk_review_group_fallback_enabled: z.boolean().optional(),
   dingtalk_review_global_fallback_enabled: z.boolean().optional(),
   dingtalk_review_allowed_reviewer_emails: optionalStringArraySchema,
+  dingtalk_review_reconcile_on_update_enabled: z.boolean().optional(),
   ai_review_email_reminder_enabled: z.boolean().optional(),
   ai_review_email_reminder_time: optionalStringSchema,
   ai_review_email_reminder_timezone: optionalStringSchema,

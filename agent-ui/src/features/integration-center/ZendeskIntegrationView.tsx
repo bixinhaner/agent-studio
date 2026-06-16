@@ -385,6 +385,7 @@ function buildDraft(detail: IntegrationDetail): ZendeskConfigDraft {
     dingtalkReviewGroupFallbackEnabled: detail.config.dingtalkReviewGroupFallbackEnabled !== false,
     dingtalkReviewGlobalFallbackEnabled: detail.config.dingtalkReviewGlobalFallbackEnabled !== false,
     dingtalkReviewAllowedReviewerEmailsRaw: asListText(detail.config.dingtalkReviewAllowedReviewerEmails),
+    dingtalkReviewReconcileOnUpdateEnabled: detail.config.dingtalkReviewReconcileOnUpdateEnabled !== false,
     aiReviewEmailReminderEnabled: asBoolean(detail.config.aiReviewEmailReminderEnabled),
     aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(detail.config.aiReviewEmailReminderTime),
     aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(detail.config.aiReviewEmailReminderTimezone),
@@ -644,6 +645,7 @@ export function ZendeskIntegrationView(props: {
           dingtalkReviewGroupFallbackEnabled: draft.dingtalkReviewGroupFallbackEnabled,
           dingtalkReviewGlobalFallbackEnabled: draft.dingtalkReviewGlobalFallbackEnabled,
           dingtalkReviewAllowedReviewerEmails: parseList(draft.dingtalkReviewAllowedReviewerEmailsRaw),
+          dingtalkReviewReconcileOnUpdateEnabled: draft.dingtalkReviewReconcileOnUpdateEnabled,
           aiReviewEmailReminderEnabled: draft.aiReviewEmailReminderEnabled,
           aiReviewEmailReminderTime: normalizeAiReviewEmailReminderTime(draft.aiReviewEmailReminderTime),
           aiReviewEmailReminderTimezone: normalizeAiReviewEmailReminderTimezone(draft.aiReviewEmailReminderTimezone),
@@ -1127,9 +1129,25 @@ export function ZendeskIntegrationView(props: {
                                 setDraft((current) => ({ ...current, dingtalkReviewGlobalFallbackEnabled: checked }))
                               }
                             />
-                            <span>Global fallback</span>
-                          </label>
-                        </div>
+                          <span>Global fallback</span>
+                        </label>
+                      </div>
+                        <label className="checkbox-field resource-center-toggle-row zendesk-review-reconcile-toggle">
+                          <Switch
+                            checked={draft.dingtalkReviewReconcileOnUpdateEnabled}
+                            disabled={saving || !draft.dingtalkNotificationEnabled || !draft.dingtalkReviewRequiredEnabled}
+                            onChange={(checked) =>
+                              setDraft((current) => ({
+                                ...current,
+                                dingtalkReviewReconcileOnUpdateEnabled: checked
+                              }))
+                            }
+                          />
+                          <span>
+                            后续 CC/follower 变化时补齐缺失评分任务
+                            <small>不重跑 agent，不修改 Zendesk，只补建当前路由接收人的评分、待办和个人通知。</small>
+                          </span>
+                        </label>
                         <label className="field">
                           <span className="field-label">Allowed reviewer emails</span>
                           <Input.TextArea

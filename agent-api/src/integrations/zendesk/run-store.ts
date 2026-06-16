@@ -157,6 +157,27 @@ export class ZendeskRunStore {
     return rows.length > 0;
   }
 
+  async listReviewableForTicket(input: { ticketId: string; instanceId?: string; limit?: number }): Promise<ZendeskRunRecord[]> {
+    const ticketId = String(input.ticketId || "").trim();
+    if (!ticketId) return [];
+    const safeLimit = Math.max(1, Math.min(20, Number(input.limit) || 10));
+    const rows = await this.db.zendeskRun.findMany({
+      where: {
+        scopeKey: zendeskScopeKey(input.instanceId),
+        ticketId,
+        status: {
+          in: ["replied", "noted", "handoff"]
+        },
+        commentId: {
+          not: null
+        }
+      },
+      orderBy: { createdAt: "desc" },
+      take: safeLimit
+    });
+    return rows.map(mapRun);
+  }
+
   async create(input: {
     instanceId?: string;
     ticketId: string;

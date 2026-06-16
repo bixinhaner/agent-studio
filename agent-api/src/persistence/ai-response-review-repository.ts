@@ -498,6 +498,18 @@ export class AiResponseReviewRepository {
     return mapReview(row, await this.loadUserMap([row]));
   }
 
+  async listForZendeskRun(runId: string): Promise<AiResponseReviewRecord[]> {
+    const id = trimOrUndefined(runId);
+    if (!id) return [];
+    const rows = await this.db.aiResponseReview.findMany({
+      where: {
+        zendeskRunId: id
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => mapReview(row));
+  }
+
   async markNotified(reviewId: string, input: { status: string; error?: string }): Promise<AiResponseReviewRecord | null> {
     const id = trimOrUndefined(reviewId);
     if (!id) return null;

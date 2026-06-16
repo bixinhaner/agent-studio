@@ -44,6 +44,7 @@ const settings: ZendeskIntegrationSettings = {
   dingtalkReviewGroupFallbackEnabled: true,
   dingtalkReviewGlobalFallbackEnabled: true,
   dingtalkReviewAllowedReviewerEmails: [],
+  dingtalkReviewReconcileOnUpdateEnabled: true,
   aiReviewEmailReminderEnabled: false,
   aiReviewEmailReminderTime: "09:00",
   aiReviewEmailReminderTimezone: "Asia/Shanghai",

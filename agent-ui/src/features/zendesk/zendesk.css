@@ -374,6 +374,22 @@
   background: rgba(255, 255, 255, 0.78);
 }
 
+.zendesk-review-reconcile-toggle {
+  align-items: flex-start;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(240, 253, 250, 0.5);
+}
+
+.zendesk-review-reconcile-toggle small {
+  display: block;
+  margin-top: 3px;
+  color: var(--admin-color-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .zendesk-group-fallback-panel {
   display: grid;
   gap: 12px;

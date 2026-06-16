@@ -305,6 +305,7 @@ export type ZendeskConfigInput = {
   dingtalkReviewGroupFallbackEnabled?: boolean;
   dingtalkReviewGlobalFallbackEnabled?: boolean;
   dingtalkReviewAllowedReviewerEmails?: string[];
+  dingtalkReviewReconcileOnUpdateEnabled?: boolean;
   aiReviewEmailReminderEnabled?: boolean;
   aiReviewEmailReminderTime?: string;
   aiReviewEmailReminderTimezone?: string;
@@ -486,6 +487,7 @@ export type ZendeskConfigDraft = {
   dingtalkReviewGroupFallbackEnabled: boolean;
   dingtalkReviewGlobalFallbackEnabled: boolean;
   dingtalkReviewAllowedReviewerEmailsRaw: string;
+  dingtalkReviewReconcileOnUpdateEnabled: boolean;
   aiReviewEmailReminderEnabled: boolean;
   aiReviewEmailReminderTime: string;
   aiReviewEmailReminderTimezone: string;

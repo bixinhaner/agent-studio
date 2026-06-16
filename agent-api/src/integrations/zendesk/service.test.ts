@@ -50,6 +50,7 @@ const baseSettings: ZendeskIntegrationSettings = {
   dingtalkReviewGroupFallbackEnabled: true,
   dingtalkReviewGlobalFallbackEnabled: true,
   dingtalkReviewAllowedReviewerEmails: [],
+  dingtalkReviewReconcileOnUpdateEnabled: true,
   aiReviewEmailReminderEnabled: false,
   aiReviewEmailReminderTime: "09:00",
   aiReviewEmailReminderTimezone: "Asia/Shanghai",
@@ -1410,6 +1411,186 @@ describe("ZendeskIntegrationService", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("reconciles missing DingTalk AI review tasks when a duplicate Zendesk update later adds a CC reviewer", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/v2/tickets/780.json") && init?.method !== "PUT") {
+        return new Response(
+          JSON.stringify({
+            ticket: {
+              id: 780,
+              subject: "CC added after AI note",
+              description: "Customer needs help.",
+              status: "open",
+              requester_id: 9001,
+              email_cc_ids: [300],
+              updated_at: "2026-05-20T02:10:00Z",
+              tags: []
+            }
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/tickets/780/comments.json")) {
+        return new Response(
+          JSON.stringify({
+            comments: [
+              {
+                id: 900,
+                body: [
+                  "AI generated an internal note.",
+                  "",
+                  "Public reply preview (not sent):",
+                  "We are checking the device status.",
+                  "",
+                  "Internal note:",
+                  "Support should verify the device logs before replying."
+                ].join("\n"),
+                public: false,
+                created_at: "2026-05-20T02:05:00Z",
+                attachments: []
+              },
+              {
+                id: 702,
+                author_id: 9001,
+                body: "Please check this ticket.",
+                public: true,
+                created_at: "2026-05-20T02:01:00Z",
+                attachments: []
+              }
+            ]
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/9001.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 9001, name: "Requester", email: "requester@example.com", role: "end-user" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url.includes("/api/v2/users/300.json")) {
+        return new Response(
+          JSON.stringify({ user: { id: 300, name: "Jesse", email: "jesse@baicells.com", role: "agent" } }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request ${url}` }), { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const settings = {
+      ...baseSettings,
+      publicBaseUrl: "https://agent.example.com",
+      zendeskBaseUrl: "https://example.zendesk.com",
+      zendeskEmail: "agent@example.com",
+      zendeskApiToken: "token",
+      dingtalkNotificationEnabled: true,
+      dingtalkReviewRequiredEnabled: true,
+      dingtalkReviewCcRoutingEnabled: true,
+      dingtalkReviewAssigneeRoutingEnabled: false,
+      dingtalkReviewAllowedReviewerEmails: ["jesse@baicells.com"]
+    };
+    const settingsStore = {
+      get: vi.fn(async () => settings),
+      getForInstance: vi.fn(async () => settings)
+    };
+    const bindingStore = {
+      get: vi.fn(async () => ({
+        ticketId: "780",
+        instanceId: "zendesk-1",
+        lastProcessedRequesterCommentId: 702,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      upsert: vi.fn()
+    };
+    const runUpdates: Array<{ runId: string; patch: Record<string, unknown> }> = [];
+    const runStore = {
+      create: vi.fn(async () => ({
+        id: "run-current-duplicate",
+        instanceId: "zendesk-1",
+        ticketId: "780",
+        source: "webhook" as const,
+        status: "received" as const,
+        detail: "received",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      })),
+      update: vi.fn(async (runId: string, patch: Record<string, unknown>) => {
+        runUpdates.push({ runId, patch });
+      }),
+      listForInstance: vi.fn(async () => []),
+      listReviewableForTicket: vi.fn(async () => [
+        {
+          id: "run-prior-ai-note",
+          instanceId: "zendesk-1",
+          ticketId: "780",
+          source: "webhook" as const,
+          status: "noted" as const,
+          detail: "已记录内部备注",
+          decision: "internal_note" as const,
+          commentId: 900,
+          requesterCommentId: 702,
+          ticketSubject: "CC added after AI note",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ])
+    };
+    const runtime = {
+      startThreadWithOptions: vi.fn(),
+      resumeThreadWithOptions: vi.fn(),
+      runStreamed: vi.fn()
+    };
+    const resolveDingTalkMentionTarget = vi.fn(async ({ zendeskUser }) => {
+      if (zendeskUser?.email === "jesse@baicells.com") {
+        return { userIds: ["ding-jesse"], label: "Jesse", detail: "matched cc reviewer" };
+      }
+      return { userIds: [], label: "", detail: "no match" };
+    });
+    const requestDingTalkAiReviews = vi.fn(async () => ({
+      reviewCount: 1,
+      reviewSummaryMarkdown: "**AI Review Required**",
+      detail: "review_count: 1"
+    }));
+    const service = new ZendeskIntegrationService(
+      {
+        resolveRuntime: vi.fn(async () => runtime as never),
+        resolveDingTalkMentionTarget,
+        requestDingTalkAiReviews
+      },
+      settingsStore as never,
+      bindingStore as unknown as ZendeskBindingStore,
+      runStore as unknown as ZendeskRunStore
+    );
+
+    const result = await service.runTicket("780", "zendesk-1");
+
+    expect(runtime.runStreamed).not.toHaveBeenCalled();
+    expect(runStore.listReviewableForTicket).toHaveBeenCalledWith({
+      ticketId: "780",
+      instanceId: "zendesk-1",
+      limit: 10
+    });
+    expect(requestDingTalkAiReviews).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-prior-ai-note",
+        atUserIds: ["ding-jesse"],
+        skipExistingReviews: true,
+        decision: expect.objectContaining({
+          internalNote: "Support should verify the device logs before replying.",
+          publicReplyPreview: "We are checking the device status."
+        }),
+        action: expect.objectContaining({
+          body: expect.stringContaining("AI generated an internal note.")
+        })
+      })
+    );
+    expect(result.detail).toContain("created_reviews: 1");
+    expect(runUpdates.some((item) => String(item.patch.detail || "").includes("已补齐 1 个 AI 评分任务"))).toBe(true);
   });
 
   it("uses the Agent Studio runtime session bridge before the legacy Zendesk codex thread binding", async () => {

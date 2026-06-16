@@ -860,8 +860,9 @@ async function requestZendeskDingTalkAiReviews(input: {
   mentionLabel?: string;
   auditThreadId?: string;
   assistantMessageExternalId?: string;
+  skipExistingReviews?: boolean;
 }): Promise<{ reviewCount: number; reviewUrl?: string; reviewSummaryMarkdown: string; detail?: string }> {
-  const uniqueDingTalkUserIds = Array.from(
+  let uniqueDingTalkUserIds = Array.from(
     new Set(input.atUserIds.map((item) => String(item || "").trim()).filter(Boolean))
   );
   if (!uniqueDingTalkUserIds.length) {
@@ -869,6 +870,22 @@ async function requestZendeskDingTalkAiReviews(input: {
       reviewCount: 0,
       reviewSummaryMarkdown: ""
     };
+  }
+  if (input.skipExistingReviews) {
+    const existingReviews = await aiResponseReviews.listForZendeskRun(input.runId);
+    const existingDingTalkUserIds = new Set(
+      existingReviews
+        .map((review) => trimOrUndefined(review.reviewerDingTalkUserId))
+        .filter((item): item is string => Boolean(item))
+    );
+    uniqueDingTalkUserIds = uniqueDingTalkUserIds.filter((userId) => !existingDingTalkUserIds.has(userId));
+    if (!uniqueDingTalkUserIds.length) {
+      return {
+        reviewCount: 0,
+        reviewSummaryMarkdown: "",
+        detail: "No missing AI review tasks for the current recipients."
+      };
+    }
   }
 
   const usersByDingTalkId = new Map<string, {
