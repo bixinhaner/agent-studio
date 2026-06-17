@@ -2134,6 +2134,10 @@ body.access-request-route #root {
   box-shadow: 0 12px 36px rgba(255, 70, 20, 0.08);
 }
 
+.assistant-running-card.is-image {
+  width: min(520px, 100%);
+}
+
 .assistant-error-card {
   margin: 2px 0 0;
   width: min(520px, 100%);
@@ -2223,6 +2227,74 @@ body.access-request-route #root {
   font-variant-numeric: tabular-nums;
 }
 
+.assistant-running-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.assistant-image-placeholder {
+  margin-top: 10px;
+  width: min(360px, 100%);
+  height: 240px;
+}
+
+.assistant-image-placeholder-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(203, 213, 225, 0.88);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 70, 20, 0.08), rgba(37, 99, 235, 0.08)),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.assistant-image-placeholder-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  animation: assistant-image-placeholder-sweep 1.8s ease-in-out infinite;
+}
+
+.assistant-image-placeholder-mark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(100, 116, 139, 0.36);
+  border-radius: 12px;
+}
+
+.assistant-image-placeholder-mark::before,
+.assistant-image-placeholder-mark::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.28);
+}
+
+.assistant-image-placeholder-mark::before {
+  right: 10px;
+  top: 9px;
+  width: 8px;
+  height: 8px;
+}
+
+.assistant-image-placeholder-mark::after {
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: 12px;
+  border-radius: 10px 10px 6px 6px;
+}
+
 .assistant-running-track {
   position: relative;
   margin-top: 8px;
@@ -2255,6 +2327,15 @@ body.access-request-route #root {
   }
   to {
     transform: translateX(300%);
+  }
+}
+
+@keyframes assistant-image-placeholder-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
 
@@ -3067,6 +3148,14 @@ body.access-request-route #root {
 .assistant-running-phase {
   font-size: 11px;
   color: #64748b;
+}
+
+.assistant-running-hint {
+  font-size: 11px;
+}
+
+.assistant-image-placeholder {
+  height: 220px;
 }
 
 .trace-empty {

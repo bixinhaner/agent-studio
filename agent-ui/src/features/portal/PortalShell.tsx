@@ -382,16 +382,30 @@ const PRODUCT_FEEDBACK_SEVERITY_OPTIONS: Array<{ value: ProductFeedbackSeverity;
 const PRODUCT_FEEDBACK_MAX_IMAGES = 3;
 const PRODUCT_FEEDBACK_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PRODUCT_FEEDBACK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const RUNNING_STAGE_CONNECTING_TEXT = "Connecting to the assistant";
-const RUNNING_STAGE_RUNTIME_STARTING_TEXT = "Starting the reasoning runtime";
-const RUNNING_STAGE_RUNTIME_CONNECTED_TEXT = "Runtime connected. Reading the first update.";
-const RUNNING_STAGE_WORKING_TEXT = "Working on your request";
-const RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT = "Still working. I'm thinking through the request and planning the next steps.";
-const RUNNING_STAGE_CONNECTING_FALLBACK_MS = 1800;
-const RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS = 8000;
-const DEFAULT_RUNNING_STAGE_TEXT = RUNNING_STAGE_CONNECTING_TEXT;
+const RUNNING_STAGE_RECEIVED_TEXT = "Request received. Preparing your workspace.";
+const RUNNING_STAGE_RUNTIME_STARTING_TEXT = "Starting the reasoning environment.";
+const RUNNING_STAGE_RUNTIME_CONNECTING_TEXT = "Connecting the runtime. This may take a few seconds.";
+const RUNNING_STAGE_CONTEXT_TEXT = "Analyzing the context.";
+const RUNNING_STAGE_ANSWER_TEXT = "Generating the answer.";
+const RUNNING_STAGE_RESULT_TEXT = "Organizing the result.";
+const RUNNING_STAGE_LONG_WAIT_TEXT = "Still working. You can stay on this page and the result will appear here.";
+const RUNNING_STAGE_IMAGE_TEXT = "Generating the image. This usually takes longer than a text answer.";
+const RUNNING_STAGE_IMAGE_HINT_TEXT = "The image will appear here automatically when it is ready.";
+const RUNNING_STAGE_RECEIVED_FALLBACK_MS = 1500;
+const RUNNING_STAGE_RUNTIME_STARTING_FALLBACK_MS = 2500;
+const RUNNING_STAGE_RUNTIME_CONNECTING_FALLBACK_MS = 6000;
+const DEFAULT_RUNNING_STAGE_TEXT = RUNNING_STAGE_RECEIVED_TEXT;
 const PORTAL_RUNNING_LEAVE_WARNING = "There are still running sessions. If you leave, you may lose visibility into their output.";
-const RunningStageTextContext = createContext(DEFAULT_RUNNING_STAGE_TEXT);
+type RunningStageKind = "text" | "image";
+type RunningStageContextValue = {
+  text: string;
+  kind: RunningStageKind;
+};
+const DEFAULT_RUNNING_STAGE_CONTEXT_VALUE: RunningStageContextValue = {
+  text: DEFAULT_RUNNING_STAGE_TEXT,
+  kind: "text"
+};
+const RunningStageTextContext = createContext<RunningStageContextValue>(DEFAULT_RUNNING_STAGE_CONTEXT_VALUE);
 const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
 const SkillComposerContext = createContext<{
@@ -2326,13 +2340,6 @@ function formatCompactTokens(tokens: number): string {
   return String(tokens);
 }
 
-function ellipsizeSingleLine(value: string, max = 32): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) return "";
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, max)}...`;
-}
-
 function normalizedToolIdentity(item: Record<string, unknown> | null): string {
   if (!item) return "";
   return [
@@ -2360,37 +2367,38 @@ function isImageGenerationItem(itemType: string, item: Record<string, unknown> |
   );
 }
 
+function isImageGenerationStageText(value: string): boolean {
+  return value.trim() === RUNNING_STAGE_IMAGE_TEXT;
+}
+
 function stageTextForCodexItem(
   itemType: string,
   lifecycle: "started" | "completed",
   item: Record<string, unknown> | null
 ): string {
   if (lifecycle === "started") {
-    if (itemType === "reasoning") return "Thinking through your request";
-    if (itemType === "command_execution") return "Checking the information needed to answer";
-    if (isImageGenerationItem(itemType, item)) return "Generating the image. This can take a little longer.";
-    if (itemType === "mcp_tool_call") return "Gathering relevant details";
-    if (itemType === "web_search") {
-      const query = typeof item?.query === "string" ? ellipsizeSingleLine(item.query, 20) : "";
-      return query ? `Looking up: ${query}` : "Looking up relevant information";
-    }
-    if (itemType === "todo_list") return "Organizing the next steps";
+    if (isImageGenerationItem(itemType, item)) return RUNNING_STAGE_IMAGE_TEXT;
+    if (itemType === "reasoning") return RUNNING_STAGE_CONTEXT_TEXT;
+    if (itemType === "command_execution") return RUNNING_STAGE_CONTEXT_TEXT;
+    if (itemType === "mcp_tool_call") return RUNNING_STAGE_CONTEXT_TEXT;
+    if (itemType === "web_search") return RUNNING_STAGE_CONTEXT_TEXT;
+    if (itemType === "todo_list") return RUNNING_STAGE_RESULT_TEXT;
     if (itemType === "file_change") return "Applying the requested changes";
-    if (itemType === "agent_message") return "Writing the answer";
+    if (itemType === "agent_message") return RUNNING_STAGE_ANSWER_TEXT;
     if (itemType === "error") return "Trying to recover";
-    return "Working on your request";
+    return RUNNING_STAGE_CONTEXT_TEXT;
   }
 
-  if (itemType === "reasoning") return "Refining the answer";
-  if (itemType === "command_execution") return "Reviewing the results";
-  if (isImageGenerationItem(itemType, item)) return "Reviewing the generated image";
-  if (itemType === "mcp_tool_call") return "Reviewing the details";
-  if (itemType === "web_search") return "Reviewing what I found";
-  if (itemType === "todo_list") return "Continuing with the plan";
+  if (isImageGenerationItem(itemType, item)) return RUNNING_STAGE_RESULT_TEXT;
+  if (itemType === "reasoning") return RUNNING_STAGE_CONTEXT_TEXT;
+  if (itemType === "command_execution") return RUNNING_STAGE_CONTEXT_TEXT;
+  if (itemType === "mcp_tool_call") return RUNNING_STAGE_CONTEXT_TEXT;
+  if (itemType === "web_search") return RUNNING_STAGE_CONTEXT_TEXT;
+  if (itemType === "todo_list") return RUNNING_STAGE_RESULT_TEXT;
   if (itemType === "file_change") return "Checking the changes";
-  if (itemType === "agent_message") return "Writing the answer";
+  if (itemType === "agent_message") return RUNNING_STAGE_ANSWER_TEXT;
   if (itemType === "error") return "Something went wrong, checking it";
-  return "Still working on your request";
+  return RUNNING_STAGE_RESULT_TEXT;
 }
 
 function parseCrestActionResult(result: unknown): Record<string, unknown> | null {
@@ -3186,22 +3194,31 @@ const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
 const HiddenToolFallback: FC<any> = () => null;
 
 const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
-  const runningStageText = useContext(RunningStageTextContext);
+  const runningStage = useContext(RunningStageTextContext);
   if (status.type !== "running") return null;
+  const isImageStage = runningStage.kind === "image";
 
   return (
     <div
-      className="assistant-running-card"
+      className={`assistant-running-card${isImageStage ? " is-image" : ""}`}
       role="status"
       aria-live="polite"
-      aria-label={`Assistant is processing: ${runningStageText}`}
+      aria-label={`Assistant is processing: ${runningStage.text}`}
     >
       <div className="assistant-running-head">
         <span className="assistant-running-spinner" aria-hidden="true" />
-        <span className="assistant-running-title">Working on it</span>
+        <span className="assistant-running-title">{isImageStage ? "Preparing image" : "Working on it"}</span>
         <span className="assistant-running-chip">Live</span>
       </div>
-      <p className="assistant-running-phase">{runningStageText}</p>
+      <p className="assistant-running-phase">{runningStage.text}</p>
+      {isImageStage ? <p className="assistant-running-hint">{RUNNING_STAGE_IMAGE_HINT_TEXT}</p> : null}
+      {isImageStage ? (
+        <div className="assistant-image-placeholder" aria-hidden="true">
+          <div className="assistant-image-placeholder-frame">
+            <span className="assistant-image-placeholder-mark" />
+          </div>
+        </div>
+      ) : null}
       <div className="assistant-running-track" aria-hidden="true">
         <span className="assistant-running-track-bar" />
       </div>
@@ -5572,6 +5589,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
+  const [runningStageKind, setRunningStageKind] = useState<RunningStageKind>("text");
+  const runningStageContextValue = useMemo<RunningStageContextValue>(
+    () => ({
+      text: runningStageText,
+      kind: runningStageKind
+    }),
+    [runningStageKind, runningStageText]
+  );
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
   const [showProcessTrace, setShowProcessTrace] = useState(() => resolveShowProcessTracePreference(portalPreferenceUser));
@@ -5612,6 +5637,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
+  const runningStageKindRef = useRef<RunningStageKind>(runningStageKind);
   const runningStageFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const enabledSkillIdsRef = useRef(enabledSkillIds);
@@ -5660,6 +5686,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   showProcessTraceRef.current = showProcessTrace;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
+  runningStageKindRef.current = runningStageKind;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
   enabledSkillIdsRef.current = enabledSkillIds;
   activeThreadIdentityRef.current = activeThreadIdentity;
@@ -6017,34 +6044,55 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     runningStageFallbackTimerRef.current = null;
   };
 
-  const updateRunningStage = (next: string, options?: { fallback?: boolean }) => {
+  const updateRunningStage = (next: string, options?: { fallback?: boolean; kind?: RunningStageKind }) => {
     const normalized = next.trim();
     if (!normalized) return;
     clearRunningStageFallbackTimer();
+    const nextKind: RunningStageKind = options?.kind ?? (isImageGenerationStageText(normalized) ? "image" : runningStageKindRef.current);
     if (runningStageTextRef.current !== normalized) {
       runningStageTextRef.current = normalized;
       setRunningStageText(normalized);
     }
+    if (runningStageKindRef.current !== nextKind) {
+      runningStageKindRef.current = nextKind;
+      setRunningStageKind(nextKind);
+    }
     if (options?.fallback === false) return;
-    if (normalized === RUNNING_STAGE_CONNECTING_TEXT) {
+    if (nextKind === "image") return;
+    if (normalized === RUNNING_STAGE_RECEIVED_TEXT) {
       runningStageFallbackTimerRef.current = setTimeout(() => {
         runningStageFallbackTimerRef.current = null;
-        if (runningStageTextRef.current === RUNNING_STAGE_CONNECTING_TEXT) {
-          updateRunningStage(RUNNING_STAGE_WORKING_TEXT);
+        if (runningStageKindRef.current === "text" && runningStageTextRef.current === RUNNING_STAGE_RECEIVED_TEXT) {
+          updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT);
         }
-      }, RUNNING_STAGE_CONNECTING_FALLBACK_MS);
+      }, RUNNING_STAGE_RECEIVED_FALLBACK_MS);
       return;
     }
-    if (normalized === RUNNING_STAGE_WORKING_TEXT || normalized === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
+    if (normalized === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
+      runningStageFallbackTimerRef.current = setTimeout(() => {
+        runningStageFallbackTimerRef.current = null;
+        if (runningStageKindRef.current === "text" && runningStageTextRef.current === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
+          updateRunningStage(RUNNING_STAGE_RUNTIME_CONNECTING_TEXT);
+        }
+      }, RUNNING_STAGE_RUNTIME_STARTING_FALLBACK_MS);
+      return;
+    }
+    if (
+      normalized === RUNNING_STAGE_RUNTIME_CONNECTING_TEXT ||
+      normalized === RUNNING_STAGE_CONTEXT_TEXT ||
+      normalized === RUNNING_STAGE_ANSWER_TEXT
+    ) {
       runningStageFallbackTimerRef.current = setTimeout(() => {
         runningStageFallbackTimerRef.current = null;
         if (
-          runningStageTextRef.current === RUNNING_STAGE_WORKING_TEXT ||
-          runningStageTextRef.current === RUNNING_STAGE_RUNTIME_STARTING_TEXT
+          runningStageKindRef.current === "text" &&
+          (runningStageTextRef.current === RUNNING_STAGE_RUNTIME_CONNECTING_TEXT ||
+            runningStageTextRef.current === RUNNING_STAGE_CONTEXT_TEXT ||
+            runningStageTextRef.current === RUNNING_STAGE_ANSWER_TEXT)
         ) {
-          updateRunningStage(RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT, { fallback: false });
+          updateRunningStage(RUNNING_STAGE_LONG_WAIT_TEXT, { fallback: false });
         }
-      }, RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS);
+      }, RUNNING_STAGE_RUNTIME_CONNECTING_FALLBACK_MS);
     }
   };
 
@@ -6719,7 +6767,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               ? threadCollaborationPendingRef.current.promise
               : null;
           if (pendingCollaboration) {
-            updateRunningStage("Waiting for thread collaboration permission");
+            updateRunningStage("Checking thread access");
             await Promise.race([
               pendingCollaboration,
               new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1500))
@@ -6751,14 +6799,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session");
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
-          updateRunningStage("Execution failed");
+          updateRunningStage("Execution failed", { fallback: false, kind: "text" });
           throw new Error(notice);
         }
         const session = ensured.session;
 
         setErrorText("");
         setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
-        updateRunningStage(RUNNING_STAGE_CONNECTING_TEXT);
+        updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -7188,7 +7236,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const processDetail = userSafeProcessDetail(detail);
               setErrorText(assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
-              updateRunningStage("Execution failed");
+              updateRunningStage("Execution failed", { fallback: false, kind: "text" });
               if (assistantErrorNotice) {
                 textChanged = appendTextPart(hasTextUpdate ? `\n\n${assistantErrorNotice}` : assistantErrorNotice) || textChanged;
               }
@@ -7285,7 +7333,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               doneAnswer =
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
-              updateRunningStage("Finishing the answer");
+              updateRunningStage(RUNNING_STAGE_RESULT_TEXT, { fallback: false, kind: "text" });
               const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
               if (promotedLatestCommentary) {
                 textChanged = true;
@@ -7319,14 +7367,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT);
+              updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT, { kind: "text" });
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
                   payload && typeof payload.reasoning_effort === "string" ? payload.reasoning_effort : "";
                 const runtimeDetail = [
                   [model, reasoning].filter(Boolean).join(" / "),
-                  "Waiting for the first runtime event."
+                  "Waiting for the first update."
                 ]
                   .filter(Boolean)
                   .join("\n");
@@ -7336,7 +7384,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "meta",
                     at: new Date().toISOString(),
-                    title: "Starting reasoning runtime",
+                    title: "Starting reasoning environment",
                     detail: runtimeDetail
                   } satisfies ProcessData
                 });
@@ -7365,7 +7413,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
             if (!firstRuntimeEventSeen) {
               firstRuntimeEventSeen = true;
-              updateRunningStage(RUNNING_STAGE_RUNTIME_CONNECTED_TEXT);
+              updateRunningStage(RUNNING_STAGE_CONTEXT_TEXT, { kind: "text" });
               if (processEnabled) {
                 updates.push({
                   type: "data",
@@ -7373,8 +7421,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "meta",
                     at: new Date().toISOString(),
-                    title: "Runtime connected",
-                    detail: `First event: ${eventType}`
+                    title: "Analyzing context",
+                    detail: `First update: ${eventType}`
                   } satisfies ProcessData
                 });
               }
@@ -7412,7 +7460,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const isStarted = eventType === "item.started";
             const isCompleted = eventType === "item.completed";
             if (itemType && (isStarted || isCompleted)) {
-              updateRunningStage(stageTextForCodexItem(itemType, isStarted ? "started" : "completed", item));
+              const isImageItemStage = isImageGenerationItem(itemType, item);
+              const nextStageText = stageTextForCodexItem(itemType, isStarted ? "started" : "completed", item);
+              const isImageStageText = isImageGenerationStageText(nextStageText);
+              if (isImageStageText) {
+                setStatusText("Generating image...");
+                updateRunningStage(nextStageText, { kind: "image" });
+              } else if (isImageItemStage && isCompleted) {
+                updateRunningStage(nextStageText, { fallback: false, kind: "text" });
+              } else if (runningStageKindRef.current !== "image") {
+                updateRunningStage(nextStageText);
+              }
             }
 
             if (itemType === "agent_message" && isCompleted) {
@@ -7696,7 +7754,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             updateRunningThreadMapForKeys(prev, runningThreadKeys, !completedInActiveThread)
           );
           setStatusText("Ready");
-          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false });
+          updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
         }
       }
     }),
@@ -7972,7 +8030,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         <ComposerActivationGuard runtime={runtime} />
         <ThreadRuntimeSubscriptionBridge runtime={runtime} />
         <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
-        <RunningStageTextContext.Provider value={runningStageText}>
+        <RunningStageTextContext.Provider value={runningStageContextValue}>
         <MobileWorkbenchContext.Provider value={isMobile}>
           <ConfigProvider theme={PORTAL_ANTD_THEME}>
             <div className="portal-workbench-root">
