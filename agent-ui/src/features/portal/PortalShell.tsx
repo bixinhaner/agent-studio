@@ -383,6 +383,8 @@ const PRODUCT_FEEDBACK_MAX_IMAGES = 3;
 const PRODUCT_FEEDBACK_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PRODUCT_FEEDBACK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const RUNNING_STAGE_CONNECTING_TEXT = "Connecting to the assistant";
+const RUNNING_STAGE_RUNTIME_STARTING_TEXT = "Starting the reasoning runtime";
+const RUNNING_STAGE_RUNTIME_CONNECTED_TEXT = "Runtime connected. Reading the first update.";
 const RUNNING_STAGE_WORKING_TEXT = "Working on your request";
 const RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT = "Still working. I'm thinking through the request and planning the next steps.";
 const RUNNING_STAGE_CONNECTING_FALLBACK_MS = 1800;
@@ -6033,10 +6035,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       }, RUNNING_STAGE_CONNECTING_FALLBACK_MS);
       return;
     }
-    if (normalized === RUNNING_STAGE_WORKING_TEXT) {
+    if (normalized === RUNNING_STAGE_WORKING_TEXT || normalized === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
       runningStageFallbackTimerRef.current = setTimeout(() => {
         runningStageFallbackTimerRef.current = null;
-        if (runningStageTextRef.current === RUNNING_STAGE_WORKING_TEXT) {
+        if (
+          runningStageTextRef.current === RUNNING_STAGE_WORKING_TEXT ||
+          runningStageTextRef.current === RUNNING_STAGE_RUNTIME_STARTING_TEXT
+        ) {
           updateRunningStage(RUNNING_STAGE_NO_VISIBLE_UPDATE_TEXT, { fallback: false });
         }
       }, RUNNING_STAGE_VISIBLE_UPDATE_FALLBACK_MS);
@@ -6771,6 +6776,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         let traceBatchSeq = 0;
         let traceRowSeq = 0;
         let seq = 0;
+        let firstRuntimeEventSeen = false;
         let activeTraceBatchPart: TraceBatchPart | null = null;
         const commentaryLineBreakGapMs = 900;
 
@@ -7313,19 +7319,25 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage(RUNNING_STAGE_WORKING_TEXT);
+              updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT);
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
                   payload && typeof payload.reasoning_effort === "string" ? payload.reasoning_effort : "";
+                const runtimeDetail = [
+                  [model, reasoning].filter(Boolean).join(" / "),
+                  "Waiting for the first runtime event."
+                ]
+                  .filter(Boolean)
+                  .join("\n");
                 updates.push({
                   type: "data",
                   name: "codex_process",
                   data: {
                     kind: "meta",
                     at: new Date().toISOString(),
-                    title: "Session started",
-                    detail: [model, reasoning].filter(Boolean).join(" / ")
+                    title: "Starting reasoning runtime",
+                    detail: runtimeDetail
                   } satisfies ProcessData
                 });
               }
@@ -7350,6 +7362,23 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const item = asRecord(raw?.item);
             const itemType = typeof item?.type === "string" ? item.type : "";
             const itemId = typeof item?.id === "string" && item.id.trim() ? item.id.trim() : "";
+
+            if (!firstRuntimeEventSeen) {
+              firstRuntimeEventSeen = true;
+              updateRunningStage(RUNNING_STAGE_RUNTIME_CONNECTED_TEXT);
+              if (processEnabled) {
+                updates.push({
+                  type: "data",
+                  name: "codex_process",
+                  data: {
+                    kind: "meta",
+                    at: new Date().toISOString(),
+                    title: "Runtime connected",
+                    detail: `First event: ${eventType}`
+                  } satisfies ProcessData
+                });
+              }
+            }
 
             if (eventType === "turn.completed") {
               const usage = parseTurnUsage(raw?.usage ?? payload?.usage);

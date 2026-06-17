@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:thread-repository": "vitest run src/persistence/thread-repository.test.ts",
     "report:local-codex-usage": "tsx src/ops/local-codex-usage-report.ts",
+    "report:portal-chat-startup": "tsx src/ops/portal-chat-startup-report.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
