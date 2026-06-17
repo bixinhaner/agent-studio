@@ -213,7 +213,18 @@ export function PortalBillingPanel(props: {
   }, []);
 
   const planGroups = useMemo(() => groupPortalPlans(summary?.plans ?? []), [summary?.plans]);
-  const activeCycle: BillingCycle = billingCycle || "year";
+  const availableCycles = useMemo<BillingCycle[]>(() => {
+    const cycles = new Set<BillingCycle>();
+    planGroups.forEach((group) => {
+      if (group.monthly) cycles.add("month");
+      if (group.annual) cycles.add("year");
+    });
+    const supportedCycles: BillingCycle[] = ["month", "year"];
+    return supportedCycles.filter((cycle) => cycles.has(cycle));
+  }, [planGroups]);
+  const defaultCycle = availableCycles.includes("year") ? "year" : availableCycles[0] ?? "year";
+  const activeCycle: BillingCycle = billingCycle && availableCycles.includes(billingCycle) ? billingCycle : defaultCycle;
+  const showCycleToggle = availableCycles.length > 1;
   const selectedGroup = useMemo(() => {
     return planGroups.find((group) => group.key === selectedTier) ?? planGroups[0] ?? null;
   }, [planGroups, selectedTier]);
@@ -340,19 +351,21 @@ export function PortalBillingPanel(props: {
           <CreditCard size={16} />
           <span>Choose access</span>
         </div>
-        <Radio.Group
-          className="portal-billing-cycle-toggle"
-          optionType="button"
-          buttonStyle="solid"
-          value={activeCycle}
-          onChange={(event) => {
-            setBillingCycle(event.target.value as BillingCycle);
-            setPromotionPreview(null);
-          }}
-        >
-          <Radio.Button value="month">Monthly</Radio.Button>
-          <Radio.Button value="year">Annual</Radio.Button>
-        </Radio.Group>
+        {showCycleToggle ? (
+          <Radio.Group
+            className="portal-billing-cycle-toggle"
+            optionType="button"
+            buttonStyle="solid"
+            value={activeCycle}
+            onChange={(event) => {
+              setBillingCycle(event.target.value as BillingCycle);
+              setPromotionPreview(null);
+            }}
+          >
+            {availableCycles.includes("month") ? <Radio.Button value="month">Monthly</Radio.Button> : null}
+            {availableCycles.includes("year") ? <Radio.Button value="year">Annual</Radio.Button> : null}
+          </Radio.Group>
+        ) : null}
 
         <div className="portal-billing-plan-grid">
           {planGroups.map((group) => {
