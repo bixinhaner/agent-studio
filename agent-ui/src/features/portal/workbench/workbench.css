@@ -1959,6 +1959,31 @@ button.session-rail-new-btn:active,
   gap: 10px;
 }
 
+.assistant-file-change-item-with-image {
+  width: min(100%, 520px);
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.assistant-file-change-image-preview {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: #f8fafc;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.assistant-file-change-image {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 560px);
+  object-fit: contain;
+  background: #f8fafc;
+}
+
 .assistant-file-change-meta {
   min-width: 0;
   display: flex;
@@ -1991,6 +2016,12 @@ button.session-rail-new-btn:active,
 
 .assistant-file-change-actions {
   flex-shrink: 0;
+}
+
+.assistant-file-change-item-with-image .assistant-file-change-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .assistant-file-change-btn {

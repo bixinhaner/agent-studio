@@ -3675,6 +3675,15 @@ const ProcessDataFallback: FC<any> = ({
             const label = fileChangeKindLabel(item.kind);
             const canPreview = !isExternalPortalUser || item.canPreview;
             const canDownload = item.canDownload && activeThreadId.trim();
+            const imageExtension = fileExtensionFromPreviewPath(item.path);
+            const imageName = fileNameFromPreviewPath(item.path);
+            const isImageArtifact = IMAGE_FILE_EXTENSIONS.has(imageExtension);
+            const inlineImageHref = canPreview && isImageArtifact && activeThreadId.trim()
+              ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
+                  path: item.path,
+                  disposition: "inline"
+                }).toString()}`
+              : "";
             const downloadHref = canDownload
               ? `${apiBase()}/api/threads/${encodeURIComponent(activeThreadId.trim())}/artifacts/content?${new URLSearchParams({
                   path: item.path,
@@ -3682,10 +3691,23 @@ const ProcessDataFallback: FC<any> = ({
                 }).toString()}`
               : "";
             return (
-              <li key={`${item.kind}-${item.path}`} className="assistant-file-change-item">
+              <li
+                key={`${item.kind}-${item.path}`}
+                className={inlineImageHref ? "assistant-file-change-item assistant-file-change-item-with-image" : "assistant-file-change-item"}
+              >
+                {inlineImageHref ? (
+                  <button
+                    type="button"
+                    className="assistant-file-change-image-preview"
+                    onClick={() => requestPreview(item.path)}
+                    aria-label={`Preview ${imageName}`}
+                  >
+                    <img className="assistant-file-change-image" src={inlineImageHref} alt={imageName} loading="lazy" />
+                  </button>
+                ) : null}
                 <div className="assistant-file-change-meta">
                   <span className="assistant-file-change-kind">{label}</span>
-                  <span className="assistant-file-change-name">{fileNameFromPreviewPath(item.path)}</span>
+                  <span className="assistant-file-change-name">{imageName}</span>
                 </div>
                 <div className="assistant-file-change-actions">
                   {canPreview ? (
