@@ -224,10 +224,6 @@ export function PortalBillingPanel(props: {
     ? new Date(Date.now() + (selectedPlan.durationDays + giftDays) * 24 * 60 * 60 * 1000).toISOString()
     : null;
   const annualSavings = activeCycle === "year" ? annualSavingsLabel(selectedGroup) : "";
-  const completedLimit = props.subscriptionStatus?.completedTurnLimit ?? selectedPlan?.monthlyCompletedTurnLimit ?? null;
-  const remainingTurns = props.subscriptionStatus?.remainingCompletedTurns ?? null;
-  const usedTurns = completedLimit !== null && remainingTurns !== null ? Math.max(0, completedLimit - remainingTurns) : null;
-  const usagePercent = completedLimit && usedTurns !== null ? Math.min(100, Math.round((usedTurns / completedLimit) * 100)) : 0;
   const paidCheckoutUnavailable = payableNow > 0 && !summary?.defaults.stripeReady;
 
   async function handlePreviewPromotion() {
@@ -336,22 +332,7 @@ export function PortalBillingPanel(props: {
             <span>Expires</span>
             <strong>{formatLocalTime(summary.currentGrant?.expiresAt)}</strong>
           </div>
-          <div>
-            <span>Auto-renew</span>
-            <strong>{summary.autoRenewal?.status ?? "not enabled"}</strong>
-          </div>
         </div>
-        {completedLimit ? (
-          <div className="portal-billing-usage">
-            <div>
-              <span>Usage this month</span>
-              <strong>{usedTurns ?? 0} / {completedLimit}</strong>
-            </div>
-            <div className="portal-billing-usage-track" aria-hidden="true">
-              <span style={{ width: `${usagePercent}%` }} />
-            </div>
-          </div>
-        ) : null}
       </section>
 
       <section className="portal-billing-section portal-billing-plan-picker">
@@ -466,7 +447,15 @@ export function PortalBillingPanel(props: {
             <small>Auto-renew is enabled by default. Stripe securely saves the card and renews this same plan after the prepaid period.</small>
           </span>
         </label>
-        <Button type="primary" size="large" block loading={checkingOut} disabled={!selectedPlan || paidCheckoutUnavailable} onClick={() => void handleCheckout()}>
+        <Button
+          type="primary"
+          size="large"
+          block
+          className="portal-billing-checkout-button"
+          loading={checkingOut}
+          disabled={!selectedPlan || paidCheckoutUnavailable}
+          onClick={() => void handleCheckout()}
+        >
           Continue to secure payment
         </Button>
       </section>

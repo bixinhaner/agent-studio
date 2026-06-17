@@ -316,36 +316,6 @@ body.portal-workbench-mode {
   overflow-wrap: anywhere;
 }
 
-.portal-billing-usage {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #eef2f7;
-}
-
-.portal-billing-usage div:first-child {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.portal-billing-usage-track {
-  margin-top: 8px;
-  height: 7px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: #e5e7eb;
-}
-
-.portal-billing-usage-track span {
-  display: block;
-  height: 100%;
-  min-width: 4px;
-  border-radius: inherit;
-  background: #0f766e;
-}
-
 .portal-billing-cycle-toggle {
   width: 100%;
   margin-bottom: 12px;
@@ -471,10 +441,27 @@ body.portal-workbench-mode {
   line-height: 1.4;
 }
 
-.portal-billing-checkout .ant-btn-primary {
+.portal-billing-checkout .portal-billing-checkout-button.ant-btn-primary {
   margin-top: 12px;
   border-radius: 8px;
-  background: var(--workbench-accent);
+  border-color: #ff4614 !important;
+  background: #ff4614 !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(255, 70, 20, 0.24);
+}
+
+.portal-billing-checkout .portal-billing-checkout-button.ant-btn-primary:not(:disabled):hover,
+.portal-billing-checkout .portal-billing-checkout-button.ant-btn-primary:not(:disabled):focus-visible {
+  border-color: #d73708 !important;
+  background: #d73708 !important;
+  color: #ffffff !important;
+}
+
+.portal-billing-checkout .portal-billing-checkout-button.ant-btn-primary:disabled {
+  border-color: #d1d5db !important;
+  background: #e5e7eb !important;
+  color: #94a3b8 !important;
+  box-shadow: none;
 }
 
 .portal-billing-identity-grid {
