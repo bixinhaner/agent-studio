@@ -32,6 +32,7 @@ import {
   type ResolvedArtifactAccessPolicy
 } from "./artifacts/thread-artifact-policy.js";
 import {
+  collectRuntimeGeneratedImageChanges,
   extractRuntimeFileChanges,
   materializeRuntimeGeneratedImageChanges,
   type RuntimeFileChange
@@ -6354,10 +6355,16 @@ async function registerGeneratedArtifactsForThread(input: {
   const policy = await resolveArtifactPolicyForActor(input.actor);
   if (!policy.enabled || !policy.autoRegisterGeneratedFiles) return [];
 
+  const codexHome = codexHomeFromRunConfig(input.session.codexRunConfig);
+  const codexGeneratedImageChanges = await collectRuntimeGeneratedImageChanges({
+    codexHome,
+    codexThreadId: input.session.codexThreadId,
+    changedAfter: input.changedAfter
+  });
   const runtimeChanges = await materializeRuntimeGeneratedImageChanges({
-    changes: input.changes,
+    changes: [...input.changes, ...codexGeneratedImageChanges],
     workspacePath,
-    codexHome: codexHomeFromRunConfig(input.session.codexRunConfig)
+    codexHome
   });
 
   const candidates = mergeRuntimeFileChanges([

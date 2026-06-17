@@ -15,6 +15,7 @@ export type RuntimeFileChange = {
 const GENERATED_IMAGE_ITEM_TYPES = new Set(["image_generation_call", "image_generation_end"]);
 const GENERATED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const GENERATED_IMAGE_DEST_DIR = "artifacts/generated-images";
+const GENERATED_IMAGE_SCAN_LIMIT = 50;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -107,6 +108,62 @@ export function extractRuntimeFileChanges(event: RuntimeStreamEvent): RuntimeFil
     ...extractRuntimeStandardFileChanges(event),
     ...extractRuntimeGeneratedImageChanges(event)
   ];
+}
+
+export async function collectRuntimeGeneratedImageChanges(input: {
+  codexHome?: string;
+  codexThreadId?: string;
+  changedAfter?: Date;
+  limit?: number;
+}): Promise<RuntimeFileChange[]> {
+  const codexHome = trimOrUndefined(input.codexHome);
+  const codexThreadId = trimOrUndefined(input.codexThreadId);
+  if (!codexHome || !codexThreadId) return [];
+
+  const resolvedCodexHome = path.resolve(codexHome);
+  const generatedImageRoot = path.resolve(resolvedCodexHome, "generated_images", codexThreadId);
+  if (!isPathInside(resolvedCodexHome, generatedImageRoot)) return [];
+
+  const sinceMs = input.changedAfter?.getTime() ?? 0;
+  const limit = Math.max(1, Math.min(input.limit ?? GENERATED_IMAGE_SCAN_LIMIT, GENERATED_IMAGE_SCAN_LIMIT));
+  const out: RuntimeFileChange[] = [];
+  const seen = new Set<string>();
+
+  const scanDir = async (dir: string) => {
+    if (out.length >= limit || !isPathInside(generatedImageRoot, dir)) return;
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (out.length >= limit) break;
+      if (entry.name.startsWith(".")) continue;
+      const absolutePath = path.resolve(dir, entry.name);
+      if (!isPathInside(generatedImageRoot, absolutePath)) continue;
+      if (entry.isDirectory()) {
+        await scanDir(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!GENERATED_IMAGE_EXTENSIONS.has(extension)) continue;
+      const stat = await fs.stat(absolutePath).catch(() => null);
+      if (!stat || !stat.isFile()) continue;
+      if (sinceMs > 0 && stat.mtimeMs + 2000 < sinceMs) continue;
+      if (seen.has(absolutePath)) continue;
+      seen.add(absolutePath);
+
+      out.push({
+        path: absolutePath,
+        kind: "generated_image",
+        sourcePath: absolutePath,
+        metadata: {
+          runtimeItemType: "generated_image_scan",
+          imageGenerationId: path.basename(entry.name, extension)
+        }
+      });
+    }
+  };
+
+  await scanDir(generatedImageRoot);
+  return out;
 }
 
 export async function materializeRuntimeGeneratedImageChanges(input: {

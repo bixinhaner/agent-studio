@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  collectRuntimeGeneratedImageChanges,
   extractRuntimeFileChanges,
   materializeRuntimeGeneratedImageChanges,
   type RuntimeFileChange
@@ -105,6 +106,52 @@ describe("runtime generated artifacts", () => {
       }
     ]);
     await expect(fs.readFile(path.join(workspacePath, materialized[0]!.path), "utf8")).resolves.toBe("generated-image");
+  });
+
+  it("collects generated images written by Codex into the thread image cache", async () => {
+    const root = await makeTempRoot();
+    const codexHome = path.join(root, "codex-home");
+    const sourcePath = path.join(codexHome, "generated_images", "thread-1", "ig_scanned.png");
+    const generatedAt = new Date();
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.from("generated-image"));
+    await fs.utimes(sourcePath, generatedAt, generatedAt);
+
+    const changes = await collectRuntimeGeneratedImageChanges({
+      codexHome,
+      codexThreadId: "thread-1",
+      changedAfter: new Date(generatedAt.getTime() - 1000)
+    });
+
+    expect(changes).toMatchObject([
+      {
+        path: sourcePath,
+        kind: "generated_image",
+        sourcePath,
+        metadata: {
+          runtimeItemType: "generated_image_scan",
+          imageGenerationId: "ig_scanned"
+        }
+      }
+    ]);
+  });
+
+  it("does not collect stale generated images from older turns", async () => {
+    const root = await makeTempRoot();
+    const codexHome = path.join(root, "codex-home");
+    const sourcePath = path.join(codexHome, "generated_images", "thread-1", "ig_old.png");
+    const generatedAt = new Date(Date.now() - 10_000);
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.from("old-image"));
+    await fs.utimes(sourcePath, generatedAt, generatedAt);
+
+    const changes = await collectRuntimeGeneratedImageChanges({
+      codexHome,
+      codexThreadId: "thread-1",
+      changedAfter: new Date()
+    });
+
+    expect(changes).toEqual([]);
   });
 
   it("does not publish generated image paths outside the workspace or codex home", async () => {
