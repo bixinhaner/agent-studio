@@ -8110,10 +8110,23 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const runtimeFileChanges: RuntimeFileChange[] = [];
     let firstCodexEventSeen = false;
     const runtimeMessage = withSkillActivationPrompts(input.message, currentSession.codexRunConfig);
-    const enterpriseRunContext = await enterpriseContext.resolveForRun({
-      channel: "portal",
-      userId: currentUser.id,
-      agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
+    timing.mark("chat_stream.runtime_prompt_prepared", {
+      inputLength: input.message.length,
+      runtimePromptLength: runtimeMessage.length,
+      skillActivationPromptApplied: runtimeMessage !== input.message
+    });
+    const agentModeId = modeIdFromRunConfig(currentSession.codexRunConfig);
+    const enterpriseRunContext = await timing.time("chat_stream.resolve_enterprise_context", () =>
+      enterpriseContext.resolveForRun({
+        channel: "portal",
+        userId: currentUser.id,
+        agentModeId
+      }),
+      { agentModeId }
+    );
+    timing.mark("chat_stream.runtime_stream_starting", {
+      hasEnterpriseContext: Boolean(enterpriseRunContext),
+      hasCodexThreadId: Boolean(currentSession.codexThreadId)
     });
     await codexExecution.streamFromRuntime({
       runtime,
