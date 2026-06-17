@@ -293,7 +293,7 @@ function normalizeThreadItem(item: unknown): Record<string, unknown> | undefined
   if (!row || !type) return undefined;
 
   if (type === "agentMessage") {
-    return { ...row, type: "agent_message", text: trimOrUndefined(row.text) ?? "" };
+    return { ...row, type: "agent_message", text: typeof row.text === "string" ? row.text : "" };
   }
   if (type === "commandExecution") {
     return {
@@ -392,7 +392,7 @@ function normalizeNotification(message: JsonRecord): CodexStreamEvent | undefine
 
   if (method === "item/agentMessage/delta") {
     const itemId = trimOrUndefined(params.itemId);
-    const delta = trimOrUndefined(params.delta) ?? "";
+    const delta = typeof params.delta === "string" ? params.delta : "";
     const raw = {
       type: "item.agent_message.delta",
       thread_id: params.threadId,

@@ -72,9 +72,37 @@ rl.on("line", (line) => {
       return;
     }
     const turnId = "turn-" + nextTurnId++;
+    const inputText = Array.isArray(params.input) && params.input[0] && typeof params.input[0].text === "string" ? params.input[0].text : "";
+    const markdownWhitespaceText = "Intro\\n\\n![Example](</tmp/image one.png>)\\n\\n| A | B |\\n|---|---|\\n| 1 | 2 |\\n";
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
       notify("turn/started", { threadId, turn: { id: turnId } });
+      if (inputText === "markdown-whitespace") {
+        for (const delta of [
+          "Intro",
+          "\\n\\n",
+          "![Example](",
+          "</tmp/image one.png>",
+          ")",
+          "\\n\\n",
+          "| A | B |",
+          "\\n",
+          "|---|---|",
+          "\\n",
+          "| 1 | 2 |",
+          "\\n"
+        ]) {
+          notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta });
+        }
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "msg-1", type: "agentMessage", text: markdownWhitespaceText },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Hel" });
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "lo" });
       notify("item/completed", {
@@ -176,6 +204,43 @@ describe("Codex app-server runtime", () => {
         return event.type === "raw_response_item.completed" && raw?.item?.type === "image_generation_call" && raw.item.name === "image_generation";
       })
     ).toBe(true);
+  });
+
+  it("preserves markdown-significant whitespace in app-server agent deltas", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-markdown")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "markdown-whitespace")) {
+      events.push(event);
+    }
+
+    const markdownWhitespaceText = "Intro\n\n![Example](</tmp/image one.png>)\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+    const deltas = events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta ?? "");
+    expect(deltas).toContain("\n\n");
+    expect(deltas).toContain("\n");
+    expect(deltas.join("")).toBe(markdownWhitespaceText);
+
+    const completed = events.find((event) => {
+      const raw = event.raw as { item?: { type?: string } } | undefined;
+      return event.type === "item.completed" && raw?.item?.type === "agent_message";
+    });
+    const completedRaw = completed?.raw as { item?: { text?: string } } | undefined;
+    expect(completed?.text).toBe(markdownWhitespaceText);
+    expect(completedRaw?.item?.text).toBe(markdownWhitespaceText);
   });
 
   it("keeps using the app-server scope that created the live thread", async () => {
