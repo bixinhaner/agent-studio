@@ -7,6 +7,10 @@
     reverse_proxy {$DEBUG_UPSTREAM_HOST}:{$DEBUG_UPSTREAM_PORT}
   }
 
+  handle /internal/* {
+    respond 404
+  }
+
   @missing_js_asset {
     path /assets/*.js
     not file
