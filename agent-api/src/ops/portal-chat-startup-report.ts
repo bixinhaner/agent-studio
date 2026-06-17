@@ -168,9 +168,13 @@ function normalizeLogPaths(input: string[]): string[] {
     : [
         process.env.PORTAL_CHAT_STARTUP_LOG,
         "/home/agentstudio/.pm2/logs/agent-studio-api-out.log",
+        "/home/agentstudio/.pm2/logs/agent-studio-api-out-0.log",
         "/home/agentstudio/.pm2/logs/agent-studio-api-error.log",
+        "/home/agentstudio/.pm2/logs/agent-studio-api-error-0.log",
         path.join(os.homedir(), ".pm2/logs/agent-studio-api-out.log"),
-        path.join(os.homedir(), ".pm2/logs/agent-studio-api-error.log")
+        path.join(os.homedir(), ".pm2/logs/agent-studio-api-out-0.log"),
+        path.join(os.homedir(), ".pm2/logs/agent-studio-api-error.log"),
+        path.join(os.homedir(), ".pm2/logs/agent-studio-api-error-0.log")
       ].filter((item): item is string => Boolean(item));
 
   return Array.from(new Set(candidates.map((item) => path.resolve(item)))).filter((item) => {
