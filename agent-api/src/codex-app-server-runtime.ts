@@ -399,7 +399,8 @@ function normalizeNotification(message: JsonRecord): CodexStreamEvent | undefine
       turn_id: params.turnId,
       item: {
         type: "agent_message",
-        id: itemId
+        id: itemId,
+        phase: trimOrUndefined(params.phase)
       }
     };
     return {

@@ -1490,13 +1490,28 @@ function extractCodexThreadIdFromRuntimeEvent(event: { type?: string; raw?: unkn
 
 function appendRuntimeAnswerPreview(
   current: string,
-  event: { delta?: string; text?: string; raw?: unknown }
+  event: { delta?: string; text?: string; raw?: unknown },
+  phaseByItemId?: Map<string, string>
 ): string {
   const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  const itemType = typeof item?.type === "string" ? item.type : "";
+  if (itemType !== "agent_message") return current;
+  const itemId = typeof item?.id === "string" ? item.id.trim() : "";
+  const phase = normalizeRuntimeAgentMessagePhase(item?.phase);
+  if (itemId && phase) {
+    phaseByItemId?.set(itemId, phase);
+  }
+  const resolvedPhase = phase || (itemId ? phaseByItemId?.get(itemId) || "" : "");
+  if (resolvedPhase && resolvedPhase !== "final_answer") return current;
   if (raw?.type === "item.completed") return current;
   if (event.delta) return current + event.delta;
   if (event.text && !current) return event.text;
   return current;
+}
+
+function normalizeRuntimeAgentMessagePhase(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/[-\s]+/g, "_").toLowerCase() : "";
 }
 
 function runtimeErrorDetail(error: unknown): string {
@@ -5879,6 +5894,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   let answerText = "";
   let streamingCardFinalized = false;
   const runProjection = new CodexRunProjection();
+  const streamingCardAgentMessagePhaseById = new Map<string, string>();
   const artifactScanStartedAt = new Date(Date.now() - 2000);
   const runtimeFileChanges: RuntimeFileChange[] = [];
   try {
@@ -5920,7 +5936,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           });
         }
         if (streamingCardReply) {
-          const nextPreview = appendRuntimeAnswerPreview(streamedAnswerPreview, event);
+          const nextPreview = appendRuntimeAnswerPreview(streamedAnswerPreview, event, streamingCardAgentMessagePhaseById);
           if (nextPreview !== streamedAnswerPreview) {
             streamedAnswerPreview = nextPreview;
             void streamingCardReply.update(streamedAnswerPreview);

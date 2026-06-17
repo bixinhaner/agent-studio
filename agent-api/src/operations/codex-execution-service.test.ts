@@ -197,6 +197,25 @@ describe("CodexExecutionService", () => {
     });
   });
 
+  it("projects agent message phase from runtime events", () => {
+    expect(projectCodexRuntimeEvent({
+      type: "item.started",
+      raw: {
+        type: "item.started",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "",
+          phase: "final_answer"
+        }
+      }
+    })).toMatchObject({
+      itemType: "agent_message",
+      itemId: "message-final",
+      agentMessagePhase: "final_answer"
+    });
+  });
+
   it("serializes projected trace rows into the shared transcript content format", () => {
     expect(codexTraceRowsToContentPart([
       {
@@ -373,6 +392,92 @@ describe("CodexExecutionService", () => {
         text: "I will generate a draft image first."
       })
     ]);
+  });
+
+  it("streams only final answer deltas when agent message phases are known", () => {
+    const projection = new CodexRunProjection({ now: () => 1781100000000 });
+    projection.push({
+      type: "item.started",
+      raw: {
+        type: "item.started",
+        item: {
+          id: "message-commentary",
+          type: "agent_message",
+          text: "",
+          phase: "commentary"
+        }
+      }
+    });
+    const commentaryDelta = projection.push({
+      type: "item.agent_message.delta",
+      delta: "I will inspect the records.",
+      raw: {
+        type: "item.agent_message.delta",
+        item: {
+          id: "message-commentary",
+          type: "agent_message"
+        }
+      }
+    });
+    projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-commentary",
+          type: "agent_message",
+          text: "I will inspect the records.",
+          phase: "commentary"
+        }
+      }
+    });
+    projection.push({
+      type: "item.started",
+      raw: {
+        type: "item.started",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "",
+          phase: "final_answer"
+        }
+      }
+    });
+    const finalDelta = projection.push({
+      type: "item.agent_message.delta",
+      delta: "Here is the answer.",
+      raw: {
+        type: "item.agent_message.delta",
+        item: {
+          id: "message-final",
+          type: "agent_message"
+        }
+      }
+    });
+    const finalCompleted = projection.push({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          text: "Here is the answer.",
+          phase: "final_answer"
+        }
+      }
+    });
+
+    expect(commentaryDelta.answerDelta).toBeUndefined();
+    expect(finalDelta.answerDelta).toBe("Here is the answer.");
+    expect(finalCompleted.liveCommentaryEntries).toEqual([
+      expect.objectContaining({
+        id: "message-commentary",
+        text: "I will inspect the records."
+      })
+    ]);
+    const finalized = projection.finalize({ finalAnswer: "Here is the answer." });
+    expect(JSON.stringify(finalized.contentParts)).toContain("I will inspect the records.");
+    expect(JSON.stringify(finalized.contentParts)).not.toContain("Here is the answer.");
   });
 
   it("removes final answers from reasoning trace suffixes", () => {

@@ -6829,13 +6829,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               data: CommentaryPartData;
             }
           | null = null;
+        let activeFinalAnswerPart: { type: "text"; text: string } | null = null;
         let currentCommentaryKey = "";
         let commentarySeq = 0;
         let traceBatchSeq = 0;
         let traceRowSeq = 0;
         let seq = 0;
         let firstRuntimeEventSeen = false;
+        let finalAnswerItemSeen = false;
         let activeTraceBatchPart: TraceBatchPart | null = null;
+        const agentMessagePhaseById = new Map<string, string>();
+        const finalAnswerTextById = new Map<string, string>();
         const commentaryLineBreakGapMs = 900;
 
         const processEnabled = showProcessTraceRef.current;
@@ -6850,6 +6854,33 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             orderedParts.push(activeTextPart);
           }
           activeTextPart.text += chunk;
+          hasTextUpdate = true;
+          return true;
+        };
+
+        const appendFinalAnswerText = (key: string, nextText: string, mode: "append" | "replace"): boolean => {
+          if (!nextText) return false;
+          activeCommentaryPart = null;
+          currentCommentaryKey = "";
+          if (!activeFinalAnswerPart) {
+            activeFinalAnswerPart = { type: "text", text: "" };
+            orderedParts.push(activeFinalAnswerPart);
+          }
+          const previousText = finalAnswerTextById.get(key) || "";
+          const resolvedText = mode === "replace" ? nextText : `${previousText}${nextText}`;
+          if (mode === "replace") {
+            if (previousText && nextText.startsWith(previousText)) {
+              activeFinalAnswerPart.text += nextText.slice(previousText.length);
+            } else if (previousText) {
+              activeFinalAnswerPart.text = activeFinalAnswerPart.text.slice(0, -previousText.length) + nextText;
+            } else {
+              activeFinalAnswerPart.text += nextText;
+            }
+          } else {
+            activeFinalAnswerPart.text += nextText;
+          }
+          finalAnswerTextById.set(key, resolvedText);
+          activeTextPart = activeFinalAnswerPart;
           hasTextUpdate = true;
           return true;
         };
@@ -7079,6 +7110,23 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
           }
           return changed;
+        };
+
+        const hasStreamedFinalAnswerText = (): boolean => {
+          if (activeFinalAnswerPart?.text.trim()) return true;
+          for (const text of finalAnswerTextById.values()) {
+            if (text.trim()) return true;
+          }
+          return false;
+        };
+
+        const normalizeAgentMessagePhase = (value: unknown): string => {
+          return typeof value === "string" ? value.trim().replace(/[-\s]+/g, "_").toLowerCase() : "";
+        };
+
+        const rememberAgentMessagePhase = (id: string, phase: string): void => {
+          if (!id || !phase) return;
+          agentMessagePhaseById.set(id, phase);
         };
 
         const appendTraceBatch = (parts: any[]): boolean => {
@@ -7344,11 +7392,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 payload && typeof payload.answer === "string" ? payload.answer : "";
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
               updateRunningStage(RUNNING_STAGE_RESULT_TEXT, { fallback: false, kind: "text" });
-              const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
-              if (promotedLatestCommentary) {
+              if (hasStreamedFinalAnswerText()) {
                 textChanged = true;
-              } else if (!hasTextUpdate && doneAnswer.trim()) {
+              } else if (finalAnswerItemSeen && doneAnswer.trim()) {
                 textChanged = appendTextPart(doneAnswer);
+              } else {
+                const promotedLatestCommentary = promoteLatestCommentaryToFinalText();
+                if (promotedLatestCommentary) {
+                  textChanged = true;
+                } else if (!hasTextUpdate && doneAnswer.trim()) {
+                  textChanged = appendTextPart(doneAnswer);
+                }
               }
               const commentaryCollapsed = collapseCommentaryParts();
               if (processEnabled) {
@@ -7420,6 +7474,16 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             const item = asRecord(raw?.item);
             const itemType = typeof item?.type === "string" ? item.type : "";
             const itemId = typeof item?.id === "string" && item.id.trim() ? item.id.trim() : "";
+            const agentMessagePhaseFromItem = itemType === "agent_message" ? normalizeAgentMessagePhase(item?.phase) : "";
+            if (agentMessagePhaseFromItem) {
+              rememberAgentMessagePhase(itemId, agentMessagePhaseFromItem);
+            }
+            const agentMessagePhase =
+              itemType === "agent_message" ? agentMessagePhaseFromItem || agentMessagePhaseById.get(itemId) || "" : "";
+            const isFinalAnswerAgentMessage = itemType === "agent_message" && agentMessagePhase === "final_answer";
+            if (isFinalAnswerAgentMessage) {
+              finalAnswerItemSeen = true;
+            }
 
             if (!firstRuntimeEventSeen) {
               firstRuntimeEventSeen = true;
@@ -7462,9 +7526,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               itemType === "agent_message";
 
             if (shouldAppendAgentText) {
-              const commentaryKey = itemId || currentCommentaryKey || `commentary-${++commentarySeq}`;
               const nextMode = delta ? "append" : "replace";
-              textChanged = updateCommentaryPart(commentaryKey, append, nextMode) || textChanged;
+              if (isFinalAnswerAgentMessage) {
+                const finalAnswerKey = itemId || `final-answer-${++seq}`;
+                textChanged = appendFinalAnswerText(finalAnswerKey, append, nextMode) || textChanged;
+              } else {
+                const commentaryKey = itemId || currentCommentaryKey || `commentary-${++commentarySeq}`;
+                textChanged = updateCommentaryPart(commentaryKey, append, nextMode) || textChanged;
+              }
             }
 
             const isStarted = eventType === "item.started";
@@ -7483,7 +7552,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
             }
 
-            if (itemType === "agent_message" && isCompleted) {
+            if (itemType === "agent_message" && isCompleted && !isFinalAnswerAgentMessage) {
               const completedKey = itemId || currentCommentaryKey;
               if (completedKey) {
                 markCommentaryCompleted(completedKey);

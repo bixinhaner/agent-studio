@@ -34,11 +34,13 @@ export type CodexRuntimeEventProjection = {
   eventType: string;
   itemType: string;
   itemId?: string;
+  agentMessagePhase?: string;
   answerDelta?: string;
   reasoningText?: string;
   completedAgentMessage?: {
     id?: string;
     text: string;
+    phase?: string;
   };
   toolCall?: CodexProjectedToolCall;
   traceRows: CodexTraceRow[];
@@ -78,6 +80,12 @@ function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function normalizeAgentMessagePhase(value: unknown): string | undefined {
+  const phase = trimOrUndefined(value);
+  if (!phase) return undefined;
+  return phase.replace(/[-\s]+/g, "_").toLowerCase();
 }
 
 function shortenText(value: string, max: number): string {
@@ -157,6 +165,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
   const eventType = trimOrUndefined(event.type) ?? trimOrUndefined(raw?.type) ?? "";
   const itemType = trimOrUndefined(item?.type) ?? "";
   const itemId = trimOrUndefined(item?.id);
+  const agentMessagePhase = itemType === "agent_message" ? normalizeAgentMessagePhase(item?.phase) : undefined;
   const isStarted = eventType === "item.started";
   const isCompleted = eventType === "item.completed";
   const traceRows: CodexTraceRow[] = [];
@@ -164,6 +173,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     eventType,
     itemType,
     itemId,
+    agentMessagePhase,
     answerDelta: itemType === "agent_message" ? trimOrUndefined(event.delta) : undefined,
     traceRows
   };
@@ -173,7 +183,8 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     if (text) {
       projection.completedAgentMessage = {
         id: itemId,
-        text
+        text,
+        phase: agentMessagePhase
       };
     }
     return projection;
@@ -416,6 +427,7 @@ export function codexCommentaryEntriesToContentPart(
 export class CodexRunProjection {
   private readonly traceRows: CodexTraceRow[] = [];
   private readonly commentaryEntries: CodexCommentaryEntry[] = [];
+  private readonly agentMessagePhaseById = new Map<string, string>();
   private pendingLiveCommentaryEntry: CodexCommentaryEntry | undefined;
   private commentarySeq = 0;
 
@@ -423,11 +435,22 @@ export class CodexRunProjection {
 
   push(event: RuntimeStreamEvent): CodexRuntimeEventProjection {
     const projection = projectCodexRuntimeEvent(event);
+    const agentMessagePhase = this.resolveAgentMessagePhase(projection);
+    if (agentMessagePhase) {
+      projection.agentMessagePhase = agentMessagePhase;
+    }
     if (this.options.streamAnswerDeltas === false) {
+      projection.answerDelta = undefined;
+    } else if (projection.answerDelta && agentMessagePhase && agentMessagePhase !== "final_answer") {
       projection.answerDelta = undefined;
     }
     this.traceRows.push(...projection.traceRows);
     if (projection.completedAgentMessage) {
+      if ((projection.completedAgentMessage.phase ?? agentMessagePhase) === "final_answer") {
+        projection.liveCommentaryEntries = this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [];
+        this.pendingLiveCommentaryEntry = undefined;
+        return projection;
+      }
       const nextEntry = this.upsertCommentaryEntry(projection.completedAgentMessage);
       projection.liveCommentaryEntries = this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [];
       this.pendingLiveCommentaryEntry = nextEntry;
@@ -457,6 +480,19 @@ export class CodexRunProjection {
     this.commentaryEntries.length = 0;
     this.pendingLiveCommentaryEntry = undefined;
     this.commentarySeq = 0;
+    this.agentMessagePhaseById.clear();
+  }
+
+  private resolveAgentMessagePhase(projection: CodexRuntimeEventProjection): string | undefined {
+    if (projection.itemType !== "agent_message") return undefined;
+    const phase = normalizeAgentMessagePhase(projection.agentMessagePhase);
+    const itemId = trimOrUndefined(projection.itemId);
+    if (phase && itemId) {
+      this.agentMessagePhaseById.set(itemId, phase);
+      return phase;
+    }
+    if (phase) return phase;
+    return itemId ? this.agentMessagePhaseById.get(itemId) : undefined;
   }
 
   private upsertCommentaryEntry(message: { id?: string; text: string }): CodexCommentaryEntry | undefined {
