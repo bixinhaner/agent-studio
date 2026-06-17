@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Codex } from "./patched-codex-sdk.js";
 import type { ReasoningEffort } from "./model-config.js";
+import { CodexAppServerRuntime, isAppServerRuntimeEnabled } from "./codex-app-server-runtime.js";
 
 export type CodexStreamEvent = {
   type: string;
@@ -89,8 +90,14 @@ function normalizeAgentTextEvent(event: any, textState: Map<string, string>): Co
 
 export class CodexRuntime {
   private readonly codex: any;
+  private readonly appServerRuntime: CodexAppServerRuntime | undefined;
 
   constructor(options: CodexRuntimeOptions = {}) {
+    if (isAppServerRuntimeEnabled()) {
+      this.codex = undefined;
+      this.appServerRuntime = new CodexAppServerRuntime(options);
+      return;
+    }
     const env =
       options.envOverrides && Object.keys(options.envOverrides).length > 0
         ? Object.fromEntries(
@@ -111,6 +118,9 @@ export class CodexRuntime {
   }
 
   async startThread(): Promise<any> {
+    if (this.appServerRuntime) {
+      throw new Error("startThread() without options is not supported by the app-server runtime");
+    }
     return await Promise.resolve(this.codex.startThread());
   }
 
@@ -120,6 +130,9 @@ export class CodexRuntime {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
   }): Promise<any> {
+    if (this.appServerRuntime) {
+      return await this.appServerRuntime.startThreadWithOptions(options);
+    }
     return await Promise.resolve(this.codex.startThread(this.buildThreadOptions(options)));
   }
 
@@ -130,6 +143,9 @@ export class CodexRuntime {
     workspace: string;
     codexRunConfig?: Record<string, unknown>;
   }): Promise<any> {
+    if (this.appServerRuntime) {
+      return await this.appServerRuntime.resumeThreadWithOptions(options);
+    }
     return await Promise.resolve(this.codex.resumeThread(options.threadId, this.buildThreadOptions(options)));
   }
 
@@ -137,6 +153,10 @@ export class CodexRuntime {
     thread: any,
     message: string
   ): AsyncGenerator<CodexStreamEvent> {
+    if (this.appServerRuntime) {
+      yield* this.appServerRuntime.runStreamed(thread, message);
+      return;
+    }
     const { events } = await thread.runStreamed(message);
     const textState = new Map<string, string>();
     for await (const event of events) {
@@ -153,6 +173,10 @@ export class CodexRuntime {
     model: string;
     reasoningEffort: ReasoningEffort;
   }): Promise<void> {
+    if (this.appServerRuntime) {
+      await this.appServerRuntime.validateProvider(options);
+      return;
+    }
     const thread = this.codex.startThread({
       model: options.model,
       modelReasoningEffort: options.reasoningEffort,

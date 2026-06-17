@@ -68,7 +68,8 @@ describe("usage recording architecture", () => {
       "operations/codex-execution-service.ts"
     ]);
     expect(matches(/extractRuntimeUsageFromStreamEvent\s*\(/)).toEqual([
-      "live-runtime-session.ts"
+      "live-runtime-session.ts",
+      "ops/local-codex-usage-report.ts"
     ]);
   });
 });

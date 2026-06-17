@@ -2355,9 +2355,19 @@ function normalizedToolIdentity(item: Record<string, unknown> | null): string {
 }
 
 function isImageGenerationItem(itemType: string, item: Record<string, unknown> | null): boolean {
+  if (
+    itemType === "image_generation" ||
+    itemType === "image_generation_call" ||
+    itemType === "imageGeneration" ||
+    itemType === "image_generation_end"
+  ) {
+    return true;
+  }
   const identity = normalizedToolIdentity(item);
+  const itemOwnType = typeof item?.type === "string" ? item.type : "";
+  if (itemOwnType === "image_generation_call" || itemOwnType === "imageGeneration") return true;
   if (!identity) return false;
-  if (/\b(imagegen|image_gen|image-generation|image_generation|gpt-image|dall-e|dalle)\b/.test(identity)) {
+  if (/(^|\b|_)(imagegen|image_gen|image-generation|image_generation|image-generation-call|image_generation_call|gpt-image|dall-e|dalle)(\b|_|$)/.test(identity)) {
     return true;
   }
   return (

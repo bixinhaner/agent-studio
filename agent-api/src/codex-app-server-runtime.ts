@@ -1,0 +1,921 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import readline from "node:readline";
+import os from "node:os";
+import path from "node:path";
+
+import type { ReasoningEffort } from "./model-config.js";
+import type { CodexRuntimeOptions, CodexStreamEvent } from "./codex-runtime.js";
+
+type JsonRecord = Record<string, unknown>;
+
+type AppServerThreadOptions = {
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  workspace: string;
+  codexRunConfig?: Record<string, unknown>;
+};
+
+export type CodexAppServerThread = {
+  id: string;
+  driver: "app_server";
+  scopeKey: string;
+  options: AppServerThreadOptions;
+};
+
+type PendingRequest = {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+};
+
+type NotificationSubscriber = (message: JsonRecord) => void;
+
+type RuntimeScope = {
+  key: string;
+  binaryPath: string;
+  env: Record<string, string>;
+  config?: Record<string, unknown>;
+  maxActiveTurns: number;
+};
+
+const DEFAULT_MAX_PROCESSES = 30;
+const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const TOML_DRIVER_APP_SERVER = "app_server";
+
+function trimOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt((value || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
+}
+
+function sha256(value: unknown): string {
+  return createHash("sha256").update(stableStringify(value)).digest("hex");
+}
+
+function mergeConfig(
+  base: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!base && !override) return undefined;
+  if (!base) return structuredClone(override);
+  if (!override) return structuredClone(base);
+  const next: Record<string, unknown> = structuredClone(base);
+  for (const [key, value] of Object.entries(override)) {
+    const current = asRecord(next[key]);
+    const child = asRecord(value);
+    next[key] = current && child ? mergeConfig(current, child) : structuredClone(value);
+  }
+  return stripUndefined(next);
+}
+
+function stripUndefined<T>(value: T): T {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)).filter((item) => item !== undefined) as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (item === undefined) continue;
+    out[key] = stripUndefined(item);
+  }
+  return out as T;
+}
+
+function effectiveEnv(options: CodexRuntimeOptions): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  for (const [key, value] of Object.entries(options.envOverrides ?? {})) {
+    if (typeof value === "string") env[key] = value;
+  }
+  if (options.apiKey) {
+    env.CODEX_API_KEY = options.apiKey;
+  }
+  return env;
+}
+
+function appServerBinaryPath(): string {
+  const configured = trimOrUndefined(process.env.CODEX_APP_SERVER_BINARY);
+  if (configured) return configured;
+
+  const candidates = [
+    "/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+    "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+  ];
+  for (const candidate of candidates) {
+    if (os.platform() === "linux" && existsSync(candidate)) return candidate;
+  }
+  return "codex";
+}
+
+function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown> | undefined {
+  const fromOptions = options.config ? structuredClone(options.config) : undefined;
+  const baseUrl = trimOrUndefined(options.baseUrl);
+  if (!baseUrl) return fromOptions;
+  return mergeConfig(fromOptions, { openai_base_url: baseUrl });
+}
+
+function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
+  const env = effectiveEnv(options);
+  const binaryPath = appServerBinaryPath();
+  const config = runtimeBaseConfig(options);
+  const scopeIdentity = {
+    binaryPath,
+    codexHome: trimOrUndefined(env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"),
+    config,
+    envOverrides: options.envOverrides ?? {},
+    apiKey: options.apiKey ? sha256(options.apiKey) : undefined,
+    baseUrl: options.baseUrl
+  };
+  return {
+    key: sha256(scopeIdentity),
+    binaryPath,
+    env,
+    config,
+    maxActiveTurns: parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS, DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS)
+  };
+}
+
+function sandboxModeFromRunConfig(codexRunConfig?: Record<string, unknown>): string {
+  const value = trimOrUndefined(codexRunConfig?.sandboxMode);
+  if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") return value;
+  return "danger-full-access";
+}
+
+function approvalPolicyFromRunConfig(codexRunConfig?: Record<string, unknown>): string {
+  const value = trimOrUndefined(codexRunConfig?.approvalPolicy);
+  if (value === "never" || value === "on-request" || value === "on-failure" || value === "untrusted") return value;
+  return "never";
+}
+
+function networkAccessFromRunConfig(codexRunConfig?: Record<string, unknown>): boolean {
+  return codexRunConfig?.networkAccessEnabled === true;
+}
+
+function additionalDirectoriesFromRunConfig(codexRunConfig?: Record<string, unknown>): string[] {
+  return asStringArray(codexRunConfig?.additionalDirectories);
+}
+
+function configFromRunConfig(input: AppServerThreadOptions): Record<string, unknown> | undefined {
+  const runConfig = input.codexRunConfig ?? {};
+  const config: Record<string, unknown> = { ...runConfig };
+  delete config.sandboxMode;
+  delete config.approvalPolicy;
+  delete config.networkAccessEnabled;
+  delete config.webSearchMode;
+  delete config.webSearchEnabled;
+  delete config.additionalDirectories;
+
+  config.model_reasoning_effort = input.reasoningEffort;
+
+  const webSearchMode = trimOrUndefined(runConfig.webSearchMode);
+  if (webSearchMode) {
+    config.web_search = webSearchMode;
+  } else if (runConfig.webSearchEnabled === true) {
+    config.web_search = "live";
+  } else if (runConfig.webSearchEnabled === false) {
+    config.web_search = "disabled";
+  }
+
+  const additionalDirectories = additionalDirectoriesFromRunConfig(runConfig);
+  const writableRoots = [...new Set([input.workspace, ...additionalDirectories].filter(Boolean))];
+  if (writableRoots.length || runConfig.networkAccessEnabled !== undefined) {
+    config.sandbox_workspace_write = mergeConfig(asRecord(config.sandbox_workspace_write), {
+      writable_roots: writableRoots,
+      network_access: networkAccessFromRunConfig(runConfig)
+    });
+  }
+
+  return stripUndefined(config);
+}
+
+function sandboxPolicy(input: AppServerThreadOptions): Record<string, unknown> {
+  const mode = sandboxModeFromRunConfig(input.codexRunConfig);
+  const networkAccess = networkAccessFromRunConfig(input.codexRunConfig);
+  if (mode === "read-only") {
+    return { type: "readOnly", networkAccess };
+  }
+  if (mode === "workspace-write") {
+    const roots = [...new Set([input.workspace, ...additionalDirectoriesFromRunConfig(input.codexRunConfig)].filter(Boolean))];
+    return {
+      type: "workspaceWrite",
+      writableRoots: roots,
+      networkAccess,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false
+    };
+  }
+  return { type: "dangerFullAccess" };
+}
+
+function threadStartParams(input: AppServerThreadOptions, scopeConfig: Record<string, unknown> | undefined): Record<string, unknown> {
+  return stripUndefined({
+    model: input.model,
+    cwd: input.workspace,
+    approvalPolicy: approvalPolicyFromRunConfig(input.codexRunConfig),
+    sandbox: sandboxModeFromRunConfig(input.codexRunConfig),
+    config: mergeConfig(scopeConfig, configFromRunConfig(input)),
+    threadSource: "user"
+  });
+}
+
+function threadResumeParams(
+  threadId: string,
+  input: AppServerThreadOptions,
+  scopeConfig: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return stripUndefined({
+    threadId,
+    model: input.model,
+    cwd: input.workspace,
+    approvalPolicy: approvalPolicyFromRunConfig(input.codexRunConfig),
+    sandbox: sandboxModeFromRunConfig(input.codexRunConfig),
+    config: mergeConfig(scopeConfig, configFromRunConfig(input))
+  });
+}
+
+function turnStartParams(threadId: string, message: string, input: AppServerThreadOptions): Record<string, unknown> {
+  return stripUndefined({
+    threadId,
+    input: [{ type: "text", text: message, text_elements: [] }],
+    cwd: input.workspace,
+    model: input.model,
+    effort: input.reasoningEffort,
+    approvalPolicy: approvalPolicyFromRunConfig(input.codexRunConfig),
+    sandboxPolicy: sandboxPolicy(input)
+  });
+}
+
+function threadIdFromResult(value: unknown): string | undefined {
+  const result = asRecord(value);
+  const thread = asRecord(result?.thread);
+  return trimOrUndefined(thread?.id) ?? trimOrUndefined(result?.threadId) ?? trimOrUndefined(result?.id);
+}
+
+function turnIdFromResult(value: unknown): string | undefined {
+  const result = asRecord(value);
+  const turn = asRecord(result?.turn);
+  return trimOrUndefined(turn?.id) ?? trimOrUndefined(result?.turnId);
+}
+
+function normalizeThreadItem(item: unknown): Record<string, unknown> | undefined {
+  const row = asRecord(item);
+  const type = trimOrUndefined(row?.type);
+  if (!row || !type) return undefined;
+
+  if (type === "agentMessage") {
+    return { ...row, type: "agent_message", text: trimOrUndefined(row.text) ?? "" };
+  }
+  if (type === "commandExecution") {
+    return {
+      ...row,
+      type: "command_execution",
+      aggregated_output: row.aggregatedOutput,
+      exit_code: row.exitCode,
+      process_id: row.processId
+    };
+  }
+  if (type === "fileChange") {
+    return { ...row, type: "file_change" };
+  }
+  if (type === "mcpToolCall") {
+    return { ...row, type: "mcp_tool_call" };
+  }
+  if (type === "dynamicToolCall") {
+    return {
+      ...row,
+      type: "mcp_tool_call",
+      server: trimOrUndefined(row.namespace) ?? "dynamic",
+      tool: trimOrUndefined(row.tool) ?? "dynamic_tool_call",
+      result: row.contentItems,
+      error: row.success === false ? { message: "Dynamic tool call failed" } : row.error
+    };
+  }
+  if (type === "webSearch") {
+    return { ...row, type: "web_search" };
+  }
+  if (type === "imageGeneration") {
+    return {
+      ...row,
+      type: "image_generation_call",
+      revised_prompt: row.revisedPrompt,
+      saved_path: row.savedPath,
+      name: "image_generation"
+    };
+  }
+  if (type === "imageView") {
+    return { ...row, type: "image_view" };
+  }
+  if (type === "reasoning") {
+    const summary = Array.isArray(row.summary) ? row.summary.filter((value): value is string => typeof value === "string") : [];
+    const content = Array.isArray(row.content) ? row.content.filter((value): value is string => typeof value === "string") : [];
+    return { ...row, type: "reasoning", text: [...summary, ...content].join("\n\n") };
+  }
+  if (type === "userMessage") {
+    return { ...row, type: "user_message" };
+  }
+  return { ...row, type };
+}
+
+function normalizeRawResponseItem(item: unknown): Record<string, unknown> | undefined {
+  const row = asRecord(item);
+  const type = trimOrUndefined(row?.type);
+  if (!row || !type) return undefined;
+  if (type === "image_generation_call") {
+    return {
+      ...row,
+      name: "image_generation"
+    };
+  }
+  return row;
+}
+
+function tokenUsageEvent(message: JsonRecord): CodexStreamEvent | undefined {
+  const params = asRecord(message.params);
+  const usage = asRecord(params?.tokenUsage);
+  const total = asRecord(usage?.total);
+  const last = asRecord(usage?.last);
+  if (!params || !total || !last) return undefined;
+  const toSnake = (value: Record<string, unknown>) => ({
+    input_tokens: value.inputTokens,
+    cached_input_tokens: value.cachedInputTokens,
+    output_tokens: value.outputTokens
+  });
+  const raw = {
+    type: "token_count",
+    thread_id: params.threadId,
+    turn_id: params.turnId,
+    info: {
+      total_token_usage: toSnake(total),
+      last_token_usage: toSnake(last)
+    }
+  };
+  return { type: "token_count", raw };
+}
+
+function normalizeNotification(message: JsonRecord): CodexStreamEvent | undefined {
+  const method = trimOrUndefined(message.method);
+  const params = asRecord(message.params) ?? {};
+
+  if (method === "thread/tokenUsage/updated") {
+    return tokenUsageEvent(message);
+  }
+
+  if (method === "item/agentMessage/delta") {
+    const itemId = trimOrUndefined(params.itemId);
+    const delta = trimOrUndefined(params.delta) ?? "";
+    const raw = {
+      type: "item.agent_message.delta",
+      thread_id: params.threadId,
+      turn_id: params.turnId,
+      item: {
+        type: "agent_message",
+        id: itemId
+      }
+    };
+    return {
+      type: "item.agent_message.delta",
+      delta,
+      raw
+    };
+  }
+
+  if (method === "item/started" || method === "item/completed") {
+    const item = normalizeThreadItem(params.item);
+    const type = method === "item/started" ? "item.started" : "item.completed";
+    return {
+      type,
+      text: typeof item?.text === "string" ? item.text : undefined,
+      raw: {
+        type,
+        thread_id: params.threadId,
+        turn_id: params.turnId,
+        started_at_ms: params.startedAtMs,
+        completed_at_ms: params.completedAtMs,
+        item
+      }
+    };
+  }
+
+  if (method === "rawResponseItem/completed") {
+    const item = normalizeRawResponseItem(params.item);
+    return {
+      type: "raw_response_item.completed",
+      raw: {
+        type: "raw_response_item.completed",
+        thread_id: params.threadId,
+        turn_id: params.turnId,
+        item
+      }
+    };
+  }
+
+  if (method === "turn/completed") {
+    return {
+      type: "turn.completed",
+      raw: {
+        type: "turn.completed",
+        thread_id: params.threadId,
+        turn_id: asRecord(params.turn)?.id,
+        turn: params.turn
+      }
+    };
+  }
+
+  if (method === "turn/started") {
+    return {
+      type: "turn.started",
+      raw: {
+        type: "turn.started",
+        thread_id: params.threadId,
+        turn_id: asRecord(params.turn)?.id,
+        turn: params.turn
+      }
+    };
+  }
+
+  if (method === "thread/started") {
+    const thread = asRecord(params.thread);
+    return {
+      type: "thread.started",
+      raw: {
+        type: "thread.started",
+        thread_id: thread?.id ?? params.threadId,
+        thread
+      }
+    };
+  }
+
+  if (method === "error") {
+    return {
+      type: "error",
+      text: trimOrUndefined(params.message),
+      raw: {
+        type: "error",
+        ...params
+      }
+    };
+  }
+
+  return method
+    ? {
+        type: method.replace(/\//g, "."),
+        raw: {
+          type: method.replace(/\//g, "."),
+          ...params
+        }
+      }
+    : undefined;
+}
+
+class AsyncEventQueue<T> implements AsyncIterable<T> {
+  private readonly items: T[] = [];
+  private readonly waiters: Array<{
+    resolve(value: IteratorResult<T>): void;
+    reject(error: unknown): void;
+  }> = [];
+  private closed = false;
+  private failure: unknown;
+
+  push(item: T): void {
+    if (this.closed || this.failure) return;
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter.resolve({ value: item, done: false });
+      return;
+    }
+    this.items.push(item);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter.resolve({ value: undefined as T, done: true });
+    }
+  }
+
+  error(error: unknown): void {
+    if (this.failure) return;
+    this.failure = error;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter.reject(error);
+    }
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: async () => {
+        if (this.failure) throw this.failure;
+        const item = this.items.shift();
+        if (item !== undefined) return { value: item, done: false };
+        if (this.closed) return { value: undefined as T, done: true };
+        return await new Promise<IteratorResult<T>>((resolve, reject) => {
+          this.waiters.push({ resolve, reject });
+        });
+      }
+    };
+  }
+}
+
+class CodexAppServerProcess {
+  readonly scopeKey: string;
+  lastUsedAt = Date.now();
+  activeTurns = 0;
+  readonly loadedThreads = new Set<string>();
+  private nextRequestId = 1;
+  private proc: ReturnType<typeof spawn> | undefined;
+  private rl: readline.Interface | undefined;
+  private readonly pending = new Map<number, PendingRequest & { timeout: NodeJS.Timeout }>();
+  private readonly subscribers = new Set<NotificationSubscriber>();
+  private readonly turnWaiters: Array<() => void> = [];
+  private startPromise: Promise<void> | undefined;
+  private closedError: Error | undefined;
+
+  constructor(private readonly scope: RuntimeScope) {
+    this.scopeKey = scope.key;
+  }
+
+  get closed(): boolean {
+    return Boolean(this.closedError);
+  }
+
+  async start(): Promise<void> {
+    if (this.startPromise) return await this.startPromise;
+    this.startPromise = this.startInner();
+    return await this.startPromise;
+  }
+
+  async request(method: string, params?: unknown): Promise<unknown> {
+    await this.start();
+    return await this.sendRequest(method, params);
+  }
+
+  private async sendRequest(method: string, params?: unknown): Promise<unknown> {
+    if (!this.proc?.stdin || this.closedError) {
+      throw this.closedError ?? new Error("Codex app-server is not running");
+    }
+    const id = this.nextRequestId++;
+    const payload = params === undefined ? { method, id } : { method, id, params };
+    const promise = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Codex app-server request timed out: ${method}`));
+      }, DEFAULT_REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timeout });
+    });
+    this.proc.stdin.write(`${JSON.stringify(payload)}\n`);
+    return await promise;
+  }
+
+  notify(method: string, params: Record<string, unknown> = {}): void {
+    this.proc?.stdin?.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  subscribe(handler: NotificationSubscriber): () => void {
+    this.subscribers.add(handler);
+    return () => {
+      this.subscribers.delete(handler);
+    };
+  }
+
+  async acquireTurnSlot(): Promise<() => void> {
+    if (this.activeTurns < this.scope.maxActiveTurns) {
+      this.activeTurns += 1;
+      return () => this.releaseTurnSlot();
+    }
+    await new Promise<void>((resolve) => {
+      this.turnWaiters.push(resolve);
+    });
+    return () => this.releaseTurnSlot();
+  }
+
+  stop(reason = "stopped"): void {
+    if (this.closedError) return;
+    this.closedError = new Error(`Codex app-server ${reason}`);
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timeout);
+      pending.reject(this.closedError);
+    }
+    this.pending.clear();
+    this.rl?.close();
+    this.proc?.kill();
+    this.subscribers.clear();
+  }
+
+  private releaseTurnSlot(): void {
+    const next = this.turnWaiters.shift();
+    if (next) {
+      next();
+      return;
+    }
+    this.activeTurns = Math.max(0, this.activeTurns - 1);
+  }
+
+  private async startInner(): Promise<void> {
+    this.proc = spawn(this.scope.binaryPath, ["app-server", "--listen", "stdio://"], {
+      env: this.scope.env,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+
+    const stderrChunks: Buffer[] = [];
+    this.proc.stderr?.on("data", (chunk) => {
+      stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    this.proc.once("error", (error) => this.handleExit(error));
+    this.proc.once("exit", (code, signal) => {
+      const stderr = Buffer.concat(stderrChunks).toString("utf8").slice(-2000);
+      this.handleExit(new Error(`Codex app-server exited code=${code} signal=${signal}${stderr ? ` stderr=${stderr}` : ""}`));
+    });
+
+    if (!this.proc.stdout || !this.proc.stdin) {
+      throw new Error("Codex app-server stdio was not available");
+    }
+
+    this.rl = readline.createInterface({ input: this.proc.stdout, crlfDelay: Infinity });
+    this.rl.on("line", (line) => this.handleLine(line));
+
+    await this.sendRequest("initialize", {
+      clientInfo: {
+        name: "agent-studio",
+        title: "Agent Studio",
+        version: "1.0.0"
+      },
+      capabilities: {
+        experimentalApi: true
+      }
+    });
+    this.notify("initialized");
+  }
+
+  private handleLine(line: string): void {
+    let message: JsonRecord;
+    try {
+      message = JSON.parse(line) as JsonRecord;
+    } catch {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(message, "id")) {
+      const id = Number(message.id);
+      const pending = this.pending.get(id);
+      if (!pending) return;
+      this.pending.delete(id);
+      clearTimeout(pending.timeout);
+      const error = asRecord(message.error);
+      if (error) {
+        pending.reject(new Error(trimOrUndefined(error.message) ?? JSON.stringify(error)));
+      } else {
+        pending.resolve(message.result);
+      }
+      return;
+    }
+
+    this.lastUsedAt = Date.now();
+    for (const subscriber of [...this.subscribers]) {
+      subscriber(message);
+    }
+  }
+
+  private handleExit(error: Error): void {
+    if (this.closedError) return;
+    this.closedError = error;
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pending.clear();
+    for (const subscriber of [...this.subscribers]) {
+      subscriber({
+        method: "error",
+        params: {
+          message: error.message
+        }
+      });
+    }
+    this.subscribers.clear();
+  }
+}
+
+class CodexAppServerManager {
+  private readonly processes = new Map<string, CodexAppServerProcess>();
+  private readonly lockedThreads = new Set<string>();
+  private readonly threadWaiters = new Map<string, Array<() => void>>();
+
+  async startThread(options: CodexRuntimeOptions, threadOptions: AppServerThreadOptions): Promise<CodexAppServerThread> {
+    const scope = runtimeScope(options);
+    const process = await this.getProcess(scope);
+    const result = await process.request("thread/start", threadStartParams(threadOptions, scope.config));
+    const threadId = threadIdFromResult(result);
+    if (!threadId) throw new Error("Codex app-server did not return a thread id");
+    process.loadedThreads.add(threadId);
+    return {
+      id: threadId,
+      driver: TOML_DRIVER_APP_SERVER,
+      scopeKey: scope.key,
+      options: threadOptions
+    };
+  }
+
+  async resumeThread(
+    options: CodexRuntimeOptions,
+    threadId: string,
+    threadOptions: AppServerThreadOptions
+  ): Promise<CodexAppServerThread> {
+    const scope = runtimeScope(options);
+    const process = await this.getProcess(scope);
+    if (!process.loadedThreads.has(threadId)) {
+      const result = await process.request("thread/resume", threadResumeParams(threadId, threadOptions, scope.config));
+      const resumedThreadId = threadIdFromResult(result) ?? threadId;
+      process.loadedThreads.add(resumedThreadId);
+    }
+    return {
+      id: threadId,
+      driver: TOML_DRIVER_APP_SERVER,
+      scopeKey: scope.key,
+      options: threadOptions
+    };
+  }
+
+  async *runTurn(options: CodexRuntimeOptions, thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
+    const scope = runtimeScope(options);
+    const process = await this.getProcess(scope);
+    const releaseThread = await this.acquireThreadLock(thread.id);
+    const releaseTurn = await process.acquireTurnSlot();
+    const queue = new AsyncEventQueue<CodexStreamEvent>();
+    let turnId: string | undefined;
+    let completed = false;
+    let unsubscribe = () => {};
+
+    try {
+      if (!process.loadedThreads.has(thread.id)) {
+        await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
+        process.loadedThreads.add(thread.id);
+      }
+      unsubscribe = process.subscribe((notification) => {
+        const params = asRecord(notification.params) ?? {};
+        const eventThreadId = trimOrUndefined(params.threadId) ?? trimOrUndefined(asRecord(params.thread)?.id);
+        if (eventThreadId && eventThreadId !== thread.id) return;
+        const eventTurnId = trimOrUndefined(params.turnId) ?? trimOrUndefined(asRecord(params.turn)?.id);
+        if (turnId && eventTurnId && eventTurnId !== turnId) return;
+        const event = normalizeNotification(notification);
+        if (!event) return;
+        queue.push(event);
+        if (event.type === "turn.completed") {
+          completed = true;
+          setTimeout(() => queue.close(), 150);
+        }
+        if (event.type === "error") {
+          queue.error(new Error(event.text || "Codex app-server runtime error"));
+        }
+      });
+      const result = await process.request("turn/start", turnStartParams(thread.id, message, thread.options));
+      turnId = turnIdFromResult(result);
+
+      for await (const event of queue) {
+        yield event;
+      }
+
+      if (!completed) {
+        throw new Error("Codex app-server turn ended before completion");
+      }
+    } finally {
+      unsubscribe();
+      releaseTurn();
+      releaseThread();
+    }
+  }
+
+  private async getProcess(scope: RuntimeScope): Promise<CodexAppServerProcess> {
+    const existing = this.processes.get(scope.key);
+    if (existing && !existing.closed) {
+      existing.lastUsedAt = Date.now();
+      await existing.start();
+      return existing;
+    }
+    if (existing?.closed) {
+      this.processes.delete(scope.key);
+    }
+    await this.ensureCapacity();
+    const process = new CodexAppServerProcess(scope);
+    this.processes.set(scope.key, process);
+    await process.start();
+    return process;
+  }
+
+  private async ensureCapacity(): Promise<void> {
+    const maxProcesses = parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_PROCESSES, DEFAULT_MAX_PROCESSES);
+    if (this.processes.size < maxProcesses) return;
+    const idle = [...this.processes.values()]
+      .filter((process) => process.activeTurns === 0)
+      .sort((left, right) => left.lastUsedAt - right.lastUsedAt)[0];
+    if (!idle) {
+      throw new Error(`Codex app-server capacity reached (${maxProcesses}) and no idle process can be evicted`);
+    }
+    idle.stop("evicted by LRU capacity policy");
+    this.processes.delete(idle.scopeKey);
+  }
+
+  stopAll(reason = "stopped"): void {
+    for (const process of this.processes.values()) {
+      process.stop(reason);
+    }
+    this.processes.clear();
+  }
+
+  private async acquireThreadLock(threadId: string): Promise<() => void> {
+    if (!this.lockedThreads.has(threadId)) {
+      this.lockedThreads.add(threadId);
+      return () => this.releaseThreadLock(threadId);
+    }
+    await new Promise<void>((resolve) => {
+      const waiters = this.threadWaiters.get(threadId) ?? [];
+      waiters.push(resolve);
+      this.threadWaiters.set(threadId, waiters);
+    });
+    return () => this.releaseThreadLock(threadId);
+  }
+
+  private releaseThreadLock(threadId: string): void {
+    const waiters = this.threadWaiters.get(threadId) ?? [];
+    const next = waiters.shift();
+    if (next) {
+      this.threadWaiters.set(threadId, waiters);
+      next();
+      return;
+    }
+    this.threadWaiters.delete(threadId);
+    this.lockedThreads.delete(threadId);
+  }
+}
+
+const appServerManager = new CodexAppServerManager();
+
+export class CodexAppServerRuntime {
+  constructor(private readonly options: CodexRuntimeOptions = {}) {}
+
+  async startThreadWithOptions(options: AppServerThreadOptions): Promise<CodexAppServerThread> {
+    return await appServerManager.startThread(this.options, options);
+  }
+
+  async resumeThreadWithOptions(options: AppServerThreadOptions & { threadId: string }): Promise<CodexAppServerThread> {
+    return await appServerManager.resumeThread(this.options, options.threadId, options);
+  }
+
+  async *runStreamed(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
+    yield* appServerManager.runTurn(this.options, thread, message);
+  }
+
+  async validateProvider(options: { model: string; reasoningEffort: ReasoningEffort }): Promise<void> {
+    const thread = await this.startThreadWithOptions({
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      workspace: process.cwd(),
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+    const events = this.runStreamed(thread, "Reply with the single word OK.");
+    for await (const event of events) {
+      if (event.type === "turn.completed") return;
+    }
+  }
+}
+
+export function isAppServerRuntimeEnabled(): boolean {
+  const value = (process.env.CODEX_RUNTIME_DRIVER || "").trim().toLowerCase();
+  return value === TOML_DRIVER_APP_SERVER || value === "app-server" || value === "appserver";
+}
+
+export function shutdownCodexAppServerRuntime(reason = "shutdown"): void {
+  appServerManager.stopAll(reason);
+}

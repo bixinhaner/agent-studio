@@ -48,6 +48,7 @@ import { appConfig, resolveWorkspace } from "./config.js";
 import { createAdminBillingRouter, createPortalBillingRouter } from "./billing/router.js";
 import { BillingService } from "./billing/service.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
 import {
   CodexMemoryEngine,
@@ -1624,6 +1625,66 @@ async function restoreLiveRuntimeThread(
     });
     return undefined;
   }
+}
+
+function runtimePrewarmLimit(): number {
+  const parsed = Number.parseInt((process.env.CODEX_APP_SERVER_MAX_PROCESSES || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+}
+
+function runtimePrewarmHours(): number {
+  const parsed = Number.parseInt((process.env.CODEX_APP_SERVER_PREWARM_HOURS || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 24;
+}
+
+async function prewarmAppServerRuntimeSessions(): Promise<void> {
+  if (!isAppServerRuntimeEnabled()) return;
+  const limit = runtimePrewarmLimit();
+  const cutoff = new Date(Date.now() - runtimePrewarmHours() * 60 * 60_000);
+  const rows = await (db as never as {
+    runtimeSession: {
+      findMany(args: {
+        where: { status: "active"; updatedAt: { gte: Date }; externalId?: { not: null } };
+        select: { externalId: true };
+        orderBy: { updatedAt: "desc" };
+        take: number;
+      }): Promise<Array<{ externalId: string | null }>>;
+    };
+  }).runtimeSession.findMany({
+    where: {
+      status: "active",
+      updatedAt: { gte: cutoff },
+      externalId: { not: null }
+    },
+    select: { externalId: true },
+    orderBy: { updatedAt: "desc" },
+    take: Math.max(limit * 8, limit)
+  });
+
+  const seenScopes = new Set<string>();
+  let attempted = 0;
+  let restored = 0;
+  for (const row of rows) {
+    if (attempted >= limit) break;
+    const sessionId = trimOrUndefined(row.externalId);
+    if (!sessionId) continue;
+    const session = await sessions.peek(sessionId);
+    const codexHome = codexHomeFromRunConfig(session?.codexRunConfig);
+    const codexThreadId = trimOrUndefined(session?.codexThreadId);
+    if (!session || !codexHome || !codexThreadId) continue;
+    const scopeKey = `${codexHome}::${stableJson(session.providerSnapshot?.runtimeOptions)}`;
+    if (seenScopes.has(scopeKey)) continue;
+    seenScopes.add(scopeKey);
+    attempted += 1;
+    const liveThread = await restoreLiveRuntimeThread(session);
+    if (liveThread) restored += 1;
+  }
+  console.log("app-server runtime prewarm completed", {
+    attempted,
+    restored,
+    limit,
+    cutoff: cutoff.toISOString()
+  });
 }
 
 async function materializeSharedCodexHomeForSessionRecord(input: {
@@ -8356,6 +8417,20 @@ setInterval(() => {
   });
 }, 60 * 60_000).unref();
 
+if (isAppServerRuntimeEnabled()) {
+  process.once("exit", () => {
+    shutdownCodexAppServerRuntime("node process exiting");
+  });
+  process.once("SIGTERM", () => {
+    shutdownCodexAppServerRuntime("received SIGTERM");
+    process.exit(0);
+  });
+  process.once("SIGINT", () => {
+    shutdownCodexAppServerRuntime("received SIGINT");
+    process.exit(130);
+  });
+}
+
 async function bootstrap() {
   await db.$connect();
   const legacyThreadOwnerId = await users.findLegacyImportOwnerId(appConfig.legacyThreadOwnerId);
@@ -8376,6 +8451,9 @@ async function bootstrap() {
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);
+  });
+  void prewarmAppServerRuntimeSessions().catch((error) => {
+    console.warn("failed to prewarm app-server runtime sessions", error instanceof Error ? error.message : String(error));
   });
   void zendesk.recoverInterruptedProcessingRuns({ reprocess: true }).then((result) => {
     if (result.markedFailed > 0 || result.requeued > 0) {
