@@ -22,6 +22,7 @@ export type CodexAppServerThread = {
   id: string;
   driver: "app_server";
   scopeKey: string;
+  scope: RuntimeScope;
   options: AppServerThreadOptions;
 };
 
@@ -741,6 +742,7 @@ class CodexAppServerManager {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
       scopeKey: scope.key,
+      scope,
       options: threadOptions
     };
   }
@@ -761,12 +763,13 @@ class CodexAppServerManager {
       id: threadId,
       driver: TOML_DRIVER_APP_SERVER,
       scopeKey: scope.key,
+      scope,
       options: threadOptions
     };
   }
 
-  async *runTurn(options: CodexRuntimeOptions, thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
-    const scope = runtimeScope(options);
+  async *runTurn(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
+    const scope = thread.scope;
     const process = await this.getProcess(scope);
     const releaseThread = await this.acquireThreadLock(thread.id);
     const releaseTurn = await process.acquireTurnSlot();
@@ -891,7 +894,7 @@ export class CodexAppServerRuntime {
   }
 
   async *runStreamed(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
-    yield* appServerManager.runTurn(this.options, thread, message);
+    yield* appServerManager.runTurn(thread, message);
   }
 
   async validateProvider(options: { model: string; reasoningEffort: ReasoningEffort }): Promise<void> {

@@ -26,6 +26,7 @@ import readline from "node:readline";
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 let nextThreadId = 1;
 let nextTurnId = 1;
+const threads = new Set();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -51,15 +52,25 @@ rl.on("line", (line) => {
     return;
   }
   if (message.method === "thread/start") {
-    respond(id, { thread: { id: "thread-" + nextThreadId++ } });
+    const threadId = "thread-" + nextThreadId++;
+    threads.add(threadId);
+    respond(id, { thread: { id: threadId } });
     return;
   }
   if (message.method === "thread/resume") {
+    if (!threads.has(params.threadId)) {
+      write({ id, error: { message: "no rollout found for thread id " + params.threadId } });
+      return;
+    }
     respond(id, { thread: { id: params.threadId } });
     return;
   }
   if (message.method === "turn/start") {
     const threadId = params.threadId;
+    if (!threads.has(threadId)) {
+      write({ id, error: { message: "no rollout found for thread id " + threadId } });
+      return;
+    }
     const turnId = "turn-" + nextTurnId++;
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
@@ -165,5 +176,34 @@ describe("Codex app-server runtime", () => {
         return event.type === "raw_response_item.completed" && raw?.item?.type === "image_generation_call" && raw.item.name === "image_generation";
       })
     ).toBe(true);
+  });
+
+  it("keeps using the app-server scope that created the live thread", async () => {
+    const creatingRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-a")
+      }
+    });
+    const unrelatedRuntime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-b")
+      }
+    });
+    const thread = await creatingRuntime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of unrelatedRuntime.runStreamed(thread, "hello")) {
+      events.push(event);
+    }
+
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
   });
 });
