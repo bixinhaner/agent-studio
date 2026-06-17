@@ -118,6 +118,7 @@ export function createAdminBillingRouter(service: BillingService): Router {
         webhookSigningSecret: req.body?.webhookSigningSecret,
         successUrl: req.body?.successUrl,
         cancelUrl: req.body?.cancelUrl,
+        portalBillingUrl: req.body?.portalBillingUrl,
         defaultCurrency: req.body?.defaultCurrency,
         defaultAutoRenew: typeof req.body?.defaultAutoRenew === "boolean" ? req.body.defaultAutoRenew : undefined,
         clearStripeSecretKey: req.body?.clearStripeSecretKey === true,
@@ -289,6 +290,18 @@ export function createAdminBillingRouter(service: BillingService): Router {
     try {
       const result = await service.runReminderSweep({
         testEmail: req.body?.testEmail
+      });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/billing/email-rules/:ruleId/test", async (req: Request, res: Response) => {
+    try {
+      const result = await service.sendReminderTestEmail({
+        ruleId: req.params.ruleId,
+        testEmail: String(req.body?.testEmail ?? "")
       });
       res.json(result);
     } catch (error) {

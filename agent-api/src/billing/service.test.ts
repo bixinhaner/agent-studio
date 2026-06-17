@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
+import type { AuthEmailSender } from "../auth/email.js";
 import { BillingService } from "./service.js";
 
 function createBillingConfig() {
@@ -68,7 +69,24 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
       })
     },
     subscriptionPlan: {
-      findMany: vi.fn(async () => [])
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
+    },
+    subscriptionGrant: {
+      findMany: vi.fn(async (_args?: unknown): Promise<unknown[]> => []),
+      findUnique: vi.fn(async (_args?: unknown): Promise<unknown | null> => null),
+      upsert: vi.fn(async (args: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+        id: "grant-1",
+        ...args.create,
+        ...args.update,
+        createdAt: now,
+        updatedAt: now
+      }))
+    },
+    organization: {
+      findUnique: vi.fn(async (_args?: unknown): Promise<unknown> => ({ id: "org-1", name: "Customer Inc", slug: "customer", ownerUserId: null }))
+    },
+    organizationMembership: {
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
     },
     accessRequest: {
       findFirst: vi.fn(async () => null)
@@ -118,7 +136,40 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
       })
     },
     billingEmailRule: {
-      findMany: vi.fn(async () => [])
+      findMany: vi.fn(async (_args?: unknown): Promise<unknown[]> => []),
+      findUnique: vi.fn(async (_args?: unknown): Promise<unknown | null> => null),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+        id: args.where.id,
+        triggerType: "expires_in_days",
+        offsetDays: 14,
+        status: "enabled",
+        audienceJson: null,
+        subject: "",
+        bodyText: "",
+        bodyHtml: null,
+        createdAt: now,
+        updatedAt: now,
+        ...args.data
+      }))
+    },
+    billingAutoRenewal: {
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
+    },
+    notificationRecord: {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+        id: `notification-${Math.random().toString(16).slice(2)}`,
+        createdAt: now,
+        updatedAt: now,
+        ...args.data
+      })),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+        id: args.where.id,
+        ...args.data,
+        createdAt: now,
+        updatedAt: now
+      })),
+      updateMany: vi.fn(async () => ({ count: 0 }))
     }
   };
 
@@ -200,6 +251,122 @@ describe("BillingService Stripe admin settings", () => {
       enabled: true,
       source: "admin"
     });
+  });
+
+  it("sends a branded billing email test without enabling production reminders", async () => {
+    const { db, raw } = createDbMock();
+    raw.billingEmailRule.findUnique.mockResolvedValueOnce({
+      id: "billing-email-rule-expiring-14",
+      triggerType: "expires_in_days",
+      offsetDays: 14,
+      status: "disabled",
+      audienceJson: { billingContacts: true },
+      subject: "{{brand_name}} subscription expires in 14 days",
+      bodyText: "Open billing: {{renew_url}}",
+      bodyHtml: '<table><tr><td>{{brand_name}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
+      lastRunAt: null,
+      createdAt: new Date("2026-06-12T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T00:00:00.000Z")
+    });
+    const send = vi.fn(async (_input: Parameters<AuthEmailSender["send"]>[0]) => ({ delivered: true, mode: "smtp" as const }));
+    const emailSender: AuthEmailSender = { send };
+    const service = new BillingService({
+      db,
+      config: createBillingConfig(),
+      emailSender,
+      resolveBrandName: async () => "Bailey"
+    });
+
+    await expect(service.sendReminderTestEmail({
+      ruleId: "billing-email-rule-expiring-14",
+      testEmail: "like@baicells.com",
+      now: new Date("2026-06-12T00:00:00.000Z")
+    })).resolves.toMatchObject({ ok: true, delivered: true, mode: "smtp" });
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      to: ["like@baicells.com"],
+      subject: "Bailey subscription expires in 14 days",
+      text: "Open billing: https://bailey.baicells.com/?billing=renew",
+      debugLabel: "billing-email-reminder-test"
+    }));
+    const html = send.mock.calls[0]?.[0]?.html ?? "";
+    expect(html).toContain("Bailey");
+    expect(html).toContain("https://bailey.baicells.com/?billing=renew");
+    expect(raw.billingEmailRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it("sends expired reminders for grants that ended in the previous 24 hours", async () => {
+    const { db, raw } = createDbMock({
+      id: "billing-customer-1",
+      organizationId: "org-1",
+      businessEmail: "customer@example.com",
+      billingEmail: "customer@example.com",
+      companyName: "Customer Inc",
+      contactName: null,
+      countryRegion: null,
+      sn: null,
+      salesContact: null,
+      stripeCustomerId: null,
+      defaultAutoRenew: true,
+      metadataJson: null
+    });
+    raw.billingEmailRule.findMany.mockResolvedValueOnce([
+      {
+        id: "billing-email-rule-expired-0",
+        triggerType: "expired",
+        offsetDays: 0,
+        status: "enabled",
+        audienceJson: { billingContacts: true },
+        subject: "{{brand_name}} expired",
+        bodyText: "Renew {{company_name}} at {{renew_url}}",
+        bodyHtml: '<table><tr><td>{{company_name}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
+        lastRunAt: null,
+        createdAt: new Date("2026-06-12T00:00:00.000Z"),
+        updatedAt: new Date("2026-06-12T00:00:00.000Z")
+      }
+    ]);
+    raw.organization.findUnique.mockResolvedValueOnce({ id: "org-1", name: "Customer <Inc>", slug: "customer", ownerUserId: null });
+    raw.subscriptionGrant.findMany.mockResolvedValueOnce([
+      {
+        id: "grant-1",
+        principalType: "organization",
+        principalId: "org-1",
+        planId: "plan-plus",
+        status: "active",
+        startsAt: new Date("2026-05-12T00:00:00.000Z"),
+        expiresAt: new Date("2026-06-11T12:00:00.000Z"),
+        cycleAnchorAt: new Date("2026-05-12T00:00:00.000Z"),
+        note: null,
+        createdAt: new Date("2026-05-12T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-12T00:00:00.000Z"),
+        plan: {
+          id: "plan-plus",
+          name: "Plus",
+          billingPriceCents: 9900,
+          billingCurrency: "usd"
+        }
+      }
+    ]);
+    const send = vi.fn(async (_input: Parameters<AuthEmailSender["send"]>[0]) => ({ delivered: true, mode: "smtp" as const }));
+    const emailSender: AuthEmailSender = { send };
+    const service = new BillingService({
+      db,
+      config: { ...createBillingConfig(), billingEmailEnabled: true },
+      emailSender,
+      resolveBrandName: async () => "Bailey"
+    });
+
+    await expect(service.runReminderSweep({ now: new Date("2026-06-12T00:00:00.000Z") })).resolves.toMatchObject({
+      ok: true,
+      results: [{ ruleId: "billing-email-rule-expired-0", sent: 1, skipped: 0, failed: 0 }]
+    });
+
+    const findManyArgs = raw.subscriptionGrant.findMany.mock.calls[0]?.[0] as unknown as { where: { expiresAt: { gte: Date; lt: Date } } };
+    expect(findManyArgs.where.expiresAt.gte.toISOString()).toBe("2026-06-11T00:00:00.000Z");
+    expect(findManyArgs.where.expiresAt.lt.toISOString()).toBe("2026-06-12T00:00:00.000Z");
+    const html = send.mock.calls[0]?.[0]?.html ?? "";
+    expect(html).toContain("Customer &lt;Inc&gt;");
+    expect(html).toContain("https://bailey.baicells.com/?billing=renew");
   });
 
   it("only lists active priced plans as billable", async () => {

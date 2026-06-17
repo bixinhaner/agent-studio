@@ -558,6 +558,23 @@
   background: var(--admin-color-surface-solid);
 }
 
+.admin-billing-email-test-row {
+  padding: 10px 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  background: color-mix(in srgb, var(--admin-color-surface-solid) 86%, #eef2ff);
+}
+
+.admin-billing-email-test-row span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .admin-billing-config-panel {
   padding: 14px;
   border: 1px solid var(--admin-color-border);
@@ -708,6 +725,10 @@
   }
 
   .admin-billing-config-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-billing-email-test-row {
     grid-template-columns: 1fr;
   }
 

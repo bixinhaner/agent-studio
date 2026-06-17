@@ -2082,6 +2082,18 @@ body.access-request-route #root {
   color: #78350f;
 }
 
+.thread-access-banner-billing-success {
+  border-color: rgba(22, 163, 74, 0.28);
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.96), rgba(236, 253, 245, 0.92));
+  color: #14532d;
+}
+
+.thread-access-banner-billing-warning {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92));
+  color: #78350f;
+}
+
 .thread-access-banner-head {
   display: flex;
   align-items: center;
@@ -2099,6 +2111,14 @@ body.access-request-route #root {
   margin-top: 6px !important;
   color: rgba(127, 29, 29, 0.78);
   font-weight: 600;
+}
+
+.thread-access-banner-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .assistant-running-card {

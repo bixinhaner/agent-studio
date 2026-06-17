@@ -9,6 +9,7 @@ type BillingConfig = {
   stripeWebhookSigningSecret: string;
   successUrl: string;
   cancelUrl: string;
+  portalBillingUrl?: string;
   defaultCurrency: string;
   defaultAutoRenew: boolean;
   billingEmailEnabled?: boolean;
@@ -23,6 +24,7 @@ type BillingResolvedConfig = BillingConfig & {
   webhookSigningSecretPreview: string | null;
   updatedAt: string | null;
   rotatedAt: string | null;
+  portalBillingUrl: string;
   billingEmailEnabled: boolean;
 };
 
@@ -148,6 +150,7 @@ const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const STRIPE_BILLING_INTEGRATION_TYPE = "stripe";
 const STRIPE_BILLING_INTEGRATION_SLUG = "billing-stripe";
 const STRIPE_WEBHOOK_ENDPOINT_PATH = "/api/integrations/stripe/webhook";
+const DEFAULT_PORTAL_BILLING_URL = "https://bailey.baicells.com/?billing=renew";
 const STRIPE_REQUIRED_WEBHOOK_EVENTS = [
   "checkout.session.completed",
   "invoice.paid",
@@ -255,7 +258,7 @@ function toDate(value: Date | string | number | null | undefined): Date | null {
 
 function addDays(date: Date, days: number): Date {
   const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + Math.max(0, days));
+  next.setUTCDate(next.getUTCDate() + days);
   return next;
 }
 
@@ -420,6 +423,20 @@ function renderTemplate(template: string, variables: Record<string, string>): st
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderHtmlTemplate(template: string, variables: Record<string, string>): string {
+  const escaped = Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, escapeHtml(value)]));
+  return renderTemplate(template, escaped);
+}
+
 function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -455,6 +472,7 @@ export class BillingService {
       config: BillingConfig;
       emailSender?: AuthEmailSender;
       notifications?: NotificationRecordRepository;
+      resolveBrandName?: () => Promise<string>;
     }
   ) {}
 
@@ -468,6 +486,7 @@ export class BillingService {
       stripeWebhookSigningSecret: trimOrUndefined(this.options.config.stripeWebhookSigningSecret) ?? "",
       successUrl: trimOrUndefined(this.options.config.successUrl) ?? "",
       cancelUrl: trimOrUndefined(this.options.config.cancelUrl) ?? "",
+      portalBillingUrl: trimOrUndefined(this.options.config.portalBillingUrl) ?? DEFAULT_PORTAL_BILLING_URL,
       defaultCurrency: normalizeCurrency(this.options.config.defaultCurrency || "usd"),
       defaultAutoRenew: this.options.config.defaultAutoRenew !== false,
       billingEmailEnabled: this.options.config.billingEmailEnabled === true
@@ -501,6 +520,7 @@ export class BillingService {
       stripeWebhookSigningSecret: webhookSigningSecret,
       successUrl: asString(config.successUrl) ?? fallback.successUrl,
       cancelUrl: asString(config.cancelUrl) ?? fallback.cancelUrl,
+      portalBillingUrl: asString(config.portalBillingUrl) ?? fallback.portalBillingUrl ?? DEFAULT_PORTAL_BILLING_URL,
       defaultCurrency: normalizeCurrency(asString(config.defaultCurrency), fallback.defaultCurrency),
       defaultAutoRenew: asBoolean(config.defaultAutoRenew) ?? fallback.defaultAutoRenew,
       billingEmailEnabled: asBoolean(config.billingEmailEnabled) ?? fallback.billingEmailEnabled === true,
@@ -511,6 +531,15 @@ export class BillingService {
       updatedAt: toIsoString(instance?.config?.updatedAt ?? instance?.updatedAt),
       rotatedAt: toIsoString(instance?.secret?.rotatedAt)
     };
+  }
+
+  private async resolveBrandName(): Promise<string> {
+    try {
+      const brandName = await this.options.resolveBrandName?.();
+      return trimOrUndefined(brandName) ?? "Agent Studio";
+    } catch {
+      return "Agent Studio";
+    }
   }
 
   async stripeConfigStatus() {
@@ -524,6 +553,7 @@ export class BillingService {
       cancelUrlConfigured: Boolean(trimOrUndefined(config.cancelUrl)),
       successUrl: config.successUrl,
       cancelUrl: config.cancelUrl,
+      portalBillingUrl: config.portalBillingUrl,
       defaultCurrency: config.defaultCurrency,
       defaultAutoRenew: config.defaultAutoRenew,
       secretKeyPreview: config.secretKeyPreview,
@@ -606,6 +636,7 @@ export class BillingService {
     webhookSigningSecret?: string | null;
     successUrl?: string | null;
     cancelUrl?: string | null;
+    portalBillingUrl?: string | null;
     defaultCurrency?: string | null;
     defaultAutoRenew?: boolean | null;
     clearStripeSecretKey?: boolean;
@@ -642,6 +673,11 @@ export class BillingService {
       const cancelUrl = trimOrUndefined(input.cancelUrl) ?? "";
       if (cancelUrl) assertHttpUrl(cancelUrl, "cancelUrl");
       nextConfig.cancelUrl = cancelUrl;
+    }
+    if (input.portalBillingUrl !== undefined && input.portalBillingUrl !== null) {
+      const portalBillingUrl = trimOrUndefined(input.portalBillingUrl) ?? "";
+      if (portalBillingUrl) assertHttpUrl(portalBillingUrl, "portalBillingUrl");
+      nextConfig.portalBillingUrl = portalBillingUrl;
     }
     if (input.defaultCurrency !== undefined && input.defaultCurrency !== null) {
       nextConfig.defaultCurrency = normalizeCurrency(input.defaultCurrency);
@@ -1258,6 +1294,81 @@ export class BillingService {
       results.push(await this.runReminderRule(rule, { now, testEmail: input.testEmail }));
     }
     return { ok: true, results };
+  }
+
+  async sendReminderTestEmail(input: { ruleId: string; testEmail: string; now?: Date }) {
+    const recipient = normalizeEmail(input.testEmail);
+    if (!recipient) throw new Error("A valid test email is required");
+
+    const rule = await this.db.billingEmailRule.findUnique({ where: { id: input.ruleId } });
+    if (!rule) throw new Error("Billing email rule does not exist");
+
+    const now = input.now ?? new Date();
+    const config = await this.resolveBillingConfig();
+    const expiresAt = addDays(now, Math.max(1, rule.triggerType === "expires_in_days" ? rule.offsetDays : 1));
+    const expiresAtLocal = new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC"
+    }).format(expiresAt);
+    const variables = await this.buildEmailVariables({
+      config,
+      companyName: "Example Customer",
+      planName: "Plus",
+      expiresAtLocal: `${expiresAtLocal} UTC`,
+      amountDue: centsLabel(9900, config.defaultCurrency)
+    });
+    const targetRef = `billing-email-test:${rule.id}:${recipient}:${Date.now()}`;
+    const notification = await this.db.notificationRecord.create({
+      data: {
+        channelType: "email",
+        targetRef,
+        eventType: rule.triggerType === "expired"
+          ? BILLING_EVENT_TYPES.expired
+          : rule.triggerType === "auto_renew_failed"
+            ? BILLING_EVENT_TYPES.autoRenewFailed
+            : BILLING_EVENT_TYPES.expiring,
+        status: "pending",
+        payload: {
+          ruleId: rule.id,
+          recipients: [recipient],
+          test: true
+        }
+      }
+    });
+
+    try {
+      if (!this.options.emailSender) throw new Error("email sender is not configured");
+      const delivery = await this.options.emailSender.send({
+        to: [recipient],
+        subject: renderTemplate(rule.subject, variables),
+        text: renderTemplate(rule.bodyText, variables),
+        html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
+        debugLabel: "billing-email-reminder-test"
+      });
+      await this.db.notificationRecord.update({
+        where: { id: notification.id },
+        data: {
+          status: "sent",
+          payload: {
+            ruleId: rule.id,
+            recipients: [recipient],
+            delivery,
+            test: true
+          }
+        }
+      });
+      return { ok: true, delivered: delivery.delivered, mode: delivery.mode };
+    } catch (error) {
+      await this.db.notificationRecord.update({
+        where: { id: notification.id },
+        data: {
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }
+      });
+      throw error;
+    }
   }
 
   async handleStripeWebhook(rawBody: Buffer, signatureHeader: string | undefined) {
@@ -2131,13 +2242,13 @@ export class BillingService {
         const expiresAtLocal = grant.expiresAt
           ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(grant.expiresAt)
           : "not set";
-        const variables = {
-          company_name: organization?.name ?? customer?.companyName ?? "your organization",
-          plan_name: grant.plan?.name ?? "Agent Studio",
-          expires_at_local: `${expiresAtLocal} UTC`,
-          renew_url: this.resolveSuccessUrl(config),
-          amount_due: grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : ""
-        };
+        const variables = await this.buildEmailVariables({
+          config,
+          companyName: organization?.name ?? customer?.companyName ?? "your organization",
+          planName: grant.plan?.name ?? "Agent Studio",
+          expiresAtLocal: `${expiresAtLocal} UTC`,
+          amountDue: grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : ""
+        });
         const notification = await this.db.notificationRecord.create({
           data: {
             organizationId: grant.principalId,
@@ -2157,7 +2268,7 @@ export class BillingService {
           to: recipients,
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
-          html: rule.bodyHtml ? renderTemplate(rule.bodyHtml, variables) : undefined,
+          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
           debugLabel: "billing-email-reminder"
         });
         await this.db.notificationRecord.update({
@@ -2226,13 +2337,13 @@ export class BillingService {
           skipped += 1;
           continue;
         }
-        const variables = {
-          company_name: organization?.name ?? customer?.companyName ?? "your organization",
-          plan_name: plan?.name ?? "Agent Studio",
-          expires_at_local: renewal.nextRenewalAt ? `${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(renewal.nextRenewalAt)} UTC` : "",
-          renew_url: this.resolveSuccessUrl(config),
-          amount_due: plan?.billingPriceCents ? centsLabel(plan.billingPriceCents, plan.billingCurrency) : ""
-        };
+        const variables = await this.buildEmailVariables({
+          config,
+          companyName: organization?.name ?? customer?.companyName ?? "your organization",
+          planName: plan?.name ?? "Agent Studio",
+          expiresAtLocal: renewal.nextRenewalAt ? `${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(renewal.nextRenewalAt)} UTC` : "",
+          amountDue: plan?.billingPriceCents ? centsLabel(plan.billingPriceCents, plan.billingCurrency) : ""
+        });
         const notification = await this.db.notificationRecord.create({
           data: {
             organizationId: renewal.organizationId,
@@ -2252,7 +2363,7 @@ export class BillingService {
           to: recipients,
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
-          html: rule.bodyHtml ? renderTemplate(rule.bodyHtml, variables) : undefined,
+          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
           debugLabel: "billing-auto-renew-failed-email"
         });
         await this.db.notificationRecord.update({
@@ -2313,12 +2424,34 @@ export class BillingService {
     return recipients;
   }
 
+  private async buildEmailVariables(input: {
+    config: BillingResolvedConfig;
+    companyName: string | null | undefined;
+    planName: string | null | undefined;
+    expiresAtLocal: string;
+    amountDue: string;
+  }): Promise<Record<string, string>> {
+    const brandName = await this.resolveBrandName();
+    return {
+      brand_name: brandName,
+      company_name: trimOrUndefined(input.companyName) ?? "your organization",
+      plan_name: trimOrUndefined(input.planName) ?? brandName,
+      expires_at_local: input.expiresAtLocal,
+      renew_url: this.resolvePortalBillingUrl(input.config),
+      amount_due: input.amountDue
+    };
+  }
+
   private resolveSuccessUrl(config: BillingResolvedConfig): string {
     return trimOrUndefined(config.successUrl) || "";
   }
 
   private resolveCancelUrl(config: BillingResolvedConfig): string {
     return trimOrUndefined(config.cancelUrl) || "";
+  }
+
+  private resolvePortalBillingUrl(config: BillingResolvedConfig): string {
+    return trimOrUndefined(config.portalBillingUrl) || DEFAULT_PORTAL_BILLING_URL;
   }
 
   private nextActionForAccount(input: {

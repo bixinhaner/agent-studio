@@ -257,6 +257,7 @@ export type AdminBillingOverviewResponse = {
     cancelUrlConfigured: boolean;
     successUrl: string;
     cancelUrl: string;
+    portalBillingUrl: string;
     defaultCurrency: string;
     defaultAutoRenew: boolean;
     secretKeyPreview: string | null;

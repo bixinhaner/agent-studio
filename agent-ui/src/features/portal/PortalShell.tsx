@@ -454,6 +454,8 @@ type FeedbackCommentDraftStore = {
 const FeedbackCommentDraftContext = createContext<MutableRefObject<FeedbackCommentDraftStore> | null>(null);
 const feedbackCommentMemory = new Map<string, string>();
 const PORTAL_THREAD_SEARCH_PARAM = "thread";
+const PORTAL_BILLING_SEARCH_PARAM = "billing";
+type PortalBillingIntent = "renew" | "success" | "cancel";
 
 function feedbackCommentKey(threadId: string, messageId: string): string {
   return `${threadId}::${messageId}`;
@@ -2663,6 +2665,22 @@ function readPortalThreadIdFromLocation(search: string): string {
   return params.get(PORTAL_THREAD_SEARCH_PARAM)?.trim() || "";
 }
 
+function readPortalBillingIntentFromLocation(search: string): PortalBillingIntent | null {
+  const params = new URLSearchParams(search);
+  const value = params.get(PORTAL_BILLING_SEARCH_PARAM)?.trim().toLowerCase();
+  return value === "renew" || value === "success" || value === "cancel" ? value : null;
+}
+
+function clearPortalBillingIntentFromLocation(): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has(PORTAL_BILLING_SEARCH_PARAM)) return;
+  params.delete(PORTAL_BILLING_SEARCH_PARAM);
+  const nextSearch = params.toString();
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+  window.history.replaceState(window.history.state, document.title, nextUrl);
+}
+
 function replacePortalThreadIdInLocation(threadId: string): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
@@ -3120,6 +3138,34 @@ const PortalSubscriptionReminderBanner: FC<{ status: PortalSubscriptionStatus; o
     </div>
   );
 };
+
+type PortalBillingReturnNotice = {
+  tone: "success" | "warning";
+  title: string;
+  detail: string;
+};
+
+const PortalBillingReturnBanner: FC<{
+  notice: PortalBillingReturnNotice;
+  onOpenBilling: () => void;
+  onDismiss: () => void;
+}> = ({ notice, onOpenBilling, onDismiss }) => (
+  <div className={`thread-access-banner thread-access-banner-billing-${notice.tone}`} role="status" aria-live="polite">
+    <div className="thread-access-banner-head">
+      {notice.tone === "success" ? <CheckIcon size={18} aria-hidden="true" /> : <AlertCircleIcon size={18} aria-hidden="true" />}
+      <strong>{notice.title}</strong>
+    </div>
+    <p>{notice.detail}</p>
+    <div className="thread-access-banner-actions">
+      <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
+        Review billing
+      </Button>
+      <Button size="small" type="text" onClick={onDismiss}>
+        Dismiss
+      </Button>
+    </div>
+  </div>
+);
 
 const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
   const normalized = message.trim();
@@ -5794,6 +5840,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const isExternalPortalUser = props.currentUser?.userType === "external_user";
   const [billingPanelOpen, setBillingPanelOpen] = useState(false);
+  const [billingReturnNotice, setBillingReturnNotice] = useState<PortalBillingReturnNotice | null>(null);
   const [subscriptionReminderModalOpen, setSubscriptionReminderModalOpen] = useState(false);
   const [dismissedSubscriptionReminderKey, setDismissedSubscriptionReminderKey] = useState("");
   const canUseCustomerBilling = isExternalPortalUser && auth.activeOrganization?.type === "customer";
@@ -5805,8 +5852,39 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   useEffect(() => {
     if (canUseCustomerBilling) return;
     setBillingPanelOpen(false);
+    setBillingReturnNotice(null);
     setSubscriptionReminderModalOpen(false);
   }, [canUseCustomerBilling]);
+
+  useEffect(() => {
+    if (!canUseCustomerBilling || typeof window === "undefined") return;
+    const intent = readPortalBillingIntentFromLocation(window.location.search);
+    if (!intent) return;
+
+    clearPortalBillingIntentFromLocation();
+    if (intent === "renew") {
+      setBillingReturnNotice(null);
+      setBillingPanelOpen(true);
+      return;
+    }
+
+    if (intent === "success") {
+      setBillingReturnNotice({
+        tone: "success",
+        title: "Payment received",
+        detail: "Your billing page is ready. Stripe may take a moment to update the final subscription status."
+      });
+      void refreshPortalSubscriptionStatus({ silent: true });
+      return;
+    }
+
+    setBillingReturnNotice({
+      tone: "warning",
+      title: "Payment was not completed",
+      detail: "You can reopen billing and continue the secure payment when you are ready."
+    });
+    setBillingPanelOpen(true);
+  }, [canUseCustomerBilling, refreshPortalSubscriptionStatus]);
 
   useEffect(() => {
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
@@ -7749,6 +7827,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <span>In shared view, you can read messages and attachments, but cannot continue running this thread.</span>
         </div>
       ) : null}
+      {billingReturnNotice && canUseCustomerBilling ? (
+        <PortalBillingReturnBanner
+          notice={billingReturnNotice}
+          onOpenBilling={openCustomerBillingPanel}
+          onDismiss={() => setBillingReturnNotice(null)}
+        />
+      ) : null}
       {blockedSubscriptionStatus ? (
         <PortalAccessBlockedBanner
           status={blockedSubscriptionStatus}
@@ -8230,7 +8315,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             {canUseCustomerBilling ? (
               <Modal
                 open={subscriptionReminderModalOpen}
-                title={blockedSubscriptionStatus ? "Access expired" : "Renew Agent Studio"}
+                title={blockedSubscriptionStatus ? "Access expired" : `Renew ${branding.platformName.trim() || "Agent Studio"}`}
                 okText={blockedSubscriptionStatus ? "Renew now" : "Choose renewal"}
                 cancelText="Later"
                 onOk={() => {

@@ -237,7 +237,7 @@ import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
-import { resolvePublicBranding } from "./system-settings/public-branding.js";
+import { resolvePublicBranding, resolvePublicPlatformName } from "./system-settings/public-branding.js";
 import { initSSE, sendSSE } from "./sse.js";
 import {
   buildThreadPublicShareSnapshot,
@@ -539,7 +539,8 @@ const billingService = new BillingService({
   db,
   config: appConfig.billing,
   emailSender: authEmailSender,
-  notifications: notificationRecords
+  notifications: notificationRecords,
+  resolveBrandName: () => resolvePublicPlatformName(systemSettings)
 });
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({

@@ -48,7 +48,8 @@ import {
   patchAdminBillingEmailRule,
   patchAdminBillingStripeSettings,
   patchAdminPromotionCode,
-  runAdminBillingEmailReminderSweep
+  runAdminBillingEmailReminderSweep,
+  sendAdminBillingEmailRuleTest
 } from "./api";
 import type {
   AdminBillingCustomerAccount,
@@ -116,6 +117,7 @@ type StripeSettingsFormState = {
   webhookSigningSecret: string;
   successUrl: string;
   cancelUrl: string;
+  portalBillingUrl: string;
   defaultCurrency: string;
   defaultAutoRenew: boolean;
   clearStripeSecretKey: boolean;
@@ -336,6 +338,7 @@ function createStripeSettingsFormState(stripe?: AdminBillingOverviewResponse["st
     webhookSigningSecret: "",
     successUrl: stripe?.successUrl ?? "",
     cancelUrl: stripe?.cancelUrl ?? "",
+    portalBillingUrl: stripe?.portalBillingUrl ?? "https://bailey.baicells.com/?billing=renew",
     defaultCurrency: stripe?.defaultCurrency ?? "usd",
     defaultAutoRenew: stripe?.defaultAutoRenew ?? true,
     clearStripeSecretKey: false,
@@ -476,6 +479,7 @@ export function BillingWorkspace() {
   const [selectedOrder, setSelectedOrder] = useState<AdminBillingOrder | null>(null);
   const [selectedAutoRenewalId, setSelectedAutoRenewalId] = useState("");
   const [manualStripeCustomerId, setManualStripeCustomerId] = useState("");
+  const [emailTestAddress, setEmailTestAddress] = useState("like@baicells.com");
   const [saving, setSaving] = useState(false);
 
   async function loadData(silent = false) {
@@ -814,6 +818,7 @@ export function BillingWorkspace() {
         webhookSigningSecret: stripeForm.clearWebhookSigningSecret ? undefined : stripeForm.webhookSigningSecret.trim() || undefined,
         successUrl: stripeForm.successUrl,
         cancelUrl: stripeForm.cancelUrl,
+        portalBillingUrl: stripeForm.portalBillingUrl,
         defaultCurrency: stripeForm.defaultCurrency,
         defaultAutoRenew: stripeForm.defaultAutoRenew,
         clearStripeSecretKey: stripeForm.clearStripeSecretKey,
@@ -872,6 +877,25 @@ export function BillingWorkspace() {
       await loadData(true);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "执行邮件提醒失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSendEmailRuleTest(rule: AdminBillingEmailRule) {
+    const testEmail = emailTestAddress.trim();
+    if (!testEmail) {
+      setErrorText("请输入测试收件人邮箱");
+      return;
+    }
+    setSaving(true);
+    setErrorText("");
+    try {
+      const result = await sendAdminBillingEmailRuleTest(rule.id, { testEmail });
+      setSuccessText(`测试邮件已发送到 ${testEmail}（${result.mode}${result.delivered ? "" : " debug"}）`);
+      await loadData(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "发送测试邮件失败");
     } finally {
       setSaving(false);
     }
@@ -1323,6 +1347,15 @@ export function BillingWorkspace() {
                 {!data?.emailSettings.enabled ? (
                   <Alert type="warning" showIcon message="计费邮件总开关关闭，生产不会向客户真实发送提醒。" />
                 ) : null}
+                <div className="admin-billing-email-test-row">
+                  <Input
+                    prefix={<Mail size={14} />}
+                    value={emailTestAddress}
+                    onChange={(event) => setEmailTestAddress(event.target.value)}
+                    placeholder="Test recipient email"
+                  />
+                  <span>单条规则测试不要求启用规则，也不会打开生产邮件总开关。</span>
+                </div>
                 <Table
                   rowKey="id"
                   size="small"
@@ -1334,8 +1367,15 @@ export function BillingWorkspace() {
                     { title: "Last run", dataIndex: "lastRunAt", render: formatLocalTime },
                     {
                       title: "Action",
-                      width: 110,
-                      render: (_, record) => <Button size="small" onClick={() => setEditingEmailRule(record)}>编辑</Button>
+                      width: 190,
+                      render: (_, record) => (
+                        <Space>
+                          <Button size="small" onClick={() => setEditingEmailRule(record)}>编辑</Button>
+                          <Button size="small" icon={<Mail size={14} />} loading={saving} onClick={() => void handleSendEmailRuleTest(record)}>
+                            测试
+                          </Button>
+                        </Space>
+                      )
                     }
                   ]}
                 />
@@ -1406,6 +1446,12 @@ export function BillingWorkspace() {
                     <Form.Item label="Cancel URL">
                       <Input value={stripeForm.cancelUrl} onChange={(event) => setStripeForm((current) => ({ ...current, cancelUrl: event.target.value }))} />
                     </Form.Item>
+                    <Form.Item label="Customer renewal URL">
+                      <Input
+                        value={stripeForm.portalBillingUrl}
+                        onChange={(event) => setStripeForm((current) => ({ ...current, portalBillingUrl: event.target.value }))}
+                      />
+                    </Form.Item>
                     <Form.Item label="Default currency">
                       <Input value={stripeForm.defaultCurrency} onChange={(event) => setStripeForm((current) => ({ ...current, defaultCurrency: event.target.value.toLowerCase() }))} maxLength={3} />
                     </Form.Item>
@@ -1428,7 +1474,8 @@ export function BillingWorkspace() {
                     ["Secret key", data?.stripe.secretKeyConfigured],
                     ["Webhook signing secret", data?.stripe.webhookSigningSecretConfigured],
                     ["Success URL", data?.stripe.successUrlConfigured],
-                    ["Cancel URL", data?.stripe.cancelUrlConfigured]
+                    ["Cancel URL", data?.stripe.cancelUrlConfigured],
+                    ["Renewal URL", Boolean(data?.stripe.portalBillingUrl)]
                   ].map(([label, ready]) => (
                     <div key={String(label)}>
                       <ShieldCheck size={18} />
@@ -1692,6 +1739,7 @@ export function BillingWorkspace() {
       <Modal
         open={Boolean(editingEmailRule)}
         title="编辑邮件规则"
+        width={760}
         okText="保存"
         confirmLoading={saving}
         onOk={() => void handleSaveEmailRule()}
@@ -1712,8 +1760,15 @@ export function BillingWorkspace() {
             <Form.Item label="Text template">
               <Input.TextArea rows={5} value={editingEmailRule.bodyText} onChange={(event) => setEditingEmailRule((current) => current ? { ...current, bodyText: event.target.value } : current)} />
             </Form.Item>
+            <Form.Item label="HTML template">
+              <Input.TextArea
+                rows={8}
+                value={editingEmailRule.bodyHtml ?? ""}
+                onChange={(event) => setEditingEmailRule((current) => current ? { ...current, bodyHtml: event.target.value } : current)}
+              />
+            </Form.Item>
             <div className="admin-billing-template-vars">
-              {["{{company_name}}", "{{plan_name}}", "{{expires_at_local}}", "{{renew_url}}"].map((item) => (
+              {["{{brand_name}}", "{{company_name}}", "{{plan_name}}", "{{expires_at_local}}", "{{renew_url}}", "{{amount_due}}"].map((item) => (
                 <Tag key={item}>{item}</Tag>
               ))}
             </div>

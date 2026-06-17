@@ -240,6 +240,7 @@ export async function patchAdminBillingStripeSettings(input: {
   webhookSigningSecret?: string | null;
   successUrl?: string | null;
   cancelUrl?: string | null;
+  portalBillingUrl?: string | null;
   defaultCurrency?: string | null;
   defaultAutoRenew?: boolean | null;
   clearStripeSecretKey?: boolean;
@@ -304,6 +305,16 @@ export async function runAdminBillingEmailReminderSweep(input: { testEmail?: str
   results: Array<{ ruleId: string; sent: number; skipped: number; failed: number }>;
 }> {
   return api("/api/admin/billing/email-reminders/run", {
+    method: "POST",
+    json: input
+  });
+}
+
+export async function sendAdminBillingEmailRuleTest(
+  ruleId: string,
+  input: { testEmail: string }
+): Promise<{ ok: true; delivered: boolean; mode: "smtp" | "debug" }> {
+  return api(`/api/admin/billing/email-rules/${encodeURIComponent(ruleId)}/test`, {
     method: "POST",
     json: input
   });
