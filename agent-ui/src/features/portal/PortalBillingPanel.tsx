@@ -147,7 +147,7 @@ function displayPlanName(value?: string | null): string {
 function planDescription(group: PortalPlanGroup, plan: PortalBillingPlan | null): string {
   if (!plan) return group.subtitle;
   if (group.key === "plus" || group.key === "pro") {
-    const interval = plan.billingInterval === "year" ? "annual" : plan.billingInterval === "month" ? "monthly" : planCycleLabel(plan);
+    const interval = plan.billingInterval === "year" ? "yearly" : plan.billingInterval === "month" ? "monthly" : planCycleLabel(plan);
     return `${group.title} · ${usageLabel(group.limit)} · ${interval} prepaid access`;
   }
   return plan.description || group.subtitle;
@@ -235,6 +235,9 @@ export function PortalBillingPanel(props: {
     ? new Date(Date.now() + (selectedPlan.durationDays + giftDays) * 24 * 60 * 60 * 1000).toISOString()
     : null;
   const annualSavings = activeCycle === "year" ? annualSavingsLabel(selectedGroup) : "";
+  const selectedPlanLabel = showCycleToggle
+    ? `${selectedGroup?.title ?? "No plan"} · ${activeCycle === "year" ? "Annual" : "Monthly"}`
+    : selectedGroup?.title ?? "No plan";
   const paidCheckoutUnavailable = payableNow > 0 && !summary?.defaults.stripeReady;
 
   async function handlePreviewPromotion() {
@@ -427,7 +430,7 @@ export function PortalBillingPanel(props: {
         ) : null}
         <div className="portal-billing-summary-row">
           <span>Selected plan</span>
-          <strong>{selectedGroup?.title ?? "No plan"} · {activeCycle === "year" ? "Annual" : "Monthly"}</strong>
+          <strong>{selectedPlanLabel}</strong>
         </div>
         <div className="portal-billing-summary-row">
           <span>Pay now</span>
