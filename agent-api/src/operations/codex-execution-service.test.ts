@@ -120,6 +120,75 @@ describe("CodexExecutionService", () => {
     }));
   });
 
+  it("tracks streamed runtime turns until completion", async () => {
+    const finish = vi.fn();
+    const start = vi.fn(() => finish);
+    const service = new CodexExecutionService({ runtimeTurnTracker: { start } });
+    const runtime = {
+      async *runStreamed(_thread: { id: string }, message: string) {
+        yield {
+          type: "message.delta",
+          delta: message
+        };
+      }
+    };
+
+    await service.streamFromRuntime({
+      runtime,
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      memory: {
+        channel: "portal",
+        prompt: "question",
+        codexHome: "/tmp/codex-home",
+        sessionId: "session-1",
+        threadId: "thread-1",
+        model: "gpt-5.5",
+        hasExternalContext: true
+      },
+      onEvent: vi.fn(),
+      onDone: vi.fn()
+    });
+
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "stream",
+      channel: "portal",
+      sessionId: "session-1",
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      hasExternalContext: true
+    }));
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases tracked runtime turns when runtime collection fails", async () => {
+    const finish = vi.fn();
+    const service = new CodexExecutionService({
+      runtimeTurnTracker: {
+        start: vi.fn(() => finish)
+      }
+    });
+    const runtime = {
+      async *runStreamed() {
+        throw new Error("runtime failed");
+      }
+    };
+
+    await expect(service.collectFromRuntime({
+      runtime,
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      memory: {
+        channel: "zendesk",
+        prompt: "question",
+        codexHome: "/tmp/codex-home",
+        sessionId: "session-1"
+      }
+    })).rejects.toThrow("runtime failed");
+
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+
   it("projects runtime reasoning and tool events into common trace rows", () => {
     const reasoning = projectCodexRuntimeEvent({
       type: "item.completed",

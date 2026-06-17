@@ -23,6 +23,7 @@ SKIP_CADDY_RELOAD="${SKIP_CADDY_RELOAD:-0}"
 SKIP_AGENT_DRAIN="${SKIP_AGENT_DRAIN:-0}"
 AGENT_DRAIN_TIMEOUT_SECONDS="${AGENT_DRAIN_TIMEOUT_SECONDS:-900}"
 AGENT_DRAIN_POLL_SECONDS="${AGENT_DRAIN_POLL_SECONDS:-5}"
+AGENT_DRAIN_STATUS_URL="${AGENT_DRAIN_STATUS_URL:-}"
 DEPLOY_DRAIN_FILE="${AGENT_STUDIO_DEPLOY_DRAIN_FILE:-}"
 
 usage() {
@@ -145,6 +146,14 @@ fi
 
 if [[ -z "$CADDY_UPSTREAM_PORT" ]]; then
   CADDY_UPSTREAM_PORT="$API_PORT"
+fi
+
+if [[ -z "$AGENT_DRAIN_STATUS_URL" ]]; then
+  agent_drain_status_host="$API_HOST"
+  if [[ "$agent_drain_status_host" == "0.0.0.0" || "$agent_drain_status_host" == "::" ]]; then
+    agent_drain_status_host="127.0.0.1"
+  fi
+  AGENT_DRAIN_STATUS_URL="http://${agent_drain_status_host}:${API_PORT}/internal/deploy/drain-status"
 fi
 
 if [[ -n "$ASSET_RETENTION_DAYS" && ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
@@ -396,6 +405,35 @@ active_agent_run_count() {
     printf '%s\n' "0"
     return 0
   }
+  local status_json
+  status_json="$(curl -fsS --max-time 2 "$AGENT_DRAIN_STATUS_URL" 2>/dev/null || true)"
+  if [[ -n "$status_json" ]]; then
+    local status_count
+    status_count="$(STATUS_JSON="$status_json" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ.get("STATUS_JSON", "{}"))
+except Exception:
+    sys.exit(1)
+
+value = payload.get("active_runtime_turns", 0)
+try:
+    value = int(value)
+except Exception:
+    sys.exit(1)
+if value < 0:
+    value = 0
+print(value)
+PY
+)"
+    if [[ "$status_count" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$status_count"
+      return 0
+    fi
+  fi
   ps -eo ppid=,args= | awk -v api_pid="$api_pid" '$1 == api_pid && index($0, "codex exec") > 0 { count++ } END { print count + 0 }'
 }
 
@@ -413,6 +451,7 @@ wait_for_agent_drain() {
   fi
 
   log_step "Waiting for active agent runs to finish"
+  log_info "Drain status endpoint: $AGENT_DRAIN_STATUS_URL"
   local started
   started="$(date +%s)"
   while true; do
@@ -622,6 +661,7 @@ main() {
   require_command npm
   require_command node
   require_command python3
+  require_command curl
   require_command pm2
 
   check_codex_linux_sandbox_prerequisites

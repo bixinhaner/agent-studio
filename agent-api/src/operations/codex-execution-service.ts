@@ -12,6 +12,19 @@ export type CodexStreamCompletionInput = Parameters<typeof streamRuntimeCompleti
 export type CodexCollectCompletionInput = Parameters<typeof collectRuntimeCompletion>[0];
 export type CodexCompletionResult = { answer: string; usage?: RuntimeUsageSnapshot };
 export type CodexCompletionMemoryInput = Omit<CodexMemoryRunInput, "answerText" | "completedAt">;
+export type CodexRuntimeTurnOperation = "stream" | "collect";
+export type CodexRuntimeTurnTrackerInput = {
+  operation: CodexRuntimeTurnOperation;
+  channel?: string;
+  sessionId?: string;
+  threadId?: string;
+  codexThreadId?: string;
+  model?: string;
+  hasExternalContext?: boolean;
+};
+export type CodexRuntimeTurnTracker = {
+  start(input: CodexRuntimeTurnTrackerInput): () => void;
+};
 export type CodexTraceKind = "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
 export type CodexTraceRow = {
   id?: string;
@@ -517,7 +530,10 @@ export class CodexRunProjection {
 }
 
 export class CodexExecutionService {
-  constructor(private readonly dependencies: { memory?: CodexMemoryRunRecorder } = {}) {}
+  constructor(private readonly dependencies: {
+    memory?: CodexMemoryRunRecorder;
+    runtimeTurnTracker?: CodexRuntimeTurnTracker;
+  } = {}) {}
 
   private enqueueMemoryRun(input: CodexCompletionMemoryInput | undefined, result: CodexCompletionResult): void {
     if (!input) return;
@@ -541,6 +557,44 @@ export class CodexExecutionService {
     await streamRuntimeCompletionWithBestEffortUsage(input);
   }
 
+  private startRuntimeTurn(operation: CodexRuntimeTurnOperation, memory: CodexCompletionMemoryInput | undefined): (() => void) | undefined {
+    const tracker = this.dependencies.runtimeTurnTracker;
+    if (!tracker) return undefined;
+    try {
+      return tracker.start({
+        operation,
+        channel: memory?.channel,
+        sessionId: memory?.sessionId,
+        threadId: memory?.threadId,
+        codexThreadId: memory?.codexThreadId,
+        model: memory?.model,
+        hasExternalContext: memory?.hasExternalContext
+      });
+    } catch (error) {
+      console.warn("codex runtime turn tracker failed to start", {
+        operation,
+        channel: memory?.channel,
+        sessionId: memory?.sessionId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      return undefined;
+    }
+  }
+
+  private finishRuntimeTurn(finish: (() => void) | undefined, operation: CodexRuntimeTurnOperation, memory: CodexCompletionMemoryInput | undefined): void {
+    if (!finish) return;
+    try {
+      finish();
+    } catch (error) {
+      console.warn("codex runtime turn tracker failed to finish", {
+        operation,
+        channel: memory?.channel,
+        sessionId: memory?.sessionId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   async streamFromRuntime<TThread>(input: Omit<CodexStreamCompletionInput, "events"> & {
     runtime: RuntimeStreamSource<TThread>;
     thread: TThread;
@@ -548,16 +602,21 @@ export class CodexExecutionService {
     enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
   }): Promise<void> {
-    await streamRuntimeCompletionWithBestEffortUsage({
-      events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
-      onEvent: input.onEvent,
-      onDone: async (payload) => {
-        await input.onDone?.(payload);
-        this.enqueueMemoryRun(input.memory, payload);
-      },
-      recordUsage: input.recordUsage,
-      onTelemetryError: input.onTelemetryError
-    });
+    const finishRuntimeTurn = this.startRuntimeTurn("stream", input.memory);
+    try {
+      await streamRuntimeCompletionWithBestEffortUsage({
+        events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
+        onEvent: input.onEvent,
+        onDone: async (payload) => {
+          await input.onDone?.(payload);
+          this.enqueueMemoryRun(input.memory, payload);
+        },
+        recordUsage: input.recordUsage,
+        onTelemetryError: input.onTelemetryError
+      });
+    } finally {
+      this.finishRuntimeTurn(finishRuntimeTurn, "stream", input.memory);
+    }
   }
 
   async collectCompletion(input: CodexCollectCompletionInput): Promise<CodexCompletionResult> {
@@ -575,14 +634,19 @@ export class CodexExecutionService {
     enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
   }): Promise<CodexCompletionResult> {
-    const result = await collectRuntimeCompletion({
-      events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
-      textMode: input.textMode,
-      onEvent: input.onEvent,
-      onUsage: input.onUsage,
-      onTextDelta: input.onTextDelta
-    });
-    this.enqueueMemoryRun(input.memory, result);
-    return result;
+    const finishRuntimeTurn = this.startRuntimeTurn("collect", input.memory);
+    try {
+      const result = await collectRuntimeCompletion({
+        events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
+        textMode: input.textMode,
+        onEvent: input.onEvent,
+        onUsage: input.onUsage,
+        onTextDelta: input.onTextDelta
+      });
+      this.enqueueMemoryRun(input.memory, result);
+      return result;
+    } finally {
+      this.finishRuntimeTurn(finishRuntimeTurn, "collect", input.memory);
+    }
   }
 }

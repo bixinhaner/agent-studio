@@ -228,7 +228,8 @@ import {
   CodexExecutionService,
   CodexRunProjection,
   type CodexCommentaryEntry,
-  type CodexRuntimeEventProjection
+  type CodexRuntimeEventProjection,
+  type CodexRuntimeTurnTrackerInput
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
@@ -260,8 +261,66 @@ import {
 
 const app = express();
 const runtime = new CodexRuntime();
+type ActiveRuntimeTurn = {
+  id: string;
+  operation: CodexRuntimeTurnTrackerInput["operation"];
+  channel?: string;
+  model?: string;
+  hasExternalContext?: boolean;
+  startedAt: string;
+  startedAtMs: number;
+};
+const activeRuntimeTurns = new Map<string, ActiveRuntimeTurn>();
+
+function startTrackedRuntimeTurn(input: CodexRuntimeTurnTrackerInput): () => void {
+  const id = randomUUID();
+  const now = Date.now();
+  activeRuntimeTurns.set(id, {
+    id,
+    operation: input.operation,
+    channel: trimOrUndefined(input.channel) ?? "unknown",
+    model: trimOrUndefined(input.model),
+    hasExternalContext: input.hasExternalContext,
+    startedAt: new Date(now).toISOString(),
+    startedAtMs: now
+  });
+  return () => {
+    activeRuntimeTurns.delete(id);
+  };
+}
+
+function activeRuntimeTurnStatus() {
+  const now = Date.now();
+  const turns = Array.from(activeRuntimeTurns.values())
+    .sort((left, right) => left.startedAtMs - right.startedAtMs)
+    .map((turn) => ({
+      id: turn.id,
+      operation: turn.operation,
+      channel: turn.channel,
+      model: turn.model,
+      has_external_context: turn.hasExternalContext,
+      started_at: turn.startedAt,
+      age_ms: Math.max(0, now - turn.startedAtMs)
+    }));
+  const byChannel = turns.reduce<Record<string, number>>((acc, turn) => {
+    const channel = turn.channel || "unknown";
+    acc[channel] = (acc[channel] ?? 0) + 1;
+    return acc;
+  }, {});
+  return {
+    active_runtime_turns: turns.length,
+    active_app_server_turns: isAppServerRuntimeEnabled() ? turns.length : 0,
+    runtime_driver: isAppServerRuntimeEnabled() ? "app_server" : "exec",
+    by_channel: byChannel,
+    turns
+  };
+}
+
 let codexMemoryEngine: CodexMemoryEngine;
 const codexExecution = new CodexExecutionService({
+  runtimeTurnTracker: {
+    start: startTrackedRuntimeTurn
+  },
   memory: {
     enqueueRun(input) {
       codexMemoryEngine.enqueueRun(input);
@@ -6941,8 +7000,41 @@ app.use(express.json({ limit: "1mb" }));
 
 const requireServiceToken = createServiceTokenMiddleware(appConfig.token);
 
+function isLocalNetworkAddress(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().replace(/^::ffff:/, "");
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+function isLocalDeployStatusRequest(req: Request): boolean {
+  const forwardedHeader = req.header("x-forwarded-for") ?? "";
+  const forwardedAddresses = forwardedHeader
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (forwardedAddresses.some((address) => !isLocalNetworkAddress(address))) {
+    return false;
+  }
+  return isLocalNetworkAddress(req.ip) || isLocalNetworkAddress(req.socket.remoteAddress);
+}
+
 app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, now: new Date().toISOString() });
+});
+
+app.get("/internal/deploy/drain-status", async (req: Request, res: Response) => {
+  if (!isLocalDeployStatusRequest(req)) {
+    res.status(404).json({ detail: "Not found" });
+    return;
+  }
+  res.setHeader("Cache-Control", "no-store");
+  const drainReason = await getDeploymentDrainReason();
+  res.json({
+    ok: true,
+    now: new Date().toISOString(),
+    draining: Boolean(drainReason),
+    ...activeRuntimeTurnStatus()
+  });
 });
 
 app.get("/public-api/branding", async (_req: Request, res: Response) => {
