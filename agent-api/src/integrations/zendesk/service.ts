@@ -10,6 +10,10 @@ import {
   type RuntimeUsageSnapshot
 } from "../../live-runtime-session.js";
 import { CodexExecutionService, CodexRunProjection } from "../../operations/codex-execution-service.js";
+import {
+  extractRuntimeFileChanges,
+  type RuntimeFileChange
+} from "../../artifacts/runtime-generated-artifacts.js";
 import { ZendeskApiError, ZendeskClient } from "./client.js";
 import { ZendeskBindingStore } from "./binding-store.js";
 import {
@@ -1261,6 +1265,13 @@ export class ZendeskIntegrationService {
       codexExecution?: Pick<CodexExecutionService, "collectFromRuntime">;
       getDrainReason?: () => Promise<string | undefined>;
       recordUsage?: (input: ZendeskUsageTelemetryInput) => Promise<void>;
+      registerGeneratedArtifacts?: (input: {
+        sessionId?: string;
+        threadId?: string;
+        changes: RuntimeFileChange[];
+        answerText?: string;
+        changedAfter?: Date;
+      }) => Promise<Record<string, unknown>[]>;
       codexSessionHomeRoot?: string;
     } = {},
     private readonly settingsStore = new ZendeskSettingsStore(),
@@ -2525,6 +2536,8 @@ export class ZendeskIntegrationService {
     let output = "";
     let latestUsage: RuntimeUsageSnapshot | undefined;
     const runtimeProjection = new CodexRunProjection();
+    let runtimeFileChanges: RuntimeFileChange[] = [];
+    const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runAgentThread = async (currentThread: ZendeskRuntimeThread) => {
       const dependencies = this.dependencies;
       const execution = dependencies.codexExecution ?? new CodexExecutionService();
@@ -2550,6 +2563,7 @@ export class ZendeskIntegrationService {
           }
         },
         onEvent: async (event) => {
+          runtimeFileChanges.push(...extractRuntimeFileChanges(event));
           const eventCodexThreadId = extractCodexThreadIdFromEvent(event);
           if (eventCodexThreadId) {
             observedCodexThreadId = eventCodexThreadId;
@@ -2631,6 +2645,7 @@ export class ZendeskIntegrationService {
         workspacePath: runtimeOptions.workspace,
         runId: run.runId
       });
+      runtimeFileChanges = [];
       runtimeProjection.reset();
       const retryResult = await runAgentThread(thread);
       output = retryResult.output;
@@ -2639,6 +2654,29 @@ export class ZendeskIntegrationService {
     const runtimeProcess = runtimeProjection.finalize({ finalAnswer: output.trim() });
     processRows.push(...runtimeProcess.traceRows);
     processRows.push(zendeskProcessRow("done", "Agent output received", `output_chars: ${output.trim().length}`));
+    const artifactContentParts: Record<string, unknown>[] = [];
+    if (this.dependencies.registerGeneratedArtifacts && runtimeFileChanges.length > 0) {
+      try {
+        artifactContentParts.push(...await this.dependencies.registerGeneratedArtifacts({
+          sessionId: runtimeSessionLease?.sessionId,
+          threadId: audit?.threadId,
+          changes: runtimeFileChanges,
+          answerText: output.trim(),
+          changedAfter: artifactScanStartedAt
+        }));
+        if (artifactContentParts.length > 0) {
+          processRows.push(zendeskProcessRow("done", "Registered generated artifacts", `parts: ${artifactContentParts.length}`));
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn("[zendesk] generated artifact registration failed", {
+          ticketId: run.ticketId,
+          instanceId: run.instanceId,
+          detail
+        });
+        processRows.push(zendeskProcessRow("error", "Generated artifact registration failed", detail));
+      }
+    }
 
     if (latestUsage && this.dependencies.recordUsage) {
       try {
@@ -2693,7 +2731,7 @@ export class ZendeskIntegrationService {
       processContentParts: runtimeProcess.contentParts.filter((part) => {
         const record = asRecord(part);
         return trimOrUndefined(record?.type) === "data" && trimOrUndefined(record?.name) === "codex_commentary";
-      })
+      }).concat(artifactContentParts)
     };
   }
 

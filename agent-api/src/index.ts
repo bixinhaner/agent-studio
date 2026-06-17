@@ -31,6 +31,11 @@ import {
   type ArtifactAccessActor,
   type ResolvedArtifactAccessPolicy
 } from "./artifacts/thread-artifact-policy.js";
+import {
+  extractRuntimeFileChanges,
+  materializeRuntimeGeneratedImageChanges,
+  type RuntimeFileChange
+} from "./artifacts/runtime-generated-artifacts.js";
 import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
@@ -1044,6 +1049,7 @@ const zendesk = new ZendeskIntegrationService({
   codexExecution,
   getDrainReason: getDeploymentDrainReason,
   codexSessionHomeRoot: appConfig.codex.sessionHomeRoot,
+  registerGeneratedArtifacts: registerGeneratedArtifactsForRuntimeSession,
   async recordUsage(input) {
     const integration = input.instanceId
       ? await db.integrationInstance.findUnique({ where: { id: input.instanceId } })
@@ -5728,6 +5734,8 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
   let answerText = "";
   let streamingCardFinalized = false;
   const runProjection = new CodexRunProjection();
+  const artifactScanStartedAt = new Date(Date.now() - 2000);
+  const runtimeFileChanges: RuntimeFileChange[] = [];
   try {
     const runtimeMessage = withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig);
     const enterpriseRunContext = await enterpriseContext.resolveForRun({
@@ -5759,6 +5767,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
       },
       onEvent(event) {
         runProjection.push(event);
+        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
@@ -5779,6 +5788,25 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           await streamingCardReply.finish(answerText);
           streamingCardFinalized = true;
         }
+        let artifactContentPart: Record<string, unknown> | undefined;
+        try {
+          const generatedArtifacts = await registerGeneratedArtifactsForSession({
+            currentUser: actor.currentUser,
+            session: currentSession,
+            changes: runtimeFileChanges,
+            answerText,
+            changedAfter: artifactScanStartedAt
+          });
+          if (generatedArtifacts.length > 0) {
+            const artifactPolicy = await resolveArtifactPolicyForActor(actor.currentUser);
+            artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
+          }
+        } catch (error) {
+          console.warn("dingtalk artifact registration failed", {
+            threadId: thread!.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+        }
         const processContentParts = runProjection.finalize({ finalAnswer: answerText }).contentParts;
         await conversationRecords.appendMessage({
           threadId: thread!.id,
@@ -5787,7 +5815,7 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
             id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
             role: "assistant",
             text: answerText,
-            contentParts: processContentParts,
+            contentParts: artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts,
             metadata: {
               channel: DINGTALK_BOT_CHANNEL,
               integrationInstanceId: input.instance.id,
@@ -6016,11 +6044,6 @@ async function resolveExistingThreadFileAbsolutePath(input: {
   });
 }
 
-type RuntimeFileChange = {
-  path: string;
-  kind: string;
-};
-
 const ARTIFACT_TEXT_SCAN_EXTENSIONS = new Set([
   ".txt",
   ".md",
@@ -6191,28 +6214,6 @@ async function resolveArtifactPolicyForActor(actor: CurrentActor): Promise<Resol
   );
 }
 
-function extractRuntimeFileChanges(event: { type?: string; raw?: unknown }): RuntimeFileChange[] {
-  if (event.type !== "item.completed") return [];
-  const raw = asRecord(event.raw);
-  const item = asRecord(raw?.item);
-  if (!item || item.type !== "file_change") return [];
-  const changes = Array.isArray(item.changes) ? item.changes : [];
-  const out: RuntimeFileChange[] = [];
-  const seen = new Set<string>();
-  for (const change of changes) {
-    const payload = asRecord(change);
-    if (!payload) continue;
-    const filePath = typeof payload.path === "string" ? payload.path.trim() : "";
-    if (!filePath) continue;
-    const kind = typeof payload.kind === "string" && payload.kind.trim() ? payload.kind.trim() : "update";
-    const key = `${kind}::${filePath}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ path: filePath, kind });
-  }
-  return out;
-}
-
 function shouldSkipArtifactChange(change: RuntimeFileChange): boolean {
   const kind = change.kind.trim().toLowerCase();
   return kind === "delete" || kind === "deleted" || kind === "remove" || kind === "removed";
@@ -6283,14 +6284,84 @@ async function registerGeneratedArtifactsForSession(input: {
   const workspacePath = trimOrUndefined(input.session.workspace);
   if (!threadId || !workspacePath) return [];
 
-  const policy = await resolveArtifactPolicyForActor(input.currentUser);
-  if (!policy.enabled || !policy.autoRegisterGeneratedFiles) return [];
-
   const thread = await threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId);
   if (!thread) return [];
 
+  return await registerGeneratedArtifactsForThread({
+    actor: input.currentUser,
+    session: input.session,
+    thread,
+    changes: input.changes,
+    answerText: input.answerText,
+    changedAfter: input.changedAfter
+  });
+}
+
+function serviceArtifactActorForThread(thread: ThreadRecord, session?: SessionRecord): CurrentActor {
+  return {
+    id: trimOrUndefined(thread.userId) ?? trimOrUndefined(session?.userId) ?? `service:${thread.id}`,
+    userType: trimOrUndefined(thread.userId ?? session?.userId) ? undefined : "service",
+    role: trimOrUndefined(thread.userId ?? session?.userId) ? undefined : "system",
+    organizationId: trimOrUndefined(thread.organizationId) ?? trimOrUndefined(session?.organizationId) ?? "system"
+  };
+}
+
+async function registerGeneratedArtifactsForRuntimeSession(input: {
+  sessionId?: string;
+  threadId?: string;
+  changes: RuntimeFileChange[];
+  answerText?: string;
+  changedAfter?: Date;
+}): Promise<Record<string, unknown>[]> {
+  const sessionId = trimOrUndefined(input.sessionId);
+  if (!sessionId) return [];
+  const session = await sessions.get(sessionId);
+  if (!session) return [];
+
+  const threadId = trimOrUndefined(input.threadId) ?? trimOrUndefined(session.threadId);
+  if (!threadId) return [];
+  const thread = await threads.get(threadId, session.organizationId);
+  if (!thread) return [];
+
+  const actor = serviceArtifactActorForThread(thread, session);
+  const artifacts = await registerGeneratedArtifactsForThread({
+    actor,
+    session,
+    thread,
+    changes: input.changes,
+    answerText: input.answerText,
+    changedAfter: input.changedAfter
+  });
+  if (artifacts.length === 0) return [];
+
+  const policy = await resolveArtifactPolicyForActor(actor);
+  const contentPart = artifactContentPartForArtifacts(artifacts, policy);
+  return contentPart ? [contentPart] : [];
+}
+
+async function registerGeneratedArtifactsForThread(input: {
+  actor: CurrentActor;
+  session: SessionRecord;
+  thread: ThreadRecord;
+  changes: RuntimeFileChange[];
+  answerText?: string;
+  changedAfter?: Date;
+}): Promise<ThreadArtifactRecord[]> {
+  const threadId = trimOrUndefined(input.thread.id);
+  const workspacePath = trimOrUndefined(input.session.workspace) ?? trimOrUndefined(input.thread.workspace);
+  if (!threadId || !workspacePath) return [];
+
+  const policy = await resolveArtifactPolicyForActor(input.actor);
+  if (!policy.enabled || !policy.autoRegisterGeneratedFiles) return [];
+
+  const runtimeChanges = await materializeRuntimeGeneratedImageChanges({
+    changes: input.changes,
+    workspacePath,
+    codexHome: codexHomeFromRunConfig(input.session.codexRunConfig)
+  });
+
   const candidates = mergeRuntimeFileChanges([
-    input.changes,
+    runtimeChanges,
     extractArtifactChangesFromText(input.answerText ?? "", workspacePath),
     await collectGeneratedArtifactChanges({
       workspacePath,
@@ -6345,11 +6416,21 @@ async function registerGeneratedArtifactsForSession(input: {
     }
 
     const status = blockedReason ? "blocked" : "ready";
+    const artifactMetadata: Record<string, unknown> = {
+      changeKind: change.kind,
+      originalPath: change.path
+    };
+    if (change.sourcePath) artifactMetadata.sourcePath = change.sourcePath;
+    if (change.metadata) {
+      for (const [key, value] of Object.entries(change.metadata)) {
+        if (value !== undefined) artifactMetadata[key] = value;
+      }
+    }
     registered.push(
       await threadArtifacts.upsertForThreadPath({
-        organizationId: thread.organizationId ?? input.currentUser.organizationId,
+        organizationId: input.thread.organizationId ?? input.actor.organizationId,
         threadId,
-        userId: thread.userId ?? input.currentUser.id,
+        userId: input.thread.userId ?? input.actor.id,
         source: "assistant_generated",
         relativePath: resolved.relativePath,
         displayName: path.basename(resolved.relativePath),
@@ -6359,10 +6440,7 @@ async function registerGeneratedArtifactsForSession(input: {
         previewStatus: status,
         downloadStatus: status,
         blockedReason,
-        metadata: {
-          changeKind: change.kind,
-          originalPath: change.path
-        },
+        metadata: artifactMetadata,
         expiresAt: addDays(new Date(), policy.retentionDays)
       })
     );
@@ -6381,7 +6459,12 @@ function mergeRuntimeFileChanges(groups: RuntimeFileChange[][]): RuntimeFileChan
       const key = `${change.kind.trim().toLowerCase() || "update"}::${normalizedPath}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ path: normalizedPath, kind: change.kind || "update" });
+      out.push({
+        path: normalizedPath,
+        kind: change.kind || "update",
+        sourcePath: change.sourcePath,
+        metadata: change.metadata
+      });
     }
   }
   return out;
