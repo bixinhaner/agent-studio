@@ -396,9 +396,15 @@ function printGroupTable(title: string, summaries: GroupSummary[]): void {
 function printHuman(options: CliOptions, records: StartupRecord[]): void {
   console.log(`Portal chat startup timing: ${records.length} ${options.operation} samples`);
   console.log(`Logs: ${options.logPaths.join(", ")}`);
-  const missingFirst = records.filter((record) => record.metrics.runtimeStartToFirstMs === undefined).length;
+  const missingFirst = records.filter((record) => record.metrics.metaToFirstMs === undefined).length;
+  const missingRuntimeStart = records.filter(
+    (record) => record.metrics.metaToFirstMs !== undefined && record.metrics.runtimeStartToFirstMs === undefined
+  ).length;
   if (missingFirst > 0) {
     console.log(`Records without first Codex event: ${missingFirst}`);
+  }
+  if (missingRuntimeStart > 0) {
+    console.log(`Records without runtime_stream_starting mark: ${missingRuntimeStart}`);
   }
   console.log("Metric cell format: avg/p50/p90");
 
