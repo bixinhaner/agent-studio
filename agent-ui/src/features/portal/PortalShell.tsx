@@ -905,6 +905,7 @@ function AssistantMarkdownLink(props: {
 }
 
 const AssistantMarkdownText = makeMarkdownText({
+  smooth: false,
   preprocess: preprocessAssistantMarkdown,
   rehypePlugins: MARKDOWN_REHYPE_PLUGINS,
   remarkPlugins: MARKDOWN_REMARK_PLUGINS,
