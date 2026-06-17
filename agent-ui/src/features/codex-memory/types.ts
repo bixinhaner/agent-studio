@@ -1,7 +1,8 @@
 import type {
   SystemSettingsCodexMemory,
   SystemSettingsEnterpriseContext,
-  SystemSettingsEnterpriseContextFields
+  SystemSettingsEnterpriseContextFields,
+  SystemSettingsPythonRuntime
 } from "../system-settings/types";
 
 export type CodexMemoryScopeKind = "user_agent" | "integration_agent" | "legacy_thread" | "unknown";
@@ -62,7 +63,32 @@ export type CodexMemoryFileContentResponse = {
 
 export type CodexMemorySettings = SystemSettingsCodexMemory;
 export type EnterpriseContextSettings = SystemSettingsEnterpriseContext;
+export type PythonRuntimeSettings = SystemSettingsPythonRuntime;
 export type EnterpriseContextChannel = "portal" | "dingtalk" | "crest" | "zendesk" | "openai_compatible_api";
+
+export type PythonRuntimeCapabilityStatus = {
+  key: "spreadsheets" | "documents" | "images" | "translation";
+  label: string;
+  status: "ready" | "partial" | "missing";
+  available: string[];
+  missing: string[];
+};
+
+export type PythonRuntimeStatus = {
+  enabled: boolean;
+  runtimeExists: boolean;
+  runtimeBytes: number;
+  pythonVersion?: string;
+  envKeys: string[];
+  capabilities: PythonRuntimeCapabilityStatus[];
+  duplicateArtifacts: {
+    sessionVirtualenvCount: number;
+    argosCacheCount: number;
+    argosDataCount: number;
+    scanned: boolean;
+  };
+  checkedAt: string;
+};
 
 export type EnterpriseContextPreviewUser = {
   name?: string;

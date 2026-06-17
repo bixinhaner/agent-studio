@@ -1,0 +1,11 @@
+pandas
+openpyxl
+python-docx
+python-pptx
+pypdf
+pdfplumber
+pymupdf
+pillow
+argostranslate
+ctranslate2
+sentencepiece

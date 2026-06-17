@@ -186,6 +186,16 @@ export const systemSettingsEnterpriseContextSchema = z
   })
   .strict();
 
+export const systemSettingsPythonRuntimeSchema = z
+  .object({
+    enabled: z.boolean(),
+    injectRuntimeHint: z.boolean(),
+    preferSharedPackages: z.boolean(),
+    sessionTmpEnabled: z.boolean(),
+    cleanupSessionArtifactsOlderThanDays: positiveIntegerSchema.max(3650)
+  })
+  .strict();
+
 export const systemSettingsAnswerFeedbackSchema = z.object({
   enabledForExternalUsers: z.boolean().default(true),
   enabledForInternalUsers: z.boolean().default(false),
@@ -220,6 +230,7 @@ export const systemSettingsPayloadSchema = z
     organizationDefaults: systemSettingsOrganizationDefaultsSchema,
     codexMemory: systemSettingsCodexMemorySchema,
     enterpriseContext: systemSettingsEnterpriseContextSchema,
+    pythonRuntime: systemSettingsPythonRuntimeSchema,
     behavior: systemSettingsBehaviorSchema
   })
   .strict();
@@ -238,6 +249,7 @@ export const systemSettingsEnterpriseContextPatchSchema = systemSettingsEnterpri
     fields: systemSettingsEnterpriseContextFieldsSchema.partial().optional()
   })
   .partial();
+export const systemSettingsPythonRuntimePatchSchema = systemSettingsPythonRuntimeSchema.partial();
 export const systemSettingsBehaviorPatchSchema = systemSettingsBehaviorSchema.partial();
 
 export const systemSettingsPayloadPatchSchema = z
@@ -251,6 +263,7 @@ export const systemSettingsPayloadPatchSchema = z
     organizationDefaults: systemSettingsOrganizationDefaultsPatchSchema.optional(),
     codexMemory: systemSettingsCodexMemoryPatchSchema.optional(),
     enterpriseContext: systemSettingsEnterpriseContextPatchSchema.optional(),
+    pythonRuntime: systemSettingsPythonRuntimePatchSchema.optional(),
     behavior: systemSettingsBehaviorPatchSchema.optional()
   })
   .strict();
@@ -267,6 +280,7 @@ export type SystemSettingsCodexMemory = z.infer<typeof systemSettingsCodexMemory
 export type SystemSettingsEnterpriseContext = z.infer<typeof systemSettingsEnterpriseContextSchema>;
 export type SystemSettingsEnterpriseContextChannels = z.infer<typeof systemSettingsEnterpriseContextChannelsSchema>;
 export type SystemSettingsEnterpriseContextFields = z.infer<typeof systemSettingsEnterpriseContextFieldsSchema>;
+export type SystemSettingsPythonRuntime = z.infer<typeof systemSettingsPythonRuntimeSchema>;
 export type SystemSettingsAnswerFeedback = z.infer<typeof systemSettingsAnswerFeedbackSchema>;
 export type SystemSettingsBehavior = z.infer<typeof systemSettingsBehaviorSchema>;
 export type SystemSettingsPortalWelcomeSuggestion = SystemSettingsBehavior["portalWelcomeSuggestions"][number];
@@ -407,6 +421,13 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
       contact: false
     },
     agentOverrides: []
+  },
+  pythonRuntime: {
+    enabled: true,
+    injectRuntimeHint: true,
+    preferSharedPackages: true,
+    sessionTmpEnabled: true,
+    cleanupSessionArtifactsOlderThanDays: 14
   },
   behavior: {
     markdown: "## Platform Behavior\n\nDetailed guidance for admins and users.",

@@ -130,6 +130,14 @@ export type SystemSettingsEnterpriseContext = {
   agentOverrides: SystemSettingsEnterpriseContextAgentOverride[];
 };
 
+export type SystemSettingsPythonRuntime = {
+  enabled: boolean;
+  injectRuntimeHint: boolean;
+  preferSharedPackages: boolean;
+  sessionTmpEnabled: boolean;
+  cleanupSessionArtifactsOlderThanDays: number;
+};
+
 export type SystemSettingsBehavior = {
   markdown: string;
   portalWelcomeMessageDesktop: string;
@@ -169,6 +177,7 @@ export type SystemSettingsPayload = {
   organizationDefaults: SystemSettingsOrganizationDefaults;
   codexMemory: SystemSettingsCodexMemory;
   enterpriseContext: SystemSettingsEnterpriseContext;
+  pythonRuntime: SystemSettingsPythonRuntime;
   behavior: SystemSettingsBehavior;
 };
 

@@ -58,6 +58,10 @@ const schema = z.object({
   CODEX_BASE_HOME: z.string().optional(),
   CODEX_SESSION_HOME_ROOT: z.string().default("./temp/codex-homes"),
   CODEX_SKILL_DRAFT_ROOT: z.string().default("./temp/skill-drafts"),
+  SHARED_PYTHON_RUNTIME_ROOT: z.string().optional(),
+  SHARED_PYTHON_PIP_CACHE_ROOT: z.string().optional(),
+  SHARED_ARGOS_PACKAGE_ROOT: z.string().optional(),
+  SHARED_ARGOS_DOWNLOAD_ROOT: z.string().optional(),
   AGENT_STUDIO_DEPLOY_DRAIN_FILE: z.string().default("./temp/deploy-drain.json")
 });
 
@@ -121,6 +125,20 @@ const codexSessionHomeRoot = path.isAbsolute(env.CODEX_SESSION_HOME_ROOT)
 const codexSkillDraftRoot = path.isAbsolute(env.CODEX_SKILL_DRAFT_ROOT)
   ? env.CODEX_SKILL_DRAFT_ROOT
   : path.resolve(process.cwd(), env.CODEX_SKILL_DRAFT_ROOT);
+
+function resolveRuntimePath(input: string | undefined, fallback: string): string {
+  const raw = (input || "").trim();
+  const value = raw || fallback;
+  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
+}
+
+const productionSharedRoot = "/var/lib/agent-studio/shared";
+const localSharedRoot = "./temp/shared-runtime";
+const sharedRoot = env.NODE_ENV === "production" ? productionSharedRoot : localSharedRoot;
+const sharedPythonRuntimeRoot = resolveRuntimePath(env.SHARED_PYTHON_RUNTIME_ROOT, path.join(sharedRoot, "python", "runtime"));
+const sharedPythonPipCacheRoot = resolveRuntimePath(env.SHARED_PYTHON_PIP_CACHE_ROOT, path.join(sharedRoot, "python", "pip-cache"));
+const sharedArgosPackageRoot = resolveRuntimePath(env.SHARED_ARGOS_PACKAGE_ROOT, path.join(sharedRoot, "argos", "packages"));
+const sharedArgosDownloadRoot = resolveRuntimePath(env.SHARED_ARGOS_DOWNLOAD_ROOT, path.join(sharedRoot, "argos", "downloads"));
 
 const deployDrainFile = path.isAbsolute(env.AGENT_STUDIO_DEPLOY_DRAIN_FILE)
   ? env.AGENT_STUDIO_DEPLOY_DRAIN_FILE
@@ -228,6 +246,12 @@ export const appConfig = {
     baseHome: codexBaseHome,
     sessionHomeRoot: codexSessionHomeRoot,
     skillDraftRoot: codexSkillDraftRoot
+  },
+  sharedPythonRuntime: {
+    runtimeRoot: sharedPythonRuntimeRoot,
+    pipCacheRoot: sharedPythonPipCacheRoot,
+    argosPackageRoot: sharedArgosPackageRoot,
+    argosDownloadRoot: sharedArgosDownloadRoot
   },
   deployDrainFile,
   orgSync: {

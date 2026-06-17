@@ -14,7 +14,8 @@ import type {
   CodexMemoryScopeListResponse,
   EnterpriseContextChannel,
   EnterpriseContextPreviewResponse,
-  EnterpriseContextSettings
+  EnterpriseContextSettings,
+  PythonRuntimeStatus
 } from "./types";
 
 export async function fetchCodexMemoryScopes(input: {
@@ -159,4 +160,8 @@ export async function previewEnterpriseContext(input: {
     method: "POST",
     json: input
   });
+}
+
+export async function fetchPythonRuntimeStatus(): Promise<PythonRuntimeStatus> {
+  return api<PythonRuntimeStatus>("/api/admin/codex-memory/python-runtime/status");
 }

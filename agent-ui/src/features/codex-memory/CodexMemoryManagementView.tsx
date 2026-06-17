@@ -70,6 +70,7 @@ import {
   fetchCodexMemoryLlmSecretState,
   fetchCodexMemoryRuns,
   fetchCodexMemoryScopes,
+  fetchPythonRuntimeStatus,
   pauseCodexMemoryBackfillRun,
   previewCodexMemoryBackfill,
   previewEnterpriseContext,
@@ -93,7 +94,10 @@ import type {
   EnterpriseContextChannel,
   EnterpriseContextFieldKey,
   EnterpriseContextPreviewResponse,
-  EnterpriseContextSettings
+  EnterpriseContextSettings,
+  PythonRuntimeCapabilityStatus,
+  PythonRuntimeSettings,
+  PythonRuntimeStatus
 } from "./types";
 
 const DEFAULT_MEMORY_SETTINGS: CodexMemorySettings = {
@@ -135,6 +139,14 @@ const DEFAULT_ENTERPRISE_CONTEXT_SETTINGS: EnterpriseContextSettings = {
     contact: false
   },
   agentOverrides: []
+};
+
+const DEFAULT_PYTHON_RUNTIME_SETTINGS: PythonRuntimeSettings = {
+  enabled: true,
+  injectRuntimeHint: true,
+  preferSharedPackages: true,
+  sessionTmpEnabled: true,
+  cleanupSessionArtifactsOlderThanDays: 14
 };
 
 const ENTERPRISE_CHANNEL_LABELS: Record<EnterpriseContextChannel, string> = {
@@ -299,6 +311,14 @@ function settingsChanged(left: CodexMemorySettings | null, right: CodexMemorySet
 function enterpriseSettingsChanged(
   left: EnterpriseContextSettings | null,
   right: EnterpriseContextSettings | null
+): boolean {
+  if (!left || !right) return Boolean(left || right);
+  return JSON.stringify(left) !== JSON.stringify(right);
+}
+
+function pythonRuntimeSettingsChanged(
+  left: PythonRuntimeSettings | null,
+  right: PythonRuntimeSettings | null
 ): boolean {
   if (!left || !right) return Boolean(left || right);
   return JSON.stringify(left) !== JSON.stringify(right);
@@ -517,6 +537,11 @@ export function CodexMemoryManagementView() {
   const [publishedSettings, setPublishedSettings] = useState<CodexMemorySettings | null>(null);
   const [enterpriseSettings, setEnterpriseSettings] = useState<EnterpriseContextSettings>(DEFAULT_ENTERPRISE_CONTEXT_SETTINGS);
   const [publishedEnterpriseSettings, setPublishedEnterpriseSettings] = useState<EnterpriseContextSettings | null>(null);
+  const [pythonRuntimeSettings, setPythonRuntimeSettings] = useState<PythonRuntimeSettings>(DEFAULT_PYTHON_RUNTIME_SETTINGS);
+  const [publishedPythonRuntimeSettings, setPublishedPythonRuntimeSettings] = useState<PythonRuntimeSettings | null>(null);
+  const [pythonRuntimeStatus, setPythonRuntimeStatus] = useState<PythonRuntimeStatus | null>(null);
+  const [pythonRuntimeLoading, setPythonRuntimeLoading] = useState(false);
+  const [pythonRuntimeError, setPythonRuntimeError] = useState("");
   const [publishedMeta, setPublishedMeta] = useState<SystemSettingsVersionMeta | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -581,7 +606,8 @@ export function CodexMemoryManagementView() {
   const selectedFile = files.find((file) => file.path === selectedFilePath) ?? null;
   const isMemorySettingsDirty = settingsChanged(settings, publishedSettings);
   const isEnterpriseSettingsDirty = enterpriseSettingsChanged(enterpriseSettings, publishedEnterpriseSettings);
-  const isSettingsDirty = isMemorySettingsDirty || isEnterpriseSettingsDirty;
+  const isPythonRuntimeSettingsDirty = pythonRuntimeSettingsChanged(pythonRuntimeSettings, publishedPythonRuntimeSettings);
+  const isSettingsDirty = isMemorySettingsDirty || isEnterpriseSettingsDirty || isPythonRuntimeSettingsDirty;
   const publishedVersion = publishedMeta ? `v${publishedMeta.versionNumber}` : "未发布";
 
   const isFileDirty = useMemo(() => {
@@ -640,6 +666,13 @@ export function CodexMemoryManagementView() {
     value: EnterpriseContextSettings[K]
   ) {
     setEnterpriseSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  function updatePythonRuntimeSetting<K extends keyof PythonRuntimeSettings>(
+    key: K,
+    value: PythonRuntimeSettings[K]
+  ) {
+    setPythonRuntimeSettings((current) => ({ ...current, [key]: value }));
   }
 
   function updateEnterpriseChannel(channel: EnterpriseContextChannel, enabled: boolean) {
@@ -707,6 +740,7 @@ export function CodexMemoryManagementView() {
       ]);
       const nextSettings = response.draft.payload.codexMemory ?? DEFAULT_MEMORY_SETTINGS;
       const nextEnterpriseSettings = response.draft.payload.enterpriseContext ?? DEFAULT_ENTERPRISE_CONTEXT_SETTINGS;
+      const nextPythonRuntimeSettings = response.draft.payload.pythonRuntime ?? DEFAULT_PYTHON_RUNTIME_SETTINGS;
       setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...nextSettings });
       setEnterpriseSettings({
         ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS,
@@ -715,6 +749,7 @@ export function CodexMemoryManagementView() {
         fields: { ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS.fields, ...nextEnterpriseSettings.fields },
         agentOverrides: nextEnterpriseSettings.agentOverrides ?? []
       });
+      setPythonRuntimeSettings({ ...DEFAULT_PYTHON_RUNTIME_SETTINGS, ...nextPythonRuntimeSettings });
       setPublishedSettings(response.published?.payload.codexMemory ? { ...DEFAULT_MEMORY_SETTINGS, ...response.published.payload.codexMemory } : null);
       setPublishedEnterpriseSettings(response.published?.payload.enterpriseContext
         ? {
@@ -729,7 +764,10 @@ export function CodexMemoryManagementView() {
               ...response.published.payload.enterpriseContext.fields
             },
             agentOverrides: response.published.payload.enterpriseContext.agentOverrides ?? []
-          }
+        }
+        : null);
+      setPublishedPythonRuntimeSettings(response.published?.payload.pythonRuntime
+        ? { ...DEFAULT_PYTHON_RUNTIME_SETTINGS, ...response.published.payload.pythonRuntime }
         : null);
       setPublishedMeta(response.publishedMeta);
       setLlmSecretState(secretState);
@@ -739,6 +777,18 @@ export function CodexMemoryManagementView() {
       setSettingsError(error instanceof Error ? error.message : "加载记忆配置失败");
     } finally {
       setSettingsLoading(false);
+    }
+  }
+
+  async function loadPythonRuntimeStatus() {
+    setPythonRuntimeLoading(true);
+    setPythonRuntimeError("");
+    try {
+      setPythonRuntimeStatus(await fetchPythonRuntimeStatus());
+    } catch (error) {
+      setPythonRuntimeError(error instanceof Error ? error.message : "加载 Python 运行时状态失败");
+    } finally {
+      setPythonRuntimeLoading(false);
     }
   }
 
@@ -950,6 +1000,7 @@ export function CodexMemoryManagementView() {
     void loadRuns();
     void loadBackfillRuns();
     void loadPreviewOptions();
+    void loadPythonRuntimeStatus();
   }, []);
 
   useEffect(() => {
@@ -977,6 +1028,7 @@ export function CodexMemoryManagementView() {
       const payload = clonePayload(current.draft.payload);
       payload.codexMemory = { ...settings };
       payload.enterpriseContext = { ...enterpriseSettings };
+      payload.pythonRuntime = { ...pythonRuntimeSettings };
       if (clearLlmApiKey || llmApiKeyDraft.trim()) {
         const nextSecretState = await saveCodexMemoryLlmSecret({
           apiKey: llmApiKeyDraft.trim() || undefined,
@@ -994,16 +1046,32 @@ export function CodexMemoryManagementView() {
           ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS,
           ...published.published!.payload.enterpriseContext
         });
+        setPublishedPythonRuntimeSettings({
+          ...DEFAULT_PYTHON_RUNTIME_SETTINGS,
+          ...(published.published!.payload.pythonRuntime ?? DEFAULT_PYTHON_RUNTIME_SETTINGS)
+        });
         setPublishedMeta(published.publishedMeta);
         setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...published.draft.payload.codexMemory });
         setEnterpriseSettings({ ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...published.draft.payload.enterpriseContext });
+        setPythonRuntimeSettings({
+          ...DEFAULT_PYTHON_RUNTIME_SETTINGS,
+          ...(published.draft.payload.pythonRuntime ?? DEFAULT_PYTHON_RUNTIME_SETTINGS)
+        });
+        void loadPythonRuntimeStatus();
         void message.success("上下文与记忆配置已保存并发布");
       } else {
         setSettings({ ...DEFAULT_MEMORY_SETTINGS, ...saved.draft.payload.codexMemory });
         setEnterpriseSettings({ ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...saved.draft.payload.enterpriseContext });
+        setPythonRuntimeSettings({
+          ...DEFAULT_PYTHON_RUNTIME_SETTINGS,
+          ...(saved.draft.payload.pythonRuntime ?? DEFAULT_PYTHON_RUNTIME_SETTINGS)
+        });
         setPublishedSettings(saved.published?.payload.codexMemory ? { ...DEFAULT_MEMORY_SETTINGS, ...saved.published.payload.codexMemory } : null);
         setPublishedEnterpriseSettings(saved.published?.payload.enterpriseContext
           ? { ...DEFAULT_ENTERPRISE_CONTEXT_SETTINGS, ...saved.published.payload.enterpriseContext }
+          : null);
+        setPublishedPythonRuntimeSettings(saved.published?.payload.pythonRuntime
+          ? { ...DEFAULT_PYTHON_RUNTIME_SETTINGS, ...saved.published.payload.pythonRuntime }
           : null);
         setPublishedMeta(saved.publishedMeta);
         void message.success("上下文与记忆配置草稿已保存");
@@ -1407,6 +1475,9 @@ export function CodexMemoryManagementView() {
             <Tag color={publishedSettings?.enabled ? "green" : "orange"}>
               {publishedSettings?.enabled ? "Memory 已启用" : "Memory 未启用"}
             </Tag>
+            <Tag color={publishedPythonRuntimeSettings?.enabled ? "green" : "orange"}>
+              {publishedPythonRuntimeSettings?.enabled ? "Python Runtime 已启用" : "Python Runtime 未启用"}
+            </Tag>
             <Tag>{publishedVersion}</Tag>
             {isSettingsDirty ? <Tag color="orange">有未发布草稿</Tag> : <Tag color="green">与发布态一致</Tag>}
           </Space>
@@ -1430,6 +1501,7 @@ export function CodexMemoryManagementView() {
               void loadScopes();
               void loadRuns();
               void loadBackfillRuns();
+              void loadPythonRuntimeStatus();
               if (selectedScopeId) void loadFiles(selectedScopeId);
             }}
           >
@@ -1699,6 +1771,168 @@ export function CodexMemoryManagementView() {
             </Space>
           </Space>
         )}
+      </div>
+    );
+  }
+
+  function pythonCapabilityColor(status: PythonRuntimeCapabilityStatus["status"]) {
+    if (status === "ready") return "green";
+    if (status === "partial") return "orange";
+    return "red";
+  }
+
+  function pythonCapabilityLabel(status: PythonRuntimeCapabilityStatus["status"]) {
+    if (status === "ready") return "可用";
+    if (status === "partial") return "部分可用";
+    return "缺失";
+  }
+
+  function renderPythonRuntimePanel() {
+    const capabilities = pythonRuntimeStatus?.capabilities ?? [];
+    const readyCapabilityCount = capabilities.filter((capability) => capability.status === "ready").length;
+    const duplicateArtifacts = pythonRuntimeStatus?.duplicateArtifacts;
+    const duplicateCount =
+      (duplicateArtifacts?.sessionVirtualenvCount ?? 0) +
+      (duplicateArtifacts?.argosCacheCount ?? 0) +
+      (duplicateArtifacts?.argosDataCount ?? 0);
+
+    return (
+      <div style={{ width: "100%", marginTop: 16 }}>
+        {pythonRuntimeError ? <Alert type="error" showIcon message={pythonRuntimeError} style={{ marginBottom: 12 }} /> : null}
+        <div className="codex-memory-python-grid">
+          <div className="admin-card" style={{ padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <FileText size={20} />
+              <div>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  共享 Python Runtime
+                </Typography.Title>
+                <Typography.Text type="secondary">发布后所有 Codex 渠道统一复用常用 Python 包和缓存。</Typography.Text>
+              </div>
+            </div>
+
+            <SettingSwitch
+              title="启用共享运行时"
+              description="开启后，新旧 thread 的新请求都会注入共享 Python 包路径和缓存目录。"
+              checked={pythonRuntimeSettings.enabled}
+              onChange={(enabled) => updatePythonRuntimeSetting("enabled", enabled)}
+            />
+            <SettingSwitch
+              title="优先复用共享包"
+              description="提示 Codex 先尝试直接 import 常用库，减少重复建 venv 和 pip install。"
+              checked={pythonRuntimeSettings.preferSharedPackages}
+              onChange={(preferSharedPackages) => updatePythonRuntimeSetting("preferSharedPackages", preferSharedPackages)}
+            />
+            <SettingSwitch
+              title="注入运行提示"
+              description="把共享运行时使用方式作为隐藏运行提示传给 Codex，不展示给最终用户。"
+              checked={pythonRuntimeSettings.injectRuntimeHint}
+              onChange={(injectRuntimeHint) => updatePythonRuntimeSetting("injectRuntimeHint", injectRuntimeHint)}
+            />
+            <SettingSwitch
+              title="会话独立临时目录"
+              description="每个 workspace 使用自己的临时目录，避免多用户并发任务互相覆盖临时文件。"
+              checked={pythonRuntimeSettings.sessionTmpEnabled}
+              onChange={(sessionTmpEnabled) => updatePythonRuntimeSetting("sessionTmpEnabled", sessionTmpEnabled)}
+            />
+            <div style={{ paddingTop: 14 }}>
+              <SettingNumber
+                title="会话临时产物保留"
+                description="用于后续安全清理 session 内重复 venv、Argos 缓存等临时产物。"
+                value={pythonRuntimeSettings.cleanupSessionArtifactsOlderThanDays}
+                min={1}
+                max={3650}
+                suffix="天"
+                onChange={(value) => updatePythonRuntimeSetting("cleanupSessionArtifactsOlderThanDays", value)}
+              />
+            </div>
+
+            <Space wrap style={{ marginTop: 18 }}>
+              <Button icon={<Save size={16} />} loading={settingsSaving} onClick={() => void handleSaveSettings(false)}>
+                保存草稿
+              </Button>
+              <Button type="primary" icon={<Send size={16} />} loading={settingsSaving} onClick={() => void handleSaveSettings(true)}>
+                保存并发布
+              </Button>
+              <Tag color={isPythonRuntimeSettingsDirty ? "orange" : "green"}>
+                {isPythonRuntimeSettingsDirty ? "有未发布差异" : "与发布态一致"}
+              </Tag>
+            </Space>
+          </div>
+
+          <div className="admin-card" style={{ padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  运行状态
+                </Typography.Title>
+                <Typography.Text type="secondary">检查生产共享 runtime 是否就绪，以及是否仍有重复会话环境。</Typography.Text>
+              </div>
+              <Button icon={<RefreshCcw size={16} />} loading={pythonRuntimeLoading} onClick={() => void loadPythonRuntimeStatus()}>
+                刷新状态
+              </Button>
+            </div>
+
+            <Spin spinning={pythonRuntimeLoading}>
+              <div className="codex-memory-python-status-grid">
+                <MemoryMetric
+                  label="Python"
+                  value={pythonRuntimeStatus?.pythonVersion?.replace(/^Python\s+/i, "") || "未检测"}
+                  hint={pythonRuntimeStatus?.enabled ? "共享运行时已启用" : "共享运行时未启用"}
+                />
+                <MemoryMetric
+                  label="关键能力"
+                  value={`${readyCapabilityCount}/${Math.max(capabilities.length, 1)}`}
+                  hint="表格、文档、图片、翻译"
+                />
+                <MemoryMetric
+                  label="共享包占用"
+                  value={formatBytes(pythonRuntimeStatus?.runtimeBytes ?? 0)}
+                  hint={pythonRuntimeStatus?.runtimeExists ? "稳定目录" : "尚未初始化"}
+                />
+                <MemoryMetric
+                  label="重复环境"
+                  value={String(duplicateCount)}
+                  hint={duplicateArtifacts?.scanned === false ? "扫描未完成" : "session 内临时产物"}
+                />
+              </div>
+
+              <div className="codex-memory-capability-grid">
+                {capabilities.map((capability) => (
+                  <div key={capability.key} className="codex-memory-capability-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                      <Typography.Text strong>{capability.label}</Typography.Text>
+                      <Tag color={pythonCapabilityColor(capability.status)}>{pythonCapabilityLabel(capability.status)}</Tag>
+                    </div>
+                    <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+                      {capability.available.length > 0
+                        ? `已就绪：${capability.available.join("、")}`
+                        : "暂无可用共享包"}
+                    </Typography.Text>
+                    {capability.missing.length > 0 ? (
+                      <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                        待补齐：{capability.missing.join("、")}
+                      </Typography.Text>
+                    ) : null}
+                  </div>
+                ))}
+                {capabilities.length === 0 ? <Empty description="暂无运行状态，点击刷新状态" /> : null}
+              </div>
+
+              <Alert
+                type={duplicateCount > 0 ? "warning" : "success"}
+                showIcon
+                style={{ marginTop: 16 }}
+                message={duplicateCount > 0 ? "仍发现会话级重复 Python 产物" : "未发现明显重复 Python 产物"}
+                description={
+                  duplicateCount > 0
+                    ? `扫描到 ${duplicateArtifacts?.sessionVirtualenvCount ?? 0} 个会话虚拟环境、${duplicateArtifacts?.argosCacheCount ?? 0} 个翻译缓存、${duplicateArtifacts?.argosDataCount ?? 0} 个翻译数据目录。后续可按保留天数做安全清理。`
+                    : "新任务会优先复用共享 runtime；临时目录仍按 workspace 隔离，不影响多用户并发。"
+                }
+              />
+            </Spin>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2312,7 +2546,7 @@ export function CodexMemoryManagementView() {
 
     const overviewPanel = (
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
+        <Col xs={24} xl={8}>
           <div className="admin-card" style={{ padding: 20, height: "100%" }}>
             <Space direction="vertical" size={14} style={{ width: "100%" }}>
               <Space>
@@ -2340,7 +2574,7 @@ export function CodexMemoryManagementView() {
             </Space>
           </div>
         </Col>
-        <Col xs={24} lg={12}>
+        <Col xs={24} xl={8}>
           <div className="admin-card" style={{ padding: 20, height: "100%" }}>
             <Space direction="vertical" size={14} style={{ width: "100%" }}>
               <Space>
@@ -2369,6 +2603,35 @@ export function CodexMemoryManagementView() {
             </Space>
           </div>
         </Col>
+        <Col xs={24} xl={8}>
+          <div className="admin-card" style={{ padding: 20, height: "100%" }}>
+            <Space direction="vertical" size={14} style={{ width: "100%" }}>
+              <Space>
+                <FileText size={20} />
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  Python 运行时
+                </Typography.Title>
+                <Tag color={pythonRuntimeSettings.enabled ? "green" : "orange"}>
+                  {pythonRuntimeSettings.enabled ? "草稿启用" : "草稿关闭"}
+                </Tag>
+              </Space>
+              <Typography.Text type="secondary">
+                统一复用表格、文档、图片和翻译相关 Python 包，减少重复下载、重复建环境和磁盘膨胀。
+              </Typography.Text>
+              <Space wrap>
+                <Tag>{pythonRuntimeSettings.preferSharedPackages ? "优先共享包" : "不强制共享包"}</Tag>
+                <Tag>{pythonRuntimeSettings.sessionTmpEnabled ? "临时目录隔离" : "默认临时目录"}</Tag>
+                <Tag>{pythonRuntimeStatus?.runtimeExists ? "共享目录已初始化" : "等待初始化"}</Tag>
+              </Space>
+              <Alert
+                type={pythonRuntimeSettings.enabled ? "success" : "info"}
+                showIcon
+                message={pythonRuntimeSettings.enabled ? "发布后 Codex 会注入共享 Python Runtime" : "当前草稿关闭共享 Python Runtime"}
+                description="这个能力只改变运行环境和内部提示，不改变用户对话入口和业务流程。"
+              />
+            </Space>
+          </div>
+        </Col>
       </Row>
     );
 
@@ -2382,6 +2645,11 @@ export function CodexMemoryManagementView() {
           />
           <MemoryMetric label="记忆空间" value={String(scopes.length)} hint={`${scopeStats.userScopes} 用户 · ${scopeStats.integrationScopes} 集成`} />
           <MemoryMetric label="memory 文件" value={String(scopeStats.totalFiles)} hint="可查看、编辑、删除" />
+          <MemoryMetric
+            label="Python Runtime"
+            value={publishedPythonRuntimeSettings?.enabled ? "已启用" : "未启用"}
+            hint={pythonRuntimeStatus?.runtimeExists ? formatBytes(pythonRuntimeStatus.runtimeBytes) : "未初始化"}
+          />
           <MemoryMetric
             label="发布状态"
             value={isSettingsDirty ? "有草稿" : "一致"}
@@ -2397,6 +2665,7 @@ export function CodexMemoryManagementView() {
             { key: "overview", label: "概览", children: overviewPanel },
             { key: "enterprise", label: "企业上下文", children: renderEnterpriseContextPanel() },
             { key: "memory", label: "长期记忆", children: renderSettingsPanel() },
+            { key: "python", label: "Python 运行时", children: renderPythonRuntimePanel() },
             { key: "spaces", label: "记忆空间", children: renderSpacesPanel() },
             { key: "backfill", label: "历史回填", children: renderBackfillPanel() },
             { key: "runs", label: "统计日志", children: renderRunLogsPanel() }

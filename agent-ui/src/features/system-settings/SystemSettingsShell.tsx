@@ -54,6 +54,7 @@ function clonePayload(payload: SystemSettingsPayload): SystemSettingsPayload {
       fields: { ...payload.enterpriseContext.fields },
       agentOverrides: payload.enterpriseContext.agentOverrides.map((item) => ({ ...item }))
     },
+    pythonRuntime: { ...payload.pythonRuntime },
     behavior: {
       ...payload.behavior,
       portalWelcomeSuggestions: payload.behavior.portalWelcomeSuggestions.map((item) => ({ ...item })),

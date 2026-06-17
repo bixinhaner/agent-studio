@@ -463,6 +463,83 @@ if changed:
 PY
 }
 
+ensure_shared_python_runtime_dirs() {
+  log_step "Preparing shared Python runtime directories"
+  run_as_root mkdir -p \
+    "$SHARED_RUNTIME_ROOT" \
+    "$SHARED_PYTHON_RUNTIME_ROOT" \
+    "$SHARED_PYTHON_PIP_CACHE_ROOT" \
+    "$SHARED_ARGOS_PACKAGE_ROOT" \
+    "$SHARED_ARGOS_DOWNLOAD_ROOT"
+  run_as_root chown -R "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+}
+
+migrate_legacy_translate_packages() {
+  local legacy_path="/tmp/baicells_translate_pkgs"
+  [[ -d "$legacy_path" && ! -L "$legacy_path" ]] || return 0
+  [[ ! -d "$SHARED_PYTHON_RUNTIME_ROOT/argostranslate" ]] || return 0
+
+  local runtime_has_files
+  runtime_has_files="$(find "$SHARED_PYTHON_RUNTIME_ROOT" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)"
+  if [[ -n "$runtime_has_files" ]]; then
+    log_warn "Shared Python runtime already has files; keeping legacy translate package at $legacy_path"
+    return 0
+  fi
+
+  log_step "Migrating legacy translate packages into shared Python runtime"
+  run_as_root rmdir "$SHARED_PYTHON_RUNTIME_ROOT"
+  run_as_root mv "$legacy_path" "$SHARED_PYTHON_RUNTIME_ROOT"
+  run_as_root chown -R "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+}
+
+ensure_legacy_translate_symlink() {
+  local legacy_path="/tmp/baicells_translate_pkgs"
+  if [[ -e "$legacy_path" && ! -L "$legacy_path" ]]; then
+    return 0
+  fi
+  run_as_root ln -sfn "$SHARED_PYTHON_RUNTIME_ROOT" "$legacy_path"
+}
+
+shared_python_env_prefix() {
+  printf 'PYTHONPATH=%s PIP_CACHE_DIR=%s ARGOS_PACKAGE_DIR=%s ARGOS_DOWNLOAD_DIR=%s' \
+    "$(shell_quote "$SHARED_PYTHON_RUNTIME_ROOT")" \
+    "$(shell_quote "$SHARED_PYTHON_PIP_CACHE_ROOT")" \
+    "$(shell_quote "$SHARED_ARGOS_PACKAGE_ROOT")" \
+    "$(shell_quote "$SHARED_ARGOS_DOWNLOAD_ROOT")"
+}
+
+check_shared_python_runtime_imports() {
+  local env_prefix
+  env_prefix="$(shared_python_env_prefix)"
+  run_as_app_user_shell "$env_prefix python3 '$script_dir/check-shared-python-runtime.py'"
+}
+
+install_shared_python_runtime_packages() {
+  local requirements="$script_dir/shared-python-runtime-requirements.txt"
+  [[ -f "$requirements" ]] || die "missing shared Python runtime requirements: $requirements"
+  run_as_app_user_shell "python3 -m pip --version >/dev/null 2>&1" || die "python3 pip is required for shared Python runtime"
+
+  log_step "Installing shared Python runtime packages"
+  local env_prefix
+  env_prefix="$(shared_python_env_prefix)"
+  run_as_app_user_shell "$env_prefix python3 -m pip install --upgrade --target '$SHARED_PYTHON_RUNTIME_ROOT' -r '$requirements'"
+}
+
+ensure_shared_python_runtime() {
+  ensure_shared_python_runtime_dirs
+  migrate_legacy_translate_packages
+  ensure_shared_python_runtime_dirs
+
+  if check_shared_python_runtime_imports; then
+    log_info "Shared Python runtime imports are ready"
+  else
+    install_shared_python_runtime_packages
+    check_shared_python_runtime_imports || die "shared Python runtime import check failed after installation"
+  fi
+
+  ensure_legacy_translate_symlink
+}
+
 build_backend() {
   log_step "Installing backend dependencies"
   run_as_app_user_shell "cd '$APP_API_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
@@ -552,6 +629,7 @@ main() {
   enable_deploy_drain
   trap disable_deploy_drain EXIT
   git_update
+  ensure_shared_python_runtime
   build_backend
   seed_rbac
   build_frontend

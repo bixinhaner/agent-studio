@@ -220,6 +220,7 @@ describe("ManagedCodexProviderResolver", () => {
               },
               codexMemory: createDefaultSystemSettingsPayload().codexMemory,
               enterpriseContext: createDefaultSystemSettingsPayload().enterpriseContext,
+              pythonRuntime: createDefaultSystemSettingsPayload().pythonRuntime,
               behavior: {
                 markdown: "test",
                 portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",
@@ -368,6 +369,7 @@ describe("resolveManagedCodexDefaults", () => {
           },
           codexMemory: createDefaultSystemSettingsPayload().codexMemory,
           enterpriseContext: createDefaultSystemSettingsPayload().enterpriseContext,
+          pythonRuntime: createDefaultSystemSettingsPayload().pythonRuntime,
           behavior: {
             markdown: "test",
             portalWelcomeMessageDesktop: "Hello, I'm your {{assistantName}}.",

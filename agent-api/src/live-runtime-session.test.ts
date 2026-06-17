@@ -174,7 +174,8 @@ describe("stripInternalRunConfigMetadata", () => {
           enabled: true,
           proxyTokenExpiresAt: "2026-06-06T16:00:00.000Z"
         }
-      }
+      },
+      _agentStudioRuntimeHints: ["use shared python runtime"]
     })).toEqual({
       mode: "default"
     });

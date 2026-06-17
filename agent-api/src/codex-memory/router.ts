@@ -5,6 +5,7 @@ import { Router, type Request, type RequestHandler, type Response } from "expres
 import { z } from "zod";
 
 import type { EnterpriseContextService } from "../enterprise-context-service.js";
+import type { SharedPythonRuntimeStatus } from "../shared-python-runtime.js";
 import { systemSettingsEnterpriseContextSchema } from "../system-settings/types.js";
 import type { CodexMemoryBackfillService } from "./backfill-service.js";
 import {
@@ -31,6 +32,7 @@ type CodexMemoryAdminRouterOptions = {
     get(id: string): Promise<{ name: string; slug: string } | undefined>;
   };
   enterpriseContext?: Pick<EnterpriseContextService, "resolveForRun">;
+  getPythonRuntimeStatus?: () => Promise<SharedPythonRuntimeStatus>;
   backfill?: Pick<
     CodexMemoryBackfillService,
     "preview" | "createRun" | "listRuns" | "pauseRun" | "resumeRun" | "cancelRun"
@@ -771,6 +773,18 @@ export function createCodexMemoryAdminRouter(options: CodexMemoryAdminRouterOpti
         return;
       }
       res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.get("/codex-memory/python-runtime/status", requireRead, async (_req: Request, res: Response) => {
+    if (!options.getPythonRuntimeStatus) {
+      res.status(501).json({ detail: "python runtime status is not configured" });
+      return;
+    }
+    try {
+      res.json(await options.getPythonRuntimeStatus());
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
     }
   });
 

@@ -108,7 +108,11 @@ type OpenAICompatibleRuntime = {
 
 type OpenAICompatibleRouterOptions = {
   runtime: OpenAICompatibleRuntime;
-  createRuntimeForRequest?(input: { codexHome: string }): Promise<OpenAICompatibleRuntime> | OpenAICompatibleRuntime;
+  createRuntimeForRequest?(input: {
+    codexHome: string;
+    workspace: string;
+    codexRunConfig?: Record<string, unknown>;
+  }): Promise<OpenAICompatibleRuntime> | OpenAICompatibleRuntime;
   materializeCodexHome?(input: {
     provider: string;
     integrationInstanceId: string;
@@ -833,7 +837,11 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         codexHome = materializedCodexHome.codexHome;
         codexRunConfig = materializedCodexHome.codexRunConfig;
         requestRuntime = options.createRuntimeForRequest
-          ? await options.createRuntimeForRequest({ codexHome: materializedCodexHome.codexHome })
+          ? await options.createRuntimeForRequest({
+              codexHome: materializedCodexHome.codexHome,
+              workspace: workspacePath,
+              codexRunConfig
+            })
           : options.runtime;
       }
 
