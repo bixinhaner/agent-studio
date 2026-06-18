@@ -1,0 +1,3 @@
+1. Portal UX：本提交让 Thought 区复用正文运行状态的 live 动效，避免 Thinking 状态在 commentary 单条完成后提前消失。
+2. 用户影响：最终正文开始流式前，Thought 区保持 live 状态；正文开始后再切回 Thought 完成态，等待反馈更连续。
+3. 验证：前端构建和 diff 检查已通过；本次提交后将推送 GitHub 并部署生产。
