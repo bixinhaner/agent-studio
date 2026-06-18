@@ -160,6 +160,122 @@ function mcpToolCallDetail(input: { server?: string; tool?: string; errorMessage
     .join("\n") || undefined;
 }
 
+function itemTextDetail(item: Record<string, unknown> | undefined, max = 800): string | undefined {
+  const text = trimOrUndefined(item?.text);
+  return text ? shortenText(text, max) : undefined;
+}
+
+function imageGenerationDetail(item: Record<string, unknown> | undefined): string | undefined {
+  const revisedPrompt = trimOrUndefined(item?.revised_prompt) ?? trimOrUndefined(item?.revisedPrompt);
+  return revisedPrompt ? shortenText(revisedPrompt, 800) : undefined;
+}
+
+function friendlyRuntimeItemTraceRow(input: {
+  itemType: string;
+  itemId?: string;
+  item: Record<string, unknown> | undefined;
+  lifecycle: "started" | "completed";
+}): CodexTraceRow | null | undefined {
+  const { itemType, itemId, item, lifecycle } = input;
+  const isStarted = lifecycle === "started";
+  const trace = (index: string, row: Omit<CodexTraceRow, "id" | "at">): CodexTraceRow => traceRow(itemId, index, row);
+
+  if (itemType === "user_message" || itemType === "hookPrompt") return null;
+
+  if (itemType === "contextCompaction") {
+    return trace("context", {
+      kind: "meta",
+      title: isStarted ? "Context window is full. Compressing context." : "Context compressed"
+    });
+  }
+
+  if (
+    itemType === "image_generation" ||
+    itemType === "image_generation_call" ||
+    itemType === "imageGeneration" ||
+    itemType === "image_generation_end"
+  ) {
+    return trace("image", {
+      kind: "tool",
+      title: isStarted ? "Generating image" : "Image generated",
+      detail: isStarted ? undefined : imageGenerationDetail(item)
+    });
+  }
+
+  if (itemType === "image_view" || itemType === "imageView") {
+    return trace("image-view", {
+      kind: "tool",
+      title: isStarted ? "Inspecting image" : "Image inspected"
+    });
+  }
+
+  if (itemType === "plan" || itemType === "todo_list") {
+    return trace("plan", {
+      kind: "process",
+      title: isStarted ? "Planning the work" : "Plan updated",
+      detail: itemTextDetail(item)
+    });
+  }
+
+  if (itemType === "command_execution") {
+    const command = trimOrUndefined(item?.command);
+    return trace("workspace", {
+      kind: "process",
+      title: isStarted ? "Running workspace operation" : "Workspace operation completed",
+      detail: command ? `$ ${command}` : undefined
+    });
+  }
+
+  if (itemType === "mcp_tool_call") {
+    const server = trimOrUndefined(item?.server);
+    const tool = trimOrUndefined(item?.tool);
+    return trace("tool", {
+      kind: "tool",
+      title: isStarted ? "Using Tool" : "Tool step completed",
+      detail: mcpToolCallDetail({ server, tool })
+    });
+  }
+
+  if (itemType === "web_search") {
+    const query = trimOrUndefined(item?.query);
+    return trace("web-search", {
+      kind: "process",
+      title: isStarted ? "Searching the web" : "Search completed",
+      detail: query
+    });
+  }
+
+  if (itemType === "file_change") {
+    return trace("file-change", {
+      kind: "process",
+      title: isStarted ? "Preparing file updates" : "Files updated"
+    });
+  }
+
+  if (itemType === "collabAgentToolCall" || itemType === "subAgentActivity") {
+    return trace("agent", {
+      kind: "process",
+      title: isStarted ? "Working with another agent" : "Agent work updated"
+    });
+  }
+
+  if (itemType === "enteredReviewMode" || itemType === "exitedReviewMode") {
+    return trace("review", {
+      kind: "process",
+      title: "Review mode updated"
+    });
+  }
+
+  if (itemType === "sleep") {
+    return trace("wait", {
+      kind: "meta",
+      title: "Waiting before continuing"
+    });
+  }
+
+  return undefined;
+}
+
 function traceRow(
   itemId: string | undefined,
   index: string,
@@ -190,6 +306,12 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     answerDelta: itemType === "agent_message" ? trimOrUndefined(event.delta) : undefined,
     traceRows
   };
+
+  if (isStarted) {
+    const lifecycleTrace = friendlyRuntimeItemTraceRow({ itemType, itemId, item, lifecycle: "started" });
+    if (lifecycleTrace) traceRows.push(lifecycleTrace);
+    if (lifecycleTrace !== undefined) return projection;
+  }
 
   if (itemType === "agent_message" && isCompleted) {
     const text = trimOrUndefined(item?.text) ?? trimOrUndefined(event.text);
@@ -224,7 +346,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     const errorMessage = trimOrUndefined(error?.message);
     const result = item?.result;
     const name = [server, tool].filter(Boolean).join(".") || "mcp_tool_call";
-    const detail = mcpToolCallDetail({ server, tool, errorMessage });
+    const detail = mcpToolCallDetail({ server, tool });
     projection.toolCall = {
       id: itemId,
       name,
@@ -235,22 +357,21 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
       errorMessage
     };
     traceRows.push(traceRow(itemId, "tool", {
-      kind: errorMessage ? "error" : "tool",
-      title: `Tool call ${errorMessage ? "failed" : "completed"}`,
-      detail: errorMessage ? "Tool execution failed." : detail,
-      rawDetail: errorMessage ? detail : undefined
+      kind: "tool",
+      title: "Tool step completed",
+      detail,
+      rawDetail: errorMessage ? mcpToolCallDetail({ server, tool, errorMessage }) : undefined
     }));
     return projection;
   }
 
   if (itemType === "command_execution" && isCompleted) {
     const command = trimOrUndefined(item?.command);
-    const status = trimOrUndefined(item?.status);
     const exitCode = typeof item?.exit_code === "number" ? item.exit_code : undefined;
     const output = trimOrUndefined(item?.aggregated_output);
     traceRows.push(traceRow(itemId, "command", {
-      kind: exitCode && exitCode !== 0 ? "error" : "process",
-      title: `Command execution ${status ?? ""}`.trim(),
+      kind: "process",
+      title: "Workspace operation completed",
       detail:
         [command ? `$ ${command}` : "", exitCode !== undefined ? `exit_code=${exitCode}` : ""]
           .filter(Boolean)
@@ -265,7 +386,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     if (query) {
       traceRows.push(traceRow(itemId, "web-search", {
         kind: "process",
-        title: "Web search",
+        title: "Search completed",
         detail: query
       }));
     }
@@ -287,7 +408,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
       .join("\n");
     traceRows.push(traceRow(itemId, "todo", {
       kind: "process",
-      title: "Execution plan",
+      title: "Plan updated",
       detail: detail || undefined
     }));
     return projection;
@@ -307,7 +428,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
       .join("\n");
     traceRows.push(traceRow(itemId, "file-change", {
       kind: "process",
-      title: "File changes",
+      title: "Files updated",
       detail: detail || undefined
     }));
     return projection;
@@ -317,10 +438,16 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     const message = trimOrUndefined(item?.message) ?? trimOrUndefined(event.text);
     traceRows.push(traceRow(itemId, "error", {
       kind: "error",
-      title: "Execution error",
+      title: "Needs attention",
       detail: message ? shortenText(message, 1200) : undefined
     }));
     return projection;
+  }
+
+  if (isCompleted) {
+    const lifecycleTrace = friendlyRuntimeItemTraceRow({ itemType, itemId, item, lifecycle: "completed" });
+    if (lifecycleTrace) traceRows.push(lifecycleTrace);
+    if (lifecycleTrace !== undefined) return projection;
   }
 
   if (
@@ -339,7 +466,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
   ) {
     traceRows.push(traceRow(itemId, "process", {
       kind: "process",
-      title: `Process event ${eventType}`,
+      title: "Processing step",
       detail: stringifyDetail(item, 800)
     }));
   }
@@ -352,7 +479,7 @@ export function codexTraceRowsToContentPart(rows: CodexTraceRow[]): Record<strin
     .map((row, index) => ({
       id: trimOrUndefined(row.id) ?? `codex-trace-row-${index + 1}`,
       kind: row.kind,
-      title: trimOrUndefined(row.title) ?? "Process event",
+      title: trimOrUndefined(row.title) ?? "Processing step",
       detail: trimOrUndefined(row.detail),
       rawDetail: trimOrUndefined(row.rawDetail),
       at: trimOrUndefined(row.at)

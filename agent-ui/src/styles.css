@@ -2227,6 +2227,7 @@ body.access-request-route #root {
   font-variant-numeric: tabular-nums;
 }
 
+.assistant-running-secondary,
 .assistant-running-hint {
   margin: 4px 0 0;
   font-size: 12px;
@@ -3150,6 +3151,7 @@ body.access-request-route #root {
   color: #64748b;
 }
 
+.assistant-running-secondary,
 .assistant-running-hint {
   font-size: 11px;
 }

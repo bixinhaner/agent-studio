@@ -383,26 +383,24 @@ const PRODUCT_FEEDBACK_MAX_IMAGES = 3;
 const PRODUCT_FEEDBACK_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const PRODUCT_FEEDBACK_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const RUNNING_STAGE_RECEIVED_TEXT = "Request received. Preparing your workspace.";
-const RUNNING_STAGE_RUNTIME_STARTING_TEXT = "Starting the reasoning environment.";
-const RUNNING_STAGE_RUNTIME_CONNECTING_TEXT = "Connecting the runtime. This may take a few seconds.";
-const RUNNING_STAGE_CONTEXT_TEXT = "Analyzing the context.";
+const RUNNING_STAGE_CONTEXT_TEXT = "Analyzing context.";
 const RUNNING_STAGE_ANSWER_TEXT = "Generating the answer.";
-const RUNNING_STAGE_RESULT_TEXT = "Organizing the result.";
-const RUNNING_STAGE_LONG_WAIT_TEXT = "Still working. You can stay on this page and the result will appear here.";
-const RUNNING_STAGE_IMAGE_TEXT = "Generating the image. This usually takes longer than a text answer.";
+const RUNNING_STAGE_RESULT_TEXT = "Thinking...";
+const RUNNING_STAGE_WAITING_TEXT = "Still working. New updates will appear here automatically.";
+const RUNNING_STAGE_IMAGE_TEXT = "Generating image. This usually takes longer than a text answer.";
 const RUNNING_STAGE_IMAGE_HINT_TEXT = "The image will appear here automatically when it is ready.";
-const RUNNING_STAGE_RECEIVED_FALLBACK_MS = 1500;
-const RUNNING_STAGE_RUNTIME_STARTING_FALLBACK_MS = 2500;
-const RUNNING_STAGE_RUNTIME_CONNECTING_FALLBACK_MS = 6000;
+const RUNNING_STAGE_WAITING_MS = 25_000;
 const DEFAULT_RUNNING_STAGE_TEXT = RUNNING_STAGE_RECEIVED_TEXT;
 const PORTAL_RUNNING_LEAVE_WARNING = "There are still running sessions. If you leave, you may lose visibility into their output.";
 type RunningStageKind = "text" | "image";
 type RunningStageContextValue = {
   text: string;
+  secondaryText: string;
   kind: RunningStageKind;
 };
 const DEFAULT_RUNNING_STAGE_CONTEXT_VALUE: RunningStageContextValue = {
   text: DEFAULT_RUNNING_STAGE_TEXT,
+  secondaryText: "",
   kind: "text"
 };
 const RunningStageTextContext = createContext<RunningStageContextValue>(DEFAULT_RUNNING_STAGE_CONTEXT_VALUE);
@@ -1035,8 +1033,8 @@ const GENERIC_ASSISTANT_ERROR_NOTICE =
   "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_PROCESS_ERROR_DETAIL =
   "The request could not be completed. Please try again. If the issue continues, contact your workspace admin.";
-const GENERIC_TOOL_ERROR_DETAIL = "A background tool step failed. Please try again or contact your workspace admin.";
-const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step failed. Please try again or contact your workspace admin.";
+const GENERIC_TOOL_ERROR_DETAIL = "A background tool step needs attention. Please try again or contact your workspace admin.";
+const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step needs attention. Please try again or contact your workspace admin.";
 
 function formatAssistantErrorNotice(detail: string, code?: string): string {
   const normalizedCode = (code || "").trim().toUpperCase();
@@ -2227,14 +2225,6 @@ function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
   };
 }
 
-function formatProcessStatus(status: string | undefined): string {
-  if (!status) return "";
-  if (status === "in_progress") return "In progress";
-  if (status === "completed") return "Completed";
-  if (status === "failed") return "Failed";
-  return status;
-}
-
 function normalizeProcessTime(value: string | undefined): string {
   if (!value) return "";
   const at = new Date(value);
@@ -2390,26 +2380,158 @@ function stageTextForCodexItem(
   if (lifecycle === "started") {
     if (isImageGenerationItem(itemType, item)) return RUNNING_STAGE_IMAGE_TEXT;
     if (itemType === "reasoning") return RUNNING_STAGE_CONTEXT_TEXT;
-    if (itemType === "command_execution") return RUNNING_STAGE_CONTEXT_TEXT;
-    if (itemType === "mcp_tool_call") return RUNNING_STAGE_CONTEXT_TEXT;
-    if (itemType === "web_search") return RUNNING_STAGE_CONTEXT_TEXT;
-    if (itemType === "todo_list") return RUNNING_STAGE_RESULT_TEXT;
-    if (itemType === "file_change") return "Applying the requested changes";
+    if (itemType === "contextCompaction") return "Context window is full. Compressing context.";
+    if (itemType === "command_execution") return "Running workspace operation.";
+    if (itemType === "mcp_tool_call") return "Using Tool.";
+    if (itemType === "web_search") return "Searching the web.";
+    if (itemType === "todo_list" || itemType === "plan") return "Planning the work.";
+    if (itemType === "file_change") return "Preparing file updates.";
+    if (itemType === "image_view" || itemType === "imageView") return "Inspecting image.";
+    if (itemType === "collabAgentToolCall" || itemType === "subAgentActivity") return "Working with another agent.";
+    if (itemType === "sleep") return "Waiting before continuing.";
     if (itemType === "agent_message") return RUNNING_STAGE_ANSWER_TEXT;
-    if (itemType === "error") return "Trying to recover";
+    if (itemType === "error") return "Request needs attention.";
     return RUNNING_STAGE_CONTEXT_TEXT;
   }
 
   if (isImageGenerationItem(itemType, item)) return RUNNING_STAGE_RESULT_TEXT;
   if (itemType === "reasoning") return RUNNING_STAGE_CONTEXT_TEXT;
-  if (itemType === "command_execution") return RUNNING_STAGE_CONTEXT_TEXT;
-  if (itemType === "mcp_tool_call") return RUNNING_STAGE_CONTEXT_TEXT;
-  if (itemType === "web_search") return RUNNING_STAGE_CONTEXT_TEXT;
-  if (itemType === "todo_list") return RUNNING_STAGE_RESULT_TEXT;
-  if (itemType === "file_change") return "Checking the changes";
+  if (itemType === "contextCompaction") return "Context compressed. Continuing with your request.";
+  if (itemType === "command_execution") return "Workspace operation completed.";
+  if (itemType === "mcp_tool_call") return "Tool step completed.";
+  if (itemType === "web_search") return "Search completed.";
+  if (itemType === "todo_list" || itemType === "plan") return "Plan updated.";
+  if (itemType === "file_change") return "Files updated.";
+  if (itemType === "image_view" || itemType === "imageView") return "Image inspected.";
+  if (itemType === "collabAgentToolCall" || itemType === "subAgentActivity") return "Agent work updated.";
+  if (itemType === "sleep") return "Continuing your request.";
   if (itemType === "agent_message") return RUNNING_STAGE_ANSWER_TEXT;
-  if (itemType === "error") return "Something went wrong, checking it";
+  if (itemType === "error") return "Request needs attention.";
   return RUNNING_STAGE_RESULT_TEXT;
+}
+
+function itemTextDetail(item: Record<string, unknown> | null, max = 800): string {
+  const text = typeof item?.text === "string" ? item.text.trim() : "";
+  return text ? shorten(text, max) : "";
+}
+
+function imageGenerationDetail(item: Record<string, unknown> | null): string {
+  const revisedPrompt =
+    (typeof item?.revised_prompt === "string" ? item.revised_prompt.trim() : "") ||
+    (typeof item?.revisedPrompt === "string" ? item.revisedPrompt.trim() : "");
+  return revisedPrompt ? shorten(revisedPrompt, 800) : "";
+}
+
+function todoListDetail(item: Record<string, unknown> | null): string {
+  const items = Array.isArray(item?.items) ? item.items : [];
+  return items
+    .slice(0, 20)
+    .map((entry) => {
+      const row = asRecord(entry);
+      if (!row) return "";
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      if (!text) return "";
+      return `${row.completed === true ? "[x]" : "[ ]"} ${text}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function codexLifecycleProcessTrace(
+  itemType: string,
+  lifecycle: "started" | "completed",
+  item: Record<string, unknown> | null
+): Pick<ProcessData, "kind" | "title" | "detail"> | null | undefined {
+  const isStarted = lifecycle === "started";
+  if (itemType === "user_message" || itemType === "hookPrompt") return null;
+
+  if (itemType === "contextCompaction") {
+    return {
+      kind: "meta",
+      title: isStarted ? "Context window is full. Compressing context." : "Context compressed"
+    };
+  }
+
+  if (isImageGenerationItem(itemType, item)) {
+    return {
+      kind: "process",
+      title: isStarted ? "Generating image" : "Image generated",
+      detail: isStarted ? undefined : imageGenerationDetail(item)
+    };
+  }
+
+  if (itemType === "image_view" || itemType === "imageView") {
+    return {
+      kind: "process",
+      title: isStarted ? "Inspecting image" : "Image inspected"
+    };
+  }
+
+  if (itemType === "plan" || itemType === "todo_list") {
+    return {
+      kind: "process",
+      title: isStarted ? "Planning the work" : "Plan updated",
+      detail: todoListDetail(item) || itemTextDetail(item)
+    };
+  }
+
+  if (itemType === "command_execution") {
+    const command = typeof item?.command === "string" ? item.command.trim() : "";
+    return {
+      kind: "process",
+      title: isStarted ? "Running workspace operation" : "Workspace operation completed",
+      detail: command ? `$ ${command}` : undefined
+    };
+  }
+
+  if (itemType === "mcp_tool_call") {
+    const server = typeof item?.server === "string" ? item.server.trim() : "";
+    const tool = typeof item?.tool === "string" ? item.tool.trim() : "";
+    return {
+      kind: "process",
+      title: isStarted ? "Using Tool" : "Tool step completed",
+      detail: [server ? `server: ${server}` : "", tool ? `tool: ${tool}` : ""].filter(Boolean).join("\n") || undefined
+    };
+  }
+
+  if (itemType === "web_search") {
+    const query = typeof item?.query === "string" ? item.query.trim() : "";
+    return {
+      kind: "process",
+      title: isStarted ? "Searching the web" : "Search completed",
+      detail: query || undefined
+    };
+  }
+
+  if (itemType === "file_change") {
+    return {
+      kind: "process",
+      title: isStarted ? "Preparing file updates" : "Files updated"
+    };
+  }
+
+  if (itemType === "collabAgentToolCall" || itemType === "subAgentActivity") {
+    return {
+      kind: "process",
+      title: isStarted ? "Working with another agent" : "Agent work updated"
+    };
+  }
+
+  if (itemType === "enteredReviewMode" || itemType === "exitedReviewMode") {
+    return {
+      kind: "process",
+      title: "Review mode updated"
+    };
+  }
+
+  if (itemType === "sleep") {
+    return {
+      kind: "meta",
+      title: "Waiting before continuing"
+    };
+  }
+
+  return undefined;
 }
 
 function parseCrestActionResult(result: unknown): Record<string, unknown> | null {
@@ -2440,8 +2562,8 @@ function crestActionTrace(
   const title = typeof payload?.title === "string" ? payload.title : actionId || "Crest action";
   if (errMsg) {
     return {
-      title: `Crest CRM · ${title} failed`,
-      detail: `error: ${shorten(errMsg, 600)}`
+      title: `Crest CRM · ${title}`,
+      detail: `needs attention: ${shorten(errMsg, 600)}`
     };
   }
   const summary = typeof payload?.summary === "string" ? payload.summary : "";
@@ -2459,7 +2581,7 @@ function crestActionTrace(
     actionId ? `action: ${actionId}` : "",
     summary,
     affectedResources.length ? `affected:\n${affectedResources.map((item) => `- ${item}`).join("\n")}` : "",
-    warnings.length ? `warnings:\n${warnings.map((item) => `- ${item}`).join("\n")}` : "",
+    warnings.length ? `notes:\n${warnings.map((item) => `- ${item}`).join("\n")}` : "",
     confirmationToken ? "confirmation: required" : "",
     idempotencyKey ? "idempotency: ready" : "",
     auditId ? `audit: ${auditId}` : ""
@@ -3208,13 +3330,16 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
   const runningStage = useContext(RunningStageTextContext);
   if (status.type !== "running") return null;
   const isImageStage = runningStage.kind === "image";
+  const ariaStatus = `Assistant is processing: ${runningStage.text}${
+    runningStage.secondaryText ? `. ${runningStage.secondaryText}` : ""
+  }`;
 
   return (
     <div
       className={`assistant-running-card${isImageStage ? " is-image" : ""}`}
       role="status"
       aria-live="polite"
-      aria-label={`Assistant is processing: ${runningStage.text}`}
+      aria-label={ariaStatus}
     >
       <div className="assistant-running-head">
         <span className="assistant-running-spinner" aria-hidden="true" />
@@ -3222,6 +3347,7 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
         <span className="assistant-running-chip">Live</span>
       </div>
       <p className="assistant-running-phase">{runningStage.text}</p>
+      {runningStage.secondaryText ? <p className="assistant-running-secondary">{runningStage.secondaryText}</p> : null}
       {isImageStage ? <p className="assistant-running-hint">{RUNNING_STAGE_IMAGE_HINT_TEXT}</p> : null}
       {isImageStage ? (
         <div className="assistant-image-placeholder" aria-hidden="true">
@@ -3618,7 +3744,7 @@ const ProcessDataFallback: FC<any> = ({
         const kind = ["reasoning", "tool", "source", "meta", "process", "done", "error", "debug"].includes(kindRaw)
           ? (kindRaw as TimelineRow["kind"])
           : "process";
-        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "Process event";
+        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "Processing step";
         const detail = typeof obj.detail === "string" ? obj.detail.trim() : "";
         const rawDetail = typeof obj.rawDetail === "string" ? obj.rawDetail.trim() : "";
         const at = typeof obj.at === "string" ? normalizeProcessTime(obj.at) : "";
@@ -3890,7 +4016,7 @@ const ProcessDataFallback: FC<any> = ({
     );
   }
   const row = (data && typeof data === "object" ? data : {}) as ProcessData;
-  const title = typeof row.title === "string" ? row.title : "Process event";
+  const title = typeof row.title === "string" ? row.title : "Processing step";
   const detail = typeof row.detail === "string" ? row.detail : "";
   const kind = typeof row.kind === "string" ? row.kind : "process";
   const at = typeof row.at === "string" ? row.at.replace("T", " ").replace("Z", "").slice(0, 19) : "";
@@ -3932,7 +4058,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
         rows.push({
           id: `timeline-${++seq}`,
           kind: "tool",
-          title: "Tool call · Failed",
+          title: "Tool step completed",
           detail: GENERIC_TOOL_ERROR_DETAIL
         });
         continue;
@@ -3943,7 +4069,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       rows.push({
         id: `timeline-${++seq}`,
         kind: "tool",
-        title: `Tool call · ${toolName}`,
+        title: `Tool · ${toolName}`,
         detail: [shorten(argsText, 800), shorten(resultText, 1000)].filter(Boolean).join("\n\n")
       });
       continue;
@@ -3966,7 +4092,7 @@ function extractTimelineRows(content: unknown): TimelineRow[] {
       const data = p.data as Record<string, unknown>;
       const kindRaw = typeof data.kind === "string" ? data.kind : "process";
       const kind = ["meta", "process", "done", "error", "debug"].includes(kindRaw) ? (kindRaw as TimelineRow["kind"]) : "process";
-      const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Process event";
+      const title = typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Processing step";
       const detail = typeof data.detail === "string" ? data.detail.trim() : "";
       const rawDetail = typeof data.rawDetail === "string" ? data.rawDetail.trim() : "";
       const at = typeof data.at === "string" ? normalizeProcessTime(data.at) : "";
@@ -5600,13 +5726,15 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const [statusText, setStatusText] = useState("Ready");
   const [runningStageText, setRunningStageText] = useState(DEFAULT_RUNNING_STAGE_TEXT);
+  const [runningStageSecondaryText, setRunningStageSecondaryText] = useState("");
   const [runningStageKind, setRunningStageKind] = useState<RunningStageKind>("text");
   const runningStageContextValue = useMemo<RunningStageContextValue>(
     () => ({
       text: runningStageText,
+      secondaryText: runningStageSecondaryText,
       kind: runningStageKind
     }),
-    [runningStageKind, runningStageText]
+    [runningStageKind, runningStageSecondaryText, runningStageText]
   );
   const [errorText, setErrorText] = useState("");
   const [resourceErrorText, setResourceErrorText] = useState("");
@@ -5648,8 +5776,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const activeLocalThreadIdRef = useRef("");
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
+  const runningStageSecondaryTextRef = useRef(runningStageSecondaryText);
   const runningStageKindRef = useRef<RunningStageKind>(runningStageKind);
-  const runningStageFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runningStageWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const enabledSkillIdsRef = useRef(enabledSkillIds);
   const knowledgeSetSelectionInitializedRef = useRef(false);
@@ -5697,6 +5826,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   showProcessTraceRef.current = showProcessTrace;
   collapseFinalTraceOnDoneRef.current = collapseFinalTraceOnDone;
   runningStageTextRef.current = runningStageText;
+  runningStageSecondaryTextRef.current = runningStageSecondaryText;
   runningStageKindRef.current = runningStageKind;
   selectedKnowledgeSetIdsRef.current = selectedKnowledgeSetIds;
   enabledSkillIdsRef.current = enabledSkillIds;
@@ -5707,9 +5837,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   useEffect(
     () => () => {
-      if (runningStageFallbackTimerRef.current) {
-        clearTimeout(runningStageFallbackTimerRef.current);
-        runningStageFallbackTimerRef.current = null;
+      if (runningStageWaitTimerRef.current) {
+        clearTimeout(runningStageWaitTimerRef.current);
+        runningStageWaitTimerRef.current = null;
       }
       for (const item of productFeedbackImagesRef.current) {
         URL.revokeObjectURL(item.previewUrl);
@@ -6049,16 +6179,37 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     };
   }, []);
 
-  const clearRunningStageFallbackTimer = () => {
-    if (!runningStageFallbackTimerRef.current) return;
-    clearTimeout(runningStageFallbackTimerRef.current);
-    runningStageFallbackTimerRef.current = null;
+  const clearRunningStageWaitTimers = () => {
+    if (runningStageWaitTimerRef.current) {
+      clearTimeout(runningStageWaitTimerRef.current);
+      runningStageWaitTimerRef.current = null;
+    }
+  };
+
+  const updateRunningStageSecondaryText = (next: string) => {
+    const normalized = next.trim();
+    if (runningStageSecondaryTextRef.current === normalized) return;
+    runningStageSecondaryTextRef.current = normalized;
+    setRunningStageSecondaryText(normalized);
+  };
+
+  const startRunningStageWaitTimers = () => {
+    clearRunningStageWaitTimers();
+    updateRunningStageSecondaryText("");
+    runningStageWaitTimerRef.current = setTimeout(() => {
+      runningStageWaitTimerRef.current = null;
+      updateRunningStageSecondaryText(RUNNING_STAGE_WAITING_TEXT);
+    }, RUNNING_STAGE_WAITING_MS);
+  };
+
+  const stopRunningStageWaitTimers = () => {
+    clearRunningStageWaitTimers();
+    updateRunningStageSecondaryText("");
   };
 
   const updateRunningStage = (next: string, options?: { fallback?: boolean; kind?: RunningStageKind }) => {
     const normalized = next.trim();
     if (!normalized) return;
-    clearRunningStageFallbackTimer();
     const nextKind: RunningStageKind = options?.kind ?? (isImageGenerationStageText(normalized) ? "image" : runningStageKindRef.current);
     if (runningStageTextRef.current !== normalized) {
       runningStageTextRef.current = normalized;
@@ -6067,43 +6218,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     if (runningStageKindRef.current !== nextKind) {
       runningStageKindRef.current = nextKind;
       setRunningStageKind(nextKind);
-    }
-    if (options?.fallback === false) return;
-    if (nextKind === "image") return;
-    if (normalized === RUNNING_STAGE_RECEIVED_TEXT) {
-      runningStageFallbackTimerRef.current = setTimeout(() => {
-        runningStageFallbackTimerRef.current = null;
-        if (runningStageKindRef.current === "text" && runningStageTextRef.current === RUNNING_STAGE_RECEIVED_TEXT) {
-          updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT);
-        }
-      }, RUNNING_STAGE_RECEIVED_FALLBACK_MS);
-      return;
-    }
-    if (normalized === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
-      runningStageFallbackTimerRef.current = setTimeout(() => {
-        runningStageFallbackTimerRef.current = null;
-        if (runningStageKindRef.current === "text" && runningStageTextRef.current === RUNNING_STAGE_RUNTIME_STARTING_TEXT) {
-          updateRunningStage(RUNNING_STAGE_RUNTIME_CONNECTING_TEXT);
-        }
-      }, RUNNING_STAGE_RUNTIME_STARTING_FALLBACK_MS);
-      return;
-    }
-    if (
-      normalized === RUNNING_STAGE_RUNTIME_CONNECTING_TEXT ||
-      normalized === RUNNING_STAGE_CONTEXT_TEXT ||
-      normalized === RUNNING_STAGE_ANSWER_TEXT
-    ) {
-      runningStageFallbackTimerRef.current = setTimeout(() => {
-        runningStageFallbackTimerRef.current = null;
-        if (
-          runningStageKindRef.current === "text" &&
-          (runningStageTextRef.current === RUNNING_STAGE_RUNTIME_CONNECTING_TEXT ||
-            runningStageTextRef.current === RUNNING_STAGE_CONTEXT_TEXT ||
-            runningStageTextRef.current === RUNNING_STAGE_ANSWER_TEXT)
-        ) {
-          updateRunningStage(RUNNING_STAGE_LONG_WAIT_TEXT, { fallback: false });
-        }
-      }, RUNNING_STAGE_RUNTIME_CONNECTING_FALLBACK_MS);
     }
   };
 
@@ -6810,7 +6924,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           const notice = formatAssistantErrorNoticeFromError(error, "Failed to initialize the current session");
           setErrorText(notice);
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
-          updateRunningStage("Execution failed", { fallback: false, kind: "text" });
+          stopRunningStageWaitTimers();
+          updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
           throw new Error(notice);
         }
         const session = ensured.session;
@@ -6818,6 +6933,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         setErrorText("");
         setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
         updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
+        startRunningStageWaitTimers();
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -7295,7 +7411,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               const processDetail = userSafeProcessDetail(detail);
               setErrorText(assistantErrorNotice);
               void refreshPortalSubscriptionStatusRef.current({ silent: true });
-              updateRunningStage("Execution failed", { fallback: false, kind: "text" });
+              stopRunningStageWaitTimers();
+              updateRunningStage("Request needs attention", { fallback: false, kind: "text" });
               if (assistantErrorNotice) {
                 textChanged = appendTextPart(hasTextUpdate ? `\n\n${assistantErrorNotice}` : assistantErrorNotice) || textChanged;
               }
@@ -7306,7 +7423,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "error",
                     at: new Date().toISOString(),
-                    title: "Execution failed",
+                    title: "Needs attention",
                     detail: processDetail,
                     rawDetail: shorten(detail, 1400)
                   } satisfies ProcessData
@@ -7318,7 +7435,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "error",
                     at: new Date().toISOString(),
-                    title: "Execution failed",
+                    title: "Needs attention",
                     detail: processDetail,
                     rawDetail: shorten(detail, 1400)
                   } satisfies ProcessData
@@ -7432,14 +7549,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             }
 
             if (event === "meta") {
-              updateRunningStage(RUNNING_STAGE_RUNTIME_STARTING_TEXT, { kind: "text" });
               if (processEnabled) {
                 const model = payload && typeof payload.model === "string" ? payload.model : "";
                 const reasoning =
                   payload && typeof payload.reasoning_effort === "string" ? payload.reasoning_effort : "";
-                const runtimeDetail = [
+                const preparationDetail = [
                   [model, reasoning].filter(Boolean).join(" / "),
-                  "Waiting for the first update."
+                  "Preparing the first update."
                 ]
                   .filter(Boolean)
                   .join("\n");
@@ -7449,8 +7565,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "meta",
                     at: new Date().toISOString(),
-                    title: "Starting reasoning environment",
-                    detail: runtimeDetail
+                    title: "Preparing your workspace",
+                    detail: preparationDetail
                   } satisfies ProcessData
                 });
               }
@@ -7497,7 +7613,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     kind: "meta",
                     at: new Date().toISOString(),
                     title: "Analyzing context",
-                    detail: `First update: ${eventType}`
+                    detail: "First processing update received."
                   } satisfies ProcessData
                 });
               }
@@ -7553,6 +7669,37 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
             }
 
+            if (processEnabled && itemType && (isStarted || isCompleted)) {
+              const completedTraceHandledElsewhere = [
+                "reasoning",
+                "command_execution",
+                "mcp_tool_call",
+                "web_search",
+                "todo_list",
+                "file_change",
+                "error"
+              ];
+              if (isStarted || !completedTraceHandledElsewhere.includes(itemType)) {
+                const lifecycleTrace = codexLifecycleProcessTrace(itemType, isStarted ? "started" : "completed", item);
+                if (lifecycleTrace) {
+                  const status = typeof item?.status === "string" ? item.status : undefined;
+                  updates.push({
+                    type: "data",
+                    name: "codex_process",
+                    data: {
+                      kind: lifecycleTrace.kind,
+                      at: new Date().toISOString(),
+                      title: lifecycleTrace.title,
+                      detail: lifecycleTrace.detail,
+                      event: eventType,
+                      item_type: itemType,
+                      status
+                    } satisfies ProcessData
+                  });
+                }
+              }
+            }
+
             if (itemType === "agent_message" && isCompleted && !isFinalAnswerAgentMessage) {
               const completedKey = itemId || currentCommentaryKey;
               if (completedKey) {
@@ -7596,7 +7743,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: `Command execution ${formatProcessStatus(status)}`.trim(),
+                  title: "Workspace operation completed",
                   detail: [command ? `$ ${command}` : "", exitCode !== undefined ? `exit_code=${exitCode}` : ""]
                     .filter(Boolean)
                     .join("\n"),
@@ -7640,10 +7787,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 type: "data",
                 name: "codex_process",
                 data: {
-                  kind: errMsg ? "error" : "process",
+                  kind: "process",
                   at: new Date().toISOString(),
-                  title: crestTrace?.title ?? `Tool call ${errMsg ? "Failed" : "Completed"}`,
-                  detail: crestTrace?.detail ?? (errMsg ? GENERIC_TOOL_ERROR_DETAIL : rawDetail),
+                  title: crestTrace?.title ?? "Tool step completed",
+                  detail: crestTrace?.detail ?? rawDetail,
                   rawDetail: errMsg ? rawDetail : undefined,
                   event: eventType,
                   item_type: itemType
@@ -7679,7 +7826,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "process",
                     at: new Date().toISOString(),
-                    title: "Web search",
+                    title: "Search completed",
                     detail: query,
                     event: eventType,
                     item_type: itemType
@@ -7688,7 +7835,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
             }
 
-            if (itemType === "todo_list" && processEnabled) {
+            if (itemType === "todo_list" && isCompleted && processEnabled) {
               const items = Array.isArray(item?.items) ? item.items : [];
               const lines = items
                 .slice(0, 20)
@@ -7707,7 +7854,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: "Execution plan (Todo)",
+                  title: "Plan updated",
                   detail: lines,
                   event: eventType,
                   item_type: itemType
@@ -7752,7 +7899,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   data: {
                     kind: "process",
                     at: new Date().toISOString(),
-                    title: "File changes",
+                    title: "Files updated",
                     detail: lines,
                     event: eventType,
                     item_type: itemType
@@ -7769,7 +7916,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "error",
                   at: new Date().toISOString(),
-                  title: "Execution error",
+                  title: "Needs attention",
                   detail: userSafeProcessDetail(message, GENERIC_EXECUTION_ERROR_DETAIL),
                   rawDetail: shorten(message, 1200),
                   event: eventType,
@@ -7783,9 +7930,31 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               !shouldAppendAgentText &&
               itemType &&
               (isStarted || isCompleted) &&
-              !["command_execution", "mcp_tool_call", "web_search", "todo_list", "file_change", "reasoning", "error"].includes(
-                itemType
-              )
+              ![
+                "agent_message",
+                "user_message",
+                "hookPrompt",
+                "reasoning",
+                "command_execution",
+                "mcp_tool_call",
+                "web_search",
+                "todo_list",
+                "plan",
+                "file_change",
+                "error",
+                "contextCompaction",
+                "image_generation",
+                "image_generation_call",
+                "imageGeneration",
+                "image_generation_end",
+                "image_view",
+                "imageView",
+                "collabAgentToolCall",
+                "subAgentActivity",
+                "enteredReviewMode",
+                "exitedReviewMode",
+                "sleep"
+              ].includes(itemType)
             ) {
               const status = typeof item?.status === "string" ? item.status : undefined;
               updates.push({
@@ -7794,7 +7963,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 data: {
                   kind: "process",
                   at: new Date().toISOString(),
-                  title: `Process event ${eventType}`,
+                  title: "Processing step",
                   detail: shorten(detailFromUnknown(item), 800),
                   event: eventType,
                   item_type: itemType,
@@ -7834,6 +8003,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             updateRunningThreadMapForKeys(prev, runningThreadKeys, !completedInActiveThread)
           );
           setStatusText("Ready");
+          stopRunningStageWaitTimers();
           updateRunningStage(DEFAULT_RUNNING_STAGE_TEXT, { fallback: false, kind: "text" });
         }
       }

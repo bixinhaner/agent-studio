@@ -241,10 +241,64 @@ describe("CodexExecutionService", () => {
         expect.objectContaining({
           id: "tool-1-tool",
           kind: "tool",
-          title: "Tool call completed"
+          title: "Tool step completed"
         })
       ]
     });
+  });
+
+  it("projects app-server lifecycle events into friendly trace rows", () => {
+    const compaction = projectCodexRuntimeEvent({
+      type: "item.started",
+      raw: {
+        type: "item.started",
+        item: {
+          id: "context-1",
+          type: "contextCompaction"
+        }
+      }
+    });
+    const image = projectCodexRuntimeEvent({
+      type: "item.completed",
+      raw: {
+        type: "item.completed",
+        item: {
+          id: "image-1",
+          type: "image_generation_call",
+          revised_prompt: "A clean product poster",
+          result: "base64-image-content"
+        }
+      }
+    });
+    const hiddenUserMessage = projectCodexRuntimeEvent({
+      type: "item.started",
+      raw: {
+        type: "item.started",
+        item: {
+          id: "user-message-1",
+          type: "user_message",
+          text: "<enterprise_context>internal</enterprise_context>"
+        }
+      }
+    });
+
+    expect(compaction.traceRows).toEqual([
+      expect.objectContaining({
+        id: "context-1-context",
+        kind: "meta",
+        title: "Context window is full. Compressing context."
+      })
+    ]);
+    expect(image.traceRows).toEqual([
+      expect.objectContaining({
+        id: "image-1-image",
+        kind: "tool",
+        title: "Image generated",
+        detail: "A clean product poster"
+      })
+    ]);
+    expect(JSON.stringify(image.traceRows)).not.toContain("base64-image-content");
+    expect(hiddenUserMessage.traceRows).toEqual([]);
   });
 
   it("projects completed agent messages for run-level commentary", () => {
