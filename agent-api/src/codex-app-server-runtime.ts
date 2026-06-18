@@ -45,7 +45,6 @@ const DEFAULT_MAX_PROCESSES = 30;
 const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const TOML_DRIVER_APP_SERVER = "app_server";
-const WORKSPACE_SCOPED_ENV_KEYS = new Set(["TMPDIR", "TEMP", "TMP"]);
 
 function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -110,22 +109,13 @@ function stripUndefined<T>(value: T): T {
   return out as T;
 }
 
-function appServerProcessEnvOverrides(options: CodexRuntimeOptions): Record<string, string> {
-  const overrides: Record<string, string> = {};
-  for (const [key, value] of Object.entries(options.envOverrides ?? {})) {
-    if (WORKSPACE_SCOPED_ENV_KEYS.has(key)) continue;
-    if (typeof value === "string") overrides[key] = value;
-  }
-  return overrides;
-}
-
 function effectiveEnv(options: CodexRuntimeOptions): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
-  for (const [key, value] of Object.entries(appServerProcessEnvOverrides(options))) {
-    env[key] = value;
+  for (const [key, value] of Object.entries(options.envOverrides ?? {})) {
+    if (typeof value === "string") env[key] = value;
   }
   if (options.apiKey) {
     env.CODEX_API_KEY = options.apiKey;
@@ -156,14 +146,13 @@ function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown
 
 function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
   const env = effectiveEnv(options);
-  const envOverrides = appServerProcessEnvOverrides(options);
   const binaryPath = appServerBinaryPath();
   const config = runtimeBaseConfig(options);
   const scopeIdentity = {
     binaryPath,
     codexHome: trimOrUndefined(env.CODEX_HOME) ?? path.join(os.homedir(), ".codex"),
     config,
-    envOverrides,
+    envOverrides: options.envOverrides ?? {},
     apiKey: options.apiKey ? sha256(options.apiKey) : undefined,
     baseUrl: options.baseUrl
   };
@@ -897,21 +886,12 @@ const appServerManager = new CodexAppServerManager();
 export class CodexAppServerRuntime {
   constructor(private readonly options: CodexRuntimeOptions = {}) {}
 
-  private withRuntimeThreadConfig(options: AppServerThreadOptions): AppServerThreadOptions {
-    const runtimeThreadConfig = asRecord(this.options.appServerThreadConfig);
-    if (!runtimeThreadConfig) return options;
-    return {
-      ...options,
-      codexRunConfig: mergeConfig(runtimeThreadConfig, options.codexRunConfig)
-    };
-  }
-
   async startThreadWithOptions(options: AppServerThreadOptions): Promise<CodexAppServerThread> {
-    return await appServerManager.startThread(this.options, this.withRuntimeThreadConfig(options));
+    return await appServerManager.startThread(this.options, options);
   }
 
   async resumeThreadWithOptions(options: AppServerThreadOptions & { threadId: string }): Promise<CodexAppServerThread> {
-    return await appServerManager.resumeThread(this.options, options.threadId, this.withRuntimeThreadConfig(options));
+    return await appServerManager.resumeThread(this.options, options.threadId, options);
   }
 
   async *runStreamed(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {

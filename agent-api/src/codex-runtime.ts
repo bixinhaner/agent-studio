@@ -15,7 +15,6 @@ export type CodexRuntimeOptions = {
   apiKey?: string;
   config?: Record<string, any>;
   envOverrides?: Record<string, string>;
-  appServerThreadConfig?: Record<string, any>;
 };
 
 function pickText(value: unknown): string {
