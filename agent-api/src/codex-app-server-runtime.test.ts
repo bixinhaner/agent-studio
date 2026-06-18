@@ -8,12 +8,14 @@ import { CodexRuntime, type CodexStreamEvent } from "./codex-runtime.js";
 
 const testTempDir = path.resolve(process.cwd(), "..", "temp", "codex-app-server-runtime-test");
 const fakeBinaryPath = path.join(testTempDir, "fake-codex-app-server.mjs");
+const fakeLogPath = path.join(testTempDir, "fake-codex-app-server.log");
 
 const originalEnv = {
   CODEX_RUNTIME_DRIVER: process.env.CODEX_RUNTIME_DRIVER,
   CODEX_APP_SERVER_BINARY: process.env.CODEX_APP_SERVER_BINARY,
   CODEX_APP_SERVER_MAX_PROCESSES: process.env.CODEX_APP_SERVER_MAX_PROCESSES,
-  CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS
+  CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS,
+  APP_SERVER_TEST_LOG: process.env.APP_SERVER_TEST_LOG
 };
 
 async function writeFakeAppServer(): Promise<void> {
@@ -21,6 +23,7 @@ async function writeFakeAppServer(): Promise<void> {
   await fs.writeFile(
     fakeBinaryPath,
     `#!/usr/bin/env node
+import fs from "node:fs";
 import readline from "node:readline";
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -30,6 +33,11 @@ const threads = new Set();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+function log(event) {
+  if (!process.env.APP_SERVER_TEST_LOG) return;
+  fs.appendFileSync(process.env.APP_SERVER_TEST_LOG, JSON.stringify({ pid: process.pid, ...event }) + "\\n");
 }
 
 function respond(id, result) {
@@ -48,16 +56,19 @@ rl.on("line", (line) => {
   const id = message.id;
   const params = message.params || {};
   if (message.method === "initialize") {
+    log({ event: "initialize" });
     respond(id, {});
     return;
   }
   if (message.method === "thread/start") {
+    log({ event: "thread/start", params });
     const threadId = "thread-" + nextThreadId++;
     threads.add(threadId);
     respond(id, { thread: { id: threadId } });
     return;
   }
   if (message.method === "thread/resume") {
+    log({ event: "thread/resume", params });
     if (!threads.has(params.threadId)) {
       write({ id, error: { message: "no rollout found for thread id " + params.threadId } });
       return;
@@ -154,10 +165,12 @@ function restoreEnv(): void {
 describe("Codex app-server runtime", () => {
   beforeEach(async () => {
     await writeFakeAppServer();
+    await fs.rm(fakeLogPath, { force: true });
     process.env.CODEX_RUNTIME_DRIVER = "app_server";
     process.env.CODEX_APP_SERVER_BINARY = fakeBinaryPath;
     process.env.CODEX_APP_SERVER_MAX_PROCESSES = "30";
     process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS = "2";
+    process.env.APP_SERVER_TEST_LOG = fakeLogPath;
   });
 
   afterEach(() => {
@@ -270,5 +283,74 @@ describe("Codex app-server runtime", () => {
     }
 
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
+  it("reuses an app-server process when only thread-scoped config and workspace temp env differ", async () => {
+    const sharedCodexHome = path.join(testTempDir, "codex-home-shared");
+    const runtimeA = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: sharedCodexHome,
+        TMPDIR: path.join(testTempDir, "workspace-a", ".agent-studio", "tmp")
+      },
+      appServerThreadConfig: {
+        mcp_servers: {
+          crest_crm: {
+            command: process.execPath,
+            args: ["/tmp/crest-proxy-a.mjs"],
+            env: {
+              AGENT_STUDIO_CREST_PROXY_TOKEN: "token-a"
+            }
+          }
+        }
+      }
+    });
+    const runtimeB = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: sharedCodexHome,
+        TMPDIR: path.join(testTempDir, "workspace-b", ".agent-studio", "tmp")
+      },
+      appServerThreadConfig: {
+        mcp_servers: {
+          crest_crm: {
+            command: process.execPath,
+            args: ["/tmp/crest-proxy-b.mjs"],
+            env: {
+              AGENT_STUDIO_CREST_PROXY_TOKEN: "token-b"
+            }
+          }
+        }
+      }
+    });
+
+    await runtimeA.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: path.join(testTempDir, "workspace-a"),
+      codexRunConfig: {
+        sandboxMode: "workspace-write",
+        approvalPolicy: "never"
+      }
+    });
+    await runtimeB.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: path.join(testTempDir, "workspace-b"),
+      codexRunConfig: {
+        sandboxMode: "workspace-write",
+        approvalPolicy: "never"
+      }
+    });
+
+    const logLines = (await fs.readFile(fakeLogPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { event: string; pid: number; params?: any });
+    const initializedPids = new Set(logLines.filter((line) => line.event === "initialize").map((line) => line.pid));
+    const starts = logLines.filter((line) => line.event === "thread/start");
+
+    expect(initializedPids.size).toBe(1);
+    expect(starts).toHaveLength(2);
+    expect(starts[0]?.params?.config?.mcp_servers?.crest_crm?.env?.AGENT_STUDIO_CREST_PROXY_TOKEN).toBe("token-a");
+    expect(starts[1]?.params?.config?.mcp_servers?.crest_crm?.env?.AGENT_STUDIO_CREST_PROXY_TOKEN).toBe("token-b");
   });
 });

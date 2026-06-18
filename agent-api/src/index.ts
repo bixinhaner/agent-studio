@@ -2505,6 +2505,16 @@ function createRuntimeForProviderSnapshot(
   if (!hasEnvOverrides && !hasConfigOverrides) {
     return new CodexRuntime(runtimeOptions);
   }
+  if (isAppServerRuntimeEnabled()) {
+    return new CodexRuntime({
+      ...(runtimeOptions ?? {}),
+      envOverrides: {
+        ...(runtimeOptions?.envOverrides ?? {}),
+        ...(overrides?.envOverrides ?? {})
+      },
+      appServerThreadConfig: mergeCodexConfig(runtimeOptions?.appServerThreadConfig, overrides?.configOverrides)
+    });
+  }
   return new CodexRuntime({
     ...(runtimeOptions ?? {}),
     config: mergeCodexConfig(runtimeOptions?.config, overrides?.configOverrides),
