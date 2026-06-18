@@ -181,7 +181,7 @@ type ThreadOneOut = {
 
 type ThreadCreateOut = {
   thread: ThreadOut;
-  session?: SessionOut;
+  session?: SessionOut | null;
 };
 
 type ThreadSessionOut = {
@@ -6423,7 +6423,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               model: cfg.model,
               reasoning_effort: cfg.reasoningEffort,
               knowledge_set_ids: knowledgeSetIds,
-              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
+              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills),
+              start_session: false
             }
           });
         } catch (error) {
@@ -6432,7 +6433,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           void refreshPortalSubscriptionStatusRef.current({ silent: true });
           throw new Error(notice);
         }
-        setActiveThreadIdentity({
+        syncActiveThreadIdentity({
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
@@ -6910,6 +6911,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error("The current shared thread is read-only and cannot continue running.");
         }
 
+        setErrorText("");
+        setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
+        updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
+        startRunningStageWaitTimers();
+
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
@@ -6935,11 +6941,6 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error(notice);
         }
         const session = ensured.session;
-
-        setErrorText("");
-        setStatusText(isSkillCreationRequest ? "Creating skill..." : "Generating...");
-        updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
-        startRunningStageWaitTimers();
 
         let hasTextUpdate = false;
         let doneAnswer = "";

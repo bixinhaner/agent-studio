@@ -1903,7 +1903,8 @@ const createThreadSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
-  codex_run_config: z.record(z.unknown()).optional()
+  codex_run_config: z.record(z.unknown()).optional(),
+  start_session: z.boolean().optional()
 });
 
 const patchThreadSchema = z.object({
@@ -8013,19 +8014,28 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         codexRunConfig: options.codexRunConfig
       })
     );
-    const session = await timing.time("create_thread.create_session", () =>
-      createSession(options, createdThread.id, timing)
-    );
-    timing.updateContext({ sessionId: session.sessionId });
-    const updated = (await timing.time("create_thread.reload_thread", () =>
-      threads.get(createdThread.id, currentUser.organizationId)
-    )) ?? createdThread;
+    const shouldStartSession = input.start_session !== false;
+    const session = shouldStartSession
+      ? await timing.time("create_thread.create_session", () =>
+          createSession(options, createdThread.id, timing)
+        )
+      : undefined;
+    if (session) {
+      timing.updateContext({ sessionId: session.sessionId });
+    } else {
+      timing.mark("create_thread.defer_session_start");
+    }
+    const updated = session
+      ? (await timing.time("create_thread.reload_thread", () =>
+          threads.get(createdThread.id, currentUser.organizationId)
+        )) ?? createdThread
+      : createdThread;
 
     res.json({
       thread: threadOut(updated),
-      session: sessionOut(session)
+      session: session ? sessionOut(session) : null
     });
-    timing.finish("success", { modeId: allocated.modeId });
+    timing.finish("success", { modeId: allocated.modeId, sessionStarted: shouldStartSession });
   } catch (error) {
     timing.finish("error", { error: error instanceof Error ? error.message : String(error) });
     res.status(statusCodeForSessionAccessError(error)).json(payloadForSessionAccessError(error, "Failed to create thread"));
