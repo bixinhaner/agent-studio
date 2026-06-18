@@ -3326,6 +3326,14 @@ const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
 
 const HiddenToolFallback: FC<any> = () => null;
 
+const AssistantLiveStatus: FC<{ title: string; compact?: boolean }> = ({ title, compact }) => (
+  <span className={`assistant-live-status${compact ? " is-compact" : ""}`}>
+    <span className="assistant-running-spinner" aria-hidden="true" />
+    <span className="assistant-running-title">{title}</span>
+    <span className="assistant-running-chip">Live</span>
+  </span>
+);
+
 const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
   const runningStage = useContext(RunningStageTextContext);
   if (status.type !== "running") return null;
@@ -3342,9 +3350,7 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
       aria-label={ariaStatus}
     >
       <div className="assistant-running-head">
-        <span className="assistant-running-spinner" aria-hidden="true" />
-        <span className="assistant-running-title">{isImageStage ? "Preparing image" : "Working on it"}</span>
-        <span className="assistant-running-chip">Live</span>
+        <AssistantLiveStatus title={isImageStage ? "Preparing image" : "Working on it"} />
       </div>
       <p className="assistant-running-phase">{runningStage.text}</p>
       {runningStage.secondaryText ? <p className="assistant-running-secondary">{runningStage.secondaryText}</p> : null}
@@ -3614,7 +3620,7 @@ const AssistantCommentaryBlock: FC<{
       onToggle={(event) => setIsOpen(event.currentTarget.open)}
     >
       <summary className="assistant-commentary-head">
-        <span className="assistant-commentary-chip">{isStreaming ? "Thinking..." : "Thought"}</span>
+        {isStreaming ? <AssistantLiveStatus title="Thinking..." compact /> : <span className="assistant-commentary-chip">Thought</span>}
         {!isStreaming && (
           <span className="assistant-commentary-count">
             {entryCount} {entryCount === 1 ? "thought" : "thoughts"} · {updateCount}{" "}
@@ -6954,6 +6960,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         let seq = 0;
         let firstRuntimeEventSeen = false;
         let finalAnswerItemSeen = false;
+        let finalAnswerStreamStarted = false;
         let activeTraceBatchPart: TraceBatchPart | null = null;
         const agentMessagePhaseById = new Map<string, string>();
         const finalAnswerTextById = new Map<string, string>();
@@ -6975,8 +6982,39 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return true;
         };
 
+        const completeCommentaryParts = (options?: { close?: boolean }): boolean => {
+          let changed = false;
+          for (const part of orderedParts) {
+            const item = part as Record<string, unknown>;
+            if (item.type !== "data" || item.name !== "codex_commentary") continue;
+            const payload = asRecord(item.data);
+            if (!payload) continue;
+            const entries = Array.isArray(payload.entries) ? payload.entries : [];
+            for (const entry of entries) {
+              const entryObj = asRecord(entry);
+              if (entryObj && entryObj.status !== "completed") {
+                entryObj.status = "completed";
+                changed = true;
+              }
+            }
+            if (payload.status !== "completed") {
+              payload.status = "completed";
+              changed = true;
+            }
+            if (options?.close && payload.open !== false) {
+              payload.open = false;
+              changed = true;
+            }
+          }
+          return changed;
+        };
+
         const appendFinalAnswerText = (key: string, nextText: string, mode: "append" | "replace"): boolean => {
           if (!nextText) return false;
+          if (!finalAnswerStreamStarted) {
+            finalAnswerStreamStarted = true;
+            completeCommentaryParts({ close: false });
+          }
           activeCommentaryPart = null;
           currentCommentaryKey = "";
           if (!activeFinalAnswerPart) {
@@ -7033,7 +7071,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               lines: [],
               entries: [],
               open: true,
-              status: "streaming"
+              status: finalAnswerStreamStarted ? "completed" : "streaming"
             }
           };
           orderedParts.push(part);
@@ -7079,7 +7117,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               id: key,
               text: "",
               lines: [],
-              status: "streaming"
+              status: finalAnswerStreamStarted ? "completed" : "streaming"
             };
             entries.push(entry);
             part.data.entries = entries;
@@ -7109,6 +7147,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             return false;
           }
           entry.text = resolvedText;
+          const nextStatus = finalAnswerStreamStarted ? "completed" : "streaming";
           if (nextDelta) {
             const lastEventAt = typeof entry.last_event_at === "number" ? entry.last_event_at : 0;
             const shouldStartNewLine = previousLines.length === 0 || now - lastEventAt >= commentaryLineBreakGapMs;
@@ -7121,11 +7160,13 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           }
           entry.lines = previousLines;
           entry.last_event_at = now;
-          entry.status = "streaming";
+          entry.status = nextStatus;
           part.data.open = true;
           part.data.last_event_at = now;
           syncCommentaryPartSummary(part);
-          part.data.status = "streaming";
+          if (!finalAnswerStreamStarted) {
+            part.data.status = "streaming";
+          }
           hasTextUpdate = true;
           return true;
         };
@@ -7205,29 +7246,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           return false;
         };
 
-        const collapseCommentaryParts = (): boolean => {
-          let changed = false;
-          for (const part of orderedParts) {
-            const item = part as Record<string, unknown>;
-            if (item.type !== "data" || item.name !== "codex_commentary") continue;
-            const payload = asRecord(item.data);
-            if (!payload) continue;
-            const entries = Array.isArray(payload.entries) ? payload.entries : [];
-            for (const entry of entries) {
-              const entryObj = asRecord(entry);
-              if (entryObj && entryObj.status !== "completed") {
-                entryObj.status = "completed";
-                changed = true;
-              }
-            }
-            if (payload.open !== false || payload.status !== "completed") {
-              payload.open = false;
-              payload.status = "completed";
-              changed = true;
-            }
-          }
-          return changed;
-        };
+        const collapseCommentaryParts = (): boolean => completeCommentaryParts({ close: true });
 
         const hasStreamedFinalAnswerText = (): boolean => {
           if (activeFinalAnswerPart?.text.trim()) return true;
@@ -7700,7 +7719,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
             }
 
-            if (itemType === "agent_message" && isCompleted && !isFinalAnswerAgentMessage) {
+            if (itemType === "agent_message" && isCompleted && !isFinalAnswerAgentMessage && finalAnswerStreamStarted) {
               const completedKey = itemId || currentCommentaryKey;
               if (completedKey) {
                 markCommentaryCompleted(completedKey);

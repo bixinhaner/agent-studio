@@ -2184,6 +2184,19 @@ body.access-request-route #root {
   gap: 8px;
 }
 
+.assistant-live-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.assistant-live-status.is-compact {
+  width: auto;
+  gap: 6px;
+}
+
 .assistant-running-spinner {
   width: 10px;
   height: 10px;
@@ -2216,6 +2229,28 @@ body.access-request-route #root {
   color: #E63B0F;
   background: #fff3f0;
   font-variant-numeric: tabular-nums;
+}
+
+.assistant-live-status.is-compact .assistant-running-spinner {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 7px rgba(255, 70, 20, 0.48);
+}
+
+.assistant-live-status.is-compact .assistant-running-title {
+  font-size: 11px;
+  color: #3b5a8f;
+}
+
+.assistant-live-status.is-compact .assistant-running-chip {
+  margin-left: 0;
+  border-color: #bfd4ff;
+  border-radius: 999px;
+  padding: 0 6px;
+  background: #eef4ff;
+  color: #3b5a8f;
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .assistant-running-phase {
