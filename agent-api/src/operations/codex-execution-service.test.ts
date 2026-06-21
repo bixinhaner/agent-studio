@@ -591,7 +591,13 @@ describe("CodexExecutionService", () => {
     });
 
     expect(commentaryDelta.answerDelta).toBeUndefined();
+    expect(commentaryDelta.commentaryDelta).toEqual({
+      id: "message-commentary",
+      text: "I will inspect the records.",
+      append: true
+    });
     expect(finalDelta.answerDelta).toBe("Here is the answer.");
+    expect(finalDelta.commentaryDelta).toBeUndefined();
     expect(finalCompleted.liveCommentaryEntries).toEqual([
       expect.objectContaining({
         id: "message-commentary",

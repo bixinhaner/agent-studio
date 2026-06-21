@@ -3618,6 +3618,10 @@ function emitCrestRuntimeEvent(
     sendSSE(res, "delta", { text: projection.answerDelta });
     return;
   }
+  if (projection.commentaryDelta) {
+    sendSSE(res, "thought", projection.commentaryDelta);
+    return;
+  }
   if (projection.reasoningText && options.emitReasoningThought !== false) {
     sendSSE(res, "thought", { text: truncateText(projection.reasoningText, 1200) });
     return;

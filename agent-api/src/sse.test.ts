@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Request, Response } from "express";
 import { describe, expect, it } from "vitest";
 
-import { createSseAbortLifecycle } from "./sse.js";
+import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 
 function fakeHttpPair() {
   const req = new EventEmitter() as Request;
@@ -41,5 +41,48 @@ describe("createSseAbortLifecycle", () => {
 
     expect(req.listenerCount("aborted")).toBe(0);
     expect(res.listenerCount("close")).toBe(0);
+  });
+});
+
+describe("SSE response helpers", () => {
+  it("disables proxy buffering when initializing a stream", () => {
+    const headers = new Map<string, string>();
+    let statusCode = 0;
+    let flushHeadersCalled = false;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+      },
+      setHeader(name: string, value: string) {
+        headers.set(name, value);
+      },
+      flushHeaders() {
+        flushHeadersCalled = true;
+      }
+    } as unknown as Response;
+
+    initSSE(res);
+
+    expect(statusCode).toBe(200);
+    expect(headers.get("X-Accel-Buffering")).toBe("no");
+    expect(flushHeadersCalled).toBe(true);
+  });
+
+  it("flushes each event frame when possible", () => {
+    const writes: string[] = [];
+    let flushCount = 0;
+    const res = {
+      write(chunk: string) {
+        writes.push(chunk);
+      },
+      flush() {
+        flushCount += 1;
+      }
+    } as unknown as Response & { flush: () => void };
+
+    sendSSE(res, "delta", { text: "hello" });
+
+    expect(writes.join("")).toBe('event: delta\ndata: {"text":"hello"}\n\n');
+    expect(flushCount).toBe(1);
   });
 });

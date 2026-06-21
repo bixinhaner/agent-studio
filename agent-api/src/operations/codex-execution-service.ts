@@ -51,6 +51,11 @@ export type CodexRuntimeEventProjection = {
   itemId?: string;
   agentMessagePhase?: string;
   answerDelta?: string;
+  commentaryDelta?: {
+    id?: string;
+    text: string;
+    append: boolean;
+  };
   reasoningText?: string;
   completedAgentMessage?: {
     id?: string;
@@ -584,6 +589,11 @@ export class CodexRunProjection {
     if (this.options.streamAnswerDeltas === false) {
       projection.answerDelta = undefined;
     } else if (projection.answerDelta && agentMessagePhase && agentMessagePhase !== "final_answer") {
+      projection.commentaryDelta = {
+        id: projection.itemId,
+        text: projection.answerDelta,
+        append: true
+      };
       projection.answerDelta = undefined;
     }
     this.traceRows.push(...projection.traceRows);
