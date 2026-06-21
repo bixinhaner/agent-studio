@@ -58,7 +58,7 @@ import {
 } from "./codex-memory/engine.js";
 import { CodexMemoryBackfillService } from "./codex-memory/backfill-service.js";
 import { createCodexMemoryAdminRouter } from "./codex-memory/router.js";
-import { EnterpriseContextService } from "./enterprise-context-service.js";
+import { EnterpriseContextService, type EnterpriseContextChannel } from "./enterprise-context-service.js";
 import {
   buildSharedPythonRuntimeEnv,
   ensureRuntimeWorkspaceTmp,
@@ -106,7 +106,9 @@ import {
   ensureThreadUploadInRunConfig,
   replaceLiveRuntimeSession,
   stripInternalRunConfigMetadata,
-  startLiveRuntimeSession
+  startLiveRuntimeSession,
+  type RuntimeStreamEvent,
+  type RuntimeUsageSnapshot
 } from "./live-runtime-session.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
@@ -228,7 +230,9 @@ import {
   CodexExecutionService,
   CodexRunProjection,
   type CodexCommentaryEntry,
+  type CodexCompletionMemoryInput,
   type CodexRuntimeEventProjection,
+  type CodexRunProjectionFinalized,
   type CodexRuntimeTurnTrackerInput
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
@@ -1596,11 +1600,17 @@ function isRecoverableCodexResumeError(error: unknown): boolean {
   return /thread\/resume failed|no rollout found for thread id/i.test(runtimeErrorDetail(error));
 }
 
-function crestRuntimeEventHasSideEffect(event: { delta?: string; text?: string; raw?: unknown }): boolean {
+function runtimeEventHasTurnSideEffect(event: { delta?: string; text?: string; raw?: unknown }): boolean {
   const raw = asRecord(event.raw);
   const item = asRecord(raw?.item);
   const itemType = typeof item?.type === "string" ? item.type : "";
-  return Boolean(event.delta || itemType === "agent_message" || itemType === "mcp_tool_call");
+  return Boolean(
+    event.delta ||
+    itemType === "agent_message" ||
+    itemType === "mcp_tool_call" ||
+    itemType === "command_execution" ||
+    itemType === "file_change"
+  );
 }
 
 async function getDeploymentDrainReason(): Promise<string | undefined> {
@@ -2968,6 +2978,236 @@ function currentActorFromRequest(req: Request): CurrentActor {
   };
 }
 
+type CodexChannelTurnResult = {
+  session: SessionRecord;
+  liveThread: LiveRuntimeThread;
+  answerText: string;
+  generatedArtifacts: ThreadArtifactRecord[];
+  artifactContentPart?: Record<string, unknown>;
+  finalizedProcess: CodexRunProjectionFinalized;
+};
+
+type CodexChannelTurnUsageContext = {
+  session: SessionRecord;
+  usage: RuntimeUsageSnapshot;
+  resultStatus: "success" | "failed";
+};
+
+type CodexChannelTurnInput = {
+  channel: EnterpriseContextChannel;
+  memoryChannel: string;
+  currentUser: CurrentActor;
+  thread: ThreadRecord;
+  session: SessionRecord;
+  liveThread: LiveRuntimeThread;
+  prompt: string;
+  memoryPrompt: string;
+  memoryMetadata?: Record<string, unknown>;
+  usageSource: string;
+  usageMetadata?: Record<string, unknown> | ((context: CodexChannelTurnUsageContext) => Promise<Record<string, unknown>> | Record<string, unknown>);
+  departmentIdSnapshot?: () => Promise<string | undefined>;
+  signal?: AbortSignal;
+  emptyAnswerText: string;
+  projectionOptions?: ConstructorParameters<typeof CodexRunProjection>[0];
+  hasExternalContext?: (session: SessionRecord) => boolean;
+  artifactScanStartedAt?: Date;
+  logLabel: string;
+  shouldSkipRetry?: () => boolean;
+  onEvent?: (input: {
+    event: RuntimeStreamEvent;
+    projection: CodexRuntimeEventProjection;
+    session: SessionRecord;
+  }) => void;
+  onArtifacts?: (input: {
+    session: SessionRecord;
+    artifacts: ThreadArtifactRecord[];
+  }) => void;
+  onArtifactError?: (error: unknown) => void;
+  onDone?: (input: CodexChannelTurnResult) => Promise<void> | void;
+  onRetry?: (input: { error: unknown; session: SessionRecord }) => Promise<void> | void;
+  onTelemetryError?: (error: unknown) => void;
+};
+
+async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexChannelTurnResult> {
+  let currentSession = input.session;
+  let liveThread = input.liveThread;
+  let runProjection = new CodexRunProjection(input.projectionOptions);
+  let runtimeFileChanges: RuntimeFileChange[] = [];
+  let runtimeSideEffectStarted = false;
+  let answerText = "";
+  let generatedArtifacts: ThreadArtifactRecord[] = [];
+  let artifactContentPart: Record<string, unknown> | undefined;
+  let finalizedProcess: CodexRunProjectionFinalized = runProjection.finalize();
+
+  const resetAttemptState = () => {
+    runProjection = new CodexRunProjection(input.projectionOptions);
+    runtimeFileChanges = [];
+    runtimeSideEffectStarted = false;
+    answerText = "";
+    generatedArtifacts = [];
+    artifactContentPart = undefined;
+    finalizedProcess = runProjection.finalize();
+  };
+
+  const runOnce = async () => {
+    const runtimeMessage = withSkillActivationPrompts(input.prompt, currentSession.codexRunConfig);
+    const enterpriseRunContext = await enterpriseContext.resolveForRun({
+      channel: input.channel,
+      userId: input.currentUser.id,
+      agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
+    });
+    await codexExecution.streamFromRuntime({
+      runtime,
+      thread: liveThread,
+      prompt: runtimeMessage,
+      enterpriseContext: enterpriseRunContext,
+      signal: input.signal,
+      memory: {
+        channel: input.memoryChannel,
+        prompt: input.memoryPrompt,
+        codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
+        codexThreadId: currentSession.codexThreadId,
+        sessionId: currentSession.sessionId,
+        threadId: input.thread.id,
+        organizationId: input.currentUser.organizationId,
+        userId: input.currentUser.id,
+        model: currentSession.model,
+        hasExternalContext:
+          input.hasExternalContext?.(currentSession) ?? codexRunConfigHasExternalContext(currentSession.codexRunConfig),
+        metadata: input.memoryMetadata
+      } satisfies CodexCompletionMemoryInput,
+      onEvent(event) {
+        const projection = runProjection.push(event);
+        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
+        if (runtimeEventHasTurnSideEffect(event)) {
+          runtimeSideEffectStarted = true;
+        }
+        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
+        if (codexThreadId) {
+          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
+            currentSession = updated;
+          });
+        }
+        input.onEvent?.({
+          event,
+          projection,
+          session: currentSession
+        });
+      },
+      async onDone(payload) {
+        answerText = payload.answer.trim() || input.emptyAnswerText;
+        try {
+          generatedArtifacts = await registerGeneratedArtifactsForSession({
+            currentUser: input.currentUser,
+            session: currentSession,
+            changes: runtimeFileChanges,
+            answerText,
+            changedAfter: input.artifactScanStartedAt
+          });
+          if (generatedArtifacts.length > 0) {
+            input.onArtifacts?.({
+              session: currentSession,
+              artifacts: generatedArtifacts
+            });
+          }
+        } catch (error) {
+          console.warn(`${input.logLabel} artifact registration failed`, {
+            threadId: input.thread.id,
+            detail: error instanceof Error ? error.message : String(error)
+          });
+          input.onArtifactError?.(error);
+        }
+        finalizedProcess = runProjection.finalize({ finalAnswer: answerText });
+        const artifactPolicy = await resolveArtifactPolicyForActor(input.currentUser);
+        artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
+        await input.onDone?.({
+          session: currentSession,
+          liveThread,
+          answerText,
+          generatedArtifacts,
+          artifactContentPart,
+          finalizedProcess
+        });
+      },
+      async recordUsage(usage, resultStatus = "success") {
+        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
+        const extraMetadata =
+          typeof input.usageMetadata === "function"
+            ? await input.usageMetadata({ session: currentSession, usage, resultStatus })
+            : input.usageMetadata ?? {};
+        await usageRecorder.recordCodexUsage({
+          organizationId: input.currentUser.organizationId,
+          userId: input.currentUser.id,
+          departmentIdSnapshot: input.departmentIdSnapshot ? await input.departmentIdSnapshot() : undefined,
+          threadId: input.thread.id,
+          sessionId: currentSession.sessionId,
+          model: currentSession.model,
+          featureType: "chat",
+          usage,
+          codexThreadId,
+          resultStatus,
+          metadata: {
+            source: input.usageSource,
+            ...extraMetadata
+          }
+        });
+      },
+      onTelemetryError(error) {
+        if (input.onTelemetryError) {
+          input.onTelemetryError(error);
+          return;
+        }
+        console.warn(`${input.logLabel} usage telemetry failed`, {
+          threadId: input.thread.id,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+  };
+
+  try {
+    await runOnce();
+  } catch (error) {
+    if (input.signal?.aborted || input.shouldSkipRetry?.()) {
+      throw error;
+    }
+    const recoverable = isRecoverableCodexResumeError(error);
+    console.warn(`${input.logLabel} runtime failed`, {
+      threadId: input.thread.id,
+      sessionId: currentSession.sessionId,
+      codexThreadId: currentSession.codexThreadId,
+      recoverable,
+      runtimeSideEffectStarted,
+      detail: runtimeErrorDetail(error)
+    });
+    if (!recoverable || runtimeSideEffectStarted) {
+      throw error;
+    }
+    await input.onRetry?.({ error, session: currentSession });
+    const replacement = await replaceUserAgentLiveRuntimeSession({
+      currentUser: input.currentUser,
+      session: currentSession,
+      threadId: input.thread.id,
+      failedCodexThreadId: currentSession.codexThreadId,
+      error,
+      logLabel: input.logLabel
+    });
+    currentSession = replacement.session;
+    liveThread = replacement.liveThread;
+    resetAttemptState();
+    await runOnce();
+  }
+
+  return {
+    session: currentSession,
+    liveThread,
+    answerText,
+    generatedArtifacts,
+    artifactContentPart,
+    finalizedProcess
+  };
+}
+
 async function ensureCrestChatThread(input: {
   currentUser: CurrentActor;
   conversationId: string;
@@ -3094,174 +3334,82 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       runConfig: { channel: "crest", conversationId: input.conversationId }
     });
 
-    const artifactScanStartedAt = new Date(Date.now() - 2000);
-    const runtimeFileChanges: RuntimeFileChange[] = [];
-    let runProjection = new CodexRunProjection({ streamAnswerDeltas: false });
-    let runtimeSideEffectStarted = false;
-    const runRuntimeCompletion = async () => {
-      const runtimePrompt = withSkillActivationPrompts(
-        crestRuntimePrompt(input, preparedAttachments),
-        currentSession.codexRunConfig
-      );
-      const enterpriseRunContext = await enterpriseContext.resolveForRun({
-        channel: "crest",
-        userId: currentUser.id,
-        agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
-      });
-      await codexExecution.streamFromRuntime({
-        runtime,
-        thread: liveThread,
-        prompt: runtimePrompt,
-        enterpriseContext: enterpriseRunContext,
-        signal: streamAbort.signal,
-        memory: {
-          channel: "crest",
-          prompt: input.message,
-          codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
-          codexThreadId: currentSession.codexThreadId,
-          sessionId: currentSession.sessionId,
+    await runCodexChannelTurn({
+      channel: "crest",
+      memoryChannel: "crest",
+      currentUser,
+      thread,
+      session: currentSession,
+      liveThread,
+      prompt: crestRuntimePrompt(input, preparedAttachments),
+      memoryPrompt: input.message,
+      memoryMetadata: {
+        conversationId: input.conversationId
+      },
+      usageSource: "crest_chat_stream",
+      signal: streamAbort.signal,
+      emptyAnswerText: "(无输出)",
+      artifactScanStartedAt: new Date(Date.now() - 2000),
+      logLabel: "crest chat",
+      shouldSkipRetry: () => streamAbort.disconnected,
+      hasExternalContext: (sessionForRun) =>
+        preparedAttachments.length > 0 || codexRunConfigHasExternalContext(sessionForRun.codexRunConfig),
+      onEvent({ projection }) {
+        emitCrestRuntimeEvent(res, projection, { emitReasoningThought: false });
+        emitCrestCommentaryThoughts(res, projection.liveCommentaryEntries);
+      },
+      onArtifacts({ session: sessionForRun, artifacts }) {
+        sendSSE(res, "artifacts", {
           threadId: thread.id,
-          organizationId: currentUser.organizationId,
-          userId: currentUser.id,
-          model: currentSession.model,
-          hasExternalContext: preparedAttachments.length > 0 || codexRunConfigHasExternalContext(currentSession.codexRunConfig),
-          metadata: {
-            conversationId: input.conversationId
-          }
-        },
-        onEvent(event) {
-          const projection = runProjection.push(event);
-          runtimeFileChanges.push(...extractRuntimeFileChanges(event));
-          if (crestRuntimeEventHasSideEffect(event)) {
-            runtimeSideEffectStarted = true;
-          }
-          const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
-          if (codexThreadId) {
-            void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
-              currentSession = updated;
-            });
-          }
-          emitCrestRuntimeEvent(res, projection, { emitReasoningThought: false });
-          emitCrestCommentaryThoughts(res, projection.liveCommentaryEntries);
-        },
-        async onDone(payload) {
-          let generatedArtifacts: ThreadArtifactRecord[] = [];
-          try {
-            generatedArtifacts = await registerGeneratedArtifactsForSession({
-              currentUser,
-              session: currentSession,
-              changes: runtimeFileChanges,
-              answerText: payload.answer,
-              changedAfter: artifactScanStartedAt
-            });
-            if (generatedArtifacts.length > 0) {
-              sendSSE(res, "artifacts", {
-                threadId: thread.id,
-                sessionId: currentSession.sessionId,
-                artifacts: generatedArtifacts.map(artifactOut)
-              });
-            }
-          } catch (error) {
-            console.warn("crest chat artifact registration failed", {
-              threadId: thread.id,
-              detail: error instanceof Error ? error.message : String(error)
-            });
-            sendSSE(res, "artifact_warning", {
-              detail: "Generated files could not be registered for Crest download"
-            });
-          }
-          const output = payload.answer.trim() || "(无输出)";
-          const finalizedProcess = runProjection.finalize({ finalAnswer: output });
-          emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
-          const artifactPolicy = await resolveArtifactPolicyForActor(currentUser);
-          const artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
-          const processContentParts = finalizedProcess.contentParts;
-          await conversationRecords.appendMessage({
-            threadId: thread.id,
-            parentId: userMessageId,
-            message: crestStoredMessage(
-              "assistant",
-              `crest-assistant-${randomUUID().replace(/-/g, "")}`,
-              output,
-              {
-                conversationId: input.conversationId,
-                sessionId: currentSession.sessionId,
-                artifacts: generatedArtifacts.map(artifactOut)
-              },
-              [],
-              artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts
-            ),
-            runConfig: { channel: "crest", conversationId: input.conversationId }
-          });
-          streamAbort.markSettled();
-          sendSSE(res, "done", {
-            output,
-            durationMs: 0,
-            threadId: thread.id,
-            sessionId: currentSession.sessionId
-          });
-        },
-        async recordUsage(usage, resultStatus = "success") {
-          const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-          await usageRecorder.recordCodexUsage({
-            organizationId: currentUser.organizationId,
-            userId: currentUser.id,
-            threadId: thread.id,
-            sessionId: currentSession.sessionId,
-            model: currentSession.model,
-            featureType: "chat",
-            usage,
-            codexThreadId,
-            resultStatus,
-            metadata: {
-              source: "crest_chat_stream",
-            }
-          });
-        },
-        onTelemetryError(error) {
-          console.warn("crest chat usage telemetry failed", {
-            threadId: thread.id,
-            detail: error instanceof Error ? error.message : String(error)
-          });
-        }
-      });
-    };
-
-    try {
-      await runRuntimeCompletion();
-    } catch (error) {
-      if (streamAbort.disconnected) {
-        throw error;
+          sessionId: sessionForRun.sessionId,
+          artifacts: artifacts.map(artifactOut)
+        });
+      },
+      onArtifactError() {
+        sendSSE(res, "artifact_warning", {
+          detail: "Generated files could not be registered for Crest download"
+        });
+      },
+      async onDone({ answerText, session: sessionForRun, generatedArtifacts, artifactContentPart, finalizedProcess }) {
+        emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
+        const processContentParts = finalizedProcess.contentParts;
+        await conversationRecords.appendMessage({
+          threadId: thread.id,
+          parentId: userMessageId,
+          message: crestStoredMessage(
+            "assistant",
+            `crest-assistant-${randomUUID().replace(/-/g, "")}`,
+            answerText,
+            {
+              conversationId: input.conversationId,
+              sessionId: sessionForRun.sessionId,
+              artifacts: generatedArtifacts.map(artifactOut)
+            },
+            [],
+            artifactContentPart ? [...processContentParts, artifactContentPart] : processContentParts
+          ),
+          runConfig: { channel: "crest", conversationId: input.conversationId }
+        });
+        streamAbort.markSettled();
+        sendSSE(res, "done", {
+          output: answerText,
+          durationMs: 0,
+          threadId: thread.id,
+          sessionId: sessionForRun.sessionId
+        });
+      },
+      onRetry() {
+        sendSSE(res, "thought", {
+          text: "检测到底层运行时会话已过期，正在重建运行环境并重试本轮请求。"
+        });
+      },
+      onTelemetryError(error) {
+        console.warn("crest chat usage telemetry failed", {
+          threadId: thread.id,
+          detail: error instanceof Error ? error.message : String(error)
+        });
       }
-      const recoverable = isRecoverableCodexResumeError(error);
-      console.warn("crest chat runtime failed", {
-        threadId: thread.id,
-        sessionId: currentSession.sessionId,
-        codexThreadId: currentSession.codexThreadId,
-        recoverable,
-        runtimeSideEffectStarted,
-        detail: runtimeErrorDetail(error)
-      });
-      if (!recoverable || runtimeSideEffectStarted) {
-        throw error;
-      }
-      sendSSE(res, "thought", {
-        text: "检测到底层运行时会话已过期，正在重建运行环境并重试本轮请求。"
-      });
-      const replacement = await replaceCrestLiveRuntimeSession({
-        currentUser,
-        session: currentSession,
-        threadId: thread.id,
-        failedCodexThreadId: currentSession.codexThreadId,
-        error
-      });
-      currentSession = replacement.session;
-      liveThread = replacement.liveThread;
-      runtimeSideEffectStarted = false;
-      runtimeFileChanges.length = 0;
-      runProjection = new CodexRunProjection({ streamAnswerDeltas: false });
-      await runRuntimeCompletion();
-    }
+    });
 
   } catch (error) {
     if (!streamAbort.disconnected && !res.writableEnded) {
@@ -3857,12 +4005,13 @@ async function createSession(options: SessionOptions, threadId?: string, timing?
   return session;
 }
 
-async function replaceCrestLiveRuntimeSession(input: {
+async function replaceUserAgentLiveRuntimeSession(input: {
   currentUser: CurrentActor;
   session: SessionRecord;
   threadId: string;
   failedCodexThreadId?: string;
   error: unknown;
+  logLabel: string;
 }): Promise<{ session: SessionRecord; liveThread: LiveRuntimeThread }> {
   const userId = trimOrUndefined(input.session.userId) ?? input.currentUser.id;
   const codexRunConfig = withoutInternalRuntimeMetadata(
@@ -3894,7 +4043,7 @@ async function replaceCrestLiveRuntimeSession(input: {
       CODEX_HOME: materializedCodexHome.codexHome
     }
   });
-  console.warn("crest chat replacing stale codex runtime session", {
+  console.warn(`${input.logLabel} replacing stale codex runtime session`, {
     threadId: input.threadId,
     sessionId: input.session.sessionId,
     failedCodexThreadId: input.failedCodexThreadId,
@@ -5978,48 +6127,40 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
 
   let answerText = "";
   let streamingCardFinalized = false;
-  const runProjection = new CodexRunProjection();
   const streamingCardAgentMessagePhaseById = new Map<string, string>();
-  const artifactScanStartedAt = new Date(Date.now() - 2000);
-  const runtimeFileChanges: RuntimeFileChange[] = [];
   try {
-    const runtimeMessage = withSkillActivationPrompts(runtimePrompt, currentSession.codexRunConfig);
-    const enterpriseRunContext = await enterpriseContext.resolveForRun({
+    const turnResult = await runCodexChannelTurn({
       channel: "dingtalk",
-      userId: actor.currentUser.id,
-      agentModeId: modeIdFromRunConfig(currentSession.codexRunConfig)
-    });
-    await codexExecution.streamFromRuntime({
-      runtime,
-      thread: liveThread,
-      prompt: runtimeMessage,
-      enterpriseContext: enterpriseRunContext,
-      memory: {
-        channel: DINGTALK_BOT_CHANNEL,
-        prompt: input.text,
-        codexHome: codexHomeFromRunConfig(currentSession.codexRunConfig),
-        codexThreadId: currentSession.codexThreadId,
-        sessionId: currentSession.sessionId,
-        threadId: thread?.id,
-        organizationId: actor.currentUser.organizationId,
-        userId: actor.currentUser.id,
-        model: currentSession.model,
-        hasExternalContext: codexRunConfigHasExternalContext(currentSession.codexRunConfig),
-        metadata: {
-          integrationInstanceId: input.instance.id,
-          externalConversationKey,
-          conversationType: scope
-        }
+      prompt: runtimePrompt,
+      memoryChannel: DINGTALK_BOT_CHANNEL,
+      currentUser: actor.currentUser,
+      thread,
+      session: currentSession,
+      liveThread,
+      memoryPrompt: input.text,
+      memoryMetadata: {
+        integrationInstanceId: input.instance.id,
+        externalConversationKey,
+        conversationType: scope
       },
-      onEvent(event) {
-        runProjection.push(event);
-        runtimeFileChanges.push(...extractRuntimeFileChanges(event));
-        const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
-        if (codexThreadId) {
-          void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
-            currentSession = updated;
-          });
-        }
+      usageSource: DINGTALK_BOT_CHANNEL,
+      usageMetadata: {
+        integrationInstanceId: input.instance.id,
+        integrationSlug: input.instance.slug,
+        agentModeId,
+        conversationType: scope,
+        externalConversationKey,
+        externalConversationId: input.robotMessage.conversationId,
+        externalMessageId: input.robotMessage.msgId
+      },
+      departmentIdSnapshot: async () =>
+        trimOrUndefined(actor.currentUser.organizationType) === "internal"
+          ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
+          : undefined,
+      emptyAnswerText: "已完成处理，但没有生成可发送的文本回复。",
+      artifactScanStartedAt: new Date(Date.now() - 2000),
+      logLabel: "DingTalk bot",
+      onEvent({ event }) {
         if (streamingCardReply) {
           const nextPreview = appendRuntimeAnswerPreview(streamedAnswerPreview, event, streamingCardAgentMessagePhaseById);
           if (nextPreview !== streamedAnswerPreview) {
@@ -6028,34 +6169,15 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           }
         }
       },
-      async onDone(payload) {
-        answerText = payload.answer.trim() || "已完成处理，但没有生成可发送的文本回复。";
+      async onDone({ answerText: output, artifactContentPart, finalizedProcess }) {
+        answerText = output;
         if (streamingCardReply) {
           await streamingCardReply.finish(answerText);
           streamingCardFinalized = true;
         }
-        let artifactContentPart: Record<string, unknown> | undefined;
-        try {
-          const generatedArtifacts = await registerGeneratedArtifactsForSession({
-            currentUser: actor.currentUser,
-            session: currentSession,
-            changes: runtimeFileChanges,
-            answerText,
-            changedAfter: artifactScanStartedAt
-          });
-          if (generatedArtifacts.length > 0) {
-            const artifactPolicy = await resolveArtifactPolicyForActor(actor.currentUser);
-            artifactContentPart = artifactContentPartForArtifacts(generatedArtifacts, artifactPolicy);
-          }
-        } catch (error) {
-          console.warn("dingtalk artifact registration failed", {
-            threadId: thread!.id,
-            detail: error instanceof Error ? error.message : String(error)
-          });
-        }
-        const processContentParts = runProjection.finalize({ finalAnswer: answerText }).contentParts;
+        const processContentParts = finalizedProcess.contentParts;
         await conversationRecords.appendMessage({
-          threadId: thread!.id,
+          threadId: thread.id,
           parentId: input.robotMessage.msgId,
           message: dingtalkMessage({
             id: `dingtalk-assistant-${randomUUID().replace(/-/g, "")}`,
@@ -6077,43 +6199,21 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
           }
         });
       },
-      async recordUsage(usage, resultStatus = "success") {
-        const departmentIdSnapshot =
-          trimOrUndefined(actor.currentUser.organizationType) === "internal"
-            ? await departmentMemberships.getPreferredDepartmentIdForUser(actor.currentUser.id)
-            : undefined;
-        const codexThreadId = usage.codexThreadId ?? currentSession.codexThreadId;
-        await usageRecorder.recordCodexUsage({
-          organizationId: actor.currentUser.organizationId,
-          userId: actor.currentUser.id,
-          departmentIdSnapshot,
-          threadId: thread!.id,
-          sessionId: currentSession.sessionId,
-          model: currentSession.model,
-          featureType: "chat",
-          usage,
-          codexThreadId,
-          resultStatus,
-          metadata: {
-            source: DINGTALK_BOT_CHANNEL,
-            integrationInstanceId: input.instance.id,
-            integrationSlug: input.instance.slug,
-            agentModeId,
-            conversationType: scope,
-            externalConversationKey,
-            externalConversationId: input.robotMessage.conversationId,
-            externalMessageId: input.robotMessage.msgId,
-          }
-        });
+      onRetry() {
+        if (streamingCardReply) {
+          void streamingCardReply.update("正在重建运行环境并重试本轮请求。");
+        }
       },
       onTelemetryError(error) {
         const detail = error instanceof Error ? error.message : String(error);
         console.warn("DingTalk bot usage telemetry ingestion failed", {
-          threadId: thread?.id,
+          threadId: thread.id,
           detail
         });
       }
     });
+    currentSession = turnResult.session;
+    liveThread = turnResult.liveThread;
   } catch (error) {
     if (streamingCardReply) {
       await streamingCardReply.fail(input.instance.robot.errorMessage || "这条消息处理失败，请稍后重试。").catch(() => undefined);
