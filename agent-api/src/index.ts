@@ -252,7 +252,7 @@ import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
 import { resolvePublicBranding, resolvePublicPlatformName } from "./system-settings/public-branding.js";
-import { initSSE, sendSSE } from "./sse.js";
+import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
@@ -3027,6 +3027,7 @@ async function ensureCrestChatThread(input: {
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
+  const streamAbort = createSseAbortLifecycle(req, res);
   try {
     const input = crestChatStreamSchema.parse(req.body || {});
     const drainReason = await getDeploymentDrainReason();
@@ -3112,6 +3113,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         thread: liveThread,
         prompt: runtimePrompt,
         enterpriseContext: enterpriseRunContext,
+        signal: streamAbort.signal,
         memory: {
           channel: "crest",
           prompt: input.message,
@@ -3191,6 +3193,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
             ),
             runConfig: { channel: "crest", conversationId: input.conversationId }
           });
+          streamAbort.markSettled();
           sendSSE(res, "done", {
             output,
             durationMs: 0,
@@ -3227,6 +3230,9 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     try {
       await runRuntimeCompletion();
     } catch (error) {
+      if (streamAbort.disconnected) {
+        throw error;
+      }
       const recoverable = isRecoverableCodexResumeError(error);
       console.warn("crest chat runtime failed", {
         threadId: thread.id,
@@ -3258,10 +3264,14 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     }
 
   } catch (error) {
-    sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
+    if (!streamAbort.disconnected && !res.writableEnded) {
+      sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
+    }
   } finally {
+    streamAbort.markSettled();
+    streamAbort.dispose();
     clearInterval(heartbeat);
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 }
 
@@ -8336,18 +8346,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   timing.mark("request_received");
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
-  const abortController = new AbortController();
-  let streamSettled = false;
-  let clientDisconnected = false;
-  const abortRuntimeTurn = (reason: string) => {
-    if (streamSettled || abortController.signal.aborted) return;
-    clientDisconnected = true;
-    abortController.abort(new Error(reason));
-  };
-  req.once("aborted", () => abortRuntimeTurn("client_aborted"));
-  res.once("close", () => {
-    if (!streamSettled) abortRuntimeTurn("connection_closed");
-  });
+  const streamAbort = createSseAbortLifecycle(req, res);
 
   try {
     const currentUser = currentActorFromRequest(req);
@@ -8456,7 +8455,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       thread: ensuredLiveThread,
       prompt: runtimeMessage,
       enterpriseContext: enterpriseRunContext,
-      signal: abortController.signal,
+      signal: streamAbort.signal,
       memory: {
         channel: "portal",
         prompt: input.message,
@@ -8515,7 +8514,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           });
           sendSSE(res, "artifact_warning", { detail: "Generated files could not be registered for external preview" });
         }
-        streamSettled = true;
+        streamAbort.markSettled();
         sendSSE(res, "done", {
           session_id: currentSession.sessionId,
           answer: payload.answer,
@@ -8556,15 +8555,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (!clientDisconnected && !res.writableEnded) {
+    if (!streamAbort.disconnected && !res.writableEnded) {
       sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
     }
     finishTiming("error", {
       error: detail,
-      deliveryStatus: clientDisconnected ? "client_disconnected" : "open"
+      deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open",
+      disconnectReason: streamAbort.reason
     });
   } finally {
-    streamSettled = true;
+    streamAbort.markSettled();
+    streamAbort.dispose();
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
   }
