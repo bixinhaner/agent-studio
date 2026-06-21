@@ -7,6 +7,7 @@ import {
   extractMessageProcessRows,
   extractMessageText,
   matchesConversationSourceFilter,
+  projectConversationTurnStatus,
   resolveConversationAudience,
   resolveThreadFileAbsolutePath,
   threadWorkspaceUploadDirs
@@ -216,6 +217,36 @@ describe("extractMessageText", () => {
     };
 
     expect(extractMessageText(message)).toBe("");
+  });
+});
+
+describe("projectConversationTurnStatus", () => {
+  it("marks completed assistant messages as completed", () => {
+    expect(projectConversationTurnStatus({ role: "assistant", status: { type: "completed" } }, "assistant")).toEqual({
+      turnStatus: "completed",
+      turnStatusReason: null
+    });
+  });
+
+  it("marks cancelled assistant messages as user interruption", () => {
+    expect(projectConversationTurnStatus({ role: "assistant", status: { type: "incomplete", reason: "cancelled" } }, "assistant")).toEqual({
+      turnStatus: "cancelled",
+      turnStatusReason: "用户发送了新消息或取消了上一轮生成，本轮未完成。"
+    });
+  });
+
+  it("marks errored assistant messages as failed", () => {
+    expect(projectConversationTurnStatus({ role: "assistant", status: { type: "error" } }, "assistant")).toEqual({
+      turnStatus: "failed",
+      turnStatusReason: "运行时异常，用户侧已显示通用失败提示。"
+    });
+  });
+
+  it("marks unmatched user messages as disconnected", () => {
+    expect(projectConversationTurnStatus({ role: "user" }, "user", { hasAssistantResponse: false })).toEqual({
+      turnStatus: "disconnected",
+      turnStatusReason: "用户消息已保存，但没有对应助手回复；可能是页面关闭、网络断开、请求启动失败或被后续消息替代。"
+    });
   });
 });
 

@@ -346,6 +346,20 @@ function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
   return "系统";
 }
 
+function turnStatusLabel(status: AdminConversationTranscriptMessage["turnStatus"]): string {
+  if (status === "cancelled") return "已中断";
+  if (status === "disconnected") return "请求未完成";
+  if (status === "failed") return "执行失败";
+  return "";
+}
+
+function turnStatusClassName(status: AdminConversationTranscriptMessage["turnStatus"]): string {
+  if (status === "cancelled") return "is-cancelled";
+  if (status === "disconnected") return "is-disconnected";
+  if (status === "failed") return "is-failed";
+  return "";
+}
+
 function attachmentKindLabel(kind: AdminConversationTranscriptAttachment["kind"]): string {
   if (kind === "image") return "图片";
   if (kind === "document") return "文档";
@@ -943,6 +957,7 @@ function TranscriptMessageBubble(props: {
   const isAssistant = props.message.role === "assistant";
   const attachmentCount = props.message.attachments.length;
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
+  const statusLabel = props.message.turnStatus === "completed" ? "" : turnStatusLabel(props.message.turnStatus);
   
   // Exclude system/tool for cleaner view unless needed
   if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0) return null;
@@ -954,7 +969,15 @@ function TranscriptMessageBubble(props: {
         ref={props.onMount}
       >
         <div className="admin-chat-meta">
-          {roleLabel(props.message.role)} • {formatLocalDateTime(props.message.createdAt)}
+          <span>{roleLabel(props.message.role)} • {formatLocalDateTime(props.message.createdAt)}</span>
+          {statusLabel ? (
+            <span
+              className={`admin-chat-turn-status ${turnStatusClassName(props.message.turnStatus)}`}
+              title={props.message.turnStatusReason ?? statusLabel}
+            >
+              {statusLabel}
+            </span>
+          ) : null}
         </div>
         <div className="admin-chat-bubble" style={{ outline: props.highlighted ? '2px solid var(--admin-color-accent)' : 'none' }}>
           {props.message.text ? (

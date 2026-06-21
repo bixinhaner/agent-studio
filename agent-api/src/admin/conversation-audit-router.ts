@@ -155,6 +155,8 @@ type ConversationTranscriptMessage = {
     detail?: string;
     at?: string;
   }>;
+  turnStatus: "completed" | "cancelled" | "disconnected" | "failed";
+  turnStatusReason: string | null;
   parentId: string | null;
   createdAt: string | null;
   hasRunConfig: boolean;
@@ -1215,20 +1217,89 @@ function transcriptPreviewText(message: ConversationTranscriptMessage): string {
   );
 }
 
+type ConversationTurnStatus = Pick<ConversationTranscriptMessage, "turnStatus" | "turnStatusReason">;
+
+const USER_TURN_DISCONNECTED_REASON =
+  "用户消息已保存，但没有对应助手回复；可能是页面关闭、网络断开、请求启动失败或被后续消息替代。";
+const ASSISTANT_CANCELLED_REASON = "用户发送了新消息或取消了上一轮生成，本轮未完成。";
+const ASSISTANT_FAILED_REASON = "运行时异常，用户侧已显示通用失败提示。";
+const ASSISTANT_INCOMPLETE_REASON = "助手回复未完整结束，可能是连接断开或运行中途停止。";
+
+function messageStatusRecord(message: unknown): Record<string, unknown> | null {
+  return asRecord(asRecord(message)?.status);
+}
+
+function normalizedStatusField(status: Record<string, unknown> | null, key: "type" | "reason"): string | undefined {
+  return trimOrUndefined(status?.[key])?.toLowerCase();
+}
+
+export function projectConversationTurnStatus(
+  message: unknown,
+  role: ConversationTranscriptMessage["role"],
+  options?: { hasAssistantResponse?: boolean }
+): ConversationTurnStatus {
+  const status = messageStatusRecord(message);
+  const statusType = normalizedStatusField(status, "type");
+  const statusReason = normalizedStatusField(status, "reason");
+
+  if (role === "user") {
+    return options?.hasAssistantResponse
+      ? { turnStatus: "completed", turnStatusReason: null }
+      : { turnStatus: "disconnected", turnStatusReason: USER_TURN_DISCONNECTED_REASON };
+  }
+
+  if (role !== "assistant") {
+    return { turnStatus: "completed", turnStatusReason: null };
+  }
+
+  if (statusType === "error" || statusReason === "error") {
+    return { turnStatus: "failed", turnStatusReason: ASSISTANT_FAILED_REASON };
+  }
+
+  if (statusType === "incomplete") {
+    if (statusReason === "cancelled" || statusReason === "aborted" || statusReason === "abort") {
+      return { turnStatus: "cancelled", turnStatusReason: ASSISTANT_CANCELLED_REASON };
+    }
+    return { turnStatus: "disconnected", turnStatusReason: ASSISTANT_INCOMPLETE_REASON };
+  }
+
+  return { turnStatus: "completed", turnStatusReason: null };
+}
+
 function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: number): ConversationTranscriptMessage {
   const id = extractMessageId(item.message, `message-${index + 1}`);
   const role = extractMessageRole(item.message);
   const processRows = role === "assistant" ? extractMessageProcessRows(item.message) : [];
+  const turnStatus = projectConversationTurnStatus(item.message, role, { hasAssistantResponse: true });
   return {
     id,
     role,
     text: extractMessageText(item.message),
     attachments: extractMessageAttachments(threadId, item.message, id),
     ...(processRows.length > 0 ? { processRows } : {}),
+    ...turnStatus,
     parentId: item.parentId ?? null,
     createdAt: parseDateString(item.createdAt) ?? extractMessageCreatedAt(item.message),
     hasRunConfig: Boolean(item.runConfig && Object.keys(item.runConfig).length > 0)
   };
+}
+
+function buildTranscriptMessages(threadId: string, messages: StoredMessageItem[]): ConversationTranscriptMessage[] {
+  const transcript = messages.map((item, index) => toTranscriptMessage(threadId, item, index));
+  return transcript.map((message, index) => {
+    if (message.role !== "user") return message;
+    const nextUserIndex = transcript.findIndex((candidate, candidateIndex) => (
+      candidateIndex > index && candidate.role === "user"
+    ));
+    const searchEnd = nextUserIndex >= 0 ? nextUserIndex : transcript.length;
+    const hasAssistantResponse = transcript
+      .slice(index + 1, searchEnd)
+      .some((candidate) => candidate.role === "assistant");
+    return {
+      ...message,
+      ...projectConversationTurnStatus({ status: { type: "completed" } }, "user", { hasAssistantResponse })
+    };
+  });
 }
 
 function feedbackCountOf(feedback: ConversationSummary["feedback"], type: ThreadFeedback["type"]): number {
@@ -1324,7 +1395,7 @@ function buildConversationSummary(
   channel: ConversationChannelSummary | null = null,
   agentModeMap: Map<string, AgentModeAuditRow> = new Map()
 ): ConversationSummary {
-  const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
+  const transcript = buildTranscriptMessages(thread.id, thread.messages);
   const userMessages = transcript.filter((item) => item.role === "user");
   const assistantMessages = transcript.filter((item) => item.role === "assistant");
   const firstUserText = summarizeText(userMessages.map((item) => transcriptPreviewText(item)).find(Boolean), 180);
@@ -2063,7 +2134,7 @@ export function createConversationAuditRouter(options: {
       const [binding] = bindings;
       const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
       const agentModeMap = new Map(agentModeRows.map((item) => [item.id, item] as const));
-      const transcript = thread.messages.map((item, index) => toTranscriptMessage(thread.id, item, index));
+      const transcript = buildTranscriptMessages(thread.id, thread.messages);
 
       res.json({
         conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap), agentModeMap),

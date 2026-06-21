@@ -2269,9 +2269,43 @@
 }
 
 .admin-chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   font-size: 11px;
   color: var(--admin-color-subtle);
   margin-top: 6px;
+}
+
+.admin-chat-bubble-container.is-user .admin-chat-meta {
+  justify-content: flex-end;
+}
+
+.admin-chat-turn-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: rgba(148, 163, 184, 0.12);
+  color: #475569;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.admin-chat-turn-status.is-disconnected {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: #9a5b05;
+}
+
+.admin-chat-turn-status.is-failed {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
 }
 
 .conversation-audit-markdown {
