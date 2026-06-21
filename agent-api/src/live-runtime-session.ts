@@ -39,6 +39,37 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function abortError(): Error {
+  const error = new Error("Codex runtime request aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+async function nextRuntimeEvent<T>(iterator: AsyncIterator<T>, signal?: AbortSignal): Promise<IteratorResult<T>> {
+  if (!signal) return await iterator.next();
+  if (signal.aborted) throw abortError();
+  return await new Promise<IteratorResult<T>>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    iterator.next().then(
+      (result) => {
+        cleanup();
+        resolve(result);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      }
+    );
+  });
+}
+
 function toTokenCount(value: unknown): number | undefined {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return undefined;
@@ -121,6 +152,7 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
 export async function collectRuntimeCompletion(input: {
   events: AsyncIterable<RuntimeStreamEvent>;
   textMode?: RuntimeCompletionTextMode;
+  signal?: AbortSignal;
   onEvent?(event: RuntimeStreamEvent): void | Promise<void>;
   onUsage?(usage: RuntimeUsageSnapshot, event: RuntimeStreamEvent): void | Promise<void>;
   onTextDelta?(delta: string, event: RuntimeStreamEvent): void | Promise<void>;
@@ -129,26 +161,37 @@ export async function collectRuntimeCompletion(input: {
   let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
   const textMode = input.textMode ?? "append";
+  const iterator = input.events[Symbol.asyncIterator]();
 
-  for await (const event of input.events) {
-    const usage = extractRuntimeUsageFromStreamEvent(event);
-    if (usage) {
-      latestUsage = usage;
-      await input.onUsage?.(usage, event);
-    }
-    const completedAgentText = completedAgentMessageText(event);
-    if (completedAgentText !== undefined) {
-      finalAgentAnswer = completedAgentText;
-    } else if (event.delta) {
-      fallbackAnswer += event.delta;
-      await input.onTextDelta?.(event.delta, event);
-    } else if (event.text) {
-      if (textMode === "append" || !fallbackAnswer) {
-        fallbackAnswer += event.text;
-        await input.onTextDelta?.(event.text, event);
+  try {
+    while (true) {
+      const next = await nextRuntimeEvent(iterator, input.signal);
+      if (next.done) break;
+      const event = next.value;
+      const usage = extractRuntimeUsageFromStreamEvent(event);
+      if (usage) {
+        latestUsage = usage;
+        await input.onUsage?.(usage, event);
       }
+      const completedAgentText = completedAgentMessageText(event);
+      if (completedAgentText !== undefined) {
+        finalAgentAnswer = completedAgentText;
+      } else if (event.delta) {
+        fallbackAnswer += event.delta;
+        await input.onTextDelta?.(event.delta, event);
+      } else if (event.text) {
+        if (textMode === "append" || !fallbackAnswer) {
+          fallbackAnswer += event.text;
+          await input.onTextDelta?.(event.text, event);
+        }
+      }
+      await input.onEvent?.(event);
     }
-    await input.onEvent?.(event);
+  } catch (error) {
+    if (iterator.return) {
+      await Promise.resolve(iterator.return()).catch(() => undefined);
+    }
+    throw error;
   }
 
   return {
@@ -159,6 +202,7 @@ export async function collectRuntimeCompletion(input: {
 
 export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   events: AsyncIterable<RuntimeStreamEvent>;
+  signal?: AbortSignal;
   onEvent(event: RuntimeStreamEvent): void;
   onDone(payload: { answer: string; usage?: RuntimeUsageSnapshot }): void | Promise<void>;
   recordUsage?(usage: RuntimeUsageSnapshot, resultStatus?: "success" | "failed"): Promise<void>;
@@ -170,6 +214,7 @@ export async function streamRuntimeCompletionWithBestEffortUsage(input: {
   try {
     completion = await collectRuntimeCompletion({
       events: input.events,
+      signal: input.signal,
       onEvent: input.onEvent,
       onUsage(usage) {
         latestUsage = usage;

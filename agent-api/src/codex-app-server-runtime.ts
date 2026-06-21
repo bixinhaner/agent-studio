@@ -32,6 +32,23 @@ type PendingRequest = {
 };
 
 type NotificationSubscriber = (message: JsonRecord) => void;
+type CodexAppServerFailureCategory =
+  | "model_or_app_server_error"
+  | "tool_or_sandbox_error"
+  | "turn_timeout"
+  | "client_aborted"
+  | "process_exit"
+  | "unknown";
+
+type RuntimeEventSummary = {
+  at: string;
+  type: string;
+  threadId?: string;
+  turnId?: string;
+  itemType?: string;
+  toolName?: string;
+  textPreview?: string;
+};
 
 type RuntimeScope = {
   key: string;
@@ -39,11 +56,16 @@ type RuntimeScope = {
   env: Record<string, string>;
   config?: Record<string, unknown>;
   maxActiveTurns: number;
+  turnIdleTimeoutMs: number;
+  turnMaxMs: number;
 };
 
 const DEFAULT_MAX_PROCESSES = 30;
 const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_TURN_IDLE_TIMEOUT_MS = 20 * 60_000;
+const DEFAULT_TURN_MAX_MS = 90 * 60_000;
+const MAX_DIAGNOSTIC_EVENTS = 20;
 const TOML_DRIVER_APP_SERVER = "app_server";
 
 function trimOrUndefined(value: unknown): string | undefined {
@@ -65,6 +87,80 @@ function asStringArray(value: unknown): string[] {
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt((value || "").trim(), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parsePositiveDurationMs(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt((value || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function previewText(value: unknown, maxLength = 240): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return undefined;
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
+}
+
+function jsonPreview(value: unknown, maxLength = 2000): string {
+  try {
+    const text = JSON.stringify(value);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  } catch {
+    return String(value);
+  }
+}
+
+function eventSummary(event: CodexStreamEvent): RuntimeEventSummary {
+  const raw = asRecord(event.raw);
+  const item = asRecord(raw?.item);
+  const toolCall = asRecord((raw as Record<string, unknown> | undefined)?.toolCall);
+  return {
+    at: new Date().toISOString(),
+    type: event.type,
+    threadId: trimOrUndefined(raw?.thread_id),
+    turnId: trimOrUndefined(raw?.turn_id),
+    itemType: trimOrUndefined(item?.type),
+    toolName: trimOrUndefined(toolCall?.name) ?? trimOrUndefined(item?.name),
+    textPreview: previewText(event.text ?? event.delta ?? item?.text)
+  };
+}
+
+function classifyRuntimeFailure(message: string, raw?: unknown): CodexAppServerFailureCategory {
+  const text = `${message}\n${jsonPreview(raw, 1000)}`.toLowerCase();
+  if (text.includes("aborted") || text.includes("abort")) return "client_aborted";
+  if (text.includes("timed out") || text.includes("timeout")) return "turn_timeout";
+  if (text.includes("sandbox") || text.includes("permission denied") || text.includes("command failed") || text.includes("tool")) {
+    return "tool_or_sandbox_error";
+  }
+  if (text.includes("exited code=") || text.includes("signal=")) return "process_exit";
+  if (text.includes("app-server") || text.includes("model") || text.includes("response")) return "model_or_app_server_error";
+  return "unknown";
+}
+
+class CodexAppServerTurnError extends Error {
+  readonly category: CodexAppServerFailureCategory;
+  readonly raw?: unknown;
+  readonly diagnostics: {
+    threadId: string;
+    turnId?: string;
+    scopeKey: string;
+    durationMs: number;
+    activeTurns: number;
+    lastEvents: RuntimeEventSummary[];
+    stderrTail?: string;
+  };
+
+  constructor(message: string, input: {
+    category?: CodexAppServerFailureCategory;
+    raw?: unknown;
+    diagnostics: CodexAppServerTurnError["diagnostics"];
+  }) {
+    super(message);
+    this.name = "CodexAppServerTurnError";
+    this.category = input.category ?? classifyRuntimeFailure(message, input.raw);
+    this.raw = input.raw;
+    this.diagnostics = input.diagnostics;
+  }
 }
 
 function stableStringify(value: unknown): string {
@@ -161,7 +257,9 @@ function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
     binaryPath,
     env,
     config,
-    maxActiveTurns: parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS, DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS)
+    maxActiveTurns: parsePositiveInt(process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS, DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS),
+    turnIdleTimeoutMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS, DEFAULT_TURN_IDLE_TIMEOUT_MS),
+    turnMaxMs: parsePositiveDurationMs(process.env.CODEX_APP_SERVER_TURN_MAX_MS, DEFAULT_TURN_MAX_MS)
   };
 }
 
@@ -561,6 +659,7 @@ class CodexAppServerProcess {
   private readonly turnWaiters: Array<() => void> = [];
   private startPromise: Promise<void> | undefined;
   private closedError: Error | undefined;
+  private stderrTail = "";
 
   constructor(private readonly scope: RuntimeScope) {
     this.scopeKey = scope.key;
@@ -600,6 +699,10 @@ class CodexAppServerProcess {
 
   notify(method: string, params: Record<string, unknown> = {}): void {
     this.proc?.stdin?.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  getStderrTail(): string | undefined {
+    return trimOrUndefined(this.stderrTail);
   }
 
   subscribe(handler: NotificationSubscriber): () => void {
@@ -648,13 +751,13 @@ class CodexAppServerProcess {
       stdio: ["pipe", "pipe", "pipe"]
     });
 
-    const stderrChunks: Buffer[] = [];
     this.proc.stderr?.on("data", (chunk) => {
-      stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      this.stderrTail = `${this.stderrTail}${text}`.slice(-4000);
     });
     this.proc.once("error", (error) => this.handleExit(error));
     this.proc.once("exit", (code, signal) => {
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").slice(-2000);
+      const stderr = this.getStderrTail();
       this.handleExit(new Error(`Codex app-server exited code=${code} signal=${signal}${stderr ? ` stderr=${stderr}` : ""}`));
     });
 
@@ -769,7 +872,7 @@ class CodexAppServerManager {
     };
   }
 
-  async *runTurn(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
+  async *runTurn(thread: CodexAppServerThread, message: string, options: { signal?: AbortSignal } = {}): AsyncGenerator<CodexStreamEvent> {
     const scope = thread.scope;
     const process = await this.getProcess(scope);
     const releaseThread = await this.acquireThreadLock(thread.id);
@@ -778,8 +881,86 @@ class CodexAppServerManager {
     let turnId: string | undefined;
     let completed = false;
     let unsubscribe = () => {};
+    let idleTimer: NodeJS.Timeout | undefined;
+    let maxTimer: NodeJS.Timeout | undefined;
+    let abortReject: ((error: Error) => void) | undefined;
+    let abortHandler: (() => void) | undefined;
+    let failureLogged = false;
+    const startedAtMs = Date.now();
+    const lastEvents: RuntimeEventSummary[] = [];
+
+    const makeTurnError = (
+      message: string,
+      input: { category?: CodexAppServerFailureCategory; raw?: unknown } = {}
+    ): CodexAppServerTurnError =>
+      new CodexAppServerTurnError(message, {
+        category: input.category,
+        raw: input.raw,
+        diagnostics: {
+          threadId: thread.id,
+          turnId,
+          scopeKey: scope.key,
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+          activeTurns: process.activeTurns,
+          lastEvents: [...lastEvents],
+          stderrTail: process.getStderrTail()
+        }
+      });
+
+    const logFailure = (error: unknown) => {
+      if (failureLogged) return;
+      failureLogged = true;
+      const turnError = error instanceof CodexAppServerTurnError ? error : makeTurnError(error instanceof Error ? error.message : String(error));
+      console.warn("codex app-server turn failed", {
+        category: turnError.category,
+        message: turnError.message,
+        raw: turnError.raw ? jsonPreview(turnError.raw) : undefined,
+        diagnostics: turnError.diagnostics
+      });
+    };
+
+    const bestEffortCancel = () => {
+      if (!turnId) return;
+      process.notify("turn/cancel", { threadId: thread.id, turnId });
+    };
+
+    const failTurn = (error: CodexAppServerTurnError) => {
+      logFailure(error);
+      bestEffortCancel();
+      if (error.category === "turn_timeout" && process.activeTurns <= 1) {
+        process.stop("turn timeout");
+      }
+      queue.error(error);
+      abortReject?.(error);
+    };
+
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        failTurn(makeTurnError(`Codex app-server turn idle timed out after ${scope.turnIdleTimeoutMs}ms`, { category: "turn_timeout" }));
+      }, scope.turnIdleTimeoutMs);
+      idleTimer.unref();
+    };
 
     try {
+      if (options.signal?.aborted) {
+        throw makeTurnError("Codex app-server turn aborted by client before start", { category: "client_aborted" });
+      }
+      const abortPromise = new Promise<never>((_, reject) => {
+        abortReject = reject;
+      });
+      if (options.signal) {
+        abortHandler = () => {
+          failTurn(makeTurnError("Codex app-server turn aborted by client", { category: "client_aborted" }));
+        };
+        options.signal.addEventListener("abort", abortHandler, { once: true });
+      }
+      maxTimer = setTimeout(() => {
+        failTurn(makeTurnError(`Codex app-server turn max runtime exceeded ${scope.turnMaxMs}ms`, { category: "turn_timeout" }));
+      }, scope.turnMaxMs);
+      maxTimer.unref();
+      resetIdleTimer();
+
       if (!process.loadedThreads.has(thread.id)) {
         await process.request("thread/resume", threadResumeParams(thread.id, thread.options, scope.config));
         process.loadedThreads.add(thread.id);
@@ -792,26 +973,39 @@ class CodexAppServerManager {
         if (turnId && eventTurnId && eventTurnId !== turnId) return;
         const event = normalizeNotification(notification);
         if (!event) return;
+        lastEvents.push(eventSummary(event));
+        if (lastEvents.length > MAX_DIAGNOSTIC_EVENTS) lastEvents.shift();
+        resetIdleTimer();
         queue.push(event);
         if (event.type === "turn.completed") {
           completed = true;
           setTimeout(() => queue.close(), 150);
         }
         if (event.type === "error") {
-          queue.error(new Error(event.text || "Codex app-server runtime error"));
+          failTurn(makeTurnError(event.text || "Codex app-server runtime error", { raw: event.raw }));
         }
       });
-      const result = await process.request("turn/start", turnStartParams(thread.id, message, thread.options));
+      const result = await Promise.race([
+        process.request("turn/start", turnStartParams(thread.id, message, thread.options)),
+        abortPromise
+      ]);
       turnId = turnIdFromResult(result);
+      abortReject = undefined;
 
       for await (const event of queue) {
         yield event;
       }
 
       if (!completed) {
-        throw new Error("Codex app-server turn ended before completion");
+        throw makeTurnError("Codex app-server turn ended before completion");
       }
+    } catch (error) {
+      logFailure(error);
+      throw error;
     } finally {
+      if (abortHandler && options.signal) options.signal.removeEventListener("abort", abortHandler);
+      if (idleTimer) clearTimeout(idleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
       unsubscribe();
       releaseTurn();
       releaseThread();
@@ -894,8 +1088,12 @@ export class CodexAppServerRuntime {
     return await appServerManager.resumeThread(this.options, options.threadId, options);
   }
 
-  async *runStreamed(thread: CodexAppServerThread, message: string): AsyncGenerator<CodexStreamEvent> {
-    yield* appServerManager.runTurn(thread, message);
+  async *runStreamed(
+    thread: CodexAppServerThread,
+    message: string,
+    options: { signal?: AbortSignal } = {}
+  ): AsyncGenerator<CodexStreamEvent> {
+    yield* appServerManager.runTurn(thread, message, options);
   }
 
   async validateProvider(options: { model: string; reasoningEffort: ReasoningEffort }): Promise<void> {

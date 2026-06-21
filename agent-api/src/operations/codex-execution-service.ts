@@ -19,6 +19,8 @@ export type CodexRuntimeTurnTrackerInput = {
   sessionId?: string;
   threadId?: string;
   codexThreadId?: string;
+  organizationId?: string;
+  userId?: string;
   model?: string;
   hasExternalContext?: boolean;
 };
@@ -81,7 +83,7 @@ export type CodexRunProjectionOptions = {
 };
 
 type RuntimeStreamSource<TThread> = {
-  runStreamed(thread: TThread, message: string): AsyncIterable<RuntimeStreamEvent>;
+  runStreamed(thread: TThread, message: string, options?: { signal?: AbortSignal }): AsyncIterable<RuntimeStreamEvent>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -694,6 +696,8 @@ export class CodexExecutionService {
         sessionId: memory?.sessionId,
         threadId: memory?.threadId,
         codexThreadId: memory?.codexThreadId,
+        organizationId: memory?.organizationId,
+        userId: memory?.userId,
         model: memory?.model,
         hasExternalContext: memory?.hasExternalContext
       });
@@ -728,11 +732,15 @@ export class CodexExecutionService {
     prompt: string;
     enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
+    signal?: AbortSignal;
   }): Promise<void> {
     const finishRuntimeTurn = this.startRuntimeTurn("stream", input.memory);
     try {
       await streamRuntimeCompletionWithBestEffortUsage({
-        events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
+        events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext), {
+          signal: input.signal
+        }),
+        signal: input.signal,
         onEvent: input.onEvent,
         onDone: async (payload) => {
           await input.onDone?.(payload);

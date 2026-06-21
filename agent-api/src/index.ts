@@ -265,6 +265,11 @@ type ActiveRuntimeTurn = {
   id: string;
   operation: CodexRuntimeTurnTrackerInput["operation"];
   channel?: string;
+  organizationId?: string;
+  userId?: string;
+  sessionId?: string;
+  threadId?: string;
+  codexThreadId?: string;
   model?: string;
   hasExternalContext?: boolean;
   startedAt: string;
@@ -279,6 +284,11 @@ function startTrackedRuntimeTurn(input: CodexRuntimeTurnTrackerInput): () => voi
     id,
     operation: input.operation,
     channel: trimOrUndefined(input.channel) ?? "unknown",
+    organizationId: trimOrUndefined(input.organizationId),
+    userId: trimOrUndefined(input.userId),
+    sessionId: trimOrUndefined(input.sessionId),
+    threadId: trimOrUndefined(input.threadId),
+    codexThreadId: trimOrUndefined(input.codexThreadId),
     model: trimOrUndefined(input.model),
     hasExternalContext: input.hasExternalContext,
     startedAt: new Date(now).toISOString(),
@@ -297,6 +307,11 @@ function activeRuntimeTurnStatus() {
       id: turn.id,
       operation: turn.operation,
       channel: turn.channel,
+      organization_id: turn.organizationId,
+      user_id: turn.userId,
+      session_id: turn.sessionId,
+      thread_id: turn.threadId,
+      codex_thread_id: turn.codexThreadId,
       model: turn.model,
       has_external_context: turn.hasExternalContext,
       started_at: turn.startedAt,
@@ -8321,6 +8336,18 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   timing.mark("request_received");
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
+  const abortController = new AbortController();
+  let streamSettled = false;
+  let clientDisconnected = false;
+  const abortRuntimeTurn = (reason: string) => {
+    if (streamSettled || abortController.signal.aborted) return;
+    clientDisconnected = true;
+    abortController.abort(new Error(reason));
+  };
+  req.once("aborted", () => abortRuntimeTurn("client_aborted"));
+  res.once("close", () => {
+    if (!streamSettled) abortRuntimeTurn("connection_closed");
+  });
 
   try {
     const currentUser = currentActorFromRequest(req);
@@ -8429,6 +8456,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       thread: ensuredLiveThread,
       prompt: runtimeMessage,
       enterpriseContext: enterpriseRunContext,
+      signal: abortController.signal,
       memory: {
         channel: "portal",
         prompt: input.message,
@@ -8487,6 +8515,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           });
           sendSSE(res, "artifact_warning", { detail: "Generated files could not be registered for external preview" });
         }
+        streamSettled = true;
         sendSSE(res, "done", {
           session_id: currentSession.sessionId,
           answer: payload.answer,
@@ -8526,11 +8555,18 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
-    sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
-    finishTiming("error", { error: error instanceof Error ? error.message : String(error) });
+    const detail = error instanceof Error ? error.message : String(error);
+    if (!clientDisconnected && !res.writableEnded) {
+      sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
+    }
+    finishTiming("error", {
+      error: detail,
+      deliveryStatus: clientDisconnected ? "client_disconnected" : "open"
+    });
   } finally {
+    streamSettled = true;
     clearInterval(heartbeat);
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 });
 

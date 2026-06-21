@@ -10,6 +10,10 @@ export type CodexStreamEvent = {
   raw?: unknown;
 };
 
+export type CodexRunStreamOptions = {
+  signal?: AbortSignal;
+};
+
 export type CodexRuntimeOptions = {
   baseUrl?: string;
   apiKey?: string;
@@ -151,15 +155,22 @@ export class CodexRuntime {
 
   async *runStreamed(
     thread: any,
-    message: string
+    message: string,
+    options: CodexRunStreamOptions = {}
   ): AsyncGenerator<CodexStreamEvent> {
+    if (options.signal?.aborted) {
+      throw new Error("Codex runtime request aborted");
+    }
     if (this.appServerRuntime) {
-      yield* this.appServerRuntime.runStreamed(thread, message);
+      yield* this.appServerRuntime.runStreamed(thread, message, options);
       return;
     }
     const { events } = await thread.runStreamed(message);
     const textState = new Map<string, string>();
     for await (const event of events) {
+      if (options.signal?.aborted) {
+        throw new Error("Codex runtime request aborted");
+      }
       const textEvent = normalizeAgentTextEvent(event, textState);
       if (textEvent) {
         yield textEvent;

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
 import { CodexRuntime, type CodexStreamEvent } from "./codex-runtime.js";
@@ -13,7 +13,9 @@ const originalEnv = {
   CODEX_RUNTIME_DRIVER: process.env.CODEX_RUNTIME_DRIVER,
   CODEX_APP_SERVER_BINARY: process.env.CODEX_APP_SERVER_BINARY,
   CODEX_APP_SERVER_MAX_PROCESSES: process.env.CODEX_APP_SERVER_MAX_PROCESSES,
-  CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS
+  CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS,
+  CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS: process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS,
+  CODEX_APP_SERVER_TURN_MAX_MS: process.env.CODEX_APP_SERVER_TURN_MAX_MS
 };
 
 async function writeFakeAppServer(): Promise<void> {
@@ -77,6 +79,13 @@ rl.on("line", (line) => {
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
       notify("turn/started", { threadId, turn: { id: turnId } });
+      if (inputText === "hang") {
+        return;
+      }
+      if (inputText === "runtime-error") {
+        notify("error", { threadId, turnId, message: "sandbox denied", detail: "permission denied opening file" });
+        return;
+      }
       if (inputText === "markdown-whitespace") {
         for (const delta of [
           "Intro",
@@ -158,6 +167,8 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_BINARY = fakeBinaryPath;
     process.env.CODEX_APP_SERVER_MAX_PROCESSES = "30";
     process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS = "2";
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "";
   });
 
   afterEach(() => {
@@ -270,5 +281,74 @@ describe("Codex app-server runtime", () => {
     }
 
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
+  it("fails and releases a turn when the app-server stops emitting events", async () => {
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "30";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "500";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-timeout")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+
+    await expect(async () => {
+      for await (const _event of runtime.runStreamed(thread, "hang")) {
+        // drain events until timeout
+      }
+    }).rejects.toThrow(/idle timed out|max runtime/);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server turn failed",
+      expect.objectContaining({
+        category: "turn_timeout"
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("aborts an in-flight app-server turn when the client signal is cancelled", async () => {
+    process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "500";
+    process.env.CODEX_APP_SERVER_TURN_MAX_MS = "1000";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-abort")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+    const abortController = new AbortController();
+
+    await expect(async () => {
+      for await (const event of runtime.runStreamed(thread, "hang", { signal: abortController.signal })) {
+        if (event.type === "turn.started") {
+          abortController.abort();
+        }
+      }
+    }).rejects.toThrow(/aborted by client/);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server turn failed",
+      expect.objectContaining({
+        category: "client_aborted"
+      })
+    );
+    warnSpy.mockRestore();
   });
 });
