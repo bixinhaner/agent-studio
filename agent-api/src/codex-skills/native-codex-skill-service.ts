@@ -116,6 +116,15 @@ async function chmodDirectories(rootPath: string, mode: number): Promise<void> {
   }
 }
 
+async function ensureRuntimeSkillDirectories(sessionSkillsRoot: string): Promise<void> {
+  await fs.mkdir(sessionSkillsRoot, { recursive: true });
+  await fs.chmod(sessionSkillsRoot, 0o755).catch(() => undefined);
+
+  const systemSkillsRoot = path.join(sessionSkillsRoot, ".system");
+  await fs.mkdir(systemSkillsRoot, { recursive: true });
+  await chmodDirectories(systemSkillsRoot, 0o755);
+}
+
 async function readJsonFile(filePath: string): Promise<unknown | undefined> {
   const content = await fs.readFile(filePath, "utf8").catch(() => undefined);
   if (content === undefined) return undefined;
@@ -246,6 +255,7 @@ export class NativeCodexSkillService {
       await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
       await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
       if (stableJson(currentManifest) === stableJson(manifest) && (await pathExists(sessionSkillsRoot))) {
+        await ensureRuntimeSkillDirectories(sessionSkillsRoot);
         return;
       }
 
@@ -273,14 +283,9 @@ export class NativeCodexSkillService {
         }
       }
 
-      const systemSkillsRoot = path.join(sessionSkillsRoot, ".system");
-      await fs.mkdir(systemSkillsRoot, { recursive: true });
-
-      // Codex auto-installs built-in .system skills into writable CODEX_HOME roots.
-      // Keep the parent locked so custom skills still come only from Agent Studio,
-      // while leaving .system writable for the Codex runtime's own bootstrap.
-      await chmodDirectories(sessionSkillsRoot, 0o555);
-      await chmodDirectories(systemSkillsRoot, 0o755);
+      // Codex 0.139+ may delete and rebuild skills/.system during bootstrap.
+      // Deleting that child directory requires the skills parent to stay writable.
+      await ensureRuntimeSkillDirectories(sessionSkillsRoot);
       await fs.mkdir(metadataDir, { recursive: true });
       await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     });
