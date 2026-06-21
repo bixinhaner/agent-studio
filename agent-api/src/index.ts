@@ -201,6 +201,7 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
+import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
 import { DINGTALK_BOT_CHANNEL, isDingTalkResetCommand, normalizeDingTalkBotConfig } from "./integrations/dingtalk/bot-config.js";
 import {
@@ -3635,13 +3636,8 @@ function emitCrestRuntimeEvent(
 
 function emitCrestCommentaryThoughts(res: Response, entries: CodexCommentaryEntry[] | undefined): void {
   for (const entry of entries ?? []) {
-    const lines = entry.lines.length > 0 ? entry.lines : [entry.text];
-    lines.map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
-      sendSSE(res, "thought", {
-        id: `${entry.id}:${index + 1}`,
-        text: truncateText(line, 1200)
-      });
-    });
+    const payload = crestCommentaryEntryToThoughtPayload(entry);
+    if (payload) sendSSE(res, "thought", payload);
   }
 }
 
