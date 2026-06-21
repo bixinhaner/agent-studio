@@ -3,6 +3,9 @@ import type { CodexCommentaryEntry } from "../../operations/codex-execution-serv
 export type CrestThoughtEventPayload = {
   id: string;
   text: string;
+  status?: CodexCommentaryEntry["status"];
+  at?: string;
+  last_event_at?: number;
 };
 
 export function crestCommentaryEntryToThoughtPayload(
@@ -13,7 +16,14 @@ export function crestCommentaryEntryToThoughtPayload(
   if (!text) return undefined;
   return {
     id: entry.id,
-    text: truncateText(text, options.maxTextLength ?? 1200)
+    text: truncateText(text, options.maxTextLength ?? 1200),
+    status: entry.status,
+    ...(typeof entry.last_event_at === "number" && Number.isFinite(entry.last_event_at)
+      ? {
+          at: new Date(entry.last_event_at).toISOString(),
+          last_event_at: entry.last_event_at
+        }
+      : {})
   };
 }
 

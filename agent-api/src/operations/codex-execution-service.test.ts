@@ -542,7 +542,7 @@ describe("CodexExecutionService", () => {
         }
       }
     });
-    projection.push({
+    const commentaryCompleted = projection.push({
       type: "item.completed",
       raw: {
         type: "item.completed",
@@ -594,16 +594,22 @@ describe("CodexExecutionService", () => {
     expect(commentaryDelta.commentaryDelta).toEqual({
       id: "message-commentary",
       text: "I will inspect the records.",
-      append: true
+      append: true,
+      status: "streaming",
+      at: "2026-06-10T14:00:00.000Z",
+      last_event_at: 1781100000000
     });
-    expect(finalDelta.answerDelta).toBe("Here is the answer.");
-    expect(finalDelta.commentaryDelta).toBeUndefined();
-    expect(finalCompleted.liveCommentaryEntries).toEqual([
+    expect(commentaryCompleted.liveCommentaryEntries).toEqual([
       expect.objectContaining({
         id: "message-commentary",
-        text: "I will inspect the records."
+        text: "I will inspect the records.",
+        status: "completed",
+        last_event_at: 1781100000000
       })
     ]);
+    expect(finalDelta.answerDelta).toBe("Here is the answer.");
+    expect(finalDelta.commentaryDelta).toBeUndefined();
+    expect(finalCompleted.liveCommentaryEntries).toEqual([]);
     const finalized = projection.finalize({ finalAnswer: "Here is the answer." });
     expect(JSON.stringify(finalized.contentParts)).toContain("I will inspect the records.");
     expect(JSON.stringify(finalized.contentParts)).not.toContain("Here is the answer.");

@@ -55,6 +55,9 @@ export type CodexRuntimeEventProjection = {
     id?: string;
     text: string;
     append: boolean;
+    status?: CodexCommentaryEntry["status"];
+    at?: string;
+    last_event_at?: number;
   };
   reasoningText?: string;
   completedAgentMessage?: {
@@ -589,10 +592,14 @@ export class CodexRunProjection {
     if (this.options.streamAnswerDeltas === false) {
       projection.answerDelta = undefined;
     } else if (projection.answerDelta && agentMessagePhase && agentMessagePhase !== "final_answer") {
+      const eventAt = this.now();
       projection.commentaryDelta = {
         id: projection.itemId,
         text: projection.answerDelta,
-        append: true
+        append: true,
+        status: "streaming",
+        at: new Date(eventAt).toISOString(),
+        last_event_at: eventAt
       };
       projection.answerDelta = undefined;
     }
@@ -604,6 +611,15 @@ export class CodexRunProjection {
         return projection;
       }
       const nextEntry = this.upsertCommentaryEntry(projection.completedAgentMessage);
+      const hasKnownNonFinalPhase = Boolean(projection.completedAgentMessage.phase ?? agentMessagePhase);
+      if (hasKnownNonFinalPhase) {
+        projection.liveCommentaryEntries = [
+          ...(this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : []),
+          ...(nextEntry ? [nextEntry] : [])
+        ];
+        this.pendingLiveCommentaryEntry = undefined;
+        return projection;
+      }
       projection.liveCommentaryEntries = this.pendingLiveCommentaryEntry ? [this.pendingLiveCommentaryEntry] : [];
       this.pendingLiveCommentaryEntry = nextEntry;
     }
@@ -651,11 +667,12 @@ export class CodexRunProjection {
     const text = trimOrUndefined(message.text);
     if (!text) return undefined;
     const id = trimOrUndefined(message.id) ?? `codex-commentary-${++this.commentarySeq}`;
+    const lastEventAt = this.now();
     const next: CodexCommentaryEntry = {
       id,
       text,
       lines: commentaryLinesFromText(text),
-      last_event_at: this.options.now?.() ?? Date.now(),
+      last_event_at: lastEventAt,
       status: "completed"
     };
     const existingIndex = this.commentaryEntries.findIndex((entry) => entry.id === id);
@@ -665,6 +682,10 @@ export class CodexRunProjection {
     }
     this.commentaryEntries.push(next);
     return next;
+  }
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now();
   }
 }
 

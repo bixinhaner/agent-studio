@@ -9,11 +9,15 @@ describe("Crest stream event projection", () => {
         id: "msg-commentary-1",
         text: "我会先查询客户数据。\n\n数据已经取回。",
         lines: ["我会先查询客户数据。", "数据已经取回。"],
+        last_event_at: 1781100000000,
         status: "completed"
       })
     ).toEqual({
       id: "msg-commentary-1",
-      text: "我会先查询客户数据。\n\n数据已经取回。"
+      text: "我会先查询客户数据。\n\n数据已经取回。",
+      status: "completed",
+      at: "2026-06-10T14:00:00.000Z",
+      last_event_at: 1781100000000
     });
   });
 
