@@ -3308,15 +3308,6 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       threadId: thread.id
     });
 
-    sendSSE(res, "thought", {
-      text: `已路由到 Agent Studio，对话已同步到 thread ${thread.id}。`
-    });
-    if (preparedAttachments.length > 0) {
-      sendSSE(res, "thought", {
-        text: `已接收 ${preparedAttachments.length} 个 Crest 原文件附件，运行时将直接读取文件。`
-      });
-    }
-
     const userMessageId = `crest-user-${randomUUID().replace(/-/g, "")}`;
     await conversationRecords.appendMessage({
       threadId: thread.id,
