@@ -86,6 +86,18 @@ rl.on("line", (line) => {
         notify("error", { threadId, turnId, message: "sandbox denied", detail: "permission denied opening file" });
         return;
       }
+      if (inputText === "retry-then-success") {
+        notify("error", {
+          threadId,
+          turnId,
+          message: "Reconnecting... 2/5",
+          willRetry: true,
+          error: {
+            message: "Reconnecting... 2/5",
+            additionalDetails: "request timed out"
+          }
+        });
+      }
       if (inputText === "markdown-whitespace") {
         for (const delta of [
           "Intro",
@@ -252,6 +264,38 @@ describe("Codex app-server runtime", () => {
     const completedRaw = completed?.raw as { item?: { text?: string } } | undefined;
     expect(completed?.text).toBe(markdownWhitespaceText);
     expect(completedRaw?.item?.text).toBe(markdownWhitespaceText);
+  });
+
+  it("keeps the turn alive when app-server emits a retryable reconnect error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-retry")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "retry-then-success")) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join("")).toBe(
+      "Hello"
+    );
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalledWith("codex app-server turn failed", expect.anything());
+    warnSpy.mockRestore();
   });
 
   it("keeps using the app-server scope that created the live thread", async () => {

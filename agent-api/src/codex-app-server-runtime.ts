@@ -125,6 +125,12 @@ function eventSummary(event: CodexStreamEvent): RuntimeEventSummary {
   };
 }
 
+function isRetryableRuntimeError(event: CodexStreamEvent): boolean {
+  if (event.type !== "error") return false;
+  const raw = asRecord(event.raw);
+  return raw?.willRetry === true;
+}
+
 function classifyRuntimeFailure(message: string, raw?: unknown): CodexAppServerFailureCategory {
   const text = `${message}\n${jsonPreview(raw, 1000)}`.toLowerCase();
   if (text.includes("aborted") || text.includes("abort")) return "client_aborted";
@@ -976,6 +982,9 @@ class CodexAppServerManager {
         lastEvents.push(eventSummary(event));
         if (lastEvents.length > MAX_DIAGNOSTIC_EVENTS) lastEvents.shift();
         resetIdleTimer();
+        if (isRetryableRuntimeError(event)) {
+          return;
+        }
         queue.push(event);
         if (event.type === "turn.completed") {
           completed = true;
