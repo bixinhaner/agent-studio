@@ -854,7 +854,7 @@ describe("ZendeskIntegrationService", () => {
           expect.objectContaining({ title: "Called agent" }),
           expect.objectContaining({ title: "Reasoning summary" }),
           expect.objectContaining({ kind: "reasoning", title: "AI process summary" }),
-          expect.objectContaining({ title: "Command execution completed" }),
+          expect.objectContaining({ title: "Workspace operation completed" }),
           expect.objectContaining({ title: "Recorded usage telemetry" }),
           expect.objectContaining({ title: "Wrote Zendesk internal note" }),
           expect.objectContaining({ title: "Sent DingTalk notification" })
