@@ -3306,6 +3306,7 @@ type CrestActiveChatRun = {
   userId: string;
   controller: AbortController;
   createdAt: number;
+  session?: SessionRecord;
 };
 
 const crestActiveChatRuns = new Map<string, CrestActiveChatRun>();
@@ -3345,7 +3346,19 @@ function registerCrestActiveChatRun(input: {
   };
 }
 
-function cancelCrestActiveChatRun(clientRunId: string, userId: string): boolean {
+function attachCrestActiveChatRunSession(input: {
+  clientRunId?: string;
+  userId: string;
+  session: SessionRecord;
+}): void {
+  const runId = trimOrUndefined(input.clientRunId);
+  if (!runId) return;
+  const entry = crestActiveChatRuns.get(runId);
+  if (!entry || entry.userId !== input.userId) return;
+  entry.session = input.session;
+}
+
+async function cancelCrestActiveChatRun(clientRunId: string, userId: string): Promise<boolean> {
   gcCrestActiveChatRuns();
   const runId = trimOrUndefined(clientRunId);
   if (!runId) return false;
@@ -3355,6 +3368,11 @@ function cancelCrestActiveChatRun(clientRunId: string, userId: string): boolean 
     entry.controller.abort(new Error("crest_user_cancelled"));
   }
   crestActiveChatRuns.delete(runId);
+  await retireLiveRuntimeSession(entry.session, {
+    status: "ended",
+    reason: "crest explicit cancel request",
+    logLabel: "crest chat"
+  });
   return true;
 }
 
@@ -3422,6 +3440,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     crestThreadId = thread.id;
     let currentSession = session;
     crestRuntimeSession = currentSession;
+    attachCrestActiveChatRunSession({
+      clientRunId: input.clientRunId,
+      userId: currentUser.id,
+      session: currentSession
+    });
     let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     if (!liveThread) {
       currentSession = await ensureThreadSession(currentUser, thread.id, {
@@ -3429,6 +3452,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         force_run_profile_controls: true
       });
       crestRuntimeSession = currentSession;
+      attachCrestActiveChatRunSession({
+        clientRunId: input.clientRunId,
+        userId: currentUser.id,
+        session: currentSession
+      });
       liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     }
     if (!liveThread) throw new Error("Agent Studio session is not available");
@@ -3509,6 +3537,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         });
       },
       async onDone({ answerText, session: sessionForRun, generatedArtifacts, artifactContentPart, finalizedProcess }) {
+        if (explicitCancel.signal.aborted) return;
         emitCrestCommentaryThoughts(res, finalizedProcess.liveCommentaryEntries);
         const processContentParts = finalizedProcess.contentParts;
         await conversationRecords.appendMessage({
@@ -3600,7 +3629,7 @@ async function handleCrestChatCancel(req: Request, res: Response): Promise<void>
   try {
     const input = crestChatCancelSchema.parse(req.body || {});
     const currentUser = await resolveCrestActor(input);
-    const cancelled = cancelCrestActiveChatRun(input.clientRunId, currentUser.id);
+    const cancelled = await cancelCrestActiveChatRun(input.clientRunId, currentUser.id);
     res.json({ cancelled });
   } catch (error) {
     res.status(400).json({
