@@ -46,6 +46,18 @@ function createMemoryDb() {
       async findUnique(args) {
         return rows.get(args.where.externalId) ?? null;
       },
+      async findFirst(args) {
+        const items = [...rows.values()].filter((row) => {
+          if (args.where?.threadId && row.threadId !== args.where.threadId) return false;
+          if (args.where?.status && row.status !== args.where.status) return false;
+          return true;
+        });
+        items.sort((left, right) => {
+          const direction = args.orderBy?.updatedAt === "asc" ? 1 : -1;
+          return direction * (left.updatedAt.getTime() - right.updatedAt.getTime());
+        });
+        return items[0] ?? null;
+      },
       async findMany() {
         return [...rows.values()];
       },
@@ -141,5 +153,27 @@ describe("SessionRepository", () => {
 
     await expect(repository.peek(created.sessionId)).resolves.toBeUndefined();
     await expect(repository.get(created.sessionId)).resolves.toBeUndefined();
+  });
+
+  it("can still resolve the latest retired session for thread-level codex resume", async () => {
+    const { db } = createMemoryDb();
+    const repository = new SessionRepository(db, null);
+
+    const created = await repository.create({
+      organizationId: "org-1",
+      userId: "user-1",
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: "/tmp/workspace",
+      codexThreadId: "codex-thread-1"
+    });
+
+    await repository.retire(created.sessionId, "ended");
+
+    await expect(repository.latestForThread("thread-1")).resolves.toMatchObject({
+      sessionId: created.sessionId,
+      codexThreadId: "codex-thread-1"
+    });
   });
 });

@@ -45,6 +45,13 @@ type RuntimeSessionRow = {
 type RuntimeSessionTable = {
   count(args: { where?: { status?: "active" | "ended" | "failed" } }): Promise<number>;
   findUnique(args: { where: { externalId: string } }): Promise<RuntimeSessionRow | null>;
+  findFirst(args: {
+    where?: {
+      threadId?: string;
+      status?: "active" | "ended" | "failed";
+    };
+    orderBy?: { updatedAt: "asc" | "desc" };
+  }): Promise<RuntimeSessionRow | null>;
   findMany(args: {
     where?: {
       status?: "active" | "ended" | "failed";
@@ -230,6 +237,17 @@ export class SessionRepository {
         endedAt: new Date()
       }
     });
+  }
+
+  async latestForThread(threadId: string): Promise<SessionRecord | undefined> {
+    const normalizedThreadId = trimOrUndefined(threadId);
+    if (!normalizedThreadId) return undefined;
+    const row = await this.db.runtimeSession.findFirst({
+      where: { threadId: normalizedThreadId },
+      orderBy: { updatedAt: "desc" }
+    });
+    if (!row || !row.externalId) return undefined;
+    return this.mapSession(row);
   }
 
   async cleanupExpired(): Promise<string[]> {

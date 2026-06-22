@@ -3256,9 +3256,11 @@ async function ensureCrestChatThread(input: {
   const existing = await threads.getByExternalId(externalId, input.currentUser.organizationId);
   if (existing) {
     const activeThread = existing.status === "archived" ? await threads.update(existing.id, { status: "regular" }) : existing;
+    const resumeCodexThreadId = await latestCodexThreadIdForAgentThread(activeThread.id);
     const session = await ensureThreadSession(input.currentUser, activeThread.id, {
       codex_run_config: activeThread.codexRunConfig,
-      force_run_profile_controls: true
+      force_run_profile_controls: true,
+      resume_codex_thread_id: resumeCodexThreadId
     });
     return { thread: (await threads.get(activeThread.id, input.currentUser.organizationId)) ?? activeThread, session };
   }
@@ -3447,9 +3449,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     });
     let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     if (!liveThread) {
+      const resumeCodexThreadId = await latestCodexThreadIdForAgentThread(thread.id);
       currentSession = await ensureThreadSession(currentUser, thread.id, {
         codex_run_config: thread.codexRunConfig,
-        force_run_profile_controls: true
+        force_run_profile_controls: true,
+        resume_codex_thread_id: resumeCodexThreadId
       });
       crestRuntimeSession = currentSession;
       attachCrestActiveChatRunSession({
@@ -4187,7 +4191,12 @@ function ensureThreadUploadDirsInRunConfig(
   return ensureThreadUploadInRunConfig(codexRunConfig, getThreadWorkspaceUploadDir(workspacePath, threadId));
 }
 
-async function createSession(options: SessionOptions, threadId?: string, timing?: RuntimeStartupTimer) {
+async function createSession(
+  options: SessionOptions,
+  threadId?: string,
+  timing?: RuntimeStartupTimer,
+  resumeCodexThreadId?: string
+) {
   const time = async <T>(
     name: string,
     action: () => Promise<T>,
@@ -4246,15 +4255,35 @@ async function createSession(options: SessionOptions, threadId?: string, timing?
       CODEX_HOME: materializedCodexHome.codexHome
     }
   });
-  const started = await time("create_session.start_live_runtime_thread", () =>
-    startLiveRuntimeSession({
-      runtime: sessionRuntime,
-      model: options.model,
-      reasoningEffort: options.reasoningEffort,
-      workspace: options.workspace,
-      codexRunConfig: runtimeLaunch.codexRunConfig
-    })
-  );
+  const normalizedResumeCodexThreadId = trimOrUndefined(resumeCodexThreadId);
+  const started = normalizedResumeCodexThreadId
+    ? await time("create_session.resume_live_runtime_thread", async () => {
+        const liveThread = await sessionRuntime.resumeThreadWithOptions({
+          threadId: normalizedResumeCodexThreadId,
+          model: options.model,
+          reasoningEffort: options.reasoningEffort,
+          workspace: options.workspace,
+          codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+        });
+        const codexThreadId =
+          typeof (liveThread as { id?: unknown })?.id === "string"
+            ? trimOrUndefined((liveThread as { id?: string }).id)
+            : undefined;
+        return {
+          liveThread,
+          codexRunConfig: runtimeLaunch.codexRunConfig,
+          codexThreadId: codexThreadId ?? normalizedResumeCodexThreadId
+        };
+      }, { codexThreadId: normalizedResumeCodexThreadId })
+    : await time("create_session.start_live_runtime_thread", () =>
+        startLiveRuntimeSession({
+          runtime: sessionRuntime,
+          model: options.model,
+          reasoningEffort: options.reasoningEffort,
+          workspace: options.workspace,
+          codexRunConfig: runtimeLaunch.codexRunConfig
+        })
+      );
   const codexRunConfig = started.codexRunConfig;
   const codexThreadId = started.codexThreadId;
   const session = await time("create_session.persist_runtime_session", () =>
@@ -4342,6 +4371,17 @@ async function replaceUserAgentLiveRuntimeSession(input: {
     throw new Error("Replacement Agent Studio runtime session is not available");
   }
   return { session: updated, liveThread };
+}
+
+async function latestCodexThreadIdForAgentThread(threadId: string): Promise<string | undefined> {
+  const latestSession = await sessions.latestForThread(threadId).catch((error) => {
+    console.warn("failed to resolve latest codex thread id for Agent Studio thread", {
+      threadId,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  });
+  return trimOrUndefined(latestSession?.codexThreadId);
 }
 
 async function resolveKnowledgeSetRunConfig(input: {
@@ -4516,6 +4556,7 @@ async function ensureThreadSession(
     knowledge_set_ids?: string[];
     codex_run_config?: Record<string, unknown>;
     force_run_profile_controls?: boolean;
+    resume_codex_thread_id?: string;
   },
   timing?: RuntimeStartupTimer
 ) {
@@ -4718,7 +4759,9 @@ async function ensureThreadSession(
     await time("ensure_thread_session.remove_stale_session", () => sessions.remove(active.sessionId));
     liveRuntimeThreads.delete(active.sessionId);
   }
-  const session = await time("ensure_thread_session.create_session", () => createSession(desired, threadId, timing));
+  const session = await time("ensure_thread_session.create_session", () =>
+    createSession(desired, threadId, timing, patch?.resume_codex_thread_id)
+  );
   timing?.updateContext({ sessionId: session.sessionId, model: session.model });
   return session;
 }
