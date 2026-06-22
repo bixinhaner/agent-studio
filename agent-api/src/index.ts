@@ -1869,6 +1869,7 @@ const crestChatStreamSchema = z.object({
   delegationToken: z.string().trim().min(1),
   delegationRefreshToken: z.string().trim().min(1).optional(),
   delegationRefreshExpiresAt: z.string().trim().min(1).optional(),
+  clientRunId: z.string().trim().min(1).max(80).optional(),
   conversationId: z.string().trim().min(1).max(160),
   message: z.string().trim().min(1).max(8000),
   context: z.record(z.unknown()).optional(),
@@ -1884,6 +1885,15 @@ const crestChatStreamSchema = z.object({
     )
     .max(10)
     .optional()
+});
+
+const crestChatCancelSchema = z.object({
+  clientId: z.string().trim().min(1),
+  clientSecret: z.string().trim().min(1),
+  delegationToken: z.string().trim().min(1),
+  delegationRefreshToken: z.string().trim().min(1).optional(),
+  delegationRefreshExpiresAt: z.string().trim().min(1).optional(),
+  clientRunId: z.string().trim().min(1).max(80)
 });
 
 const crestDelegationIntrospectionSchema = z.object({
@@ -3265,10 +3275,96 @@ async function ensureCrestChatThread(input: {
   return { thread: (await threads.get(created.id, input.currentUser.organizationId)) ?? created, session };
 }
 
+type CrestActiveChatRun = {
+  userId: string;
+  controller: AbortController;
+  createdAt: number;
+};
+
+const crestActiveChatRuns = new Map<string, CrestActiveChatRun>();
+const CREST_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
+
+function gcCrestActiveChatRuns(): void {
+  const cutoff = Date.now() - CREST_ACTIVE_CHAT_RUN_TTL_MS;
+  for (const [runId, entry] of crestActiveChatRuns.entries()) {
+    if (entry.createdAt < cutoff) {
+      crestActiveChatRuns.delete(runId);
+    }
+  }
+}
+
+function registerCrestActiveChatRun(input: {
+  clientRunId?: string;
+  userId: string;
+  controller: AbortController;
+}): (() => void) | undefined {
+  const runId = trimOrUndefined(input.clientRunId);
+  if (!runId) return undefined;
+  gcCrestActiveChatRuns();
+  const existing = crestActiveChatRuns.get(runId);
+  if (existing && !existing.controller.signal.aborted) {
+    throw new Error("Crest chat run is already active");
+  }
+  crestActiveChatRuns.set(runId, {
+    userId: input.userId,
+    controller: input.controller,
+    createdAt: Date.now()
+  });
+  return () => {
+    const current = crestActiveChatRuns.get(runId);
+    if (current?.controller === input.controller) {
+      crestActiveChatRuns.delete(runId);
+    }
+  };
+}
+
+function cancelCrestActiveChatRun(clientRunId: string, userId: string): boolean {
+  gcCrestActiveChatRuns();
+  const runId = trimOrUndefined(clientRunId);
+  if (!runId) return false;
+  const entry = crestActiveChatRuns.get(runId);
+  if (!entry || entry.userId !== userId) return false;
+  if (!entry.controller.signal.aborted) {
+    entry.controller.abort(new Error("crest_user_cancelled"));
+  }
+  crestActiveChatRuns.delete(runId);
+  return true;
+}
+
+function mergeAbortSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+  const abortFrom = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason ?? new Error("aborted"));
+    }
+  };
+  for (const signal of signals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      continue;
+    }
+    const listener = () => abortFrom(signal);
+    signal.addEventListener("abort", listener, { once: true });
+    listeners.push({ signal, listener });
+  }
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const item of listeners) {
+        item.signal.removeEventListener("abort", item.listener);
+      }
+    }
+  };
+}
+
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
   const streamAbort = createSseAbortLifecycle(req, res);
+  const explicitCancel = new AbortController();
+  const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
+  let unregisterRun: (() => void) | undefined;
   try {
     const input = crestChatStreamSchema.parse(req.body || {});
     const drainReason = await getDeploymentDrainReason();
@@ -3278,6 +3374,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     }
 
     const currentUser = await resolveCrestActor(input);
+    unregisterRun = registerCrestActiveChatRun({
+      clientRunId: input.clientRunId,
+      userId: currentUser.id,
+      controller: explicitCancel
+    });
     const { thread, session } = await ensureCrestChatThread({
       currentUser,
       conversationId: input.conversationId,
@@ -3339,11 +3440,11 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         conversationId: input.conversationId
       },
       usageSource: "crest_chat_stream",
-      signal: streamAbort.signal,
+      signal: runAbort.signal,
       emptyAnswerText: "(无输出)",
       artifactScanStartedAt: new Date(Date.now() - 2000),
       logLabel: "crest chat",
-      shouldSkipRetry: () => streamAbort.disconnected,
+      shouldSkipRetry: () => streamAbort.disconnected || explicitCancel.signal.aborted,
       hasExternalContext: (sessionForRun) =>
         preparedAttachments.length > 0 || codexRunConfigHasExternalContext(sessionForRun.codexRunConfig),
       onEvent({ projection }) {
@@ -3404,14 +3505,29 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     });
 
   } catch (error) {
-    if (!streamAbort.disconnected && !res.writableEnded) {
+    if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
       sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
     }
   } finally {
+    unregisterRun?.();
+    runAbort.dispose();
     streamAbort.markSettled();
     streamAbort.dispose();
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
+  }
+}
+
+async function handleCrestChatCancel(req: Request, res: Response): Promise<void> {
+  try {
+    const input = crestChatCancelSchema.parse(req.body || {});
+    const currentUser = await resolveCrestActor(input);
+    const cancelled = cancelCrestActiveChatRun(input.clientRunId, currentUser.id);
+    res.json({ cancelled });
+  } catch (error) {
+    res.status(400).json({
+      detail: error instanceof Error ? error.message : "Crest chat cancel failed"
+    });
   }
 }
 
@@ -7232,6 +7348,9 @@ crestIntegrationRouter.use(createCrestRouter({
 }));
 crestIntegrationRouter.post("/chat/stream", async (req: Request, res: Response) => {
   await handleCrestChatStream(req, res);
+});
+crestIntegrationRouter.post("/chat/cancel", async (req: Request, res: Response) => {
+  await handleCrestChatCancel(req, res);
 });
 crestIntegrationRouter.post("/artifacts/content", async (req: Request, res: Response) => {
   await handleCrestArtifactContent(req, res);
