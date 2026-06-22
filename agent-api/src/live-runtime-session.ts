@@ -111,10 +111,7 @@ function parseTokenCountUsage(event: Record<string, unknown>, raw: Record<string
   const info = asRecord(source.info);
   const codexThreadId = trimOrUndefined(typeof source.thread_id === "string" ? source.thread_id : undefined);
   const cumulative = parseUsageRecord(info?.total_token_usage, "cumulative_snapshot", { codexThreadId });
-  return parseUsageRecord(info?.last_token_usage, "turn_delta", {
-    cumulative,
-    codexThreadId
-  });
+  return cumulative ?? parseUsageRecord(info?.last_token_usage, "turn_delta", { codexThreadId });
 }
 
 function completedAgentMessageText(event: RuntimeStreamEvent): string | undefined {

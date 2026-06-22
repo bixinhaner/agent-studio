@@ -13,9 +13,10 @@ async function* events(items: Array<Record<string, unknown>>) {
 }
 
 describe("streamRuntimeCompletionWithBestEffortUsage", () => {
-  it("prefers Codex last token usage when token-count telemetry is available", () => {
+  it("uses cumulative token-count telemetry so app-server multi-step turns are billed by snapshot diff", () => {
     expect(extractRuntimeUsageFromStreamEvent({
       type: "token_count",
+      thread_id: "codex-thread-1",
       info: {
         total_token_usage: {
           input_tokens: 10_000,
@@ -29,14 +30,37 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
         }
       }
     })).toEqual({
+      inputTokens: 10_000,
+      cachedInputTokens: 8000,
+      outputTokens: 500,
+      kind: "cumulative_snapshot",
+      cumulativeInputTokens: undefined,
+      cumulativeCachedInputTokens: undefined,
+      cumulativeOutputTokens: undefined,
+      codexThreadId: "codex-thread-1"
+    });
+  });
+
+  it("falls back to last token usage when token-count cumulative telemetry is unavailable", () => {
+    expect(extractRuntimeUsageFromStreamEvent({
+      type: "token_count",
+      thread_id: "codex-thread-1",
+      info: {
+        last_token_usage: {
+          input_tokens: 1200,
+          cached_input_tokens: 900,
+          output_tokens: 80
+        }
+      }
+    })).toEqual({
       inputTokens: 1200,
       cachedInputTokens: 900,
       outputTokens: 80,
       kind: "turn_delta",
-      cumulativeInputTokens: 10_000,
-      cumulativeCachedInputTokens: 8000,
-      cumulativeOutputTokens: 500,
-      codexThreadId: undefined
+      cumulativeInputTokens: undefined,
+      cumulativeCachedInputTokens: undefined,
+      cumulativeOutputTokens: undefined,
+      codexThreadId: "codex-thread-1"
     });
   });
 
@@ -160,7 +184,7 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       inputTokens: 1000,
       cachedInputTokens: 600,
       outputTokens: 40,
-      kind: "turn_delta"
+      kind: "cumulative_snapshot"
     }), "failed");
   });
 });
