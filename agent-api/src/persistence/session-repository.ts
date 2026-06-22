@@ -35,6 +35,7 @@ type RuntimeSessionRow = {
   organizationId: string | null;
   threadId: string | null;
   userId: string | null;
+  status: "active" | "ended" | "failed";
   externalId: string | null;
   metadata: unknown;
   createdAt: Date | string;
@@ -164,6 +165,7 @@ export class SessionRepository {
   async peek(sessionId: string): Promise<SessionRecord | undefined> {
     const row = await this.db.runtimeSession.findUnique({ where: { externalId: sessionId } });
     if (!row || !row.externalId) return undefined;
+    if (row.status !== "active") return undefined;
 
     const ttlMs = this.ttlMs;
     if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs <= 0) {
@@ -217,6 +219,16 @@ export class SessionRepository {
   async remove(sessionId: string): Promise<void> {
     await this.db.runtimeSession.deleteMany({
       where: { externalId: sessionId }
+    });
+  }
+
+  async retire(sessionId: string, status: "ended" | "failed" = "ended"): Promise<void> {
+    await this.db.runtimeSession.update({
+      where: { externalId: sessionId },
+      data: {
+        status,
+        endedAt: new Date()
+      }
     });
   }
 

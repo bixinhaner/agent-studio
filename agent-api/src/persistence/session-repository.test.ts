@@ -11,6 +11,7 @@ type RuntimeSessionRow = {
   organizationId: string | null;
   threadId: string | null;
   userId: string | null;
+  status: "active" | "ended" | "failed";
   externalId: string | null;
   metadata: unknown;
   createdAt: Date;
@@ -56,6 +57,7 @@ function createMemoryDb() {
           organizationId: typeof args.data.organizationId === "string" ? args.data.organizationId : null,
           threadId: typeof args.data.threadId === "string" ? args.data.threadId : null,
           userId: typeof args.data.userId === "string" ? args.data.userId : null,
+          status: args.data.status === "failed" || args.data.status === "ended" ? args.data.status : "active",
           externalId,
           metadata: args.data.metadata,
           createdAt: now,
@@ -69,6 +71,7 @@ function createMemoryDb() {
         if (!existing) throw new Error("missing row");
         const updated: RuntimeSessionRow = {
           ...existing,
+          status: args.data.status === "failed" || args.data.status === "ended" ? args.data.status : existing.status,
           metadata: args.data.metadata ?? existing.metadata,
           updatedAt: new Date()
         };
@@ -119,5 +122,24 @@ describe("SessionRepository", () => {
         }
       }
     });
+  });
+
+  it("hides retired sessions from active lookups", async () => {
+    const { db } = createMemoryDb();
+    const repository = new SessionRepository(db, null);
+
+    const created = await repository.create({
+      organizationId: "org-1",
+      userId: "user-1",
+      threadId: "thread-1",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: "/tmp/workspace"
+    });
+
+    await repository.retire(created.sessionId, "ended");
+
+    await expect(repository.peek(created.sessionId)).resolves.toBeUndefined();
+    await expect(repository.get(created.sessionId)).resolves.toBeUndefined();
   });
 });

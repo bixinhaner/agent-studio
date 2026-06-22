@@ -1849,6 +1849,33 @@ async function persistSessionCodexThreadId(session: SessionRecord, codexThreadId
   }
 }
 
+async function retireLiveRuntimeSession(
+  session: SessionRecord | undefined,
+  input: { status?: "ended" | "failed"; reason: string; logLabel?: string }
+): Promise<void> {
+  if (!session?.sessionId) return;
+  liveRuntimeThreads.delete(session.sessionId);
+  try {
+    await sessions.retire(session.sessionId, input.status ?? "ended");
+  } catch (error) {
+    console.warn(`${input.logLabel ?? "runtime"} failed to retire live runtime session`, {
+      sessionId: session.sessionId,
+      threadId: session.threadId,
+      codexThreadId: session.codexThreadId,
+      reason: input.reason,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+  console.log(`${input.logLabel ?? "runtime"} retired live runtime session`, {
+    sessionId: session.sessionId,
+    threadId: session.threadId,
+    codexThreadId: session.codexThreadId,
+    status: input.status ?? "ended",
+    reason: input.reason
+  });
+}
+
 const createSessionSchema = z.object({
   session_id: z.string().optional(),
   model: z.string().optional(),
@@ -3363,12 +3390,14 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
   const streamAbort = createSseAbortLifecycle(req, res);
   const explicitCancel = new AbortController();
-  const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
+  const runAbort = mergeAbortSignals([explicitCancel.signal]);
   let unregisterRun: (() => void) | undefined;
   let crestInput: z.infer<typeof crestChatStreamSchema> | undefined;
   let crestThreadId: string | undefined;
   let crestUserMessageId: string | undefined;
   let crestAssistantMessageWritten = false;
+  let crestRuntimeSession: SessionRecord | undefined;
+  let crestRuntimeFailure: string | undefined;
   try {
     const input = crestChatStreamSchema.parse(req.body || {});
     crestInput = input;
@@ -3392,12 +3421,14 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     });
     crestThreadId = thread.id;
     let currentSession = session;
+    crestRuntimeSession = currentSession;
     let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     if (!liveThread) {
       currentSession = await ensureThreadSession(currentUser, thread.id, {
         codex_run_config: thread.codexRunConfig,
         force_run_profile_controls: true
       });
+      crestRuntimeSession = currentSession;
       liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     }
     if (!liveThread) throw new Error("Agent Studio session is not available");
@@ -3441,7 +3472,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       runConfig: { channel: "crest", conversationId: input.conversationId }
     });
 
-    await runCodexChannelTurn({
+    const turnResult = await runCodexChannelTurn({
       channel: "crest",
       memoryChannel: "crest",
       currentUser,
@@ -3458,7 +3489,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       emptyAnswerText: "(无输出)",
       artifactScanStartedAt: new Date(Date.now() - 2000),
       logLabel: "crest chat",
-      shouldSkipRetry: () => streamAbort.disconnected || explicitCancel.signal.aborted,
+      shouldSkipRetry: () => explicitCancel.signal.aborted,
       hasExternalContext: (sessionForRun) =>
         preparedAttachments.length > 0 || codexRunConfigHasExternalContext(sessionForRun.codexRunConfig),
       onEvent({ projection }) {
@@ -3518,8 +3549,12 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
         });
       }
     });
+    crestRuntimeSession = turnResult.session;
 
   } catch (error) {
+    if (crestRuntimeSession && !explicitCancel.signal.aborted) {
+      crestRuntimeFailure = error instanceof Error ? error.message : String(error);
+    }
     if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
       sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
     }
@@ -3537,6 +3572,19 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           userMessageId: crestUserMessageId,
           detail: error instanceof Error ? error.message : String(error)
         });
+      });
+    }
+    if (explicitCancel.signal.aborted) {
+      await retireLiveRuntimeSession(crestRuntimeSession, {
+        status: "ended",
+        reason: "crest explicit cancel",
+        logLabel: "crest chat"
+      });
+    } else if (crestRuntimeFailure) {
+      await retireLiveRuntimeSession(crestRuntimeSession, {
+        status: "failed",
+        reason: `crest runtime failure: ${crestRuntimeFailure}`,
+        logLabel: "crest chat"
       });
     }
     unregisterRun?.();
@@ -3630,7 +3678,7 @@ async function appendCrestStoppedAssistant(input: {
   await conversationRecords.appendMessage({
     threadId: input.threadId,
     parentId: input.parentId,
-    message: crestStoredMessage("assistant", assistantId, "上一轮请求已停止，未生成回答。", {
+    message: crestStoredMessage("assistant", assistantId, "已停止回答。", {
       conversationId: input.conversationId,
       context: input.context,
       stopped: true,

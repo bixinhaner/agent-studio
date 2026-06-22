@@ -10,6 +10,9 @@ export function initSSE(res: Response): void {
 }
 
 export function sendSSE(res: Response, event: string, payload: unknown): void {
+  if (res.writableEnded || (res as Response & { destroyed?: boolean }).destroyed) {
+    return;
+  }
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
   (res as Response & { flush?: () => void }).flush?.();
