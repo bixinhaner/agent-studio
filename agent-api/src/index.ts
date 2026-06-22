@@ -3365,8 +3365,13 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
   const explicitCancel = new AbortController();
   const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
   let unregisterRun: (() => void) | undefined;
+  let crestInput: z.infer<typeof crestChatStreamSchema> | undefined;
+  let crestThreadId: string | undefined;
+  let crestUserMessageId: string | undefined;
+  let crestAssistantMessageWritten = false;
   try {
     const input = crestChatStreamSchema.parse(req.body || {});
+    crestInput = input;
     const drainReason = await getDeploymentDrainReason();
     if (drainReason) {
       sendSSE(res, "error", { message: drainReason });
@@ -3385,6 +3390,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       message: input.message,
       context: input.context
     });
+    crestThreadId = thread.id;
     let currentSession = session;
     let liveThread = liveRuntimeThreads.get(currentSession.sessionId) || await restoreLiveRuntimeThread(currentSession);
     if (!liveThread) {
@@ -3410,10 +3416,18 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       threadId: thread.id
     });
 
+    const parentForUserMessage = await closeDanglingCrestUserHead({
+      threadId: thread.id,
+      headId: thread.headId ?? null,
+      conversationId: input.conversationId,
+      context: input.context ?? {}
+    });
+
     const userMessageId = `crest-user-${randomUUID().replace(/-/g, "")}`;
+    crestUserMessageId = userMessageId;
     await conversationRecords.appendMessage({
       threadId: thread.id,
-      parentId: thread.headId ?? null,
+      parentId: parentForUserMessage,
       message: crestStoredMessage(
         "user",
         userMessageId,
@@ -3483,6 +3497,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
           ),
           runConfig: { channel: "crest", conversationId: input.conversationId }
         });
+        crestAssistantMessageWritten = true;
         streamAbort.markSettled();
         sendSSE(res, "done", {
           output: answerText,
@@ -3509,6 +3524,21 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
       sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
     }
   } finally {
+    if (explicitCancel.signal.aborted && crestThreadId && crestUserMessageId && !crestAssistantMessageWritten && crestInput) {
+      await appendCrestStoppedAssistant({
+        threadId: crestThreadId,
+        parentId: crestUserMessageId,
+        conversationId: crestInput.conversationId,
+        context: crestInput.context ?? {},
+        reason: "explicit_cancel"
+      }).catch((error) => {
+        console.warn("crest chat failed to append stopped assistant", {
+          threadId: crestThreadId,
+          userMessageId: crestUserMessageId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
     unregisterRun?.();
     runAbort.dispose();
     streamAbort.markSettled();
@@ -3554,6 +3584,61 @@ async function handleCrestArtifactContent(req: Request, res: Response): Promise<
 function crestThreadTitle(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   return normalized ? `Crest CRM - ${normalized.slice(0, 40)}` : "Crest CRM 对话";
+}
+
+async function closeDanglingCrestUserHead(input: {
+  threadId: string;
+  headId?: string | null;
+  conversationId: string;
+  context: Record<string, unknown>;
+}): Promise<string | null> {
+  const headId = trimOrUndefined(input.headId ?? undefined);
+  if (!headId) return null;
+  try {
+    const repository = await conversationRecords.getMessageRepository(input.threadId);
+    const headMessage = repository.messages.find((item) => storedMessageId(item.message) === headId);
+    if (!headMessage || storedMessageRole(headMessage.message) !== "user") return headId;
+    const message = asRecord(headMessage.message);
+    const metadata = asRecord(message?.metadata);
+    if (metadata?.channel !== "crest") return headId;
+    const stoppedId = await appendCrestStoppedAssistant({
+      threadId: input.threadId,
+      parentId: headId,
+      conversationId: input.conversationId,
+      context: input.context,
+      reason: "dangling_user_head"
+    });
+    return stoppedId;
+  } catch (error) {
+    console.warn("crest chat failed to close dangling user head", {
+      threadId: input.threadId,
+      headId,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+    return headId;
+  }
+}
+
+async function appendCrestStoppedAssistant(input: {
+  threadId: string;
+  parentId: string;
+  conversationId: string;
+  context: Record<string, unknown>;
+  reason: "explicit_cancel" | "dangling_user_head";
+}): Promise<string> {
+  const assistantId = `crest-assistant-stopped-${randomUUID().replace(/-/g, "")}`;
+  await conversationRecords.appendMessage({
+    threadId: input.threadId,
+    parentId: input.parentId,
+    message: crestStoredMessage("assistant", assistantId, "上一轮请求已停止，未生成回答。", {
+      conversationId: input.conversationId,
+      context: input.context,
+      stopped: true,
+      stopReason: input.reason
+    }),
+    runConfig: { channel: "crest", conversationId: input.conversationId }
+  });
+  return assistantId;
 }
 
 function crestStoredMessage(
