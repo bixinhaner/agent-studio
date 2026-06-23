@@ -1029,6 +1029,10 @@ function errorCodeFromUnknown(error: unknown): string | undefined {
   return error instanceof ApiError ? error.code || error.reasonCode : undefined;
 }
 
+const DIRECT_MESSAGE_TEXT_MAX_CHARS = 20_000;
+const LARGE_DIRECT_MESSAGE_NOTICE =
+  "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
+const LARGE_PASTE_UPLOAD_FALLBACK_TEXT = "Please analyze the attached text file.";
 const GENERIC_ASSISTANT_ERROR_NOTICE =
   "I couldn't complete this response. Please try again. If the issue continues, contact your workspace admin.";
 const GENERIC_PROCESS_ERROR_DETAIL =
@@ -1039,6 +1043,9 @@ const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step needs attent
 function formatAssistantErrorNotice(detail: string, code?: string): string {
   const normalizedCode = (code || "").trim().toUpperCase();
   const normalized = detail.replace(/\s+/g, " ").trim();
+  if (normalizedCode === "DIRECT_CHAT_MESSAGE_TOO_LARGE") {
+    return LARGE_DIRECT_MESSAGE_NOTICE;
+  }
   if (normalizedCode === "AI_REQUEST_LIMIT_REACHED" || normalizedCode.endsWith("_TURN_LIMIT_EXCEEDED")) {
     return "AI request limit reached. Please wait for the next reset or contact your workspace admin.";
   }
@@ -1070,6 +1077,9 @@ function formatAssistantErrorNotice(detail: string, code?: string): string {
   }
   if (/system is updating|agent studio is deploying|currently deploying|deployment drain/i.test(normalized)) {
     return "System is updating. Please retry in a few minutes.";
+  }
+  if (/too large to send directly|upload (it|the content) as a .*file|direct messages are limited/i.test(normalized)) {
+    return LARGE_DIRECT_MESSAGE_NOTICE;
   }
   if (/service capacity|token limit|temporarily unavailable/i.test(normalized)) {
     return "This workspace is temporarily unavailable. Please try again after the next reset or contact your workspace admin.";
@@ -1853,6 +1863,34 @@ function composerUploadBlockReason(attachments: readonly Attachment[]): "uploadi
   return hasUploading ? "uploading" : "";
 }
 
+function formatCharacterCount(value: number): string {
+  return new Intl.NumberFormat(undefined).format(value);
+}
+
+function largeDirectMessageNotice(characters: number): string {
+  return [
+    LARGE_DIRECT_MESSAGE_NOTICE,
+    `Current message: ${formatCharacterCount(characters)} characters.`
+  ].join(" ");
+}
+
+function largePasteFileName(now = new Date()): string {
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+    "-",
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0")
+  ].join("");
+  return `pasted-text-${stamp}.txt`;
+}
+
+function largePasteAttachedNotice(fileName: string): string {
+  return `Large pasted text was attached as ${fileName}. Add a short question and send it when the upload finishes.`;
+}
+
 function useComposerMultilineRef(composerText: string) {
   const composerWrapRef = useRef<HTMLDivElement>(null);
   const composerTextRef = useRef(composerText);
@@ -1904,6 +1942,55 @@ function useComposerMultilineRef(composerText: string) {
   }, [composerText, syncMultilineState]);
 
   return composerWrapRef;
+}
+
+function useLargeTextPasteAttachmentGuard(input: {
+  composerWrapRef: MutableRefObject<HTMLDivElement | null>;
+  aui: ReturnType<typeof useAui>;
+  enabled: boolean;
+  onNotice: (notice: string) => void;
+}) {
+  const { composerWrapRef, aui, enabled, onNotice } = input;
+
+  useEffect(() => {
+    const wrap = composerWrapRef.current;
+    if (!wrap || !enabled) return;
+    const textarea = wrap.querySelector("textarea");
+    if (!textarea) return;
+
+    const handlePaste = (event: ClipboardEvent) => {
+      if (event.defaultPrevented) return;
+      const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+      if (pastedText.length <= DIRECT_MESSAGE_TEXT_MAX_CHARS) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const pastedBytes = new Blob([pastedText]).size;
+      if (pastedBytes > THREAD_ATTACHMENT_MAX_BYTES) {
+        onNotice(
+          `The pasted text is too large to upload as one file. Save it as a smaller .txt or .log file and upload it. File uploads are limited to ${formatFileSize(
+            THREAD_ATTACHMENT_MAX_BYTES
+          )}.`
+        );
+        return;
+      }
+
+      const fileName = largePasteFileName();
+      const file = new File([pastedText], fileName, { type: "text/plain" });
+      const currentText = aui.composer().getState().text.trim();
+      if (!currentText) {
+        aui.composer().setText(LARGE_PASTE_UPLOAD_FALLBACK_TEXT);
+      }
+      onNotice(largePasteAttachedNotice(fileName));
+      void aui.composer().addAttachment(file).catch((error) => {
+        onNotice(error instanceof Error ? error.message : "Failed to attach pasted text. Save it as a file and upload it.");
+      });
+    };
+
+    textarea.addEventListener("paste", handlePaste);
+    return () => textarea.removeEventListener("paste", handlePaste);
+  }, [aui, composerWrapRef, enabled, onNotice]);
 }
 
 function skillUsesImageIcon(skill: RuntimeSkillOption): boolean {
@@ -2006,7 +2093,9 @@ const UploadAwareComposer: FC = () => {
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const uploadBlockReason = useAuiState((state) => composerUploadBlockReason(state.composer.attachments));
   const sendBlockedByUpload = uploadBlockReason !== "";
-  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload || accessBlock.blocked;
+  const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
+  const sendDisabled =
+    threadRunning || !composerEditing || composerEmpty || sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked;
   const sendTitle =
     accessBlock.blocked
       ? accessBlock.notice
@@ -2014,10 +2103,19 @@ const UploadAwareComposer: FC = () => {
       ? "Wait for attachments to finish uploading"
       : uploadBlockReason === "failed"
         ? "Retry or remove failed uploads before sending"
+        : sendBlockedByLargeText
+          ? LARGE_DIRECT_MESSAGE_NOTICE
         : "Send message";
   const [composerSending, setComposerSending] = useState(false);
+  const [largeTextNotice, setLargeTextNotice] = useState("");
   const composerSendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerWrapRef = useComposerMultilineRef(composerText);
+  useLargeTextPasteAttachmentGuard({
+    composerWrapRef,
+    aui,
+    enabled: !accessBlock.blocked,
+    onNotice: setLargeTextNotice
+  });
 
   useEffect(() => {
     return () => {
@@ -2026,6 +2124,12 @@ const UploadAwareComposer: FC = () => {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!largeTextNotice || sendBlockedByLargeText) return;
+    const timer = window.setTimeout(() => setLargeTextNotice(""), 9000);
+    return () => window.clearTimeout(timer);
+  }, [largeTextNotice, sendBlockedByLargeText]);
 
   const triggerComposerSendAnimation = useCallback(() => {
     if (composerSendingTimerRef.current !== null) {
@@ -2043,7 +2147,7 @@ const UploadAwareComposer: FC = () => {
   }, []);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
-    if (sendBlockedByUpload || accessBlock.blocked) {
+    if (sendBlockedByUpload || sendBlockedByLargeText || accessBlock.blocked) {
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2073,6 +2177,14 @@ const UploadAwareComposer: FC = () => {
             {uploadBlockReason === "uploading"
               ? "Uploading attachments. You can keep typing; sending unlocks when ready."
               : "An attachment failed to upload. Retry or remove it before sending."}
+          </p>
+        ) : sendBlockedByLargeText ? (
+          <p className="portal-upload-composer-hint" role="alert">
+            {largeDirectMessageNotice(composerText.length)}
+          </p>
+        ) : largeTextNotice ? (
+          <p className="portal-upload-composer-hint" role="status">
+            {largeTextNotice}
           </p>
         ) : null}
         <div className="portal-composer-input-row">
@@ -2118,12 +2230,13 @@ const MobileAwareComposer: FC = () => {
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
   const composerEmpty = useAuiState((state) => state.composer.isEmpty);
   const composerEditing = useAuiState((state) => state.composer.isEditing);
-  const sendDisabled = threadRunning || !composerEditing || composerEmpty || accessBlock.blocked;
-  const sendTitle = accessBlock.blocked ? accessBlock.notice : "Send message";
+  const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
+  const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked;
+  const sendTitle = accessBlock.blocked ? accessBlock.notice : sendBlockedByLargeText ? LARGE_DIRECT_MESSAGE_NOTICE : "Send message";
   const composerWrapRef = useComposerMultilineRef(composerText);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
-    if (accessBlock.blocked) {
+    if (accessBlock.blocked || sendBlockedByLargeText) {
       event.preventDefault();
       event.stopPropagation();
     }
@@ -2141,6 +2254,10 @@ const MobileAwareComposer: FC = () => {
         {accessBlock.blocked ? (
           <p className="portal-upload-composer-hint portal-access-composer-hint" role="alert">
             {accessBlock.notice}
+          </p>
+        ) : sendBlockedByLargeText ? (
+          <p className="portal-upload-composer-hint" role="alert">
+            {largeDirectMessageNotice(composerText.length)}
           </p>
         ) : null}
         <div className="portal-composer-input-row">
@@ -3022,6 +3139,22 @@ function sanitizeMessageForPersistence(message: unknown): unknown {
     ...obj,
     attachments: sanitizeUserAttachments(obj.attachments)
   };
+}
+
+function findLatestUserMessageForStream(messages: readonly ThreadMessage[]): {
+  message: ThreadMessage;
+  parentId: string | null;
+} | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user") continue;
+    const previousMessageId = index > 0 ? messages[index - 1]?.id : undefined;
+    return {
+      message,
+      parentId: typeof previousMessageId === "string" && previousMessageId.trim() ? previousMessageId.trim() : null
+    };
+  }
+  return null;
 }
 
 function reviveMessage(message: unknown, persistedCreatedAt?: string | null): unknown {
@@ -5538,6 +5671,7 @@ const AgentRuntimeAdapterProvider: FC<
         const remoteId = init.remoteId;
         const state = aui.threadListItem().getState();
         const messageForPersistence = sanitizeMessageForPersistence(item.message);
+        const messageRole = asRecord(messageForPersistence)?.role;
         const hasTitle = !isPlaceholderThreadTitle(typeof state.title === "string" ? state.title : "");
         const firstUserText = userTextFromUnknownMessage(messageForPersistence);
         const optimisticTitle = guessThreadTitleFromText(firstUserText);
@@ -5556,6 +5690,9 @@ const AgentRuntimeAdapterProvider: FC<
               autoTitleAppliedRemoteIdsRef.current.delete(remoteId);
             });
           }
+        }
+        if (messageRole === "user") {
+          return;
         }
         await api(`/api/threads/${encodeURIComponent(remoteId)}/messages`, {
           method: "POST",
@@ -6866,9 +7003,11 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!prompt) {
           throw new Error("No user input text detected");
         }
-        const latestUserMessageId = [...options.messages]
-          .reverse()
-          .find((message) => message.role === "user")?.id;
+        const latestUserMessage = findLatestUserMessageForStream(options.messages);
+        const latestUserMessageId = latestUserMessage?.message.id;
+        const latestUserMessageForPersistence = latestUserMessage
+          ? sanitizeMessageForPersistence(latestUserMessage.message)
+          : undefined;
         const isSkillCreationRequest = isSkillCreationIntent(prompt);
         const runtimePrompt = isSkillCreationRequest ? buildSkillCreatorReviewPrompt(prompt) : prompt;
 
@@ -7417,6 +7556,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               session_id: session.session_id,
               thread_id: threadId,
               user_message_id: latestUserMessageId,
+              client_user_message_id: latestUserMessageId,
+              parent_id: latestUserMessage?.parentId ?? null,
+              user_message: latestUserMessageForPersistence,
+              display_message: prompt,
               message: runtimePrompt
             }),
             signal: options.abortSignal

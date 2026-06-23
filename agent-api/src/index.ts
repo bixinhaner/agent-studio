@@ -1889,8 +1889,35 @@ const streamSchema = z.object({
   session_id: z.string().min(1),
   thread_id: z.string().min(1).optional(),
   user_message_id: z.string().trim().min(1).optional(),
+  client_user_message_id: z.string().trim().min(1).optional(),
+  parent_id: z.string().trim().min(1).nullable().optional(),
+  user_message: z.unknown().optional(),
+  display_message: z.string().optional(),
   message: z.string().min(1)
 });
+
+const DIRECT_CHAT_MESSAGE_MAX_CHARS = 20_000;
+const DIRECT_CHAT_MESSAGE_TOO_LARGE_DETAIL =
+  "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
+
+class DirectChatMessageTooLargeError extends Error {
+  readonly code = "DIRECT_CHAT_MESSAGE_TOO_LARGE";
+  readonly reasonCode = "direct_chat_message_too_large";
+
+  constructor(readonly characters: number) {
+    super(DIRECT_CHAT_MESSAGE_TOO_LARGE_DETAIL);
+    this.name = "DirectChatMessageTooLargeError";
+  }
+}
+
+function isDirectChatMessageTooLargeError(error: unknown): error is DirectChatMessageTooLargeError {
+  return error instanceof DirectChatMessageTooLargeError;
+}
+
+function assertDirectChatMessageWithinLimit(message: string): void {
+  if (message.length <= DIRECT_CHAT_MESSAGE_MAX_CHARS) return;
+  throw new DirectChatMessageTooLargeError(message.length);
+}
 
 const crestChatStreamSchema = z.object({
   clientId: z.string().trim().min(1),
@@ -2097,6 +2124,7 @@ type CurrentActor = {
 const QUOTA_ACCESS_DENIED_MESSAGE = "Current quota limit has been exceeded; cannot create a new session";
 
 function statusCodeForSessionAccessError(error: unknown): number {
+  if (isDirectChatMessageTooLargeError(error)) return 413;
   if (isChatAccessDeniedError(error)) return 403;
   const detail = error instanceof Error ? error.message : "";
   return detail === QUOTA_ACCESS_DENIED_MESSAGE ? 403 : 400;
@@ -2108,6 +2136,13 @@ function payloadForSessionAccessError(error: unknown, fallbackDetail: string): {
   reason_code?: string;
 } {
   const detail = error instanceof Error ? error.message : fallbackDetail;
+  if (isDirectChatMessageTooLargeError(error)) {
+    return {
+      detail,
+      code: error.code,
+      reason_code: error.reasonCode
+    };
+  }
   if (isChatAccessDeniedError(error)) {
     return {
       detail,
@@ -6645,34 +6680,139 @@ function portalAssistantMessage(input: {
   };
 }
 
-async function resolvePortalUserMessageParent(input: {
+function portalUserMessage(input: {
+  id: string;
+  message: unknown;
+  displayText: string;
+  sessionId: string;
+}) {
+  const payload = asRecord(input.message);
+  const now = new Date().toISOString();
+  const baseMetadata = asRecord(payload?.metadata) ?? {};
+  const customMetadata = asRecord(baseMetadata.custom) ?? {};
+  if (payload?.role === "user") {
+    return {
+      ...payload,
+      id: input.id,
+      role: "user",
+      createdAt: typeof payload.createdAt === "string" ? payload.createdAt : now,
+      metadata: {
+        ...baseMetadata,
+        custom: {
+          ...customMetadata,
+          channel: "portal",
+          sessionId: input.sessionId,
+          serverPersisted: true
+        }
+      }
+    };
+  }
+  return {
+    id: input.id,
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: input.displayText
+      }
+    ],
+    attachments: [],
+    createdAt: now,
+    metadata: {
+      custom: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        serverPersisted: true
+      }
+    }
+  };
+}
+
+function findStoredMessageById(
+  repository: { messages: { message: unknown }[] },
+  messageId?: string
+): { message: unknown } | undefined {
+  const normalizedId = trimOrUndefined(messageId);
+  if (!normalizedId) return undefined;
+  return repository.messages.find((item) => storedMessageId(item.message) === normalizedId);
+}
+
+async function ensurePortalStreamUserMessage(input: {
   threadId: string;
-  requestedUserMessageId?: string;
-}): Promise<string | undefined> {
-  const requested = trimOrUndefined(input.requestedUserMessageId);
+  userMessageId?: string;
+  parentId?: string | null;
+  userMessage?: unknown;
+  displayText: string;
+  sessionId: string;
+}): Promise<string> {
+  const requestedUserMessageId = trimOrUndefined(input.userMessageId);
+  const payloadId = storedMessageId(input.userMessage);
+  const userMessageId =
+    requestedUserMessageId ??
+    payloadId ??
+    `portal-user-${createHash("sha256")
+      .update(`${input.threadId}:${input.sessionId}:${input.displayText}`)
+      .digest("hex")
+      .slice(0, 24)}`;
+  const displayText = trimOrUndefined(input.displayText) ?? "User message";
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const repository = await conversationRecords.getMessageRepository(input.threadId);
+      const existingUserMessage = findStoredMessageById(repository, userMessageId);
+      if (existingUserMessage) {
+        if (storedMessageRole(existingUserMessage.message) !== "user") {
+          throw new Error("Existing portal message id is not a user message");
+        }
+        return userMessageId;
+      }
+
+      const requestedParentId = trimOrUndefined(input.parentId ?? undefined);
+      const requestedParent = findStoredMessageById(repository, requestedParentId);
+      const repositoryHeadId = trimOrUndefined(repository.headId ?? undefined);
+      const repositoryHead = findStoredMessageById(repository, repositoryHeadId);
+      const parentId = requestedParent ? requestedParentId ?? null : repositoryHead ? repositoryHeadId ?? null : null;
+      const message = portalUserMessage({
+        id: userMessageId,
+        message: input.userMessage,
+        displayText,
+        sessionId: input.sessionId
+      });
+
+      await conversationRecords.appendMessage({
+        threadId: input.threadId,
+        parentId,
+        message,
+        runConfig: { channel: "portal", sessionId: input.sessionId, serverPersisted: true }
+      });
+      return userMessageId;
+    } catch (error) {
+      if (attempt >= 3) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+    }
+  }
+  return userMessageId;
+}
+
+async function requirePortalUserMessageParent(input: {
+  threadId: string;
+  userMessageId: string;
+}): Promise<string> {
+  const userMessageId = trimOrUndefined(input.userMessageId);
+  if (!userMessageId) throw new Error("Portal assistant persistence requires a user message id");
   const repository = await conversationRecords.getMessageRepository(input.threadId);
-  if (requested) {
-    const requestedMessage = repository.messages.find((item) => storedMessageId(item.message) === requested);
-    if (requestedMessage && storedMessageRole(requestedMessage.message) === "user") {
-      return requested;
-    }
+  const userMessage = findStoredMessageById(repository, userMessageId);
+  if (!userMessage || storedMessageRole(userMessage.message) !== "user") {
+    throw new Error("Portal assistant persistence requires an existing user message parent");
   }
-  const headId = trimOrUndefined(repository.headId ?? undefined);
-  if (headId) {
-    const headMessage = repository.messages.find((item) => storedMessageId(item.message) === headId);
-    if (headMessage && storedMessageRole(headMessage.message) === "user") {
-      return headId;
-    }
-  }
-  const latestUserMessage = [...repository.messages]
-    .reverse()
-    .find((item) => storedMessageRole(item.message) === "user" && storedMessageId(item.message));
-  return latestUserMessage ? storedMessageId(latestUserMessage.message) : undefined;
+  return userMessageId;
 }
 
 async function persistPortalAssistantMessageWithRetry(input: {
   threadId: string;
-  userMessageId?: string;
+  userMessageId: string;
   sessionId: string;
   answerText: string;
   contentParts?: Record<string, unknown>[];
@@ -6681,17 +6821,10 @@ async function persistPortalAssistantMessageWithRetry(input: {
   if (!answerText) return false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const parentId = await resolvePortalUserMessageParent({
+      const parentId = await requirePortalUserMessageParent({
         threadId: input.threadId,
-        requestedUserMessageId: input.userMessageId
+        userMessageId: input.userMessageId
       });
-      if (!parentId) {
-        console.warn("portal assistant persistence skipped because no user parent was found", {
-          threadId: input.threadId,
-          sessionId: input.sessionId
-        });
-        return false;
-      }
       const assistantId = `portal-assistant-${createHash("sha256")
         .update(`${input.threadId}:${parentId}:${input.sessionId}`)
         .digest("hex")
@@ -8928,11 +9061,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
   const streamAbort = createSseAbortLifecycle(req, res);
+  let directInputLength: number | undefined;
 
   try {
     const currentUser = currentActorFromRequest(req);
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = streamSchema.parse(req.body || {});
+    directInputLength = input.message.length;
+    assertDirectChatMessageWithinLimit(input.message);
     timing.updateContext({ sessionId: input.session_id, threadId: input.thread_id });
     const drainReason = await timing.time("chat_stream.check_deploy_drain", () => getDeploymentDrainReason());
     if (drainReason) {
@@ -8998,10 +9134,27 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         featureType: "chat"
       })
     );
+    if (!currentSession.threadId) {
+      sendSSE(res, "error", { detail: "Session is not bound to a thread. Refresh and try again." });
+      finishTiming("error", { reason: "session_not_bound_to_thread" });
+      res.end();
+      return;
+    }
+    const persistedPortalUserMessageId = await timing.time("chat_stream.persist_user_message", () =>
+      ensurePortalStreamUserMessage({
+        threadId: currentSession.threadId!,
+        userMessageId: input.client_user_message_id ?? input.user_message_id,
+        parentId: input.parent_id ?? null,
+        userMessage: input.user_message,
+        displayText: input.display_message ?? input.message,
+        sessionId: currentSession.sessionId
+      })
+    );
 
     sendSSE(res, "meta", {
       session_id: currentSession.sessionId,
       thread_id: currentSession.threadId,
+      user_message_id: persistedPortalUserMessageId,
       model: currentSession.model,
       reasoning_effort: currentSession.reasoningEffort,
       workspace: currentSession.workspace,
@@ -9093,7 +9246,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
               persistPortalAssistantMessageWithRetry({
                 threadId: currentSession.threadId!,
-                userMessageId: input.user_message_id,
+                userMessageId: persistedPortalUserMessageId,
                 sessionId: currentSession.sessionId,
                 answerText: payload.answer,
                 contentParts: artifactContentPart ? [artifactContentPart] : undefined
@@ -9156,6 +9309,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     }
     finishTiming("error", {
       error: detail,
+      inputLength: directInputLength,
       deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open",
       disconnectReason: streamAbort.reason
     });
