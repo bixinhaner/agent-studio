@@ -142,7 +142,35 @@ check_backend_env() {
   database_url="$(read_env_value "$BACKEND_ENV_FILE" "DATABASE_URL")" || die "DATABASE_URL is missing from $BACKEND_ENV_FILE"
   [[ -n "$database_url" ]] || die "DATABASE_URL is empty in $BACKEND_ENV_FILE"
   DATABASE_URL="$database_url"
+  validate_database_pool_settings "$database_url"
   print_ok "backend env includes DATABASE_URL"
+}
+
+validate_database_pool_settings() {
+  local database_url="$1"
+
+  python3 - "$database_url" <<'PY'
+from urllib.parse import parse_qs, urlsplit
+import sys
+
+query = parse_qs(urlsplit(sys.argv[1]).query)
+
+def value_as_int(key: str) -> int | None:
+    values = query.get(key)
+    if not values:
+        return None
+    try:
+        return int(values[-1])
+    except Exception:
+        return None
+
+connection_limit = value_as_int("connection_limit")
+pool_timeout = value_as_int("pool_timeout")
+if connection_limit is None or connection_limit < 10:
+    raise SystemExit("DATABASE_URL must include connection_limit=10 or higher")
+if pool_timeout is None or pool_timeout < 30:
+    raise SystemExit("DATABASE_URL must include pool_timeout=30 or higher")
+PY
 }
 
 check_frontend_env() {

@@ -1887,6 +1887,7 @@ const createSessionSchema = z.object({
 const streamSchema = z.object({
   session_id: z.string().min(1),
   thread_id: z.string().min(1).optional(),
+  user_message_id: z.string().trim().min(1).optional(),
   message: z.string().min(1)
 });
 
@@ -6570,6 +6571,154 @@ function storedMessageRole(message: unknown): string {
   return typeof obj?.role === "string" ? obj.role.trim() : "";
 }
 
+function withStoredMessageId(message: unknown, id: string): unknown {
+  const obj = asRecord(message);
+  if (!obj) return message;
+  return {
+    ...obj,
+    id
+  };
+}
+
+async function normalizePortalAssistantMessageAppend(input: {
+  threadId: string;
+  parentId?: string | null;
+  message: unknown;
+  runConfig?: Record<string, unknown>;
+}): Promise<unknown> {
+  if (storedMessageRole(input.message) !== "assistant") return input.message;
+  const parentId = trimOrUndefined(input.parentId ?? undefined);
+  if (!parentId) return input.message;
+  const channel = trimOrUndefined(input.runConfig?.channel as string | undefined);
+  if (channel && channel !== "portal") return input.message;
+  const repository = await conversationRecords.getMessageRepository(input.threadId);
+  const existingAssistant = repository.messages.find((item) => {
+    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+  });
+  const existingId = existingAssistant ? storedMessageId(existingAssistant.message) : undefined;
+  return existingId ? withStoredMessageId(input.message, existingId) : input.message;
+}
+
+function portalAssistantMessage(input: {
+  id: string;
+  answerText: string;
+  sessionId: string;
+  contentParts?: Record<string, unknown>[];
+}) {
+  return {
+    id: input.id,
+    role: "assistant",
+    content: [
+      {
+        type: "text",
+        text: input.answerText
+      },
+      ...(input.contentParts ?? [])
+    ],
+    status: {
+      type: "complete",
+      reason: "stop"
+    },
+    createdAt: new Date().toISOString(),
+    metadata: {
+      unstable_state: {},
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        serverPersisted: true
+      }
+    }
+  };
+}
+
+async function resolvePortalUserMessageParent(input: {
+  threadId: string;
+  requestedUserMessageId?: string;
+}): Promise<string | undefined> {
+  const requested = trimOrUndefined(input.requestedUserMessageId);
+  const repository = await conversationRecords.getMessageRepository(input.threadId);
+  if (requested) {
+    const requestedMessage = repository.messages.find((item) => storedMessageId(item.message) === requested);
+    if (requestedMessage && storedMessageRole(requestedMessage.message) === "user") {
+      return requested;
+    }
+  }
+  const headId = trimOrUndefined(repository.headId ?? undefined);
+  if (headId) {
+    const headMessage = repository.messages.find((item) => storedMessageId(item.message) === headId);
+    if (headMessage && storedMessageRole(headMessage.message) === "user") {
+      return headId;
+    }
+  }
+  const latestUserMessage = [...repository.messages]
+    .reverse()
+    .find((item) => storedMessageRole(item.message) === "user" && storedMessageId(item.message));
+  return latestUserMessage ? storedMessageId(latestUserMessage.message) : undefined;
+}
+
+async function persistPortalAssistantMessageWithRetry(input: {
+  threadId: string;
+  userMessageId?: string;
+  sessionId: string;
+  answerText: string;
+  contentParts?: Record<string, unknown>[];
+}): Promise<boolean> {
+  const answerText = trimOrUndefined(input.answerText);
+  if (!answerText) return false;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const parentId = await resolvePortalUserMessageParent({
+        threadId: input.threadId,
+        requestedUserMessageId: input.userMessageId
+      });
+      if (!parentId) {
+        console.warn("portal assistant persistence skipped because no user parent was found", {
+          threadId: input.threadId,
+          sessionId: input.sessionId
+        });
+        return false;
+      }
+      const assistantId = `portal-assistant-${createHash("sha256")
+        .update(`${input.threadId}:${parentId}:${input.sessionId}`)
+        .digest("hex")
+        .slice(0, 24)}`;
+      const message = portalAssistantMessage({
+        id: assistantId,
+        answerText,
+        sessionId: input.sessionId,
+        contentParts: input.contentParts
+      });
+      const normalizedMessage = await normalizePortalAssistantMessageAppend({
+        threadId: input.threadId,
+        parentId,
+        message,
+        runConfig: { channel: "portal", sessionId: input.sessionId }
+      });
+      await conversationRecords.appendMessage({
+        threadId: input.threadId,
+        parentId,
+        message: normalizedMessage,
+        runConfig: { channel: "portal", sessionId: input.sessionId, serverPersisted: true }
+      });
+      return true;
+    } catch (error) {
+      if (attempt >= 3) {
+        console.warn("portal assistant persistence failed", {
+          threadId: input.threadId,
+          sessionId: input.sessionId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+    }
+  }
+  return false;
+}
+
 function decodeHeaderMaybeUri(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -8671,10 +8820,16 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
       return;
     }
     const input = appendMessageSchema.parse(req.body || {});
-    const updated = await conversationRecords.appendMessage({
+    const message = await normalizePortalAssistantMessageAppend({
       threadId,
       parentId: input.parent_id ?? null,
       message: input.message,
+      runConfig: input.run_config
+    });
+    const updated = await conversationRecords.appendMessage({
+      threadId,
+      parentId: input.parent_id ?? null,
+      message,
       runConfig: input.run_config,
       createdAt: input.created_at,
       updatedAt: input.updated_at
@@ -8902,6 +9057,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       },
       async onDone(payload) {
         timing.mark("chat_stream.on_done_started");
+        let serverPersistedAssistant = false;
         try {
           const artifacts = await timing.time("chat_stream.register_artifacts", () =>
             registerGeneratedArtifactsForSession({
@@ -8912,13 +9068,26 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
               changedAfter: artifactScanStartedAt
             })
           );
+          let artifactContentPart: Record<string, unknown> | undefined;
           if (artifacts.length > 0) {
             const policy = await resolveArtifactPolicyForActor(currentUser);
+            artifactContentPart = artifactContentPartForArtifacts(artifacts, policy);
             sendSSE(res, "artifacts", {
               policy: artifactPolicyOut(policy),
               artifacts: artifacts.map(artifactOut),
-              content_part: artifactContentPartForArtifacts(artifacts, policy)
+              content_part: artifactContentPart
             });
+          }
+          if (currentSession.threadId) {
+            serverPersistedAssistant = await timing.time("chat_stream.persist_assistant_message", () =>
+              persistPortalAssistantMessageWithRetry({
+                threadId: currentSession.threadId!,
+                userMessageId: input.user_message_id,
+                sessionId: currentSession.sessionId,
+                answerText: payload.answer,
+                contentParts: artifactContentPart ? [artifactContentPart] : undefined
+              })
+            );
           }
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -8933,6 +9102,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sendSSE(res, "done", {
           session_id: currentSession.sessionId,
           answer: payload.answer,
+          server_persisted: serverPersistedAssistant,
           completed_at: new Date().toISOString()
         });
         timing.mark("chat_stream.done_sent");

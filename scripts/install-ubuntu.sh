@@ -718,7 +718,7 @@ ensure_env_files() {
   [[ -n "$SESSION_COOKIE_SECRET" ]] || SESSION_COOKIE_SECRET="$(generate_random_secret 32)"
   record_install_state session_cookie_secret "$SESSION_COOKIE_SECRET"
 
-  local database_url="postgresql://$POSTGRES_DB_USER:$POSTGRES_DB_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME?schema=public"
+  local database_url="postgresql://$POSTGRES_DB_USER:$POSTGRES_DB_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME?schema=public&connection_limit=10&pool_timeout=30"
   write_env_key_value "$BACKEND_ENV_FILE" DATABASE_URL "$database_url"
   write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_MODEL "$DEFAULT_MODEL"
   write_env_key_value "$BACKEND_ENV_FILE" DEFAULT_REASONING_EFFORT "$DEFAULT_REASONING_EFFORT"

@@ -6866,6 +6866,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         if (!prompt) {
           throw new Error("No user input text detected");
         }
+        const latestUserMessageId = [...options.messages]
+          .reverse()
+          .find((message) => message.role === "user")?.id;
         const isSkillCreationRequest = isSkillCreationIntent(prompt);
         const runtimePrompt = isSkillCreationRequest ? buildSkillCreatorReviewPrompt(prompt) : prompt;
 
@@ -7413,6 +7416,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             body: JSON.stringify({
               session_id: session.session_id,
               thread_id: threadId,
+              user_message_id: latestUserMessageId,
               message: runtimePrompt
             }),
             signal: options.abortSignal
