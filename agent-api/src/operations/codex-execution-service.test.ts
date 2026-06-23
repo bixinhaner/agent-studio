@@ -161,6 +161,52 @@ describe("CodexExecutionService", () => {
     expect(finish).toHaveBeenCalledTimes(1);
   });
 
+  it("releases tracked streamed runtime turns when abort cleanup hangs", async () => {
+    const finish = vi.fn();
+    const service = new CodexExecutionService({
+      runtimeTurnTracker: {
+        start: vi.fn(() => finish)
+      }
+    });
+    let returnCalled = false;
+    const runtime = {
+      runStreamed() {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              next: () => new Promise<IteratorResult<{ type: string }>>(() => undefined),
+              return: () => {
+                returnCalled = true;
+                return new Promise<IteratorResult<{ type: string }>>(() => undefined);
+              }
+            };
+          }
+        };
+      }
+    };
+    const controller = new AbortController();
+    const run = service.streamFromRuntime({
+      runtime,
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      signal: controller.signal,
+      memory: {
+        channel: "portal",
+        prompt: "question",
+        codexHome: "/tmp/codex-home",
+        sessionId: "session-1"
+      },
+      onEvent: vi.fn(),
+      onDone: vi.fn()
+    });
+
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(run).rejects.toThrow("aborted");
+    expect(returnCalled).toBe(true);
+    expect(finish).toHaveBeenCalledTimes(1);
+  }, 2000);
+
   it("releases tracked runtime turns when runtime collection fails", async () => {
     const finish = vi.fn();
     const service = new CodexExecutionService({

@@ -415,6 +415,12 @@ const SkillComposerContext = createContext<{
   enabledSkillIds: [],
   toggleSkill: () => undefined
 });
+type PortalActiveRun = {
+  sessionId: string;
+  threadId: string;
+  userMessageId?: string;
+};
+const PortalRunCancelContext = createContext<() => void>(() => undefined);
 const SkillDraftActionContext = createContext<{
   openNewSessionWithSkill: (input: { skillName: string; managedSkillId?: string }) => Promise<void> | void;
   refreshRuntimeOptions: () => Promise<PortalRuntimeOptions | null>;
@@ -2086,6 +2092,7 @@ const SkillComposerControls: FC = () => {
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
+  const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
@@ -2163,6 +2170,9 @@ const UploadAwareComposer: FC = () => {
     triggerComposerSendAnimation();
     aui.composer().send();
   };
+  const stopCurrentRun = () => {
+    requestPortalRunCancel();
+  };
 
   return (
     <div ref={composerWrapRef} className={composerSending ? "portal-composer-wrap is-sending" : "portal-composer-wrap"}>
@@ -2201,7 +2211,7 @@ const UploadAwareComposer: FC = () => {
             <SkillComposerControls />
           </div>
           {threadRunning ? (
-            <Composer.Cancel className="portal-stop-btn">
+            <Composer.Cancel className="portal-stop-btn" onClick={stopCurrentRun}>
               <SquareIcon size={13} />
             </Composer.Cancel>
           ) : (
@@ -2225,6 +2235,7 @@ const UploadAwareComposer: FC = () => {
 const MobileAwareComposer: FC = () => {
   const aui = useAui();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
+  const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const composerText = useAuiState((state) => (state.composer.isEditing ? state.composer.text : ""));
@@ -2246,6 +2257,9 @@ const MobileAwareComposer: FC = () => {
     event.preventDefault();
     if (sendDisabled) return;
     aui.composer().send();
+  };
+  const stopCurrentRun = () => {
+    requestPortalRunCancel();
   };
 
   return (
@@ -2273,7 +2287,7 @@ const MobileAwareComposer: FC = () => {
             <SkillComposerControls />
           </div>
           {threadRunning ? (
-            <Composer.Cancel className="portal-stop-btn">
+            <Composer.Cancel className="portal-stop-btn" onClick={stopCurrentRun}>
               <SquareIcon size={13} />
             </Composer.Cancel>
           ) : (
@@ -5917,6 +5931,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const collapseFinalTraceOnDoneRef = useRef(collapseFinalTraceOnDone);
   const activeRemoteThreadIdRef = useRef("");
   const activeLocalThreadIdRef = useRef("");
+  const activePortalRunRef = useRef<PortalActiveRun | null>(null);
   const usageByThreadRef = useRef<Record<string, ContextUsageSnapshot>>({});
   const runningStageTextRef = useRef(runningStageText);
   const runningStageSecondaryTextRef = useRef(runningStageSecondaryText);
@@ -6955,6 +6970,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     setLayoutState((prev) => switchWorkbenchTab(openWorkbenchDrawer(prev), "preview"));
   }, []);
 
+  const requestPortalRunCancel = useCallback(() => {
+    const run = activePortalRunRef.current;
+    if (!run?.sessionId) return;
+    void api<{ cancelled: boolean }>("/api/chat/cancel", {
+      method: "POST",
+      json: {
+        session_id: run.sessionId,
+        thread_id: run.threadId,
+        user_message_id: run.userMessageId
+      }
+    }).catch((error) => {
+      console.warn("portal chat cancel failed", error);
+    });
+  }, []);
+
   const handleThreadLinkClickCapture = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       if (event.defaultPrevented) return;
@@ -7083,6 +7113,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           throw new Error(notice);
         }
         const session = ensured.session;
+        const activeRun: PortalActiveRun = {
+          sessionId: session.session_id,
+          threadId,
+          userMessageId: latestUserMessageId
+        };
+        activePortalRunRef.current = activeRun;
 
         let hasTextUpdate = false;
         let doneAnswer = "";
@@ -8158,6 +8194,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             };
           }
         } finally {
+          const currentActiveRun = activePortalRunRef.current;
+          if (
+            currentActiveRun?.sessionId === activeRun.sessionId &&
+            currentActiveRun.threadId === activeRun.threadId &&
+            currentActiveRun.userMessageId === activeRun.userMessageId
+          ) {
+            activePortalRunRef.current = null;
+          }
           runningThreadKeys.forEach((key) => completedRunThreadIdsRef.current.add(key));
           const activeThreadKeys = normalizeThreadIdentityKeys(
             activeThreadIdentityRef.current.remoteId,
@@ -8440,6 +8484,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <PortalRunCancelContext.Provider value={requestPortalRunCancel}>
       <PortalSubscriptionAccessContext.Provider value={subscriptionAccessContextValue}>
       <SkillComposerContext.Provider value={skillComposerContext}>
       <SkillDraftActionContext.Provider value={skillDraftActionContext}>
@@ -9061,6 +9106,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       </SkillDraftActionContext.Provider>
       </SkillComposerContext.Provider>
       </PortalSubscriptionAccessContext.Provider>
+      </PortalRunCancelContext.Provider>
     </AssistantRuntimeProvider>
   );
 }

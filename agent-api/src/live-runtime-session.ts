@@ -45,6 +45,23 @@ function abortError(): Error {
   return error;
 }
 
+const RUNTIME_ITERATOR_RETURN_TIMEOUT_MS = 250;
+
+function timeout(ms: number): Promise<"timeout"> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("timeout"), ms);
+    timer.unref?.();
+  });
+}
+
+async function returnRuntimeIteratorBestEffort<T>(iterator: AsyncIterator<T>): Promise<void> {
+  if (!iterator.return) return;
+  const returned = Promise.resolve(iterator.return())
+    .then(() => "returned" as const)
+    .catch(() => "failed" as const);
+  await Promise.race([returned, timeout(RUNTIME_ITERATOR_RETURN_TIMEOUT_MS)]);
+}
+
 async function nextRuntimeEvent<T>(iterator: AsyncIterator<T>, signal?: AbortSignal): Promise<IteratorResult<T>> {
   if (!signal) return await iterator.next();
   if (signal.aborted) throw abortError();
@@ -231,9 +248,7 @@ export async function collectRuntimeCompletion(input: {
       await input.onEvent?.(event);
     }
   } catch (error) {
-    if (iterator.return) {
-      await Promise.resolve(iterator.return()).catch(() => undefined);
-    }
+    await returnRuntimeIteratorBestEffort(iterator);
     throw error;
   }
 

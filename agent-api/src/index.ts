@@ -1896,6 +1896,12 @@ const streamSchema = z.object({
   message: z.string().min(1)
 });
 
+const portalChatCancelSchema = z.object({
+  session_id: z.string().trim().min(1),
+  thread_id: z.string().trim().min(1).optional(),
+  user_message_id: z.string().trim().min(1).optional()
+});
+
 const DIRECT_CHAT_MESSAGE_MAX_CHARS = 20_000;
 const DIRECT_CHAT_MESSAGE_TOO_LARGE_DETAIL =
   "This message is too large to send directly. Upload the content as a .txt or .log file, then send a short question. Direct messages are limited to 20,000 characters.";
@@ -3450,6 +3456,133 @@ function mergeAbortSignals(signals: AbortSignal[]): { signal: AbortSignal; dispo
       }
     }
   };
+}
+
+type PortalActiveChatRun = {
+  userId: string;
+  controller: AbortController;
+  createdAt: number;
+  session?: SessionRecord;
+  threadId?: string;
+  userMessageId?: string;
+  assistantMessageWritten?: boolean;
+};
+
+const portalActiveChatRuns = new Map<string, PortalActiveChatRun>();
+const PORTAL_ACTIVE_CHAT_RUN_TTL_MS = 2 * 60 * 60_000;
+
+function gcPortalActiveChatRuns(): void {
+  const cutoff = Date.now() - PORTAL_ACTIVE_CHAT_RUN_TTL_MS;
+  for (const [sessionId, entry] of portalActiveChatRuns.entries()) {
+    if (entry.createdAt < cutoff) {
+      portalActiveChatRuns.delete(sessionId);
+    }
+  }
+}
+
+function registerPortalActiveChatRun(input: {
+  sessionId: string;
+  userId: string;
+  controller: AbortController;
+  threadId?: string;
+}): () => void {
+  const sessionId = trimOrUndefined(input.sessionId);
+  if (!sessionId) return () => undefined;
+  gcPortalActiveChatRuns();
+  const existing = portalActiveChatRuns.get(sessionId);
+  if (existing && existing.userId === input.userId && !existing.controller.signal.aborted) {
+    existing.controller.abort(new Error("portal_run_superseded"));
+  }
+  portalActiveChatRuns.set(sessionId, {
+    userId: input.userId,
+    controller: input.controller,
+    createdAt: Date.now(),
+    threadId: trimOrUndefined(input.threadId)
+  });
+  return () => {
+    const current = portalActiveChatRuns.get(sessionId);
+    if (current?.controller === input.controller) {
+      portalActiveChatRuns.delete(sessionId);
+    }
+  };
+}
+
+function attachPortalActiveChatRun(input: {
+  sessionId: string;
+  userId: string;
+  session?: SessionRecord;
+  threadId?: string;
+  userMessageId?: string;
+}): void {
+  const sessionId = trimOrUndefined(input.sessionId);
+  if (!sessionId) return;
+  const entry = portalActiveChatRuns.get(sessionId);
+  if (!entry || entry.userId !== input.userId) return;
+  entry.session = input.session ?? entry.session;
+  entry.threadId = trimOrUndefined(input.threadId) ?? entry.threadId;
+  entry.userMessageId = trimOrUndefined(input.userMessageId) ?? entry.userMessageId;
+}
+
+function markPortalActiveChatRunAssistantWritten(input: {
+  sessionId: string;
+  userId: string;
+}): void {
+  const sessionId = trimOrUndefined(input.sessionId);
+  if (!sessionId) return;
+  const entry = portalActiveChatRuns.get(sessionId);
+  if (!entry || entry.userId !== input.userId) return;
+  entry.assistantMessageWritten = true;
+}
+
+async function cancelPortalActiveChatRun(input: {
+  sessionId: string;
+  currentUser: CurrentActor;
+  threadId?: string;
+  userMessageId?: string;
+}): Promise<boolean> {
+  gcPortalActiveChatRuns();
+  const sessionId = trimOrUndefined(input.sessionId);
+  if (!sessionId) return false;
+  const entry = portalActiveChatRuns.get(sessionId);
+  if (entry && entry.userId !== input.currentUser.id) return false;
+  const session =
+    entry?.session ??
+    (await sessions.getOwned(sessionId, input.currentUser.id, input.currentUser.organizationId));
+  if (!session) return false;
+
+  const requestedThreadId = trimOrUndefined(input.threadId);
+  const threadId = requestedThreadId ?? trimOrUndefined(entry?.threadId) ?? trimOrUndefined(session.threadId);
+  if (requestedThreadId && trimOrUndefined(session.threadId) && requestedThreadId !== trimOrUndefined(session.threadId)) {
+    return false;
+  }
+  const userMessageId = trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId);
+
+  if (entry && !entry.controller.signal.aborted) {
+    entry.controller.abort(new Error("portal_user_cancelled"));
+  }
+  portalActiveChatRuns.delete(sessionId);
+
+  if (threadId && userMessageId && entry?.assistantMessageWritten !== true) {
+    await appendPortalStoppedAssistant({
+      threadId,
+      userMessageId,
+      sessionId,
+      reason: "explicit_cancel"
+    }).catch((error) => {
+      console.warn("portal chat failed to append stopped assistant", {
+        threadId,
+        userMessageId,
+        sessionId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
+  await retireLiveRuntimeSession(session, {
+    status: "ended",
+    reason: "portal explicit cancel request",
+    logLabel: "portal chat"
+  });
+  return true;
 }
 
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
@@ -6680,6 +6813,53 @@ function portalAssistantMessage(input: {
   };
 }
 
+function portalStoppedAssistantMessage(input: {
+  id: string;
+  sessionId: string;
+  reason: string;
+}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id,
+    role: "assistant",
+    content: [
+      {
+        type: "text",
+        text: "Response stopped."
+      },
+      {
+        type: "data",
+        name: "codex_process_audit",
+        data: {
+          kind: "cancelled",
+          at: now,
+          title: "Stopped",
+          detail: "The response was stopped before it completed.",
+          reason: input.reason
+        }
+      }
+    ],
+    status: {
+      type: "incomplete",
+      reason: "cancelled"
+    },
+    createdAt: now,
+    metadata: {
+      unstable_state: {},
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        serverPersisted: true,
+        stopped: true,
+        stopReason: input.reason
+      }
+    }
+  };
+}
+
 function portalUserMessage(input: {
   id: string;
   message: unknown;
@@ -6794,6 +6974,43 @@ async function ensurePortalStreamUserMessage(input: {
     }
   }
   return userMessageId;
+}
+
+async function appendPortalStoppedAssistant(input: {
+  threadId: string;
+  userMessageId: string;
+  sessionId: string;
+  reason: string;
+}): Promise<boolean> {
+  const parentId = await requirePortalUserMessageParent({
+    threadId: input.threadId,
+    userMessageId: input.userMessageId
+  });
+  const repository = await conversationRecords.getMessageRepository(input.threadId);
+  const existingAssistant = repository.messages.find((item) => {
+    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+  });
+  if (existingAssistant) return false;
+  const assistantId = `portal-assistant-cancelled-${createHash("sha256")
+    .update(`${input.threadId}:${parentId}:${input.sessionId}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+  await conversationRecords.appendMessage({
+    threadId: input.threadId,
+    parentId,
+    message: portalStoppedAssistantMessage({
+      id: assistantId,
+      sessionId: input.sessionId,
+      reason: input.reason
+    }),
+    runConfig: {
+      channel: "portal",
+      sessionId: input.sessionId,
+      serverPersisted: true,
+      stopped: true
+    }
+  });
+  return true;
 }
 
 async function requirePortalUserMessageParent(input: {
@@ -9044,6 +9261,23 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
   }
 });
 
+app.post("/api/chat/cancel", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const input = portalChatCancelSchema.parse(req.body || {});
+    const cancelled = await cancelPortalActiveChatRun({
+      sessionId: input.session_id,
+      currentUser,
+      threadId: input.thread_id,
+      userMessageId: input.user_message_id
+    });
+    res.json({ cancelled });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to cancel chat run";
+    res.status(400).json({ detail });
+  }
+});
+
 app.post("/api/chat/stream", async (req: Request, res: Response) => {
   const timing = createRuntimeStartupTimer({
     traceId: randomUUID(),
@@ -9061,7 +9295,16 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   initSSE(res);
   const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
   const streamAbort = createSseAbortLifecycle(req, res);
+  const explicitCancel = new AbortController();
+  const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
   let directInputLength: number | undefined;
+  let unregisterPortalRun: (() => void) | undefined;
+  let portalRuntimeSession: SessionRecord | undefined;
+  let portalThreadId: string | undefined;
+  let portalUserMessageId: string | undefined;
+  let portalAssistantMessageWritten = false;
+  let portalRuntimeStarted = false;
+  let portalRuntimeFailure: string | undefined;
 
   try {
     const currentUser = currentActorFromRequest(req);
@@ -9106,6 +9349,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     }
     const ensuredLiveThread = liveThread;
     let currentSession: SessionRecord = session;
+    portalRuntimeSession = currentSession;
     const requestedThreadId = String(input.thread_id || "").trim();
     if (requestedThreadId) {
       const boundThreadId = String(currentSession.threadId || "").trim();
@@ -9122,6 +9366,19 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         return;
       }
     }
+    portalThreadId = currentSession.threadId ?? requestedThreadId;
+    unregisterPortalRun = registerPortalActiveChatRun({
+      sessionId: currentSession.sessionId,
+      userId: currentUser.id,
+      controller: explicitCancel,
+      threadId: portalThreadId
+    });
+    attachPortalActiveChatRun({
+      sessionId: currentSession.sessionId,
+      userId: currentUser.id,
+      session: currentSession,
+      threadId: portalThreadId
+    });
 
     // Each streamed turn is a new costly action. Gate it before execution without
     // terminating any turn that is already in flight.
@@ -9150,6 +9407,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         sessionId: currentSession.sessionId
       })
     );
+    portalUserMessageId = persistedPortalUserMessageId;
+    attachPortalActiveChatRun({
+      sessionId: currentSession.sessionId,
+      userId: currentUser.id,
+      session: currentSession,
+      threadId: currentSession.threadId,
+      userMessageId: persistedPortalUserMessageId
+    });
 
     sendSSE(res, "meta", {
       session_id: currentSession.sessionId,
@@ -9184,12 +9449,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       hasEnterpriseContext: Boolean(enterpriseRunContext),
       hasCodexThreadId: Boolean(currentSession.codexThreadId)
     });
+    portalRuntimeStarted = true;
     await codexExecution.streamFromRuntime({
       runtime,
       thread: ensuredLiveThread,
       prompt: runtimeMessage,
       enterpriseContext: enterpriseRunContext,
-      signal: streamAbort.signal,
+      signal: runAbort.signal,
       memory: {
         channel: "portal",
         prompt: input.message,
@@ -9215,6 +9481,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         if (codexThreadId) {
           void persistSessionCodexThreadId(currentSession, codexThreadId).then((updated) => {
             currentSession = updated;
+            portalRuntimeSession = updated;
+            attachPortalActiveChatRun({
+              sessionId: updated.sessionId,
+              userId: currentUser.id,
+              session: updated,
+              threadId: updated.threadId ?? currentSession.threadId,
+              userMessageId: persistedPortalUserMessageId
+            });
           });
         }
         sendSSE(res, "codex", event);
@@ -9252,6 +9526,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
                 contentParts: artifactContentPart ? [artifactContentPart] : undefined
               })
             );
+            if (serverPersistedAssistant) {
+              portalAssistantMessageWritten = true;
+              markPortalActiveChatRunAssistantWritten({
+                sessionId: currentSession.sessionId,
+                userId: currentUser.id
+              });
+            }
           }
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -9304,7 +9585,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (!streamAbort.disconnected && !res.writableEnded) {
+    if (portalRuntimeSession && portalRuntimeStarted && !explicitCancel.signal.aborted) {
+      portalRuntimeFailure = detail;
+    }
+    if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
       sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
     }
     finishTiming("error", {
@@ -9314,6 +9598,38 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       disconnectReason: streamAbort.reason
     });
   } finally {
+    const cancelled = explicitCancel.signal.aborted || streamAbort.disconnected;
+    const portalRuntimeSessionId = trimOrUndefined(portalRuntimeSession?.sessionId);
+    if (cancelled && portalThreadId && portalUserMessageId && portalRuntimeSessionId && !portalAssistantMessageWritten) {
+      await appendPortalStoppedAssistant({
+        threadId: portalThreadId,
+        userMessageId: portalUserMessageId,
+        sessionId: portalRuntimeSessionId,
+        reason: explicitCancel.signal.aborted ? "explicit_cancel" : "client_disconnected"
+      }).catch((error) => {
+        console.warn("portal chat failed to append stopped assistant", {
+          threadId: portalThreadId,
+          userMessageId: portalUserMessageId,
+          sessionId: portalRuntimeSession?.sessionId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
+    if (cancelled) {
+      await retireLiveRuntimeSession(portalRuntimeSession, {
+        status: "ended",
+        reason: explicitCancel.signal.aborted ? "portal explicit cancel" : "portal client disconnected",
+        logLabel: "portal chat"
+      });
+    } else if (portalRuntimeFailure) {
+      await retireLiveRuntimeSession(portalRuntimeSession, {
+        status: "failed",
+        reason: `portal runtime failure: ${portalRuntimeFailure}`,
+        logLabel: "portal chat"
+      });
+    }
+    unregisterPortalRun?.();
+    runAbort.dispose();
     streamAbort.markSettled();
     streamAbort.dispose();
     clearInterval(heartbeat);
