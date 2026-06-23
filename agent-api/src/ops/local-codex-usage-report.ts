@@ -80,6 +80,10 @@ type AggregateRow = {
   unknownPriceRequests: number;
 };
 
+type ParseUsageState = {
+  previousCumulativeByKey: Map<string, RuntimeUsageSnapshot>;
+};
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const LONG_CONTEXT_THRESHOLD = 272_000;
 const DEFAULT_DAYS = 7;
@@ -421,7 +425,37 @@ function reasoningOutputTokensFromPayload(payload: Record<string, unknown>): num
   return numberValue(usage?.reasoning_output_tokens);
 }
 
-async function parseSessionFile(filePath: string, options: CliOptions): Promise<{
+function deltaFromCumulative(current: number, previous: number | undefined): number {
+  if (previous === undefined || current < previous) return Math.max(0, current);
+  return Math.max(0, current - previous);
+}
+
+function usageForLocalRequest(
+  usage: RuntimeUsageSnapshot,
+  previousCumulativeByKey: Map<string, RuntimeUsageSnapshot>,
+  key: string
+): RuntimeUsageSnapshot {
+  if (usage.kind !== "cumulative_snapshot") return usage;
+  const previous = previousCumulativeByKey.get(key);
+  previousCumulativeByKey.set(key, usage);
+  const inputTokens = deltaFromCumulative(usage.inputTokens, previous?.inputTokens);
+  const cachedInputTokens = Math.min(
+    inputTokens,
+    deltaFromCumulative(usage.cachedInputTokens, previous?.cachedInputTokens)
+  );
+  return {
+    ...usage,
+    inputTokens,
+    cachedInputTokens,
+    outputTokens: deltaFromCumulative(usage.outputTokens, previous?.outputTokens),
+    kind: "turn_delta",
+    cumulativeInputTokens: usage.inputTokens,
+    cumulativeCachedInputTokens: usage.cachedInputTokens,
+    cumulativeOutputTokens: usage.outputTokens
+  };
+}
+
+async function parseSessionFile(filePath: string, options: CliOptions, state: ParseUsageState): Promise<{
   session?: SessionSummary;
   requests: RequestRecord[];
 }> {
@@ -470,10 +504,16 @@ async function parseSessionFile(filePath: string, options: CliOptions): Promise<
     if (!timestamp) continue;
     const eventAt = new Date(timestamp);
     if (Number.isNaN(eventAt.getTime())) continue;
+
+    const rawUsage = extractRuntimeUsageFromStreamEvent(payload);
+    if (!rawUsage) continue;
+    const usage = usageForLocalRequest(
+      rawUsage,
+      state.previousCumulativeByKey,
+      rawUsage.codexThreadId ?? sessionId
+    );
     if (eventAt < options.since! || eventAt >= options.until) continue;
 
-    const usage = extractRuntimeUsageFromStreamEvent(payload);
-    if (!usage) continue;
     const modelForRequest = model || "unknown";
     const cost = estimatedCost({
       model: modelForRequest,
@@ -772,9 +812,18 @@ async function main(): Promise<void> {
   const sessions: SessionSummary[] = [];
   const sessionsById = new Map<string, SessionSummary>();
   const requests: RequestRecord[] = [];
+  const usageState: ParseUsageState = {
+    previousCumulativeByKey: new Map()
+  };
+  const filePaths: string[] = [];
 
   for await (const filePath of walkJsonlFiles(options.sessionsRoot)) {
-    const parsed = await parseSessionFile(filePath, options);
+    filePaths.push(filePath);
+  }
+  filePaths.sort();
+
+  for (const filePath of filePaths) {
+    const parsed = await parseSessionFile(filePath, options, usageState);
     if (parsed.session) {
       const existing = sessionsById.get(parsed.session.sessionId);
       if (existing) {
