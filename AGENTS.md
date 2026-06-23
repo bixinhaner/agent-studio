@@ -5,6 +5,13 @@
 - 前端显示时区都要跟随用户本地时区。
 - 当用户要求执行 Git 提交并推送 GitHub 时，必须严格按以下流程串行执行（禁止并行执行任何会修改 Git 状态的命令，如 add/commit/amend/notes/push）：先确认提交范围（全部或部分）并 `git add`，再提交；提交信息和 note 若为多行必须使用真实换行，禁止在文本中写字面量 `\n`；若有 note，提交后执行 `git notes add`；随后必须用 `git show -s --format=%B HEAD` 与 `git notes show HEAD` 自检格式；最后先推送分支再推送 `refs/notes/commits`，如因 amend 导致提交哈希变化则使用 `--force-with-lease`；完成后向用户明确反馈提交哈希与推送结果。
 
+## UI/UX 设计约束
+
+- 涉及前端、界面、交互、样式、组件、文案、可访问性、portal 或 admin console 的改动前，必须先阅读并遵守 [`design.md`](./design.md)。
+- `design.md` 是本项目从 Vercel `design.md` 和 Web Interface Guidelines 中提取后的本地化设计约束；不要直接照搬 Vercel 品牌视觉。
+- Admin Console 与 Portal/Public Surface 的设计密度不同：管理界面优先高效配置、审计和排障；portal/公开入口优先低认知负担、runtime branding 和单任务完成。
+- 如果 `design.md` 与现有代码或业务目标冲突，以用户任务和当前产品心智优先，并在回复中说明取舍、为什么这样做、对用户的影响。
+
 ## Usage 统计与计费约束
 
 - 所有业务入口必须统一走 `UsageRecorder`，禁止直接调用 `UsageIngestionService`、`usageEventRepository.create()` 或自行计算 `estimated_cost` / `internal_cost`；底层 token 归一化、费用计算和 daily rollup 更新由 `UsageIngestionService` 内部完成。
