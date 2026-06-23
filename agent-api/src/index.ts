@@ -65,6 +65,7 @@ import {
   inspectSharedPythonRuntime,
   sharedPythonRuntimeHint
 } from "./shared-python-runtime.js";
+import { buildToolRuntimeEnv, ensureToolRuntimeEnvDirs } from "./tool-runtime-env.js";
 import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
@@ -2498,6 +2499,12 @@ async function resolveRuntimeLaunchConfig(input: {
   if (pythonRuntimeSettings.enabled && pythonRuntimeSettings.sessionTmpEnabled && input.workspace) {
     await ensureRuntimeWorkspaceTmp(input.workspace);
   }
+  if (input.workspace) {
+    await ensureToolRuntimeEnvDirs(input.workspace);
+  }
+  const toolEnv = buildToolRuntimeEnv({
+    workspace: input.workspace
+  });
   const pythonEnv = buildSharedPythonRuntimeEnv({
     settings: pythonRuntimeSettings,
     workspace: input.workspace
@@ -2510,9 +2517,13 @@ async function resolveRuntimeLaunchConfig(input: {
     ),
     runtimeHint ? [runtimeHint] : []
   );
+  const envOverrides = {
+    ...toolEnv,
+    ...pythonEnv
+  };
   return {
     configOverrides: crestMcp?.configOverrides,
-    envOverrides: Object.keys(pythonEnv).length > 0 ? pythonEnv : undefined,
+    envOverrides: Object.keys(envOverrides).length > 0 ? envOverrides : undefined,
     codexRunConfig
   };
 }
