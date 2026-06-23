@@ -66,6 +66,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_TURN_IDLE_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_TURN_MAX_MS = 90 * 60_000;
 const MAX_DIAGNOSTIC_EVENTS = 20;
+const MAX_BUFFERED_PRE_START_EVENTS = 50;
 const TOML_DRIVER_APP_SERVER = "app_server";
 
 function trimOrUndefined(value: unknown): string | undefined {
@@ -123,6 +124,10 @@ function eventSummary(event: CodexStreamEvent): RuntimeEventSummary {
     toolName: trimOrUndefined(toolCall?.name) ?? trimOrUndefined(item?.name),
     textPreview: previewText(event.text ?? event.delta ?? item?.text)
   };
+}
+
+function streamEventTurnId(event: CodexStreamEvent): string | undefined {
+  return trimOrUndefined(asRecord(event.raw)?.turn_id);
 }
 
 function isRetryableRuntimeError(event: CodexStreamEvent): boolean {
@@ -545,13 +550,16 @@ function normalizeNotification(message: JsonRecord): CodexStreamEvent | undefine
   }
 
   if (method === "turn/completed") {
+    const turn = asRecord(params.turn);
     return {
       type: "turn.completed",
       raw: {
         type: "turn.completed",
         thread_id: params.threadId,
-        turn_id: asRecord(params.turn)?.id,
-        turn: params.turn
+        turn_id: turn?.id ?? params.turnId,
+        turn: params.turn,
+        usage: params.usage ?? turn?.usage,
+        last_agent_message: params.last_agent_message ?? params.lastAgentMessage ?? turn?.last_agent_message ?? turn?.lastAgentMessage
       }
     };
   }
@@ -894,6 +902,7 @@ class CodexAppServerManager {
     let failureLogged = false;
     const startedAtMs = Date.now();
     const lastEvents: RuntimeEventSummary[] = [];
+    const bufferedBeforeTurnId: CodexStreamEvent[] = [];
 
     const makeTurnError = (
       message: string,
@@ -948,6 +957,32 @@ class CodexAppServerManager {
       idleTimer.unref();
     };
 
+    const acceptEvent = (event: CodexStreamEvent) => {
+      lastEvents.push(eventSummary(event));
+      if (lastEvents.length > MAX_DIAGNOSTIC_EVENTS) lastEvents.shift();
+      resetIdleTimer();
+      if (isRetryableRuntimeError(event)) {
+        return;
+      }
+      queue.push(event);
+      if (event.type === "turn.completed") {
+        completed = true;
+        setTimeout(() => queue.close(), 150);
+      }
+      if (event.type === "error") {
+        failTurn(makeTurnError(event.text || "Codex app-server runtime error", { raw: event.raw }));
+      }
+    };
+
+    const acceptBufferedEventsForTurn = () => {
+      const buffered = bufferedBeforeTurnId.splice(0);
+      for (const event of buffered) {
+        const bufferedTurnId = streamEventTurnId(event);
+        if (bufferedTurnId && bufferedTurnId !== turnId) continue;
+        acceptEvent(event);
+      }
+    };
+
     try {
       if (options.signal?.aborted) {
         throw makeTurnError("Codex app-server turn aborted by client before start", { category: "client_aborted" });
@@ -979,20 +1014,17 @@ class CodexAppServerManager {
         if (turnId && eventTurnId && eventTurnId !== turnId) return;
         const event = normalizeNotification(notification);
         if (!event) return;
-        lastEvents.push(eventSummary(event));
-        if (lastEvents.length > MAX_DIAGNOSTIC_EVENTS) lastEvents.shift();
-        resetIdleTimer();
-        if (isRetryableRuntimeError(event)) {
+        const normalizedTurnId = streamEventTurnId(event) ?? eventTurnId;
+        if (!turnId && normalizedTurnId) {
+          if (bufferedBeforeTurnId.length < MAX_BUFFERED_PRE_START_EVENTS) {
+            bufferedBeforeTurnId.push(event);
+          }
           return;
         }
-        queue.push(event);
-        if (event.type === "turn.completed") {
-          completed = true;
-          setTimeout(() => queue.close(), 150);
+        if (turnId && normalizedTurnId && normalizedTurnId !== turnId) {
+          return;
         }
-        if (event.type === "error") {
-          failTurn(makeTurnError(event.text || "Codex app-server runtime error", { raw: event.raw }));
-        }
+        acceptEvent(event);
       });
       const result = await Promise.race([
         process.request("turn/start", turnStartParams(thread.id, message, thread.options)),
@@ -1000,6 +1032,7 @@ class CodexAppServerManager {
       ]);
       turnId = turnIdFromResult(result);
       abortReject = undefined;
+      acceptBufferedEventsForTurn();
 
       for await (const event of queue) {
         yield event;

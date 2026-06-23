@@ -122,6 +122,49 @@ function completedAgentMessageText(event: RuntimeStreamEvent): string | undefine
   return typeof item.text === "string" ? item.text : "";
 }
 
+function textFromMessageLike(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  if (typeof record.text === "string") return record.text;
+  if (typeof record.message === "string") return record.message;
+  if (typeof record.content === "string") return record.content;
+  if (Array.isArray(record.content)) {
+    const text = record.content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        const part = asRecord(item);
+        return typeof part?.text === "string" ? part.text : "";
+      })
+      .join("");
+    return text || undefined;
+  }
+  return undefined;
+}
+
+function completedTurnFinalAnswerText(event: RuntimeStreamEvent): string | undefined {
+  if (event.type !== "turn.completed") return undefined;
+  const raw = asRecord(event.raw);
+  const turn = asRecord(raw?.turn);
+  const candidates = [
+    raw?.last_agent_message,
+    raw?.lastAgentMessage,
+    raw?.lastAgentMessageText,
+    raw?.final_answer,
+    raw?.finalAnswer,
+    turn?.last_agent_message,
+    turn?.lastAgentMessage,
+    turn?.lastAgentMessageText,
+    turn?.final_answer,
+    turn?.finalAnswer
+  ];
+  for (const candidate of candidates) {
+    const text = textFromMessageLike(candidate);
+    if (text !== undefined) return text;
+  }
+  return undefined;
+}
+
 export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsageSnapshot | undefined {
   const event = asRecord(value);
   if (!event) return undefined;
@@ -133,7 +176,7 @@ export function extractRuntimeUsageFromStreamEvent(value: unknown): RuntimeUsage
   }
   if (eventType !== "turn.completed") return undefined;
 
-  const usage = asRecord(raw?.usage ?? event.usage);
+  const usage = asRecord(raw?.usage ?? event.usage ?? asRecord(raw?.turn)?.usage);
   if (!usage) return undefined;
   const codexThreadId = trimOrUndefined(
     typeof raw?.thread_id === "string" ? raw.thread_id : typeof event.thread_id === "string" ? event.thread_id : undefined
@@ -171,8 +214,11 @@ export async function collectRuntimeCompletion(input: {
         await input.onUsage?.(usage, event);
       }
       const completedAgentText = completedAgentMessageText(event);
+      const completedTurnText = completedTurnFinalAnswerText(event);
       if (completedAgentText !== undefined) {
         finalAgentAnswer = completedAgentText;
+      } else if (completedTurnText !== undefined) {
+        finalAgentAnswer = completedTurnText;
       } else if (event.delta) {
         fallbackAnswer += event.delta;
         await input.onTextDelta?.(event.delta, event);

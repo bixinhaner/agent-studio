@@ -76,6 +76,30 @@ rl.on("line", (line) => {
     const turnId = "turn-" + nextTurnId++;
     const inputText = Array.isArray(params.input) && params.input[0] && typeof params.input[0].text === "string" ? params.input[0].text : "";
     const markdownWhitespaceText = "Intro\\n\\n![Example](</tmp/image one.png>)\\n\\n| A | B |\\n|---|---|\\n| 1 | 2 |\\n";
+    if (inputText === "stale-before-start") {
+      notify("item/completed", {
+        threadId,
+        turnId: "stale-turn",
+        item: { id: "stale-msg", type: "agentMessage", text: "STALE" },
+        completedAtMs: Date.now()
+      });
+      notify("turn/completed", { threadId, turn: { id: "stale-turn", last_agent_message: "STALE" } });
+      setTimeout(() => {
+        respond(id, { turn: { id: turnId } });
+        setTimeout(() => {
+          notify("turn/started", { threadId, turn: { id: turnId } });
+          notify("item/agentMessage/delta", { threadId, turnId, itemId: "fresh-msg", delta: "Fresh" });
+          notify("item/completed", {
+            threadId,
+            turnId,
+            item: { id: "fresh-msg", type: "agentMessage", text: "Fresh" },
+            completedAtMs: Date.now()
+          });
+          notify("turn/completed", { threadId, turn: { id: turnId, last_agent_message: "Fresh" } });
+        }, 5);
+      }, 200);
+      return;
+    }
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
       notify("turn/started", { threadId, turn: { id: turnId } });
@@ -325,6 +349,40 @@ describe("Codex app-server runtime", () => {
     }
 
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+  });
+
+  it("drops stale pre-start events from a previous turn before accepting the new turn", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-stale-pre-start")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "stale-before-start")) {
+      events.push(event);
+    }
+
+    expect(events.some((event) => JSON.stringify(event.raw).includes("stale-turn"))).toBe(false);
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join("")).toBe(
+      "Fresh"
+    );
+    expect(
+      events.some((event) => {
+        const raw = event.raw as { turn_id?: string; last_agent_message?: string } | undefined;
+        return event.type === "turn.completed" && raw?.last_agent_message === "Fresh";
+      })
+    ).toBe(true);
   });
 
   it("fails and releases a turn when the app-server stops emitting events", async () => {

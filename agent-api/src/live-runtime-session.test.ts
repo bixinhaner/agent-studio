@@ -134,6 +134,34 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
     });
   });
 
+  it("uses turn.completed last_agent_message when item.completed is missing", async () => {
+    const onDone = vi.fn();
+
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: events([
+        {
+          type: "item.agent_message.delta",
+          delta: "流式片段不完整"
+        },
+        {
+          type: "turn.completed",
+          raw: {
+            type: "turn.completed",
+            turn_id: "turn-1",
+            last_agent_message: "这是 app-server 完成事件里的最终答案。"
+          }
+        }
+      ]),
+      onEvent: vi.fn(),
+      onDone
+    });
+
+    expect(onDone).toHaveBeenCalledWith({
+      answer: "这是 app-server 完成事件里的最终答案。",
+      usage: undefined
+    });
+  });
+
   it("keeps the legacy delta fallback when completed agent messages are unavailable", async () => {
     const onDone = vi.fn();
 
