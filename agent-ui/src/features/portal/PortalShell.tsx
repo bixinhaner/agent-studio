@@ -6978,7 +6978,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       json: {
         session_id: run.sessionId,
         thread_id: run.threadId,
-        user_message_id: run.userMessageId
+        user_message_id: run.userMessageId,
+        client_cancel_clicked_at: new Date().toISOString(),
+        client_cancel_source: "portal_stop_button"
       }
     }).catch((error) => {
       console.warn("portal chat cancel failed", error);

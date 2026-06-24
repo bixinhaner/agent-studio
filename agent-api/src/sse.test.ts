@@ -42,6 +42,19 @@ describe("createSseAbortLifecycle", () => {
     expect(req.listenerCount("aborted")).toBe(0);
     expect(res.listenerCount("close")).toBe(0);
   });
+
+  it("records the last sent event in lifecycle snapshots", () => {
+    const { req, res } = fakeHttpPair();
+    const lifecycle = createSseAbortLifecycle(req, res);
+
+    lifecycle.recordSentEvent("codex");
+    const snapshot = lifecycle.snapshot();
+
+    expect(snapshot.lastEventName).toBe("codex");
+    expect(snapshot.lastEventAt).toBeDefined();
+    expect(snapshot.openedAt).toBeDefined();
+    expect(snapshot.durationMs).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe("SSE response helpers", () => {
@@ -80,9 +93,25 @@ describe("SSE response helpers", () => {
       }
     } as unknown as Response & { flush: () => void };
 
-    sendSSE(res, "delta", { text: "hello" });
+    const sent = sendSSE(res, "delta", { text: "hello" });
 
+    expect(sent).toBe(true);
     expect(writes.join("")).toBe('event: delta\ndata: {"text":"hello"}\n\n');
     expect(flushCount).toBe(1);
+  });
+
+  it("does not write to closed streams", () => {
+    const writes: string[] = [];
+    const res = {
+      writableEnded: true,
+      write(chunk: string) {
+        writes.push(chunk);
+      }
+    } as unknown as Response;
+
+    const sent = sendSSE(res, "delta", { text: "hello" });
+
+    expect(sent).toBe(false);
+    expect(writes).toHaveLength(0);
   });
 });

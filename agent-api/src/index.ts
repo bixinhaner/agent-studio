@@ -1899,7 +1899,9 @@ const streamSchema = z.object({
 const portalChatCancelSchema = z.object({
   session_id: z.string().trim().min(1),
   thread_id: z.string().trim().min(1).optional(),
-  user_message_id: z.string().trim().min(1).optional()
+  user_message_id: z.string().trim().min(1).optional(),
+  client_cancel_clicked_at: z.string().trim().min(1).optional(),
+  client_cancel_source: z.string().trim().min(1).optional()
 });
 
 const DIRECT_CHAT_MESSAGE_MAX_CHARS = 20_000;
@@ -3462,6 +3464,7 @@ type PortalActiveChatRun = {
   userId: string;
   controller: AbortController;
   createdAt: number;
+  traceId?: string;
   session?: SessionRecord;
   threadId?: string;
   userMessageId?: string;
@@ -3480,11 +3483,30 @@ function gcPortalActiveChatRuns(): void {
   }
 }
 
+function logPortalStreamLifecycle(stage: string, details: Record<string, unknown>): void {
+  try {
+    console.info(
+      JSON.stringify({
+        event: "agent_studio_portal_stream_lifecycle",
+        stage,
+        at: new Date().toISOString(),
+        ...details
+      })
+    );
+  } catch (error) {
+    console.info("agent_studio_portal_stream_lifecycle", {
+      stage,
+      logError: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 function registerPortalActiveChatRun(input: {
   sessionId: string;
   userId: string;
   controller: AbortController;
   threadId?: string;
+  traceId?: string;
 }): () => void {
   const sessionId = trimOrUndefined(input.sessionId);
   if (!sessionId) return () => undefined;
@@ -3497,6 +3519,7 @@ function registerPortalActiveChatRun(input: {
     userId: input.userId,
     controller: input.controller,
     createdAt: Date.now(),
+    traceId: trimOrUndefined(input.traceId),
     threadId: trimOrUndefined(input.threadId)
   });
   return () => {
@@ -3534,30 +3557,90 @@ function markPortalActiveChatRunAssistantWritten(input: {
   entry.assistantMessageWritten = true;
 }
 
+type PortalCancelActiveChatRunResult = {
+  cancelled: boolean;
+  matchReason: string;
+  activeRunFound: boolean;
+  runtimeAbortRequested: boolean;
+  streamTraceId?: string;
+  sessionId?: string;
+  threadId?: string;
+  userMessageId?: string;
+};
+
 async function cancelPortalActiveChatRun(input: {
   sessionId: string;
   currentUser: CurrentActor;
   threadId?: string;
   userMessageId?: string;
-}): Promise<boolean> {
+  cancelTraceId?: string;
+}): Promise<PortalCancelActiveChatRunResult> {
   gcPortalActiveChatRuns();
   const sessionId = trimOrUndefined(input.sessionId);
-  if (!sessionId) return false;
+  if (!sessionId) {
+    return {
+      cancelled: false,
+      matchReason: "missing_session_id",
+      activeRunFound: false,
+      runtimeAbortRequested: false
+    };
+  }
   const entry = portalActiveChatRuns.get(sessionId);
-  if (entry && entry.userId !== input.currentUser.id) return false;
+  if (entry && entry.userId !== input.currentUser.id) {
+    return {
+      cancelled: false,
+      matchReason: "active_run_user_mismatch",
+      activeRunFound: true,
+      runtimeAbortRequested: false,
+      streamTraceId: entry.traceId,
+      sessionId,
+      threadId: entry.threadId,
+      userMessageId: entry.userMessageId
+    };
+  }
   const session =
     entry?.session ??
     (await sessions.getOwned(sessionId, input.currentUser.id, input.currentUser.organizationId));
-  if (!session) return false;
+  if (!session) {
+    return {
+      cancelled: false,
+      matchReason: entry ? "active_run_session_missing" : "no_active_run_or_session",
+      activeRunFound: Boolean(entry),
+      runtimeAbortRequested: false,
+      streamTraceId: entry?.traceId,
+      sessionId,
+      threadId: entry?.threadId,
+      userMessageId: entry?.userMessageId
+    };
+  }
 
   const requestedThreadId = trimOrUndefined(input.threadId);
   const threadId = requestedThreadId ?? trimOrUndefined(entry?.threadId) ?? trimOrUndefined(session.threadId);
   if (requestedThreadId && trimOrUndefined(session.threadId) && requestedThreadId !== trimOrUndefined(session.threadId)) {
-    return false;
+    return {
+      cancelled: false,
+      matchReason: "thread_mismatch",
+      activeRunFound: Boolean(entry),
+      runtimeAbortRequested: false,
+      streamTraceId: entry?.traceId,
+      sessionId,
+      threadId,
+      userMessageId: trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId)
+    };
   }
   const userMessageId = trimOrUndefined(input.userMessageId) ?? trimOrUndefined(entry?.userMessageId);
 
+  const runtimeAbortRequested = Boolean(entry && !entry.controller.signal.aborted);
   if (entry && !entry.controller.signal.aborted) {
+    logPortalStreamLifecycle("runtime_abort_requested", {
+      cancel_trace_id: input.cancelTraceId,
+      trace_id: entry.traceId,
+      session_id: sessionId,
+      thread_id: threadId,
+      user_message_id: userMessageId,
+      user_id: input.currentUser.id,
+      organization_id: input.currentUser.organizationId
+    });
     entry.controller.abort(new Error("portal_user_cancelled"));
   }
   portalActiveChatRuns.delete(sessionId);
@@ -3582,7 +3665,16 @@ async function cancelPortalActiveChatRun(input: {
     reason: "portal explicit cancel request",
     logLabel: "portal chat"
   });
-  return true;
+  return {
+    cancelled: true,
+    matchReason: runtimeAbortRequested ? "matched_active_run" : "matched_session_only",
+    activeRunFound: Boolean(entry),
+    runtimeAbortRequested,
+    streamTraceId: entry?.traceId,
+    sessionId,
+    threadId,
+    userMessageId
+  };
 }
 
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
@@ -9265,13 +9357,50 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
     const input = portalChatCancelSchema.parse(req.body || {});
-    const cancelled = await cancelPortalActiveChatRun({
+    const cancelTraceId = randomUUID();
+    if (input.client_cancel_source) {
+      logPortalStreamLifecycle("user_clicked_stop", {
+        cancel_trace_id: cancelTraceId,
+        session_id: input.session_id,
+        thread_id: input.thread_id,
+        user_message_id: input.user_message_id,
+        user_id: currentUser.id,
+        organization_id: currentUser.organizationId,
+        client_cancel_clicked_at: input.client_cancel_clicked_at,
+        client_cancel_source: input.client_cancel_source
+      });
+    }
+    logPortalStreamLifecycle("cancel_request_received", {
+      cancel_trace_id: cancelTraceId,
+      session_id: input.session_id,
+      thread_id: input.thread_id,
+      user_message_id: input.user_message_id,
+      user_id: currentUser.id,
+      organization_id: currentUser.organizationId,
+      client_cancel_clicked_at: input.client_cancel_clicked_at,
+      client_cancel_source: input.client_cancel_source
+    });
+    const result = await cancelPortalActiveChatRun({
       sessionId: input.session_id,
       currentUser,
       threadId: input.thread_id,
-      userMessageId: input.user_message_id
+      userMessageId: input.user_message_id,
+      cancelTraceId
     });
-    res.json({ cancelled });
+    logPortalStreamLifecycle("cancel_matched_active_run", {
+      cancel_trace_id: cancelTraceId,
+      trace_id: result.streamTraceId,
+      session_id: result.sessionId ?? input.session_id,
+      thread_id: result.threadId ?? input.thread_id,
+      user_message_id: result.userMessageId ?? input.user_message_id,
+      user_id: currentUser.id,
+      organization_id: currentUser.organizationId,
+      cancelled: result.cancelled,
+      active_run_found: result.activeRunFound,
+      runtime_abort_requested: result.runtimeAbortRequested,
+      match_reason: result.matchReason
+    });
+    res.json({ cancelled: result.cancelled });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to cancel chat run";
     res.status(400).json({ detail });
@@ -9279,8 +9408,9 @@ app.post("/api/chat/cancel", async (req: Request, res: Response) => {
 });
 
 app.post("/api/chat/stream", async (req: Request, res: Response) => {
+  const portalStreamTraceId = randomUUID();
   const timing = createRuntimeStartupTimer({
-    traceId: randomUUID(),
+    traceId: portalStreamTraceId,
     source: "portal",
     operation: "chat_stream",
     route: "POST /api/chat/stream"
@@ -9293,29 +9423,56 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   };
   timing.mark("request_received");
   initSSE(res);
-  const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
   const streamAbort = createSseAbortLifecycle(req, res);
+  const sendTrackedSSE = (eventName: string, payload: unknown): boolean => {
+    const sent = sendSSE(res, eventName, payload);
+    if (sent) streamAbort.recordSentEvent(eventName);
+    return sent;
+  };
+  const heartbeat = setInterval(() => sendTrackedSSE("ping", { now: new Date().toISOString() }), 15000);
   const explicitCancel = new AbortController();
   const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
   let directInputLength: number | undefined;
   let unregisterPortalRun: (() => void) | undefined;
   let portalRuntimeSession: SessionRecord | undefined;
+  let portalRequestedSessionId: string | undefined;
   let portalThreadId: string | undefined;
   let portalUserMessageId: string | undefined;
+  let portalCurrentUserId: string | undefined;
+  let portalCurrentOrganizationId: string | undefined;
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
   let portalRuntimeFailure: string | undefined;
+  const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
+    logPortalStreamLifecycle(stage, {
+      trace_id: portalStreamTraceId,
+      session_id: portalRuntimeSession?.sessionId ?? portalRequestedSessionId,
+      thread_id: portalThreadId,
+      user_message_id: portalUserMessageId,
+      user_id: portalCurrentUserId,
+      organization_id: portalCurrentOrganizationId,
+      ...details
+    });
+  };
 
   try {
     const currentUser = currentActorFromRequest(req);
+    portalCurrentUserId = currentUser.id;
+    portalCurrentOrganizationId = currentUser.organizationId;
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = streamSchema.parse(req.body || {});
+    portalRequestedSessionId = input.session_id;
+    portalThreadId = input.thread_id;
+    logPortalStream("stream_opened", {
+      requested_thread_id: input.thread_id,
+      lifecycle: streamAbort.snapshot()
+    });
     directInputLength = input.message.length;
     assertDirectChatMessageWithinLimit(input.message);
     timing.updateContext({ sessionId: input.session_id, threadId: input.thread_id });
     const drainReason = await timing.time("chat_stream.check_deploy_drain", () => getDeploymentDrainReason());
     if (drainReason) {
-      sendSSE(res, "error", { detail: drainReason });
+      sendTrackedSSE("error", { detail: drainReason });
       finishTiming("error", { reason: "deployment_drain" });
       res.end();
       return;
@@ -9342,7 +9499,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         await timing.time("chat_stream.remove_invalid_session", () => sessions.remove(session.sessionId));
         liveRuntimeThreads.delete(session.sessionId);
       }
-      sendSSE(res, "error", { detail: "Session does not exist or has expired" });
+      sendTrackedSSE("error", { detail: "Session does not exist or has expired" });
       finishTiming("error", { reason: "session_missing_or_expired" });
       res.end();
       return;
@@ -9354,13 +9511,13 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (requestedThreadId) {
       const boundThreadId = String(currentSession.threadId || "").trim();
       if (!boundThreadId) {
-        sendSSE(res, "error", { detail: "Session is not bound to a thread. Refresh and try again." });
+        sendTrackedSSE("error", { detail: "Session is not bound to a thread. Refresh and try again." });
         finishTiming("error", { reason: "session_not_bound_to_thread" });
         res.end();
         return;
       }
       if (boundThreadId !== requestedThreadId) {
-        sendSSE(res, "error", { detail: "Session does not match the requested thread. Please try again." });
+        sendTrackedSSE("error", { detail: "Session does not match the requested thread. Please try again." });
         finishTiming("error", { reason: "session_thread_mismatch" });
         res.end();
         return;
@@ -9371,7 +9528,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       sessionId: currentSession.sessionId,
       userId: currentUser.id,
       controller: explicitCancel,
-      threadId: portalThreadId
+      threadId: portalThreadId,
+      traceId: portalStreamTraceId
     });
     attachPortalActiveChatRun({
       sessionId: currentSession.sessionId,
@@ -9392,7 +9550,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       })
     );
     if (!currentSession.threadId) {
-      sendSSE(res, "error", { detail: "Session is not bound to a thread. Refresh and try again." });
+      sendTrackedSSE("error", { detail: "Session is not bound to a thread. Refresh and try again." });
       finishTiming("error", { reason: "session_not_bound_to_thread" });
       res.end();
       return;
@@ -9416,7 +9574,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       userMessageId: persistedPortalUserMessageId
     });
 
-    sendSSE(res, "meta", {
+    sendTrackedSSE("meta", {
       session_id: currentSession.sessionId,
       thread_id: currentSession.threadId,
       user_message_id: persistedPortalUserMessageId,
@@ -9475,6 +9633,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         if (!firstCodexEventSeen) {
           firstCodexEventSeen = true;
           timing.mark("chat_stream.first_codex_event", { eventType: event.type });
+          logPortalStream("first_codex_event", {
+            runtime_event_type: event.type,
+            lifecycle: streamAbort.snapshot()
+          });
         }
         runtimeFileChanges.push(...extractRuntimeFileChanges(event));
         const codexThreadId = extractCodexThreadIdFromRuntimeEvent(event);
@@ -9491,10 +9653,17 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             });
           });
         }
-        sendSSE(res, "codex", event);
+        sendTrackedSSE("codex", event);
       },
       async onDone(payload) {
         timing.mark("chat_stream.on_done_started");
+        if (streamAbort.disconnected) {
+          logPortalStream("task_completed_after_disconnect", {
+            answer_length: payload.answer.length,
+            runtime_file_change_count: runtimeFileChanges.length,
+            lifecycle: streamAbort.snapshot()
+          });
+        }
         let serverPersistedAssistant = false;
         try {
           const artifacts = await timing.time("chat_stream.register_artifacts", () =>
@@ -9510,7 +9679,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
           if (artifacts.length > 0) {
             const policy = await resolveArtifactPolicyForActor(currentUser);
             artifactContentPart = artifactContentPartForArtifacts(artifacts, policy);
-            sendSSE(res, "artifacts", {
+            sendTrackedSSE("artifacts", {
               policy: artifactPolicyOut(policy),
               artifacts: artifacts.map(artifactOut),
               content_part: artifactContentPart
@@ -9541,10 +9710,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
             threadId: currentSession.threadId,
             detail
           });
-          sendSSE(res, "artifact_warning", { detail: "Generated files could not be registered for external preview" });
+          sendTrackedSSE("artifact_warning", { detail: "Generated files could not be registered for external preview" });
         }
         streamAbort.markSettled();
-        sendSSE(res, "done", {
+        sendTrackedSSE("done", {
           session_id: currentSession.sessionId,
           answer: payload.answer,
           server_persisted: serverPersistedAssistant,
@@ -9589,7 +9758,18 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       portalRuntimeFailure = detail;
     }
     if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
-      sendSSE(res, "error", payloadForSessionAccessError(error, "Chat stream failed"));
+      sendTrackedSSE("error", payloadForSessionAccessError(error, "Chat stream failed"));
+    }
+    if (explicitCancel.signal.aborted) {
+      logPortalStream("runtime_abort_effective", {
+        scope: "agent_studio_stream",
+        runtime_started: portalRuntimeStarted,
+        assistant_message_written: portalAssistantMessageWritten,
+        stream_disconnected: streamAbort.disconnected,
+        disconnect_reason: streamAbort.reason,
+        error: detail.slice(0, 500),
+        lifecycle: streamAbort.snapshot()
+      });
     }
     finishTiming("error", {
       error: detail,
@@ -9628,6 +9808,25 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         logLabel: "portal chat"
       });
     }
+    if (streamAbort.lastEventName) {
+      logPortalStream("last_sse_event_sent", {
+        last_sse_event_sent: streamAbort.lastEventName,
+        last_sse_event_sent_at: streamAbort.lastEventAt?.toISOString(),
+        lifecycle: streamAbort.snapshot()
+      });
+    }
+    logPortalStream("stream_closed", {
+      cancelled,
+      explicit_cancel_aborted: explicitCancel.signal.aborted,
+      client_disconnected: streamAbort.disconnected,
+      disconnect_reason: streamAbort.reason,
+      runtime_started: portalRuntimeStarted,
+      runtime_failure: portalRuntimeFailure ? portalRuntimeFailure.slice(0, 500) : undefined,
+      assistant_message_written: portalAssistantMessageWritten,
+      last_sse_event_sent: streamAbort.lastEventName,
+      last_sse_event_sent_at: streamAbort.lastEventAt?.toISOString(),
+      lifecycle: streamAbort.snapshot()
+    });
     unregisterPortalRun?.();
     runAbort.dispose();
     streamAbort.markSettled();
