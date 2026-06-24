@@ -201,13 +201,37 @@ export type AdminBillingStripeEvent = {
 export type AdminBillingNotificationRecord = {
   id: string;
   organizationId?: string | null;
+  organizationName?: string | null;
+  organizationSlug?: string | null;
   targetRef: string;
   eventType: string;
   status: string;
+  ruleId?: string | null;
+  ruleTrigger?: string | null;
+  subject?: string | null;
+  recipients?: string[];
+  deliveryMode?: string | null;
+  delivered?: boolean | null;
+  isTest?: boolean;
+  expiresAt?: string | null;
   payload?: unknown;
   errorMessage?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+};
+
+export type AdminBillingAccountStatus = {
+  state: string;
+  severity: "success" | "warning" | "error" | "processing" | "default" | string;
+  attention: boolean;
+  recommendedAction: string;
+  legacyNextAction: string;
+  daysUntilExpiry?: number | null;
+  lastEmail?: {
+    status: string;
+    subject?: string | null;
+    sentAt?: string | null;
+  } | null;
 };
 
 export type AdminBillingCustomerAccount = {
@@ -222,6 +246,7 @@ export type AdminBillingCustomerAccount = {
   grant: AdminBillingGrant | null;
   autoRenewal: AdminBillingAutoRenewal | null;
   latestOrder: AdminBillingOrder | null;
+  accountStatus?: AdminBillingAccountStatus;
   nextAction: string;
 };
 

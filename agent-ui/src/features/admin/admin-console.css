@@ -444,6 +444,139 @@
   max-width: 140px;
 }
 
+.admin-billing-status-cell,
+.admin-billing-email-record {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.admin-billing-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.admin-billing-status-cell strong,
+.admin-billing-action-card strong,
+.admin-billing-email-record strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.admin-billing-status-cell span,
+.admin-billing-action-card p,
+.admin-billing-action-card span,
+.admin-billing-email-record span,
+.admin-billing-email-record small,
+.admin-billing-muted {
+  min-width: 0;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-billing-attention-dot {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--admin-radius-full);
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  font-weight: 500;
+}
+
+.dark .admin-billing-attention-dot {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.admin-billing-action-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.025);
+}
+
+.admin-billing-action-card p {
+  margin: 0;
+}
+
+.admin-billing-table-title {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-billing-table-title strong {
+  font-size: 13px;
+}
+
+.admin-billing-table-title span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.admin-billing-notification-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-billing-notification-toolbar .ant-input-affix-wrapper {
+  max-width: 460px;
+}
+
+.admin-billing-notification-toolbar span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.admin-billing-email-record code {
+  display: block;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-color-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.admin-billing-email-record.compact {
+  gap: 5px;
+}
+
+.admin-billing-email-recipients {
+  display: block;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-billing-error-text {
+  display: block;
+  max-width: 210px;
+  color: #b42318;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.dark .admin-billing-error-text {
+  color: #ff6b6b;
+}
+
 .admin-billing-tab-stack {
   padding: 12px;
   display: flex;

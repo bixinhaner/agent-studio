@@ -52,8 +52,10 @@ import {
   sendAdminBillingEmailRuleTest
 } from "./api";
 import type {
+  AdminBillingAccountStatus,
   AdminBillingCustomerAccount,
   AdminBillingEmailRule,
+  AdminBillingNotificationRecord,
   AdminBillingOverviewResponse,
   AdminBillingAutoRenewal,
   AdminBillingOrder,
@@ -200,7 +202,7 @@ function stripeLookupStatusColor(status?: string | null): string {
   }
 }
 
-function nextActionLabel(value: string): string {
+function legacyNextActionLabel(value: string): string {
   switch (value) {
     case "create_payment_link":
       return "创建付款链接";
@@ -215,6 +217,120 @@ function nextActionLabel(value: string): string {
     default:
       return "观察";
   }
+}
+
+function accountStateLabel(value?: string | null): string {
+  switch (value) {
+    case "no_entitlement":
+      return "未开通";
+    case "payment_failed":
+      return "扣款失败";
+    case "payment_pending":
+      return "等待付款";
+    case "expired":
+      return "已过期";
+    case "auto_renew_scheduled":
+      return "自动续费已安排";
+    case "expiring":
+      return "即将到期";
+    case "active":
+      return "正常";
+    default:
+      return "需确认";
+  }
+}
+
+function recommendedActionLabel(value?: string | null): string {
+  switch (value) {
+    case "create_checkout_link":
+      return "创建付款链接";
+    case "ask_update_payment_method":
+      return "联系客户更新支付方式";
+    case "send_renewal_link":
+      return "发送续费链接";
+    case "wait_for_payment":
+      return "等待客户完成付款";
+    case "follow_up_sales":
+      return "销售跟进续费";
+    case "no_action":
+      return "无需处理";
+    default:
+      return "人工复核";
+  }
+}
+
+function accountStatusColor(status?: AdminBillingAccountStatus | null): string {
+  switch (status?.severity) {
+    case "success":
+      return "success";
+    case "warning":
+      return "warning";
+    case "error":
+      return "error";
+    case "processing":
+      return "processing";
+    default:
+      return "default";
+  }
+}
+
+function daysUntilLabel(days?: number | null): string {
+  if (days === null || days === undefined) return "";
+  if (days < 0) return `已过期 ${Math.abs(days)} 天`;
+  if (days === 0) return "今天到期";
+  return `剩 ${days} 天`;
+}
+
+function accountStatusReason(status: AdminBillingAccountStatus | undefined, fallbackNextAction: string): string {
+  if (!status) return legacyNextActionLabel(fallbackNextAction);
+  const daysText = daysUntilLabel(status.daysUntilExpiry);
+  const emailText = status.lastEmail?.sentAt
+    ? `最近邮件 ${formatLocalTime(status.lastEmail.sentAt)} · ${status.lastEmail.status}`
+    : "暂无最近邮件记录";
+  switch (status.state) {
+    case "auto_renew_scheduled":
+      return `Stripe 将自动续费${daysText ? `，${daysText}` : ""}`;
+    case "expiring":
+      return `${daysText || "即将到期"} · ${emailText}`;
+    case "expired":
+      return `${daysText || "已过期"} · 需要客户重新付款`;
+    case "payment_failed":
+      return "不设置宽限期，当前授权不会自动延长";
+    case "payment_pending":
+      return "已有待支付订单，先避免重复创建付款链接";
+    case "no_entitlement":
+      return "该组织没有有效授权";
+    case "active":
+      return daysText ? `${daysText}，当前无需处理` : "当前无需处理";
+    default:
+      return legacyNextActionLabel(fallbackNextAction);
+  }
+}
+
+function renderAccountStatusCell(record: AdminBillingCustomerAccount) {
+  const status = record.accountStatus;
+  return (
+    <div className="admin-billing-status-cell">
+      <div className="admin-billing-status-line">
+        <Tag color={accountStatusColor(status)}>{accountStateLabel(status?.state)}</Tag>
+        {status?.attention ? <span className="admin-billing-attention-dot">需处理</span> : null}
+      </div>
+      <strong>{recommendedActionLabel(status?.recommendedAction)}</strong>
+      <span>{accountStatusReason(status, record.nextAction)}</span>
+    </div>
+  );
+}
+
+function compactRecipients(record: AdminBillingNotificationRecord): string {
+  const recipients = record.recipients ?? [];
+  if (!recipients.length) return "未记录";
+  if (recipients.length <= 2) return recipients.join(", ");
+  return `${recipients.slice(0, 2).join(", ")} +${recipients.length - 2}`;
+}
+
+function deliveryLabel(record: AdminBillingNotificationRecord): string {
+  if (record.deliveryMode) return record.delivered === false ? `${record.deliveryMode} · 未送达` : record.deliveryMode;
+  return record.delivered === false ? "未送达" : "未记录";
 }
 
 function planBillingLabel(plan?: AdminBillingPlan | null): string {
@@ -442,7 +558,11 @@ function AutoRenewalDetailPanel(props: {
       <section className="admin-billing-detail-section">
         <h3>邮件提醒</h3>
         {relatedNotifications.length ? relatedNotifications.map((item) => (
-          <p key={item.id}>{item.eventType} · {item.status} · {formatLocalTime(item.createdAt)}</p>
+          <p key={item.id}>
+            {item.subject ?? item.eventType} · {item.status} · {formatLocalTime(item.createdAt)}
+            <br />
+            To: {compactRecipients(item)}
+          </p>
         )) : <p>暂无相关提醒记录</p>}
       </section>
       <section className="admin-billing-detail-section">
@@ -463,6 +583,7 @@ export function BillingWorkspace() {
   const [errorText, setErrorText] = useState("");
   const [successText, setSuccessText] = useState("");
   const [query, setQuery] = useState("");
+  const [notificationQuery, setNotificationQuery] = useState("");
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [promotionModalOpen, setPromotionModalOpen] = useState(false);
   const [promotionForm, setPromotionForm] = useState<PromotionFormState>(createPromotionFormState());
@@ -515,6 +636,10 @@ export function BillingWorkspace() {
         item.billingCustomer?.companyName ?? "",
         item.billingCustomer?.salesContact ?? "",
         item.grant?.planName ?? "",
+        item.accountStatus?.state ?? "",
+        item.accountStatus?.recommendedAction ?? "",
+        accountStateLabel(item.accountStatus?.state),
+        recommendedActionLabel(item.accountStatus?.recommendedAction),
         item.nextAction
       ].join(" ").toLowerCase().includes(normalized)
     );
@@ -549,6 +674,25 @@ export function BillingWorkspace() {
     () => (data?.customers ?? []).map((item) => ({ label: item.organization.name, value: item.organization.id })),
     [data?.customers]
   );
+
+  const filteredNotifications = useMemo(() => {
+    const items = data?.notifications ?? [];
+    const normalized = notificationQuery.trim().toLowerCase();
+    if (!normalized) return items;
+    return items.filter((item) =>
+      [
+        item.organizationName ?? "",
+        item.organizationSlug ?? "",
+        item.subject ?? "",
+        item.eventType,
+        item.status,
+        item.ruleId ?? "",
+        item.ruleTrigger ?? "",
+        item.targetRef,
+        ...(item.recipients ?? [])
+      ].join(" ").toLowerCase().includes(normalized)
+    );
+  }, [data?.notifications, notificationQuery]);
 
   const summaryCards = useMemo(() => {
     const summary = data?.summary;
@@ -618,9 +762,9 @@ export function BillingWorkspace() {
       )
     },
     {
-      title: "Next action",
-      width: 170,
-      render: (_, record) => nextActionLabel(record.nextAction)
+      title: "Account status",
+      width: 280,
+      render: (_, record) => renderAccountStatusCell(record)
     }
   ];
 
@@ -1008,6 +1152,21 @@ export function BillingWorkspace() {
         </div>
       </div>
       <div className="admin-billing-detail-section">
+        <h3>运营状态</h3>
+        <div className="admin-billing-action-card">
+          <div className="admin-billing-status-line">
+            <Tag color={accountStatusColor(selectedAccount.accountStatus)}>
+              {accountStateLabel(selectedAccount.accountStatus?.state)}
+            </Tag>
+            {selectedAccount.accountStatus?.daysUntilExpiry !== null && selectedAccount.accountStatus?.daysUntilExpiry !== undefined ? (
+              <span>{daysUntilLabel(selectedAccount.accountStatus.daysUntilExpiry)}</span>
+            ) : null}
+          </div>
+          <strong>{recommendedActionLabel(selectedAccount.accountStatus?.recommendedAction)}</strong>
+          <p>{accountStatusReason(selectedAccount.accountStatus, selectedAccount.nextAction)}</p>
+        </div>
+      </div>
+      <div className="admin-billing-detail-section">
         <h3>客户信息</h3>
         <p>公司：{selectedAccount.billingCustomer?.companyName ?? selectedAccount.organization.name}</p>
         <p>联系人：{selectedAccount.billingCustomer?.contactName ?? "未记录"}</p>
@@ -1379,17 +1538,82 @@ export function BillingWorkspace() {
                     }
                   ]}
                 />
+                <div className="admin-billing-notification-toolbar">
+                  <Input
+                    prefix={<Search size={14} />}
+                    value={notificationQuery}
+                    onChange={(event) => setNotificationQuery(event.target.value)}
+                    placeholder="搜索通知记录：组织、邮箱、主题、状态"
+                    allowClear
+                  />
+                  <span>Showing {filteredNotifications.length} of {data?.notifications.length ?? 0}</span>
+                </div>
                 <Table
                   rowKey="id"
                   size="small"
-                  title={() => "通知记录"}
-                  dataSource={data?.notifications ?? []}
+                  title={() => (
+                    <div className="admin-billing-table-title">
+                      <strong>通知记录</strong>
+                      <span>最近 80 条计费邮件；每条记录代表一个组织一次规则发送。</span>
+                    </div>
+                  )}
+                  dataSource={filteredNotifications}
+                  pagination={{ pageSize: 10, showSizeChanger: false }}
                   columns={[
-                    { title: "Event", dataIndex: "eventType" },
-                    { title: "Status", dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
-                    { title: "Target", dataIndex: "targetRef" },
-                    { title: "Created", dataIndex: "createdAt", render: formatLocalTime },
-                    { title: "Error", dataIndex: "errorMessage" }
+                    {
+                      title: "Organization",
+                      width: 220,
+                      render: (_, record) => (
+                        <div className="admin-billing-email-record">
+                          <strong>{record.organizationName ?? "System test"}</strong>
+                          <span>{record.organizationSlug ?? (record.isTest ? "test email" : "unknown organization")}</span>
+                        </div>
+                      )
+                    },
+                    {
+                      title: "Recipients",
+                      width: 240,
+                      render: (_, record) => (
+                        <Tooltip title={(record.recipients ?? []).join(", ") || "未记录"}>
+                          <span className="admin-billing-email-recipients">{compactRecipients(record)}</span>
+                        </Tooltip>
+                      )
+                    },
+                    {
+                      title: "Email",
+                      render: (_, record) => (
+                        <div className="admin-billing-email-record">
+                          <strong>{record.subject ?? record.eventType}</strong>
+                          <span>{record.ruleTrigger ?? record.eventType}</span>
+                          <code>{record.targetRef}</code>
+                        </div>
+                      )
+                    },
+                    {
+                      title: "Status",
+                      width: 150,
+                      filters: [
+                        { text: "sent", value: "sent" },
+                        { text: "failed", value: "failed" },
+                        { text: "pending", value: "pending" }
+                      ],
+                      onFilter: (value, record) => record.status === value,
+                      render: (_, record) => (
+                        <div className="admin-billing-email-record compact">
+                          <span>
+                            <Tag color={statusColor(record.status)}>{record.status}</Tag>
+                            {record.isTest ? <Tag>test</Tag> : null}
+                          </span>
+                          <small>{deliveryLabel(record)}</small>
+                        </div>
+                      )
+                    },
+                    { title: "Created", width: 180, dataIndex: "createdAt", render: formatLocalTime },
+                    {
+                      title: "Error",
+                      width: 220,
+                      render: (_, record) => record.errorMessage ? <span className="admin-billing-error-text">{record.errorMessage}</span> : <span className="admin-billing-muted">无</span>
+                    }
                   ]}
                 />
               </div>

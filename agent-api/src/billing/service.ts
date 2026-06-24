@@ -301,6 +301,20 @@ function jsonStringArray(value: Prisma.JsonValue | null | undefined): string[] {
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
+function jsonNormalizedEmailArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const emails: string[] = [];
+  for (const item of value) {
+    const email = normalizeEmail(typeof item === "string" ? item : null);
+    if (email && !emails.includes(email)) emails.push(email);
+  }
+  return emails;
+}
+
+function dateDiffDays(from: Date, to: Date): number {
+  return Math.ceil((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 function mergeMetadataJson(value: Prisma.JsonValue | null | undefined, patch: Record<string, unknown>): Prisma.InputJsonValue {
   return {
     ...asRecord(value),
@@ -850,6 +864,19 @@ export class BillingService {
     const grantByOrg = new Map(grants.map((grant) => [grant.principalId, grant]));
     const planById = new Map(plans.map((plan) => [plan.id, plan]));
     const autoRenewalByOrg = new Map(autoRenewals.map((item) => [item.organizationId, item]));
+    const organizationById = new Map(organizations.map((organization) => [organization.id, organization]));
+    const emailRuleById = new Map(emailRules.map((rule) => [rule.id, rule]));
+    const mappedNotifications = notifications.map((item) => this.mapNotificationRecord(item, organizationById, emailRuleById));
+    const latestBillingNotificationByOrg = new Map<string, (typeof mappedNotifications)[number]>();
+    for (const notification of mappedNotifications) {
+      if (
+        notification.organizationId &&
+        Object.values(BILLING_EVENT_TYPES).includes(notification.eventType as (typeof BILLING_EVENT_TYPES)[keyof typeof BILLING_EVENT_TYPES]) &&
+        !latestBillingNotificationByOrg.has(notification.organizationId)
+      ) {
+        latestBillingNotificationByOrg.set(notification.organizationId, notification);
+      }
+    }
     const latestOrderByOrg = new Map<string, (typeof orders)[number]>();
     for (const order of orders) {
       if (!latestOrderByOrg.has(order.organizationId)) latestOrderByOrg.set(order.organizationId, order);
@@ -881,13 +908,21 @@ export class BillingService {
         const plan = grant?.planId ? planById.get(grant.planId) : null;
         const autoRenewal = autoRenewalByOrg.get(organization.id);
         const latestOrder = latestOrderByOrg.get(organization.id);
+        const accountStatus = this.accountStatusForAccount({
+          grant,
+          autoRenewal,
+          latestOrder,
+          latestNotification: latestBillingNotificationByOrg.get(organization.id),
+          now
+        });
         return {
           organization,
           billingCustomer: customer ? this.mapBillingCustomer(customer) : null,
           grant: grant ? this.mapGrant(grant, plan ?? null) : null,
           autoRenewal: autoRenewal ? this.mapAutoRenewal(autoRenewal) : null,
           latestOrder: latestOrder ? this.mapOrder(latestOrder, planById.get(latestOrder.planId ?? "") ?? null) : null,
-          nextAction: this.nextActionForAccount({ grant, autoRenewal, latestOrder, now })
+          accountStatus,
+          nextAction: accountStatus.legacyNextAction
         };
       }),
       plans: plans.map((plan) => this.mapPlan(plan)),
@@ -896,17 +931,7 @@ export class BillingService {
       promotionCodes: promotionCodes.map((item) => this.mapPromotionCode(item)),
       emailRules: emailRules.map((item) => this.mapEmailRule(item)),
       stripeEvents: stripeEvents.map((item) => this.mapStripeEvent(item)),
-      notifications: notifications.map((item) => ({
-        id: item.id,
-        organizationId: item.organizationId,
-        targetRef: item.targetRef,
-        eventType: item.eventType,
-        status: item.status,
-        payload: item.payload,
-        errorMessage: item.errorMessage,
-        createdAt: toIsoString(item.createdAt),
-        updatedAt: toIsoString(item.updatedAt)
-      })),
+      notifications: mappedNotifications,
       stripe,
       emailSettings
     };
@@ -2454,6 +2479,94 @@ export class BillingService {
     return trimOrUndefined(config.portalBillingUrl) || DEFAULT_PORTAL_BILLING_URL;
   }
 
+  private accountStatusForAccount(input: {
+    grant?: { status: string; expiresAt: Date | string | null } | null;
+    autoRenewal?: { status: string; cancelAtPeriodEnd?: boolean | null } | null;
+    latestOrder?: { status: string } | null;
+    latestNotification?: { status: string; subject?: string | null; createdAt?: string | null } | null;
+    now: Date;
+  }) {
+    const expiresAt = toDate(input.grant?.expiresAt);
+    const daysUntilExpiry = expiresAt ? dateDiffDays(input.now, expiresAt) : null;
+    const lastEmail = input.latestNotification
+      ? {
+          status: input.latestNotification.status,
+          subject: input.latestNotification.subject ?? null,
+          sentAt: input.latestNotification.createdAt ?? null
+        }
+      : null;
+    const common = { daysUntilExpiry, lastEmail };
+
+    if (!input.grant) {
+      return {
+        ...common,
+        state: "no_entitlement",
+        severity: "warning",
+        attention: true,
+        recommendedAction: "create_checkout_link",
+        legacyNextAction: "create_payment_link"
+      };
+    }
+    if (input.autoRenewal?.status === "payment_failed") {
+      return {
+        ...common,
+        state: "payment_failed",
+        severity: "error",
+        attention: true,
+        recommendedAction: "ask_update_payment_method",
+        legacyNextAction: "update_payment_method"
+      };
+    }
+    if (input.latestOrder?.status === "pending_payment") {
+      return {
+        ...common,
+        state: "payment_pending",
+        severity: "processing",
+        attention: true,
+        recommendedAction: "wait_for_payment",
+        legacyNextAction: "waiting_for_payment"
+      };
+    }
+    if (expiresAt && expiresAt <= input.now) {
+      return {
+        ...common,
+        state: "expired",
+        severity: "error",
+        attention: true,
+        recommendedAction: "send_renewal_link",
+        legacyNextAction: "expired_renew_now"
+      };
+    }
+    if (input.autoRenewal?.status === "enabled" && input.autoRenewal.cancelAtPeriodEnd !== true) {
+      return {
+        ...common,
+        state: "auto_renew_scheduled",
+        severity: "success",
+        attention: false,
+        recommendedAction: "no_action",
+        legacyNextAction: "monitor"
+      };
+    }
+    if (expiresAt && expiresAt <= addDays(input.now, 14)) {
+      return {
+        ...common,
+        state: "expiring",
+        severity: "warning",
+        attention: true,
+        recommendedAction: lastEmail?.status === "sent" ? "follow_up_sales" : "send_renewal_link",
+        legacyNextAction: "expiring_review_renewal"
+      };
+    }
+    return {
+      ...common,
+      state: "active",
+      severity: "success",
+      attention: false,
+      recommendedAction: "no_action",
+      legacyNextAction: "monitor"
+    };
+  }
+
   private nextActionForAccount(input: {
     grant?: { status: string; expiresAt: Date | string | null } | null;
     autoRenewal?: { status: string } | null;
@@ -2467,6 +2580,40 @@ export class BillingService {
     if (expiresAt && expiresAt <= addDays(input.now, 14)) return "expiring_review_renewal";
     if (input.latestOrder?.status === "pending_payment") return "waiting_for_payment";
     return "monitor";
+  }
+
+  private mapNotificationRecord(
+    item: Awaited<ReturnType<PrismaClient["notificationRecord"]["findMany"]>>[number],
+    organizationById: Map<string, { id: string; name: string; slug: string }>,
+    emailRuleById: Map<string, Awaited<ReturnType<PrismaClient["billingEmailRule"]["findMany"]>>[number]>
+  ) {
+    const payload = asRecord(item.payload);
+    const delivery = asRecord(payload.delivery);
+    const targetParts = item.targetRef.split(":");
+    const ruleId = asString(payload.ruleId) ?? (targetParts[0]?.startsWith("billing-email") ? targetParts[1] : undefined) ?? null;
+    const rule = ruleId ? emailRuleById.get(ruleId) : undefined;
+    const organization = item.organizationId ? organizationById.get(item.organizationId) : undefined;
+    return {
+      id: item.id,
+      organizationId: item.organizationId,
+      organizationName: organization?.name ?? null,
+      organizationSlug: organization?.slug ?? null,
+      targetRef: item.targetRef,
+      eventType: item.eventType,
+      status: item.status,
+      ruleId,
+      ruleTrigger: rule ? `${rule.triggerType} · ${rule.offsetDays}d` : null,
+      subject: rule?.subject ?? asString(payload.subject) ?? null,
+      recipients: jsonNormalizedEmailArray(payload.recipients),
+      deliveryMode: asString(delivery.mode) ?? null,
+      delivered: asBoolean(delivery.delivered) ?? null,
+      isTest: asBoolean(payload.test) === true || item.targetRef.includes(":test:"),
+      expiresAt: asString(payload.expiresAt) ?? null,
+      errorMessage: item.errorMessage,
+      payload: item.payload,
+      createdAt: toIsoString(item.createdAt),
+      updatedAt: toIsoString(item.updatedAt)
+    };
   }
 
   private async promotionCodeForId(id: string): Promise<string> {
