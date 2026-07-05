@@ -58,6 +58,10 @@ const DEFAULT_BOT_CONFIG: Required<DingTalkBotConfigInput> = {
   streamingCardUpdateIntervalMs: 700,
   streamingCardMinUpdateChars: 24,
   resetCommands: ["新对话", "重置", "reset", "/reset"],
+  errorAlertEnabled: false,
+  errorAlertUseSuperAdmins: true,
+  errorAlertUserIds: [],
+  errorAlertThrottleSeconds: 300,
   unauthorizedMessage: "当前钉钉账号还没有关联到 Agent Studio 用户，请联系管理员同步组织通讯录。",
   busyMessage: "上一条消息还在处理中，请稍后再发。",
   resetConfirmationMessage: "已开启新对话。",
@@ -139,6 +143,15 @@ function readBotConfig(value: unknown): Required<DingTalkBotConfigInput> {
       1000
     ),
     resetCommands: resetCommands.length > 0 ? resetCommands : DEFAULT_BOT_CONFIG.resetCommands,
+    errorAlertEnabled: asBoolean(robot.errorAlertEnabled, DEFAULT_BOT_CONFIG.errorAlertEnabled),
+    errorAlertUseSuperAdmins: asBoolean(robot.errorAlertUseSuperAdmins, DEFAULT_BOT_CONFIG.errorAlertUseSuperAdmins),
+    errorAlertUserIds: asStringArray(robot.errorAlertUserIds),
+    errorAlertThrottleSeconds: asNumber(
+      robot.errorAlertThrottleSeconds,
+      DEFAULT_BOT_CONFIG.errorAlertThrottleSeconds,
+      0,
+      86_400
+    ),
     unauthorizedMessage: asString(robot.unauthorizedMessage) || DEFAULT_BOT_CONFIG.unauthorizedMessage,
     busyMessage: asString(robot.busyMessage) || DEFAULT_BOT_CONFIG.busyMessage,
     resetConfirmationMessage: asString(robot.resetConfirmationMessage) || DEFAULT_BOT_CONFIG.resetConfirmationMessage,
@@ -181,6 +194,10 @@ function buildBotConfig(draft: Required<DingTalkBotConfigInput>): DingTalkBotCon
     streamingCardUpdateIntervalMs: asNumber(draft.streamingCardUpdateIntervalMs, 700, 250, 10_000),
     streamingCardMinUpdateChars: asNumber(draft.streamingCardMinUpdateChars, 24, 1, 1000),
     resetCommands: asStringArray(draft.resetCommands),
+    errorAlertEnabled: draft.errorAlertEnabled,
+    errorAlertUseSuperAdmins: draft.errorAlertUseSuperAdmins,
+    errorAlertUserIds: asStringArray(draft.errorAlertUserIds),
+    errorAlertThrottleSeconds: asNumber(draft.errorAlertThrottleSeconds, 300, 0, 86_400),
     unauthorizedMessage: draft.unauthorizedMessage.trim(),
     busyMessage: draft.busyMessage.trim(),
     resetConfirmationMessage: draft.resetConfirmationMessage.trim(),
@@ -297,6 +314,7 @@ export function DingTalkIntegrationView(props: {
 
   const alertUserIdsText = useMemo(() => (configDraft.alertUserIds || []).join("\n"), [configDraft.alertUserIds]);
   const resetCommandsText = useMemo(() => robotDraft.resetCommands.join("\n"), [robotDraft.resetCommands]);
+  const errorAlertUserIdsText = useMemo(() => robotDraft.errorAlertUserIds.join("\n"), [robotDraft.errorAlertUserIds]);
   const botStatus = botStatuses.find((item) => item.instanceId === props.instanceId) || botStatuses[0];
   const agentModeOptions = useMemo(
     () => agentModes.map((item) => ({ label: `${item.name} (${item.slug})`, value: item.id })),
@@ -696,6 +714,64 @@ export function DingTalkIntegrationView(props: {
               </Checkbox>
             </Space>
           </div>
+          <div className="field integration-field-span-2">
+            <span className="field-label">问答失败提醒</span>
+            <Space wrap>
+              <Switch
+                checked={robotDraft.errorAlertEnabled}
+                checkedChildren="启用"
+                unCheckedChildren="停用"
+                onChange={(checked) => setRobotDraft((current) => ({ ...current, errorAlertEnabled: checked }))}
+              />
+              <Checkbox
+                checked={robotDraft.errorAlertUseSuperAdmins}
+                disabled={!robotDraft.errorAlertEnabled}
+                onChange={(event) =>
+                  setRobotDraft((current) => ({ ...current, errorAlertUseSuperAdmins: event.target.checked }))
+                }
+              >
+                优先发送给超级管理员
+              </Checkbox>
+            </Space>
+            <span className="field-help">
+              用户收到异常提示时发送钉钉工作通知；专用收件人留空时，会使用超级管理员或上方通知用户 IDs。
+            </span>
+          </div>
+          {robotDraft.errorAlertEnabled ? (
+            <>
+              <label className="field">
+                <span className="field-label">专用提醒用户 IDs</span>
+                <Input.TextArea
+                  rows={3}
+                  value={errorAlertUserIdsText}
+                  placeholder="每行一个钉钉 userId；留空则使用超级管理员或通用通知用户 IDs"
+                  onChange={(event) =>
+                    setRobotDraft((current) => ({
+                      ...current,
+                      errorAlertUserIds: event.target.value.split(/\n|,/g).map((item) => item.trim()).filter(Boolean)
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">同类错误节流秒数</span>
+                <InputNumber
+                  min={0}
+                  max={86400}
+                  step={60}
+                  value={robotDraft.errorAlertThrottleSeconds}
+                  style={{ width: "100%" }}
+                  onChange={(value) =>
+                    setRobotDraft((current) => ({
+                      ...current,
+                      errorAlertThrottleSeconds: typeof value === "number" ? value : DEFAULT_BOT_CONFIG.errorAlertThrottleSeconds
+                    }))
+                  }
+                />
+                <span className="field-help">相同实例和相同错误信息在此时间内只提醒 1 次；填 0 表示不节流。</span>
+              </label>
+            </>
+          ) : null}
           <label className="field integration-field-span-2">
             <span className="field-label">新对话指令</span>
             <Input.TextArea

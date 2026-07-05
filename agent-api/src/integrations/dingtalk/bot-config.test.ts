@@ -16,6 +16,10 @@ describe("normalizeDingTalkBotConfig", () => {
     expect(config.streamingCardUpdateIntervalMs).toBe(700);
     expect(config.streamingCardMinUpdateChars).toBe(24);
     expect(config.resetCommands).toContain("新对话");
+    expect(config.errorAlertEnabled).toBe(false);
+    expect(config.errorAlertUseSuperAdmins).toBe(true);
+    expect(config.errorAlertUserIds).toEqual([]);
+    expect(config.errorAlertThrottleSeconds).toBe(300);
   });
 
   it("normalizes configured scope, mode, knowledge sets, and reply text", () => {
@@ -33,6 +37,10 @@ describe("normalizeDingTalkBotConfig", () => {
         streamingCardUpdateIntervalMs: "500",
         streamingCardMinUpdateChars: "12",
         resetCommands: [" Restart ", "restart", "/new"],
+        errorAlertEnabled: true,
+        errorAlertUseSuperAdmins: false,
+        errorAlertUserIds: [" user-1 ", "user-1", "", "user-2"],
+        errorAlertThrottleSeconds: "60",
         errorMessage: "自定义错误"
       }
     });
@@ -49,6 +57,10 @@ describe("normalizeDingTalkBotConfig", () => {
     expect(config.streamingCardUpdateIntervalMs).toBe(500);
     expect(config.streamingCardMinUpdateChars).toBe(12);
     expect(config.resetCommands).toEqual(["Restart", "restart", "/new"]);
+    expect(config.errorAlertEnabled).toBe(true);
+    expect(config.errorAlertUseSuperAdmins).toBe(false);
+    expect(config.errorAlertUserIds).toEqual(["user-1", "user-2"]);
+    expect(config.errorAlertThrottleSeconds).toBe(60);
     expect(config.errorMessage).toBe("自定义错误");
   });
 });

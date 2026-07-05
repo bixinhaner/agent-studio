@@ -212,6 +212,10 @@ export type DingTalkBotConfigInput = {
   streamingCardUpdateIntervalMs?: number;
   streamingCardMinUpdateChars?: number;
   resetCommands?: string[];
+  errorAlertEnabled?: boolean;
+  errorAlertUseSuperAdmins?: boolean;
+  errorAlertUserIds?: string[];
+  errorAlertThrottleSeconds?: number;
   unauthorizedMessage?: string;
   busyMessage?: string;
   resetConfirmationMessage?: string;

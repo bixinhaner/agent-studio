@@ -34,6 +34,10 @@ export type DingTalkBotRuntimeConfig = {
   streamingCardUpdateIntervalMs: number;
   streamingCardMinUpdateChars: number;
   resetCommands: string[];
+  errorAlertEnabled: boolean;
+  errorAlertUseSuperAdmins: boolean;
+  errorAlertUserIds: string[];
+  errorAlertThrottleSeconds: number;
   unauthorizedMessage: string;
   busyMessage: string;
   resetConfirmationMessage: string;
@@ -49,7 +53,11 @@ export type DingTalkBotInstance = {
   organizationId?: string | null;
   clientId: string;
   clientSecret: string;
+  redirectUri?: string;
+  scope?: string;
   apiBaseUrl: string;
+  alertAgentId?: string;
+  alertUserIds?: string[];
   robot: DingTalkBotRuntimeConfig;
 };
 

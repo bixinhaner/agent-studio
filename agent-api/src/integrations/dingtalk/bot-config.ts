@@ -68,6 +68,10 @@ export function normalizeDingTalkBotConfig(input: unknown): DingTalkBotRuntimeCo
     streamingCardUpdateIntervalMs: asNumber(robot.streamingCardUpdateIntervalMs, 700, { min: 250, max: 10_000 }),
     streamingCardMinUpdateChars: asNumber(robot.streamingCardMinUpdateChars, 24, { min: 1, max: 1000 }),
     resetCommands: resetCommands.length > 0 ? resetCommands : DEFAULT_RESET_COMMANDS,
+    errorAlertEnabled: asBoolean(robot.errorAlertEnabled, false),
+    errorAlertUseSuperAdmins: asBoolean(robot.errorAlertUseSuperAdmins, true),
+    errorAlertUserIds: asStringArray(robot.errorAlertUserIds),
+    errorAlertThrottleSeconds: asNumber(robot.errorAlertThrottleSeconds, 300, { min: 0, max: 86_400 }),
     unauthorizedMessage:
       trimOrUndefined(robot.unauthorizedMessage) ??
       "当前钉钉账号还没有关联到 Agent Studio 用户，请联系管理员同步组织通讯录。",

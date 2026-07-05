@@ -212,6 +212,7 @@ import {
   type DingTalkBotInstance,
   type DingTalkBotStreamingCardReply
 } from "./integrations/dingtalk/bot-stream-service.js";
+import { DingTalkBotErrorNotifier } from "./integrations/dingtalk/bot-error-notifier.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
@@ -1266,6 +1267,7 @@ async function listDingTalkBotStreamInstances(): Promise<DingTalkBotInstance[]> 
       const secret = secretById.get(row.id) ?? {};
       const clientId = asString(config.clientId);
       const clientSecret = asString(secret.clientSecret);
+      const alertUserIds = asStringArray(config.alertUserIds);
       const apiBaseUrl = asString(config.apiBaseUrl) ?? "https://api.dingtalk.com";
       const robot = normalizeDingTalkBotConfig(config);
       return {
@@ -1276,15 +1278,64 @@ async function listDingTalkBotStreamInstances(): Promise<DingTalkBotInstance[]> 
         organizationId: row.organizationId,
         clientId: clientId ?? "",
         clientSecret: clientSecret ?? "",
+        redirectUri: asString(config.redirectUri),
+        scope: asString(config.scope),
         apiBaseUrl,
+        alertAgentId: asString(config.alertAgentId),
+        alertUserIds,
         robot
       };
     })
     .filter((instance) => instance.robot.enabled);
 }
+
+async function listSuperAdminDingTalkUserIds(): Promise<string[]> {
+  const rows = await db.user.findMany({
+    where: {
+      status: "active",
+      role: "super_admin",
+      dingtalkUserId: { not: null }
+    },
+    select: {
+      dingtalkUserId: true
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  return asStringArray(rows.map((row) => row.dingtalkUserId));
+}
+
+async function sendDingTalkBotErrorWorkNotice(input: {
+  instance: DingTalkBotInstance;
+  userIds: string[];
+  message: string;
+}): Promise<void> {
+  const client = createDingTalkClient({
+    ...appConfig.dingtalk,
+    clientId: input.instance.clientId || appConfig.dingtalk.clientId,
+    clientSecret: input.instance.clientSecret || appConfig.dingtalk.clientSecret,
+    redirectUri: input.instance.redirectUri || appConfig.dingtalk.redirectUri,
+    scope: input.instance.scope || appConfig.dingtalk.scope,
+    apiBaseUrl: input.instance.apiBaseUrl,
+    alertAgentId: input.instance.alertAgentId || appConfig.dingtalk.alertAgentId,
+    alertUserIds: input.userIds
+  });
+  if (!client.sendWorkNotice) {
+    throw new Error("DingTalk work notice sender is not available");
+  }
+  await client.sendWorkNotice({
+    userIds: input.userIds,
+    message: input.message
+  });
+}
 const dingtalkBotStream = new DingTalkBotStreamService({
   listInstances: listDingTalkBotStreamInstances,
   handleMessage: handleDingTalkBotMessage,
+  logger: console
+});
+const dingtalkBotErrorNotifier = new DingTalkBotErrorNotifier({
+  notifications: notificationRecords,
+  sendWorkNotice: sendDingTalkBotErrorWorkNotice,
+  listSuperAdminDingTalkUserIds,
   logger: console
 });
 const notificationDispatch = new NotificationDispatchService({
@@ -6548,9 +6599,45 @@ async function upsertDingTalkBinding(input: {
   });
 }
 
+function reportDingTalkBotError(input: {
+  incoming: DingTalkBotIncomingMessage;
+  error: unknown;
+  actor?: DingTalkBotActor;
+  thread?: ThreadRecord;
+  session?: SessionRecord;
+}): void {
+  void dingtalkBotErrorNotifier
+    .notify({
+      instance: input.incoming.instance,
+      robotMessage: input.incoming.robotMessage,
+      text: input.incoming.text,
+      error: input.error,
+      actor: input.actor
+        ? {
+            id: input.actor.currentUser.id,
+            organizationId: input.actor.currentUser.organizationId,
+            displayName: input.actor.displayName,
+            dingtalkUserId: input.actor.dingtalkUserId
+          }
+        : undefined,
+      threadId: input.thread?.id,
+      sessionId: input.session?.sessionId
+    })
+    .catch((error) => {
+      console.warn("DingTalk bot error alert dispatch failed", {
+        instanceId: input.incoming.instance.id,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+}
+
 async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Promise<DingTalkBotHandleResult> {
   const agentModeId = trimOrUndefined(input.instance.robot.agentModeId);
   if (!agentModeId) {
+    reportDingTalkBotError({
+      incoming: input,
+      error: new Error("DingTalk bot is not bound to an Agent Mode")
+    });
     return { status: "failed", replyText: input.instance.robot.errorMessage, detail: "missing agentModeId" };
   }
   const actor = await resolveDingTalkBotActor(input);
@@ -6802,6 +6889,13 @@ async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Prom
     if (streamingCardReply) {
       await streamingCardReply.fail(input.instance.robot.errorMessage || "这条消息处理失败，请稍后重试。").catch(() => undefined);
     }
+    reportDingTalkBotError({
+      incoming: input,
+      error,
+      actor,
+      thread,
+      session: currentSession
+    });
     throw error;
   }
 
