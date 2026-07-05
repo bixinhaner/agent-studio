@@ -708,9 +708,9 @@ export function BillingWorkspace() {
         meta: "当前仍可使用的组织授权"
       },
       {
-        label: "14 天内到期",
-        value: summary?.expiringIn14Days ?? "--",
-        meta: "会触发临期提醒和 Portal 提示"
+        label: "临期提醒窗口",
+        value: summary?.expiringReminderWindow ?? summary?.expiringIn14Days ?? "--",
+        meta: "与 14 天邮件扫描窗口一致"
       },
       {
         label: "续费失败",

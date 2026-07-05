@@ -256,6 +256,7 @@ export type AdminBillingOverviewResponse = {
     currency: string;
     activeSubscriptions: number;
     expiringIn14Days: number;
+    expiringReminderWindow?: number;
     failedRenewals: number;
     activeAutoRenewals: number;
     promotionCodes: number;

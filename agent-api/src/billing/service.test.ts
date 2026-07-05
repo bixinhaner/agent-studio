@@ -83,6 +83,7 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
       }))
     },
     organization: {
+      findMany: vi.fn(async (): Promise<unknown[]> => []),
       findUnique: vi.fn(async (_args?: unknown): Promise<unknown> => ({ id: "org-1", name: "Customer Inc", slug: "customer", ownerUserId: null }))
     },
     organizationMembership: {
@@ -92,6 +93,7 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
       findFirst: vi.fn(async () => null)
     },
     billingCustomer: {
+      findMany: vi.fn(async (): Promise<unknown[]> => (billingCustomer ? [billingCustomer] : [])),
       findUnique: vi.fn(async (args: { where: { organizationId?: string; stripeCustomerId?: string; id?: string } }) => {
         if (!billingCustomer) return null;
         if (args.where.organizationId) return billingCustomer.organizationId === args.where.organizationId ? billingCustomer : null;
@@ -135,6 +137,9 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
         return billingCustomer;
       })
     },
+    billingOrder: {
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
+    },
     billingEmailRule: {
       findMany: vi.fn(async (_args?: unknown): Promise<unknown[]> => []),
       findUnique: vi.fn(async (_args?: unknown): Promise<unknown | null> => null),
@@ -155,7 +160,14 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
     billingAutoRenewal: {
       findMany: vi.fn(async (): Promise<unknown[]> => [])
     },
+    promotionCode: {
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
+    },
+    billingStripeEvent: {
+      findMany: vi.fn(async (): Promise<unknown[]> => [])
+    },
     notificationRecord: {
+      findMany: vi.fn(async (): Promise<unknown[]> => []),
       findFirst: vi.fn(async () => null),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
         id: `notification-${Math.random().toString(16).slice(2)}`,
@@ -251,6 +263,112 @@ describe("BillingService Stripe admin settings", () => {
       enabled: true,
       source: "admin"
     });
+  });
+
+  it("aligns expiring account status with the 14-day email sweep window", async () => {
+    const { db, raw } = createDbMock({
+      id: "billing-customer-1",
+      organizationId: "org-1",
+      businessEmail: "customer@example.com",
+      billingEmail: "customer@example.com"
+    });
+    raw.organization.findMany.mockResolvedValueOnce([
+      {
+        id: "org-1",
+        slug: "customer",
+        name: "Customer Inc",
+        type: "customer",
+        status: "active",
+        ownerUserId: null,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-01T00:00:00.000Z")
+      }
+    ]);
+    raw.subscriptionPlan.findMany.mockResolvedValueOnce([
+      {
+        id: "plan-plus",
+        slug: "plus",
+        name: "Plus",
+        description: null,
+        status: "active",
+        featureType: "codex",
+        monthlyCompletedTurnLimit: 300,
+        monthlyTokenLimit: null,
+        billingCurrency: "usd",
+        billingInterval: "year",
+        billingIntervalCount: 1,
+        billingPriceCents: 99900,
+        billingStatus: "active",
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-01T00:00:00.000Z")
+      }
+    ]);
+    raw.subscriptionGrant.findMany.mockResolvedValueOnce([
+      {
+        id: "grant-1",
+        principalType: "organization",
+        principalId: "org-1",
+        planId: "plan-plus",
+        status: "active",
+        startsAt: new Date("2026-05-09T06:02:00.000Z"),
+        expiresAt: new Date("2026-07-09T06:02:00.000Z"),
+        cycleAnchorAt: new Date("2026-05-09T06:02:00.000Z"),
+        note: null,
+        createdAt: new Date("2026-05-09T06:02:00.000Z"),
+        updatedAt: new Date("2026-05-09T06:02:00.000Z")
+      }
+    ]);
+    raw.billingEmailRule.findMany.mockResolvedValueOnce([
+      {
+        id: "billing-email-rule-expiring-14",
+        triggerType: "expires_in_days",
+        offsetDays: 14,
+        status: "enabled",
+        audienceJson: { billingContacts: true },
+        subject: "Trial ends soon",
+        bodyText: "Renew",
+        bodyHtml: null,
+        lastRunAt: null,
+        createdAt: new Date("2026-06-12T00:00:00.000Z"),
+        updatedAt: new Date("2026-06-12T00:00:00.000Z")
+      }
+    ]);
+    raw.notificationRecord.findMany.mockResolvedValueOnce([
+      {
+        id: "notification-1",
+        organizationId: "org-1",
+        channelType: "email",
+        targetRef: "billing-email:billing-email-rule-expiring-14:org-1:2026-06-24",
+        eventType: "billing.subscription.expiring_email",
+        status: "sent",
+        payload: {
+          ruleId: "billing-email-rule-expiring-14",
+          recipients: ["customer@example.com"],
+          delivery: { mode: "smtp", delivered: true }
+        },
+        errorMessage: null,
+        createdAt: new Date("2026-06-24T06:47:00.000Z"),
+        updatedAt: new Date("2026-06-24T06:47:00.000Z")
+      }
+    ]);
+    const service = new BillingService({ db, config: createBillingConfig() });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-24T06:47:00.000Z"));
+    try {
+      const overview = await service.getAdminOverview();
+      expect(overview.summary.expiringReminderWindow).toBe(1);
+      expect(overview.customers[0]?.accountStatus).toMatchObject({
+        state: "expiring",
+        recommendedAction: "follow_up_sales",
+        daysUntilExpiry: 15,
+        lastEmail: {
+          status: "sent",
+          subject: "Trial ends soon"
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sends a branded billing email test without enabling production reminders", async () => {

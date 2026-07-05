@@ -163,6 +163,9 @@ const BILLING_EVENT_TYPES = {
   expired: "billing.subscription.expired_email",
   autoRenewFailed: "billing.auto_renew.failed_email"
 } as const;
+const BILLING_EXPIRING_REMINDER_DAYS = 14;
+const BILLING_REMINDER_SWEEP_WINDOW_DAYS = 1;
+const BILLING_EXPIRING_STATUS_WINDOW_DAYS = BILLING_EXPIRING_REMINDER_DAYS + BILLING_REMINDER_SWEEP_WINDOW_DAYS;
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -313,6 +316,10 @@ function jsonNormalizedEmailArray(value: unknown): string[] {
 
 function dateDiffDays(from: Date, to: Date): number {
   return Math.ceil((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function isInExpiringReminderWindow(expiresAt: Date | null, now: Date): boolean {
+  return Boolean(expiresAt && expiresAt > now && expiresAt < addDays(now, BILLING_EXPIRING_STATUS_WINDOW_DAYS));
 }
 
 function mergeMetadataJson(value: Prisma.JsonValue | null | undefined, patch: Record<string, unknown>): Prisma.InputJsonValue {
@@ -882,14 +889,13 @@ export class BillingService {
       if (!latestOrderByOrg.has(order.organizationId)) latestOrderByOrg.set(order.organizationId, order);
     }
     const now = new Date();
-    const expiringBoundary = addDays(now, 14);
     const paidOrders = orders.filter((order) => order.status === "paid");
     const revenueCents = paidOrders.reduce((sum, order) => sum + Math.max(0, order.amountTotalCents), 0);
     const activeAutoRenewals = autoRenewals.filter((item) => item.status === "enabled");
     const failedAutoRenewals = autoRenewals.filter((item) => item.status === "payment_failed");
     const expiringGrantCount = grants.filter((grant) => {
       const expiresAt = toDate(grant.expiresAt);
-      return expiresAt && expiresAt > now && expiresAt <= expiringBoundary;
+      return isInExpiringReminderWindow(expiresAt, now);
     }).length;
 
     return {
@@ -898,6 +904,7 @@ export class BillingService {
         currency: stripe.defaultCurrency || "usd",
         activeSubscriptions: grants.filter((grant) => grant.status === "active" && (!grant.expiresAt || new Date(grant.expiresAt) > now)).length,
         expiringIn14Days: expiringGrantCount,
+        expiringReminderWindow: expiringGrantCount,
         failedRenewals: failedAutoRenewals.length,
         activeAutoRenewals: activeAutoRenewals.length,
         promotionCodes: promotionCodes.filter((item) => item.status === "active").length
@@ -2547,7 +2554,7 @@ export class BillingService {
         legacyNextAction: "monitor"
       };
     }
-    if (expiresAt && expiresAt <= addDays(input.now, 14)) {
+    if (isInExpiringReminderWindow(expiresAt, input.now)) {
       return {
         ...common,
         state: "expiring",
@@ -2577,7 +2584,7 @@ export class BillingService {
     if (!input.grant) return "create_payment_link";
     if (input.autoRenewal?.status === "payment_failed") return "update_payment_method";
     if (expiresAt && expiresAt <= input.now) return "expired_renew_now";
-    if (expiresAt && expiresAt <= addDays(input.now, 14)) return "expiring_review_renewal";
+    if (isInExpiringReminderWindow(expiresAt, input.now)) return "expiring_review_renewal";
     if (input.latestOrder?.status === "pending_payment") return "waiting_for_payment";
     return "monitor";
   }
