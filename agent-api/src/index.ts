@@ -648,7 +648,7 @@ const conversationRecovery = new ConversationRecoveryService({
   notifications: notificationRecords,
   billing: billingService,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings),
-  resolvePortalUrl: () => appConfig.appBaseUrl
+  resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
 });
 const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
   recovery: conversationRecovery,

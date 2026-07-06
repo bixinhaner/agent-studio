@@ -30,6 +30,7 @@ const schema = z.object({
   SESSION_COOKIE_MAX_AGE_DAYS: z.string().default("7"),
   SESSION_COOKIE_SECURE: z.string().optional(),
   APP_BASE_URL: z.string().optional(),
+  SERVICE_RECOVERY_PORTAL_URL: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),
   SMTP_SECURE: z.string().optional(),
@@ -207,6 +208,7 @@ export const appConfig = {
         : parseBoolean(env.SESSION_COOKIE_SECURE)
   },
   appBaseUrl: (env.APP_BASE_URL || "").trim(),
+  serviceRecoveryPortalUrl: (env.SERVICE_RECOVERY_PORTAL_URL || "").trim(),
   authEmail: {
     host: (env.SMTP_HOST || "").trim(),
     port: parseInteger(env.SMTP_PORT, 587),
