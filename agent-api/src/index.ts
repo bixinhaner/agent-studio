@@ -241,6 +241,10 @@ import {
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { ConversationRecoveryService } from "./operations/conversation-recovery-service.js";
+import {
+  VisibleConversationFailureReporter,
+  type VisibleConversationFailureInput
+} from "./operations/visible-conversation-failure-reporter.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
@@ -644,6 +648,13 @@ const conversationRecovery = new ConversationRecoveryService({
   notifications: notificationRecords,
   billing: billingService,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings)
+});
+const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
+  recovery: conversationRecovery,
+  notifications: notificationRecords,
+  sendWorkNotice: sendActiveDingTalkWorkNotice,
+  listSuperAdminDingTalkUserIds,
+  logger: console
 });
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({
@@ -3747,6 +3758,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
   let crestInput: z.infer<typeof crestChatStreamSchema> | undefined;
   let crestThreadId: string | undefined;
   let crestUserMessageId: string | undefined;
+  let crestCurrentActor: CurrentActor | undefined;
   let crestAssistantMessageWritten = false;
   let crestRuntimeSession: SessionRecord | undefined;
   let crestRuntimeFailure: string | undefined;
@@ -3760,6 +3772,7 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     }
 
     const currentUser = await resolveCrestActor(input);
+    crestCurrentActor = currentUser;
     unregisterRun = registerCrestActiveChatRun({
       clientRunId: input.clientRunId,
       userId: currentUser.id,
@@ -3920,8 +3933,33 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     if (crestRuntimeSession && !explicitCancel.signal.aborted) {
       crestRuntimeFailure = error instanceof Error ? error.message : String(error);
     }
-    if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
+    const errorSent =
+      !streamAbort.disconnected &&
+      !explicitCancel.signal.aborted &&
+      !res.writableEnded &&
       sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
+    if (errorSent && crestRuntimeFailure) {
+      reportVisibleConversationFailure({
+        source: "crest_chat_stream",
+        channel: "crest",
+        organizationId: crestCurrentActor?.organizationId,
+        userId: crestCurrentActor?.id,
+        threadId: crestThreadId,
+        sessionId: crestRuntimeSession?.sessionId,
+        userMessageId: crestUserMessageId,
+        externalConversationId: crestInput?.conversationId,
+        audience: recoveryAudienceForActor(crestCurrentActor),
+        severity: "high",
+        reasonCode: "runtime_error",
+        title: "CREST 回答失败",
+        questionPreview: crestInput?.message,
+        failureDetail: crestRuntimeFailure,
+        metadata: {
+          clientRunId: crestInput?.clientRunId,
+          conversationId: crestInput?.conversationId,
+          assistantMessageWritten: crestAssistantMessageWritten
+        }
+      });
     }
   } finally {
     if (explicitCancel.signal.aborted && crestThreadId && crestUserMessageId && !crestAssistantMessageWritten && crestInput) {
@@ -6624,7 +6662,7 @@ function reportDingTalkBotError(input: {
       threadId: input.thread?.id,
       source: "dingtalk_bot_error",
       channel: DINGTALK_BOT_CHANNEL,
-      audience: dingtalkRecoveryAudience(input.actor?.currentUser),
+      audience: recoveryAudienceForActor(input.actor?.currentUser),
       severity: "high",
       reasonCode: "runtime_error",
       title: `钉钉机器人问答失败：${
@@ -6678,6 +6716,18 @@ function reportDingTalkBotError(input: {
     });
 }
 
+function reportVisibleConversationFailure(input: VisibleConversationFailureInput): void {
+  void visibleConversationFailureReporter.report(input).catch((error) => {
+    console.warn("visible conversation failure report failed", {
+      source: input.source,
+      channel: input.channel,
+      threadId: input.threadId,
+      sessionId: input.sessionId,
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  });
+}
+
 function dingtalkBotRecoveryKey(
   input: {
     incoming: DingTalkBotIncomingMessage;
@@ -6697,7 +6747,7 @@ function dingtalkBotRecoveryKey(
     .join(":");
 }
 
-function dingtalkRecoveryAudience(actor?: CurrentActor): "internal" | "external" | "unknown" {
+function recoveryAudienceForActor(actor?: CurrentActor): "internal" | "external" | "unknown" {
   if (!actor) return "unknown";
   if (actor.userType === "external_user" || actor.organizationType === "customer") return "external";
   if (actor.userType === "internal_employee" || actor.organizationType === "internal") return "internal";
@@ -9614,6 +9664,8 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalUserMessageId: string | undefined;
   let portalCurrentUserId: string | undefined;
   let portalCurrentOrganizationId: string | undefined;
+  let portalCurrentActor: CurrentActor | undefined;
+  let portalQuestionPreview: string | undefined;
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
   let portalRuntimeFailure: string | undefined;
@@ -9631,12 +9683,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
 
   try {
     const currentUser = currentActorFromRequest(req);
+    portalCurrentActor = currentUser;
     portalCurrentUserId = currentUser.id;
     portalCurrentOrganizationId = currentUser.organizationId;
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = streamSchema.parse(req.body || {});
     portalRequestedSessionId = input.session_id;
     portalThreadId = input.thread_id;
+    portalQuestionPreview = input.display_message ?? input.message;
     logPortalStream("stream_opened", {
       requested_thread_id: input.thread_id,
       lifecycle: streamAbort.snapshot()
@@ -9931,8 +9985,34 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (portalRuntimeSession && portalRuntimeStarted && !explicitCancel.signal.aborted) {
       portalRuntimeFailure = detail;
     }
-    if (!streamAbort.disconnected && !explicitCancel.signal.aborted && !res.writableEnded) {
+    const errorSent =
+      !streamAbort.disconnected &&
+      !explicitCancel.signal.aborted &&
+      !res.writableEnded &&
       sendTrackedSSE("error", payloadForSessionAccessError(error, "Chat stream failed"));
+    if (errorSent && portalRuntimeFailure) {
+      reportVisibleConversationFailure({
+        source: "portal_chat_stream",
+        channel: "portal",
+        organizationId: portalCurrentOrganizationId,
+        userId: portalCurrentUserId,
+        threadId: portalThreadId ?? portalRuntimeSession?.threadId,
+        sessionId: portalRuntimeSession?.sessionId,
+        userMessageId: portalUserMessageId,
+        audience: recoveryAudienceForActor(portalCurrentActor),
+        severity: "high",
+        reasonCode: "runtime_error",
+        title: "站内聊天回答失败",
+        questionPreview: portalQuestionPreview,
+        failureDetail: detail,
+        metadata: {
+          traceId: portalStreamTraceId,
+          requestedSessionId: portalRequestedSessionId,
+          runtimeStarted: portalRuntimeStarted,
+          assistantMessageWritten: portalAssistantMessageWritten,
+          deliveryStatus: streamAbort.disconnected ? "client_disconnected" : "open"
+        }
+      });
     }
     if (explicitCancel.signal.aborted) {
       logPortalStream("runtime_abort_effective", {
