@@ -25,6 +25,7 @@ import {
   sanitizeIntegrationConfigForRead
 } from "./types.js";
 import type { PolicyService } from "../../resources/policy-service.js";
+import { ActionConnectorIntegrationAdapter } from "./action-connector-adapter.js";
 import { CrestCrmIntegrationAdapter } from "./crest-crm-adapter.js";
 import { DingTalkIntegrationAdapter, type IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { OpenAICodexIntegrationAdapter } from "./openai-codex-adapter.js";
@@ -473,6 +474,7 @@ export function createIntegrationCenterService(options: {
   const repository = new IntegrationInstanceRepository(options.db);
   const adapters: Partial<Record<string, ValidationAdapter>> = {
     dingtalk: new DingTalkIntegrationAdapter(),
+    action_connector: new ActionConnectorIntegrationAdapter(),
     crest_crm: new CrestCrmIntegrationAdapter(),
     openai_codex: new OpenAICodexIntegrationAdapter(),
     openai_compatible_api: new OpenAICompatibleApiIntegrationAdapter(),

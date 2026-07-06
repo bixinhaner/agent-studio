@@ -1,6 +1,12 @@
 import type { ZendeskRunRecord, ZendeskSetupGuide } from "../zendesk/types";
 
-export type IntegrationType = 'dingtalk' | 'zendesk' | 'openai_codex' | 'openai_compatible_api' | 'crest_crm';
+export type IntegrationType =
+  | 'dingtalk'
+  | 'zendesk'
+  | 'openai_codex'
+  | 'openai_compatible_api'
+  | 'crest_crm'
+  | 'action_connector';
 export type IntegrationCenterTab = IntegrationType;
 export type IntegrationStatus = 'draft' | 'active' | 'disabled' | 'error' | string;
 export type IntegrationSectionTab = 'basic' | 'config' | 'bot' | 'history' | 'bindings' | 'policies';
@@ -363,6 +369,21 @@ export type CrestCrmConfigDraft = {
   actionCatalogPath: string;
   clientIdDraft: string;
   clientSecretDraft: string;
+};
+
+export type ActionConnectorConfigDraft = {
+  displayName: string;
+  baseUrl: string;
+  healthPath: string;
+  actionListPath: string;
+  actionSearchPath: string;
+  actionDescribePath: string;
+  actionPreviewPath: string;
+  actionExecutePath: string;
+  delegationHeader: string;
+  allowReadActions: boolean;
+  allowLowRiskActions: boolean;
+  allowHighRiskActions: boolean;
 };
 
 export type ExternalApiUsageSummary = {

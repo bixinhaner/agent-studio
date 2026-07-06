@@ -202,6 +202,7 @@ import { AgentModeRepository, type AgentModeRepositoryDb } from "./persistence/a
 import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-instance-repository.js";
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
+import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
@@ -8544,6 +8545,13 @@ app.use(
 );
 
 app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessRequestService));
+
+app.use(
+  "/api/action-connectors",
+  createActionConnectorRuntimeRouter({
+    db: db as unknown as IntegrationInstanceRepositoryDb
+  })
+);
 
 app.use(
   "/api/ai-response-reviews",
