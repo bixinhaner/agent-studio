@@ -409,6 +409,7 @@ export class ConversationRecoveryService {
           organizationName: hydrated.organization?.name ?? undefined,
           lastOccurredAt: hydrated.lastOccurredAt,
           resolutionSummary: trimOrUndefined(input.resolutionSummary ?? undefined) ?? hydrated.resolutionSummary,
+          compensationDays: compensationDaysForEmail(row),
           portalUrl
         }),
         debugLabel: "conversation-recovery-email"
@@ -774,6 +775,7 @@ function buildZhEmailTemplate(input: {
   const displayName = trimOrUndefined(input.user?.displayName ?? undefined) ?? "您好";
   const organizationName = trimOrUndefined(input.organization?.name ?? undefined);
   const occurredAt = new Date(input.row.lastOccurredAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+  const compensationNotice = recoveryCompensationNotice(compensationDaysForEmail(input.row), "zh", input.brandName);
   const subject = `${input.brandName} 已处理一次响应中断`;
   const bodyLines: Array<string | null> = [
     `${displayName}，`,
@@ -785,6 +787,7 @@ function buildZhEmailTemplate(input: {
     "",
     "处理说明：",
     input.row.resolutionSummary || defaultRecoveryResolution("zh", input.brandName),
+    ...(compensationNotice ? ["", "权益补偿：", compensationNotice] : []),
     "",
     `您可以重新进入 ${input.brandName} 继续使用。`,
     "",
@@ -810,6 +813,7 @@ function buildEnEmailTemplate(input: {
     timeStyle: "short",
     timeZone: "UTC"
   }).format(new Date(input.row.lastOccurredAt));
+  const compensationNotice = recoveryCompensationNotice(compensationDaysForEmail(input.row), "en", input.brandName);
   const subject = `${input.brandName} has addressed a recent response interruption`;
   const bodyLines: Array<string | null> = [
     `${displayName},`,
@@ -821,6 +825,7 @@ function buildEnEmailTemplate(input: {
     "",
     "What we addressed:",
     input.row.resolutionSummary || defaultRecoveryResolution("en", input.brandName),
+    ...(compensationNotice ? ["", "Access credit:", compensationNotice] : []),
     "",
     `You can return to ${input.brandName} and continue using it.`,
     "",
@@ -888,6 +893,7 @@ function recoveryEmailHtml(input: {
   organizationName?: string;
   lastOccurredAt: string;
   resolutionSummary?: string;
+  compensationDays?: number;
   portalUrl: string;
 }): string {
   const copy = recoveryEmailCopy(input.brandName, input.templateLanguage);
@@ -897,6 +903,10 @@ function recoveryEmailHtml(input: {
     ?? defaultRecoveryResolution(input.templateLanguage, input.brandName);
   const organizationRows = input.organizationName
     ? recoverySummaryRow(copy.organization, input.organizationName)
+    : "";
+  const compensationNotice = recoveryCompensationNotice(input.compensationDays, input.templateLanguage, input.brandName);
+  const compensationBlock = compensationNotice
+    ? recoveryCompensationBlock(copy.compensation, compensationNotice)
     : "";
   return `<!doctype html>
 <html>
@@ -947,6 +957,7 @@ function recoveryEmailHtml(input: {
                 </table>
               </td>
             </tr>
+            ${compensationBlock}
             <tr>
               <td align="center" style="padding:0 34px 30px;font-family:Arial,Helvetica,sans-serif;">
                 <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#FF4614;color:#ffffff;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:15px;line-height:20px;font-weight:bold;">${escapeHtml(copy.cta)}</a>
@@ -982,6 +993,7 @@ function recoveryEmailCopy(brandName: string, language: "zh" | "en") {
       currentStatus: "Current Status",
       ready: "Ready to continue",
       explanation: "What we addressed",
+      compensation: "Access credit",
       cta: `Continue using ${brandName}`,
       footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
     };
@@ -995,9 +1007,44 @@ function recoveryEmailCopy(brandName: string, language: "zh" | "en") {
     currentStatus: "当前状态",
     ready: "可以继续使用",
     explanation: "处理说明",
+    compensation: "权益补偿",
     cta: `继续使用 ${brandName}`,
     footer: `这封邮件是 ${brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
   };
+}
+
+function compensationDaysForEmail(row: { compensationDays?: number | null; compensationOrderId?: string | null }): number | undefined {
+  if (!trimOrUndefined(row.compensationOrderId ?? undefined)) return undefined;
+  const days = Number(row.compensationDays ?? 0);
+  return Number.isFinite(days) && days > 0 ? Math.floor(days) : undefined;
+}
+
+function recoveryCompensationNotice(days: number | undefined, language: "zh" | "en", brandName: string): string | undefined {
+  if (!days) return undefined;
+  if (language === "en") {
+    const unit = days === 1 ? "day" : "days";
+    return `We have added ${days} ${unit} of access to your organization. You can continue using ${brandName}.`;
+  }
+  return `我们已为您的组织增加 ${days} 天使用权益，您可以继续使用 ${brandName}。`;
+}
+
+function recoveryCompensationBlock(label: string, message: string): string {
+  return `<tr>
+              <td style="padding:0 34px 24px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;border-collapse:separate;">
+                  <tr>
+                    <td style="padding:16px 18px 4px;">
+                      <p style="margin:0;font-size:13px;line-height:20px;font-weight:bold;color:#15803d;">${escapeHtml(label)}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0 18px 10px;">
+                      ${textToHtmlLines(message)}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`;
 }
 
 function recoverySummaryRow(label: string, value: string): string {

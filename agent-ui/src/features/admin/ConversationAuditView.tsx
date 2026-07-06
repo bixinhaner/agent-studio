@@ -2472,7 +2472,7 @@ function ConversationRecoveryDetail(props: {
           <Select placeholder="选择套餐" value={giftPlanId || undefined} options={planOptions} onChange={setGiftPlanId} />
           <InputNumber min={1} max={90} value={giftDays} onChange={(value) => setGiftDays(Math.max(1, Number(value) || 1))} addonAfter="天" style={{ width: "100%" }} />
           <Input.TextArea rows={4} value={giftReason} onChange={(event) => setGiftReason(event.target.value)} />
-          <Alert type="info" showIcon message="补偿会复用现有 billing 赠送链路，订单和订阅变更会自动留痕。" />
+          <Alert type="info" showIcon message="补偿会复用现有 billing 赠送链路，订单和订阅变更会自动留痕；赠送后再发送补救邮件会自动包含权益补偿说明。" />
         </div>
       </Modal>
     </>

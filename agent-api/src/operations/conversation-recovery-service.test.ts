@@ -237,6 +237,7 @@ describe("ConversationRecoveryService", () => {
     expect(sendHtml).toContain("background:#fafafa");
     expect(sendHtml).toContain("background:#FF4614");
     expect(sendHtml).toContain("href=\"https://portal.example.com\"");
+    expect(sendHtml).not.toContain("Access credit");
     expect(sendHtml).not.toContain("runtime error");
     expect(notifications.create).toHaveBeenCalledWith(expect.objectContaining({
       channelType: "email",
@@ -281,5 +282,45 @@ describe("ConversationRecoveryService", () => {
     });
     expect(result.case.compensationOrderId).toBe("order-1");
     expect(result.case.compensationGrantId).toBe("grant-1");
+  });
+
+  it("includes granted compensation days in recovery email templates and HTML", async () => {
+    const db = createDb(recoveryRow({
+      compensationDays: 5,
+      compensationOrderId: "order-1",
+      compensationGrantId: "grant-1",
+      compensatedAt: now
+    }));
+    const notifications = createNotifications();
+    const emailSender: AuthEmailSender = {
+      send: vi.fn(async () => ({ delivered: true, mode: "smtp" as const }))
+    };
+    const service = new ConversationRecoveryService({
+      db: db as never,
+      emailSender,
+      notifications,
+      billing: { grantGiftDays: vi.fn() } as never,
+      resolveBrandName: () => "AgentStudio",
+      resolvePortalUrl: () => "https://portal.example.com"
+    });
+
+    const detail = await service.get("case-1");
+
+    expect(detail.case.suggestedEmail.templates.zh.bodyText).toContain("权益补偿：");
+    expect(detail.case.suggestedEmail.templates.zh.bodyText).toContain("我们已为您的组织增加 5 天使用权益");
+    expect(detail.case.suggestedEmail.templates.en.bodyText).toContain("Access credit:");
+    expect(detail.case.suggestedEmail.templates.en.bodyText).toContain("We have added 5 days of access to your organization.");
+
+    await service.sendResolutionEmail({
+      caseId: "case-1",
+      recipientEmail: "user@example.com",
+      subject: detail.case.suggestedEmail.templates.en.subject,
+      bodyText: detail.case.suggestedEmail.templates.en.bodyText,
+      templateLanguage: "en"
+    });
+
+    const sendHtml = vi.mocked(emailSender.send).mock.calls[0]?.[0]?.html ?? "";
+    expect(sendHtml).toContain("Access credit");
+    expect(sendHtml).toContain("We have added 5 days of access to your organization.");
   });
 });
