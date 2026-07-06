@@ -74,6 +74,7 @@ type AdminRouterOptions = {
   alerts?: Pick<AlertEvaluationService, "evaluateQuotaResult">;
   orgSyncConfig?: { enabled: boolean; intervalMinutes: number };
   broadcastRouter?: Router;
+  recoveryRouter?: Router;
 };
 
 type UserRow = {
@@ -747,6 +748,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       getDb: () => getDbInstance() as never
     })
   );
+
+  router.use(options.recoveryRouter ?? Router());
 
   router.use(options.monitoringRouter ?? Router());
 

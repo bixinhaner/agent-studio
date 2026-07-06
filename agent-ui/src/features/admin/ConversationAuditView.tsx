@@ -1,9 +1,11 @@
-import { Alert, Button, Empty, Input, Modal, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs } from "antd";
+import { Alert, Button, Empty, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Tag, Typography, Badge, Tabs, Segmented } from "antd";
 import { createPortal } from "react-dom";
 import {
   Activity,
   Clock3,
+  Gift,
   HardDrive,
+  Mail,
   MessageSquareText,
   Network,
   Package,
@@ -36,9 +38,14 @@ import {
   fetchAdminAiResponseReviewList,
   fetchAdminConversationAuditDetail,
   fetchAdminConversationAuditList,
+  fetchAdminConversationRecoveryDetail,
+  fetchAdminConversationRecoveryList,
   fetchAdminProductFeedbackDetail,
   fetchAdminProductFeedbackList,
+  grantAdminConversationRecoveryDays,
   hardDeleteAdminConversation,
+  sendAdminConversationRecoveryEmail,
+  updateAdminConversationRecoveryStatus,
   updateAdminProductFeedbackStatus
 } from "./api";
 import type {
@@ -55,6 +62,12 @@ import type {
   AdminConversationChannelSummary,
   AdminConversationFeedback,
   AdminConversationFeedbackFilter,
+  AdminConversationRecoveryCase,
+  AdminConversationRecoveryDetailResponse,
+  AdminConversationRecoveryListResponse,
+  AdminConversationRecoveryPlan,
+  AdminConversationRecoveryStatus,
+  AdminConversationRecoveryStatusFilter,
   AdminConversationListResponse,
   AdminConversationAgentModeSummary,
   AdminConversationSort,
@@ -75,8 +88,9 @@ import type {
   AdminProductFeedbackTypeFilter
 } from "./types";
 
-type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews";
+type AuditMode = "conversations" | "api" | "product_feedback" | "ai_reviews" | "customer_recovery";
 type TranscriptRoleFilter = "all" | AdminConversationTranscriptMessage["role"];
+type RecoveryEmailTemplateLanguage = "zh" | "en";
 
 type ConversationAuditHashState = {
   query: string;
@@ -153,7 +167,9 @@ function readConversationAuditHashState(): ConversationAuditHashState {
   const conversationId = params.get("conversation")?.trim() ?? "";
   const rawMode = params.get("mode")?.trim();
   const mode: AuditMode =
-    rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" ? rawMode : "conversations";
+    rawMode === "api" || rawMode === "product_feedback" || rawMode === "ai_reviews" || rawMode === "customer_recovery"
+      ? rawMode
+      : "conversations";
   return {
     conversationId,
     query: params.get("query")?.trim() || conversationId,
@@ -316,6 +332,79 @@ function productFeedbackStatusColor(status: AdminProductFeedbackStatus): string 
   if (status === "in_progress") return "processing";
   if (status === "triaged") return "warning";
   return "error";
+}
+
+const RECOVERY_STATUS_OPTIONS: Array<{ value: AdminConversationRecoveryStatusFilter; label: string }> = [
+  { value: "all", label: "全部状态" },
+  { value: "open", label: "待补救" },
+  { value: "ready_to_notify", label: "待通知" },
+  { value: "notified", label: "已通知" },
+  { value: "closed", label: "已关闭" }
+];
+
+const RECOVERY_STATUS_UPDATE_OPTIONS: Array<{ value: AdminConversationRecoveryStatus; label: string }> =
+  RECOVERY_STATUS_OPTIONS.filter((item): item is { value: AdminConversationRecoveryStatus; label: string } => item.value !== "all");
+const RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE: Record<RecoveryEmailTemplateLanguage, string> = {
+  zh: "（请在发送前补充本次问题的修复结果、正确口径或后续处理说明。）",
+  en: "(Please add the resolution, corrected answer, or next steps before sending.)"
+};
+const RECOVERY_EMAIL_SUMMARY_PLACEHOLDERS = Object.values(RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE);
+
+function recoveryStatusLabel(status: AdminConversationRecoveryStatus): string {
+  if (status === "ready_to_notify") return "待通知";
+  if (status === "notified") return "已通知";
+  if (status === "closed") return "已关闭";
+  return "待补救";
+}
+
+function recoveryStatusColor(status: AdminConversationRecoveryStatus): string {
+  if (status === "notified" || status === "closed") return "success";
+  if (status === "ready_to_notify") return "warning";
+  return "error";
+}
+
+function recoveryAudienceLabel(audience: AdminConversationRecoveryCase["audience"]): string {
+  if (audience === "external") return "外部客户";
+  if (audience === "internal") return "内部用户";
+  return "未识别";
+}
+
+function recoverySourceLabel(source: string): string {
+  if (source === "dingtalk_bot_error") return "钉钉问答失败";
+  return source || "未知来源";
+}
+
+function recoveryCompensationReasonLabel(reason: string): string {
+  if (reason === "eligible") return "可赠送套餐天数";
+  if (reason === "already_compensated") return "已赠送";
+  if (reason === "missing_organization") return "缺少组织";
+  if (reason === "missing_plan") return "缺少套餐";
+  if (reason === "internal_or_non_customer") return "仅外部客户可赠送";
+  return reason || "不可赠送";
+}
+
+function resolveRecoveryEmailTemplateLanguage(recoveryCase: AdminConversationRecoveryCase): RecoveryEmailTemplateLanguage {
+  const enTemplate = recoveryCase.suggestedEmail.templates?.en;
+  if (!enTemplate) return "zh";
+  if (recoveryCase.suggestedEmail.subject === enTemplate.subject || recoveryCase.suggestedEmail.bodyText === enTemplate.bodyText) {
+    return "en";
+  }
+  return recoveryCase.suggestedEmail.bodyText.includes("Resolution:") ? "en" : "zh";
+}
+
+function syncRecoverySummaryIntoEmailBody(
+  body: string,
+  previousSummary: string,
+  nextSummary: string,
+  language: RecoveryEmailTemplateLanguage
+): string {
+  const placeholder = RECOVERY_EMAIL_SUMMARY_PLACEHOLDERS.find((item) => body.includes(item));
+  const nextText = nextSummary.trim() || placeholder || RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE[language];
+  if (placeholder) {
+    return body.replace(placeholder, nextText);
+  }
+  const previousText = previousSummary.trim();
+  return previousText && body.includes(previousText) ? body.replace(previousText, nextText) : body;
 }
 
 function redactInlineDataUrls(value: unknown): unknown {
@@ -1954,6 +2043,424 @@ function AiReviewWorkspace() {
   );
 }
 
+function ConversationRecoveryWorkspace() {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<AdminConversationRecoveryStatusFilter>("all");
+  const [page, setPage] = useState(1);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
+  const [listData, setListData] = useState<AdminConversationRecoveryListResponse | null>(null);
+  const [selectedId, setSelectedId] = useState("");
+  const [detailData, setDetailData] = useState<AdminConversationRecoveryDetailResponse | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [errorText, setErrorText] = useState("");
+
+  const deferredQuery = useDeferredValue(query.trim());
+
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    setErrorText("");
+    fetchAdminConversationRecoveryList({
+      query: deferredQuery || undefined,
+      status: statusFilter,
+      page,
+      pageSize: 20
+    })
+      .then((res) => {
+        if (!active) return;
+        setListData(res);
+        if (!selectedId && res.cases[0]?.id) {
+          setSelectedId(res.cases[0].id);
+        }
+      })
+      .catch((error) => {
+        if (active) setErrorText(error instanceof Error ? error.message : "加载服务补救记录失败");
+      })
+      .finally(() => active && setListLoading(false));
+    return () => { active = false; };
+  }, [deferredQuery, page, refreshToken, selectedId, statusFilter]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetailData(null);
+      return;
+    }
+    let active = true;
+    setDetailLoading(true);
+    setErrorText("");
+    fetchAdminConversationRecoveryDetail(selectedId)
+      .then((res) => active && setDetailData(res))
+      .catch((error) => {
+        if (active) {
+          setErrorText(error instanceof Error ? error.message : "加载服务补救详情失败");
+          setDetailData(null);
+        }
+      })
+      .finally(() => active && setDetailLoading(false));
+    return () => { active = false; };
+  }, [selectedId]);
+
+  const handleCaseUpdated = (nextCase: AdminConversationRecoveryCase) => {
+    setDetailData((prev) => prev ? { ...prev, case: nextCase } : prev);
+    setListData((prev) => prev
+      ? {
+          ...prev,
+          cases: prev.cases.map((item) => item.id === nextCase.id ? nextCase : item)
+        }
+      : prev
+    );
+    setRefreshToken((value) => value + 1);
+  };
+
+  return (
+    <div className="admin-split-layout">
+      <div className="admin-split-master">
+        <div style={{ padding: "16px", borderBottom: "1px solid var(--admin-color-border)" }}>
+          <Input
+            prefix={<Search size={14} />}
+            placeholder="搜索用户、问题、Thread 或错误..."
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            style={{ marginBottom: 12 }}
+          />
+          <Space style={{ width: "100%", justifyContent: "space-between" }}>
+            <Select
+              size="small"
+              value={statusFilter}
+              options={RECOVERY_STATUS_OPTIONS}
+              onChange={(value) => {
+                setStatusFilter(value);
+                setPage(1);
+              }}
+              style={{ width: 112 }}
+            />
+            <Tag color={statusFilter === "all" ? "default" : "blue"} style={{ marginInlineEnd: 0 }}>
+              共 {listData?.summary.totalCases ?? 0} 条
+            </Tag>
+          </Space>
+        </div>
+
+        <div className="admin-master-list">
+          {listLoading ? <Spin style={{ margin: "auto", padding: 24 }} /> :
+           listData?.cases.length === 0 ? <Empty style={{ margin: "auto" }} description="暂无服务补救记录" /> :
+           listData?.cases.map((item) => (
+             <button
+               key={item.id}
+               className={`admin-master-item ${selectedId === item.id ? "active" : ""}`}
+               onClick={() => setSelectedId(item.id)}
+             >
+               <div className="admin-master-header">
+                 <span className="admin-master-title">{item.title}</span>
+                 <span className="admin-master-time">{formatLocalDateTime(item.lastOccurredAt).split(" ")[1]}</span>
+               </div>
+               <div className="admin-master-preview">
+                 {item.questionPreview || item.failureDetail || "无问题预览"}
+               </div>
+               <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                 <Tag color={recoveryStatusColor(item.status)} style={{ marginInlineEnd: 0 }}>
+                   {recoveryStatusLabel(item.status)}
+                 </Tag>
+                 <Tag style={{ marginInlineEnd: 0 }}>{recoveryAudienceLabel(item.audience)}</Tag>
+                 {item.failureCount > 1 ? <Tag style={{ marginInlineEnd: 0 }}>失败 {item.failureCount} 次</Tag> : null}
+               </div>
+             </button>
+           ))}
+        </div>
+        <div style={{ padding: "8px 16px", borderTop: "1px solid var(--admin-color-border)", textAlign: "center" }}>
+          <Pagination simple current={page} total={listData?.page.totalItems || 0} pageSize={20} onChange={setPage} />
+        </div>
+      </div>
+
+      <div className="admin-split-detail">
+        {errorText ? <Alert type="error" message={errorText} showIcon style={{ margin: 16 }} /> : null}
+        <ConversationRecoveryDetail
+          detail={detailData}
+          loading={detailLoading}
+          onCaseUpdated={handleCaseUpdated}
+          onError={(message) => setErrorText(message)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ConversationRecoveryDetail(props: {
+  detail: AdminConversationRecoveryDetailResponse | null;
+  loading: boolean;
+  onCaseUpdated(nextCase: AdminConversationRecoveryCase): void;
+  onError(message: string): void;
+}) {
+  const recoveryCase = props.detail?.case ?? null;
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [recipientEmail, setRecipientEmail] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBodyText, setEmailBodyText] = useState("");
+  const [emailTemplateLanguage, setEmailTemplateLanguage] = useState<RecoveryEmailTemplateLanguage>("zh");
+  const [resolutionSummary, setResolutionSummary] = useState("");
+  const [rootCause, setRootCause] = useState("");
+  const [giftPlanId, setGiftPlanId] = useState("");
+  const [giftDays, setGiftDays] = useState(3);
+  const [giftReason, setGiftReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    if (!recoveryCase) return;
+    setEmailTemplateLanguage(resolveRecoveryEmailTemplateLanguage(recoveryCase));
+    setRecipientEmail(recoveryCase.suggestedEmail.recipientEmail || "");
+    setEmailSubject(recoveryCase.suggestedEmail.subject);
+    setEmailBodyText(recoveryCase.suggestedEmail.bodyText);
+    setResolutionSummary(recoveryCase.resolutionSummary || "");
+    setRootCause(recoveryCase.rootCause || "");
+    setGiftPlanId(recoveryCase.compensation.defaultPlanId || props.detail?.plans[0]?.id || "");
+    setGiftDays(recoveryCase.compensationDays || 3);
+    setGiftReason(`服务补救补偿：${recoveryCase.title}`);
+  }, [props.detail?.plans, recoveryCase]);
+
+  if (props.loading && !props.detail) {
+    return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><Spin size="large" /></div>;
+  }
+  if (!props.detail || !recoveryCase) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--admin-color-subtle)" }}>
+        <Empty description="选择左侧记录查看补救详情" />
+      </div>
+    );
+  }
+
+  const planOptions = props.detail.plans.map((plan: AdminConversationRecoveryPlan) => ({
+    value: plan.id,
+    label: `${plan.name} (${plan.slug})`
+  }));
+
+  const applyEmailTemplate = (language: RecoveryEmailTemplateLanguage) => {
+    const template = recoveryCase.suggestedEmail.templates?.[language] ?? recoveryCase.suggestedEmail;
+    setEmailTemplateLanguage(language);
+    setEmailSubject(template.subject);
+    setEmailBodyText(syncRecoverySummaryIntoEmailBody(template.bodyText, "", resolutionSummary, language));
+  };
+
+  const sendEmail = async () => {
+    setActionLoading(true);
+    try {
+      const result = await sendAdminConversationRecoveryEmail(recoveryCase.id, {
+        recipientEmail,
+        subject: emailSubject,
+        bodyText: emailBodyText,
+        templateLanguage: emailTemplateLanguage,
+        rootCause,
+        resolutionSummary
+      });
+      props.onCaseUpdated(result.case);
+      setEmailOpen(false);
+      Modal.success({
+        title: result.mode === "debug" ? "邮件已记录为调试发送" : "补救邮件已发送",
+        content: result.mode === "debug" ? "当前 SMTP 未配置，邮件内容已写入服务日志。" : "发送结果已写入通知记录。",
+        centered: true
+      });
+    } catch (error) {
+      props.onError(error instanceof Error ? error.message : "发送补救邮件失败");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const grantDays = async () => {
+    setActionLoading(true);
+    try {
+      const result = await grantAdminConversationRecoveryDays(recoveryCase.id, {
+        planId: giftPlanId,
+        days: giftDays,
+        reason: giftReason
+      });
+      props.onCaseUpdated(result.case);
+      setGiftOpen(false);
+      Modal.success({
+        title: "套餐天数已赠送",
+        content: `已为该客户组织赠送 ${giftDays} 天，权益变更走现有 billing 链路。`,
+        centered: true
+      });
+    } catch (error) {
+      props.onError(error instanceof Error ? error.message : "赠送套餐天数失败");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const updateStatus = (status: AdminConversationRecoveryStatus) => {
+    setActionLoading(true);
+    updateAdminConversationRecoveryStatus(recoveryCase.id, status)
+      .then((result) => props.onCaseUpdated(result.case))
+      .catch((error) => props.onError(error instanceof Error ? error.message : "更新恢复状态失败"))
+      .finally(() => setActionLoading(false));
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--admin-color-border)", background: "var(--admin-color-surface)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 12 }}>
+            <div>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px 0" }}>{recoveryCase.title}</h2>
+              <div style={{ color: "var(--admin-color-subtle)", fontSize: 13 }}>
+                {displayUserLabel(recoveryCase.user)} • {formatLocalDateTime(recoveryCase.lastOccurredAt)}
+              </div>
+            </div>
+            <Space wrap>
+              <Select
+                size="small"
+                value={recoveryCase.status}
+                options={RECOVERY_STATUS_UPDATE_OPTIONS}
+                onChange={updateStatus}
+                style={{ width: 104 }}
+                disabled={props.loading || actionLoading}
+              />
+              <Tag color={recoveryStatusColor(recoveryCase.status)}>{recoveryStatusLabel(recoveryCase.status)}</Tag>
+            </Space>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, fontSize: 13, flexWrap: "wrap", alignItems: "center" }}>
+            <Tag color="cyan">{recoverySourceLabel(recoveryCase.source)}</Tag>
+            <Tag>{recoveryAudienceLabel(recoveryCase.audience)}</Tag>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--admin-color-subtle)" }}>
+              <Clock3 size={14} />
+              失败 {recoveryCase.failureCount} 次
+            </span>
+            {recoveryCase.threadId ? (
+              <Button size="small" type="link" href={`#admin/conversations?conversation=${encodeURIComponent(recoveryCase.threadId)}`}>
+                查看会话
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 24, background: "#f9fafb" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+            <Button icon={<Mail size={14} />} type="primary" onClick={() => setEmailOpen(true)}>
+              发送补救邮件
+            </Button>
+            <Button
+              icon={<Gift size={14} />}
+              disabled={!recoveryCase.compensation.eligible || actionLoading}
+              onClick={() => setGiftOpen(true)}
+            >
+              赠送套餐天数
+            </Button>
+            <Tag color={recoveryCase.compensation.eligible ? "green" : "default"} style={{ alignSelf: "center" }}>
+              {recoveryCompensationReasonLabel(recoveryCase.compensation.reason)}
+            </Tag>
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>失败现场</Typography.Title>
+            <div style={{ background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--admin-color-border)", display: "grid", gap: 10, fontSize: 13 }}>
+              <div><strong>用户问题：</strong>{recoveryCase.questionPreview || "无问题预览"}</div>
+              <div><strong>失败原因：</strong>{recoveryCase.failureDetail || "未记录错误摘要"}</div>
+              <div><strong>组织：</strong>{recoveryCase.organization?.name || recoveryCase.organizationId || "-"}</div>
+              <div><strong>邮箱：</strong>{recoveryCase.suggestedEmail.recipientEmail || "未识别，可发送前手动填写"}</div>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>补救动作</Typography.Title>
+            <div style={{ background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--admin-color-border)", display: "grid", gap: 8, fontSize: 13 }}>
+              <div>邮件通知：{recoveryCase.notifiedAt ? formatLocalDateTime(recoveryCase.notifiedAt) : "未发送"}</div>
+              <div>补偿：{recoveryCase.compensationOrderId ? `${recoveryCase.compensationDays || 0} 天` : "未赠送"}</div>
+              <div>根因：{recoveryCase.rootCause || "未填写"}</div>
+              <div>修复说明：{recoveryCase.resolutionSummary || "未填写"}</div>
+            </div>
+          </div>
+
+          <div>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>现场元数据</Typography.Title>
+            <div style={{ background: "#282c34", color: "#abb2bf", padding: 16, borderRadius: 8, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 12 }}>
+              {formatJsonBlock(recoveryCase.metadata)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Modal
+        open={emailOpen}
+        title="发送补救邮件"
+        okText="发送邮件"
+        cancelText="取消"
+        width={720}
+        centered
+        confirmLoading={actionLoading}
+        onOk={sendEmail}
+        onCancel={() => setEmailOpen(false)}
+        destroyOnHidden
+      >
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>模板语言</Typography.Text>
+            <Segmented
+              value={emailTemplateLanguage}
+              options={[
+                { label: "中文", value: "zh" },
+                { label: "English", value: "en" }
+              ]}
+              onChange={(value) => applyEmailTemplate(value === "en" ? "en" : "zh")}
+            />
+          </div>
+          <Input aria-label="收件邮箱" placeholder="收件邮箱" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} />
+          <Input aria-label="邮件标题" placeholder="邮件标题" value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+          <Input.TextArea
+            aria-label="根因，内部留痕"
+            placeholder="根因，内部留痕"
+            rows={2}
+            value={rootCause}
+            onChange={(event) => setRootCause(event.target.value)}
+          />
+          <Input.TextArea
+            aria-label="对用户可见的修复说明"
+            placeholder="对用户可见的修复说明"
+            rows={3}
+            value={resolutionSummary}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setEmailBodyText((current) => syncRecoverySummaryIntoEmailBody(current, resolutionSummary, nextValue, emailTemplateLanguage));
+              setResolutionSummary(nextValue);
+            }}
+          />
+          <Input.TextArea
+            aria-label="邮件正文"
+            placeholder="邮件正文"
+            rows={10}
+            value={emailBodyText}
+            onChange={(event) => setEmailBodyText(event.target.value)}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={giftOpen}
+        title="赠送套餐天数"
+        okText="确认赠送"
+        cancelText="取消"
+        width={560}
+        centered
+        confirmLoading={actionLoading}
+        onOk={grantDays}
+        onCancel={() => setGiftOpen(false)}
+        destroyOnHidden
+      >
+        <div style={{ display: "grid", gap: 12 }}>
+          <Select placeholder="选择套餐" value={giftPlanId || undefined} options={planOptions} onChange={setGiftPlanId} />
+          <InputNumber min={1} max={90} value={giftDays} onChange={(value) => setGiftDays(Math.max(1, Number(value) || 1))} addonAfter="天" style={{ width: "100%" }} />
+          <Input.TextArea rows={4} value={giftReason} onChange={(event) => setGiftReason(event.target.value)} />
+          <Alert type="info" showIcon message="补偿会复用现有 billing 赠送链路，订单和订阅变更会自动留痕。" />
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 const PRODUCT_FEEDBACK_TYPE_OPTIONS: Array<{ value: AdminProductFeedbackTypeFilter; label: string }> = [
   { value: "all", label: "全部类型" },
   { value: "usability_issue", label: "改进意见" },
@@ -2300,6 +2807,7 @@ export function ConversationAuditView() {
           onChange={k => setMode(k as AuditMode)} 
           items={[
             { key: "conversations", label: "用户交互会话" },
+            { key: "customer_recovery", label: "服务补救" },
             { key: "ai_reviews", label: "Zendesk AI评分" },
             { key: "product_feedback", label: "系统反馈" },
             { key: "api", label: "底层 API 调用" }
@@ -2310,6 +2818,8 @@ export function ConversationAuditView() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {mode === "conversations" ? (
           <ConversationWorkspace />
+        ) : mode === "customer_recovery" ? (
+          <ConversationRecoveryWorkspace />
         ) : mode === "ai_reviews" ? (
           <AiReviewWorkspace />
         ) : mode === "product_feedback" ? (

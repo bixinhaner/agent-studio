@@ -8,6 +8,10 @@ import type {
   AdminAiResponseReviewListResponse,
   AdminBillingOverviewResponse,
   AdminConversationDetailResponse,
+  AdminConversationRecoveryDetailResponse,
+  AdminConversationRecoveryListInput,
+  AdminConversationRecoveryListResponse,
+  AdminConversationRecoveryStatus,
   AdminConversationListInput,
   AdminConversationListResponse,
   AdminCreatedInvite,
@@ -411,6 +415,71 @@ export async function updateAdminProductFeedbackStatus(
   return api<AdminProductFeedbackDetailResponse>(`/api/admin/product-feedback/${encodeURIComponent(feedbackId)}`, {
     method: "PATCH",
     json: { status }
+  });
+}
+
+export async function fetchAdminConversationRecoveryList(
+  input: AdminConversationRecoveryListInput = {}
+): Promise<AdminConversationRecoveryListResponse> {
+  const params = new URLSearchParams();
+  if (input.query?.trim()) params.set("query", input.query.trim());
+  if (input.status) params.set("status", input.status);
+  if (typeof input.page === "number") params.set("page", String(input.page));
+  if (typeof input.pageSize === "number") params.set("page_size", String(input.pageSize));
+  const query = params.toString();
+  return api<AdminConversationRecoveryListResponse>(`/api/admin/customer-recovery/cases${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAdminConversationRecoveryDetail(
+  caseId: string
+): Promise<AdminConversationRecoveryDetailResponse> {
+  return api<AdminConversationRecoveryDetailResponse>(`/api/admin/customer-recovery/cases/${encodeURIComponent(caseId)}`);
+}
+
+export async function updateAdminConversationRecoveryStatus(
+  caseId: string,
+  status: AdminConversationRecoveryStatus
+): Promise<{ case: AdminConversationRecoveryDetailResponse["case"] }> {
+  return api<{ case: AdminConversationRecoveryDetailResponse["case"] }>(
+    `/api/admin/customer-recovery/cases/${encodeURIComponent(caseId)}`,
+    {
+      method: "PATCH",
+      json: { status }
+    }
+  );
+}
+
+export async function sendAdminConversationRecoveryEmail(
+  caseId: string,
+  input: {
+    recipientEmail?: string;
+    subject: string;
+    bodyText: string;
+    templateLanguage?: "zh" | "en";
+    rootCause?: string;
+    resolutionSummary?: string;
+  }
+): Promise<{ case: AdminConversationRecoveryDetailResponse["case"]; notificationId: string; delivered: boolean; mode: "smtp" | "debug" }> {
+  return api(
+    `/api/admin/customer-recovery/cases/${encodeURIComponent(caseId)}/send-email`,
+    {
+      method: "POST",
+      json: input
+    }
+  );
+}
+
+export async function grantAdminConversationRecoveryDays(
+  caseId: string,
+  input: {
+    planId?: string;
+    days: number;
+    reason?: string;
+  }
+): Promise<{ case: AdminConversationRecoveryDetailResponse["case"]; order: unknown; grant: unknown }> {
+  return api(`/api/admin/customer-recovery/cases/${encodeURIComponent(caseId)}/grant-days`, {
+    method: "POST",
+    json: input
   });
 }
 

@@ -1723,6 +1723,51 @@ model NotificationRecord {
   @@map("notification_records")
 }
 
+model ConversationRecoveryCase {
+  id                   String    @id @default(cuid())
+  recoveryKey          String    @unique @map("recovery_key")
+  organizationId       String?   @map("organization_id")
+  userId               String?   @map("user_id")
+  threadId             String?   @map("thread_id")
+  source               String
+  channel              String
+  audience             String    @default("unknown")
+  status               String    @default("open")
+  severity             String    @default("medium")
+  reasonCode           String    @default("runtime_error") @map("reason_code")
+  title                String
+  questionPreview      String?   @map("question_preview")
+  failureDetail        String?   @map("failure_detail")
+  rootCause            String?   @map("root_cause")
+  resolutionSummary    String?   @map("resolution_summary")
+  recipientEmail       String?   @map("recipient_email")
+  emailSubject         String?   @map("email_subject")
+  emailBodyText        String?   @map("email_body_text")
+  emailNotificationId  String?   @map("email_notification_id")
+  compensationPlanId   String?   @map("compensation_plan_id")
+  compensationDays     Int?      @map("compensation_days")
+  compensationOrderId  String?   @map("compensation_order_id")
+  compensationGrantId  String?   @map("compensation_grant_id")
+  failureCount         Int       @default(1) @map("failure_count")
+  metadata             Json?
+  occurredAt           DateTime  @default(now()) @map("occurred_at")
+  lastOccurredAt       DateTime  @default(now()) @map("last_occurred_at")
+  notifiedAt           DateTime? @map("notified_at")
+  compensatedAt        DateTime? @map("compensated_at")
+  closedAt             DateTime? @map("closed_at")
+  createdByUserId      String?   @map("created_by_user_id")
+  updatedByUserId      String?   @map("updated_by_user_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([organizationId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([threadId])
+  @@index([source, status, createdAt])
+  @@index([channel, lastOccurredAt])
+  @@map("conversation_recovery_cases")
+}
+
 model BillingCustomer {
   id                   String   @id @default(cuid())
   organizationId       String   @unique @map("organization_id")

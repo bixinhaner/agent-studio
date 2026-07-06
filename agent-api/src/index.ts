@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { registerCommonApiRoutes } from "./app-routes.js";
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
+import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
 import { createAdminRouter } from "./admin/router.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
@@ -239,6 +240,7 @@ import {
   type CodexRuntimeTurnTrackerInput
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
+import { ConversationRecoveryService } from "./operations/conversation-recovery-service.js";
 import { UsageLedgerService } from "./operations/usage-ledger-service.js";
 import { UsageRecorder } from "./operations/usage-recorder.js";
 import { UsageRollupService } from "./operations/usage-rollup-service.js";
@@ -634,6 +636,13 @@ const billingService = new BillingService({
   config: appConfig.billing,
   emailSender: authEmailSender,
   notifications: notificationRecords,
+  resolveBrandName: () => resolvePublicPlatformName(systemSettings)
+});
+const conversationRecovery = new ConversationRecoveryService({
+  db: db as never,
+  emailSender: authEmailSender,
+  notifications: notificationRecords,
+  billing: billingService,
   resolveBrandName: () => resolvePublicPlatformName(systemSettings)
 });
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
@@ -6606,6 +6615,44 @@ function reportDingTalkBotError(input: {
   thread?: ThreadRecord;
   session?: SessionRecord;
 }): void {
+  const failureDetail = dingTalkErrorDetail(input.error);
+  void conversationRecovery
+    .recordFailure({
+      recoveryKey: dingtalkBotRecoveryKey(input, failureDetail),
+      organizationId: input.actor?.currentUser.organizationId ?? input.incoming.instance.organizationId,
+      userId: input.actor?.currentUser.id,
+      threadId: input.thread?.id,
+      source: "dingtalk_bot_error",
+      channel: DINGTALK_BOT_CHANNEL,
+      audience: dingtalkRecoveryAudience(input.actor?.currentUser),
+      severity: "high",
+      reasonCode: "runtime_error",
+      title: `钉钉机器人问答失败：${
+        trimOrUndefined(input.actor?.displayName) ||
+        trimOrUndefined(input.incoming.robotMessage.senderNick) ||
+        input.incoming.instance.name
+      }`,
+      questionPreview: input.incoming.text,
+      failureDetail,
+      metadata: {
+        integrationInstanceId: input.incoming.instance.id,
+        integrationSlug: input.incoming.instance.slug,
+        botName: input.incoming.instance.name,
+        sessionId: input.session?.sessionId,
+        externalMessageId: trimOrUndefined(input.incoming.robotMessage.msgId),
+        externalConversationId: trimOrUndefined(input.incoming.robotMessage.conversationId),
+        conversationType: trimOrUndefined(input.incoming.robotMessage.conversationType),
+        senderStaffId: trimOrUndefined(input.incoming.robotMessage.senderStaffId),
+        senderNick: trimOrUndefined(input.incoming.robotMessage.senderNick)
+      }
+    })
+    .catch((error) => {
+      console.warn("DingTalk bot recovery case record failed", {
+        instanceId: input.incoming.instance.id,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+
   void dingtalkBotErrorNotifier
     .notify({
       instance: input.incoming.instance,
@@ -6629,6 +6676,38 @@ function reportDingTalkBotError(input: {
         detail: error instanceof Error ? error.message : String(error)
       });
     });
+}
+
+function dingtalkBotRecoveryKey(
+  input: {
+    incoming: DingTalkBotIncomingMessage;
+    thread?: ThreadRecord;
+  },
+  failureDetail: string
+): string {
+  return [
+    "dingtalk_bot_error",
+    input.incoming.instance.id,
+    trimOrUndefined(input.thread?.id),
+    trimOrUndefined(input.incoming.robotMessage.msgId) ??
+      trimOrUndefined(input.incoming.robotMessage.conversationId) ??
+      summarizeText(failureDetail, 80)
+  ]
+    .filter(Boolean)
+    .join(":");
+}
+
+function dingtalkRecoveryAudience(actor?: CurrentActor): "internal" | "external" | "unknown" {
+  if (!actor) return "unknown";
+  if (actor.userType === "external_user" || actor.organizationType === "customer") return "external";
+  if (actor.userType === "internal_employee" || actor.organizationType === "internal") return "internal";
+  return "unknown";
+}
+
+function dingTalkErrorDetail(error: unknown): string {
+  if (error instanceof Error) return summarizeText(error.message || "DingTalk bot message failed", 500);
+  if (typeof error === "string") return summarizeText(error || "DingTalk bot message failed", 500);
+  return "DingTalk bot message failed";
 }
 
 async function handleDingTalkBotMessage(input: DingTalkBotIncomingMessage): Promise<DingTalkBotHandleResult> {
@@ -8308,7 +8387,8 @@ registerCommonApiRoutes(app, {
       broadcasts,
       service: broadcastService,
       requirePermission
-    })
+    }),
+    recoveryRouter: createConversationRecoveryRouter(conversationRecovery)
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,

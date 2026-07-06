@@ -27,6 +27,8 @@ export type AdminProductFeedbackSeverity = "blocking" | "high" | "medium" | "low
 export type AdminProductFeedbackStatus = "open" | "triaged" | "in_progress" | "resolved" | "closed";
 export type AdminProductFeedbackStatusFilter = "all" | AdminProductFeedbackStatus;
 export type AdminProductFeedbackSort = "created_desc" | "updated_desc";
+export type AdminConversationRecoveryStatus = "open" | "ready_to_notify" | "notified" | "closed";
+export type AdminConversationRecoveryStatusFilter = "all" | AdminConversationRecoveryStatus;
 export type AdminAiResponseReviewStatus = "pending" | "overdue" | "submitted" | "cancelled";
 export type AdminAiResponseReviewStatusFilter = "all" | AdminAiResponseReviewStatus;
 export type AdminAiResponseReviewFilter =
@@ -606,6 +608,115 @@ export type AdminProductFeedbackListResponse = {
 
 export type AdminProductFeedbackDetailResponse = {
   feedback: AdminProductFeedbackRecord;
+};
+
+export type AdminConversationRecoveryPlan = {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  featureType: string;
+};
+
+export type AdminConversationRecoveryEmailTemplate = {
+  language: "zh" | "en";
+  subject: string;
+  bodyText: string;
+};
+
+export type AdminConversationRecoveryCase = {
+  id: string;
+  recoveryKey: string;
+  organizationId?: string;
+  userId?: string;
+  threadId?: string;
+  source: string;
+  channel: string;
+  audience: "internal" | "external" | "unknown";
+  status: AdminConversationRecoveryStatus;
+  severity: string;
+  reasonCode: string;
+  title: string;
+  questionPreview?: string;
+  failureDetail?: string;
+  rootCause?: string;
+  resolutionSummary?: string;
+  recipientEmail?: string;
+  emailSubject?: string;
+  emailBodyText?: string;
+  emailNotificationId?: string;
+  compensationPlanId?: string;
+  compensationDays?: number;
+  compensationOrderId?: string;
+  compensationGrantId?: string;
+  failureCount: number;
+  metadata?: unknown;
+  occurredAt: string;
+  lastOccurredAt: string;
+  notifiedAt?: string;
+  compensatedAt?: string;
+  closedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  user: AdminConversationUser | null;
+  organization: {
+    id: string;
+    slug: string;
+    name: string;
+    type: string;
+    status: string;
+  } | null;
+  suggestedEmail: {
+    recipientEmail?: string;
+    subject: string;
+    bodyText: string;
+    templates: {
+      zh: AdminConversationRecoveryEmailTemplate;
+      en: AdminConversationRecoveryEmailTemplate;
+    };
+  };
+  compensation: {
+    eligible: boolean;
+    reason: string;
+    defaultPlanId?: string;
+  };
+};
+
+export type AdminConversationRecoveryListInput = {
+  query?: string;
+  status?: AdminConversationRecoveryStatusFilter;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AdminConversationRecoveryListResponse = {
+  filters: {
+    query: string;
+    status: AdminConversationRecoveryStatusFilter;
+  };
+  summary: {
+    totalCases: number;
+    openCount: number;
+    readyToNotifyCount: number;
+    notifiedCount: number;
+    closedCount: number;
+    externalCount: number;
+    emailReadyCount: number;
+    compensatedCount: number;
+  };
+  page: {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+    totalPages: number;
+  };
+  cases: AdminConversationRecoveryCase[];
+  plans: AdminConversationRecoveryPlan[];
+};
+
+export type AdminConversationRecoveryDetailResponse = {
+  case: AdminConversationRecoveryCase;
+  plans: AdminConversationRecoveryPlan[];
 };
 
 export type AdminAiResponseReviewRecord = {
