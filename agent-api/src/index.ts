@@ -647,7 +647,8 @@ const conversationRecovery = new ConversationRecoveryService({
   emailSender: authEmailSender,
   notifications: notificationRecords,
   billing: billingService,
-  resolveBrandName: () => resolvePublicPlatformName(systemSettings)
+  resolveBrandName: () => resolvePublicPlatformName(systemSettings),
+  resolvePortalUrl: () => appConfig.appBaseUrl
 });
 const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
   recovery: conversationRecovery,

@@ -345,8 +345,8 @@ const RECOVERY_STATUS_OPTIONS: Array<{ value: AdminConversationRecoveryStatusFil
 const RECOVERY_STATUS_UPDATE_OPTIONS: Array<{ value: AdminConversationRecoveryStatus; label: string }> =
   RECOVERY_STATUS_OPTIONS.filter((item): item is { value: AdminConversationRecoveryStatus; label: string } => item.value !== "all");
 const RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE: Record<RecoveryEmailTemplateLanguage, string> = {
-  zh: "（请在发送前补充本次问题的修复结果、正确口径或后续处理说明。）",
-  en: "(Please add the resolution, corrected answer, or next steps before sending.)"
+  zh: "我们已完成服务侧排查和处理。您可以重新进入 Bailey 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。",
+  en: "We have reviewed and addressed the service-side issue. You can return to Bailey and continue using it. If the same issue appears again, reply to this email and we will follow up."
 };
 const RECOVERY_EMAIL_SUMMARY_PLACEHOLDERS = Object.values(RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE);
 
@@ -2408,33 +2408,51 @@ function ConversationRecoveryDetail(props: {
               onChange={(value) => applyEmailTemplate(value === "en" ? "en" : "zh")}
             />
           </div>
-          <Input aria-label="收件邮箱" placeholder="收件邮箱" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} />
-          <Input aria-label="邮件标题" placeholder="邮件标题" value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
-          <Input.TextArea
-            aria-label="根因，内部留痕"
-            placeholder="根因，内部留痕"
-            rows={2}
-            value={rootCause}
-            onChange={(event) => setRootCause(event.target.value)}
-          />
-          <Input.TextArea
-            aria-label="对用户可见的修复说明"
-            placeholder="对用户可见的修复说明"
-            rows={3}
-            value={resolutionSummary}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setEmailBodyText((current) => syncRecoverySummaryIntoEmailBody(current, resolutionSummary, nextValue, emailTemplateLanguage));
-              setResolutionSummary(nextValue);
-            }}
-          />
-          <Input.TextArea
-            aria-label="邮件正文"
-            placeholder="邮件正文"
-            rows={10}
-            value={emailBodyText}
-            onChange={(event) => setEmailBodyText(event.target.value)}
-          />
+          <label style={{ display: "grid", gap: 6 }}>
+            <Typography.Text strong>收件邮箱</Typography.Text>
+            <Input aria-label="收件邮箱" placeholder="user@example.com" value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <Typography.Text strong>邮件标题</Typography.Text>
+            <Input aria-label="邮件标题" placeholder="邮件标题" value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <Typography.Text strong>内部根因（不会发送给用户）</Typography.Text>
+            <Input.TextArea
+              aria-label="内部根因，不会发送给用户"
+              placeholder="仅供内部复盘，例如模型输出、知识库、工具调用或服务异常原因"
+              rows={2}
+              value={rootCause}
+              onChange={(event) => setRootCause(event.target.value)}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <Typography.Text strong>用户可见说明（会进入邮件）</Typography.Text>
+            <Input.TextArea
+              aria-label="用户可见说明，会进入邮件"
+              placeholder={RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE[emailTemplateLanguage]}
+              rows={3}
+              value={resolutionSummary}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setEmailBodyText((current) => syncRecoverySummaryIntoEmailBody(current, resolutionSummary, nextValue, emailTemplateLanguage));
+                setResolutionSummary(nextValue);
+              }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <Typography.Text strong>邮件正文</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              发送时会自动套用样式化邮件模板；这里编辑的是纯文本正文和邮件客户端降级内容。
+            </Typography.Text>
+            <Input.TextArea
+              aria-label="邮件正文"
+              placeholder="邮件正文"
+              rows={10}
+              value={emailBodyText}
+              onChange={(event) => setEmailBodyText(event.target.value)}
+            />
+          </label>
         </div>
       </Modal>
 

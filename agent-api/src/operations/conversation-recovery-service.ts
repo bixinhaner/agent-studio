@@ -229,6 +229,7 @@ export class ConversationRecoveryService {
       notifications: Pick<NotificationRecordRepository, "create" | "update">;
       billing: Pick<BillingService, "grantGiftDays">;
       resolveBrandName?: () => string | Promise<string>;
+      resolvePortalUrl?: () => string | Promise<string>;
     }
   ) {}
 
@@ -361,6 +362,7 @@ export class ConversationRecoveryService {
     const row = await this.getCaseRow(input.caseId);
     const hydrated = await this.hydrate(row);
     const brandName = await this.resolveBrandName();
+    const portalUrl = await this.resolvePortalUrl();
     const recipientEmail = normalizeEmail(input.recipientEmail) ?? normalizeEmail(hydrated.suggestedEmail.recipientEmail);
     const subject = trimOrUndefined(input.subject);
     const bodyText = trimOrUndefined(input.bodyText);
@@ -404,7 +406,10 @@ export class ConversationRecoveryService {
           subject,
           bodyText,
           templateLanguage,
-          organizationName: hydrated.organization?.name ?? undefined
+          organizationName: hydrated.organization?.name ?? undefined,
+          lastOccurredAt: hydrated.lastOccurredAt,
+          resolutionSummary: trimOrUndefined(input.resolutionSummary ?? undefined) ?? hydrated.resolutionSummary,
+          portalUrl
         }),
         debugLabel: "conversation-recovery-email"
       });
@@ -638,6 +643,11 @@ export class ConversationRecoveryService {
     const resolved = await this.deps.resolveBrandName?.();
     return trimOrUndefined(resolved) ?? "AgentStudio";
   }
+
+  private async resolvePortalUrl(): Promise<string> {
+    const resolved = await this.deps.resolvePortalUrl?.();
+    return trimOrUndefined(resolved)?.replace(/\/+$/, "") || "https://bailey.baicells.com";
+  }
 }
 
 function recoveryWhere(input: { query: string; status: ConversationRecoveryStatusFilter }) {
@@ -764,20 +774,21 @@ function buildZhEmailTemplate(input: {
   const displayName = trimOrUndefined(input.user?.displayName ?? undefined) ?? "您好";
   const organizationName = trimOrUndefined(input.organization?.name ?? undefined);
   const occurredAt = new Date(input.row.lastOccurredAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
-  const subject = `关于您在 ${input.brandName} 中遇到的回答失败`;
+  const subject = `${input.brandName} 已处理一次响应中断`;
   const bodyLines: Array<string | null> = [
     `${displayName}，`,
     "",
-    `这是关于您近期在 ${input.brandName} 使用过程中遇到的一次服务响应问题的跟进。`,
+    "我们检测到一次回答未能完成，并已处理相关问题。",
     `相关时间：${occurredAt}`,
     organizationName ? `关联组织：${organizationName}` : null,
-    "",
-    "我们已经完成排查并处理相关问题。给您带来的不便，我们很抱歉。",
+    "当前状态：可以继续使用",
     "",
     "处理说明：",
-    input.row.resolutionSummary || "（请在发送前补充本次问题的修复结果、正确口径或后续处理说明。）",
+    input.row.resolutionSummary || defaultRecoveryResolution("zh", input.brandName),
     "",
-    "如果这个问题仍然影响您的使用，可以直接回复这封邮件，我们会继续跟进。"
+    `您可以重新进入 ${input.brandName} 继续使用。`,
+    "",
+    `这封邮件是 ${input.brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
   ];
   return {
     language: "zh",
@@ -799,20 +810,21 @@ function buildEnEmailTemplate(input: {
     timeStyle: "short",
     timeZone: "UTC"
   }).format(new Date(input.row.lastOccurredAt));
-  const subject = `Follow-up on an issue you experienced in ${input.brandName}`;
+  const subject = `${input.brandName} has addressed a recent response interruption`;
   const bodyLines: Array<string | null> = [
     `${displayName},`,
     "",
-    `This is a follow-up about a recent service response issue you experienced while using ${input.brandName}.`,
+    "We detected an incomplete response and addressed the related issue.",
     `Related time: ${occurredAt} UTC`,
     organizationName ? `Organization: ${organizationName}` : null,
+    "Current status: Ready to continue",
     "",
-    "We have completed the review and addressed the related issue. We apologize for the interruption.",
+    "What we addressed:",
+    input.row.resolutionSummary || defaultRecoveryResolution("en", input.brandName),
     "",
-    "Resolution:",
-    input.row.resolutionSummary || "(Please add the resolution, corrected answer, or next steps before sending.)",
+    `You can return to ${input.brandName} and continue using it.`,
     "",
-    "If this issue is still affecting your work, you can reply to this email and we will continue to follow up."
+    `This email is a proactive ${input.brandName} service follow-up and does not include your conversation content.`
   ];
   return {
     language: "en",
@@ -874,36 +886,75 @@ function recoveryEmailHtml(input: {
   bodyText: string;
   templateLanguage: "zh" | "en";
   organizationName?: string;
+  lastOccurredAt: string;
+  resolutionSummary?: string;
+  portalUrl: string;
 }): string {
-  const paragraphs = textToHtmlParagraphs(input.bodyText);
-  const footerText = input.templateLanguage === "en"
-    ? "This message is a service follow-up about a recent support resolution."
-    : "这封邮件用于说明近期一次服务补救进展。";
-  const organizationLine = input.organizationName
-    ? `<p style="margin:0 0 16px;font-size:13px;line-height:20px;color:#5b6472;">${escapeHtml(input.organizationName)}</p>`
+  const copy = recoveryEmailCopy(input.brandName, input.templateLanguage);
+  const occurredAt = formatRecoveryEmailTime(input.lastOccurredAt, input.templateLanguage);
+  const resolution = trimOrUndefined(input.resolutionSummary)
+    ?? extractResolutionSummary(input.bodyText, input.templateLanguage)
+    ?? defaultRecoveryResolution(input.templateLanguage, input.brandName);
+  const organizationRows = input.organizationName
+    ? recoverySummaryRow(copy.organization, input.organizationName)
     : "";
   return `<!doctype html>
 <html>
-  <body style="margin:0;padding:0;background:#f4f6f8;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f6f8;margin:0;padding:24px 0;">
+  <body style="margin:0;padding:0;background:#fafafa;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fafafa;margin:0;padding:28px 0;">
       <tr>
-        <td align="center" style="padding:0 12px;">
-          <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border:1px solid #d9e0ea;border-collapse:collapse;">
+        <td align="center" style="padding:0 14px;">
+          <table role="presentation" width="620" cellspacing="0" cellpadding="0" border="0" style="width:620px;max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:20px;border-collapse:separate;overflow:hidden;">
             <tr>
-              <td style="padding:28px 32px 12px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
-                <div style="font-size:12px;line-height:18px;color:#5b6472;font-weight:bold;letter-spacing:0;text-transform:uppercase;">${escapeHtml(input.brandName)}</div>
-                <h1 style="margin:10px 0 0;font-size:24px;line-height:32px;font-weight:bold;color:#111827;">${escapeHtml(input.subject)}</h1>
+              <td style="padding:30px 34px 20px;font-family:Arial,Helvetica,sans-serif;color:#111827;background:#ffffff;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td style="vertical-align:middle;">
+                      <span style="display:inline-block;width:12px;height:12px;border-radius:999px;background:#FF4614;margin-right:8px;vertical-align:middle;"></span>
+                      <span style="font-size:15px;line-height:22px;font-weight:bold;color:#111827;vertical-align:middle;">${escapeHtml(input.brandName)}</span>
+                    </td>
+                    <td align="right" style="vertical-align:middle;">
+                      <span style="display:inline-block;border:1px solid #fed7c7;background:#fff4ef;color:#C83A12;border-radius:999px;padding:6px 10px;font-size:12px;line-height:16px;font-weight:bold;">${escapeHtml(copy.status)}</span>
+                    </td>
+                  </tr>
+                </table>
+                <h1 style="margin:24px 0 10px;font-size:28px;line-height:36px;font-weight:bold;color:#111827;">${escapeHtml(copy.h1)}</h1>
+                <p style="margin:0;font-size:15px;line-height:24px;color:#4b5563;">${escapeHtml(copy.lead)}</p>
               </td>
             </tr>
             <tr>
-              <td style="padding:0 32px 8px;font-family:Arial,Helvetica,sans-serif;color:#374151;">
-                ${organizationLine}
-                ${paragraphs}
+              <td style="padding:0 34px 20px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f9fafb;border:1px solid #eef0f3;border-radius:14px;border-collapse:separate;">
+                  ${recoverySummaryRow(copy.relatedTime, occurredAt)}
+                  ${organizationRows}
+                  ${recoverySummaryRow(copy.currentStatus, copy.ready)}
+                </table>
               </td>
             </tr>
             <tr>
-              <td style="padding:20px 32px 28px;font-family:Arial,Helvetica,sans-serif;color:#6b7280;border-top:1px solid #edf0f4;">
-                <p style="margin:0;font-size:12px;line-height:18px;">${escapeHtml(footerText)}</p>
+              <td style="padding:0 34px 24px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;border-collapse:separate;">
+                  <tr>
+                    <td style="padding:16px 18px 4px;">
+                      <p style="margin:0;font-size:13px;line-height:20px;font-weight:bold;color:#C83A12;">${escapeHtml(copy.explanation)}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0 18px 10px;">
+                      ${textToHtmlLines(resolution)}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:0 34px 30px;font-family:Arial,Helvetica,sans-serif;">
+                <a href="${escapeHtml(input.portalUrl)}" style="display:inline-block;background:#FF4614;color:#ffffff;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:15px;line-height:20px;font-weight:bold;">${escapeHtml(copy.cta)}</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 34px 24px;font-family:Arial,Helvetica,sans-serif;color:#6b7280;border-top:1px solid #f3f4f6;background:#ffffff;">
+                <p style="margin:0;font-size:12px;line-height:19px;">${escapeHtml(copy.footer)}</p>
               </td>
             </tr>
           </table>
@@ -914,15 +965,76 @@ function recoveryEmailHtml(input: {
 </html>`;
 }
 
-function textToHtmlParagraphs(value: string): string {
-  return value
-    .split(/\n{2,}/)
-    .map((block) => {
-      const html = escapeHtml(block.trim()).replace(/\n/g, "<br>");
-      return html ? `<p style="margin:0 0 16px;font-size:15px;line-height:24px;">${html}</p>` : "";
-    })
+function defaultRecoveryResolution(language: "zh" | "en", brandName: string): string {
+  return language === "en"
+    ? `We have reviewed and addressed the service-side issue. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`
+    : `我们已完成服务侧排查和处理。您可以重新进入 ${brandName} 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。`;
+}
+
+function recoveryEmailCopy(brandName: string, language: "zh" | "en") {
+  if (language === "en") {
+    return {
+      status: "Service issue addressed",
+      h1: "We detected an incomplete response and addressed the issue",
+      lead: `The related service issue has been handled. You can continue using ${brandName}.`,
+      relatedTime: "Related Time",
+      organization: "Organization",
+      currentStatus: "Current Status",
+      ready: "Ready to continue",
+      explanation: "What we addressed",
+      cta: `Continue using ${brandName}`,
+      footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+    };
+  }
+  return {
+    status: "服务问题已处理",
+    h1: "我们检测到一次回答未能完成，并已处理相关问题",
+    lead: `相关服务问题已经处理完成。您可以继续使用 ${brandName}。`,
+    relatedTime: "相关时间",
+    organization: "关联组织",
+    currentStatus: "当前状态",
+    ready: "可以继续使用",
+    explanation: "处理说明",
+    cta: `继续使用 ${brandName}`,
+    footer: `这封邮件是 ${brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
+  };
+}
+
+function recoverySummaryRow(label: string, value: string): string {
+  return `<tr>
+                    <td style="padding:12px 16px;border-bottom:1px solid #eef0f3;font-size:12px;line-height:18px;color:#6b7280;width:38%;">${escapeHtml(label)}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #eef0f3;font-size:13px;line-height:19px;color:#111827;font-weight:bold;">${escapeHtml(value)}</td>
+                  </tr>`;
+}
+
+function formatRecoveryEmailTime(value: string, language: "zh" | "en"): string {
+  const date = new Date(value);
+  if (language === "en") {
+    return `${new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC"
+    }).format(date)} UTC`;
+  }
+  return date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+}
+
+function extractResolutionSummary(bodyText: string, language: "zh" | "en"): string | undefined {
+  const label = language === "en" ? "What we addressed:" : "处理说明：";
+  const index = bodyText.indexOf(label);
+  if (index < 0) return undefined;
+  const afterLabel = bodyText.slice(index + label.length).trim();
+  const firstBlock = afterLabel.split(/\n{2,}/)[0]?.trim();
+  return trimOrUndefined(firstBlock);
+}
+
+function textToHtmlLines(value: string): string {
+  return escapeHtml(value)
+    .split(/\n+/)
+    .map((line) => line.trim())
     .filter(Boolean)
-    .join("\n                ");
+    .map((line) => `<p style="margin:0 0 8px;font-size:14px;line-height:22px;color:#374151;">${line}</p>`)
+    .join("");
 }
 
 function escapeHtml(value: string): string {

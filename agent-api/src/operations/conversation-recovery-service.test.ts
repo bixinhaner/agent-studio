@@ -182,8 +182,14 @@ describe("ConversationRecoveryService", () => {
       })
     );
     expect(record.suggestedEmail.recipientEmail).toBe("alice@example.com");
-    expect(record.suggestedEmail.templates.zh.subject).toContain("AgentStudio");
-    expect(record.suggestedEmail.templates.en.subject).toContain("Follow-up");
+    expect(record.suggestedEmail.templates.zh.subject).toBe("AgentStudio 已处理一次响应中断");
+    expect(record.suggestedEmail.templates.en.subject).toBe("AgentStudio has addressed a recent response interruption");
+    expect(record.suggestedEmail.templates.zh.bodyText).toContain("我们检测到一次回答未能完成，并已处理相关问题。");
+    expect(record.suggestedEmail.templates.en.bodyText).toContain("We detected an incomplete response and addressed the related issue.");
+    expect(record.suggestedEmail.templates.zh.bodyText).toContain("处理说明：");
+    expect(record.suggestedEmail.templates.en.bodyText).toContain("What we addressed:");
+    expect(record.suggestedEmail.templates.zh.bodyText).toContain("这封邮件是 AgentStudio 对近期服务体验的一次主动跟进，不包含您的具体对话内容。");
+    expect(record.suggestedEmail.templates.en.bodyText).toContain("This email is a proactive AgentStudio service follow-up and does not include your conversation content.");
     expect(record.suggestedEmail.templates.zh.bodyText).not.toContain("员工遇到系统报错");
     expect(record.suggestedEmail.templates.en.bodyText).not.toContain("员工遇到系统报错");
     expect(record.compensation.eligible).toBe(true);
@@ -200,7 +206,8 @@ describe("ConversationRecoveryService", () => {
       emailSender,
       notifications,
       billing: { grantGiftDays: vi.fn() } as never,
-      resolveBrandName: () => "AgentStudio"
+      resolveBrandName: () => "AgentStudio",
+      resolvePortalUrl: () => "https://portal.example.com"
     });
 
     const result = await service.sendResolutionEmail({
@@ -220,6 +227,17 @@ describe("ConversationRecoveryService", () => {
       text: "我们已经修复该问题。",
       html: expect.stringContaining("<table role=\"presentation\"")
     }));
+    const sendCall = vi.mocked(emailSender.send).mock.calls[0]?.[0];
+    const sendHtml = sendCall?.html ?? "";
+    expect(sendHtml).toContain("Service issue addressed");
+    expect(sendHtml).toContain("We detected an incomplete response and addressed the issue");
+    expect(sendHtml).toContain("What we addressed");
+    expect(sendHtml).toContain("已修复运行时配置");
+    expect(sendHtml).toContain("Continue using AgentStudio");
+    expect(sendHtml).toContain("background:#fafafa");
+    expect(sendHtml).toContain("background:#FF4614");
+    expect(sendHtml).toContain("href=\"https://portal.example.com\"");
+    expect(sendHtml).not.toContain("runtime error");
     expect(notifications.create).toHaveBeenCalledWith(expect.objectContaining({
       channelType: "email",
       eventType: "conversation_recovery.resolution_email",
