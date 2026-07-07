@@ -3757,7 +3757,6 @@ async function cancelPortalActiveChatRun(input: {
 }
 
 const ACTION_CONNECTOR_CHANNEL = "action_connector";
-const ACTION_CONNECTOR_RUNTIME_ORG = "external-action-connector";
 
 type ActionConnectorRuntimeOptions = {
   agentModeId: string;
@@ -3794,7 +3793,7 @@ function actionConnectorRuntimeActor(input: ActionConnectorCodexRunnerInput): Cu
     id: actionConnectorRuntimeOwnerId(input.connector.id),
     userType: "service",
     role: "integration",
-    organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? ACTION_CONNECTOR_RUNTIME_ORG,
+    organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? "",
     organizationType: "integration",
     membershipType: "service"
   };
@@ -4152,7 +4151,7 @@ async function startActionConnectorRuntimeSession(input: {
       });
 
   const session = await sessions.create({
-    organizationId: trimOrUndefined(input.runner.connector.organizationId ?? undefined) ?? input.runtimeOwner.organizationId,
+    organizationId: trimOrUndefined(input.runner.connector.organizationId ?? undefined),
     threadId: input.thread.id,
     model: input.runtime.model,
     reasoningEffort: input.runtime.reasoningEffort,
