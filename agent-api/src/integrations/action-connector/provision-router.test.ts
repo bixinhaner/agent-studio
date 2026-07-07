@@ -244,6 +244,49 @@ describe("Action connector provision router", () => {
     expect(db.instances[0].name).toBe("New Name");
   });
 
+  it("preserves existing agent runtime settings when reprovision omits them", async () => {
+    const db = createDbMock([
+      {
+        id: "connector-existing",
+        organizationId: null,
+        type: "action_connector",
+        slug: "external-ops",
+        name: "External Operations",
+        description: null,
+        status: "active",
+        isSystemSingleton: false,
+        createdAt: "2026-07-06T00:00:00.000Z",
+        updatedAt: "2026-07-06T00:00:00.000Z"
+      }
+    ]);
+    db.configs.push({
+      id: "config-existing",
+      integrationInstanceId: "connector-existing",
+      config: {
+        displayName: "External Operations",
+        baseUrl: "https://old.example.com",
+        agentModeId: "agent-mode-from-studio",
+        runtimeInstruction: "Use the operations support skill."
+      },
+      createdAt: "2026-07-06T00:00:00.000Z",
+      updatedAt: "2026-07-06T00:00:00.000Z"
+    });
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
+
+    await request(app)
+      .post("/api/integrations/action-connectors/provision")
+      .set("Authorization", "Bearer expected-token")
+      .send(payload())
+      .expect(200);
+
+    expect(db.configs[0].config).toMatchObject({
+      baseUrl: "https://ops.example.com",
+      agentModeId: "agent-mode-from-studio",
+      runtimeInstruction: "Use the operations support skill."
+    });
+  });
+
   it("marks the connector as error when validation fails", async () => {
     const db = createDbMock();
     const fetchImpl = vi.fn(async () => new Response("down", { status: 503 })) as unknown as typeof fetch;

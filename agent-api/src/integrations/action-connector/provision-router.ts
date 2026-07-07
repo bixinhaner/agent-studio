@@ -2,7 +2,11 @@ import express, { type Request, type Response } from "express";
 import { z } from "zod";
 
 import { IntegrationInstanceRepository, type IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
-import { ActionConnectorIntegrationAdapter, actionConnectorConfigSchema } from "../center/action-connector-adapter.js";
+import {
+  ActionConnectorIntegrationAdapter,
+  actionConnectorConfigSchema,
+  type ActionConnectorConfig
+} from "../center/action-connector-adapter.js";
 
 const provisionRequestSchema = z.object({
   slug: z.string().trim().min(1),
@@ -24,6 +28,19 @@ function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "Action connector provision failed";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function runtimeStreamPath(connectorId: string): string {
   return `/api/action-connectors/${encodeURIComponent(connectorId)}/chat/stream`;
 }
@@ -38,16 +55,43 @@ async function findActionConnectorBySlug(repository: IntegrationInstanceReposito
   return instances.find((instance) => instance.slug === slug) ?? null;
 }
 
-async function upsertActionConnector(repository: IntegrationInstanceRepository, payload: ProvisionRequest) {
+function preserveAgentRuntimeConfig(input: {
+  existingConfig?: Record<string, unknown>;
+  nextConfig: ActionConnectorConfig;
+  rawConfig: unknown;
+}): ActionConnectorConfig {
+  const rawConfig = asRecord(input.rawConfig);
+  const config = { ...input.nextConfig };
+  if (!hasOwn(rawConfig, "agentModeId")) {
+    config.agentModeId = asString(input.existingConfig?.agentModeId) ?? config.agentModeId;
+  }
+  if (!hasOwn(rawConfig, "runtimeInstruction")) {
+    config.runtimeInstruction = asString(input.existingConfig?.runtimeInstruction) ?? config.runtimeInstruction;
+  }
+  return config;
+}
+
+async function upsertActionConnector(
+  repository: IntegrationInstanceRepository,
+  payload: ProvisionRequest,
+  rawConfig: unknown
+): Promise<{ connectorId: string; config: ActionConnectorConfig }> {
   const existing = await findActionConnectorBySlug(repository, payload.slug);
+  const config = existing
+    ? preserveAgentRuntimeConfig({
+        existingConfig: existing.config,
+        nextConfig: payload.config,
+        rawConfig
+      })
+    : payload.config;
   if (existing) {
     await repository.updateInstance(existing.id, {
       name: payload.name,
       description: payload.description ?? null,
       status: payload.status ?? "active"
     });
-    await repository.upsertConfig(existing.id, payload.config);
-    return existing.id;
+    await repository.upsertConfig(existing.id, config);
+    return { connectorId: existing.id, config };
   }
 
   const created = await repository.createInstance({
@@ -57,8 +101,8 @@ async function upsertActionConnector(repository: IntegrationInstanceRepository, 
     description: payload.description ?? null,
     status: payload.status ?? "active"
   });
-  await repository.upsertConfig(created.id, payload.config);
-  return created.id;
+  await repository.upsertConfig(created.id, config);
+  return { connectorId: created.id, config };
 }
 
 export function createActionConnectorProvisionRouter(options: {
@@ -79,8 +123,8 @@ export function createActionConnectorProvisionRouter(options: {
     }
 
     try {
-      const connectorId = await upsertActionConnector(repository, payload);
-      const validation = await validator.validate(payload.config);
+      const { connectorId, config } = await upsertActionConnector(repository, payload, asRecord(req.body).config);
+      const validation = await validator.validate(config);
       await repository.recordValidation(connectorId, {
         triggerType: "automatic",
         status: validation.status,
