@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ActionConnectorRuntimeService, type AgentStreamEvent } from "./runtime.js";
+import { ActionConnectorConversationRecorder, type ActionConnectorRecordTurnInput } from "./conversation-recorder.js";
 
 const forbiddenTerms = [String.fromCharCode(103, 111, 111, 109, 99), String.fromCharCode(79, 77, 67)];
 
@@ -241,6 +242,99 @@ describe("ActionConnectorRuntimeService", () => {
     expect(events.map((event) => event.type)).toContain("tool_result");
     expect(requestBodies).toContainEqual({ actionId: "system.health", input: {}, dryRun: true });
     expect(requestBodies).toContainEqual({ actionId: "system.health", input: {}, dryRun: false });
+  });
+
+  it("passes connector-owned identity to the conversation recorder", async () => {
+    const db = createDbMock();
+    db.integrationInstanceConfig.findUnique = vi.fn(async () => ({
+      id: "config-1",
+      integrationInstanceId: "connector-1",
+      config: {
+        displayName: "Operations System",
+        baseUrl: "https://ops.example.com",
+        identityPath: "/identity",
+        policy: {
+          allowReadActions: true,
+          allowLowRiskActions: false,
+          allowHighRiskActions: false
+        }
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }));
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).endsWith("/identity")) {
+        return connectorResponse({
+          externalUserId: "external-user-1",
+          externalUserName: "External Operator",
+          roles: ["operator"],
+          scopes: ["agent-actions"]
+        });
+      }
+      if (String(url).endsWith("/actions/search")) {
+        return connectorResponse([{
+          id: "system.health",
+          title: "Read health",
+          description: "Read system health",
+          risk: "read"
+        }]);
+      }
+      if (String(url).endsWith("/actions/describe")) {
+        return connectorResponse({
+          id: "system.health",
+          title: "Read health",
+          description: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/preview")) {
+        return connectorResponse({
+          actionId: "system.health",
+          summary: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/execute")) {
+        return connectorResponse({
+          actionId: "system.health",
+          status: "ok",
+          result: { status: "ok" }
+        });
+      }
+      return connectorResponse([]);
+    }) as unknown as typeof fetch;
+    class StubRecorder extends ActionConnectorConversationRecorder {
+      calls: ActionConnectorRecordTurnInput[] = [];
+      constructor() {
+        super({ conversations: {} as never });
+      }
+      override async recordTurn(input: ActionConnectorRecordTurnInput) {
+        this.calls.push(input);
+        return { threadId: "thread-1" };
+      }
+    }
+    const recorder = new StubRecorder();
+    const runtime = new ActionConnectorRuntimeService(db as never, fetchImpl, recorder);
+
+    await runtime.streamChat({
+      connectorId: "connector-1",
+      delegationHeaderValue: "Bearer delegated",
+      request: {
+        message: "health",
+        mode: "execute",
+        locale: "en-US",
+        timezone: "UTC",
+        context: {}
+      },
+      emit: () => undefined
+    });
+
+    expect(recorder.calls).toHaveLength(1);
+    expect(recorder.calls[0].identity).toMatchObject({
+      externalUserId: "external-user-1",
+      externalUserName: "External Operator"
+    });
+    expect(recorder.calls[0].status).toBe("completed");
   });
 
   it("blocks actions disabled by connector policy", async () => {

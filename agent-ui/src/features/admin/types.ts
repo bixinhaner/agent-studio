@@ -16,7 +16,7 @@ export type AdminSection =
 
 export type AdminConversationStatusFilter = "all" | "regular" | "archived";
 export type AdminConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-export type AdminConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk";
+export type AdminConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk" | "action_connector";
 export type AdminConversationSort = "updated_desc" | "created_desc";
 export type AdminApiAuditResultFilter = "all" | "success" | "failed";
 export type AdminApiAuditDeliveryFilter = "all" | "delivered" | "client_aborted" | "connection_closed" | "unknown";

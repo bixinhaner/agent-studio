@@ -117,7 +117,8 @@ const SOURCE_OPTIONS: Array<{ value: AdminConversationSourceFilter; label: strin
   { value: "internal", label: "内部对话" },
   { value: "external", label: "外部客户对话" },
   { value: "zendesk", label: "Zendesk" },
-  { value: "dingtalk", label: "钉钉" }
+  { value: "dingtalk", label: "钉钉" },
+  { value: "action_connector", label: "Action Connector" }
 ];
 
 const SORT_OPTIONS: Array<{ value: AdminConversationSort; label: string }> = [
@@ -193,6 +194,9 @@ function conversationChannelTargetLabel(conversation: AdminConversationSummary):
   if (channel.type === "zendesk") {
     return channel.externalConversationId ? `Zendesk #${channel.externalConversationId}` : "Zendesk 工单";
   }
+  if (channel.type === "action_connector") {
+    return channel.externalUserName || channel.externalUserId || channel.externalConversationId || "Action Connector 会话";
+  }
   if (channel.conversationType === "group") {
     return channel.externalGroupName || channel.externalGroupId || channel.externalConversationId || "钉钉群聊";
   }
@@ -201,24 +205,29 @@ function conversationChannelTargetLabel(conversation: AdminConversationSummary):
 
 function conversationChannelBadgeLabel(channel: AdminConversationChannelSummary): string {
   if (channel.type === "zendesk") return "工单";
+  if (channel.type === "action_connector") return "Connector";
   if (channel.conversationType === "group") return "群聊";
   if (channel.conversationType === "ticket") return "工单";
   return "单聊";
 }
 
 function conversationChannelUserFieldLabel(channel: AdminConversationChannelSummary): string {
+  if (channel.type === "action_connector") return "外部用户";
   return channel.type === "zendesk" ? "Zendesk 请求者" : "钉钉用户";
 }
 
 function conversationChannelConversationFieldLabel(channel: AdminConversationChannelSummary): string {
+  if (channel.type === "action_connector") return "外部会话";
   return channel.type === "zendesk" ? "工单" : "会话";
 }
 
 function conversationChannelBotFieldLabel(channel: AdminConversationChannelSummary): string {
+  if (channel.type === "action_connector") return "Connector";
   return channel.type === "zendesk" ? "集成实例" : "机器人";
 }
 
 function conversationChannelMessageFieldLabel(channel: AdminConversationChannelSummary): string {
+  if (channel.type === "action_connector") return "外部请求";
   return channel.type === "zendesk" ? "客户评论" : "外部消息";
 }
 

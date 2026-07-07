@@ -380,6 +380,7 @@ export type ActionConnectorConfigDraft = {
   actionDescribePath: string;
   actionPreviewPath: string;
   actionExecutePath: string;
+  identityPath: string;
   delegationHeader: string;
   allowReadActions: boolean;
   allowLowRiskActions: boolean;

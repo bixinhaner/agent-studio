@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { actionConnectorConfigSchema, type ActionConnectorConfig } from "../center/action-connector-adapter.js";
-import { ActionConnectorClient, type ActionDescriptor, type ConnectorActionRequest } from "./client.js";
+import { ActionConnectorClient, type ActionDescriptor, type ConnectorActionRequest, type ConnectorIdentity } from "./client.js";
+import {
+  ActionConnectorConversationRecorder,
+  type ActionConnectorRuntimeInstance,
+  type ActionConnectorTurnStatus
+} from "./conversation-recorder.js";
 import type { IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
 
 export const actionConnectorChatRequestSchema = z.object({
@@ -39,6 +44,8 @@ type IntegrationInstanceRow = {
   type: string;
   status: string;
   name: string;
+  slug?: string | null;
+  organizationId?: string | null;
 };
 
 type FetchLike = typeof fetch;
@@ -48,7 +55,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-async function loadConnectorConfig(db: IntegrationInstanceRepositoryDb, connectorId: string): Promise<ActionConnectorConfig> {
+async function loadConnector(
+  db: IntegrationInstanceRepositoryDb,
+  connectorId: string
+): Promise<{ instance: ActionConnectorRuntimeInstance; config: ActionConnectorConfig }> {
   const instance = (await db.integrationInstance.findUnique({ where: { id: connectorId } })) as IntegrationInstanceRow | null;
   if (!instance || instance.type !== "action_connector") {
     throw new Error("action connector not found");
@@ -60,7 +70,15 @@ async function loadConnectorConfig(db: IntegrationInstanceRepositoryDb, connecto
     where: { integrationInstanceId: connectorId }
   })) as IntegrationConfigRow | null;
   const parsed = actionConnectorConfigSchema.parse(asRecord(configRow?.config));
-  return parsed;
+  return {
+    instance: {
+      id: instance.id,
+      name: instance.name,
+      slug: instance.slug,
+      organizationId: instance.organizationId
+    },
+    config: parsed
+  };
 }
 
 function isChinese(locale: string): boolean {
@@ -142,7 +160,8 @@ function summarizeResult(actionId: string, result: unknown, locale: string): str
 export class ActionConnectorRuntimeService {
   constructor(
     private readonly db: IntegrationInstanceRepositoryDb,
-    private readonly fetchImpl: FetchLike = fetch
+    private readonly fetchImpl: FetchLike = fetch,
+    private readonly recorder?: ActionConnectorConversationRecorder
   ) {}
 
   async streamChat(input: {
@@ -152,11 +171,12 @@ export class ActionConnectorRuntimeService {
     signal?: AbortSignal;
     emit(event: AgentStreamEvent): void;
   }): Promise<void> {
-    const config = await loadConnectorConfig(this.db, input.connectorId);
+    const { instance, config } = await loadConnector(this.db, input.connectorId);
     const client = new ActionConnectorClient(config, input.delegationHeaderValue, this.fetchImpl);
     const runId = randomUUID();
     const conversationId = input.request.conversationId || randomUUID();
     const callId = randomUUID();
+    const identityPromise = client.identity(input.signal).catch((): ConnectorIdentity | null => null);
 
     input.emit({ type: "start", runId, conversationId });
     input.emit({
@@ -191,13 +211,58 @@ export class ActionConnectorRuntimeService {
     });
 
     if (input.request.mode === "preview") {
+      await this.recordTurn({
+        connector: instance,
+        displayName: config.displayName,
+        conversationId,
+        runId,
+        callId,
+        request: input.request,
+        identity: await identityPromise,
+        selectedAction: selected,
+        descriptor,
+        preview,
+        status: "previewed"
+      });
       input.emit({ type: "done" });
       return;
     }
 
     const result = await client.execute(selected, input.signal);
     input.emit({ type: "tool_result", callId, status: "ok", output: result });
-    input.emit({ type: "delta", text: `${summarizeResult(selected.actionId, result, input.request.locale)}\n` });
+    const summaryText = summarizeResult(selected.actionId, result, input.request.locale);
+    await this.recordTurn({
+      connector: instance,
+      displayName: config.displayName,
+      conversationId,
+      runId,
+      callId,
+      request: input.request,
+      identity: await identityPromise,
+      selectedAction: selected,
+      descriptor,
+      preview,
+      result,
+      summaryText,
+      status: "completed"
+    });
+    input.emit({ type: "delta", text: `${summaryText}\n` });
     input.emit({ type: "done" });
+  }
+
+  private async recordTurn(input: Parameters<ActionConnectorConversationRecorder["recordTurn"]>[0] & {
+    status: ActionConnectorTurnStatus;
+  }): Promise<void> {
+    if (!this.recorder) return;
+    try {
+      await this.recorder.recordTurn(input);
+    } catch (error) {
+      console.warn("[action-connector] failed to record external conversation turn", {
+        connectorId: input.connector.id,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 }

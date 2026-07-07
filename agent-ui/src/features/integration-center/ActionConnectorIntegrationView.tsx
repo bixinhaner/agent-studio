@@ -29,6 +29,7 @@ const DEFAULTS = {
   actionDescribePath: "/api/v1/agent-actions/actions/describe",
   actionPreviewPath: "/api/v1/agent-actions/actions/preview",
   actionExecutePath: "/api/v1/agent-actions/actions/execute",
+  identityPath: "",
   delegationHeader: "Authorization"
 };
 
@@ -56,6 +57,7 @@ function buildDraft(detail: IntegrationDetail): ActionConnectorConfigDraft {
     actionDescribePath: asString(detail.config.actionDescribePath) || DEFAULTS.actionDescribePath,
     actionPreviewPath: asString(detail.config.actionPreviewPath) || DEFAULTS.actionPreviewPath,
     actionExecutePath: asString(detail.config.actionExecutePath) || DEFAULTS.actionExecutePath,
+    identityPath: asString(detail.config.identityPath),
     delegationHeader: asString(detail.config.delegationHeader) || DEFAULTS.delegationHeader,
     allowReadActions: asBoolean(policy.allowReadActions, true),
     allowLowRiskActions: asBoolean(policy.allowLowRiskActions, false),
@@ -124,6 +126,7 @@ export function ActionConnectorIntegrationView(props: {
           actionDescribePath: pathInput(draft.actionDescribePath) || DEFAULTS.actionDescribePath,
           actionPreviewPath: pathInput(draft.actionPreviewPath) || DEFAULTS.actionPreviewPath,
           actionExecutePath: pathInput(draft.actionExecutePath) || DEFAULTS.actionExecutePath,
+          identityPath: pathInput(draft.identityPath),
           delegationHeader: draft.delegationHeader.trim() || DEFAULTS.delegationHeader,
           policy: {
             allowReadActions: draft.allowReadActions,
@@ -248,6 +251,15 @@ export function ActionConnectorIntegrationView(props: {
                   <span className="field-label">Execute</span>
                   <Input value={draft.actionExecutePath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionExecutePath: event.target.value }))} />
                 </label>
+                <label className="field resource-center-form-span-2">
+                  <span className="field-label">Identity</span>
+                  <Input
+                    value={draft.identityPath}
+                    disabled={saving}
+                    placeholder="/api/v1/agent-actions/identity"
+                    onChange={(event) => setDraft((current) => ({ ...current, identityPath: event.target.value }))}
+                  />
+                </label>
               </div>
             </Card>
 
@@ -298,4 +310,3 @@ export function ActionConnectorIntegrationView(props: {
     </section>
   );
 }
-

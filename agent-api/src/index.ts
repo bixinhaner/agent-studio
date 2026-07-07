@@ -8564,7 +8564,9 @@ registerCommonApiRoutes(app, {
     db: db as unknown as IntegrationInstanceRepositoryDb
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
-    db: db as unknown as IntegrationInstanceRepositoryDb
+    db: db as unknown as IntegrationInstanceRepositoryDb,
+    conversations: conversationRecords,
+    usageRecorder
   })
 });
 

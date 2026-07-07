@@ -83,7 +83,7 @@ type ConversationAuditDb = ThreadRepositoryDb & ProductFeedbackRepositoryDb & Us
 
 type ConversationStatusFilter = "all" | "regular" | "archived";
 type ConversationFeedbackFilter = "all" | "with_feedback" | "positive" | "negative" | "none";
-export type ConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk";
+export type ConversationSourceFilter = "all" | "internal" | "external" | "zendesk" | "dingtalk" | "action_connector";
 type ConversationSort = "updated_desc" | "created_desc";
 
 type ApiAuditResultFilter = "all" | "success" | "failed";
@@ -833,7 +833,13 @@ function parseFeedbackFilter(value: unknown): ConversationFeedbackFilter {
 }
 
 function parseSourceFilter(value: unknown): ConversationSourceFilter {
-  return value === "internal" || value === "external" || value === "zendesk" || value === "dingtalk" ? value : "all";
+  return value === "internal" ||
+    value === "external" ||
+    value === "zendesk" ||
+    value === "dingtalk" ||
+    value === "action_connector"
+    ? value
+    : "all";
 }
 
 function parseSort(value: unknown): ConversationSort {
@@ -945,6 +951,7 @@ export function matchesConversationSourceFilter(
   if (filter === "all") return true;
   if (filter === "zendesk") return summary.channel?.type === "zendesk";
   if (filter === "dingtalk") return summary.channel?.type === "dingtalk_bot";
+  if (filter === "action_connector") return summary.channel?.type === "action_connector";
   if (filter === "internal") return !summary.channel && summary.audience === "internal";
   if (filter === "external") return !summary.channel && summary.audience === "external";
   return true;
@@ -1351,6 +1358,8 @@ function buildConversationChannelSummary(
         : "钉钉单聊"
       : type === "zendesk"
         ? "Zendesk 工单"
+      : type === "action_connector"
+        ? "Action Connector"
       : type;
   return {
     type,

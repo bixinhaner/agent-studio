@@ -33,6 +33,7 @@ describe("matchesConversationSourceFilter", () => {
   it("matches Zendesk and DingTalk by external channel", () => {
     expect(matchesConversationSourceFilter({ audience: "external", channel: { type: "zendesk" } }, "zendesk")).toBe(true);
     expect(matchesConversationSourceFilter({ audience: "internal", channel: { type: "dingtalk_bot" } }, "dingtalk")).toBe(true);
+    expect(matchesConversationSourceFilter({ audience: "unknown", channel: { type: "action_connector" } }, "action_connector")).toBe(true);
     expect(matchesConversationSourceFilter({ audience: "external", channel: null }, "zendesk")).toBe(false);
   });
 });

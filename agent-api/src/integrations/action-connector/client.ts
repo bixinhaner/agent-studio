@@ -15,6 +15,16 @@ export type ConnectorActionRequest = {
   dryRun?: boolean;
 };
 
+export type ConnectorIdentity = {
+  externalUserId?: string;
+  externalUserName?: string;
+  externalUnionId?: string;
+  organizationId?: string;
+  scopes?: string[];
+  roles?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 type FetchLike = typeof fetch;
 
 function unwrapConnectorEnvelope(payload: unknown): unknown {
@@ -68,6 +78,12 @@ export class ActionConnectorClient {
     return await this.request("POST", this.config.actionExecutePath, request, signal);
   }
 
+  async identity(signal?: AbortSignal): Promise<ConnectorIdentity | null> {
+    if (!this.config.identityPath) return null;
+    const payload = await this.request("GET", this.config.identityPath, undefined, signal);
+    return payload && typeof payload === "object" ? (payload as ConnectorIdentity) : null;
+  }
+
   private async request(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
     const headers: Record<string, string> = {
       Accept: "application/json"
@@ -94,4 +110,3 @@ export class ActionConnectorClient {
     return unwrapConnectorEnvelope(payload);
   }
 }
-

@@ -21,6 +21,7 @@ export const actionConnectorConfigSchema = z.object({
   actionDescribePath: pathSchema.default("/api/v1/agent-actions/actions/describe"),
   actionPreviewPath: pathSchema.default("/api/v1/agent-actions/actions/preview"),
   actionExecutePath: pathSchema.default("/api/v1/agent-actions/actions/execute"),
+  identityPath: z.union([pathSchema, z.literal("")]).default(""),
   delegationHeader: z.string().trim().min(1).default("Authorization"),
   policy: z
     .object({
@@ -87,11 +88,11 @@ export class ActionConnectorIntegrationAdapter {
           search: config.actionSearchPath,
           describe: config.actionDescribePath,
           preview: config.actionPreviewPath,
-          execute: config.actionExecutePath
+          execute: config.actionExecutePath,
+          identity: config.identityPath || undefined
         },
         policy: config.policy
       }
     };
   }
 }
-
