@@ -3,6 +3,7 @@ import multer, { MulterError } from "multer";
 import { z } from "zod";
 
 import { isInternalOrganizationType, resolveResourceRoleIds } from "../auth/resource-role-context.js";
+import type { CustomerExperienceIssueReporter } from "../operations/customer-experience-issue-reporter.js";
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
 import type { ProductFeedbackRepository } from "../persistence/product-feedback-repository.js";
 import { toPortalRuntimeOptions } from "./runtime-options.js";
@@ -92,10 +93,17 @@ function handleProductFeedbackUploadError(error: unknown, res: Response): boolea
   return true;
 }
 
+function audienceFromOrganizationType(organizationType: string | null | undefined): "internal" | "external" | "unknown" {
+  const normalized = typeof organizationType === "string" ? organizationType.trim() : "";
+  if (!normalized) return "unknown";
+  return isInternalOrganizationType(normalized) ? "internal" : "external";
+}
+
 export function createPortalRouter(options: {
   runtimeOptions: Pick<PortalRuntimeOptionService, "resolve">;
   listDepartmentIdsForUser(userId: string): Promise<string[]>;
   productFeedback?: Pick<ProductFeedbackRepository, "create">;
+  customerExperienceIssues?: Pick<CustomerExperienceIssueReporter, "reportProductFeedback">;
   subscriptionEntitlements?: Pick<SubscriptionEntitlementService, "getPortalSubscriptionStatus">;
 }): Router {
   const router = Router();
@@ -173,6 +181,25 @@ export function createPortalRouter(options: {
           description: parsed.data.description,
           context: mergeProductFeedbackContextWithImages(parsed.data.context, productFeedbackImagesFromRequest(req))
         });
+        if (options.customerExperienceIssues) {
+          void options.customerExperienceIssues.reportProductFeedback({
+            id: feedback.id,
+            organizationId: feedback.organizationId,
+            userId: feedback.userId,
+            threadId: feedback.threadId,
+            type: feedback.type,
+            severity: feedback.severity,
+            description: feedback.description,
+            context: feedback.context,
+            createdAt: feedback.createdAt,
+            audience: audienceFromOrganizationType(req.currentOrganization?.type)
+          }).catch((error) => {
+            console.warn("product feedback experience issue report failed", {
+              feedbackId: feedback.id,
+              detail: error instanceof Error ? error.message : String(error)
+            });
+          });
+        }
         res.status(201).json({
           feedback: {
             id: feedback.id,

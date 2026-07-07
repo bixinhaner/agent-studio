@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { CustomerExperienceIssueReporter } from "./customer-experience-issue-reporter.js";
 import { VisibleConversationFailureReporter } from "./visible-conversation-failure-reporter.js";
 
 function testRecovery() {
@@ -18,6 +19,20 @@ function testNotifications() {
   };
 }
 
+function testIssues(input: {
+  recovery: ReturnType<typeof testRecovery>;
+  notifications: ReturnType<typeof testNotifications>;
+  sendWorkNotice: ReturnType<typeof vi.fn>;
+  listSuperAdminDingTalkUserIds: ReturnType<typeof vi.fn>;
+}) {
+  return new CustomerExperienceIssueReporter({
+    recovery: input.recovery,
+    notifications: input.notifications,
+    sendWorkNotice: input.sendWorkNotice,
+    listSuperAdminDingTalkUserIds: input.listSuperAdminDingTalkUserIds
+  });
+}
+
 describe("VisibleConversationFailureReporter", () => {
   it("records a recovery case and sends a DingTalk admin notice", async () => {
     const recovery = testRecovery();
@@ -25,10 +40,7 @@ describe("VisibleConversationFailureReporter", () => {
     const sendWorkNotice = vi.fn(async () => undefined);
     const listSuperAdminDingTalkUserIds = vi.fn(async () => ["admin-1"]);
     const reporter = new VisibleConversationFailureReporter({
-      recovery,
-      notifications,
-      sendWorkNotice,
-      listSuperAdminDingTalkUserIds
+      issues: testIssues({ recovery, notifications, sendWorkNotice, listSuperAdminDingTalkUserIds })
     });
 
     const result = await reporter.report({
@@ -107,10 +119,7 @@ describe("VisibleConversationFailureReporter", () => {
     const sendWorkNotice = vi.fn(async () => undefined);
     const listSuperAdminDingTalkUserIds = vi.fn(async () => ["admin-1"]);
     const reporter = new VisibleConversationFailureReporter({
-      recovery,
-      notifications,
-      sendWorkNotice,
-      listSuperAdminDingTalkUserIds
+      issues: testIssues({ recovery, notifications, sendWorkNotice, listSuperAdminDingTalkUserIds })
     });
 
     const result = await reporter.report({
@@ -126,7 +135,7 @@ describe("VisibleConversationFailureReporter", () => {
       recoveryCaseId: "case-1",
       notification: {
         status: "disabled",
-        detail: "admin notification disabled for this failure"
+        detail: "admin notification disabled for this issue"
       }
     });
     expect(recovery.recordFailure).toHaveBeenCalledTimes(1);
@@ -140,10 +149,12 @@ describe("VisibleConversationFailureReporter", () => {
     const notifications = testNotifications();
     const sendWorkNotice = vi.fn(async () => undefined);
     const reporter = new VisibleConversationFailureReporter({
-      recovery,
-      notifications,
-      sendWorkNotice,
-      listSuperAdminDingTalkUserIds: vi.fn(async () => [])
+      issues: testIssues({
+        recovery,
+        notifications,
+        sendWorkNotice,
+        listSuperAdminDingTalkUserIds: vi.fn(async () => [])
+      })
     });
 
     await reporter.report({

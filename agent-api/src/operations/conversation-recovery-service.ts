@@ -220,6 +220,7 @@ type ConversationRecoveryCaseBase = Omit<
   ConversationRecoveryCaseRecord,
   "user" | "organization" | "suggestedEmail" | "compensation"
 >;
+type RecoveryEmailIssueKind = "response_failure" | "experience_report";
 
 export class ConversationRecoveryService {
   constructor(
@@ -410,7 +411,8 @@ export class ConversationRecoveryService {
           lastOccurredAt: hydrated.lastOccurredAt,
           resolutionSummary: trimOrUndefined(input.resolutionSummary ?? undefined) ?? hydrated.resolutionSummary,
           compensationDays: compensationDaysForEmail(row),
-          portalUrl
+          portalUrl,
+          issueKind: recoveryEmailIssueKind(row)
         }),
         debugLabel: "conversation-recovery-email"
       });
@@ -772,30 +774,31 @@ function buildZhEmailTemplate(input: {
   user: ConversationRecoveryUser | null;
   organization: ConversationRecoveryOrganization | null;
 }): ConversationRecoveryEmailTemplateDraft {
+  const issueKind = recoveryEmailIssueKind(input.row);
+  const copy = recoveryEmailTextCopy(input.brandName, "zh", issueKind);
   const displayName = trimOrUndefined(input.user?.displayName ?? undefined) ?? "您好";
   const organizationName = trimOrUndefined(input.organization?.name ?? undefined);
   const occurredAt = new Date(input.row.lastOccurredAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
   const compensationNotice = recoveryCompensationNotice(compensationDaysForEmail(input.row), "zh", input.brandName);
-  const subject = `${input.brandName} 已处理一次响应中断`;
   const bodyLines: Array<string | null> = [
     `${displayName}，`,
     "",
-    "我们检测到一次回答未能完成，并已处理相关问题。",
+    copy.lead,
     `相关时间：${occurredAt}`,
     organizationName ? `关联组织：${organizationName}` : null,
-    "当前状态：可以继续使用",
+    `当前状态：${copy.ready}`,
     "",
-    "处理说明：",
-    input.row.resolutionSummary || defaultRecoveryResolution("zh", input.brandName),
+    `${copy.explanation}：`,
+    input.row.resolutionSummary || defaultRecoveryResolution("zh", input.brandName, issueKind),
     ...(compensationNotice ? ["", "权益补偿：", compensationNotice] : []),
     "",
     `您可以重新进入 ${input.brandName} 继续使用。`,
     "",
-    `这封邮件是 ${input.brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
+    copy.footer
   ];
   return {
     language: "zh",
-    subject,
+    subject: copy.subject,
     bodyText: bodyLines.filter((line): line is string => line !== null).join("\n")
   };
 }
@@ -806,6 +809,8 @@ function buildEnEmailTemplate(input: {
   user: ConversationRecoveryUser | null;
   organization: ConversationRecoveryOrganization | null;
 }): ConversationRecoveryEmailTemplateDraft {
+  const issueKind = recoveryEmailIssueKind(input.row);
+  const copy = recoveryEmailTextCopy(input.brandName, "en", issueKind);
   const displayName = trimOrUndefined(input.user?.displayName ?? undefined) ?? "Hello";
   const organizationName = trimOrUndefined(input.organization?.name ?? undefined);
   const occurredAt = new Intl.DateTimeFormat("en-US", {
@@ -814,26 +819,25 @@ function buildEnEmailTemplate(input: {
     timeZone: "UTC"
   }).format(new Date(input.row.lastOccurredAt));
   const compensationNotice = recoveryCompensationNotice(compensationDaysForEmail(input.row), "en", input.brandName);
-  const subject = `${input.brandName} has addressed a recent response interruption`;
   const bodyLines: Array<string | null> = [
     `${displayName},`,
     "",
-    "We detected an incomplete response and addressed the related issue.",
+    copy.lead,
     `Related time: ${occurredAt} UTC`,
     organizationName ? `Organization: ${organizationName}` : null,
-    "Current status: Ready to continue",
+    `Current status: ${copy.ready}`,
     "",
-    "What we addressed:",
-    input.row.resolutionSummary || defaultRecoveryResolution("en", input.brandName),
+    `${copy.explanation}:`,
+    input.row.resolutionSummary || defaultRecoveryResolution("en", input.brandName, issueKind),
     ...(compensationNotice ? ["", "Access credit:", compensationNotice] : []),
     "",
     `You can return to ${input.brandName} and continue using it.`,
     "",
-    `This email is a proactive ${input.brandName} service follow-up and does not include your conversation content.`
+    copy.footer
   ];
   return {
     language: "en",
-    subject,
+    subject: copy.subject,
     bodyText: bodyLines.filter((line): line is string => line !== null).join("\n")
   };
 }
@@ -885,6 +889,18 @@ function normalizeEmailTemplateLanguage(value: string | null | undefined): "zh" 
   return value === "en" ? "en" : "zh";
 }
 
+function recoveryEmailIssueKind(row: { source: string; reasonCode: string }): RecoveryEmailIssueKind {
+  if (
+    row.source === "conversation_negative_feedback" ||
+    row.source.startsWith("product_feedback_") ||
+    row.reasonCode === "negative_feedback" ||
+    row.reasonCode.startsWith("product_feedback_")
+  ) {
+    return "experience_report";
+  }
+  return "response_failure";
+}
+
 function recoveryEmailHtml(input: {
   brandName: string;
   subject: string;
@@ -895,12 +911,13 @@ function recoveryEmailHtml(input: {
   resolutionSummary?: string;
   compensationDays?: number;
   portalUrl: string;
+  issueKind: RecoveryEmailIssueKind;
 }): string {
-  const copy = recoveryEmailCopy(input.brandName, input.templateLanguage);
+  const copy = recoveryEmailCopy(input.brandName, input.templateLanguage, input.issueKind);
   const occurredAt = formatRecoveryEmailTime(input.lastOccurredAt, input.templateLanguage);
   const resolution = trimOrUndefined(input.resolutionSummary)
     ?? extractResolutionSummary(input.bodyText, input.templateLanguage)
-    ?? defaultRecoveryResolution(input.templateLanguage, input.brandName);
+    ?? defaultRecoveryResolution(input.templateLanguage, input.brandName, input.issueKind);
   const organizationRows = input.organizationName
     ? recoverySummaryRow(copy.organization, input.organizationName)
     : "";
@@ -976,14 +993,71 @@ function recoveryEmailHtml(input: {
 </html>`;
 }
 
-function defaultRecoveryResolution(language: "zh" | "en", brandName: string): string {
-  return language === "en"
-    ? `We have reviewed and addressed the service-side issue. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`
+function recoveryEmailTextCopy(brandName: string, language: "zh" | "en", issueKind: RecoveryEmailIssueKind) {
+  if (language === "en") {
+    if (issueKind === "experience_report") {
+      return {
+        subject: `${brandName} has addressed a recent experience report`,
+        lead: "We completed a proactive follow-up based on recent service experience signals.",
+        ready: "Ready to continue",
+        explanation: "Follow-up details",
+        footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+      };
+    }
+    return {
+      subject: `${brandName} has addressed a recent response interruption`,
+      lead: "We detected an incomplete response and addressed the related issue.",
+      ready: "Ready to continue",
+      explanation: "What we addressed",
+      footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+    };
+  }
+  if (issueKind === "experience_report") {
+    return {
+      subject: `${brandName} 已处理一次体验反馈`,
+      lead: "我们根据近期服务体验信号完成了一次主动跟进，并已处理相关问题。",
+      ready: "可以继续使用",
+      explanation: "跟进说明",
+      footer: `这封邮件是 ${brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
+    };
+  }
+  return {
+    subject: `${brandName} 已处理一次响应中断`,
+    lead: "我们检测到一次回答未能完成，并已处理相关问题。",
+    ready: "可以继续使用",
+    explanation: "处理说明",
+    footer: `这封邮件是 ${brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
+  };
+}
+
+function defaultRecoveryResolution(language: "zh" | "en", brandName: string, issueKind: RecoveryEmailIssueKind): string {
+  if (language === "en") {
+    return issueKind === "experience_report"
+      ? `We have reviewed and addressed the related service experience signal. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`
+      : `We have reviewed and addressed the service-side issue. You can return to ${brandName} and continue using it. If the same issue appears again, reply to this email and we will follow up.`;
+  }
+  return issueKind === "experience_report"
+    ? `我们已完成相关服务体验信号的排查和处理。您可以重新进入 ${brandName} 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。`
     : `我们已完成服务侧排查和处理。您可以重新进入 ${brandName} 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。`;
 }
 
-function recoveryEmailCopy(brandName: string, language: "zh" | "en") {
+function recoveryEmailCopy(brandName: string, language: "zh" | "en", issueKind: RecoveryEmailIssueKind) {
   if (language === "en") {
+    if (issueKind === "experience_report") {
+      return {
+        status: "Experience report addressed",
+        h1: "We completed a service experience follow-up",
+        lead: `The related follow-up has been handled. You can continue using ${brandName}.`,
+        relatedTime: "Related Time",
+        organization: "Organization",
+        currentStatus: "Current Status",
+        ready: "Ready to continue",
+        explanation: "Follow-up details",
+        compensation: "Access credit",
+        cta: `Continue using ${brandName}`,
+        footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+      };
+    }
     return {
       status: "Service issue addressed",
       h1: "We detected an incomplete response and addressed the issue",
@@ -996,6 +1070,21 @@ function recoveryEmailCopy(brandName: string, language: "zh" | "en") {
       compensation: "Access credit",
       cta: `Continue using ${brandName}`,
       footer: `This email is a proactive ${brandName} service follow-up and does not include your conversation content.`
+    };
+  }
+  if (issueKind === "experience_report") {
+    return {
+      status: "体验反馈已跟进",
+      h1: "我们已完成一次服务体验跟进",
+      lead: `相关体验跟进已经处理完成。您可以继续使用 ${brandName}。`,
+      relatedTime: "相关时间",
+      organization: "关联组织",
+      currentStatus: "当前状态",
+      ready: "可以继续使用",
+      explanation: "跟进说明",
+      compensation: "权益补偿",
+      cta: `继续使用 ${brandName}`,
+      footer: `这封邮件是 ${brandName} 对近期服务体验的一次主动跟进，不包含您的具体对话内容。`
     };
   }
   return {
@@ -1067,12 +1156,15 @@ function formatRecoveryEmailTime(value: string, language: "zh" | "en"): string {
 }
 
 function extractResolutionSummary(bodyText: string, language: "zh" | "en"): string | undefined {
-  const label = language === "en" ? "What we addressed:" : "处理说明：";
-  const index = bodyText.indexOf(label);
-  if (index < 0) return undefined;
-  const afterLabel = bodyText.slice(index + label.length).trim();
-  const firstBlock = afterLabel.split(/\n{2,}/)[0]?.trim();
-  return trimOrUndefined(firstBlock);
+  const labels = language === "en" ? ["What we addressed:", "Follow-up details:"] : ["处理说明：", "跟进说明："];
+  for (const label of labels) {
+    const index = bodyText.indexOf(label);
+    if (index < 0) continue;
+    const afterLabel = bodyText.slice(index + label.length).trim();
+    const firstBlock = afterLabel.split(/\n{2,}/)[0]?.trim();
+    return trimOrUndefined(firstBlock);
+  }
+  return undefined;
 }
 
 function textToHtmlLines(value: string): string {

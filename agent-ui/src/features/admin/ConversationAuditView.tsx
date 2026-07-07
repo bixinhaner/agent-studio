@@ -336,7 +336,7 @@ function productFeedbackStatusColor(status: AdminProductFeedbackStatus): string 
 
 const RECOVERY_STATUS_OPTIONS: Array<{ value: AdminConversationRecoveryStatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
-  { value: "open", label: "待补救" },
+  { value: "open", label: "待跟进" },
   { value: "ready_to_notify", label: "待通知" },
   { value: "notified", label: "已通知" },
   { value: "closed", label: "已关闭" }
@@ -345,8 +345,8 @@ const RECOVERY_STATUS_OPTIONS: Array<{ value: AdminConversationRecoveryStatusFil
 const RECOVERY_STATUS_UPDATE_OPTIONS: Array<{ value: AdminConversationRecoveryStatus; label: string }> =
   RECOVERY_STATUS_OPTIONS.filter((item): item is { value: AdminConversationRecoveryStatus; label: string } => item.value !== "all");
 const RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE: Record<RecoveryEmailTemplateLanguage, string> = {
-  zh: "我们已完成服务侧排查和处理。您可以重新进入 Bailey 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。",
-  en: "We have reviewed and addressed the service-side issue. You can return to Bailey and continue using it. If the same issue appears again, reply to this email and we will follow up."
+  zh: "我们已完成相关服务体验的排查和处理。您可以重新进入 Bailey 继续使用；如果相同问题再次出现，可以直接回复这封邮件，我们会继续跟进。",
+  en: "We have reviewed and addressed the related service experience issue. You can return to Bailey and continue using it. If the same issue appears again, reply to this email and we will follow up."
 };
 const RECOVERY_EMAIL_SUMMARY_PLACEHOLDERS = Object.values(RECOVERY_EMAIL_SUMMARY_PLACEHOLDER_BY_LANGUAGE);
 
@@ -354,7 +354,7 @@ function recoveryStatusLabel(status: AdminConversationRecoveryStatus): string {
   if (status === "ready_to_notify") return "待通知";
   if (status === "notified") return "已通知";
   if (status === "closed") return "已关闭";
-  return "待补救";
+  return "待跟进";
 }
 
 function recoveryStatusColor(status: AdminConversationRecoveryStatus): string {
@@ -370,8 +370,21 @@ function recoveryAudienceLabel(audience: AdminConversationRecoveryCase["audience
 }
 
 function recoverySourceLabel(source: string): string {
+  if (source === "portal_chat_stream") return "站内回答失败";
+  if (source === "crest_chat_stream") return "CREST 回答失败";
   if (source === "dingtalk_bot_error") return "钉钉问答失败";
+  if (source === "conversation_negative_feedback") return "回答差评";
+  if (source === "product_feedback_blocking") return "阻塞反馈";
+  if (source === "product_feedback_bug") return "高严重 Bug";
   return source || "未知来源";
+}
+
+function recoveryOccurrenceText(recoveryCase: Pick<AdminConversationRecoveryCase, "failureCount" | "reasonCode" | "source">): string {
+  const count = recoveryCase.failureCount || 1;
+  if (recoveryCase.reasonCode === "runtime_error" || recoveryCase.source.endsWith("_error") || recoveryCase.source.endsWith("_stream")) {
+    return `失败 ${count} 次`;
+  }
+  return `记录 ${count} 次`;
 }
 
 function recoveryCompensationReasonLabel(reason: string): string {
@@ -2075,7 +2088,7 @@ function ConversationRecoveryWorkspace() {
         }
       })
       .catch((error) => {
-        if (active) setErrorText(error instanceof Error ? error.message : "加载服务补救记录失败");
+        if (active) setErrorText(error instanceof Error ? error.message : "加载体验跟进记录失败");
       })
       .finally(() => active && setListLoading(false));
     return () => { active = false; };
@@ -2093,7 +2106,7 @@ function ConversationRecoveryWorkspace() {
       .then((res) => active && setDetailData(res))
       .catch((error) => {
         if (active) {
-          setErrorText(error instanceof Error ? error.message : "加载服务补救详情失败");
+          setErrorText(error instanceof Error ? error.message : "加载体验跟进详情失败");
           setDetailData(null);
         }
       })
@@ -2146,7 +2159,7 @@ function ConversationRecoveryWorkspace() {
 
         <div className="admin-master-list">
           {listLoading ? <Spin style={{ margin: "auto", padding: 24 }} /> :
-           listData?.cases.length === 0 ? <Empty style={{ margin: "auto" }} description="暂无服务补救记录" /> :
+           listData?.cases.length === 0 ? <Empty style={{ margin: "auto" }} description="暂无体验跟进记录" /> :
            listData?.cases.map((item) => (
              <button
                key={item.id}
@@ -2158,14 +2171,14 @@ function ConversationRecoveryWorkspace() {
                  <span className="admin-master-time">{formatLocalDateTime(item.lastOccurredAt).split(" ")[1]}</span>
                </div>
                <div className="admin-master-preview">
-                 {item.questionPreview || item.failureDetail || "无问题预览"}
+                 {item.questionPreview || item.failureDetail || "无内容预览"}
                </div>
                <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                  <Tag color={recoveryStatusColor(item.status)} style={{ marginInlineEnd: 0 }}>
                    {recoveryStatusLabel(item.status)}
                  </Tag>
                  <Tag style={{ marginInlineEnd: 0 }}>{recoveryAudienceLabel(item.audience)}</Tag>
-                 {item.failureCount > 1 ? <Tag style={{ marginInlineEnd: 0 }}>失败 {item.failureCount} 次</Tag> : null}
+                 {item.failureCount > 1 ? <Tag style={{ marginInlineEnd: 0 }}>{recoveryOccurrenceText(item)}</Tag> : null}
                </div>
              </button>
            ))}
@@ -2218,7 +2231,7 @@ function ConversationRecoveryDetail(props: {
     setRootCause(recoveryCase.rootCause || "");
     setGiftPlanId(recoveryCase.compensation.defaultPlanId || props.detail?.plans[0]?.id || "");
     setGiftDays(recoveryCase.compensationDays || 3);
-    setGiftReason(`服务补救补偿：${recoveryCase.title}`);
+    setGiftReason(`体验跟进补偿：${recoveryCase.title}`);
   }, [props.detail?.plans, recoveryCase]);
 
   if (props.loading && !props.detail) {
@@ -2227,7 +2240,7 @@ function ConversationRecoveryDetail(props: {
   if (!props.detail || !recoveryCase) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--admin-color-subtle)" }}>
-        <Empty description="选择左侧记录查看补救详情" />
+        <Empty description="选择左侧记录查看跟进详情" />
       </div>
     );
   }
@@ -2258,12 +2271,12 @@ function ConversationRecoveryDetail(props: {
       props.onCaseUpdated(result.case);
       setEmailOpen(false);
       Modal.success({
-        title: result.mode === "debug" ? "邮件已记录为调试发送" : "补救邮件已发送",
+        title: result.mode === "debug" ? "邮件已记录为调试发送" : "跟进邮件已发送",
         content: result.mode === "debug" ? "当前 SMTP 未配置，邮件内容已写入服务日志。" : "发送结果已写入通知记录。",
         centered: true
       });
     } catch (error) {
-      props.onError(error instanceof Error ? error.message : "发送补救邮件失败");
+      props.onError(error instanceof Error ? error.message : "发送跟进邮件失败");
     } finally {
       setActionLoading(false);
     }
@@ -2295,7 +2308,7 @@ function ConversationRecoveryDetail(props: {
     setActionLoading(true);
     updateAdminConversationRecoveryStatus(recoveryCase.id, status)
       .then((result) => props.onCaseUpdated(result.case))
-      .catch((error) => props.onError(error instanceof Error ? error.message : "更新恢复状态失败"))
+      .catch((error) => props.onError(error instanceof Error ? error.message : "更新跟进状态失败"))
       .finally(() => setActionLoading(false));
   };
 
@@ -2328,7 +2341,7 @@ function ConversationRecoveryDetail(props: {
             <Tag>{recoveryAudienceLabel(recoveryCase.audience)}</Tag>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--admin-color-subtle)" }}>
               <Clock3 size={14} />
-              失败 {recoveryCase.failureCount} 次
+              {recoveryOccurrenceText(recoveryCase)}
             </span>
             {recoveryCase.threadId ? (
               <Button size="small" type="link" href={`#admin/conversations?conversation=${encodeURIComponent(recoveryCase.threadId)}`}>
@@ -2341,7 +2354,7 @@ function ConversationRecoveryDetail(props: {
         <div style={{ flex: 1, overflowY: "auto", padding: 24, background: "#f9fafb" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             <Button icon={<Mail size={14} />} type="primary" onClick={() => setEmailOpen(true)}>
-              发送补救邮件
+              发送跟进邮件
             </Button>
             <Button
               icon={<Gift size={14} />}
@@ -2356,17 +2369,17 @@ function ConversationRecoveryDetail(props: {
           </div>
 
           <div style={{ marginBottom: 24 }}>
-            <Typography.Title level={5} style={{ fontSize: 14 }}>失败现场</Typography.Title>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>事件现场</Typography.Title>
             <div style={{ background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--admin-color-border)", display: "grid", gap: 10, fontSize: 13 }}>
-              <div><strong>用户问题：</strong>{recoveryCase.questionPreview || "无问题预览"}</div>
-              <div><strong>失败原因：</strong>{recoveryCase.failureDetail || "未记录错误摘要"}</div>
+              <div><strong>内容预览：</strong>{recoveryCase.questionPreview || "无内容预览"}</div>
+              <div><strong>事件说明：</strong>{recoveryCase.failureDetail || "未记录事件摘要"}</div>
               <div><strong>组织：</strong>{recoveryCase.organization?.name || recoveryCase.organizationId || "-"}</div>
               <div><strong>邮箱：</strong>{recoveryCase.suggestedEmail.recipientEmail || "未识别，可发送前手动填写"}</div>
             </div>
           </div>
 
           <div style={{ marginBottom: 24 }}>
-            <Typography.Title level={5} style={{ fontSize: 14 }}>补救动作</Typography.Title>
+            <Typography.Title level={5} style={{ fontSize: 14 }}>跟进动作</Typography.Title>
             <div style={{ background: "#fff", padding: 16, borderRadius: 8, border: "1px solid var(--admin-color-border)", display: "grid", gap: 8, fontSize: 13 }}>
               <div>邮件通知：{recoveryCase.notifiedAt ? formatLocalDateTime(recoveryCase.notifiedAt) : "未发送"}</div>
               <div>补偿：{recoveryCase.compensationOrderId ? `${recoveryCase.compensationDays || 0} 天` : "未赠送"}</div>
@@ -2386,7 +2399,7 @@ function ConversationRecoveryDetail(props: {
 
       <Modal
         open={emailOpen}
-        title="发送补救邮件"
+        title="发送跟进邮件"
         okText="发送邮件"
         cancelText="取消"
         width={720}
@@ -2472,7 +2485,7 @@ function ConversationRecoveryDetail(props: {
           <Select placeholder="选择套餐" value={giftPlanId || undefined} options={planOptions} onChange={setGiftPlanId} />
           <InputNumber min={1} max={90} value={giftDays} onChange={(value) => setGiftDays(Math.max(1, Number(value) || 1))} addonAfter="天" style={{ width: "100%" }} />
           <Input.TextArea rows={4} value={giftReason} onChange={(event) => setGiftReason(event.target.value)} />
-          <Alert type="info" showIcon message="补偿会复用现有 billing 赠送链路，订单和订阅变更会自动留痕；赠送后再发送补救邮件会自动包含权益补偿说明。" />
+          <Alert type="info" showIcon message="补偿会复用现有 billing 赠送链路，订单和订阅变更会自动留痕；赠送后再发送跟进邮件会自动包含权益补偿说明。" />
         </div>
       </Modal>
     </>
@@ -2825,7 +2838,7 @@ export function ConversationAuditView() {
           onChange={k => setMode(k as AuditMode)} 
           items={[
             { key: "conversations", label: "用户交互会话" },
-            { key: "customer_recovery", label: "服务补救" },
+            { key: "customer_recovery", label: "体验跟进" },
             { key: "ai_reviews", label: "Zendesk AI评分" },
             { key: "product_feedback", label: "系统反馈" },
             { key: "api", label: "底层 API 调用" }

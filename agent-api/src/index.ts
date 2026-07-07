@@ -242,6 +242,7 @@ import {
 } from "./operations/codex-execution-service.js";
 import { ConversationRecordService } from "./operations/conversation-record-service.js";
 import { ConversationRecoveryService } from "./operations/conversation-recovery-service.js";
+import { CustomerExperienceIssueReporter } from "./operations/customer-experience-issue-reporter.js";
 import {
   VisibleConversationFailureReporter,
   type VisibleConversationFailureInput
@@ -651,12 +652,15 @@ const conversationRecovery = new ConversationRecoveryService({
   resolveBrandName: () => resolvePublicPlatformName(systemSettings),
   resolvePortalUrl: () => appConfig.serviceRecoveryPortalUrl || appConfig.appBaseUrl
 });
-const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
+const customerExperienceIssues = new CustomerExperienceIssueReporter({
   recovery: conversationRecovery,
   notifications: notificationRecords,
   sendWorkNotice: sendActiveDingTalkWorkNotice,
   listSuperAdminDingTalkUserIds,
   logger: console
+});
+const visibleConversationFailureReporter = new VisibleConversationFailureReporter({
+  issues: customerExperienceIssues
 });
 const purchaseProofStorage = new PurchaseProofStorage(appConfig.accessRequestUploadRoot);
 const accessRequestService = createAccessRequestService({
@@ -8517,6 +8521,7 @@ registerCommonApiRoutes(app, {
     runtimeOptions: portalRuntimeOptions,
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     productFeedback,
+    customerExperienceIssues,
     subscriptionEntitlements
   }),
   resourcesPortalRouter: createResourcesPortalRouter({
@@ -9579,6 +9584,23 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
       comment: input.type === "negative" && hasCommentInput ? summarizeText(input.comment || "", 1000) : undefined,
       userId: currentUser.id
     });
+    if (input.type === "negative") {
+      void customerExperienceIssues.reportNegativeConversationFeedback({
+        organizationId: currentUser.organizationId,
+        userId: currentUser.id,
+        threadId,
+        messageId: input.message_id,
+        audience: recoveryAudienceForActor(currentUser),
+        contentPreview: summarizeText(input.content_preview || ""),
+        comment: input.type === "negative" && hasCommentInput ? summarizeText(input.comment || "", 1000) : undefined
+      }).catch((error) => {
+        console.warn("negative feedback experience issue report failed", {
+          threadId,
+          messageId: input.message_id,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
     res.json({ feedback: feedbackOut(feedback) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to submit feedback";
