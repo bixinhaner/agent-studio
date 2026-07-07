@@ -26,6 +26,8 @@ export function registerCommonApiRoutes(
     serviceTokenMiddleware: RequestHandler;
     zendeskRouter: Router;
     crestRouter?: Router;
+    actionConnectorProvisionRouter?: Router;
+    actionConnectorRuntimeRouter?: Router;
   }
 ): void {
   const systemSettingsMount = Router();
@@ -58,5 +60,11 @@ export function registerCommonApiRoutes(
   );
   app.use("/api/integrations/zendesk", options.serviceTokenMiddleware, options.zendeskRouter);
   app.use("/api/integrations/crest", options.crestRouter ?? Router());
+  app.use(
+    "/api/integrations/action-connectors",
+    options.serviceTokenMiddleware,
+    options.actionConnectorProvisionRouter ?? Router()
+  );
+  app.use("/api/action-connectors", options.actionConnectorRuntimeRouter ?? Router());
   app.use("/api", requireCurrentUser, requireCurrentOrganization);
 }

@@ -203,6 +203,7 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
+import { createActionConnectorProvisionRouter } from "./integrations/action-connector/provision-router.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
@@ -8533,7 +8534,13 @@ registerCommonApiRoutes(app, {
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
-  crestRouter: crestIntegrationRouter
+  crestRouter: crestIntegrationRouter,
+  actionConnectorProvisionRouter: createActionConnectorProvisionRouter({
+    db: db as unknown as IntegrationInstanceRepositoryDb
+  }),
+  actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
+    db: db as unknown as IntegrationInstanceRepositoryDb
+  })
 });
 
 app.use("/api/admin", createAdminBillingRouter(billingService));
@@ -8550,13 +8557,6 @@ app.use(
 );
 
 app.use("/api/access-requests-review", createAccessRequestReviewRouter(accessRequestService));
-
-app.use(
-  "/api/action-connectors",
-  createActionConnectorRuntimeRouter({
-    db: db as unknown as IntegrationInstanceRepositoryDb
-  })
-);
 
 app.use(
   "/api/ai-response-reviews",
