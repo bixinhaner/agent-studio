@@ -10,6 +10,7 @@ const schema = z.object({
   PORT: z.string().default("8787"),
   HOST: z.string().default("0.0.0.0"),
   AGENT_API_TOKEN: z.string().optional(),
+  ACTION_CONNECTOR_ALLOWED_ORIGINS: z.string().optional(),
   DINGTALK_CLIENT_ID: z.string().optional(),
   DINGTALK_CLIENT_SECRET: z.string().optional(),
   DINGTALK_REDIRECT_URI: z.string().optional(),
@@ -173,6 +174,10 @@ export const appConfig = {
   port: Number(env.PORT) || 8787,
   host: env.HOST,
   token: (env.AGENT_API_TOKEN || "").trim(),
+  actionConnectorAllowedOrigins: (env.ACTION_CONNECTOR_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
   dingtalk: {
     clientId: (env.DINGTALK_CLIENT_ID || "").trim(),
     clientSecret: (env.DINGTALK_CLIENT_SECRET || "").trim(),

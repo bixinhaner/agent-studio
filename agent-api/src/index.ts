@@ -1,4 +1,4 @@
-import cors from "cors";
+import cors, { type CorsOptions } from "cors";
 import express, { type Request, type Response } from "express";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
@@ -8204,7 +8204,30 @@ function isLocalDevOrigin(origin: string): boolean {
   }
 }
 
-function isAllowedCorsOrigin(origin: string): boolean {
+function isExactOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
+  if (!allowedOrigins.length) return false;
+  try {
+    const normalized = new URL(origin).origin;
+    return allowedOrigins.some((allowed) => {
+      try {
+        return new URL(allowed).origin === normalized;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedCorsOrigin(origin: string, requestPath = ""): boolean {
+  if (
+    requestPath.startsWith("/api/action-connectors/") &&
+    isExactOriginAllowed(origin, appConfig.actionConnectorAllowedOrigins)
+  ) {
+    return true;
+  }
+
   const appBaseUrl = appConfig.appBaseUrl.trim();
   if (appBaseUrl) {
     try {
@@ -8218,18 +8241,20 @@ function isAllowedCorsOrigin(origin: string): boolean {
   return appConfig.sessionCookie.secure === false && isLocalDevOrigin(origin);
 }
 
-app.use(
-  cors({
+function corsOptionsForRequest(req: Request): CorsOptions {
+  return {
     credentials: true,
     origin(origin, callback) {
-      if (!origin || isAllowedCorsOrigin(origin)) {
+      if (!origin || isAllowedCorsOrigin(origin, req.path)) {
         callback(null, true);
         return;
       }
       callback(null, false);
     }
-  })
-);
+  };
+}
+
+app.use(cors((req: Request, callback) => callback(null, corsOptionsForRequest(req))));
 app.post(
   "/api/integrations/zendesk/:instanceId/webhook",
   express.raw({
