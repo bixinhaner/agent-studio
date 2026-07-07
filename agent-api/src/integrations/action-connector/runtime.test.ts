@@ -109,6 +109,7 @@ describe("ActionConnectorRuntimeService", () => {
       delegationHeaderValue: "Bearer delegated",
       request: {
         message: "查看告警",
+        mode: "execute",
         locale: "zh-CN",
         timezone: "Asia/Shanghai",
         context: {}
@@ -129,6 +130,117 @@ describe("ActionConnectorRuntimeService", () => {
     for (const term of forbiddenTerms) {
       expect(JSON.stringify(events)).not.toContain(term);
     }
+  });
+
+  it("can stop after a generic action preview before execution", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/actions/search")) {
+        return connectorResponse([{
+          id: "system.health",
+          title: "Read health",
+          description: "Read system health",
+          risk: "read"
+        }]);
+      }
+      if (String(url).endsWith("/actions/describe")) {
+        return connectorResponse({
+          id: "system.health",
+          title: "Read health",
+          description: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/preview")) {
+        return connectorResponse({
+          actionId: "system.health",
+          summary: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/execute")) {
+        throw new Error("execute should wait for client approval");
+      }
+      return connectorResponse([]);
+    }) as unknown as typeof fetch;
+    const runtime = new ActionConnectorRuntimeService(createDbMock() as never, fetchImpl);
+    const events: AgentStreamEvent[] = [];
+
+    await runtime.streamChat({
+      connectorId: "connector-1",
+      delegationHeaderValue: "Bearer delegated",
+      request: {
+        message: "health",
+        mode: "preview",
+        locale: "en-US",
+        timezone: "UTC",
+        context: {}
+      },
+      emit: (event) => events.push(event)
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "start",
+      "delta",
+      "tool_call",
+      "action_preview",
+      "done"
+    ]);
+    expect(calls.some((url) => url.endsWith("/actions/execute"))).toBe(false);
+  });
+
+  it("executes an approved generic action request", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      if (init?.body) requestBodies.push(JSON.parse(String(init.body)));
+      if (String(url).endsWith("/actions/search")) {
+        return connectorResponse([]);
+      }
+      if (String(url).endsWith("/actions/describe")) {
+        return connectorResponse({
+          id: "system.health",
+          title: "Read health",
+          description: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/preview")) {
+        return connectorResponse({
+          actionId: "system.health",
+          summary: "Read system health",
+          risk: "read"
+        });
+      }
+      if (String(url).endsWith("/actions/execute")) {
+        return connectorResponse({
+          actionId: "system.health",
+          status: "ok",
+          result: { status: "ok" }
+        });
+      }
+      return connectorResponse([]);
+    }) as unknown as typeof fetch;
+    const runtime = new ActionConnectorRuntimeService(createDbMock() as never, fetchImpl);
+    const events: AgentStreamEvent[] = [];
+
+    await runtime.streamChat({
+      connectorId: "connector-1",
+      delegationHeaderValue: "Bearer delegated",
+      request: {
+        message: "health",
+        mode: "execute",
+        approvedAction: { actionId: "system.health", input: {} },
+        locale: "en-US",
+        timezone: "UTC",
+        context: {}
+      },
+      emit: (event) => events.push(event)
+    });
+
+    expect(events.map((event) => event.type)).toContain("tool_result");
+    expect(requestBodies).toContainEqual({ actionId: "system.health", input: {}, dryRun: true });
+    expect(requestBodies).toContainEqual({ actionId: "system.health", input: {}, dryRun: false });
   });
 
   it("blocks actions disabled by connector policy", async () => {
@@ -175,6 +287,7 @@ describe("ActionConnectorRuntimeService", () => {
         delegationHeaderValue: "Bearer delegated",
         request: {
           message: "health",
+          mode: "execute",
           locale: "en-US",
           timezone: "UTC",
           context: {}

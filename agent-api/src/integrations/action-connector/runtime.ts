@@ -8,6 +8,12 @@ import type { IntegrationInstanceRepositoryDb } from "../../persistence/integrat
 export const actionConnectorChatRequestSchema = z.object({
   message: z.string().trim().min(1),
   conversationId: z.string().trim().min(1).optional(),
+  mode: z.enum(["preview", "execute"]).default("execute"),
+  approvedAction: z.object({
+    actionId: z.string().trim().min(1),
+    input: z.record(z.string(), z.unknown()).optional(),
+    dryRun: z.boolean().optional()
+  }).optional(),
   locale: z.string().trim().min(1).default("en-US"),
   timezone: z.string().trim().min(1).default("UTC"),
   context: z.record(z.string(), z.unknown()).default({})
@@ -98,6 +104,15 @@ function chooseAction(message: string, actions: ActionDescriptor[]): ConnectorAc
   return { actionId: first.id, input: {} };
 }
 
+function getApprovedAction(request: ActionConnectorChatRequest): ConnectorActionRequest | null {
+  if (!request.approvedAction) return null;
+  return {
+    actionId: request.approvedAction.actionId,
+    input: request.approvedAction.input ?? {},
+    dryRun: false
+  };
+}
+
 function summarizeResult(actionId: string, result: unknown, locale: string): string {
   const zh = isChinese(locale);
   const data = asRecord(result);
@@ -150,7 +165,7 @@ export class ActionConnectorRuntimeService {
     });
 
     const actions = await client.search(input.request.message, input.signal);
-    const selected = chooseAction(input.request.message, actions.length > 0 ? actions : await client.list(input.signal));
+    const selected = getApprovedAction(input.request) ?? chooseAction(input.request.message, actions.length > 0 ? actions : await client.list(input.signal));
     const descriptor = (await client.describe(selected.actionId, input.signal)) ?? actions.find((action) => action.id === selected.actionId);
     if (!descriptor) throw new Error("selected action descriptor not found");
     if (!riskAllowed(config, descriptor.risk)) {
@@ -175,10 +190,14 @@ export class ActionConnectorRuntimeService {
       preview
     });
 
+    if (input.request.mode === "preview") {
+      input.emit({ type: "done" });
+      return;
+    }
+
     const result = await client.execute(selected, input.signal);
     input.emit({ type: "tool_result", callId, status: "ok", output: result });
     input.emit({ type: "delta", text: `${summarizeResult(selected.actionId, result, input.request.locale)}\n` });
     input.emit({ type: "done" });
   }
 }
-
