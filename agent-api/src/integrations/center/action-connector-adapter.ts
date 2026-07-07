@@ -23,6 +23,8 @@ export const actionConnectorConfigSchema = z.object({
   actionExecutePath: pathSchema.default("/api/v1/agent-actions/actions/execute"),
   identityPath: z.union([pathSchema, z.literal("")]).default(""),
   delegationHeader: z.string().trim().min(1).default("Authorization"),
+  agentModeId: z.string().trim().min(1).default("default"),
+  runtimeInstruction: z.string().trim().max(12000).default(""),
   policy: z
     .object({
       allowReadActions: z.boolean().default(true),
@@ -91,6 +93,8 @@ export class ActionConnectorIntegrationAdapter {
           execute: config.actionExecutePath,
           identity: config.identityPath || undefined
         },
+        agentModeId: config.agentModeId,
+        runtimeInstructionConfigured: config.runtimeInstruction.length > 0,
         policy: config.policy
       }
     };

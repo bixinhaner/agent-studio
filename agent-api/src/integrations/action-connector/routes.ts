@@ -2,10 +2,12 @@ import express, { type Request, type Response } from "express";
 
 import { createSseAbortLifecycle, initSSE, sendSSE } from "../../sse.js";
 import type { IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
-import type { ConversationRecordService } from "../../operations/conversation-record-service.js";
-import type { UsageRecorder } from "../../operations/usage-recorder.js";
-import { ActionConnectorConversationRecorder } from "./conversation-recorder.js";
-import { actionConnectorChatRequestSchema, ActionConnectorRuntimeService, type AgentStreamEvent } from "./runtime.js";
+import {
+  actionConnectorChatRequestSchema,
+  ActionConnectorRuntimeService,
+  type ActionConnectorCodexRunner,
+  type AgentStreamEvent
+} from "./runtime.js";
 
 function bearerHeader(req: Request): string | undefined {
   const header = req.header("authorization");
@@ -19,18 +21,11 @@ function sendAgentEvent(res: Response, event: AgentStreamEvent): boolean {
 
 export function createActionConnectorRuntimeRouter(options: {
   db: IntegrationInstanceRepositoryDb;
-  conversations?: ConversationRecordService;
-  usageRecorder?: UsageRecorder;
   fetchImpl?: typeof fetch;
+  codexRunner?: ActionConnectorCodexRunner;
 }) {
   const router = express.Router();
-  const recorder = options.conversations
-    ? new ActionConnectorConversationRecorder({
-        conversations: options.conversations,
-        usageRecorder: options.usageRecorder
-      })
-    : undefined;
-  const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, recorder);
+  const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, options.codexRunner);
 
   router.post("/:connectorId/chat/stream", async (req: Request, res: Response) => {
     initSSE(res);

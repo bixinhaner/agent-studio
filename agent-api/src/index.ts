@@ -203,6 +203,7 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
+import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
 import { createActionConnectorProvisionRouter } from "./integrations/action-connector/provision-router.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
@@ -3753,6 +3754,684 @@ async function cancelPortalActiveChatRun(input: {
     threadId,
     userMessageId
   };
+}
+
+const ACTION_CONNECTOR_CHANNEL = "action_connector";
+const ACTION_CONNECTOR_RUNTIME_ORG = "external-action-connector";
+
+type ActionConnectorRuntimeOptions = {
+  agentModeId: string;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  workspace: string;
+  codexRunConfig: Record<string, unknown>;
+  codexHome: string;
+  providerSnapshot: ManagedCodexProviderSnapshot;
+  configOverrides?: Record<string, unknown>;
+  envOverrides: Record<string, string>;
+  cliPath: string;
+  runtimeConfigPath: string;
+};
+
+type ActionConnectorPreparedTurn = {
+  runId: string;
+  conversationId: string;
+  externalConversationKey: string;
+  identity: Awaited<ReturnType<ActionConnectorCodexRunnerInput["client"]["identity"]>>;
+  runtimeOwner: CurrentActor;
+  thread: ThreadRecord;
+  session: SessionRecord;
+  liveThread: LiveRuntimeThread;
+  runtime: ActionConnectorRuntimeOptions;
+};
+
+function actionConnectorRuntimeOwnerId(connectorId: string): string {
+  return `integration:${ACTION_CONNECTOR_CHANNEL}:${connectorId}`;
+}
+
+function actionConnectorRuntimeActor(input: ActionConnectorCodexRunnerInput): CurrentActor {
+  return {
+    id: actionConnectorRuntimeOwnerId(input.connector.id),
+    userType: "service",
+    role: "integration",
+    organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? ACTION_CONNECTOR_RUNTIME_ORG,
+    organizationType: "integration",
+    membershipType: "service"
+  };
+}
+
+function actionConnectorExternalUserKey(identity: ActionConnectorPreparedTurn["identity"]): string {
+  const externalUserId =
+    trimOrUndefined(identity?.externalUserId) ??
+    trimOrUndefined(identity?.externalUnionId) ??
+    trimOrUndefined(identity?.externalUserName);
+  if (!externalUserId) {
+    throw new Error("Action connector identity is missing external user id");
+  }
+  return externalUserId;
+}
+
+function actionConnectorConversationKey(input: {
+  connectorId: string;
+  externalUserKey: string;
+  conversationId: string;
+}): string {
+  return `${ACTION_CONNECTOR_CHANNEL}:${input.connectorId}:${input.externalUserKey}:${input.conversationId}`;
+}
+
+function actionConnectorThreadExternalId(externalConversationKey: string): string {
+  return `${externalConversationKey}:thread`;
+}
+
+function actionConnectorThreadTitle(input: {
+  displayName: string;
+  message: string;
+  context?: Record<string, unknown>;
+}): string {
+  const sourceTitle = asString(asRecord(input.context)?.title);
+  const normalized = (sourceTitle || input.message).replace(/\s+/g, " ").trim();
+  return `${input.displayName}: ${normalized ? normalized.slice(0, 64) : "Embedded agent conversation"}`;
+}
+
+function actionConnectorStoredMessage(
+  role: "user" | "assistant",
+  id: string,
+  text: string,
+  metadata: Record<string, unknown>,
+  contentParts: Record<string, unknown>[] = []
+) {
+  return {
+    id,
+    role,
+    content: [{ type: "text", text }, ...contentParts],
+    createdAt: new Date().toISOString(),
+    metadata: {
+      channel: ACTION_CONNECTOR_CHANNEL,
+      ...metadata
+    }
+  };
+}
+
+function actionConnectorCliSource(): string {
+  return `#!/usr/bin/env node
+import fs from "node:fs";
+
+const command = process.argv[2];
+const args = process.argv.slice(3);
+
+function required(value, name) {
+  if (!value || !String(value).trim()) throw new Error(name + " is required");
+  return String(value).trim();
+}
+
+function runtimeConfig() {
+  const filePath = required(process.env.ACTION_CONNECTOR_RUNTIME_CONFIG, "ACTION_CONNECTOR_RUNTIME_CONFIG");
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function parseJsonArg(value, fallback) {
+  if (!value || !value.trim()) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error("Invalid JSON argument: " + error.message);
+  }
+}
+
+function unwrap(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if (Object.prototype.hasOwnProperty.call(payload, "ret")) {
+    if (payload.ret === 1) return payload.data;
+    throw new Error(typeof payload.msg === "string" ? payload.msg : "Connector request failed");
+  }
+  return payload;
+}
+
+async function readPayload(response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function request(method, path, body) {
+  const config = runtimeConfig();
+  const baseUrl = required(config.baseUrl, "baseUrl").replace(/\\/+$/, "");
+  const delegationHeader = required(config.delegationHeader || "Authorization", "delegationHeader");
+  const delegationValue = required(config.delegationValue, "delegationValue");
+  const headers = { Accept: "application/json" };
+  headers[delegationHeader] = delegationValue;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+
+  const response = await fetch(baseUrl + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    const detail =
+      payload && typeof payload === "object" && typeof payload.msg === "string"
+        ? payload.msg
+        : "Connector request failed with HTTP " + response.status;
+    throw new Error(detail);
+  }
+  console.log(JSON.stringify(unwrap(payload), null, 2));
+}
+
+try {
+  const config = runtimeConfig();
+  const paths = config.paths || {};
+  if (command === "identity") {
+    await request("GET", required(paths.identity, "identityPath"));
+  } else if (command === "list") {
+    await request("GET", required(paths.list, "actionListPath"));
+  } else if (command === "search") {
+    await request("POST", required(paths.search, "actionSearchPath"), { query: args.join(" ").trim() });
+  } else if (command === "describe") {
+    await request("POST", required(paths.describe, "actionDescribePath"), { actionId: args[0] });
+  } else if (command === "preview" || command === "execute") {
+    const actionId = required(args[0], "actionId");
+    const input = parseJsonArg(args[1], {});
+    await request("POST", required(paths[command], command + "Path"), { actionId, input, dryRun: command === "preview" });
+  } else {
+    throw new Error("Unknown command. Use identity, list, search, describe, preview, or execute.");
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+`;
+}
+
+async function materializeActionConnectorRuntimeFiles(input: {
+  runner: ActionConnectorCodexRunnerInput;
+  workspace: string;
+}): Promise<{ cliPath: string; runtimeConfigPath: string }> {
+  const targetDir = path.join(input.workspace, ".agent-studio");
+  const cliPath = path.join(targetDir, "action-connector-cli.mjs");
+  const runtimeConfigPath = path.join(targetDir, "action-connector-runtime.json");
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.writeFile(cliPath, actionConnectorCliSource(), "utf8");
+  await fs.chmod(cliPath, 0o755).catch(() => undefined);
+  await fs.writeFile(
+    runtimeConfigPath,
+    JSON.stringify({
+      baseUrl: input.runner.config.baseUrl,
+      delegationHeader: input.runner.config.delegationHeader,
+      delegationValue: input.runner.delegationHeaderValue,
+      paths: {
+        identity: input.runner.config.identityPath || "",
+        list: input.runner.config.actionListPath,
+        search: input.runner.config.actionSearchPath,
+        describe: input.runner.config.actionDescribePath,
+        preview: input.runner.config.actionPreviewPath,
+        execute: input.runner.config.actionExecutePath
+      }
+    }, null, 2),
+    { encoding: "utf8", mode: 0o600 }
+  );
+  await fs.chmod(runtimeConfigPath, 0o600).catch(() => undefined);
+  return { cliPath, runtimeConfigPath };
+}
+
+async function resolveActionConnectorRuntimeOptions(
+  input: ActionConnectorCodexRunnerInput
+): Promise<ActionConnectorRuntimeOptions> {
+  const agentModeId = trimOrUndefined(input.config.agentModeId) ?? "default";
+  const agentMode = await agentModes.get(agentModeId);
+  if (!agentMode || trimOrUndefined(agentMode.status) !== "active") {
+    throw new Error("Action connector agent mode does not exist or is disabled");
+  }
+  const runProfile = await runProfiles.get(agentMode.runProfileId);
+  if (!runProfile || trimOrUndefined(runProfile.status) !== "active") {
+    throw new Error("Action connector run profile does not exist or is disabled");
+  }
+
+  const selectedModel = normalizeModel(runProfile.defaultModel || appConfig.defaultModel);
+  const selectedReasoningEffort = normalizeReasoningEffortForModel(
+    selectedModel,
+    (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) || appConfig.defaultReasoningEffort
+  );
+  const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
+  const workspace = buildIntegrationAgentWorkspacePath({
+    rootPath: workspaceRoot,
+    provider: ACTION_CONNECTOR_CHANNEL,
+    integrationInstanceId: input.connector.id,
+    modeId: agentModeId
+  });
+  await fs.mkdir(workspace, { recursive: true });
+  await applyWorkspaceAgentsMdForMode(agentModeId, workspace);
+  const files = await materializeActionConnectorRuntimeFiles({ runner: input, workspace });
+  const enabledSkills = await resolveEnabledSkillsForBotMode(agentModeId);
+  const baseCodexRunConfig = withRunConfigEnabledSkillSelection(
+    {
+      sandboxMode: runProfile.sandboxMode,
+      approvalPolicy: runProfile.approvalPolicy,
+      networkAccessEnabled: runProfile.networkAccessEnabled,
+      webSearchMode: runProfile.webSearchMode,
+      mode: agentModeId,
+      actionConnector: {
+        integrationInstanceId: input.connector.id,
+        displayName: input.config.displayName,
+        runtimeConfigPath: files.runtimeConfigPath
+      }
+    },
+    enabledSkills
+  );
+  const materializedCodexHome = await materializeSharedIntegrationCodexHomeForRunConfig({
+    provider: ACTION_CONNECTOR_CHANNEL,
+    integrationInstanceId: input.connector.id,
+    modeId: agentModeId,
+    codexRunConfig: baseCodexRunConfig
+  });
+  const runtimeLaunch = await resolveRuntimeLaunchConfig({
+    workspace,
+    codexRunConfig: materializedCodexHome.codexRunConfig
+  });
+
+  return {
+    agentModeId,
+    model: selectedModel,
+    reasoningEffort: selectedReasoningEffort,
+    workspace,
+    codexRunConfig: runtimeLaunch.codexRunConfig ?? {},
+    codexHome: materializedCodexHome.codexHome,
+    providerSnapshot: await resolveProviderSnapshot(),
+    configOverrides: runtimeLaunch.configOverrides,
+    envOverrides: {
+      ...(runtimeLaunch.envOverrides ?? {}),
+      ACTION_CONNECTOR_RUNTIME_CONFIG: files.runtimeConfigPath
+    },
+    ...files
+  };
+}
+
+async function ensureActionConnectorThread(input: {
+  connector: ActionConnectorCodexRunnerInput["connector"];
+  config: ActionConnectorCodexRunnerInput["config"];
+  identity: ActionConnectorPreparedTurn["identity"];
+  conversationId: string;
+  message: string;
+  context: Record<string, unknown>;
+  runtime: ActionConnectorRuntimeOptions;
+}): Promise<{ thread: ThreadRecord; externalConversationKey: string }> {
+  const externalUserKey = actionConnectorExternalUserKey(input.identity);
+  const organizationId = trimOrUndefined(input.connector.organizationId ?? undefined);
+  const externalConversationKey = actionConnectorConversationKey({
+    connectorId: input.connector.id,
+    externalUserKey,
+    conversationId: input.conversationId
+  });
+  const externalId = actionConnectorThreadExternalId(externalConversationKey);
+  const binding = await conversationRecords.getExternalConversationBinding(externalConversationKey);
+  let thread = binding
+    ? await conversationRecords.getThread(binding.threadId, organizationId)
+    : await conversationRecords.getThreadByExternalId(externalId, organizationId);
+
+  const codexRunConfig = withRunConfigCodexHome(input.runtime.codexRunConfig, input.runtime.codexHome);
+  if (!thread) {
+    thread = await conversationRecords.createThread({
+      id: randomUUID().replace(/-/g, ""),
+      organizationId,
+      title: actionConnectorThreadTitle({
+        displayName: input.config.displayName,
+        message: input.message,
+        context: input.context
+      }),
+      externalId,
+      model: input.runtime.model,
+      reasoningEffort: input.runtime.reasoningEffort,
+      workspace: input.runtime.workspace,
+      codexRunConfig
+    });
+    return { thread, externalConversationKey };
+  }
+
+  let next = thread.status === "archived"
+    ? await conversationRecords.updateThread(thread.id, { status: "regular" })
+    : thread;
+  if (
+    next.model !== input.runtime.model ||
+    next.reasoningEffort !== input.runtime.reasoningEffort ||
+    next.workspace !== input.runtime.workspace ||
+    stableJson(next.codexRunConfig) !== stableJson(codexRunConfig)
+  ) {
+    next = await conversationRecords.updateThread(next.id, {
+      model: input.runtime.model,
+      reasoningEffort: input.runtime.reasoningEffort,
+      workspace: input.runtime.workspace,
+      codexRunConfig
+    });
+  }
+  return { thread: next, externalConversationKey };
+}
+
+async function startActionConnectorRuntimeSession(input: {
+  runner: ActionConnectorCodexRunnerInput;
+  runtime: ActionConnectorRuntimeOptions;
+  thread: ThreadRecord;
+  runtimeOwner: CurrentActor;
+  resumeCodexThreadId?: string;
+}): Promise<{ session: SessionRecord; liveThread: LiveRuntimeThread }> {
+  const sessionRuntime = createRuntimeForProviderSnapshot(input.runtime.providerSnapshot, {
+    configOverrides: input.runtime.configOverrides,
+    envOverrides: {
+      ...input.runtime.envOverrides,
+      CODEX_HOME: input.runtime.codexHome
+    }
+  });
+  const resumeCodexThreadId = trimOrUndefined(input.resumeCodexThreadId);
+  const started = resumeCodexThreadId
+    ? await sessionRuntime.resumeThreadWithOptions({
+        threadId: resumeCodexThreadId,
+        model: input.runtime.model,
+        reasoningEffort: input.runtime.reasoningEffort,
+        workspace: input.runtime.workspace,
+        codexRunConfig: stripInternalRunConfigMetadata(input.runtime.codexRunConfig)
+      }).then((liveThread) => {
+        const codexThreadId =
+          typeof (liveThread as { id?: unknown })?.id === "string"
+            ? trimOrUndefined((liveThread as { id?: string }).id)
+            : undefined;
+        return {
+          liveThread,
+          codexRunConfig: input.runtime.codexRunConfig,
+          codexThreadId: codexThreadId ?? resumeCodexThreadId
+        };
+      })
+    : await startLiveRuntimeSession({
+        runtime: sessionRuntime,
+        model: input.runtime.model,
+        reasoningEffort: input.runtime.reasoningEffort,
+        workspace: input.runtime.workspace,
+        codexRunConfig: input.runtime.codexRunConfig
+      });
+
+  const session = await sessions.create({
+    organizationId: trimOrUndefined(input.runner.connector.organizationId ?? undefined) ?? input.runtimeOwner.organizationId,
+    threadId: input.thread.id,
+    model: input.runtime.model,
+    reasoningEffort: input.runtime.reasoningEffort,
+    workspace: input.runtime.workspace,
+    codexRunConfig: started.codexRunConfig,
+    codexThreadId: started.codexThreadId,
+    providerSnapshot: input.runtime.providerSnapshot
+  });
+  liveRuntimeThreads.set(session.sessionId, started.liveThread);
+  return { session, liveThread: started.liveThread };
+}
+
+async function ensureActionConnectorRuntimeSession(input: {
+  runner: ActionConnectorCodexRunnerInput;
+  runtime: ActionConnectorRuntimeOptions;
+  thread: ThreadRecord;
+  runtimeOwner: CurrentActor;
+}): Promise<{ session: SessionRecord; liveThread: LiveRuntimeThread }> {
+  const active = input.thread.sessionId ? await sessions.get(input.thread.sessionId) : undefined;
+  const liveThread = active ? liveRuntimeThreads.get(active.sessionId) : undefined;
+  const changed =
+    !active ||
+    !liveThread ||
+    active.model !== input.runtime.model ||
+    active.reasoningEffort !== input.runtime.reasoningEffort ||
+    active.workspace !== input.runtime.workspace ||
+    stableJson(active.codexRunConfig) !== stableJson(input.runtime.codexRunConfig);
+
+  if (!changed && active && liveThread) {
+    return { session: active, liveThread };
+  }
+
+  if (active?.sessionId) {
+    await sessions.remove(active.sessionId);
+    liveRuntimeThreads.delete(active.sessionId);
+  }
+
+  return await startActionConnectorRuntimeSession({
+    runner: input.runner,
+    runtime: input.runtime,
+    thread: input.thread,
+    runtimeOwner: input.runtimeOwner,
+    resumeCodexThreadId: await latestCodexThreadIdForAgentThread(input.thread.id)
+  });
+}
+
+async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunnerInput): Promise<ActionConnectorPreparedTurn> {
+  const runId = trimOrUndefined(input.request.clientRunId) ?? randomUUID();
+  const conversationId = input.request.conversationId || randomUUID();
+  const identity = await input.client.identity(input.signal);
+  actionConnectorExternalUserKey(identity);
+  const runtimeOwner = actionConnectorRuntimeActor(input);
+  const runtime = await resolveActionConnectorRuntimeOptions(input);
+  const { thread, externalConversationKey } = await ensureActionConnectorThread({
+    connector: input.connector,
+    config: input.config,
+    identity,
+    conversationId,
+    message: input.request.message,
+    context: input.request.context,
+    runtime
+  });
+  const { session, liveThread } = await ensureActionConnectorRuntimeSession({
+    runner: input,
+    runtime,
+    thread,
+    runtimeOwner
+  });
+  const externalUserId =
+    trimOrUndefined(identity?.externalUserId) ??
+    trimOrUndefined(identity?.externalUnionId);
+  const externalUserName = trimOrUndefined(identity?.externalUserName);
+  await conversationRecords.upsertExternalConversation({
+    organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? null,
+    integrationInstanceId: input.connector.id,
+    threadId: thread.id,
+    userId: null,
+    channel: ACTION_CONNECTOR_CHANNEL,
+    externalConversationKey,
+    externalConversationId: conversationId,
+    conversationType: "embedded_agent",
+    agentModeId: runtime.agentModeId,
+    externalUserId,
+    externalUnionId: trimOrUndefined(identity?.externalUnionId),
+    externalUserName,
+    botName: input.config.displayName || input.connector.name,
+    lastExternalMessageId: runId,
+    lastMessageAt: new Date(),
+    metadata: {
+      integrationSlug: trimOrUndefined(input.connector.slug ?? undefined),
+      sourcePath: asString(asRecord(input.request.context)?.path),
+      sourceTitle: asString(asRecord(input.request.context)?.title),
+      locale: input.request.locale,
+      timezone: input.request.timezone,
+      runtimeOwnerId: runtimeOwner.id,
+      externalIdentity: identity ?? null
+    }
+  });
+  return {
+    runId,
+    conversationId,
+    externalConversationKey,
+    identity,
+    runtimeOwner,
+    thread,
+    session,
+    liveThread,
+    runtime
+  };
+}
+
+function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
+  prepared: ActionConnectorPreparedTurn;
+}): string {
+  const approvedAction = input.request.approvedAction
+    ? JSON.stringify(input.request.approvedAction, null, 2)
+    : "";
+  const context = JSON.stringify(input.request.context ?? {}, null, 2);
+  const policy = JSON.stringify(input.config.policy, null, 2);
+  return [
+    "这条消息来自一个外部业务系统内嵌 Agent 助手。",
+    "你负责推理、选择动作、读取信息和形成回答；业务数据查询和指令执行必须通过 action-connector-cli 完成。",
+    "不要要求用户手动复制业务系统数据。不要直连业务系统数据库。不要编造动作结果。",
+    `业务系统显示名：${input.config.displayName}`,
+    `对话 ID：${input.prepared.conversationId}`,
+    `运行 ID：${input.prepared.runId}`,
+    `用户语言：${input.request.locale}`,
+    `用户时区：${input.request.timezone}`,
+    `当前请求模式：${input.request.mode}`,
+    `Connector policy：\n${policy}`,
+    input.config.runtimeInstruction ? `Connector 运行说明：\n${input.config.runtimeInstruction}` : undefined,
+    approvedAction ? `用户已批准的动作：\n${approvedAction}` : undefined,
+    `当前页面上下文：\n${context}`,
+    "",
+    "可用 CLI：",
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} identity`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} list`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} search "query text"`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} describe action.id`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} preview action.id '{"key":"value"}'`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} execute action.id '{"key":"value"}'`,
+    "",
+    "执行规则：",
+    "- 先用 search/list/describe 了解可用动作和参数，再调用 preview 或 execute。",
+    "- read 风险动作可以直接 execute 读取真实数据。",
+    "- low/high 风险动作只能 preview，除非当前请求模式是 execute 且存在用户已批准的动作。",
+    "- 如果 connector policy 不允许某类风险动作，直接说明不能执行，不要绕过。",
+    "- 最终回答必须基于 CLI 返回的真实结果，用用户语言简洁说明关键结论。",
+    "",
+    "用户问题：",
+    input.request.message
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
+function emitActionConnectorRuntimeEvent(
+  emit: ActionConnectorCodexRunnerInput["emit"],
+  projection: CodexRuntimeEventProjection
+): void {
+  if (projection.answerDelta) {
+    emit({ type: "delta", text: projection.answerDelta });
+  }
+}
+
+async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
+  const prepared = await prepareActionConnectorRuntimeTurn(input);
+  input.emit({
+    type: "start",
+    runId: prepared.runId,
+    conversationId: prepared.conversationId
+  });
+
+  const externalUserId =
+    trimOrUndefined(prepared.identity?.externalUserId) ??
+    trimOrUndefined(prepared.identity?.externalUnionId);
+  const externalUserName = trimOrUndefined(prepared.identity?.externalUserName);
+  const userMessageId = `${ACTION_CONNECTOR_CHANNEL}-user-${prepared.runId}`;
+  await conversationRecords.appendMessage({
+    threadId: prepared.thread.id,
+    parentId: prepared.thread.headId ?? null,
+    message: actionConnectorStoredMessage("user", userMessageId, input.request.message, {
+      integrationInstanceId: input.connector.id,
+      externalConversationKey: prepared.externalConversationKey,
+      conversationId: prepared.conversationId,
+      runId: prepared.runId,
+      context: input.request.context,
+      externalUserId,
+      externalUserName
+    }),
+    runConfig: {
+      channel: ACTION_CONNECTOR_CHANNEL,
+      integrationInstanceId: input.connector.id,
+      externalConversationKey: prepared.externalConversationKey,
+      runId: prepared.runId
+    }
+  });
+
+  await runCodexChannelTurn({
+    channel: "openai_compatible_api",
+    memoryChannel: ACTION_CONNECTOR_CHANNEL,
+    currentUser: prepared.runtimeOwner,
+    thread: prepared.thread,
+    session: prepared.session,
+    liveThread: prepared.liveThread,
+    prompt: actionConnectorRuntimePrompt({ ...input, prepared }),
+    memoryPrompt: input.request.message,
+    memoryMetadata: {
+      channel: ACTION_CONNECTOR_CHANNEL,
+      integrationInstanceId: input.connector.id,
+      externalConversationKey: prepared.externalConversationKey,
+      conversationId: prepared.conversationId
+    },
+    usageSource: "action_connector_chat_stream",
+    usageMetadata: {
+      channel: ACTION_CONNECTOR_CHANNEL,
+      integrationInstanceId: input.connector.id,
+      externalConversationKey: prepared.externalConversationKey,
+      conversationId: prepared.conversationId,
+      runId: prepared.runId,
+      externalUserId,
+      externalUserName
+    },
+    signal: input.signal,
+    emptyAnswerText: input.request.locale.toLowerCase().startsWith("zh") ? "没有生成回答。" : "No answer was generated.",
+    logLabel: "action connector chat",
+    shouldSkipRetry: () => true,
+    hasExternalContext: () => true,
+    onEvent({ projection }) {
+      emitActionConnectorRuntimeEvent(input.emit, projection);
+    },
+    async onDone({ answerText, session: sessionForRun, finalizedProcess }) {
+      await conversationRecords.appendMessage({
+        threadId: prepared.thread.id,
+        parentId: userMessageId,
+        message: actionConnectorStoredMessage(
+          "assistant",
+          `${ACTION_CONNECTOR_CHANNEL}-assistant-${prepared.runId}`,
+          answerText,
+          {
+            integrationInstanceId: input.connector.id,
+            externalConversationKey: prepared.externalConversationKey,
+            conversationId: prepared.conversationId,
+            runId: prepared.runId,
+            sessionId: sessionForRun.sessionId,
+            runtimeOwnerId: prepared.runtimeOwner.id
+          },
+          finalizedProcess.contentParts
+        ),
+        runConfig: {
+          channel: ACTION_CONNECTOR_CHANNEL,
+          integrationInstanceId: input.connector.id,
+          externalConversationKey: prepared.externalConversationKey,
+          runId: prepared.runId,
+          sessionId: sessionForRun.sessionId
+        }
+      });
+      await conversationRecords.touchExternalConversation({
+        externalConversationKey: prepared.externalConversationKey,
+        lastExternalMessageId: prepared.runId,
+        lastMessageAt: new Date(),
+        metadata: {
+          integrationSlug: trimOrUndefined(input.connector.slug ?? undefined),
+          lastRunId: prepared.runId,
+          lastSessionId: sessionForRun.sessionId,
+          runtimeOwnerId: prepared.runtimeOwner.id,
+          externalIdentity: prepared.identity ?? null
+        }
+      });
+      input.emit({ type: "done" });
+    },
+    onTelemetryError(error) {
+      console.warn("action connector chat usage telemetry failed", {
+        connectorId: input.connector.id,
+        conversationId: prepared.conversationId,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
 }
 
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
@@ -8565,8 +9244,7 @@ registerCommonApiRoutes(app, {
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
     db: db as unknown as IntegrationInstanceRepositoryDb,
-    conversations: conversationRecords,
-    usageRecorder
+    codexRunner: runActionConnectorCodexChat
   })
 });
 
