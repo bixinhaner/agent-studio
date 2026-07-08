@@ -204,6 +204,10 @@ import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
+import {
+  actionConnectorCommentaryEntriesToEvents,
+  projectActionConnectorRuntimeEvents
+} from "./integrations/action-connector/runtime-events.js";
 import { createActionConnectorProvisionRouter } from "./integrations/action-connector/provision-router.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
@@ -4312,8 +4316,8 @@ function emitActionConnectorRuntimeEvent(
   emit: ActionConnectorCodexRunnerInput["emit"],
   projection: CodexRuntimeEventProjection
 ): void {
-  if (projection.answerDelta) {
-    emit({ type: "delta", text: projection.answerDelta });
+  for (const event of projectActionConnectorRuntimeEvents(projection)) {
+    emit(event);
   }
 }
 
@@ -4384,6 +4388,9 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       emitActionConnectorRuntimeEvent(input.emit, projection);
     },
     async onDone({ answerText, session: sessionForRun, finalizedProcess }) {
+      for (const event of actionConnectorCommentaryEntriesToEvents(finalizedProcess.liveCommentaryEntries)) {
+        input.emit(event);
+      }
       await conversationRecords.appendMessage({
         threadId: prepared.thread.id,
         parentId: userMessageId,

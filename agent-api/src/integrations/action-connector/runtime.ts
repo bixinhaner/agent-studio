@@ -22,12 +22,38 @@ export const actionConnectorChatRequestSchema = z.object({
 
 export type ActionConnectorChatRequest = z.infer<typeof actionConnectorChatRequestSchema>;
 
+export type AgentThoughtStatus = "streaming" | "completed";
+export type AgentProcessKind =
+  | "status"
+  | "thought"
+  | "tool_call"
+  | "action_preview"
+  | "tool_result"
+  | "artifact"
+  | "ui_intent"
+  | "reasoning"
+  | "source"
+  | "process"
+  | "done"
+  | "debug"
+  | "error";
+
 export type AgentStreamEvent =
   | { type: "start"; runId: string; conversationId: string }
+  | {
+      type: "thought";
+      id?: string;
+      text: string;
+      append?: boolean;
+      status?: AgentThoughtStatus;
+      at?: string;
+      lastEventAt?: number;
+    }
   | { type: "delta"; text: string }
   | { type: "tool_call"; callId: string; toolName: string; title: string; input: unknown }
   | { type: "action_preview"; callId: string; title: string; summary: string; risk: "read" | "low" | "high"; preview: unknown }
   | { type: "tool_result"; callId: string; status: "ok" | "error"; output?: unknown; error?: { code: string; message: string; retryable?: boolean } }
+  | { type: "process"; id?: string; kind: AgentProcessKind; title: string; detail?: unknown; at?: string }
   | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }
   | { type: "error"; error: { code: string; message: string; retryable?: boolean } };
 
