@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 import { actionConnectorConfigSchema, type ActionConnectorConfig } from "../center/action-connector-adapter.js";
-import { ActionConnectorClient } from "./client.js";
 import type { ActionConnectorRuntimeInstance } from "./conversation-recorder.js";
+import type { ActionConnectorToolBridge } from "./tool-bridge.js";
 import type { IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
 
 export const actionConnectorChatRequestSchema = z.object({
@@ -41,6 +41,14 @@ export type AgentProcessKind =
 export type AgentStreamEvent =
   | { type: "start"; runId: string; conversationId: string }
   | {
+      type: "tool_request";
+      runId: string;
+      toolCallId: string;
+      tool: "rest.request" | string;
+      title: string;
+      input: unknown;
+    }
+  | {
       type: "thought";
       id?: string;
       text: string;
@@ -75,7 +83,7 @@ type FetchLike = typeof fetch;
 export type ActionConnectorCodexRunnerInput = {
   connector: ActionConnectorRuntimeInstance;
   config: ActionConnectorConfig;
-  client: ActionConnectorClient;
+  bridge?: ActionConnectorToolBridge;
   delegationHeaderValue: string;
   request: ActionConnectorChatRequest;
   signal?: AbortSignal;
@@ -118,9 +126,12 @@ async function loadConnector(
 export class ActionConnectorRuntimeService {
   constructor(
     private readonly db: IntegrationInstanceRepositoryDb,
-    private readonly fetchImpl: FetchLike = fetch,
-    private readonly codexRunner?: ActionConnectorCodexRunner
-  ) {}
+    fetchImpl: FetchLike = fetch,
+    private readonly codexRunner?: ActionConnectorCodexRunner,
+    private readonly bridge?: ActionConnectorToolBridge
+  ) {
+    void fetchImpl;
+  }
 
   async streamChat(input: {
     connectorId: string;
@@ -134,11 +145,10 @@ export class ActionConnectorRuntimeService {
     }
 
     const { instance, config } = await loadConnector(this.db, input.connectorId);
-    const client = new ActionConnectorClient(config, input.delegationHeaderValue, this.fetchImpl);
     await this.codexRunner({
       connector: instance,
       config,
-      client,
+      bridge: this.bridge,
       delegationHeaderValue: input.delegationHeaderValue,
       request: input.request,
       signal: input.signal,

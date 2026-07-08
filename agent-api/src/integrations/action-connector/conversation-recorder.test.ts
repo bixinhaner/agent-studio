@@ -117,7 +117,7 @@ describe("ActionConnectorConversationRecorder", () => {
         externalUserId: "external-user-1",
         externalUserName: "External Operator",
         roles: ["operator"],
-        scopes: ["agent-actions"]
+        scopes: ["agent-runtime"]
       },
       selectedAction: { actionId: "device.search", input: { isOnline: true } },
       descriptor: {

@@ -28,12 +28,14 @@ function createDbMock(overrides: {
         integrationInstanceId: "connector-1",
         config: overrides.config ?? {
           displayName: "Operations System",
-          baseUrl: "https://ops.example.com",
-          identityPath: "/identity",
           policy: {
             allowReadActions: true,
             allowLowRiskActions: false,
-            allowHighRiskActions: false
+            allowHighRiskActions: false,
+            allowedMethods: ["GET"],
+            blockedPathPrefixes: [],
+            toolTimeoutSeconds: 30,
+            maxResponseBytes: 262144
           }
         },
         createdAt: new Date().toISOString(),
@@ -56,13 +58,6 @@ function createDbMock(overrides: {
     },
     $transaction: vi.fn()
   };
-}
-
-function connectorResponse(data: unknown): Response {
-  return new Response(JSON.stringify({ ret: 1, msg: "ok", data }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  });
 }
 
 describe("ActionConnectorRuntimeService", () => {
@@ -88,23 +83,13 @@ describe("ActionConnectorRuntimeService", () => {
   });
 
   it("loads the generic connector and delegates the turn to the Codex runner", async () => {
-    const calls: Array<{ url: string; auth?: string }> = [];
     const fetchImpl = vi.fn(async (url, init) => {
-      calls.push({
-        url: String(url),
-        auth: (init?.headers as Record<string, string>)?.Authorization
-      });
-      if (String(url).endsWith("/identity")) {
-        return connectorResponse({
-          externalUserId: "external-user-1",
-          externalUserName: "External Operator"
-        });
-      }
-      return connectorResponse([]);
+      void url;
+      void init;
+      return new Response("{}");
     }) as unknown as typeof fetch;
     const runner = vi.fn(async (input: ActionConnectorCodexRunnerInput) => {
       input.emit({ type: "start", runId: "run-1", conversationId: input.request.conversationId ?? "conversation-1" });
-      await input.client.identity(input.signal);
       input.emit({ type: "delta", text: "delegated to codex\n" });
       input.emit({ type: "done" });
     });
@@ -135,10 +120,9 @@ describe("ActionConnectorRuntimeService", () => {
     });
     expect(runnerInput.config).toMatchObject({
       displayName: "Operations System",
-      baseUrl: "https://ops.example.com",
       agentModeId: "default"
     });
-    expect(calls).toEqual([{ url: "https://ops.example.com/identity", auth: "Bearer delegated" }]);
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(events.map((event) => (event as { type: string }).type)).toEqual(["start", "delta", "done"]);
     for (const term of forbiddenTerms) {
       expect(JSON.stringify({ events, config: runnerInput.config })).not.toContain(term);

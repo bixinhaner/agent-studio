@@ -146,12 +146,14 @@ function payload(overrides: Record<string, unknown> = {}) {
     runtimeBaseUrl: "https://agent.example.com/",
     config: {
       displayName: "External Operations",
-      baseUrl: "https://ops.example.com/",
-      healthPath: "/healthz",
       policy: {
         allowReadActions: true,
         allowLowRiskActions: false,
-        allowHighRiskActions: false
+        allowHighRiskActions: false,
+        allowedMethods: ["GET"],
+        blockedPathPrefixes: ["/api/v1/auth/*"],
+        toolTimeoutSeconds: 30,
+        maxResponseBytes: 262144
       }
     },
     ...overrides
@@ -210,9 +212,12 @@ describe("Action connector provision router", () => {
     expect(db.instances).toHaveLength(1);
     expect(db.instances[0].type).toBe("action_connector");
     expect(db.configs[0].config).toMatchObject({
-      baseUrl: "https://ops.example.com",
-      displayName: "External Operations"
+      displayName: "External Operations",
+      policy: {
+        allowedMethods: ["GET"]
+      }
     });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("updates an existing connector with the same slug", async () => {
@@ -264,7 +269,6 @@ describe("Action connector provision router", () => {
       integrationInstanceId: "connector-existing",
       config: {
         displayName: "External Operations",
-        baseUrl: "https://old.example.com",
         agentModeId: "agent-mode-from-studio",
         runtimeInstruction: "Use the operations support skill."
       },
@@ -281,13 +285,12 @@ describe("Action connector provision router", () => {
       .expect(200);
 
     expect(db.configs[0].config).toMatchObject({
-      baseUrl: "https://ops.example.com",
       agentModeId: "agent-mode-from-studio",
       runtimeInstruction: "Use the operations support skill."
     });
   });
 
-  it("marks the connector as error when validation fails", async () => {
+  it("does not require inbound access to the external system during provision", async () => {
     const db = createDbMock();
     const fetchImpl = vi.fn(async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
     const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
@@ -296,10 +299,11 @@ describe("Action connector provision router", () => {
       .post("/api/integrations/action-connectors/provision")
       .set("Authorization", "Bearer expected-token")
       .send(payload())
-      .expect(502);
+      .expect(200);
 
-    expect(response.body.status).toBe("error");
-    expect(db.instances[0].status).toBe("error");
+    expect(response.body.status).toBe("connected");
+    expect(db.instances[0].status).toBe("active");
     expect(db.validations).toHaveLength(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

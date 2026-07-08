@@ -2,26 +2,21 @@ import { z } from "zod";
 
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 
-const pathSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .refine((value) => value.startsWith("/"), "path must start with /");
+const optionalBaseUrlSchema = z
+  .union([
+    z
+      .string()
+      .trim()
+      .url()
+      .transform((value) => value.replace(/\/+$/, "")),
+    z.literal("")
+  ])
+  .optional()
+  .default("");
 
 export const actionConnectorConfigSchema = z.object({
   displayName: z.string().trim().min(1),
-  baseUrl: z
-    .string()
-    .trim()
-    .url()
-    .transform((value) => value.replace(/\/+$/, "")),
-  healthPath: pathSchema.default("/healthz"),
-  actionListPath: pathSchema.default("/api/v1/agent-actions/actions"),
-  actionSearchPath: pathSchema.default("/api/v1/agent-actions/actions/search"),
-  actionDescribePath: pathSchema.default("/api/v1/agent-actions/actions/describe"),
-  actionPreviewPath: pathSchema.default("/api/v1/agent-actions/actions/preview"),
-  actionExecutePath: pathSchema.default("/api/v1/agent-actions/actions/execute"),
-  identityPath: z.union([pathSchema, z.literal("")]).default(""),
+  baseUrl: optionalBaseUrlSchema,
   delegationHeader: z.string().trim().min(1).default("Authorization"),
   agentModeId: z.string().trim().min(1).default("default"),
   runtimeInstruction: z.string().trim().max(12000).default(""),
@@ -29,12 +24,20 @@ export const actionConnectorConfigSchema = z.object({
     .object({
       allowReadActions: z.boolean().default(true),
       allowLowRiskActions: z.boolean().default(false),
-      allowHighRiskActions: z.boolean().default(false)
+      allowHighRiskActions: z.boolean().default(false),
+      allowedMethods: z.array(z.string().trim().min(1)).default(["GET"]),
+      blockedPathPrefixes: z.array(z.string().trim().min(1)).default([]),
+      toolTimeoutSeconds: z.number().int().positive().max(300).default(30),
+      maxResponseBytes: z.number().int().positive().max(4 * 1024 * 1024).default(262144)
     })
     .default({
       allowReadActions: true,
       allowLowRiskActions: false,
-      allowHighRiskActions: false
+      allowHighRiskActions: false,
+      allowedMethods: ["GET"],
+      blockedPathPrefixes: [],
+      toolTimeoutSeconds: 30,
+      maxResponseBytes: 262144
     })
 });
 
@@ -61,38 +64,14 @@ export class ActionConnectorIntegrationAdapter {
     }
 
     const config = parsed.data;
-    try {
-      const response = await this.fetchImpl(`${config.baseUrl}${config.healthPath}`, {
-        method: "GET",
-        headers: { Accept: "application/json" }
-      });
-      if (!response.ok) {
-        return validationFailed("Action connector health check failed", {
-          status: response.status,
-          healthPath: config.healthPath
-        });
-      }
-    } catch (error) {
-      return validationFailed("Action connector is unreachable", {
-        error: error instanceof Error ? error.message : "network error",
-        healthPath: config.healthPath
-      });
-    }
+    void this.fetchImpl;
 
     return {
       status: "success",
-      summary: "Action connector connection validated",
+      summary: "Action connector configuration validated",
       detail: {
         displayName: config.displayName,
-        baseUrl: config.baseUrl,
-        actionPaths: {
-          list: config.actionListPath,
-          search: config.actionSearchPath,
-          describe: config.actionDescribePath,
-          preview: config.actionPreviewPath,
-          execute: config.actionExecutePath,
-          identity: config.identityPath || undefined
-        },
+        executionMode: "outbound_tool_bridge",
         agentModeId: config.agentModeId,
         runtimeInstructionConfigured: config.runtimeInstruction.length > 0,
         policy: config.policy

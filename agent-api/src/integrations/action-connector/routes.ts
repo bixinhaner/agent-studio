@@ -8,6 +8,7 @@ import {
   type ActionConnectorCodexRunner,
   type AgentStreamEvent
 } from "./runtime.js";
+import { ActionConnectorToolBridge, type ExternalToolRequestInput, type ExternalToolResultInput } from "./tool-bridge.js";
 
 function bearerHeader(req: Request): string | undefined {
   const header = req.header("authorization");
@@ -25,7 +26,8 @@ export function createActionConnectorRuntimeRouter(options: {
   codexRunner?: ActionConnectorCodexRunner;
 }) {
   const router = express.Router();
-  const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, options.codexRunner);
+  const bridge = new ActionConnectorToolBridge();
+  const runtime = new ActionConnectorRuntimeService(options.db, options.fetchImpl, options.codexRunner, bridge);
 
   router.post("/:connectorId/chat/stream", async (req: Request, res: Response) => {
     initSSE(res);
@@ -70,6 +72,80 @@ export function createActionConnectorRuntimeRouter(options: {
       lifecycle.markSettled();
       lifecycle.dispose();
       res.end();
+    }
+  });
+
+  router.post("/:connectorId/tool-requests", async (req: Request, res: Response) => {
+    const bridgeToken = req.header("x-action-connector-bridge-token")?.trim();
+    if (!bridgeToken) {
+      res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Missing bridge token." } });
+      return;
+    }
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const runId = typeof body.runId === "string" ? body.runId.trim() : "";
+    const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId.trim() : undefined;
+    const input = body.input && typeof body.input === "object" && !Array.isArray(body.input)
+      ? body.input as ExternalToolRequestInput
+      : undefined;
+    if (!runId || !input || typeof input.method !== "string" || typeof input.path !== "string") {
+      res.status(400).json({ error: { code: "INVALID_TOOL_REQUEST", message: "runId and REST input are required." } });
+      return;
+    }
+
+    try {
+      const result = await bridge.request({
+        connectorId: req.params.connectorId,
+        runId,
+        bridgeToken,
+        toolCallId,
+        request: input
+      });
+      res.json(result);
+    } catch (error) {
+      res.status(504).json({
+        status: "error",
+        error: {
+          code: "TOOL_BRIDGE_ERROR",
+          message: error instanceof Error ? error.message : "External tool bridge failed.",
+          retryable: true
+        }
+      });
+    }
+  });
+
+  router.post("/:connectorId/tool-results", async (req: Request, res: Response) => {
+    const delegationHeaderValue = bearerHeader(req);
+    if (!delegationHeaderValue) {
+      res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Missing delegation bearer token." } });
+      return;
+    }
+
+    const body = (req.body || {}) as Partial<ExternalToolResultInput>;
+    if (
+      typeof body.runId !== "string" ||
+      typeof body.toolCallId !== "string" ||
+      (body.status !== "ok" && body.status !== "error")
+    ) {
+      res.status(400).json({ error: { code: "INVALID_TOOL_RESULT", message: "runId, toolCallId and status are required." } });
+      return;
+    }
+
+    try {
+      bridge.resolve({
+        connectorId: req.params.connectorId,
+        delegationHeaderValue,
+        result: body as ExternalToolResultInput
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(404).json({
+        error: {
+          code: "TOOL_RESULT_REJECTED",
+          message: error instanceof Error ? error.message : "External tool result was rejected.",
+          retryable: false
+        }
+      });
     }
   });
 

@@ -204,6 +204,7 @@ import type { IntegrationInstanceRepositoryDb } from "./persistence/integration-
 import { createIntegrationCenterRouter } from "./integrations/center/router.js";
 import { createIntegrationCenterService, type IntegrationCenterDb } from "./integrations/center/service.js";
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
+import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
@@ -3787,12 +3788,13 @@ type ActionConnectorPreparedTurn = {
   runId: string;
   conversationId: string;
   externalConversationKey: string;
-  identity: Awaited<ReturnType<ActionConnectorCodexRunnerInput["client"]["identity"]>>;
+  identity: ConnectorIdentity;
   runtimeOwner: CurrentActor;
   thread: ThreadRecord;
   session: SessionRecord;
   liveThread: LiveRuntimeThread;
   runtime: ActionConnectorRuntimeOptions;
+  disposeBridge?: () => void;
 };
 
 function actionConnectorRuntimeOwnerId(connectorId: string): string {
@@ -3819,6 +3821,32 @@ function actionConnectorExternalUserKey(identity: ActionConnectorPreparedTurn["i
     throw new Error("Action connector identity is missing external user id");
   }
   return externalUserId;
+}
+
+function actionConnectorIdentityFromRequest(input: ActionConnectorCodexRunnerInput) {
+  const context = asRecord(input.request.context) ?? {};
+  const externalIdentity = asRecord(context.externalIdentity) ?? {};
+  const text = (key: string) => {
+    const value = externalIdentity[key];
+    return trimOrUndefined(typeof value === "string" ? value : undefined);
+  };
+  const externalUserId =
+    text("externalUserId") ??
+    text("userId") ??
+    `delegated:${createHash("sha256").update(input.delegationHeaderValue).digest("hex").slice(0, 16)}`;
+  return {
+    externalUserId,
+    externalUserName: text("externalUserName") ?? text("username") ?? text("name"),
+    externalUnionId: text("externalUnionId"),
+    organizationId: text("organizationId"),
+    roles: Array.isArray(externalIdentity?.roles)
+      ? externalIdentity.roles.filter((item): item is string => typeof item === "string")
+      : undefined,
+    scopes: Array.isArray(externalIdentity?.scopes)
+      ? externalIdentity.scopes.filter((item): item is string => typeof item === "string")
+      : undefined,
+    metadata: asRecord(externalIdentity.metadata) ?? undefined
+  };
 }
 
 function actionConnectorConversationKey(input: {
@@ -3864,6 +3892,7 @@ function actionConnectorStoredMessage(
 
 function actionConnectorCliSource(): string {
   return `#!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
 const command = process.argv[2];
@@ -3907,48 +3936,76 @@ async function readPayload(response) {
   }
 }
 
-async function request(method, path, body) {
-  const config = runtimeConfig();
-  const baseUrl = required(config.baseUrl, "baseUrl").replace(/\\/+$/, "");
-  const delegationHeader = required(config.delegationHeader || "Authorization", "delegationHeader");
-  const delegationValue = required(config.delegationValue, "delegationValue");
-  const headers = { Accept: "application/json" };
-  headers[delegationHeader] = delegationValue;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+function connectorBridgeUrl(config) {
+  const baseUrl = required(config.bridgeBaseUrl, "bridgeBaseUrl").replace(/\\/+$/, "");
+  const connectorId = encodeURIComponent(required(config.connectorId, "connectorId"));
+  return baseUrl + "/api/action-connectors/" + connectorId + "/tool-requests";
+}
 
-  const response = await fetch(baseUrl + path, {
-    method,
+async function submitToolRequest(input, toolCallId) {
+  const config = runtimeConfig();
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Action-Connector-Bridge-Token": required(config.bridgeToken, "bridgeToken")
+  };
+  const response = await fetch(connectorBridgeUrl(config), {
+    method: "POST",
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
+    body: JSON.stringify({
+      runId: required(config.runId, "runId"),
+      toolCallId: toolCallId || randomUUID(),
+      input
+    })
   });
   const payload = await readPayload(response);
   if (!response.ok) {
     const detail =
-      payload && typeof payload === "object" && typeof payload.msg === "string"
-        ? payload.msg
-        : "Connector request failed with HTTP " + response.status;
+      payload && typeof payload === "object" && payload.error && typeof payload.error.message === "string"
+        ? payload.error.message
+        : "External tool bridge failed with HTTP " + response.status;
     throw new Error(detail);
   }
-  console.log(JSON.stringify(unwrap(payload), null, 2));
+  if (payload && typeof payload === "object" && payload.status === "error") {
+    const error = payload.error && typeof payload.error === "object" ? payload.error : {};
+    throw new Error(typeof error.message === "string" ? error.message : "External tool request failed");
+  }
+  console.log(JSON.stringify(unwrap(payload && typeof payload === "object" && "output" in payload ? payload.output : payload), null, 2));
 }
 
 try {
   const config = runtimeConfig();
-  const paths = config.paths || {};
   if (command === "identity") {
-    await request("GET", required(paths.identity, "identityPath"));
-  } else if (command === "list") {
-    await request("GET", required(paths.list, "actionListPath"));
-  } else if (command === "search") {
-    await request("POST", required(paths.search, "actionSearchPath"), { query: args.join(" ").trim() });
+    console.log(JSON.stringify(config.identity || {}, null, 2));
+  } else if (command === "catalog" || command === "list" || command === "search") {
+    const query = command === "catalog" || command === "search" ? args.join(" ").trim() : "";
+    await submitToolRequest({
+      operationId: "agent.catalog.search",
+      method: "GET",
+      path: "/api/v1/agent/catalog",
+      query: query ? { q: query } : {}
+    });
   } else if (command === "describe") {
-    await request("POST", required(paths.describe, "actionDescribePath"), { actionId: args[0] });
-  } else if (command === "preview" || command === "execute") {
-    const actionId = required(args[0], "actionId");
-    const input = parseJsonArg(args[1], {});
-    await request("POST", required(paths[command], command + "Path"), { actionId, input, dryRun: command === "preview" });
+    await submitToolRequest({
+      operationId: "agent.catalog.describe",
+      method: "GET",
+      path: "/api/v1/agent/catalog/describe",
+      query: { operationId: required(args[0], "operationId") }
+    });
+  } else if (command === "request") {
+    const method = required(args[0], "method").toUpperCase();
+    const requestPath = required(args[1], "path");
+    const input = parseJsonArg(args[2], {});
+    await submitToolRequest({
+      operationId: typeof input.operationId === "string" ? input.operationId : undefined,
+      method,
+      path: requestPath,
+      query: input.query && typeof input.query === "object" ? input.query : undefined,
+      body: Object.prototype.hasOwnProperty.call(input, "body") ? input.body : undefined,
+      reason: typeof input.reason === "string" ? input.reason : undefined
+    });
   } else {
-    throw new Error("Unknown command. Use identity, list, search, describe, preview, or execute.");
+    throw new Error("Unknown command. Use identity, catalog, search, describe, or request.");
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
@@ -3960,6 +4017,9 @@ try {
 async function materializeActionConnectorRuntimeFiles(input: {
   runner: ActionConnectorCodexRunnerInput;
   workspace: string;
+  runId: string;
+  bridgeToken?: string;
+  identity: unknown;
 }): Promise<{ cliPath: string; runtimeConfigPath: string }> {
   const targetDir = path.join(input.workspace, ".agent-studio");
   const cliPath = path.join(targetDir, "action-connector-cli.mjs");
@@ -3970,17 +4030,13 @@ async function materializeActionConnectorRuntimeFiles(input: {
   await fs.writeFile(
     runtimeConfigPath,
     JSON.stringify({
-      baseUrl: input.runner.config.baseUrl,
-      delegationHeader: input.runner.config.delegationHeader,
-      delegationValue: input.runner.delegationHeaderValue,
-      paths: {
-        identity: input.runner.config.identityPath || "",
-        list: input.runner.config.actionListPath,
-        search: input.runner.config.actionSearchPath,
-        describe: input.runner.config.actionDescribePath,
-        preview: input.runner.config.actionPreviewPath,
-        execute: input.runner.config.actionExecutePath
-      }
+      bridgeBaseUrl: `http://127.0.0.1:${appConfig.port}`,
+      connectorId: input.runner.connector.id,
+      runId: input.runId,
+      bridgeToken: input.bridgeToken,
+      identity: input.identity,
+      displayName: input.runner.config.displayName,
+      policy: input.runner.config.policy
     }, null, 2),
     { encoding: "utf8", mode: 0o600 }
   );
@@ -3989,7 +4045,8 @@ async function materializeActionConnectorRuntimeFiles(input: {
 }
 
 async function resolveActionConnectorRuntimeOptions(
-  input: ActionConnectorCodexRunnerInput
+  input: ActionConnectorCodexRunnerInput,
+  context: { runId: string; bridgeToken?: string; identity: unknown }
 ): Promise<ActionConnectorRuntimeOptions> {
   const agentModeId = trimOrUndefined(input.config.agentModeId) ?? "default";
   const agentMode = await agentModes.get(agentModeId);
@@ -4015,7 +4072,13 @@ async function resolveActionConnectorRuntimeOptions(
   });
   await fs.mkdir(workspace, { recursive: true });
   await applyWorkspaceAgentsMdForMode(agentModeId, workspace);
-  const files = await materializeActionConnectorRuntimeFiles({ runner: input, workspace });
+  const files = await materializeActionConnectorRuntimeFiles({
+    runner: input,
+    workspace,
+    runId: context.runId,
+    bridgeToken: context.bridgeToken,
+    identity: context.identity
+  });
   const enabledSkills = await resolveEnabledSkillsForBotMode(agentModeId);
   const baseCodexRunConfig = withRunConfigEnabledSkillSelection(
     {
@@ -4212,66 +4275,82 @@ async function ensureActionConnectorRuntimeSession(input: {
 async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunnerInput): Promise<ActionConnectorPreparedTurn> {
   const runId = trimOrUndefined(input.request.clientRunId) ?? randomUUID();
   const conversationId = input.request.conversationId || randomUUID();
-  const identity = await input.client.identity(input.signal);
+  const identity = actionConnectorIdentityFromRequest(input);
   actionConnectorExternalUserKey(identity);
   const runtimeOwner = actionConnectorRuntimeActor(input);
-  const runtime = await resolveActionConnectorRuntimeOptions(input);
-  const { thread, externalConversationKey } = await ensureActionConnectorThread({
-    connector: input.connector,
-    config: input.config,
-    identity,
-    conversationId,
-    message: input.request.message,
-    context: input.request.context,
-    runtime
-  });
-  const { session, liveThread } = await ensureActionConnectorRuntimeSession({
-    runner: input,
-    runtime,
-    thread,
-    runtimeOwner
-  });
-  const externalUserId =
-    trimOrUndefined(identity?.externalUserId) ??
-    trimOrUndefined(identity?.externalUnionId);
-  const externalUserName = trimOrUndefined(identity?.externalUserName);
-  await conversationRecords.upsertExternalConversation({
-    organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? null,
-    integrationInstanceId: input.connector.id,
-    threadId: thread.id,
-    userId: null,
-    channel: ACTION_CONNECTOR_CHANNEL,
-    externalConversationKey,
-    externalConversationId: conversationId,
-    conversationType: "embedded_agent",
-    agentModeId: runtime.agentModeId,
-    externalUserId,
-    externalUnionId: trimOrUndefined(identity?.externalUnionId),
-    externalUserName,
-    botName: input.config.displayName || input.connector.name,
-    lastExternalMessageId: runId,
-    lastMessageAt: new Date(),
-    metadata: {
-      integrationSlug: trimOrUndefined(input.connector.slug ?? undefined),
-      sourcePath: asString(asRecord(input.request.context)?.path),
-      sourceTitle: asString(asRecord(input.request.context)?.title),
-      locale: input.request.locale,
-      timezone: input.request.timezone,
-      runtimeOwnerId: runtimeOwner.id,
-      externalIdentity: identity ?? null
-    }
-  });
-  return {
+  const bridgeRegistration = input.bridge?.registerRun({
+    connectorId: input.connector.id,
     runId,
-    conversationId,
-    externalConversationKey,
-    identity,
-    runtimeOwner,
-    thread,
-    session,
-    liveThread,
-    runtime
-  };
+    delegationHeaderValue: input.delegationHeaderValue,
+    emit: input.emit
+  });
+  try {
+    const runtime = await resolveActionConnectorRuntimeOptions(input, {
+      runId,
+      bridgeToken: bridgeRegistration?.bridgeToken,
+      identity
+    });
+    const { thread, externalConversationKey } = await ensureActionConnectorThread({
+      connector: input.connector,
+      config: input.config,
+      identity,
+      conversationId,
+      message: input.request.message,
+      context: input.request.context,
+      runtime
+    });
+    const { session, liveThread } = await ensureActionConnectorRuntimeSession({
+      runner: input,
+      runtime,
+      thread,
+      runtimeOwner
+    });
+    const externalUserId =
+      trimOrUndefined(identity?.externalUserId) ??
+      trimOrUndefined(identity?.externalUnionId);
+    const externalUserName = trimOrUndefined(identity?.externalUserName);
+    await conversationRecords.upsertExternalConversation({
+      organizationId: trimOrUndefined(input.connector.organizationId ?? undefined) ?? null,
+      integrationInstanceId: input.connector.id,
+      threadId: thread.id,
+      userId: null,
+      channel: ACTION_CONNECTOR_CHANNEL,
+      externalConversationKey,
+      externalConversationId: conversationId,
+      conversationType: "embedded_agent",
+      agentModeId: runtime.agentModeId,
+      externalUserId,
+      externalUnionId: trimOrUndefined(identity?.externalUnionId),
+      externalUserName,
+      botName: input.config.displayName || input.connector.name,
+      lastExternalMessageId: runId,
+      lastMessageAt: new Date(),
+      metadata: {
+        integrationSlug: trimOrUndefined(input.connector.slug ?? undefined),
+        sourcePath: asString(asRecord(input.request.context)?.path),
+        sourceTitle: asString(asRecord(input.request.context)?.title),
+        locale: input.request.locale,
+        timezone: input.request.timezone,
+        runtimeOwnerId: runtimeOwner.id,
+        externalIdentity: identity ?? null
+      }
+    });
+    return {
+      runId,
+      conversationId,
+      externalConversationKey,
+      identity,
+      runtimeOwner,
+      thread,
+      session,
+      liveThread,
+      runtime,
+      disposeBridge: bridgeRegistration?.dispose
+    };
+  } catch (error) {
+    bridgeRegistration?.dispose();
+    throw error;
+  }
 }
 
 function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
@@ -4284,8 +4363,8 @@ function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
   const policy = JSON.stringify(input.config.policy, null, 2);
   return [
     "这条消息来自一个外部业务系统内嵌 Agent 助手。",
-    "你负责推理、选择动作、读取信息和形成回答；业务数据查询和指令执行必须通过 action-connector-cli 完成。",
-    "不要要求用户手动复制业务系统数据。不要直连业务系统数据库。不要编造动作结果。",
+    "你负责推理、选择 REST API、读取信息和形成回答；业务数据查询必须通过 action-connector-cli 的通用 REST 工具完成。",
+    "不要要求用户手动复制业务系统数据。不要直连业务系统数据库。不要编造 API 结果。",
     `业务系统显示名：${input.config.displayName}`,
     `对话 ID：${input.prepared.conversationId}`,
     `运行 ID：${input.prepared.runId}`,
@@ -4299,17 +4378,15 @@ function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
     "",
     "可用 CLI：",
     `- node ${JSON.stringify(input.prepared.runtime.cliPath)} identity`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} list`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} search "query text"`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} describe action.id`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} preview action.id '{"key":"value"}'`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} execute action.id '{"key":"value"}'`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} catalog "query text"`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} describe operationId`,
+    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} request GET /api/v1/example '{"operationId":"example.list","query":{"key":"value"},"reason":"why this API is needed"}'`,
     "",
     "执行规则：",
-    "- 先用 search/list/describe 了解可用动作和参数，再调用 preview 或 execute。",
-    "- read 风险动作可以直接 execute 读取真实数据。",
-    "- low/high 风险动作只能 preview，除非当前请求模式是 execute 且存在用户已批准的动作。",
-    "- 如果 connector policy 不允许某类风险动作，直接说明不能执行，不要绕过。",
+    "- 先用 catalog/describe 了解可用 REST API 和参数，再调用 request。",
+    "- 只能请求 /api/v1 下 catalog 中存在的 API；不要猜测未确认的路径。",
+    "- 默认优先使用 GET 读取真实数据；写操作只有在 connector policy 和外部系统确认允许时才能请求。",
+    "- API 返回失败时，根据错误调整参数或说明无法完成，不要绕过策略。",
     "- 最终回答必须基于 CLI 返回的真实结果，用用户语言简洁说明关键结论。",
     "",
     "用户问题：",
@@ -4330,6 +4407,7 @@ function emitActionConnectorRuntimeEvent(
 
 async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
+  try {
   input.emit({
     type: "start",
     runId: prepared.runId,
@@ -4445,6 +4523,9 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       });
     }
   });
+  } finally {
+    prepared.disposeBridge?.();
+  }
 }
 
 async function handleCrestChatStream(req: Request, res: Response): Promise<void> {
