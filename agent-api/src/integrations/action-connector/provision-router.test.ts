@@ -249,7 +249,7 @@ describe("Action connector provision router", () => {
     expect(db.instances[0].name).toBe("New Name");
   });
 
-  it("preserves existing agent runtime settings when reprovision omits them", async () => {
+  it("preserves the selected agent mode but clears legacy connector prompts when reprovision omits them", async () => {
     const db = createDbMock([
       {
         id: "connector-existing",
@@ -286,7 +286,7 @@ describe("Action connector provision router", () => {
 
     expect(db.configs[0].config).toMatchObject({
       agentModeId: "agent-mode-from-studio",
-      runtimeInstruction: "Use the operations support skill."
+      runtimeInstruction: ""
     });
   });
 

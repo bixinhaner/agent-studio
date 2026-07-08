@@ -65,9 +65,6 @@ function preserveAgentRuntimeConfig(input: {
   if (!hasOwn(rawConfig, "agentModeId")) {
     config.agentModeId = asString(input.existingConfig?.agentModeId) ?? config.agentModeId;
   }
-  if (!hasOwn(rawConfig, "runtimeInstruction")) {
-    config.runtimeInstruction = asString(input.existingConfig?.runtimeInstruction) ?? config.runtimeInstruction;
-  }
   return config;
 }
 

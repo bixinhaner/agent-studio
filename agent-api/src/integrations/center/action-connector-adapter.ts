@@ -73,7 +73,6 @@ export class ActionConnectorIntegrationAdapter {
         displayName: config.displayName,
         executionMode: "outbound_tool_bridge",
         agentModeId: config.agentModeId,
-        runtimeInstructionConfigured: config.runtimeInstruction.length > 0,
         policy: config.policy
       }
     };

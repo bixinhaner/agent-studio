@@ -206,6 +206,7 @@ import { createIntegrationCenterService, type IntegrationCenterDb } from "./inte
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
 import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
+import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
   projectActionConnectorRuntimeEvents
@@ -4071,7 +4072,7 @@ async function resolveActionConnectorRuntimeOptions(
     modeId: agentModeId
   });
   await fs.mkdir(workspace, { recursive: true });
-  await applyWorkspaceAgentsMdForMode(agentModeId, workspace);
+  const workspaceAgentsMd = await applyWorkspaceAgentsMdForMode(agentModeId, workspace);
   const files = await materializeActionConnectorRuntimeFiles({
     runner: input,
     workspace,
@@ -4080,6 +4081,14 @@ async function resolveActionConnectorRuntimeOptions(
     identity: context.identity
   });
   const enabledSkills = await resolveEnabledSkillsForBotMode(agentModeId);
+  const actionConnectorRunConfig: Record<string, unknown> = {
+    integrationInstanceId: input.connector.id,
+    displayName: input.config.displayName,
+    runtimeConfigPath: files.runtimeConfigPath
+  };
+  if (workspaceAgentsMd.fingerprint) {
+    actionConnectorRunConfig.workspaceAgentsMdFingerprint = workspaceAgentsMd.fingerprint;
+  }
   const baseCodexRunConfig = withRunConfigEnabledSkillSelection(
     {
       sandboxMode: runProfile.sandboxMode,
@@ -4087,11 +4096,7 @@ async function resolveActionConnectorRuntimeOptions(
       networkAccessEnabled: runProfile.networkAccessEnabled,
       webSearchMode: runProfile.webSearchMode,
       mode: agentModeId,
-      actionConnector: {
-        integrationInstanceId: input.connector.id,
-        displayName: input.config.displayName,
-        runtimeConfigPath: files.runtimeConfigPath
-      }
+      actionConnector: actionConnectorRunConfig
     },
     enabledSkills
   );
@@ -4356,44 +4361,13 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
 function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
   prepared: ActionConnectorPreparedTurn;
 }): string {
-  const approvedAction = input.request.approvedAction
-    ? JSON.stringify(input.request.approvedAction, null, 2)
-    : "";
-  const context = JSON.stringify(input.request.context ?? {}, null, 2);
-  const policy = JSON.stringify(input.config.policy, null, 2);
-  return [
-    "这条消息来自一个外部业务系统内嵌 Agent 助手。",
-    "你负责推理、选择 REST API、读取信息和形成回答；业务数据查询必须通过 action-connector-cli 的通用 REST 工具完成。",
-    "不要要求用户手动复制业务系统数据。不要直连业务系统数据库。不要编造 API 结果。",
-    `业务系统显示名：${input.config.displayName}`,
-    `对话 ID：${input.prepared.conversationId}`,
-    `运行 ID：${input.prepared.runId}`,
-    `用户语言：${input.request.locale}`,
-    `用户时区：${input.request.timezone}`,
-    `当前请求模式：${input.request.mode}`,
-    `Connector policy：\n${policy}`,
-    input.config.runtimeInstruction ? `Connector 运行说明：\n${input.config.runtimeInstruction}` : undefined,
-    approvedAction ? `用户已批准的动作：\n${approvedAction}` : undefined,
-    `当前页面上下文：\n${context}`,
-    "",
-    "可用 CLI：",
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} identity`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} catalog "query text"`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} describe operationId`,
-    `- node ${JSON.stringify(input.prepared.runtime.cliPath)} request GET /api/v1/example '{"operationId":"example.list","query":{"key":"value"},"reason":"why this API is needed"}'`,
-    "",
-    "执行规则：",
-    "- 先用 catalog/describe 了解可用 REST API 和参数，再调用 request。",
-    "- 只能请求 /api/v1 下 catalog 中存在的 API；不要猜测未确认的路径。",
-    "- 默认优先使用 GET 读取真实数据；写操作只有在 connector policy 和外部系统确认允许时才能请求。",
-    "- API 返回失败时，根据错误调整参数或说明无法完成，不要绕过策略。",
-    "- 最终回答必须基于 CLI 返回的真实结果，用用户语言简洁说明关键结论。",
-    "",
-    "用户问题：",
-    input.request.message
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n");
+  return buildActionConnectorRuntimePrompt({
+    config: input.config,
+    request: input.request,
+    conversationId: input.prepared.conversationId,
+    runId: input.prepared.runId,
+    cliPath: input.prepared.runtime.cliPath
+  });
 }
 
 function emitActionConnectorRuntimeEvent(
@@ -5569,11 +5543,19 @@ async function resolveWorkspaceAgentsMdContentForMode(modeId: string): Promise<s
   return resolveWorkspaceAgentsMdContent(source.sourceRef);
 }
 
-async function applyWorkspaceAgentsMdForMode(modeId: string, workspacePath: string): Promise<void> {
+function fingerprintWorkspaceAgentsMdContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+async function applyWorkspaceAgentsMdForMode(
+  modeId: string,
+  workspacePath: string
+): Promise<{ fingerprint?: string }> {
   const content = await resolveWorkspaceAgentsMdContentForMode(modeId);
-  if (!content) return;
+  if (!content) return {};
   await fs.mkdir(workspacePath, { recursive: true });
   await fs.writeFile(path.join(workspacePath, "AGENTS.md"), content, "utf8");
+  return { fingerprint: fingerprintWorkspaceAgentsMdContent(content) };
 }
 
 async function resolveSessionOptions(
