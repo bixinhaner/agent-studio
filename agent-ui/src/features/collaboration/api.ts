@@ -2,6 +2,9 @@ import { api } from "../../lib/api";
 
 import type {
   AddThreadCommentInput,
+  BroadcastAudienceConfig,
+  BroadcastAudiencePreview,
+  BroadcastDeliveryRecord,
   BroadcastRecord,
   CreateBroadcastDraftInput,
   InboxItemRecord,
@@ -135,9 +138,23 @@ function mapBroadcastInput(input: CreateBroadcastDraftInput | UpdateBroadcastDra
   return {
     ...(input.title !== undefined ? { title: trim(input.title) } : {}),
     ...(input.bodyMarkdown !== undefined ? { body_markdown: trim(input.bodyMarkdown) } : {}),
+    ...(input.channelEmailEnabled !== undefined ? { channel_email_enabled: input.channelEmailEnabled } : {}),
+    ...(input.channelInAppEnabled !== undefined ? { channel_in_app_enabled: input.channelInAppEnabled } : {}),
     ...(input.dingtalkDeliveryEnabled !== undefined
       ? { dingtalk_delivery_enabled: input.dingtalkDeliveryEnabled }
       : {}),
+    ...(input.content !== undefined
+      ? {
+          content: {
+            ...(input.content.subject !== undefined ? { subject: trim(input.content.subject) } : {}),
+            ...(input.content.bodyMarkdown !== undefined ? { body_markdown: trim(input.content.bodyMarkdown) } : {}),
+            ...(input.content.ctaLabel !== undefined ? { cta_label: trim(input.content.ctaLabel) } : {}),
+            ...(input.content.ctaUrl !== undefined ? { cta_url: trim(input.content.ctaUrl) } : {}),
+            ...(input.content.language !== undefined ? { language: input.content.language } : {})
+          }
+        }
+      : {}),
+    ...(input.audience !== undefined ? { audience: mapAudienceInput(input.audience) } : {}),
     ...(input.targets !== undefined
       ? {
           targets: input.targets.map((target) => ({
@@ -146,6 +163,23 @@ function mapBroadcastInput(input: CreateBroadcastDraftInput | UpdateBroadcastDra
           }))
         }
       : {})
+  };
+}
+
+function mapAudienceInput(audience: BroadcastAudienceConfig) {
+  return {
+    include: audience.include.map((rule) => ({
+      type: rule.type,
+      ...(rule.id ? { id: trim(rule.id) } : {}),
+      ...(rule.value ? { value: trim(rule.value) } : {}),
+      ...(rule.includeChildren !== undefined ? { include_children: rule.includeChildren } : {})
+    })),
+    exclude: audience.exclude.map((rule) => ({
+      type: rule.type,
+      ...(rule.id ? { id: trim(rule.id) } : {}),
+      ...(rule.value ? { value: trim(rule.value) } : {}),
+      ...(rule.includeChildren !== undefined ? { include_children: rule.includeChildren } : {})
+    }))
   };
 }
 
@@ -185,4 +219,38 @@ export async function publishBroadcast(broadcastId: string): Promise<BroadcastRe
     }
   );
   return response.broadcast;
+}
+
+export async function previewBroadcastAudience(broadcastId: string): Promise<BroadcastAudiencePreview> {
+  const response = await api<{ preview: BroadcastAudiencePreview }>(
+    `/api/admin/broadcasts/${encodeURIComponent(trim(broadcastId))}/audience-preview`,
+    {
+      method: "POST"
+    }
+  );
+  return response.preview;
+}
+
+export async function sendBroadcastTestEmail(input: {
+  broadcastId: string;
+  testEmail: string;
+  simulatedUserId?: string;
+}): Promise<{ broadcast: BroadcastRecord; delivered: boolean; mode: "smtp" | "debug" }> {
+  return api<{ broadcast: BroadcastRecord; delivered: boolean; mode: "smtp" | "debug" }>(
+    `/api/admin/broadcasts/${encodeURIComponent(trim(input.broadcastId))}/test-email`,
+    {
+      method: "POST",
+      json: {
+        test_email: trim(input.testEmail),
+        ...(input.simulatedUserId ? { simulated_user_id: trim(input.simulatedUserId) } : {})
+      }
+    }
+  );
+}
+
+export async function fetchBroadcastDeliveries(broadcastId: string): Promise<BroadcastDeliveryRecord[]> {
+  const response = await api<{ deliveries: BroadcastDeliveryRecord[] }>(
+    `/api/admin/broadcasts/${encodeURIComponent(trim(broadcastId))}/deliveries`
+  );
+  return response.deliveries;
 }

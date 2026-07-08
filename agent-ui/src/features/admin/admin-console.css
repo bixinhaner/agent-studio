@@ -1712,6 +1712,394 @@
   color: var(--admin-color-subtle);
 }
 
+.engagement-workspace {
+  min-height: 0;
+}
+
+.engagement-step-card .ant-card-body {
+  padding: 18px 22px;
+}
+
+.engagement-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.engagement-overview-grid.narrow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.engagement-campaign-list,
+.engagement-detail-panel,
+.engagement-panel,
+.engagement-email-preview {
+  background: var(--admin-color-surface-solid);
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-md);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.engagement-campaign-list {
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.engagement-list-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--admin-color-border);
+}
+
+.engagement-campaign-row {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--admin-color-border);
+  background: transparent;
+  color: var(--admin-color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.engagement-campaign-row:hover,
+.engagement-campaign-row.active {
+  background: var(--admin-color-accent-soft);
+}
+
+.engagement-campaign-row-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.engagement-campaign-row-main div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.engagement-campaign-row-main strong {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.engagement-campaign-row-main span,
+.engagement-campaign-row-meta {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--admin-color-subtle);
+}
+
+.engagement-campaign-row-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.engagement-campaign-row-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.engagement-detail-panel {
+  padding: 20px;
+  min-height: 520px;
+}
+
+.engagement-detail-head {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.engagement-detail-head h2 {
+  margin: 8px 0 6px;
+  font-size: 22px;
+  line-height: 30px;
+}
+
+.engagement-detail-head p {
+  margin: 0;
+  color: var(--admin-color-subtle);
+  line-height: 22px;
+}
+
+.engagement-detail-metrics,
+.engagement-confirm-grid,
+.engagement-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.engagement-mini-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.engagement-detail-metrics div,
+.engagement-confirm-grid div,
+.engagement-mini-grid div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+  background: rgba(249, 250, 251, 0.72);
+}
+
+.engagement-detail-metrics svg {
+  color: var(--admin-color-accent);
+}
+
+.engagement-detail-metrics span,
+.engagement-confirm-grid span,
+.engagement-mini-grid span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.engagement-detail-metrics strong,
+.engagement-confirm-grid strong,
+.engagement-mini-grid strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.engagement-delivery-head,
+.engagement-panel-head,
+.engagement-email-preview-top {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.engagement-delivery-head h3,
+.engagement-panel-head h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 24px;
+}
+
+.engagement-panel-head p {
+  margin: 4px 0 0;
+  color: var(--admin-color-subtle);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.engagement-delivery-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.engagement-delivery-list > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.engagement-delivery-list small {
+  color: var(--admin-color-subtle);
+}
+
+.engagement-panel {
+  padding: 20px;
+}
+
+.engagement-field-label,
+.engagement-rule-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-color-text);
+}
+
+.engagement-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.engagement-channel-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--admin-color-border);
+  border-radius: var(--admin-radius-sm);
+  background: #fff;
+}
+
+.engagement-rule-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--admin-color-border);
+}
+
+.engagement-rule-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.engagement-audience-meter {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.engagement-audience-meter strong {
+  font-size: 34px;
+  line-height: 38px;
+  font-variant-numeric: tabular-nums;
+}
+
+.engagement-audience-meter span {
+  color: var(--admin-color-subtle);
+}
+
+.engagement-recipient-list {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.engagement-recipient-list div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--admin-color-border);
+}
+
+.engagement-recipient-list span {
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+}
+
+.engagement-email-preview {
+  padding: 30px 34px;
+  background: #fff;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.engagement-email-preview-top {
+  align-items: center;
+}
+
+.engagement-email-preview-top > div:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  margin-right: auto;
+}
+
+.engagement-email-preview-top span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.engagement-email-brand {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: #ff4614;
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.engagement-email-brand-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.engagement-email-preview h2 {
+  margin: 26px 0 10px;
+  font-size: 28px;
+  line-height: 36px;
+  color: #111827;
+}
+
+.engagement-email-preheader,
+.engagement-email-body p {
+  color: #4b5563;
+  font-size: 15px;
+  line-height: 25px;
+}
+
+.engagement-email-body {
+  margin-top: 18px;
+}
+
+.engagement-email-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 12px;
+  background: #ff4614;
+  color: #fff;
+  padding: 13px 22px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.engagement-email-footer {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #f3f4f6;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.engagement-sticky-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--admin-color-border);
+}
+
+@media (max-width: 980px) {
+  .engagement-list-head,
+  .engagement-detail-head,
+  .engagement-panel-head {
+    flex-direction: column;
+  }
+
+  .engagement-channel-grid,
+  .engagement-detail-metrics,
+  .engagement-confirm-grid,
+  .engagement-mini-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .engagement-email-preview {
+    padding: 22px;
+  }
+}
+
 .admin-entity-list {
   display: flex;
   flex-direction: column;

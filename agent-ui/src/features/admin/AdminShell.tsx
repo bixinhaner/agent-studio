@@ -179,12 +179,12 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
   },
   broadcasts: {
     id: "broadcasts",
-    title: "广播管理",
-    description: "维护系统广播模板与触达策略。",
+    title: "运营触达",
+    description: "配置邮件、站内信和钉钉触达，控制受众、测试和发送追踪。",
     scope: "运营触达",
     cadence: "按活动排期维护",
     group: "operations",
-    keywords: ["广播", "公告", "触达"],
+    keywords: ["广播", "公告", "触达", "邮件", "营销"],
     icon: <Bell size={18} />
   },
   users: {

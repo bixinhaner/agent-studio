@@ -42,6 +42,7 @@ import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-servi
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
+import { BroadcastAudienceResolver } from "./collaboration/broadcast-audience.js";
 import { InboxProjectionService } from "./collaboration/inbox-projection-service.js";
 import { createCollaborationRouter } from "./collaboration/router.js";
 import { ThreadCollaborationService } from "./collaboration/thread-collaboration-service.js";
@@ -1485,6 +1486,7 @@ const inboxProjection = new InboxProjectionService({
     listUserIdsForDepartment
   }
 });
+const broadcastAudienceResolver = new BroadcastAudienceResolver(db as never);
 const collaborationReadService = new ThreadCollaborationService({
   threads,
   shares: threadShares,
@@ -1561,6 +1563,11 @@ const broadcastService = new BroadcastService({
   notifications: {
     dispatchBroadcast: ({ broadcast, recipientUserIds }) => notificationDispatch.dispatchBroadcast({ broadcast, recipientUserIds })
   },
+  notificationRecords,
+  audienceResolver: broadcastAudienceResolver,
+  emailSender: authEmailSender,
+  getBranding: async () => (await resolvePublicBranding(systemSettings)).branding,
+  portalBaseUrl: appConfig.appBaseUrl || appConfig.serviceRecoveryPortalUrl,
   authorizer: {
     canCreateBroadcast: async ({ actorUserId }) => hasUserPermission(actorUserId, "collaboration.broadcast.publish"),
     canUpdateBroadcast: async ({ actorUserId }) => hasUserPermission(actorUserId, "collaboration.broadcast.publish"),

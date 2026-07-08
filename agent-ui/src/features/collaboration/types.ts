@@ -114,6 +114,8 @@ export type InboxItemRecord = {
 
 export type BroadcastTargetType = "all_users" | "department" | "role";
 export type BroadcastStatus = "draft" | "published" | "archived";
+export type BroadcastTestStatus = "not_tested" | "passed" | "failed" | "stale";
+export type BroadcastLanguage = "zh" | "en";
 
 export type BroadcastTargetRecord = {
   id: string;
@@ -132,6 +134,14 @@ export type BroadcastRecord = {
   publishedAt?: string;
   publishedByUserId?: string;
   dingtalkDeliveryEnabled: boolean;
+  channelEmailEnabled: boolean;
+  channelInAppEnabled: boolean;
+  channels: BroadcastChannels;
+  content: BroadcastContent;
+  audience: BroadcastAudienceConfig;
+  audienceSnapshot?: BroadcastAudienceSnapshot;
+  deliverySummary?: BroadcastDeliverySummary;
+  testState: BroadcastTestState;
   createdAt: string;
   updatedAt: string;
   targets: BroadcastTargetRecord[];
@@ -145,13 +155,115 @@ export type BroadcastTargetInput = {
 export type CreateBroadcastDraftInput = {
   title: string;
   bodyMarkdown: string;
+  channelEmailEnabled?: boolean;
+  channelInAppEnabled?: boolean;
   dingtalkDeliveryEnabled?: boolean;
+  content?: Partial<BroadcastContent>;
+  audience?: BroadcastAudienceConfig;
   targets: BroadcastTargetInput[];
 };
 
 export type UpdateBroadcastDraftInput = {
   title?: string;
   bodyMarkdown?: string;
+  channelEmailEnabled?: boolean;
+  channelInAppEnabled?: boolean;
   dingtalkDeliveryEnabled?: boolean;
+  content?: Partial<BroadcastContent>;
+  audience?: BroadcastAudienceConfig;
   targets?: BroadcastTargetInput[];
+};
+
+export type BroadcastChannels = {
+  email: boolean;
+  inApp: boolean;
+  dingtalk: boolean;
+};
+
+export type BroadcastContent = {
+  subject: string;
+  bodyMarkdown: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+  language: BroadcastLanguage;
+};
+
+export type BroadcastAudienceRuleType =
+  | "all_users"
+  | "organization_type"
+  | "organization"
+  | "department"
+  | "user"
+  | "role"
+  | "disabled_users"
+  | "missing_email"
+  | "email_opt_out";
+
+export type BroadcastAudienceRule = {
+  type: BroadcastAudienceRuleType;
+  id?: string;
+  value?: string;
+  includeChildren?: boolean;
+};
+
+export type BroadcastAudienceConfig = {
+  include: BroadcastAudienceRule[];
+  exclude: BroadcastAudienceRule[];
+};
+
+export type BroadcastAudienceSnapshot = {
+  recipientCount: number;
+  emailReachableCount: number;
+  internalCount: number;
+  externalCount: number;
+  excludedCount: number;
+  sampleRecipients: BroadcastAudienceRecipient[];
+  calculatedAt: string;
+};
+
+export type BroadcastAudienceRecipient = {
+  userId: string;
+  displayName?: string;
+  email?: string;
+  organizationName?: string;
+  organizationType?: string;
+};
+
+export type BroadcastAudiencePreview = {
+  recipients: BroadcastAudienceRecipient[];
+  snapshot: BroadcastAudienceSnapshot;
+  excluded: {
+    disabled: number;
+    missingEmail: number;
+    emailOptOut: number;
+    rules: number;
+  };
+};
+
+export type BroadcastTestState = {
+  status: BroadcastTestStatus;
+  lastTestedAt?: string;
+  lastFingerprint?: string;
+};
+
+export type BroadcastDeliverySummary = {
+  recipientCount: number;
+  emailSent: number;
+  emailFailed: number;
+  inAppSent: number;
+  dingtalkSent: number;
+  lastPublishedAt?: string;
+};
+
+export type BroadcastDeliveryRecord = {
+  id: string;
+  organizationId?: string;
+  channelType: "in_app" | "dingtalk" | "email";
+  targetRef: string;
+  eventType: string;
+  status: "pending" | "sent" | "failed";
+  payload?: unknown;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
 };
