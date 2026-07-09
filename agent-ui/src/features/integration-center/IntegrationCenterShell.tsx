@@ -341,9 +341,11 @@ export function IntegrationCenterShell() {
                     {item.slug}
                   </div>
                   <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                    <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
-                      {item.secretState.hasSecrets ? "🔑 已配置" : "⚠️ 缺密钥"}
-                    </Tag>
+                    {item.type !== "action_connector" ? (
+                      <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
+                        {item.secretState.hasSecrets ? "🔑 已配置" : "⚠️ 缺密钥"}
+                      </Tag>
+                    ) : null}
                     {item.isSystemSingleton && (
                       <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
                         系统单例

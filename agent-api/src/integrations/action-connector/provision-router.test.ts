@@ -163,7 +163,6 @@ function payload(overrides: Record<string, unknown> = {}) {
 function buildApp(input: {
   token?: string;
   db: unknown;
-  fetchImpl?: typeof fetch;
 }) {
   const app = express();
   app.use(express.json());
@@ -171,8 +170,7 @@ function buildApp(input: {
     "/api/integrations/action-connectors",
     createServiceTokenMiddleware(input.token),
     createActionConnectorProvisionRouter({
-      db: input.db as never,
-      fetchImpl: input.fetchImpl
+      db: input.db as never
     })
   );
   return app;
@@ -193,8 +191,7 @@ describe("Action connector provision router", () => {
 
   it("creates a generic action connector by slug", async () => {
     const db = createDbMock();
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
-    const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
+    const app = buildApp({ token: "expected-token", db: db.db });
 
     const response = await request(app)
       .post("/api/integrations/action-connectors/provision")
@@ -217,7 +214,6 @@ describe("Action connector provision router", () => {
         allowedMethods: ["GET"]
       }
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("updates an existing connector with the same slug", async () => {
@@ -235,8 +231,7 @@ describe("Action connector provision router", () => {
         updatedAt: "2026-07-06T00:00:00.000Z"
       }
     ]);
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
-    const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
+    const app = buildApp({ token: "expected-token", db: db.db });
 
     const response = await request(app)
       .post("/api/integrations/action-connectors/provision")
@@ -275,8 +270,7 @@ describe("Action connector provision router", () => {
       createdAt: "2026-07-06T00:00:00.000Z",
       updatedAt: "2026-07-06T00:00:00.000Z"
     });
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
-    const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
+    const app = buildApp({ token: "expected-token", db: db.db });
 
     await request(app)
       .post("/api/integrations/action-connectors/provision")
@@ -331,10 +325,9 @@ describe("Action connector provision router", () => {
     });
   });
 
-  it("does not require inbound access to the external system during provision", async () => {
+  it("provisions without testing inbound access to the external system", async () => {
     const db = createDbMock();
-    const fetchImpl = vi.fn(async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
-    const app = buildApp({ token: "expected-token", db: db.db, fetchImpl });
+    const app = buildApp({ token: "expected-token", db: db.db });
 
     const response = await request(app)
       .post("/api/integrations/action-connectors/provision")
@@ -345,6 +338,5 @@ describe("Action connector provision router", () => {
     expect(response.body.status).toBe("connected");
     expect(db.instances[0].status).toBe("active");
     expect(db.validations).toHaveLength(1);
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

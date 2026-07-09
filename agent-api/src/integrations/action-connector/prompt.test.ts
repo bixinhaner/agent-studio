@@ -7,8 +7,6 @@ describe("buildActionConnectorRuntimePrompt", () => {
     const prompt = buildActionConnectorRuntimePrompt({
       config: {
         displayName: "Operations System",
-        baseUrl: "",
-        delegationHeader: "Authorization",
         agentModeId: "operations-agent",
         runtimePrompt: [
           "Connector: {{displayName}}",
@@ -50,8 +48,6 @@ describe("buildActionConnectorRuntimePrompt", () => {
     const prompt = buildActionConnectorRuntimePrompt({
       config: {
         displayName: "Operations System",
-        baseUrl: "",
-        delegationHeader: "Authorization",
         agentModeId: "operations-agent",
         runtimePrompt: "",
         policy: {

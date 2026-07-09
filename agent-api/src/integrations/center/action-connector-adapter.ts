@@ -3,22 +3,8 @@ import { z } from "zod";
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
 import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "../action-connector/default-prompt.js";
 
-const optionalBaseUrlSchema = z
-  .union([
-    z
-      .string()
-      .trim()
-      .url()
-      .transform((value) => value.replace(/\/+$/, "")),
-    z.literal("")
-  ])
-  .optional()
-  .default("");
-
 export const actionConnectorConfigSchema = z.object({
   displayName: z.string().trim().min(1),
-  baseUrl: optionalBaseUrlSchema,
-  delegationHeader: z.string().trim().min(1).default("Authorization"),
   agentModeId: z.string().trim().min(1).default("default"),
   runtimePrompt: z.string().trim().max(24000).default(DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT),
   policy: z
@@ -44,15 +30,11 @@ export const actionConnectorConfigSchema = z.object({
 
 export type ActionConnectorConfig = z.infer<typeof actionConnectorConfigSchema>;
 
-type FetchLike = typeof fetch;
-
 function validationFailed(summary: string, detail: unknown): IntegrationValidationOutcome {
   return { status: "failed", summary, detail };
 }
 
 export class ActionConnectorIntegrationAdapter {
-  constructor(private readonly fetchImpl: FetchLike = fetch) {}
-
   async validate(input: Record<string, unknown>): Promise<IntegrationValidationOutcome> {
     const parsed = actionConnectorConfigSchema.safeParse(input);
     if (!parsed.success) {
@@ -65,7 +47,6 @@ export class ActionConnectorIntegrationAdapter {
     }
 
     const config = parsed.data;
-    void this.fetchImpl;
 
     return {
       status: "success",

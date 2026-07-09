@@ -373,19 +373,7 @@ export type CrestCrmConfigDraft = {
 
 export type ActionConnectorConfigDraft = {
   displayName: string;
-  baseUrl: string;
-  healthPath: string;
-  actionListPath: string;
-  actionSearchPath: string;
-  actionDescribePath: string;
-  actionPreviewPath: string;
-  actionExecutePath: string;
-  identityPath: string;
-  delegationHeader: string;
   runtimePrompt: string;
-  allowReadActions: boolean;
-  allowLowRiskActions: boolean;
-  allowHighRiskActions: boolean;
 };
 
 export type ExternalApiUsageSummary = {

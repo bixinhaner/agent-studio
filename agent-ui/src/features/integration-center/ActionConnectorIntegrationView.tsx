@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Input, Segmented, Select, Space, Switch, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Input, Segmented, Select, Space, Tag, Typography } from "antd";
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
 import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "./actionConnectorRuntimePrompt";
@@ -23,59 +23,29 @@ const STATUS_OPTIONS = [
   { label: "disabled", value: "disabled" }
 ];
 
-const DEFAULTS = {
-  healthPath: "/healthz",
-  actionListPath: "/api/v1/agent-actions/actions",
-  actionSearchPath: "/api/v1/agent-actions/actions/search",
-  actionDescribePath: "/api/v1/agent-actions/actions/describe",
-  actionPreviewPath: "/api/v1/agent-actions/actions/preview",
-  actionExecutePath: "/api/v1/agent-actions/actions/execute",
-  identityPath: "",
-  delegationHeader: "Authorization"
-};
-
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function asBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
 function buildDraft(detail: IntegrationDetail): ActionConnectorConfigDraft {
-  const policy = asRecord(detail.config.policy);
   return {
     displayName: asString(detail.config.displayName) || detail.instance.name,
-    baseUrl: asString(detail.config.baseUrl),
-    healthPath: asString(detail.config.healthPath) || DEFAULTS.healthPath,
-    actionListPath: asString(detail.config.actionListPath) || DEFAULTS.actionListPath,
-    actionSearchPath: asString(detail.config.actionSearchPath) || DEFAULTS.actionSearchPath,
-    actionDescribePath: asString(detail.config.actionDescribePath) || DEFAULTS.actionDescribePath,
-    actionPreviewPath: asString(detail.config.actionPreviewPath) || DEFAULTS.actionPreviewPath,
-    actionExecutePath: asString(detail.config.actionExecutePath) || DEFAULTS.actionExecutePath,
-    identityPath: asString(detail.config.identityPath),
-    delegationHeader: asString(detail.config.delegationHeader) || DEFAULTS.delegationHeader,
-    runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
-    allowReadActions: asBoolean(policy.allowReadActions, true),
-    allowLowRiskActions: asBoolean(policy.allowLowRiskActions, false),
-    allowHighRiskActions: asBoolean(policy.allowHighRiskActions, false)
+    runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT
   };
 }
 
-function pathInput(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-}
-
-function configWithoutLegacyRuntimeInstruction(config: Record<string, unknown>): Record<string, unknown> {
+function activeActionConnectorConfig(config: Record<string, unknown>): Record<string, unknown> {
   const next = { ...config };
   delete next.runtimeInstruction;
+  delete next.baseUrl;
+  delete next.healthPath;
+  delete next.delegationHeader;
+  delete next.actionListPath;
+  delete next.actionSearchPath;
+  delete next.actionDescribePath;
+  delete next.actionPreviewPath;
+  delete next.actionExecutePath;
+  delete next.identityPath;
   return next;
 }
 
@@ -112,39 +82,19 @@ export function ActionConnectorIntegrationView(props: {
       setErrorText("请填写连接器显示名称");
       return;
     }
-    if (!draft.baseUrl.trim()) {
-      setErrorText("请填写 Base URL");
-      return;
-    }
 
     setSaving(true);
     setErrorText("");
     setSuccessText("");
     try {
-      const existingPolicy = asRecord(props.detail.config.policy);
       const detail = await updateIntegrationInstance(props.detail.instance.id, {
         name: name.trim(),
         description: description.trim() || null,
         status,
         config: {
-          ...configWithoutLegacyRuntimeInstruction(props.detail.config),
+          ...activeActionConnectorConfig(props.detail.config),
           displayName: draft.displayName.trim(),
-          baseUrl: draft.baseUrl.trim().replace(/\/+$/, ""),
-          healthPath: pathInput(draft.healthPath) || DEFAULTS.healthPath,
-          actionListPath: pathInput(draft.actionListPath) || DEFAULTS.actionListPath,
-          actionSearchPath: pathInput(draft.actionSearchPath) || DEFAULTS.actionSearchPath,
-          actionDescribePath: pathInput(draft.actionDescribePath) || DEFAULTS.actionDescribePath,
-          actionPreviewPath: pathInput(draft.actionPreviewPath) || DEFAULTS.actionPreviewPath,
-          actionExecutePath: pathInput(draft.actionExecutePath) || DEFAULTS.actionExecutePath,
-          identityPath: pathInput(draft.identityPath),
-          delegationHeader: draft.delegationHeader.trim() || DEFAULTS.delegationHeader,
-          runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
-          policy: {
-            ...existingPolicy,
-            allowReadActions: draft.allowReadActions,
-            allowLowRiskActions: draft.allowLowRiskActions,
-            allowHighRiskActions: draft.allowHighRiskActions
-          }
+          runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT
         }
       });
       props.onUpdated(detail);
@@ -163,9 +113,9 @@ export function ActionConnectorIntegrationView(props: {
     try {
       const result = await validateIntegrationInstance(props.detail.instance.id);
       props.onUpdated(result.detail);
-      setSuccessText("Action connector 连接校验完成");
+      setSuccessText("Action connector 配置校验完成");
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "校验 Action connector 失败");
+      setErrorText(error instanceof Error ? error.message : "校验 Action connector 配置失败");
     } finally {
       setValidating(false);
     }
@@ -177,7 +127,7 @@ export function ActionConnectorIntegrationView(props: {
         <div className="resource-center-section-header">
           <div>
             <h3>{props.detail.instance.name}</h3>
-            <p>连接业务系统的通用 Action API，让 agent 通过受控动作读取或操作外部系统。</p>
+            <p>连接外部业务系统，让 agent 通过受控工具请求读取或操作系统能力。</p>
           </div>
           <Tag color={status === "active" ? "success" : "default"}>{status}</Tag>
         </div>
@@ -214,65 +164,20 @@ export function ActionConnectorIntegrationView(props: {
                   onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))}
                 />
               </label>
-              <label className="field">
-                <span className="field-label">Base URL</span>
-                <Input
-                  value={draft.baseUrl}
-                  disabled={saving}
-                  placeholder="https://ops.example.com"
-                  onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Health Path</span>
-                <Input
-                  value={draft.healthPath}
-                  disabled={saving}
-                  onChange={(event) => setDraft((current) => ({ ...current, healthPath: event.target.value }))}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Delegation Header</span>
-                <Input
-                  value={draft.delegationHeader}
-                  disabled={saving}
-                  onChange={(event) => setDraft((current) => ({ ...current, delegationHeader: event.target.value }))}
-                />
-              </label>
             </div>
 
-            <Card size="small" title="Action Paths" className="antd-admin-card">
-              <div className="resource-center-form-grid">
-                <label className="field">
-                  <span className="field-label">List</span>
-                  <Input value={draft.actionListPath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionListPath: event.target.value }))} />
-                </label>
-                <label className="field">
-                  <span className="field-label">Search</span>
-                  <Input value={draft.actionSearchPath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionSearchPath: event.target.value }))} />
-                </label>
-                <label className="field">
-                  <span className="field-label">Describe</span>
-                  <Input value={draft.actionDescribePath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionDescribePath: event.target.value }))} />
-                </label>
-                <label className="field">
-                  <span className="field-label">Preview</span>
-                  <Input value={draft.actionPreviewPath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionPreviewPath: event.target.value }))} />
-                </label>
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">Execute</span>
-                  <Input value={draft.actionExecutePath} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, actionExecutePath: event.target.value }))} />
-                </label>
-                <label className="field resource-center-form-span-2">
-                  <span className="field-label">Identity</span>
-                  <Input
-                    value={draft.identityPath}
-                    disabled={saving}
-                    placeholder="/api/v1/agent-actions/identity"
-                    onChange={(event) => setDraft((current) => ({ ...current, identityPath: event.target.value }))}
-                  />
-                </label>
-              </div>
+            <Card size="small" title="Connector" className="antd-admin-card">
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="Connector ID">
+                  <Typography.Text code copyable>{props.detail.instance.id}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Slug">
+                  <Typography.Text code>{props.detail.instance.slug}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Agent Mode">
+                  <Typography.Text code>{asString(props.detail.config.agentModeId) || "default"}</Typography.Text>
+                </Descriptions.Item>
+              </Descriptions>
             </Card>
 
             <Card size="small" title="Runtime Prompt" className="antd-admin-card">
@@ -308,23 +213,6 @@ export function ActionConnectorIntegrationView(props: {
               </Space>
             </Card>
 
-            <Card size="small" title="Risk Policy" className="antd-admin-card">
-              <Space direction="vertical" size={12} className="admin-full-width">
-                <label className="field">
-                  <span className="field-label">Read actions</span>
-                  <Switch checked={draft.allowReadActions} disabled={saving} onChange={(checked) => setDraft((current) => ({ ...current, allowReadActions: checked }))} />
-                </label>
-                <label className="field">
-                  <span className="field-label">Low-risk write actions</span>
-                  <Switch checked={draft.allowLowRiskActions} disabled={saving} onChange={(checked) => setDraft((current) => ({ ...current, allowLowRiskActions: checked }))} />
-                </label>
-                <label className="field">
-                  <span className="field-label">High-risk actions</span>
-                  <Switch checked={draft.allowHighRiskActions} disabled={saving} onChange={(checked) => setDraft((current) => ({ ...current, allowHighRiskActions: checked }))} />
-                </label>
-              </Space>
-            </Card>
-
             <label className="field">
               <span className="field-label">实例描述</span>
               <Input.TextArea
@@ -340,7 +228,7 @@ export function ActionConnectorIntegrationView(props: {
                 保存配置
               </Button>
               <Button onClick={() => void handleValidate()} loading={validating}>
-                校验连接
+                校验配置
               </Button>
             </Space>
           </Space>

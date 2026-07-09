@@ -107,11 +107,10 @@ async function upsertActionConnector(
 
 export function createActionConnectorProvisionRouter(options: {
   db: IntegrationInstanceRepositoryDb;
-  fetchImpl?: typeof fetch;
 }) {
   const router = express.Router();
   const repository = new IntegrationInstanceRepository(options.db);
-  const validator = new ActionConnectorIntegrationAdapter(options.fetchImpl);
+  const validator = new ActionConnectorIntegrationAdapter();
 
   router.post("/provision", async (req: Request, res: Response) => {
     let payload: ProvisionRequest;
