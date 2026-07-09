@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Card, Input, Segmented, Select, Space, Switch, Tag } from "antd";
 
 import { updateIntegrationInstance, validateIntegrationInstance } from "./api";
+import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "./actionConnectorRuntimePrompt";
 import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
@@ -59,6 +60,7 @@ function buildDraft(detail: IntegrationDetail): ActionConnectorConfigDraft {
     actionExecutePath: asString(detail.config.actionExecutePath) || DEFAULTS.actionExecutePath,
     identityPath: asString(detail.config.identityPath),
     delegationHeader: asString(detail.config.delegationHeader) || DEFAULTS.delegationHeader,
+    runtimePrompt: asString(detail.config.runtimePrompt) || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
     allowReadActions: asBoolean(policy.allowReadActions, true),
     allowLowRiskActions: asBoolean(policy.allowLowRiskActions, false),
     allowHighRiskActions: asBoolean(policy.allowHighRiskActions, false)
@@ -69,6 +71,12 @@ function pathInput(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function configWithoutLegacyRuntimeInstruction(config: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...config };
+  delete next.runtimeInstruction;
+  return next;
 }
 
 export function ActionConnectorIntegrationView(props: {
@@ -113,11 +121,13 @@ export function ActionConnectorIntegrationView(props: {
     setErrorText("");
     setSuccessText("");
     try {
+      const existingPolicy = asRecord(props.detail.config.policy);
       const detail = await updateIntegrationInstance(props.detail.instance.id, {
         name: name.trim(),
         description: description.trim() || null,
         status,
         config: {
+          ...configWithoutLegacyRuntimeInstruction(props.detail.config),
           displayName: draft.displayName.trim(),
           baseUrl: draft.baseUrl.trim().replace(/\/+$/, ""),
           healthPath: pathInput(draft.healthPath) || DEFAULTS.healthPath,
@@ -128,7 +138,9 @@ export function ActionConnectorIntegrationView(props: {
           actionExecutePath: pathInput(draft.actionExecutePath) || DEFAULTS.actionExecutePath,
           identityPath: pathInput(draft.identityPath),
           delegationHeader: draft.delegationHeader.trim() || DEFAULTS.delegationHeader,
+          runtimePrompt: draft.runtimePrompt.trim() || DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT,
           policy: {
+            ...existingPolicy,
             allowReadActions: draft.allowReadActions,
             allowLowRiskActions: draft.allowLowRiskActions,
             allowHighRiskActions: draft.allowHighRiskActions
@@ -261,6 +273,39 @@ export function ActionConnectorIntegrationView(props: {
                   />
                 </label>
               </div>
+            </Card>
+
+            <Card size="small" title="Runtime Prompt" className="antd-admin-card">
+              <Space direction="vertical" size={12} className="admin-full-width">
+                <Alert
+                  type="info"
+                  showIcon
+                  className="admin-alert-inline"
+                  message="这是 Action Connector 的协议层 prompt 模板。业务规则应放在 Agent Mode 的 AGENTS.md；这里只描述工具协议、安全边界和动态上下文占位符。"
+                />
+                <label className="field">
+                  <span className="field-label">Prompt 模板</span>
+                  <Input.TextArea
+                    rows={12}
+                    value={draft.runtimePrompt}
+                    disabled={saving}
+                    spellCheck={false}
+                    onChange={(event) => setDraft((current) => ({ ...current, runtimePrompt: event.target.value }))}
+                  />
+                </label>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                  <span className="field-help">
+                    可用占位符：{"{{displayName}}"}, {"{{conversationId}}"}, {"{{runId}}"}, {"{{locale}}"}, {"{{timezone}}"}, {"{{mode}}"}, {"{{policyJson}}"}, {"{{approvedActionBlock}}"}, {"{{contextJson}}"}, {"{{cliPathJson}}"}, {"{{message}}"}
+                  </span>
+                  <Button
+                    type="default"
+                    disabled={saving}
+                    onClick={() => setDraft((current) => ({ ...current, runtimePrompt: DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT }))}
+                  >
+                    恢复默认
+                  </Button>
+                </div>
+              </Space>
             </Card>
 
             <Card size="small" title="Risk Policy" className="antd-admin-card">

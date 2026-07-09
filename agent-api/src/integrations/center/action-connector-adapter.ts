@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { IntegrationValidationOutcome } from "./dingtalk-adapter.js";
+import { DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT } from "../action-connector/default-prompt.js";
 
 const optionalBaseUrlSchema = z
   .union([
@@ -19,7 +20,7 @@ export const actionConnectorConfigSchema = z.object({
   baseUrl: optionalBaseUrlSchema,
   delegationHeader: z.string().trim().min(1).default("Authorization"),
   agentModeId: z.string().trim().min(1).default("default"),
-  runtimeInstruction: z.string().trim().max(12000).default(""),
+  runtimePrompt: z.string().trim().max(24000).default(DEFAULT_ACTION_CONNECTOR_RUNTIME_PROMPT),
   policy: z
     .object({
       allowReadActions: z.boolean().default(true),

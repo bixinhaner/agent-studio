@@ -249,7 +249,7 @@ describe("Action connector provision router", () => {
     expect(db.instances[0].name).toBe("New Name");
   });
 
-  it("preserves the selected agent mode but clears legacy connector prompts when reprovision omits them", async () => {
+  it("preserves the selected agent mode and materializes the default runtime prompt", async () => {
     const db = createDbMock([
       {
         id: "connector-existing",
@@ -285,8 +285,49 @@ describe("Action connector provision router", () => {
       .expect(200);
 
     expect(db.configs[0].config).toMatchObject({
+      agentModeId: "agent-mode-from-studio"
+    });
+    expect(db.configs[0].config.runtimePrompt).toContain("action-connector-cli");
+    expect(db.configs[0].config).not.toHaveProperty("runtimeInstruction");
+  });
+
+  it("preserves a Studio-managed runtime prompt when reprovision omits it", async () => {
+    const db = createDbMock([
+      {
+        id: "connector-existing",
+        organizationId: null,
+        type: "action_connector",
+        slug: "external-ops",
+        name: "External Operations",
+        description: null,
+        status: "active",
+        isSystemSingleton: false,
+        createdAt: "2026-07-06T00:00:00.000Z",
+        updatedAt: "2026-07-06T00:00:00.000Z"
+      }
+    ]);
+    db.configs.push({
+      id: "config-existing",
+      integrationInstanceId: "connector-existing",
+      config: {
+        displayName: "External Operations",
+        agentModeId: "agent-mode-from-studio",
+        runtimePrompt: "Studio-managed connector runtime prompt."
+      },
+      createdAt: "2026-07-06T00:00:00.000Z",
+      updatedAt: "2026-07-06T00:00:00.000Z"
+    });
+    const app = buildApp({ token: "expected-token", db: db.db });
+
+    await request(app)
+      .post("/api/integrations/action-connectors/provision")
+      .set("Authorization", "Bearer expected-token")
+      .send(payload())
+      .expect(200);
+
+    expect(db.configs[0].config).toMatchObject({
       agentModeId: "agent-mode-from-studio",
-      runtimeInstruction: ""
+      runtimePrompt: "Studio-managed connector runtime prompt."
     });
   });
 

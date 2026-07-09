@@ -382,6 +382,7 @@ export type ActionConnectorConfigDraft = {
   actionExecutePath: string;
   identityPath: string;
   delegationHeader: string;
+  runtimePrompt: string;
   allowReadActions: boolean;
   allowLowRiskActions: boolean;
   allowHighRiskActions: boolean;
