@@ -64,7 +64,15 @@ Optional filters include `status`, `keyword`, `creator`, and `templateId`. Descr
 node "$CLI" request GET /api/v1/system/info '{"operationId":"get.system.info","reason":"Read OMC runtime information"}'
 ```
 
-Use for runtime version and system information, not for business health. For health or license questions, search the live `system` or `licenses` category.
+Use for runtime version and system information, not for business health. Use the direct system-license operation below for license questions.
+
+## System license
+
+```bash
+node "$CLI" request GET /api/v1/system-license '{"operationId":"get.system_license","reason":"Read the current system license"}'
+```
+
+Use this directly for current license status. A `404` response whose message is `no system license configured` means no license is configured; it is not a reason to search for another endpoint.
 
 ## Combining independent reads
 

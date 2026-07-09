@@ -1,4 +1,4 @@
 interface:
   display_name: "OMC Operations"
   short_description: "Query and operate OMC through its live API catalog"
-  default_prompt: "Use $omc-operations to inspect the current OMC state and complete the requested operation."
+  default_prompt: "Use $omc-operations to complete the OMC request. Reuse its already-loaded instructions within the same thread, use hot routes directly, and open Skill files only for an unfamiliar operation."

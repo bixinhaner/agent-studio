@@ -29,8 +29,13 @@ Do not rediscover a known operation merely because a new user turn started. Redi
 | Alarm totals or severity distribution | `GET /api/v1/alarms/statistics` | `get.alarms.statistics` |
 | Operations task list | `GET /api/v1/ops/tasks` | `get.ops.tasks` |
 | Runtime system information | `GET /api/v1/system/info` | `get.system.info` |
+| Current system license | `GET /api/v1/system-license` | `get.system_license` |
 
 For these intents, do not call catalog or describe first. Use `page=1&page_size=20` for record lists unless the user requests another range.
+
+An empty `counts` object from `/api/v1/devices/stats` means the current user can see zero devices, so online and offline counts are both zero. Answer directly; do not call `/api/v1/devices` merely to verify the empty result.
+
+A `404` from `/api/v1/system-license` with `no system license configured` is a valid domain result meaning no license is configured. Report it directly; do not retry or search for another license endpoint.
 
 ## Use the connector CLI
 

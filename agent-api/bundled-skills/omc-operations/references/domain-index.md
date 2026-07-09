@@ -15,7 +15,7 @@ Use this index to choose a likely live catalog category. Category names and rout
 | Files, transfer, backup, restore | `files`, `backup` | `list`, `transfer`, `download`, `backup` |
 | Operations, provisioning, scheduled work | `ops`, `tasks`, `provisioning` | `tasks`, `status`, `executions`, `provision` |
 | Users, roles, permissions, audit, logs | `users`, `roles`, `permissions`, `audit-logs`, `logs` | `list`, `roles`, `audit`, `events` |
-| License, runtime, and system administration | `licenses`, `system` | `info`, `status`, `health`, `license` |
+| License, runtime, and system administration | `system-license`, `system` | `info`, `status`, `health`, `license` |
 | Northbound integrations | `northbound` | `destinations`, `status`, `configuration` |
 
 If none of these categories exists, call `/api/v1/agent/catalog/categories` and choose from the returned live index. Then search only that category:

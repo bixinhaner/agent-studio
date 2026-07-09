@@ -75,6 +75,7 @@ describe("buildActionConnectorRuntimePrompt", () => {
 
     expect(prompt).toContain("可用 CLI");
     expect(prompt).toContain("优先遵循已启用 Skill");
+    expect(prompt).toContain("同一对话中已读取的 Skill 不要重复打开");
     expect(prompt).toContain("仅当操作未知时才搜索 catalog");
     expect(prompt).toContain("只有参数、路径变量、请求体或写入语义不明确时才 describe");
     expect(prompt).not.toContain("先用 catalog/describe");

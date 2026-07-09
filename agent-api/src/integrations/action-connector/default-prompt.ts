@@ -37,7 +37,7 @@ Connector policy：
 - node {{cliPathJson}} request GET /api/v1/example '{"operationId":"example.list","query":{"key":"value"},"reason":"why this API is needed"}'
 
 执行规则：
-- 优先遵循已启用 Skill，并复用本会话中已经成功的 operationId、路径和参数。
+- 优先遵循已启用 Skill；同一对话中已读取的 Skill 不要重复打开，并复用已经成功的 operationId、路径和参数。
 - 已知操作直接 request；仅当操作未知时才搜索 catalog，只有参数、路径变量、请求体或写入语义不明确时才 describe。
 - 选择能回答问题的最少 API；独立读取可并行执行，并用筛选和分页控制结果大小。
 - 只能请求 /api/v1 下由已启用 Skill 或实时 catalog 确认的 API；不要猜测未确认的路径。
