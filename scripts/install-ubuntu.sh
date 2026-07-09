@@ -666,11 +666,13 @@ render_caddy_config() {
   local destination="$2"
   local domain="$3"
   local ui_root="$4"
-  local upstream_host="${5:-127.0.0.1}"
-  local upstream_port="${6:-8787}"
+  local admin_upstream_host="${5:-127.0.0.1}"
+  local admin_upstream_port="${6:-8787}"
+  local chat_upstream_host="${7:-127.0.0.1}"
+  local chat_upstream_port="${8:-8788}"
 
   ensure_dir "$(dirname "$destination")"
-  python3 - "$template" "$destination" "$domain" "$ui_root" "$upstream_host" "$upstream_port" <<'PY'
+  python3 - "$template" "$destination" "$domain" "$ui_root" "$admin_upstream_host" "$admin_upstream_port" "$chat_upstream_host" "$chat_upstream_port" <<'PY'
 from pathlib import Path
 import sys
 
@@ -678,14 +680,18 @@ template = Path(sys.argv[1]).read_text()
 destination = Path(sys.argv[2])
 domain = sys.argv[3]
 ui_root = sys.argv[4]
-upstream_host = sys.argv[5]
-upstream_port = sys.argv[6]
+admin_upstream_host = sys.argv[5]
+admin_upstream_port = sys.argv[6]
+chat_upstream_host = sys.argv[7]
+chat_upstream_port = sys.argv[8]
 destination.write_text(
     template
     .replace("{$DOMAIN}", domain)
     .replace("{$UI_DIST_ROOT}", ui_root)
-    .replace("{$CADDY_UPSTREAM_HOST}", upstream_host)
-    .replace("{$CADDY_UPSTREAM_PORT}", upstream_port)
+    .replace("{$CADDY_ADMIN_UPSTREAM_HOST}", admin_upstream_host)
+    .replace("{$CADDY_ADMIN_UPSTREAM_PORT}", admin_upstream_port)
+    .replace("{$CADDY_CHAT_UPSTREAM_HOST}", chat_upstream_host)
+    .replace("{$CADDY_CHAT_UPSTREAM_PORT}", chat_upstream_port)
 )
 PY
 }
@@ -879,7 +885,7 @@ ensure_caddy_config() {
     return 0
   fi
 
-  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787"
+  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787" "127.0.0.1" "8788"
   ensure_secure_file_mode "$CADDY_CONFIG_FILE" 644
   if command_exists caddy; then
     caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null 2>&1 || true

@@ -11,9 +11,16 @@ GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_REF="${GIT_REF:-main}"
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
+ADMIN_API_PORT="${ADMIN_API_PORT:-}"
+CHAT_API_PORT="${CHAT_API_PORT:-}"
+DEPLOY_SCOPE="${AGENT_STUDIO_DEPLOY_SCOPE:-all}"
 DOMAIN="${DOMAIN:-}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-}"
 CADDY_UPSTREAM_PORT="${CADDY_UPSTREAM_PORT:-}"
+CADDY_ADMIN_UPSTREAM_HOST="${CADDY_ADMIN_UPSTREAM_HOST:-}"
+CADDY_ADMIN_UPSTREAM_PORT="${CADDY_ADMIN_UPSTREAM_PORT:-}"
+CADDY_CHAT_UPSTREAM_HOST="${CADDY_CHAT_UPSTREAM_HOST:-}"
+CADDY_CHAT_UPSTREAM_PORT="${CADDY_CHAT_UPSTREAM_PORT:-}"
 CADDY_EXTRA_SNIPPET_DIR="${CADDY_EXTRA_SNIPPET_DIR:-/etc/caddy/conf.d}"
 ASSET_RETENTION_DAYS="${AGENT_STUDIO_ASSET_RETENTION_DAYS:-}"
 FRONTEND_BUILD_NODE_OPTIONS="${FRONTEND_BUILD_NODE_OPTIONS:---max-old-space-size=3072}"
@@ -37,12 +44,27 @@ Options:
   --remote <name>        Git remote name [default: $GIT_REMOTE]
   --ref <name>           Git branch to deploy [default: $GIT_REF]
   --domain <name>        Public domain used to render Caddy config [default: install state domain]
+  --frontend-only        Build and publish frontend assets only; do not drain or restart API
+  --admin-only           Build backend and restart the admin API only
+  --chat-only            Build backend, drain active runs, and restart the chat API only
+  --all                  Build frontend/backend and restart both APIs [default]
   --api-host <host>      Host written into PM2 env [default: $API_HOST]
-  --api-port <port>      Port written into PM2 env [default: $API_PORT]
+  --api-port <port>      Backward-compatible admin API port [default: $API_PORT]
+  --admin-api-port <port>
+                         Admin API port [default: --api-port value]
+  --chat-api-port <port> Chat/runtime API port [default: admin port + 1]
   --caddy-upstream-host <host>
-                         Backend host used by Caddy reverse proxy [default: 127.0.0.1]
+                         Backward-compatible upstream host applied to both admin and chat [default: 127.0.0.1]
   --caddy-upstream-port <port>
-                         Backend port used by Caddy reverse proxy [default: --api-port value]
+                         Backward-compatible admin upstream port [default: admin API port]
+  --caddy-admin-upstream-host <host>
+                         Admin upstream host used by Caddy reverse proxy [default: --caddy-upstream-host value]
+  --caddy-admin-upstream-port <port>
+                         Admin upstream port used by Caddy reverse proxy [default: --admin-api-port value]
+  --caddy-chat-upstream-host <host>
+                         Chat upstream host used by Caddy reverse proxy [default: --caddy-upstream-host value]
+  --caddy-chat-upstream-port <port>
+                         Chat upstream port used by Caddy reverse proxy [default: --chat-api-port value]
   --asset-retention-days <days>
                          Days to keep old frontend assets; 0 disables pruning [default: ${ASSET_RETENTION_DAYS:-30}]
   --frontend-node-options <value>
@@ -75,6 +97,22 @@ while [[ $# -gt 0 ]]; do
       DOMAIN="$2"
       shift 2
       ;;
+    --frontend-only)
+      DEPLOY_SCOPE="frontend"
+      shift
+      ;;
+    --admin-only)
+      DEPLOY_SCOPE="admin"
+      shift
+      ;;
+    --chat-only)
+      DEPLOY_SCOPE="chat"
+      shift
+      ;;
+    --all)
+      DEPLOY_SCOPE="all"
+      shift
+      ;;
     --api-host)
       API_HOST="$2"
       shift 2
@@ -83,12 +121,36 @@ while [[ $# -gt 0 ]]; do
       API_PORT="$2"
       shift 2
       ;;
+    --admin-api-port)
+      ADMIN_API_PORT="$2"
+      shift 2
+      ;;
+    --chat-api-port)
+      CHAT_API_PORT="$2"
+      shift 2
+      ;;
     --caddy-upstream-host)
       CADDY_UPSTREAM_HOST="$2"
       shift 2
       ;;
     --caddy-upstream-port)
       CADDY_UPSTREAM_PORT="$2"
+      shift 2
+      ;;
+    --caddy-admin-upstream-host)
+      CADDY_ADMIN_UPSTREAM_HOST="$2"
+      shift 2
+      ;;
+    --caddy-admin-upstream-port)
+      CADDY_ADMIN_UPSTREAM_PORT="$2"
+      shift 2
+      ;;
+    --caddy-chat-upstream-host)
+      CADDY_CHAT_UPSTREAM_HOST="$2"
+      shift 2
+      ;;
+    --caddy-chat-upstream-port)
+      CADDY_CHAT_UPSTREAM_PORT="$2"
       shift 2
       ;;
     --asset-retention-days)
@@ -140,24 +202,57 @@ fi
 pm2_template_path="$script_dir/../templates/pm2-ecosystem.config.cjs.template"
 caddy_template_path="$script_dir/../templates/Caddyfile.template"
 
+case "$DEPLOY_SCOPE" in
+  all|frontend|admin|chat) ;;
+  *) die "unknown deploy scope: $DEPLOY_SCOPE" ;;
+esac
+
+if [[ -z "$ADMIN_API_PORT" ]]; then
+  ADMIN_API_PORT="$API_PORT"
+fi
+
+if [[ -z "$CHAT_API_PORT" ]]; then
+  if [[ "$ADMIN_API_PORT" =~ ^[0-9]+$ ]]; then
+    CHAT_API_PORT="$((ADMIN_API_PORT + 1))"
+  else
+    CHAT_API_PORT="8788"
+  fi
+fi
+
 if [[ -z "$CADDY_UPSTREAM_HOST" ]]; then
   CADDY_UPSTREAM_HOST="127.0.0.1"
 fi
 
 if [[ -z "$CADDY_UPSTREAM_PORT" ]]; then
-  CADDY_UPSTREAM_PORT="$API_PORT"
+  CADDY_UPSTREAM_PORT="$ADMIN_API_PORT"
 fi
 
-if [[ -z "$AGENT_DRAIN_STATUS_URL" ]]; then
-  agent_drain_status_host="$API_HOST"
-  if [[ "$agent_drain_status_host" == "0.0.0.0" || "$agent_drain_status_host" == "::" ]]; then
-    agent_drain_status_host="127.0.0.1"
-  fi
-  AGENT_DRAIN_STATUS_URL="http://${agent_drain_status_host}:${API_PORT}/internal/deploy/drain-status"
+if [[ -z "$CADDY_ADMIN_UPSTREAM_HOST" ]]; then
+  CADDY_ADMIN_UPSTREAM_HOST="$CADDY_UPSTREAM_HOST"
+fi
+
+if [[ -z "$CADDY_ADMIN_UPSTREAM_PORT" ]]; then
+  CADDY_ADMIN_UPSTREAM_PORT="$CADDY_UPSTREAM_PORT"
+fi
+
+if [[ -z "$CADDY_CHAT_UPSTREAM_HOST" ]]; then
+  CADDY_CHAT_UPSTREAM_HOST="$CADDY_UPSTREAM_HOST"
+fi
+
+if [[ -z "$CADDY_CHAT_UPSTREAM_PORT" ]]; then
+  CADDY_CHAT_UPSTREAM_PORT="$CHAT_API_PORT"
 fi
 
 if [[ -n "$ASSET_RETENTION_DAYS" && ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   die "--asset-retention-days must be a non-negative integer"
+fi
+
+if [[ ! "$ADMIN_API_PORT" =~ ^[0-9]+$ || "$ADMIN_API_PORT" == "0" ]]; then
+  die "--admin-api-port must be a positive integer"
+fi
+
+if [[ ! "$CHAT_API_PORT" =~ ^[0-9]+$ || "$CHAT_API_PORT" == "0" ]]; then
+  die "--chat-api-port must be a positive integer"
 fi
 
 if [[ ! "$AGENT_DRAIN_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -170,6 +265,26 @@ fi
 
 shell_quote() {
   printf '%q' "$1"
+}
+
+deploy_builds_backend() {
+  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "admin" || "$DEPLOY_SCOPE" == "chat" ]]
+}
+
+deploy_builds_frontend() {
+  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "frontend" ]]
+}
+
+deploy_restarts_admin() {
+  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "admin" ]]
+}
+
+deploy_restarts_chat() {
+  [[ "$DEPLOY_SCOPE" == "all" || "$DEPLOY_SCOPE" == "chat" ]]
+}
+
+deploy_refreshes_caddy() {
+  [[ "$DEPLOY_SCOPE" == "all" ]]
 }
 
 require_repo_checkout() {
@@ -193,7 +308,7 @@ render_pm2_ecosystem() {
 
   local rendered_ecosystem
   rendered_ecosystem="$(mktemp)"
-  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_APP_NAME" "$APP_API_DIR" "$API_HOST" "$API_PORT" <<'PY'
+  python3 - "$pm2_template_path" "$rendered_ecosystem" "$PM2_ADMIN_APP_NAME" "$PM2_CHAT_APP_NAME" "$APP_API_DIR" "$API_HOST" "$ADMIN_API_PORT" "$CHAT_API_PORT" <<'PY'
 from pathlib import Path
 import sys
 
@@ -201,10 +316,12 @@ template = Path(sys.argv[1]).read_text()
 destination = Path(sys.argv[2])
 rendered = (
     template
-    .replace("__PM2_APP_NAME__", sys.argv[3])
-    .replace("__APP_API_DIR__", sys.argv[4])
-    .replace("__API_HOST__", sys.argv[5])
-    .replace("__API_PORT__", sys.argv[6])
+    .replace("__PM2_ADMIN_APP_NAME__", sys.argv[3])
+    .replace("__PM2_CHAT_APP_NAME__", sys.argv[4])
+    .replace("__APP_API_DIR__", sys.argv[5])
+    .replace("__API_HOST__", sys.argv[6])
+    .replace("__ADMIN_API_PORT__", sys.argv[7])
+    .replace("__CHAT_API_PORT__", sys.argv[8])
 )
 destination.write_text(rendered)
 PY
@@ -222,10 +339,12 @@ render_caddy_config() {
   local destination="$2"
   local domain="$3"
   local ui_root="$4"
-  local upstream_host="$5"
-  local upstream_port="$6"
+  local admin_upstream_host="$5"
+  local admin_upstream_port="$6"
+  local chat_upstream_host="$7"
+  local chat_upstream_port="$8"
 
-  python3 - "$template" "$destination" "$domain" "$ui_root" "$upstream_host" "$upstream_port" <<'PY'
+  python3 - "$template" "$destination" "$domain" "$ui_root" "$admin_upstream_host" "$admin_upstream_port" "$chat_upstream_host" "$chat_upstream_port" <<'PY'
 from pathlib import Path
 import sys
 
@@ -233,14 +352,18 @@ template = Path(sys.argv[1]).read_text()
 destination = Path(sys.argv[2])
 domain = sys.argv[3]
 ui_root = sys.argv[4]
-upstream_host = sys.argv[5]
-upstream_port = sys.argv[6]
+admin_upstream_host = sys.argv[5]
+admin_upstream_port = sys.argv[6]
+chat_upstream_host = sys.argv[7]
+chat_upstream_port = sys.argv[8]
 rendered = (
     template
     .replace("{$DOMAIN}", domain)
     .replace("{$UI_DIST_ROOT}", ui_root)
-    .replace("{$CADDY_UPSTREAM_HOST}", upstream_host)
-    .replace("{$CADDY_UPSTREAM_PORT}", upstream_port)
+    .replace("{$CADDY_ADMIN_UPSTREAM_HOST}", admin_upstream_host)
+    .replace("{$CADDY_ADMIN_UPSTREAM_PORT}", admin_upstream_port)
+    .replace("{$CADDY_CHAT_UPSTREAM_HOST}", chat_upstream_host)
+    .replace("{$CADDY_CHAT_UPSTREAM_PORT}", chat_upstream_port)
 )
 destination.write_text(rendered)
 PY
@@ -314,7 +437,15 @@ refresh_caddy_config() {
 
   local rendered_config
   rendered_config="$(mktemp)"
-  render_caddy_config "$caddy_template_path" "$rendered_config" "$DOMAIN" "$APP_UI_DIR/dist" "$CADDY_UPSTREAM_HOST" "$CADDY_UPSTREAM_PORT"
+  render_caddy_config \
+    "$caddy_template_path" \
+    "$rendered_config" \
+    "$DOMAIN" \
+    "$APP_UI_DIR/dist" \
+    "$CADDY_ADMIN_UPSTREAM_HOST" \
+    "$CADDY_ADMIN_UPSTREAM_PORT" \
+    "$CADDY_CHAT_UPSTREAM_HOST" \
+    "$CADDY_CHAT_UPSTREAM_PORT"
   append_extra_caddy_snippets "$rendered_config"
 
   if command_exists caddy; then
@@ -395,18 +526,45 @@ disable_deploy_drain() {
   fi
 }
 
+pm2_app_exists() {
+  local app_name="$1"
+  run_as_app_user_shell "pm2 describe '$app_name' >/dev/null 2>&1"
+}
+
 pm2_app_pid() {
-  run_as_app_user_shell "pm2 pid '$PM2_APP_NAME' 2>/dev/null | tail -n 1" | tr -dc '0-9'
+  local app_name="$1"
+  run_as_app_user_shell "pm2 pid '$app_name' 2>/dev/null | tail -n 1" | tr -dc '0-9'
+}
+
+drain_pm2_app_name() {
+  if pm2_app_exists "$PM2_CHAT_APP_NAME"; then
+    printf '%s\n' "$PM2_CHAT_APP_NAME"
+  else
+    printf '%s\n' "$PM2_ADMIN_APP_NAME"
+  fi
+}
+
+drain_status_url() {
+  local status_host="$API_HOST"
+  local status_port="$CHAT_API_PORT"
+  if ! pm2_app_exists "$PM2_CHAT_APP_NAME"; then
+    status_port="$ADMIN_API_PORT"
+  fi
+  if [[ "$status_host" == "0.0.0.0" || "$status_host" == "::" ]]; then
+    status_host="127.0.0.1"
+  fi
+  printf 'http://%s:%s/internal/deploy/drain-status\n' "$status_host" "$status_port"
 }
 
 active_agent_run_count() {
   local api_pid="$1"
+  local status_url="$2"
   [[ -n "$api_pid" && "$api_pid" != "0" ]] || {
     printf '%s\n' "0"
     return 0
   }
   local status_json
-  status_json="$(curl -fsS --max-time 2 "$AGENT_DRAIN_STATUS_URL" 2>/dev/null || true)"
+  status_json="$(curl -fsS --max-time 2 "$status_url" 2>/dev/null || true)"
   if [[ -n "$status_json" ]]; then
     local status_count
     status_count="$(STATUS_JSON="$status_json" python3 - <<'PY' 2>/dev/null || true
@@ -444,19 +602,24 @@ wait_for_agent_drain() {
   fi
 
   local api_pid
-  api_pid="$(pm2_app_pid || true)"
+  local drain_app_name
+  drain_app_name="$(drain_pm2_app_name)"
+  api_pid="$(pm2_app_pid "$drain_app_name" || true)"
   if [[ -z "$api_pid" || "$api_pid" == "0" ]]; then
-    log_info "PM2 app is not running; no active agent runs to drain"
+    log_info "PM2 app $drain_app_name is not running; no active agent runs to drain"
     return 0
   fi
 
   log_step "Waiting for active agent runs to finish"
-  log_info "Drain status endpoint: $AGENT_DRAIN_STATUS_URL"
+  local status_url
+  status_url="${AGENT_DRAIN_STATUS_URL:-$(drain_status_url)}"
+  log_info "Drain PM2 app: $drain_app_name"
+  log_info "Drain status endpoint: $status_url"
   local started
   started="$(date +%s)"
   while true; do
     local active_count
-    active_count="$(active_agent_run_count "$api_pid")"
+    active_count="$(active_agent_run_count "$api_pid" "$status_url")"
     if [[ "$active_count" == "0" ]]; then
       log_info "No active agent runs remain"
       return 0
@@ -643,16 +806,28 @@ build_frontend() {
   [[ -d "$APP_UI_DIR/dist/assets" ]] || die "frontend build did not produce dist/assets"
 }
 
-restart_pm2() {
+restart_pm2_app() {
+  local app_name="$1"
+  log_step "Restarting PM2 app: $app_name"
+  if pm2_app_exists "$app_name"; then
+    run_as_app_user_shell "pm2 restart '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
+  else
+    run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$app_name' --update-env"
+  fi
+}
+
+restart_pm2_targets() {
   log_step "Rendering PM2 ecosystem file"
   render_pm2_ecosystem
 
-  log_step "Restarting PM2 app"
-  if run_as_app_user_shell "pm2 describe '$PM2_APP_NAME' >/dev/null 2>&1"; then
-    run_as_app_user_shell "pm2 restart '$PM2_ECOSYSTEM_FILE' --only '$PM2_APP_NAME' --update-env"
-  else
-    run_as_app_user_shell "pm2 start '$PM2_ECOSYSTEM_FILE' --only '$PM2_APP_NAME' --update-env"
+  if deploy_restarts_admin; then
+    restart_pm2_app "$PM2_ADMIN_APP_NAME"
   fi
+
+  if deploy_restarts_chat; then
+    restart_pm2_app "$PM2_CHAT_APP_NAME"
+  fi
+
   run_as_app_user_shell "pm2 save"
 }
 
@@ -662,26 +837,50 @@ main() {
   require_command node
   require_command python3
   require_command curl
-  require_command pm2
+  if deploy_restarts_admin || deploy_restarts_chat; then
+    require_command pm2
+  fi
 
-  check_codex_linux_sandbox_prerequisites
+  if deploy_restarts_chat; then
+    check_codex_linux_sandbox_prerequisites
+  fi
   require_repo_checkout
-  enable_deploy_drain
-  trap disable_deploy_drain EXIT
   git_update
-  ensure_shared_python_runtime
-  build_backend
-  seed_rbac
-  build_frontend
-  wait_for_agent_drain
-  restart_pm2
-  disable_deploy_drain
-  trap - EXIT
-  refresh_caddy_config
+  if deploy_restarts_chat; then
+    ensure_shared_python_runtime
+  fi
+  if deploy_builds_backend; then
+    build_backend
+  fi
+  if deploy_restarts_admin; then
+    seed_rbac
+  fi
+  if deploy_builds_frontend; then
+    build_frontend
+  fi
+  if deploy_restarts_chat; then
+    enable_deploy_drain
+    trap disable_deploy_drain EXIT
+    wait_for_agent_drain
+  fi
+  if deploy_restarts_admin || deploy_restarts_chat; then
+    restart_pm2_targets
+  fi
+  if deploy_refreshes_caddy; then
+    refresh_caddy_config
+  else
+    log_info "Skipping Caddy config refresh for deploy scope: $DEPLOY_SCOPE"
+  fi
+  if deploy_restarts_chat; then
+    disable_deploy_drain
+    trap - EXIT
+  fi
 
   log_step "Deploy complete"
   log_info "Repo: $APP_REPO_DIR"
-  log_info "PM2 app: $PM2_APP_NAME"
+  log_info "Deploy scope: $DEPLOY_SCOPE"
+  log_info "PM2 admin app: $PM2_ADMIN_APP_NAME on $API_HOST:$ADMIN_API_PORT"
+  log_info "PM2 chat app: $PM2_CHAT_APP_NAME on $API_HOST:$CHAT_API_PORT"
   log_info "PM2 ecosystem: $PM2_ECOSYSTEM_FILE"
   log_info "Caddy config: $CADDY_CONFIG_FILE"
   log_info "Public domain: ${DOMAIN:-<unset>}"

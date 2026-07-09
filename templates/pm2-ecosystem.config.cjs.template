@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       // Default app name: agent-studio-api
-      name: "__PM2_APP_NAME__",
+      name: "__PM2_ADMIN_APP_NAME__",
       cwd: "__APP_API_DIR__",
       script: "dist/index.js",
       interpreter: "node",
@@ -13,7 +13,25 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         HOST: "__API_HOST__",
-        PORT: "__API_PORT__"
+        PORT: "__ADMIN_API_PORT__",
+        AGENT_STUDIO_SERVICE_ROLE: "admin"
+      }
+    },
+    {
+      // Dedicated chat/runtime app. Restart only this app for conversation changes.
+      name: "__PM2_CHAT_APP_NAME__",
+      cwd: "__APP_API_DIR__",
+      script: "dist/index.js",
+      interpreter: "node",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_restarts: 10,
+      env: {
+        NODE_ENV: "production",
+        HOST: "__API_HOST__",
+        PORT: "__CHAT_API_PORT__",
+        AGENT_STUDIO_SERVICE_ROLE: "chat"
       }
     }
   ]

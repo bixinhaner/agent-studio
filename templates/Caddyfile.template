@@ -2,9 +2,14 @@
   encode zstd gzip
   root * {$UI_DIST_ROOT}
 
-  @api path /api/* /public-api/* /openai/* /healthz
+  @chat_api path /api/chat/* /api/session /api/threads /api/threads/* /api/portal/* /api/fs/* /api/ai-response-reviews /api/ai-response-reviews/* /api/integrations/crest/* /api/integrations/zendesk/* /api/action-connectors/* /openai/* /public-api/thread-shares/* /public-api/thread-shares
+  handle @chat_api {
+    reverse_proxy {$CADDY_CHAT_UPSTREAM_HOST}:{$CADDY_CHAT_UPSTREAM_PORT}
+  }
+
+  @api path /api/* /public-api/* /healthz
   handle @api {
-    reverse_proxy {$CADDY_UPSTREAM_HOST}:{$CADDY_UPSTREAM_PORT}
+    reverse_proxy {$CADDY_ADMIN_UPSTREAM_HOST}:{$CADDY_ADMIN_UPSTREAM_PORT}
   }
 
   handle /internal/* {

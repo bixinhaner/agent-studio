@@ -9,7 +9,9 @@ source "$script_dir/lib/common.sh"
 
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
-HEALTH_URL="${HEALTH_URL:-http://$API_HOST:$API_PORT/healthz}"
+ADMIN_API_PORT="${ADMIN_API_PORT:-$API_PORT}"
+CHAT_API_PORT="${CHAT_API_PORT:-8788}"
+HEALTH_URL="${HEALTH_URL:-}"
 
 usage() {
   cat <<USAGE
@@ -164,6 +166,7 @@ check_env_files() {
 }
 
 main() {
+  HEALTH_URL="${HEALTH_URL:-http://$API_HOST:$ADMIN_API_PORT/healthz}"
   print_section "summary"
   printf 'repo: %s\n' "$APP_REPO_DIR"
   printf 'api dir: %s\n' "$APP_API_DIR"
@@ -172,13 +175,18 @@ main() {
   printf 'frontend env: %s\n' "$FRONTEND_ENV_FILE"
   printf 'caddy config: %s\n' "$CADDY_CONFIG_FILE"
   printf 'health url: %s\n' "$HEALTH_URL"
+  printf 'admin api: %s:%s (%s)\n' "$API_HOST" "$ADMIN_API_PORT" "$PM2_ADMIN_APP_NAME"
+  printf 'chat api: %s:%s (%s)\n' "$API_HOST" "$CHAT_API_PORT" "$PM2_CHAT_APP_NAME"
 
   try_run "required commands" check_required_commands
   try_run "env parseability" check_env_files
   try_run "build outputs" check_build_outputs
   try_run "pm2 status" run_as_app_user_shell "pm2 status"
-  try_run "pm2 logs" run_as_app_user_shell "pm2 logs '$PM2_APP_NAME' --lines 80 --nostream"
+  try_run "pm2 admin logs" run_as_app_user_shell "pm2 logs '$PM2_ADMIN_APP_NAME' --lines 80 --nostream"
+  try_run "pm2 chat logs" run_as_app_user_shell "pm2 logs '$PM2_CHAT_APP_NAME' --lines 80 --nostream"
   try_run "health check" curl --fail --silent --show-error "$HEALTH_URL"
+  try_run "admin health check" curl --fail --silent --show-error "http://$API_HOST:$ADMIN_API_PORT/healthz"
+  try_run "chat health check" curl --fail --silent --show-error "http://$API_HOST:$CHAT_API_PORT/healthz"
   try_run "caddy validate" caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile
   try_run "document render runtime" check_document_render_runtime
   try_run "prisma migrate status" run_as_app_user_shell "cd '$APP_API_DIR' && npx prisma migrate status"

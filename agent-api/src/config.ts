@@ -9,6 +9,7 @@ const schema = z.object({
   NODE_ENV: z.string().optional(),
   PORT: z.string().default("8787"),
   HOST: z.string().default("0.0.0.0"),
+  AGENT_STUDIO_SERVICE_ROLE: z.enum(["all", "admin", "chat"]).default("all"),
   AGENT_API_TOKEN: z.string().optional(),
   ACTION_CONNECTOR_ALLOWED_ORIGINS: z.string().optional(),
   DINGTALK_CLIENT_ID: z.string().optional(),
@@ -173,6 +174,7 @@ function defaultCookieSecure(nodeEnv: string | undefined): boolean {
 export const appConfig = {
   port: Number(env.PORT) || 8787,
   host: env.HOST,
+  serviceRole: env.AGENT_STUDIO_SERVICE_ROLE,
   token: (env.AGENT_API_TOKEN || "").trim(),
   actionConnectorAllowedOrigins: (env.ACTION_CONNECTOR_ALLOWED_ORIGINS || "")
     .split(",")

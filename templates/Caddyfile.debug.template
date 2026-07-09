@@ -2,9 +2,14 @@
   encode zstd gzip
   root * {$DEBUG_UI_DIST_ROOT}
 
-  @api path /api/* /public-api/* /openai/* /healthz
+  @chat_api path /api/chat/* /api/session /api/threads /api/threads/* /api/portal/* /api/fs/* /api/ai-response-reviews /api/ai-response-reviews/* /api/integrations/crest/* /api/integrations/zendesk/* /api/action-connectors/* /openai/* /public-api/thread-shares/* /public-api/thread-shares
+  handle @chat_api {
+    reverse_proxy {$DEBUG_CHAT_UPSTREAM_HOST}:{$DEBUG_CHAT_UPSTREAM_PORT}
+  }
+
+  @api path /api/* /public-api/* /healthz
   handle @api {
-    reverse_proxy {$DEBUG_UPSTREAM_HOST}:{$DEBUG_UPSTREAM_PORT}
+    reverse_proxy {$DEBUG_ADMIN_UPSTREAM_HOST}:{$DEBUG_ADMIN_UPSTREAM_PORT}
   }
 
   handle /internal/* {

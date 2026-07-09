@@ -9,10 +9,15 @@ source "$script_dir/lib/common.sh"
 
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8787}"
-HEALTH_URL="${HEALTH_URL:-http://$API_HOST:$API_PORT/healthz}"
+ADMIN_API_PORT="${ADMIN_API_PORT:-$API_PORT}"
+CHAT_API_PORT="${CHAT_API_PORT:-8788}"
+HEALTH_URL="${HEALTH_URL:-}"
+ADMIN_HEALTH_URL="${ADMIN_HEALTH_URL:-}"
+CHAT_HEALTH_URL="${CHAT_HEALTH_URL:-}"
 SKIP_CODEX_CHECK="${SKIP_CODEX_CHECK:-0}"
 
 usage() {
+  local default_health_url="${HEALTH_URL:-http://$API_HOST:$ADMIN_API_PORT/healthz}"
   cat <<USAGE
 Usage: $(basename "$0") [options]
 
@@ -21,8 +26,11 @@ Validate a deployed Agent Studio environment.
 Options:
   --repo-dir <path>      Repository checkout path [default: $APP_REPO_DIR]
   --api-host <host>      API host to probe [default: $API_HOST]
-  --api-port <port>      API port to probe [default: $API_PORT]
-  --health-url <url>     Full health endpoint override [default: $HEALTH_URL]
+  --api-port <port>      Backward-compatible admin API port [default: $API_PORT]
+  --admin-api-port <port>
+                         Admin API port to probe [default: --api-port value]
+  --chat-api-port <port> Chat API port to probe [default: $CHAT_API_PORT]
+  --health-url <url>     Full health endpoint override [default: $default_health_url]
   --skip-codex-check     Skip Codex runtime validation
   -h, --help             Show this help text
 USAGE
@@ -41,6 +49,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-port)
       API_PORT="$2"
+      ADMIN_API_PORT="$2"
+      shift 2
+      ;;
+    --admin-api-port)
+      ADMIN_API_PORT="$2"
+      shift 2
+      ;;
+    --chat-api-port)
+      CHAT_API_PORT="$2"
       shift 2
       ;;
     --health-url)
@@ -198,8 +215,9 @@ check_postgres() {
 }
 
 check_pm2() {
-  run_as_app_user_shell "pm2 status '$PM2_APP_NAME' >/dev/null"
-  print_ok "pm2 status is available for $PM2_APP_NAME"
+  run_as_app_user_shell "pm2 status '$PM2_ADMIN_APP_NAME' >/dev/null"
+  run_as_app_user_shell "pm2 status '$PM2_CHAT_APP_NAME' >/dev/null"
+  print_ok "pm2 status is available for $PM2_ADMIN_APP_NAME and $PM2_CHAT_APP_NAME"
 }
 
 check_caddy() {
@@ -213,6 +231,9 @@ check_caddy() {
 check_http() {
   curl --fail --silent --show-error "$HEALTH_URL" >/dev/null
   print_ok "health endpoint is reachable at $HEALTH_URL"
+  curl --fail --silent --show-error "$ADMIN_HEALTH_URL" >/dev/null
+  curl --fail --silent --show-error "$CHAT_HEALTH_URL" >/dev/null
+  print_ok "admin/chat health endpoints are reachable at $ADMIN_HEALTH_URL and $CHAT_HEALTH_URL"
 }
 
 check_codex_runtime() {
@@ -272,6 +293,8 @@ EOF"
 
 main() {
   HEALTH_URL="${HEALTH_URL:-http://$API_HOST:$API_PORT/healthz}"
+  ADMIN_HEALTH_URL="${ADMIN_HEALTH_URL:-http://$API_HOST:$ADMIN_API_PORT/healthz}"
+  CHAT_HEALTH_URL="${CHAT_HEALTH_URL:-http://$API_HOST:$CHAT_API_PORT/healthz}"
 
   check_commands
   check_required_files

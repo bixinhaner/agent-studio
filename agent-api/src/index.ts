@@ -284,6 +284,8 @@ import {
 } from "./public-share/thread-public-share-snapshot.js";
 
 const app = express();
+const runsAdminService = appConfig.serviceRole !== "chat";
+const runsChatService = appConfig.serviceRole !== "admin";
 const runtime = new CodexRuntime();
 type ActiveRuntimeTurn = {
   id: string;
@@ -10909,17 +10911,21 @@ async function cleanupExpiredSessions() {
   }
 }
 
-setInterval(() => {
-  void cleanupExpiredSessions();
-}, 60_000).unref();
+if (runsChatService) {
+  setInterval(() => {
+    void cleanupExpiredSessions();
+  }, 60_000).unref();
+}
 
-setInterval(() => {
-  void billingService.runReminderSweep().catch((error) => {
-    console.warn("billing reminder sweep failed", error instanceof Error ? error.message : String(error));
-  });
-}, 60 * 60_000).unref();
+if (runsAdminService) {
+  setInterval(() => {
+    void billingService.runReminderSweep().catch((error) => {
+      console.warn("billing reminder sweep failed", error instanceof Error ? error.message : String(error));
+    });
+  }, 60 * 60_000).unref();
+}
 
-if (isAppServerRuntimeEnabled()) {
+if (runsChatService && isAppServerRuntimeEnabled()) {
   process.once("exit", () => {
     shutdownCodexAppServerRuntime("node process exiting");
   });
@@ -10935,35 +10941,41 @@ if (isAppServerRuntimeEnabled()) {
 
 async function bootstrap() {
   await db.$connect();
-  const legacyThreadOwnerId = await users.findLegacyImportOwnerId(appConfig.legacyThreadOwnerId);
-  const imported = await importLegacyThreadsFromJson({
-    filePath: appConfig.threadStoreFile,
-    repository: threads,
-    defaultUserId: legacyThreadOwnerId
-  });
-  if (imported.importedCount) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `imported ${imported.importedCount} legacy thread(s) from ${appConfig.threadStoreFile}${imported.archivedPath ? ` -> ${imported.archivedPath}` : ""}`
-    );
+  if (runsAdminService) {
+    const legacyThreadOwnerId = await users.findLegacyImportOwnerId(appConfig.legacyThreadOwnerId);
+    const imported = await importLegacyThreadsFromJson({
+      filePath: appConfig.threadStoreFile,
+      repository: threads,
+      defaultUserId: legacyThreadOwnerId
+    });
+    if (imported.importedCount) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `imported ${imported.importedCount} legacy thread(s) from ${appConfig.threadStoreFile}${imported.archivedPath ? ` -> ${imported.archivedPath}` : ""}`
+      );
+    }
+    orgSyncScheduler.start();
+    zendeskAiReviewEmailReminderScheduler.start();
   }
-  orgSyncScheduler.start();
-  zendeskAiReviewEmailReminderScheduler.start();
-  dingtalkBotStream.start();
+  if (runsChatService) {
+    dingtalkBotStream.start();
+  }
   app.listen(appConfig.port, appConfig.host, () => {
     // eslint-disable-next-line no-console
-    console.log(`agent-studio-api listening on http://${appConfig.host}:${appConfig.port}`);
+    console.log(`agent-studio-api(${appConfig.serviceRole}) listening on http://${appConfig.host}:${appConfig.port}`);
   });
-  void prewarmAppServerRuntimeSessions().catch((error) => {
-    console.warn("failed to prewarm app-server runtime sessions", error instanceof Error ? error.message : String(error));
-  });
-  void zendesk.recoverInterruptedProcessingRuns({ reprocess: true }).then((result) => {
-    if (result.markedFailed > 0 || result.requeued > 0) {
-      console.log("recovered interrupted Zendesk runs", result);
-    }
-  }).catch((error) => {
-    console.warn("failed to recover interrupted Zendesk runs", error instanceof Error ? error.message : String(error));
-  });
+  if (runsChatService) {
+    void prewarmAppServerRuntimeSessions().catch((error) => {
+      console.warn("failed to prewarm app-server runtime sessions", error instanceof Error ? error.message : String(error));
+    });
+    void zendesk.recoverInterruptedProcessingRuns({ reprocess: true }).then((result) => {
+      if (result.markedFailed > 0 || result.requeued > 0) {
+        console.log("recovered interrupted Zendesk runs", result);
+      }
+    }).catch((error) => {
+      console.warn("failed to recover interrupted Zendesk runs", error instanceof Error ? error.message : String(error));
+    });
+  }
 }
 
 bootstrap().catch((error) => {

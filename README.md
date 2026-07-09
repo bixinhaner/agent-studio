@@ -189,9 +189,16 @@ The production layout expected by the scripts is configurable through environmen
 
 - repository root: `/usr/local/agent-studio`
 - app user: `agentstudio`
-- backend: PM2 app `agent-studio-api`
+- backend: PM2 apps `agent-studio-api` (admin/API management) and `agent-studio-chat-api` (chat/runtime/SSE)
 - frontend: static Vite build served by Caddy
 - API health endpoint: `/healthz`
+
+Deployment scopes:
+
+- `scripts/deploy-agent-studio.sh --frontend-only`: rebuilds static frontend assets only; it does not enable deployment drain or restart PM2.
+- `scripts/deploy-agent-studio.sh --admin-only`: rebuilds the backend and restarts only `agent-studio-api`; active chat/runtime turns keep running.
+- `scripts/deploy-agent-studio.sh --chat-only`: rebuilds the backend, enables deployment drain, waits for active chat/runtime turns, and restarts only `agent-studio-chat-api`.
+- `scripts/deploy-agent-studio.sh --all`: full deploy; this remains the default for production updates that touch shared backend, chat, Caddy, or frontend assets.
 
 Before deploying publicly, configure a real domain, HTTPS, secure cookies, SMTP delivery, provider credentials, durable upload/storage paths, and a production PostgreSQL database.
 

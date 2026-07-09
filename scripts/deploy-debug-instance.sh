@@ -12,6 +12,7 @@ DEBUG_INSTALL_ROOT="${DEBUG_INSTALL_ROOT:-/usr/local/agent-studio-debug}"
 DEBUG_PM2_APP_NAME="${DEBUG_PM2_APP_NAME:-agent-studio-debug-api}"
 DEBUG_API_HOST="${DEBUG_API_HOST:-127.0.0.1}"
 DEBUG_API_PORT="${DEBUG_API_PORT:-8789}"
+DEBUG_CHAT_API_PORT="${DEBUG_CHAT_API_PORT:-8790}"
 DEBUG_HTTPS_PORT="${DEBUG_HTTPS_PORT:-4443}"
 DEBUG_DOMAIN="${DEBUG_DOMAIN:-}"
 DEBUG_CADDY_SNIPPET_FILE="${DEBUG_CADDY_SNIPPET_FILE:-/etc/caddy/conf.d/agent-studio-debug.caddy}"
@@ -30,7 +31,8 @@ Options:
   --prod-root <path>       Production install root used for the main Caddy config [default: $PROD_INSTALL_ROOT]
   --domain <name>          Public hostname for the debug entry [default: production install state domain]
   --api-host <host>        Debug API bind host [default: $DEBUG_API_HOST]
-  --api-port <port>        Debug API port [default: $DEBUG_API_PORT]
+  --api-port <port>        Debug admin API port [default: $DEBUG_API_PORT]
+  --chat-api-port <port>   Debug chat API port [default: $DEBUG_CHAT_API_PORT]
   --https-port <port>      Debug public HTTPS port [default: $DEBUG_HTTPS_PORT]
   --skip-git-pull          Rebuild current checkout without fetching or pulling
   --skip-rbac-seed         Skip built-in RBAC seed step
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --api-port)
       DEBUG_API_PORT="$2"
+      shift 2
+      ;;
+    --chat-api-port)
+      DEBUG_CHAT_API_PORT="$2"
       shift 2
       ;;
     --https-port)
@@ -115,7 +121,7 @@ PY
 render_debug_caddy_snippet() {
   local destination="$1"
 
-  python3 - "$DEBUG_CADDY_TEMPLATE_FILE" "$destination" "$DEBUG_DOMAIN" "$DEBUG_HTTPS_PORT" "$DEBUG_INSTALL_ROOT/agent-ui/dist" "$DEBUG_API_HOST" "$DEBUG_API_PORT" <<'PY'
+  python3 - "$DEBUG_CADDY_TEMPLATE_FILE" "$destination" "$DEBUG_DOMAIN" "$DEBUG_HTTPS_PORT" "$DEBUG_INSTALL_ROOT/agent-ui/dist" "$DEBUG_API_HOST" "$DEBUG_API_PORT" "$DEBUG_CHAT_API_PORT" <<'PY'
 from pathlib import Path
 import sys
 
@@ -126,8 +132,10 @@ rendered = (
     .replace("{$DEBUG_DOMAIN}", sys.argv[3])
     .replace("{$DEBUG_HTTPS_PORT}", sys.argv[4])
     .replace("{$DEBUG_UI_DIST_ROOT}", sys.argv[5])
-    .replace("{$DEBUG_UPSTREAM_HOST}", sys.argv[6])
-    .replace("{$DEBUG_UPSTREAM_PORT}", sys.argv[7])
+    .replace("{$DEBUG_ADMIN_UPSTREAM_HOST}", sys.argv[6])
+    .replace("{$DEBUG_ADMIN_UPSTREAM_PORT}", sys.argv[7])
+    .replace("{$DEBUG_CHAT_UPSTREAM_HOST}", sys.argv[6])
+    .replace("{$DEBUG_CHAT_UPSTREAM_PORT}", sys.argv[8])
 )
 destination.write_text(rendered)
 PY
@@ -163,6 +171,7 @@ deploy_debug_app() {
     --repo-dir "$DEBUG_INSTALL_ROOT"
     --api-host "$DEBUG_API_HOST"
     --api-port "$DEBUG_API_PORT"
+    --chat-api-port "$DEBUG_CHAT_API_PORT"
     --skip-caddy-reload
   )
 
