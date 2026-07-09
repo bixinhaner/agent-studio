@@ -669,7 +669,7 @@ render_caddy_config() {
   local admin_upstream_host="${5:-127.0.0.1}"
   local admin_upstream_port="${6:-8787}"
   local chat_upstream_host="${7:-127.0.0.1}"
-  local chat_upstream_port="${8:-8788}"
+  local chat_upstream_port="${8:-8791}"
 
   ensure_dir "$(dirname "$destination")"
   python3 - "$template" "$destination" "$domain" "$ui_root" "$admin_upstream_host" "$admin_upstream_port" "$chat_upstream_host" "$chat_upstream_port" <<'PY'
@@ -885,7 +885,7 @@ ensure_caddy_config() {
     return 0
   fi
 
-  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787" "127.0.0.1" "8788"
+  render_caddy_config "$template" "$CADDY_CONFIG_FILE" "$DOMAIN" "$APP_UI_DIR/dist" "127.0.0.1" "8787" "127.0.0.1" "8791"
   ensure_secure_file_mode "$CADDY_CONFIG_FILE" 644
   if command_exists caddy; then
     caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile >/dev/null 2>&1 || true

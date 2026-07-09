@@ -52,7 +52,7 @@ Options:
   --api-port <port>      Backward-compatible admin API port [default: $API_PORT]
   --admin-api-port <port>
                          Admin API port [default: --api-port value]
-  --chat-api-port <port> Chat/runtime API port [default: admin port + 1]
+  --chat-api-port <port> Chat/runtime API port [default: 8791]
   --caddy-upstream-host <host>
                          Backward-compatible upstream host applied to both admin and chat [default: 127.0.0.1]
   --caddy-upstream-port <port>
@@ -212,11 +212,7 @@ if [[ -z "$ADMIN_API_PORT" ]]; then
 fi
 
 if [[ -z "$CHAT_API_PORT" ]]; then
-  if [[ "$ADMIN_API_PORT" =~ ^[0-9]+$ ]]; then
-    CHAT_API_PORT="$((ADMIN_API_PORT + 1))"
-  else
-    CHAT_API_PORT="8788"
-  fi
+  CHAT_API_PORT="8791"
 fi
 
 if [[ -z "$CADDY_UPSTREAM_HOST" ]]; then
