@@ -53,6 +53,18 @@ describe("action connector runtime event projection", () => {
     ]);
   });
 
+  it("forwards answer delta text without trimming markdown whitespace", () => {
+    const markdownDelta = "\n\n# 一级标题\n\n```js\nconst message = \"Hello Markdown\";\n```\n";
+    const events = projectActionConnectorRuntimeEvents({
+      eventType: "item.agent_message.delta",
+      itemType: "agent_message",
+      answerDelta: markdownDelta,
+      traceRows: []
+    });
+
+    expect(events).toEqual([{ type: "delta", text: markdownDelta }]);
+  });
+
   it("projects completed commentary entries as completed thought events", () => {
     expect(
       actionConnectorCommentaryEntriesToEvents([

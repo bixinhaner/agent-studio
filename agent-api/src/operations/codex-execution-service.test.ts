@@ -661,6 +661,24 @@ describe("CodexExecutionService", () => {
     expect(JSON.stringify(finalized.contentParts)).not.toContain("Here is the answer.");
   });
 
+  it("preserves markdown-significant whitespace in final answer deltas", () => {
+    const markdownDelta = "\n\n# 一级标题\n\n```js\nconst message = \"Hello Markdown\";\n```\n";
+    const projection = projectCodexRuntimeEvent({
+      type: "item.agent_message.delta",
+      delta: markdownDelta,
+      raw: {
+        type: "item.agent_message.delta",
+        item: {
+          id: "message-final",
+          type: "agent_message",
+          phase: "final_answer"
+        }
+      }
+    });
+
+    expect(projection.answerDelta).toBe(markdownDelta);
+  });
+
   it("removes final answers from reasoning trace suffixes", () => {
     const projection = new CodexRunProjection({ now: () => 1781100000000 });
     projection.push({

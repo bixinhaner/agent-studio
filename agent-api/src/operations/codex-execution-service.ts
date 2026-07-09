@@ -298,6 +298,10 @@ function traceRow(
   };
 }
 
+function runtimeTextDelta(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntimeEventProjection {
   const raw = asRecord(event.raw);
   const item = asRecord(raw?.item);
@@ -313,7 +317,7 @@ export function projectCodexRuntimeEvent(event: RuntimeStreamEvent): CodexRuntim
     itemType,
     itemId,
     agentMessagePhase,
-    answerDelta: itemType === "agent_message" ? trimOrUndefined(event.delta) : undefined,
+    answerDelta: itemType === "agent_message" ? runtimeTextDelta(event.delta) : undefined,
     traceRows
   };
 
@@ -591,17 +595,20 @@ export class CodexRunProjection {
     }
     if (this.options.streamAnswerDeltas === false) {
       projection.answerDelta = undefined;
-    } else if (projection.answerDelta && agentMessagePhase && agentMessagePhase !== "final_answer") {
-      const eventAt = this.now();
-      projection.commentaryDelta = {
-        id: projection.itemId,
-        text: projection.answerDelta,
-        append: true,
-        status: "streaming",
-        at: new Date(eventAt).toISOString(),
-        last_event_at: eventAt
-      };
-      projection.answerDelta = undefined;
+    } else if (agentMessagePhase && agentMessagePhase !== "final_answer") {
+      const answerDelta = runtimeTextDelta(projection.answerDelta);
+      if (answerDelta) {
+        const eventAt = this.now();
+        projection.commentaryDelta = {
+          id: projection.itemId,
+          text: answerDelta,
+          append: true,
+          status: "streaming",
+          at: new Date(eventAt).toISOString(),
+          last_event_at: eventAt
+        };
+        projection.answerDelta = undefined;
+      }
     }
     this.traceRows.push(...projection.traceRows);
     if (projection.completedAgentMessage) {

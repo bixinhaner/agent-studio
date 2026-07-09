@@ -158,7 +158,7 @@ export function projectActionConnectorRuntimeEvents(
     events.push(traceRowToProcessEvent(row, index));
   });
 
-  if (projection.answerDelta) {
+  if (typeof projection.answerDelta === "string") {
     events.push({ type: "delta", text: projection.answerDelta });
   }
 
