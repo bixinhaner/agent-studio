@@ -188,6 +188,11 @@ function conversationAudienceLabel(audience: AdminConversationSummary["audience"
   return "未关联";
 }
 
+function conversationSourceAudienceLabel(conversation: AdminConversationSummary): string {
+  if (conversation.channel?.type === "action_connector") return "外部系统";
+  return conversationAudienceLabel(conversation.audience);
+}
+
 function conversationChannelTargetLabel(conversation: AdminConversationSummary): string {
   const channel = conversation.channel;
   if (!channel) return displayUserLabel(conversation.user);
@@ -195,12 +200,37 @@ function conversationChannelTargetLabel(conversation: AdminConversationSummary):
     return channel.externalConversationId ? `Zendesk #${channel.externalConversationId}` : "Zendesk 工单";
   }
   if (channel.type === "action_connector") {
-    return channel.externalUserName || channel.externalUserId || channel.externalConversationId || "Action Connector 会话";
+    return conversationActionConnectorTargetLabel(channel);
   }
   if (channel.conversationType === "group") {
     return channel.externalGroupName || channel.externalGroupId || channel.externalConversationId || "钉钉群聊";
   }
   return channel.externalUserName || channel.externalUserId || channel.externalConversationId || "钉钉单聊";
+}
+
+function conversationActionConnectorTargetLabel(channel: AdminConversationChannelSummary): string {
+  const source = conversationActionConnectorSourceLabel(channel);
+  const user = channel.sourceUserDisplayName || channel.externalUserName || channel.externalUserId || "";
+  if (source && user) return `${source} / ${user}`;
+  return source || user || channel.externalConversationId || "Action Connector 会话";
+}
+
+function conversationActionConnectorSourceLabel(channel: AdminConversationChannelSummary): string {
+  const instanceName = channel.sourceInstanceName?.trim();
+  const instanceShortId = channel.sourceInstanceShortId?.trim();
+  if (instanceName && channel.sourceInstanceNameIsDefault && instanceShortId) {
+    return `${instanceName} · ${instanceShortId}`;
+  }
+  if (instanceName) return instanceName;
+  if (channel.integrationName) return channel.integrationName;
+  if (channel.sourceSystem) return formatSourceSystemLabel(channel.sourceSystem);
+  return "";
+}
+
+function formatSourceSystemLabel(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /^[a-z0-9_-]{2,8}$/i.test(trimmed) ? trimmed.toUpperCase() : trimmed;
 }
 
 function conversationChannelBadgeLabel(channel: AdminConversationChannelSummary): string {
@@ -217,7 +247,7 @@ function conversationChannelUserFieldLabel(channel: AdminConversationChannelSumm
 }
 
 function conversationChannelConversationFieldLabel(channel: AdminConversationChannelSummary): string {
-  if (channel.type === "action_connector") return "外部会话";
+  if (channel.type === "action_connector") return "会话 ID";
   return channel.type === "zendesk" ? "工单" : "会话";
 }
 
@@ -227,7 +257,7 @@ function conversationChannelBotFieldLabel(channel: AdminConversationChannelSumma
 }
 
 function conversationChannelMessageFieldLabel(channel: AdminConversationChannelSummary): string {
-  if (channel.type === "action_connector") return "外部请求";
+  if (channel.type === "action_connector") return "最近请求 ID";
   return channel.type === "zendesk" ? "客户评论" : "外部消息";
 }
 
@@ -253,6 +283,11 @@ function conversationAgentModeTitle(agentMode: AdminConversationAgentModeSummary
 function compactFieldValue(value: string | null | undefined): string {
   const text = typeof value === "string" ? value.trim() : "";
   return text || "-";
+}
+
+function compactListValue(values: string[] | null | undefined): string {
+  const items = Array.isArray(values) ? values.filter(Boolean) : [];
+  return items.length > 0 ? items.join(", ") : "-";
 }
 
 function conversationSkillSummaryLabel(skillNames: string[]): string {
@@ -1263,6 +1298,72 @@ function ConversationDetail(props: {
               {compactFieldValue(conversation.channel.requesterCountryRegion)}
             </span>
           </div>
+        ) : conversation.channel?.type === "action_connector" ? (
+          <div className="conversation-channel-section conversation-channel-section--compact">
+            <div className="conversation-channel-title-row">
+              <span className="conversation-channel-title">外部来源</span>
+              <Tag color="cyan">{conversationChannelBadgeLabel(conversation.channel)}</Tag>
+            </div>
+            <div className="conversation-channel-compact-grid">
+              <div>
+                <span className="field-label">来源</span>
+                <p title={conversationActionConnectorSourceLabel(conversation.channel)}>
+                  {compactFieldValue(conversationActionConnectorSourceLabel(conversation.channel))}
+                </p>
+              </div>
+              <div>
+                <span className="field-label">用户</span>
+                <p title={conversation.channel.sourceUserDisplayName || conversation.channel.externalUserName || conversation.channel.externalUserId || ""}>
+                  {compactFieldValue(conversation.channel.sourceUserDisplayName || conversation.channel.externalUserName || conversation.channel.externalUserId)}
+                </p>
+              </div>
+              <div>
+                <span className="field-label">Connector</span>
+                <p title={conversation.channel.integrationName || conversation.channel.botName || ""}>
+                  {compactFieldValue(conversation.channel.integrationName || conversation.channel.botName)}
+                </p>
+              </div>
+              <div>
+                <span className="field-label">Agent Mode</span>
+                <p title={conversationAgentModeTitle(conversation.agentMode) || conversation.channel.agentModeId || ""}>
+                  {compactFieldValue(agentModeLabel || conversation.channel.agentModeId)}
+                </p>
+              </div>
+              <div>
+                <span className="field-label">最近消息时间</span>
+                <p>{formatLocalDateTime(conversation.channel.lastMessageAt || conversation.updatedAt)}</p>
+              </div>
+            </div>
+            <details className="conversation-channel-debug">
+              <summary>调试信息</summary>
+              <div className="conversation-channel-debug-grid">
+                <div>
+                  <span className="field-label">{conversationChannelConversationFieldLabel(conversation.channel)}</span>
+                  <p>{compactFieldValue(conversation.channel.externalConversationId)}</p>
+                </div>
+                <div>
+                  <span className="field-label">{conversationChannelMessageFieldLabel(conversation.channel)}</span>
+                  <p>{compactFieldValue(conversation.channel.lastExternalMessageId)}</p>
+                </div>
+                <div>
+                  <span className="field-label">实例 ID</span>
+                  <p>{compactFieldValue(conversation.channel.sourceInstanceId)}</p>
+                </div>
+                <div>
+                  <span className="field-label">来源系统</span>
+                  <p>{compactFieldValue(conversation.channel.sourceSystem ? formatSourceSystemLabel(conversation.channel.sourceSystem) : null)}</p>
+                </div>
+                <div>
+                  <span className="field-label">Connector ID</span>
+                  <p>{compactFieldValue(conversation.channel.integrationInstanceId)}</p>
+                </div>
+                <div>
+                  <span className="field-label">本地 IP</span>
+                  <p>{compactListValue(conversation.channel.sourceLocalIPs)}</p>
+                </div>
+              </div>
+            </details>
+          </div>
         ) : conversation.channel ? (
           <div className="conversation-channel-section">
             <div className="conversation-channel-title-row">
@@ -1558,7 +1659,7 @@ function ConversationWorkspace() {
                  </div>
                  <div className="conversation-master-meta">
                    <Badge status={conv.status === 'archived' ? 'default' : 'processing'} />
-                   <span className="conversation-master-meta-text">{conversationAudienceLabel(conv.audience)}</span>
+                   <span className="conversation-master-meta-text">{conversationSourceAudienceLabel(conv)}</span>
                    <span className="conversation-master-meta-text conversation-master-target" title={conversationChannelTargetLabel(conv)}>
                      {conversationChannelTargetLabel(conv)}
                    </span>

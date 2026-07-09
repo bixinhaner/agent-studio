@@ -125,6 +125,13 @@ type ConversationChannelSummary = {
   lastMessageAt: string | null;
   requesterOrganization: string | null;
   requesterCountryRegion: string | null;
+  sourceSystem: string | null;
+  sourceInstanceId: string | null;
+  sourceInstanceShortId: string | null;
+  sourceInstanceName: string | null;
+  sourceInstanceNameIsDefault: boolean;
+  sourceUserDisplayName: string | null;
+  sourceLocalIPs: string[];
 };
 
 type ConversationAgentModeSummary = {
@@ -1351,6 +1358,8 @@ function buildConversationChannelSummary(
   const integration = integrationMap.get(binding.integrationInstanceId);
   const type = trimOrUndefined(binding.channel) ?? "external";
   const metadata = asRecord(binding.metadata);
+  const externalIdentity = asRecord(metadata?.externalIdentity);
+  const sourceMetadata = asRecord(externalIdentity?.metadata);
   const label =
     type === "dingtalk_bot"
       ? binding.conversationType === "group"
@@ -1380,7 +1389,14 @@ function buildConversationChannelSummary(
     lastExternalMessageId: trimOrUndefined(binding.lastExternalMessageId) ?? null,
     lastMessageAt: trimOrUndefined(binding.lastMessageAt) ?? null,
     requesterOrganization: trimOrUndefined(metadata?.requesterOrganization) ?? null,
-    requesterCountryRegion: trimOrUndefined(metadata?.requesterCountryRegion) ?? null
+    requesterCountryRegion: trimOrUndefined(metadata?.requesterCountryRegion) ?? null,
+    sourceSystem: trimOrUndefined(sourceMetadata?.sourceSystem) ?? null,
+    sourceInstanceId: trimOrUndefined(sourceMetadata?.instanceId) ?? null,
+    sourceInstanceShortId: trimOrUndefined(sourceMetadata?.instanceShortId) ?? null,
+    sourceInstanceName: trimOrUndefined(sourceMetadata?.instanceName) ?? null,
+    sourceInstanceNameIsDefault: sourceMetadata?.instanceNameIsDefault === true,
+    sourceUserDisplayName: trimOrUndefined(sourceMetadata?.userDisplayName) ?? null,
+    sourceLocalIPs: asStringArray(sourceMetadata?.localIPs)
   };
 }
 

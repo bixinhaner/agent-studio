@@ -2553,6 +2553,57 @@
   font-size: 13px;
 }
 
+.conversation-channel-section--compact {
+  background: rgba(8, 145, 178, 0.045);
+}
+
+.conversation-channel-compact-grid,
+.conversation-channel-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.conversation-channel-compact-grid p,
+.conversation-channel-debug-grid p {
+  margin: 3px 0 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-color-text);
+  font-size: 13px;
+}
+
+.conversation-channel-debug {
+  margin-top: 2px;
+  border-top: 1px solid var(--admin-color-border);
+  padding-top: 8px;
+}
+
+.conversation-channel-debug summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--admin-color-subtle);
+  font-size: 12px;
+  font-weight: 700;
+  outline-offset: 3px;
+}
+
+.conversation-channel-debug[open] summary {
+  margin-bottom: 8px;
+}
+
+.conversation-channel-debug-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.conversation-channel-debug-grid p {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .conversation-zendesk-requester-strip {
   display: flex;
   align-items: center;
@@ -3932,7 +3983,9 @@
     border-bottom: 1px solid var(--admin-color-border);
   }
 
-  .conversation-channel-grid {
+  .conversation-channel-grid,
+  .conversation-channel-compact-grid,
+  .conversation-channel-debug-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3952,7 +4005,9 @@
 
   .admin-page-summary-grid,
   .admin-entity-card-grid,
-  .conversation-channel-grid {
+  .conversation-channel-grid,
+  .conversation-channel-compact-grid,
+  .conversation-channel-debug-grid {
     grid-template-columns: 1fr;
   }
 

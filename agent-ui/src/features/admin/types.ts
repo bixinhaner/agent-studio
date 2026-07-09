@@ -337,6 +337,13 @@ export type AdminConversationChannelSummary = {
   lastMessageAt: string | null;
   requesterOrganization: string | null;
   requesterCountryRegion: string | null;
+  sourceSystem: string | null;
+  sourceInstanceId: string | null;
+  sourceInstanceShortId: string | null;
+  sourceInstanceName: string | null;
+  sourceInstanceNameIsDefault: boolean;
+  sourceUserDisplayName: string | null;
+  sourceLocalIPs: string[];
 };
 
 export type AdminConversationAgentModeSummary = {
