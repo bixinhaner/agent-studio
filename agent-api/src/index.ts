@@ -206,6 +206,7 @@ import { createIntegrationCenterService, type IntegrationCenterDb } from "./inte
 import { createActionConnectorRuntimeRouter } from "./integrations/action-connector/routes.js";
 import type { ConnectorIdentity } from "./integrations/action-connector/client.js";
 import type { ActionConnectorCodexRunnerInput } from "./integrations/action-connector/runtime.js";
+import { actionConnectorRuntimeEnvFromRunConfig } from "./integrations/action-connector/runtime-env.js";
 import { buildActionConnectorRuntimePrompt } from "./integrations/action-connector/prompt.js";
 import {
   actionConnectorCommentaryEntriesToEvents,
@@ -1790,6 +1791,7 @@ async function restoreLiveRuntimeThread(
       configOverrides: runtimeLaunch.configOverrides,
       envOverrides: {
         ...(runtimeLaunch.envOverrides ?? {}),
+        ...actionConnectorRuntimeEnvFromRunConfig(materializedCodexHome.codexRunConfig),
         CODEX_HOME: materializedCodexHome.codexHome
       }
     });
