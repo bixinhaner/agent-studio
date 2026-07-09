@@ -25,11 +25,13 @@ Do not rediscover a known operation merely because a new user turn started. Redi
 | Online/offline/device totals | `GET /api/v1/devices/stats` | `get.devices.stats` |
 | Broad network overview | `GET /api/v1/dashboard/summary` | `get.dashboard.summary` |
 | Device records or identifiers | `GET /api/v1/devices` | `get.devices` |
+| Site names and locations | `GET /api/v1/sites` | `get.sites` |
 | Current active alarm records | `GET /api/v1/alarms/active` | `get.alarms.active` |
 | Alarm totals or severity distribution | `GET /api/v1/alarms/statistics` | `get.alarms.statistics` |
 | Operations task list | `GET /api/v1/ops/tasks` | `get.ops.tasks` |
 | Runtime system information | `GET /api/v1/system/info` | `get.system.info` |
 | Current system license | `GET /api/v1/system-license` | `get.system_license` |
+| Northbound push targets | `GET /api/v1/northbound/push/targets` | `get.northbound.push.targets` |
 
 For these intents, do not call catalog or describe first. Use `page=1&page_size=20` for record lists unless the user requests another range.
 
@@ -76,6 +78,8 @@ node "$CLI" request GET /api/v1/devices/stats '{"operationId":"get.devices.stats
 ```
 
 The catalog is paginated. Follow `nextOffset` only when `hasMore` is true and the current page has not provided a suitable operation. Keep `limit` at 8 or below for normal discovery.
+
+Catalog search uses token-AND matching. Choose a category before searching, then use only one or two path/resource nouns. Do not begin with an unscoped natural-language query or intent words such as `list`, `enabled`, `status`, or `current`. If no operation matches, list the same category once with an empty `q`; do not try multiple reformulations.
 
 ## Plan tool calls
 

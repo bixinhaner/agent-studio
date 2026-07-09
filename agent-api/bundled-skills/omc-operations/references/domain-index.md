@@ -26,4 +26,6 @@ node "$CLI" request GET /api/v1/agent/catalog '{"operationId":"agent.catalog.sea
 
 Search uses token-AND matching and normalizes `/`, `.`, `_`, `-`, and `:`. Prefer resource/path words such as `devices stats`; avoid long natural-language sentences.
 
+Use one or two resource words on the first search. Do not include result semantics such as `list`, `enabled`, `status`, or `current` unless that word is visibly part of the API path. If the scoped search returns no items, retry the same category once with an empty `q` instead of repeatedly changing keywords.
+
 The live catalog contains every route currently visible under the OMC Agent policy. Read methods are visible when reads are enabled; write methods appear only when the corresponding policy allows them.

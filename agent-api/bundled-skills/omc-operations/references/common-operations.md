@@ -50,6 +50,14 @@ node "$CLI" request GET /api/v1/alarms/statistics '{"operationId":"get.alarms.st
 
 Use when the user asks for totals, severity distribution, acknowledged state, or a concise alarm summary. Do not also list active alarms unless examples or affected devices are requested.
 
+## Sites
+
+```bash
+node "$CLI" request GET /api/v1/sites '{"operationId":"get.sites","query":{"page":1,"page_size":20},"reason":"List site names and locations"}'
+```
+
+Use for actual site records. Do not substitute the device list when the user explicitly asks for sites.
+
 ## Operations tasks
 
 ```bash
@@ -73,6 +81,14 @@ node "$CLI" request GET /api/v1/system-license '{"operationId":"get.system_licen
 ```
 
 Use this directly for current license status. A `404` response whose message is `no system license configured` means no license is configured; it is not a reason to search for another endpoint.
+
+## Northbound push targets
+
+```bash
+node "$CLI" request GET /api/v1/northbound/push/targets '{"operationId":"get.northbound.push.targets","reason":"List northbound push targets and enabled state"}'
+```
+
+Use for configured northbound destinations and their enabled state.
 
 ## Combining independent reads
 
