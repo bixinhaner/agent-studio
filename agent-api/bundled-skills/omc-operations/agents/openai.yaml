@@ -1,0 +1,4 @@
+interface:
+  display_name: "OMC Operations"
+  short_description: "Query and operate OMC through its live API catalog"
+  default_prompt: "Use $omc-operations to inspect the current OMC state and complete the requested operation."
