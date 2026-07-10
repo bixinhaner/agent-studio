@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.topology.nodes.by_id",
+  "method": "PUT",
+  "path": "/api/v1/topology/nodes/:id",
+  "handler": "github.com/omcgo/omcgo/internal/topology.(*Handler).UpdateTopoNode-fm",
+  "category": "topology",
+  "title": "拓扑 - 更新",
+  "summary": "拓扑 - 更新",
+  "description": "拓扑：更新指定资源的完整配置 Handler: UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.",
+  "intents": [
+    "拓扑 - 更新",
+    "拓扑：更新指定资源的完整配置 Handler: UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.",
+    "topology",
+    "拓扑",
+    "nodes"
+  ],
+  "tags": [
+    "topology",
+    "拓扑",
+    "nodes"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：拓扑 - 更新",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "UpdateTopoNodeRequest",
+      "properties": {
+        "device_sn": {
+          "nullable": true,
+          "type": "string"
+        },
+        "domain_id": {
+          "nullable": true,
+          "type": "string"
+        },
+        "label": {
+          "nullable": true,
+          "type": "string"
+        },
+        "node_type": {
+          "nullable": true,
+          "type": "string"
+        },
+        "site_id": {
+          "nullable": true,
+          "type": "string"
+        },
+        "status": {
+          "nullable": true,
+          "type": "string"
+        },
+        "x": {
+          "goType": "float64",
+          "nullable": true,
+          "type": "number"
+        },
+        "y": {
+          "goType": "float64",
+          "nullable": true,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

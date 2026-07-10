@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0",
+  "category": "dead-letters",
+  "title": "死信队列",
+  "operations": [
+    {
+      "operationId": "delete.admin.dead_letters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/dead-letters/:id",
+      "title": "死信队列 - 删除",
+      "summary": "死信队列 - 删除",
+      "description": "死信队列：删除指定资源记录 Handler: Delete 删除一条死信记录。删除后续 Get 同 ID 返回 404。",
+      "intents": [
+        "死信队列 - 删除",
+        "死信队列：删除指定资源记录 Handler: Delete 删除一条死信记录。删除后续 Get 同 ID 返回 404。",
+        "dead-letters",
+        "admin",
+        "dead letters"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.dead_letters.by_id.json"
+    },
+    {
+      "operationId": "get.admin.dead_letters",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters",
+      "title": "死信队列 - 列表",
+      "summary": "死信队列 - 列表",
+      "description": "死信队列：按筛选条件查询资源列表 Handler: List 返回分页死信记录。可选过滤 module / subject。",
+      "intents": [
+        "死信队列 - 列表",
+        "死信队列：按筛选条件查询资源列表 Handler: List 返回分页死信记录。可选过滤 module / subject。",
+        "dead-letters",
+        "admin",
+        "dead letters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.dead_letters.json"
+    },
+    {
+      "operationId": "get.admin.dead_letters.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/dead-letters/:id",
+      "title": "死信队列 - 详情",
+      "summary": "死信队列 - 详情",
+      "description": "死信队列：查询指定资源的详细信息 Handler: Get 返回单条死信详情。404 if not found。",
+      "intents": [
+        "死信队列 - 详情",
+        "死信队列：查询指定资源的详细信息 Handler: Get 返回单条死信详情。404 if not found。",
+        "dead-letters",
+        "admin",
+        "dead letters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.dead_letters.by_id.json"
+    },
+    {
+      "operationId": "post.admin.dead_letters.by_id.replay",
+      "method": "POST",
+      "path": "/api/v1/admin/dead-letters/:id/replay",
+      "title": "死信队列 - POST",
+      "summary": "死信队列 - POST",
+      "description": "死信队列：执行 POST 请求对应的业务操作 Handler: Replay 把死信 payload 重新 publish 到原 subject，记录不删除（PRD §8.3）。\n未找到对应模块 replayer → 503；publisher 失败 → 500；记录 not found → 404。",
+      "intents": [
+        "死信队列 - POST",
+        "死信队列：执行 POST 请求对应的业务操作 Handler: Replay 把死信 payload 重新 publish 到原 subject，记录不删除（PRD §8.3）。\n未找到对应模块 replayer → 503；publisher 失败 → 500；记录 not found → 404。",
+        "dead-letters",
+        "admin",
+        "replay",
+        "dead letters"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.dead_letters.by_id.replay.json"
+    }
+  ]
+}

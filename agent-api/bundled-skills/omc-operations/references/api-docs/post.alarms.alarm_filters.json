@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.alarms.alarm_filters",
+  "method": "POST",
+  "path": "/api/v1/alarms/alarm-filters",
+  "handler": "github.com/omcgo/omcgo/internal/alarm.(*FilterHandler).Create-fm",
+  "category": "alarms",
+  "title": "告警 - alarmfilters",
+  "summary": "告警 - alarmfilters",
+  "description": "告警：处理alarmfilters相关数据",
+  "intents": [
+    "告警 - alarmfilters",
+    "告警：处理alarmfilters相关数据",
+    "alarms",
+    "告警",
+    "alarm-filters",
+    "alarm filters"
+  ],
+  "tags": [
+    "alarms",
+    "告警",
+    "alarm-filters"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：告警 - alarmfilters",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateAlarmFilterRuleRequest",
+      "properties": {
+        "acknowledge_desc": {
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "default",
+            "ignore",
+            "auto_acknowledge",
+            "auto_clear",
+            "notify_webhook",
+            "notify_email"
+          ],
+          "type": "string"
+        },
+        "alarm_identifiers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "alarm_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "device_group_ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "device_ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "email_recipients": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "nullable": true,
+          "type": "boolean"
+        },
+        "filter_type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "priority": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "webhook_secret": {
+          "nullable": true,
+          "type": "string"
+        },
+        "webhook_url": {
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "filter_type",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.pm.adhoc.tasks",
+  "method": "POST",
+  "path": "/api/v1/pm/adhoc/tasks",
+  "handler": "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Create-fm",
+  "category": "pm",
+  "title": "性能 PM - 创建",
+  "summary": "性能 PM - 创建",
+  "description": "性能 PM：创建新的资源记录 Handler: Create POST /pm/adhoc/tasks",
+  "intents": [
+    "性能 PM - 创建",
+    "性能 PM：创建新的资源记录 Handler: Create POST /pm/adhoc/tasks",
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：性能 PM - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "createRequestDTO",
+      "properties": {
+        "cron_expr": {
+          "type": "string"
+        },
+        "device_sns": {
+          "description": "T-0185：device_sns 仅在 device/aggregate_group 维度必填（向导期放宽）；\nnetwork/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dimension": {
+          "description": "维度：'device' (默认) / 'aggregate_group' (N 个 SN 临时组) / 'product' (按产品) /\n      'band' (按频段，T-0183) / 'network' (全网，T-0184) / 'device_group' (设备组，T-0184)",
+          "enum": [
+            "device",
+            "aggregate_group",
+            "product",
+            "band",
+            "network",
+            "device_group"
+          ],
+          "type": "string"
+        },
+        "expire_days": {
+          "description": "非持续型过期天数（T-0182，默认 60）",
+          "goType": "int",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "granularities": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "is_builtin": {
+          "description": "内置任务标记（T-0182，由内置任务预置流程使用；普通用户建任务忽略）",
+          "type": "boolean"
+        },
+        "metric_paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "oneshot",
+            "continuous"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "object_ldns": {
+          "description": "T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。可选，不传/空 = 全小区（向后兼容）。\n仅 device/aggregate_group 维度生效；其他维度忽略（不落库、不报错）。",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "technology": {
+          "description": "制式：lte/nr/gsm，空=不限；建后不可改（T-0182）",
+          "enum": [
+            "lte",
+            "nr",
+            "gsm"
+          ],
+          "type": "string"
+        },
+        "window_end": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "window_start": {
+          "description": "T-0185：window 仅 oneshot 必填；continuous 不填 → 存 NULL 开窗滚动聚合（与内置任务同语义）。",
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "granularities",
+        "metric_paths",
+        "mode",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

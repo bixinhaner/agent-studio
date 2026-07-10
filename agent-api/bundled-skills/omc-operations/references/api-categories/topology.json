@@ -1,0 +1,263 @@
+{
+  "schemaVersion": "1.0",
+  "category": "topology",
+  "title": "拓扑",
+  "operations": [
+    {
+      "operationId": "delete.topology.edges.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/topology/edges/:id",
+      "title": "拓扑 - 删除",
+      "summary": "拓扑 - 删除",
+      "description": "拓扑：删除指定资源记录 Handler: DeleteTopoEdge handles DELETE /api/v1/topology/edges/:id.",
+      "intents": [
+        "拓扑 - 删除",
+        "拓扑：删除指定资源记录 Handler: DeleteTopoEdge handles DELETE /api/v1/topology/edges/:id.",
+        "topology",
+        "拓扑",
+        "edges"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.topology.edges.by_id.json"
+    },
+    {
+      "operationId": "delete.topology.nodes.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/topology/nodes/:id",
+      "title": "拓扑 - 删除",
+      "summary": "拓扑 - 删除",
+      "description": "拓扑：删除指定资源记录 Handler: DeleteTopoNode handles DELETE /api/v1/topology/nodes/:id.",
+      "intents": [
+        "拓扑 - 删除",
+        "拓扑：删除指定资源记录 Handler: DeleteTopoNode handles DELETE /api/v1/topology/nodes/:id.",
+        "topology",
+        "拓扑",
+        "nodes"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.topology.nodes.by_id.json"
+    },
+    {
+      "operationId": "get.topology.edges",
+      "method": "GET",
+      "path": "/api/v1/topology/edges",
+      "title": "拓扑 - 列表",
+      "summary": "拓扑 - 列表",
+      "description": "拓扑：按筛选条件查询资源列表 Handler: ListTopoEdges handles GET /api/v1/topology/edges.",
+      "intents": [
+        "拓扑 - 列表",
+        "拓扑：按筛选条件查询资源列表 Handler: ListTopoEdges handles GET /api/v1/topology/edges.",
+        "topology",
+        "拓扑",
+        "edges"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.edges.json"
+    },
+    {
+      "operationId": "get.topology.edges.by_id",
+      "method": "GET",
+      "path": "/api/v1/topology/edges/:id",
+      "title": "拓扑 - 详情",
+      "summary": "拓扑 - 详情",
+      "description": "拓扑：查询指定资源的详细信息 Handler: GetTopoEdge handles GET /api/v1/topology/edges/:id.",
+      "intents": [
+        "拓扑 - 详情",
+        "拓扑：查询指定资源的详细信息 Handler: GetTopoEdge handles GET /api/v1/topology/edges/:id.",
+        "topology",
+        "拓扑",
+        "edges"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.edges.by_id.json"
+    },
+    {
+      "operationId": "get.topology.geo",
+      "method": "GET",
+      "path": "/api/v1/topology/geo",
+      "title": "拓扑 - 地理位置数据",
+      "summary": "拓扑 - 地理位置数据",
+      "description": "拓扑：查询地图展示所需地理数据 Handler: GetGeoData handles GET /api/v1/topology/geo.",
+      "intents": [
+        "拓扑 - 地理位置数据",
+        "拓扑：查询地图展示所需地理数据 Handler: GetGeoData handles GET /api/v1/topology/geo.",
+        "topology",
+        "拓扑",
+        "geo"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.geo.json"
+    },
+    {
+      "operationId": "get.topology.graph",
+      "method": "GET",
+      "path": "/api/v1/topology/graph",
+      "title": "拓扑 - 列表",
+      "summary": "拓扑 - 列表",
+      "description": "拓扑：按筛选条件查询资源列表 Handler: GetTopoGraph handles GET /api/v1/topology/graph.\nSupports ?layout_type=hierarchy|force|circular to apply layout algorithm.\nSupports ?domain_id to filter by domain.\nSupports ?node_type to filter by node type (eNB, gNB, CPE, etc.).\nSupports ?status to filter by node status (online, offline, alarm, maintenance).\nSupports ?limit=N to cap node count (default: 200, max: 500).\nRecommended limits: 50 (detailed), 100 (standard), 200 (default), 500 (large).",
+      "intents": [
+        "拓扑 - 列表",
+        "拓扑：按筛选条件查询资源列表 Handler: GetTopoGraph handles GET /api/v1/topology/graph.\nSupports ?layout_type=hierarchy|force|circular to apply layout algorithm.\nSupports ?domain_id to filter by domain.\nSupports ?node_type to filter by node type (eNB, gNB, CPE, etc.).\nSupports ?status to filter by node status (online, offline, alarm, maintenance).\nSupports ?limit=N to cap node count (default: 200, max: 500).\nRecommended limits: 50 (detailed), 100 (standard), 200 (default), 500 (large).",
+        "topology",
+        "拓扑",
+        "graph"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.graph.json"
+    },
+    {
+      "operationId": "get.topology.nodes",
+      "method": "GET",
+      "path": "/api/v1/topology/nodes",
+      "title": "拓扑 - 列表",
+      "summary": "拓扑 - 列表",
+      "description": "拓扑：按筛选条件查询资源列表 Handler: ListTopoNodes handles GET /api/v1/topology/nodes.",
+      "intents": [
+        "拓扑 - 列表",
+        "拓扑：按筛选条件查询资源列表 Handler: ListTopoNodes handles GET /api/v1/topology/nodes.",
+        "topology",
+        "拓扑",
+        "nodes"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.nodes.json"
+    },
+    {
+      "operationId": "get.topology.nodes.by_id",
+      "method": "GET",
+      "path": "/api/v1/topology/nodes/:id",
+      "title": "拓扑 - 详情",
+      "summary": "拓扑 - 详情",
+      "description": "拓扑：查询指定资源的详细信息 Handler: GetTopoNode handles GET /api/v1/topology/nodes/:id.",
+      "intents": [
+        "拓扑 - 详情",
+        "拓扑：查询指定资源的详细信息 Handler: GetTopoNode handles GET /api/v1/topology/nodes/:id.",
+        "topology",
+        "拓扑",
+        "nodes"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.nodes.by_id.json"
+    },
+    {
+      "operationId": "get.topology.statistics",
+      "method": "GET",
+      "path": "/api/v1/topology/statistics",
+      "title": "拓扑 - 统计",
+      "summary": "拓扑 - 统计",
+      "description": "拓扑：查询统计汇总数据 Handler: GetTopologyStatistics handles GET /api/v1/topology/statistics.\nReturns topology statistics with optional domain filtering.",
+      "intents": [
+        "拓扑 - 统计",
+        "拓扑：查询统计汇总数据 Handler: GetTopologyStatistics handles GET /api/v1/topology/statistics.\nReturns topology statistics with optional domain filtering.",
+        "topology",
+        "拓扑",
+        "statistics"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.topology.statistics.json"
+    },
+    {
+      "operationId": "post.topology.edges",
+      "method": "POST",
+      "path": "/api/v1/topology/edges",
+      "title": "拓扑 - 创建",
+      "summary": "拓扑 - 创建",
+      "description": "拓扑：创建新的资源记录 Handler: CreateTopoEdge handles POST /api/v1/topology/edges.",
+      "intents": [
+        "拓扑 - 创建",
+        "拓扑：创建新的资源记录 Handler: CreateTopoEdge handles POST /api/v1/topology/edges.",
+        "topology",
+        "拓扑",
+        "edges"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.topology.edges.json"
+    },
+    {
+      "operationId": "post.topology.nodes",
+      "method": "POST",
+      "path": "/api/v1/topology/nodes",
+      "title": "拓扑 - 创建",
+      "summary": "拓扑 - 创建",
+      "description": "拓扑：创建新的资源记录 Handler: CreateTopoNode handles POST /api/v1/topology/nodes.",
+      "intents": [
+        "拓扑 - 创建",
+        "拓扑：创建新的资源记录 Handler: CreateTopoNode handles POST /api/v1/topology/nodes.",
+        "topology",
+        "拓扑",
+        "nodes"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.topology.nodes.json"
+    },
+    {
+      "operationId": "post.topology.nodes.batch",
+      "method": "POST",
+      "path": "/api/v1/topology/nodes/batch",
+      "title": "拓扑 - 批量",
+      "summary": "拓扑 - 批量",
+      "description": "拓扑：对多个对象执行批量操作 Handler: BatchCreateTopoNodes handles POST /api/v1/topology/nodes/batch.",
+      "intents": [
+        "拓扑 - 批量",
+        "拓扑：对多个对象执行批量操作 Handler: BatchCreateTopoNodes handles POST /api/v1/topology/nodes/batch.",
+        "topology",
+        "拓扑",
+        "nodes",
+        "batch"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.topology.nodes.batch.json"
+    },
+    {
+      "operationId": "post.topology.sync",
+      "method": "POST",
+      "path": "/api/v1/topology/sync",
+      "title": "拓扑 - 同步",
+      "summary": "拓扑 - 同步",
+      "description": "拓扑：从运行态或外部系统同步最新数据 Handler: SyncDevicesFromTopology handles POST /api/v1/topology/sync.\nSynchronizes devices from the devices table to topology nodes.",
+      "intents": [
+        "拓扑 - 同步",
+        "拓扑：从运行态或外部系统同步最新数据 Handler: SyncDevicesFromTopology handles POST /api/v1/topology/sync.\nSynchronizes devices from the devices table to topology nodes.",
+        "topology",
+        "拓扑",
+        "sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.topology.sync.json"
+    },
+    {
+      "operationId": "put.topology.edges.by_id",
+      "method": "PUT",
+      "path": "/api/v1/topology/edges/:id",
+      "title": "拓扑 - 更新",
+      "summary": "拓扑 - 更新",
+      "description": "拓扑：更新指定资源的完整配置 Handler: UpdateTopoEdge handles PUT /api/v1/topology/edges/:id.",
+      "intents": [
+        "拓扑 - 更新",
+        "拓扑：更新指定资源的完整配置 Handler: UpdateTopoEdge handles PUT /api/v1/topology/edges/:id.",
+        "topology",
+        "拓扑",
+        "edges"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.topology.edges.by_id.json"
+    },
+    {
+      "operationId": "put.topology.nodes.by_id",
+      "method": "PUT",
+      "path": "/api/v1/topology/nodes/:id",
+      "title": "拓扑 - 更新",
+      "summary": "拓扑 - 更新",
+      "description": "拓扑：更新指定资源的完整配置 Handler: UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.",
+      "intents": [
+        "拓扑 - 更新",
+        "拓扑：更新指定资源的完整配置 Handler: UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.",
+        "topology",
+        "拓扑",
+        "nodes"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.topology.nodes.by_id.json"
+    }
+  ]
+}

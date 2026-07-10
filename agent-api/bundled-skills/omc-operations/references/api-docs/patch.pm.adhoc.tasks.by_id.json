@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "patch.pm.adhoc.tasks.by_id",
+  "method": "PATCH",
+  "path": "/api/v1/pm/adhoc/tasks/:id",
+  "handler": "github.com/omcgo/omcgo/internal/pm/adhoc.(*Handler).Update-fm",
+  "category": "pm",
+  "title": "性能 PM - 部分更新",
+  "summary": "性能 PM - 部分更新",
+  "description": "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+  "intents": [
+    "性能 PM - 部分更新",
+    "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "adhoc",
+    "tasks"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：性能 PM - 部分更新",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "updateRequestDTO",
+      "properties": {
+        "device_sns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "granularities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metric_paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "object_ldns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "window_end": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        },
+        "window_start": {
+          "format": "date-time",
+          "goType": "time.Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_paths"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

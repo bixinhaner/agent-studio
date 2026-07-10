@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "category": "device-registrations",
+  "title": "设备预登记",
+  "operations": [
+    {
+      "operationId": "delete.device_registrations.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-registrations/:id",
+      "title": "设备预登记 - 删除",
+      "summary": "设备预登记 - 删除",
+      "description": "设备预登记：删除指定资源记录 Handler: DeleteRegistration handles DELETE /device-registrations/:id.",
+      "intents": [
+        "设备预登记 - 删除",
+        "设备预登记：删除指定资源记录 Handler: DeleteRegistration handles DELETE /device-registrations/:id.",
+        "device-registrations",
+        "设备预登记",
+        "device registrations"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_registrations.by_id.json"
+    },
+    {
+      "operationId": "get.device_registrations",
+      "method": "GET",
+      "path": "/api/v1/device-registrations",
+      "title": "设备预登记 - 列表",
+      "summary": "设备预登记 - 列表",
+      "description": "设备预登记：按筛选条件查询资源列表 Handler: ListRegistrations handles GET /device-registrations.",
+      "intents": [
+        "设备预登记 - 列表",
+        "设备预登记：按筛选条件查询资源列表 Handler: ListRegistrations handles GET /device-registrations.",
+        "device-registrations",
+        "设备预登记",
+        "device registrations"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_registrations.json"
+    },
+    {
+      "operationId": "post.device_registrations",
+      "method": "POST",
+      "path": "/api/v1/device-registrations",
+      "title": "设备预登记 - 创建",
+      "summary": "设备预登记 - 创建",
+      "description": "设备预登记：创建新的资源记录 Handler: CreateRegistration handles POST /device-registrations.",
+      "intents": [
+        "设备预登记 - 创建",
+        "设备预登记：创建新的资源记录 Handler: CreateRegistration handles POST /device-registrations.",
+        "device-registrations",
+        "设备预登记",
+        "device registrations"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_registrations.json"
+    }
+  ]
+}

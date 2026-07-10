@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "1.0",
+  "category": "files",
+  "title": "文件",
+  "operations": [
+    {
+      "operationId": "delete.files.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/files/:id",
+      "title": "文件 - 删除",
+      "summary": "文件 - 删除",
+      "description": "文件：删除指定资源记录 Handler: Delete handles DELETE /api/v1/files/:id.",
+      "intents": [
+        "文件 - 删除",
+        "文件：删除指定资源记录 Handler: Delete handles DELETE /api/v1/files/:id.",
+        "files",
+        "文件"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.files.by_id.json"
+    },
+    {
+      "operationId": "get.files",
+      "method": "GET",
+      "path": "/api/v1/files",
+      "title": "文件 - 列表",
+      "summary": "文件 - 列表",
+      "description": "文件：按筛选条件查询资源列表 Handler: List handles GET /api/v1/files.",
+      "intents": [
+        "文件 - 列表",
+        "文件：按筛选条件查询资源列表 Handler: List handles GET /api/v1/files.",
+        "files",
+        "文件"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.files.json"
+    },
+    {
+      "operationId": "get.files.by_id",
+      "method": "GET",
+      "path": "/api/v1/files/:id",
+      "title": "文件 - 详情",
+      "summary": "文件 - 详情",
+      "description": "文件：查询指定资源的详细信息 Handler: GetByID handles GET /api/v1/files/:id.",
+      "intents": [
+        "文件 - 详情",
+        "文件：查询指定资源的详细信息 Handler: GetByID handles GET /api/v1/files/:id.",
+        "files",
+        "文件"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.files.by_id.json"
+    },
+    {
+      "operationId": "get.files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/files/:id/download",
+      "title": "文件 - 下载",
+      "summary": "文件 - 下载",
+      "description": "下载文件或导出结果 Handler: Download handles GET /api/v1/files/:id/download (blob download).",
+      "intents": [
+        "文件 - 下载",
+        "下载文件或导出结果 Handler: Download handles GET /api/v1/files/:id/download (blob download).",
+        "files",
+        "文件",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.files.by_id.download.json"
+    },
+    {
+      "operationId": "post.files",
+      "method": "POST",
+      "path": "/api/v1/files",
+      "title": "文件 - 创建",
+      "summary": "文件 - 创建",
+      "description": "文件：创建新的资源记录 Handler: Upload handles POST /api/v1/files (multipart/form-data).",
+      "intents": [
+        "文件 - 创建",
+        "文件：创建新的资源记录 Handler: Upload handles POST /api/v1/files (multipart/form-data).",
+        "files",
+        "文件"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.files.json"
+    },
+    {
+      "operationId": "post.files.by_id.distribute",
+      "method": "POST",
+      "path": "/api/v1/files/:id/distribute",
+      "title": "文件 - POST",
+      "summary": "文件 - POST",
+      "description": "文件：执行 POST 请求对应的业务操作 Handler: Distribute handles POST /api/v1/files/:id/distribute.",
+      "intents": [
+        "文件 - POST",
+        "文件：执行 POST 请求对应的业务操作 Handler: Distribute handles POST /api/v1/files/:id/distribute.",
+        "files",
+        "文件",
+        "distribute"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.files.by_id.distribute.json"
+    }
+  ]
+}

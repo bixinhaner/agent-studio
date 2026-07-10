@@ -1,0 +1,228 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.mml.groups.by_id.execute",
+  "method": "POST",
+  "path": "/api/v1/mml/groups/:id/execute",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*Handler).ExecuteGroup-fm",
+  "category": "mml",
+  "title": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+  "summary": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+  "description": "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+  "intents": [
+    "MML - 执行",
+    "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+    "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+    "mml",
+    "groups",
+    "execute"
+  ],
+  "tags": [
+    "mml",
+    "groups",
+    "execute"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "mml_param_groups.id",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "properties": {
+        "device_sns": {
+          "example": [
+            "BAICELLS-SN-001"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execute_type": {
+          "default": "immediate",
+          "enum": [
+            "immediate",
+            "scheduled",
+            "periodic"
+          ],
+          "type": "string"
+        },
+        "operation_filter": {
+          "description": "仅执行特定 operation_type 的命令；空则全部",
+          "items": {
+            "enum": [
+              "LST",
+              "MOD",
+              "ADD",
+              "RMV"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "description": "MOD/ADD 操作的入参（按 command 透传）",
+          "type": "object"
+        },
+        "scheduled_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "task_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_sns"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "201": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/MMLTaskBrief"
+          }
+        }
+      },
+      "description": "mml_task 创建成功"
+    },
+    "400": {
+      "description": "device_sns 缺失 / group_id 无效 / operation_filter 过滤后无命令"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "description": "group 不存在"
+    }
+  },
+  "referencedSchemas": {
+    "MMLTaskBrief": {
+      "properties": {
+        "commands": {
+          "description": "后端展开的命令明细。每个元素包含 command_code / rpc_method /\noperation_type / parameters；Sprint B-6 之后 orphan command 会\n额外标记 orphan:true。\n",
+          "items": {
+            "properties": {
+              "command_code": {
+                "type": "string"
+              },
+              "operation_type": {
+                "enum": [
+                  "LST",
+                  "MOD",
+                  "ADD",
+                  "RMV",
+                  "DSP",
+                  "ACT",
+                  "DEA",
+                  "RST",
+                  "CLR",
+                  "UPG"
+                ],
+                "type": "string"
+              },
+              "orphan": {
+                "description": "Sprint B-6：standard-model 重建后该 command_code 已不存在",
+                "type": "boolean"
+              },
+              "parameters": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "rpc_method": {
+                "enum": [
+                  "GetParameterValues",
+                  "SetParameterValues",
+                  "AddObject",
+                  "DeleteObject",
+                  "Reboot",
+                  "FactoryReset",
+                  "Download",
+                  "Upload",
+                  "GetRPCMethods"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "device_sns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "execute_type": {
+          "type": "string"
+        },
+        "failed_count": {
+          "type": "integer"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "paused",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "success_count": {
+          "type": "integer"
+        },
+        "task_name": {
+          "type": "string"
+        },
+        "total_devices": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

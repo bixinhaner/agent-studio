@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.devices.batch_reboot",
+  "method": "POST",
+  "path": "/api/v1/devices/batch-reboot",
+  "handler": "github.com/omcgo/omcgo/internal/device.(*Handler).BatchRebootDevices-fm",
+  "category": "devices",
+  "title": "设备 - 批量重启",
+  "summary": "设备 - 批量重启",
+  "description": "批量下发设备重启操作 Handler: BatchRebootDevices handles POST /api/v1/devices/batch-reboot.\nAccepts a JSON body with a list of device IDs and queues a Reboot command for each.",
+  "intents": [
+    "设备 - 批量重启",
+    "批量下发设备重启操作 Handler: BatchRebootDevices handles POST /api/v1/devices/batch-reboot.\nAccepts a JSON body with a list of device IDs and queues a Reboot command for each.",
+    "devices",
+    "设备",
+    "batch-reboot",
+    "batch reboot"
+  ],
+  "tags": [
+    "devices",
+    "设备",
+    "batch-reboot"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：设备 - 批量重启",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "BatchIDsRequest",
+      "properties": {
+        "ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

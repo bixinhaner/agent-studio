@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.firmware.by_id",
+  "method": "DELETE",
+  "path": "/api/v1/firmware/:id",
+  "handler": "github.com/omcgo/omcgo/internal/software.(*Handler).DeleteFirmware-fm",
+  "category": "firmware",
+  "title": "Delete firmware",
+  "summary": "Delete firmware",
+  "description": "固件：删除指定资源记录",
+  "intents": [
+    "固件 - 删除",
+    "Delete firmware",
+    "固件：删除指定资源记录",
+    "firmware",
+    "固件"
+  ],
+  "tags": [
+    "firmware",
+    "固件",
+    "Software"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Delete firmware",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "204": {
+      "description": "Firmware deleted"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

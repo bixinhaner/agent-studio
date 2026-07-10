@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.admin.sysDictionaryDetail.updateSysDictionaryDetail",
+  "method": "PUT",
+  "path": "/api/v1/admin/sysDictionaryDetail/updateSysDictionaryDetail",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*DictionaryHandler).UpdateDictionaryDetail-fm",
+  "category": "sysDictionaryDetail",
+  "title": "字典明细 - 更新字典明细",
+  "summary": "字典明细 - 更新字典明细",
+  "description": "处理更新字典明细相关数据 Handler: UpdateDictionaryDetail handles PUT /sysDictionaryDetail/updateSysDictionaryDetail",
+  "intents": [
+    "字典明细 - 更新字典明细",
+    "处理更新字典明细相关数据 Handler: UpdateDictionaryDetail handles PUT /sysDictionaryDetail/updateSysDictionaryDetail",
+    "sysDictionaryDetail",
+    "admin",
+    "updateSysDictionaryDetail"
+  ],
+  "tags": [
+    "sysDictionaryDetail",
+    "admin",
+    "updateSysDictionaryDetail"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：字典明细 - 更新字典明细",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "UpdateDictionaryDetailRequest",
+      "properties": {
+        "extend": {
+          "nullable": true,
+          "type": "string"
+        },
+        "id": {
+          "goType": "int64",
+          "type": "integer"
+        },
+        "label": {
+          "nullable": true,
+          "type": "string"
+        },
+        "label_i18n": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "LabelI18n: 展示值多语言;非 nil 时整体覆盖 label_i18n。",
+          "type": "object"
+        },
+        "parent_id": {
+          "description": "PRD §10：可改父明细。Set 为指针类型表示是否变更：\n  nil           → 不改 parent_id\n  非 nil + 内层 nil → 显式改成顶层（不支持，请求体里只能用 number 或不传）\n  非 nil + 内层非 nil → 改成该 id 的子项\n实际语义：使用 *int64（仅当请求里包含 parent_id 字段时才动）。",
+          "goType": "int64",
+          "nullable": true,
+          "type": "integer"
+        },
+        "sort": {
+          "goType": "int",
+          "nullable": true,
+          "type": "integer"
+        },
+        "status": {
+          "nullable": true,
+          "type": "boolean"
+        },
+        "sysDictionaryId": {
+          "goType": "int64",
+          "nullable": true,
+          "type": "integer"
+        },
+        "value": {
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "category": "permissions",
+  "title": "permissions",
+  "operations": [
+    {
+      "operationId": "get.admin.permissions",
+      "method": "GET",
+      "path": "/api/v1/admin/permissions",
+      "title": "List all permissions",
+      "summary": "List all permissions",
+      "description": "权限：按筛选条件查询资源列表",
+      "intents": [
+        "权限 - 列表",
+        "List all permissions",
+        "权限：按筛选条件查询资源列表",
+        "permissions",
+        "权限",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.permissions.json"
+    }
+  ]
+}

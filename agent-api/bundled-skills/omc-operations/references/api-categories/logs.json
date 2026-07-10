@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "1.0",
+  "category": "logs",
+  "title": "日志",
+  "operations": [
+    {
+      "operationId": "get.admin.logs.login",
+      "method": "GET",
+      "path": "/api/v1/admin/logs/login",
+      "title": "日志 - 登录",
+      "summary": "日志 - 登录",
+      "description": "日志：提交账号凭据并获取访问令牌",
+      "intents": [
+        "日志 - 登录",
+        "日志：提交账号凭据并获取访问令牌",
+        "logs",
+        "日志",
+        "admin",
+        "login"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.logs.login.json"
+    },
+    {
+      "operationId": "get.admin.logs.operation",
+      "method": "GET",
+      "path": "/api/v1/admin/logs/operation",
+      "title": "日志 - 列表",
+      "summary": "日志 - 列表",
+      "description": "日志：按筛选条件查询资源列表",
+      "intents": [
+        "日志 - 列表",
+        "日志：按筛选条件查询资源列表",
+        "logs",
+        "日志",
+        "admin",
+        "operation"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.logs.operation.json"
+    },
+    {
+      "operationId": "get.admin.logs.task",
+      "method": "GET",
+      "path": "/api/v1/admin/logs/task",
+      "title": "日志 - 列表",
+      "summary": "日志 - 列表",
+      "description": "日志：按筛选条件查询资源列表",
+      "intents": [
+        "日志 - 列表",
+        "日志：按筛选条件查询资源列表",
+        "logs",
+        "日志",
+        "admin",
+        "task"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.logs.task.json"
+    },
+    {
+      "operationId": "get.logs.ne_messages",
+      "method": "GET",
+      "path": "/api/v1/logs/ne-messages",
+      "title": "List NE (Network Element) messages",
+      "summary": "List NE (Network Element) messages",
+      "description": "日志：处理nemessages相关数据 Handler: ListNEMessageLogs handles GET /logs/ne-messages.",
+      "intents": [
+        "日志 - nemessages",
+        "List NE (Network Element) messages",
+        "日志：处理nemessages相关数据 Handler: ListNEMessageLogs handles GET /logs/ne-messages.",
+        "logs",
+        "日志",
+        "ne-messages",
+        "ne messages"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.logs.ne_messages.json"
+    },
+    {
+      "operationId": "get.logs.system",
+      "method": "GET",
+      "path": "/api/v1/logs/system",
+      "title": "List system logs",
+      "summary": "List system logs",
+      "description": "日志：按筛选条件查询资源列表 Handler: ListSystemLogs handles GET /logs/system.",
+      "intents": [
+        "日志 - 列表",
+        "List system logs",
+        "日志：按筛选条件查询资源列表 Handler: ListSystemLogs handles GET /logs/system.",
+        "logs",
+        "日志",
+        "system"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.logs.system.json"
+    }
+  ]
+}

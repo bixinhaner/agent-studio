@@ -1,0 +1,221 @@
+{
+  "schemaVersion": "1.0",
+  "category": "device-groups",
+  "title": "设备分组",
+  "operations": [
+    {
+      "operationId": "delete.device_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id",
+      "title": "设备分组 - 删除",
+      "summary": "设备分组 - 删除",
+      "description": "设备分组：删除指定资源记录 Handler: DeleteGroup handles DELETE /device-groups/:id.",
+      "intents": [
+        "设备分组 - 删除",
+        "设备分组：删除指定资源记录 Handler: DeleteGroup handles DELETE /device-groups/:id.",
+        "device-groups",
+        "设备分组",
+        "device groups"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_groups.by_id.json"
+    },
+    {
+      "operationId": "delete.device_groups.by_id.devices",
+      "method": "DELETE",
+      "path": "/api/v1/device-groups/:id/devices",
+      "title": "设备分组 - DELETE",
+      "summary": "设备分组 - DELETE",
+      "description": "设备分组：执行 DELETE 请求对应的业务操作 Handler: BatchRemoveDevices handles DELETE /device-groups/:id/devices.",
+      "intents": [
+        "设备分组 - DELETE",
+        "设备分组：执行 DELETE 请求对应的业务操作 Handler: BatchRemoveDevices handles DELETE /device-groups/:id/devices.",
+        "device-groups",
+        "设备分组",
+        "devices",
+        "device groups"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_groups.by_id.devices.json"
+    },
+    {
+      "operationId": "get.device_groups.by_id",
+      "method": "GET",
+      "path": "/api/v1/device-groups/:id",
+      "title": "设备分组 - 详情",
+      "summary": "设备分组 - 详情",
+      "description": "设备分组：查询指定资源的详细信息 Handler: Get handles GET /device-groups/:id.",
+      "intents": [
+        "设备分组 - 详情",
+        "设备分组：查询指定资源的详细信息 Handler: Get handles GET /device-groups/:id.",
+        "device-groups",
+        "设备分组",
+        "device groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_groups.by_id.json"
+    },
+    {
+      "operationId": "get.device_groups.by_id.check_delete",
+      "method": "GET",
+      "path": "/api/v1/device-groups/:id/check-delete",
+      "title": "设备分组 - 校验是否可删除",
+      "summary": "设备分组 - 校验是否可删除",
+      "description": "设备分组：删除前检查资源是否仍被引用 Handler: CheckDelete handles GET /device-groups/:id/check-delete.",
+      "intents": [
+        "设备分组 - 校验是否可删除",
+        "设备分组：删除前检查资源是否仍被引用 Handler: CheckDelete handles GET /device-groups/:id/check-delete.",
+        "device-groups",
+        "设备分组",
+        "check-delete",
+        "device groups",
+        "check delete"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_groups.by_id.check_delete.json"
+    },
+    {
+      "operationId": "get.device_groups.by_id.devices",
+      "method": "GET",
+      "path": "/api/v1/device-groups/:id/devices",
+      "title": "设备分组 - GET",
+      "summary": "设备分组 - GET",
+      "description": "设备分组：执行 GET 请求对应的业务操作 Handler: ListDevices handles GET /device-groups/:id/devices.",
+      "intents": [
+        "设备分组 - GET",
+        "设备分组：执行 GET 请求对应的业务操作 Handler: ListDevices handles GET /device-groups/:id/devices.",
+        "device-groups",
+        "设备分组",
+        "devices",
+        "device groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_groups.by_id.devices.json"
+    },
+    {
+      "operationId": "get.device_groups.stats",
+      "method": "GET",
+      "path": "/api/v1/device-groups/stats",
+      "title": "设备分组 - 统计",
+      "summary": "设备分组 - 统计",
+      "description": "设备分组：查询统计汇总数据 Handler: GetStats handles GET /device-groups/stats.",
+      "intents": [
+        "设备分组 - 统计",
+        "设备分组：查询统计汇总数据 Handler: GetStats handles GET /device-groups/stats.",
+        "device-groups",
+        "设备分组",
+        "stats",
+        "device groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_groups.stats.json"
+    },
+    {
+      "operationId": "get.device_groups.tree",
+      "method": "GET",
+      "path": "/api/v1/device-groups/tree",
+      "title": "设备分组 - 树形结构",
+      "summary": "设备分组 - 树形结构",
+      "description": "设备分组：查询树形层级数据 Handler: GetTreeWithCounts handles GET /device-groups/tree.",
+      "intents": [
+        "设备分组 - 树形结构",
+        "设备分组：查询树形层级数据 Handler: GetTreeWithCounts handles GET /device-groups/tree.",
+        "device-groups",
+        "设备分组",
+        "tree",
+        "device groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_groups.tree.json"
+    },
+    {
+      "operationId": "post.device_groups",
+      "method": "POST",
+      "path": "/api/v1/device-groups",
+      "title": "设备分组 - 创建",
+      "summary": "设备分组 - 创建",
+      "description": "设备分组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+      "intents": [
+        "设备分组 - 创建",
+        "设备分组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+        "device-groups",
+        "设备分组",
+        "device groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_groups.json"
+    },
+    {
+      "operationId": "post.device_groups.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/:id/devices",
+      "title": "设备分组 - POST",
+      "summary": "设备分组 - POST",
+      "description": "设备分组：执行 POST 请求对应的业务操作 Handler: BatchAddDevices handles POST /device-groups/:id/devices.",
+      "intents": [
+        "设备分组 - POST",
+        "设备分组：执行 POST 请求对应的业务操作 Handler: BatchAddDevices handles POST /device-groups/:id/devices.",
+        "device-groups",
+        "设备分组",
+        "devices",
+        "device groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_groups.by_id.devices.json"
+    },
+    {
+      "operationId": "post.device_groups.move_devices",
+      "method": "POST",
+      "path": "/api/v1/device-groups/move-devices",
+      "title": "设备分组 - 移动设备",
+      "summary": "设备分组 - 移动设备",
+      "description": "设备分组：将设备移动到目标分组 Handler: MoveDevicesHandler handles POST /device-groups/move-devices.",
+      "intents": [
+        "设备分组 - 移动设备",
+        "设备分组：将设备移动到目标分组 Handler: MoveDevicesHandler handles POST /device-groups/move-devices.",
+        "device-groups",
+        "设备分组",
+        "move-devices",
+        "device groups",
+        "move devices"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.device_groups.move_devices.json"
+    },
+    {
+      "operationId": "put.device_groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/device-groups/:id",
+      "title": "设备分组 - 更新",
+      "summary": "设备分组 - 更新",
+      "description": "设备分组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+      "intents": [
+        "设备分组 - 更新",
+        "设备分组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+        "device-groups",
+        "设备分组",
+        "device groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.device_groups.by_id.json"
+    },
+    {
+      "operationId": "put.device_groups.sort",
+      "method": "PUT",
+      "path": "/api/v1/device-groups/sort",
+      "title": "设备分组 - 排序",
+      "summary": "设备分组 - 排序",
+      "description": "设备分组：调整列表或树节点顺序 Handler: BatchSort handles PUT /device-groups/sort.",
+      "intents": [
+        "设备分组 - 排序",
+        "设备分组：调整列表或树节点顺序 Handler: BatchSort handles PUT /device-groups/sort.",
+        "device-groups",
+        "设备分组",
+        "sort",
+        "device groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.device_groups.sort.json"
+    }
+  ]
+}

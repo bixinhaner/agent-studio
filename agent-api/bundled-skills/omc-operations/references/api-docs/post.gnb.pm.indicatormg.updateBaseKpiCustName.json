@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.gnb.pm.indicatormg.updateBaseKpiCustName",
+  "method": "POST",
+  "path": "/api/v1/gnb/pm/indicatormg/updateBaseKpiCustName",
+  "handler": "github.com/omcgo/omcgo/internal/pm/indicator.(*IndicatorHandler).UpdateGNBBaseKpiCustName-fm",
+  "category": "gnb",
+  "title": "gNB - 指标管理更新基础 KPI 自定义名",
+  "summary": "gNB - 指标管理更新基础 KPI 自定义名",
+  "description": "gNB：处理更新基础 KPI 自定义名相关数据 Handler: UpdateGNBBaseKpiCustName handles POST /gnb/pm/indicatormg/updateBaseKpiCustName.",
+  "intents": [
+    "gNB - 指标管理更新基础 KPI 自定义名",
+    "gNB：处理更新基础 KPI 自定义名相关数据 Handler: UpdateGNBBaseKpiCustName handles POST /gnb/pm/indicatormg/updateBaseKpiCustName.",
+    "gnb",
+    "pm",
+    "indicatormg",
+    "updateBaseKpiCustName"
+  ],
+  "tags": [
+    "gnb",
+    "pm",
+    "indicatormg",
+    "updateBaseKpiCustName"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：gNB - 指标管理更新基础 KPI 自定义名",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CustNameUpdateRequest",
+      "properties": {
+        "cust_name": {
+          "type": "string"
+        },
+        "device_type": {
+          "enum": [
+            "ENB",
+            "GSM",
+            "GNB"
+          ],
+          "type": "string"
+        },
+        "operator_code": {
+          "type": "string"
+        },
+        "perf_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_type",
+        "operator_code",
+        "perf_id"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

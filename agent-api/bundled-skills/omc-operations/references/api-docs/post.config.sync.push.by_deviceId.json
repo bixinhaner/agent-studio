@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.config.sync.push.by_deviceId",
+  "method": "POST",
+  "path": "/api/v1/config/sync/push/:deviceId",
+  "handler": "github.com/omcgo/omcgo/internal/config.(*SyncHandler).PushConfig-fm",
+  "category": "config",
+  "title": "Push configuration to a device",
+  "summary": "Push configuration to a device",
+  "description": "配置：向设备或外部系统推送数据 Handler: PushConfig queues SetParameterValues commands for a device.",
+  "intents": [
+    "配置 - 推送",
+    "Push configuration to a device",
+    "配置：向设备或外部系统推送数据 Handler: PushConfig queues SetParameterValues commands for a device.",
+    "config",
+    "配置",
+    "sync",
+    "push"
+  ],
+  "tags": [
+    "config",
+    "配置",
+    "sync",
+    "push",
+    "ConfigSync"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Push configuration to a device",
+  "pathParams": [
+    {
+      "name": "deviceId",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :deviceId",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "PushConfigRequest",
+      "properties": {
+        "parameters": {
+          "items": {
+            "goType": "ParameterValue",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "description": "string, int, boolean, etc.",
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "parameters"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "200": {
+      "description": "Configuration pushed"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

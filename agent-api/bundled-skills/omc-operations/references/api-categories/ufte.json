@@ -1,0 +1,275 @@
+{
+  "schemaVersion": "1.0",
+  "category": "ufte",
+  "title": "ufte",
+  "operations": [
+    {
+      "operationId": "delete.ufte.task_types.by_typeCode",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/task-types/:typeCode",
+      "title": "ufte - tasktypes删除",
+      "summary": "ufte - tasktypes删除",
+      "description": "ufte：查询或维护指定对象的tasktypes删除数据",
+      "intents": [
+        "ufte - tasktypes删除",
+        "ufte：查询或维护指定对象的tasktypes删除数据",
+        "ufte",
+        "task-types",
+        "task types"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.ufte.task_types.by_typeCode.json"
+    },
+    {
+      "operationId": "delete.ufte.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/ufte/tasks/:id",
+      "title": "ufte - 删除",
+      "summary": "ufte - 删除",
+      "description": "ufte：删除指定资源记录",
+      "intents": [
+        "ufte - 删除",
+        "ufte：删除指定资源记录",
+        "ufte",
+        "tasks"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.ufte.tasks.by_id.json"
+    },
+    {
+      "operationId": "get.ufte.device_candidates",
+      "method": "GET",
+      "path": "/api/v1/ufte/device-candidates",
+      "title": "ufte - devicecandidates",
+      "summary": "ufte - devicecandidates",
+      "description": "ufte：处理devicecandidates相关数据",
+      "intents": [
+        "ufte - devicecandidates",
+        "ufte：处理devicecandidates相关数据",
+        "ufte",
+        "device-candidates",
+        "device candidates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.device_candidates.json"
+    },
+    {
+      "operationId": "get.ufte.devices",
+      "method": "GET",
+      "path": "/api/v1/ufte/devices",
+      "title": "ufte - 列表",
+      "summary": "ufte - 列表",
+      "description": "ufte：按筛选条件查询资源列表",
+      "intents": [
+        "ufte - 列表",
+        "ufte：按筛选条件查询资源列表",
+        "ufte",
+        "devices"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.devices.json"
+    },
+    {
+      "operationId": "get.ufte.devices.export",
+      "method": "GET",
+      "path": "/api/v1/ufte/devices/export",
+      "title": "ufte - 导出",
+      "summary": "ufte - 导出",
+      "description": "ufte：按条件导出业务数据 Handler: ExportDevices 真流式导出设备子任务列表为 CSV。\n\n复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，\n每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，\n大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。\n\n为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存\n膨胀 ③ 客户端拼 CSV 字段含 , \" 换行 时转义易错。后端 csv.Writer 标准库自动转义。",
+      "intents": [
+        "ufte - 导出",
+        "ufte：按条件导出业务数据 Handler: ExportDevices 真流式导出设备子任务列表为 CSV。\n\n复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，\n每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，\n大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。\n\n为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存\n膨胀 ③ 客户端拼 CSV 字段含 , \" 换行 时转义易错。后端 csv.Writer 标准库自动转义。",
+        "ufte",
+        "devices",
+        "export"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.devices.export.json"
+    },
+    {
+      "operationId": "get.ufte.overview",
+      "method": "GET",
+      "path": "/api/v1/ufte/overview",
+      "title": "ufte - 列表",
+      "summary": "ufte - 列表",
+      "description": "ufte：按筛选条件查询资源列表",
+      "intents": [
+        "ufte - 列表",
+        "ufte：按筛选条件查询资源列表",
+        "ufte",
+        "overview"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.overview.json"
+    },
+    {
+      "operationId": "get.ufte.task_types",
+      "method": "GET",
+      "path": "/api/v1/ufte/task-types",
+      "title": "ufte - tasktypes",
+      "summary": "ufte - tasktypes",
+      "description": "ufte：处理tasktypes相关数据",
+      "intents": [
+        "ufte - tasktypes",
+        "ufte：处理tasktypes相关数据",
+        "ufte",
+        "task-types",
+        "task types"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.task_types.json"
+    },
+    {
+      "operationId": "get.ufte.tasks",
+      "method": "GET",
+      "path": "/api/v1/ufte/tasks",
+      "title": "ufte - 列表",
+      "summary": "ufte - 列表",
+      "description": "ufte：按筛选条件查询资源列表",
+      "intents": [
+        "ufte - 列表",
+        "ufte：按筛选条件查询资源列表",
+        "ufte",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.ufte.tasks.json"
+    },
+    {
+      "operationId": "post.ufte.task_types",
+      "method": "POST",
+      "path": "/api/v1/ufte/task-types",
+      "title": "ufte - tasktypes",
+      "summary": "ufte - tasktypes",
+      "description": "ufte：处理tasktypes相关数据",
+      "intents": [
+        "ufte - tasktypes",
+        "ufte：处理tasktypes相关数据",
+        "ufte",
+        "task-types",
+        "task types"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.ufte.task_types.json"
+    },
+    {
+      "operationId": "post.ufte.tasks",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks",
+      "title": "ufte - 创建",
+      "summary": "ufte - 创建",
+      "description": "ufte：创建新的资源记录",
+      "intents": [
+        "ufte - 创建",
+        "ufte：创建新的资源记录",
+        "ufte",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.ufte.tasks.json"
+    },
+    {
+      "operationId": "post.ufte.tasks.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/batch-delete",
+      "title": "ufte - 批量删除",
+      "summary": "ufte - 批量删除",
+      "description": "ufte：处理批量删除相关数据 Handler: BatchDeleteTasks 批量删除任务；单条失败不影响其他。",
+      "intents": [
+        "ufte - 批量删除",
+        "ufte：处理批量删除相关数据 Handler: BatchDeleteTasks 批量删除任务；单条失败不影响其他。",
+        "ufte",
+        "tasks",
+        "batch-delete",
+        "batch delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.ufte.tasks.batch_delete.json"
+    },
+    {
+      "operationId": "post.ufte.tasks.by_id.retry",
+      "method": "POST",
+      "path": "/api/v1/ufte/tasks/:id/retry",
+      "title": "ufte - 重试",
+      "summary": "ufte - 重试",
+      "description": "ufte：重试失败任务或消息",
+      "intents": [
+        "ufte - 重试",
+        "ufte：重试失败任务或消息",
+        "ufte",
+        "tasks",
+        "retry"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.ufte.tasks.by_id.retry.json"
+    },
+    {
+      "operationId": "put.ufte.task_types.by_typeCode",
+      "method": "PUT",
+      "path": "/api/v1/ufte/task-types/:typeCode",
+      "title": "ufte - tasktypes更新",
+      "summary": "ufte - tasktypes更新",
+      "description": "ufte：查询或维护指定对象的tasktypes更新数据",
+      "intents": [
+        "ufte - tasktypes更新",
+        "ufte：查询或维护指定对象的tasktypes更新数据",
+        "ufte",
+        "task-types",
+        "task types"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.ufte.task_types.by_typeCode.json"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.start",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/start",
+      "title": "ufte - 启动",
+      "summary": "ufte - 启动",
+      "description": "ufte：启动任务、流程或服务",
+      "intents": [
+        "ufte - 启动",
+        "ufte：启动任务、流程或服务",
+        "ufte",
+        "tasks",
+        "start"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.ufte.tasks.by_id.start.json"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.suspend",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/suspend",
+      "title": "ufte - PUT",
+      "summary": "ufte - PUT",
+      "description": "ufte：执行 PUT 请求对应的业务操作",
+      "intents": [
+        "ufte - PUT",
+        "ufte：执行 PUT 请求对应的业务操作",
+        "ufte",
+        "tasks",
+        "suspend"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.ufte.tasks.by_id.suspend.json"
+    },
+    {
+      "operationId": "put.ufte.tasks.by_id.terminate",
+      "method": "PUT",
+      "path": "/api/v1/ufte/tasks/:id/terminate",
+      "title": "ufte - PUT",
+      "summary": "ufte - PUT",
+      "description": "ufte：执行 PUT 请求对应的业务操作",
+      "intents": [
+        "ufte - PUT",
+        "ufte：执行 PUT 请求对应的业务操作",
+        "ufte",
+        "tasks",
+        "terminate"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.ufte.tasks.by_id.terminate.json"
+    }
+  ]
+}

@@ -32,16 +32,15 @@ Connector policy：
 
 可用 CLI：
 - node {{cliPathJson}} identity
-- node {{cliPathJson}} catalog "query text"
-- node {{cliPathJson}} describe operationId
 - node {{cliPathJson}} request GET /api/v1/example '{"operationId":"example.list","query":{"key":"value"},"reason":"why this API is needed"}'
+- 未启用完整本地手册的 Connector 兼容命令：node {{cliPathJson}} catalog "query text"；node {{cliPathJson}} describe operationId
 
 执行规则：
 - 优先遵循已启用 Skill；同一对话中已读取的 Skill 不要重复打开，并复用已经成功的 operationId、路径和参数。
-- 已知操作直接 request；仅当操作未知时才搜索 catalog，只有参数、路径变量、请求体或写入语义不明确时才 describe。
-- catalog 搜索先选分类，再用一到两个路径或资源词搜索；不要先做无分类的自然语言搜索，也不要连续改写长关键词。
+- 如果已启用 Skill 提供完整本地 API 手册，先校验手册版本，再按 Skill 指引读取一个分类索引和一个操作文档后直接 request；版本匹配时不要调用 catalog 或 describe。
+- 只有未启用完整本地手册的 Connector 才使用 catalog/describe；此时先缩小分类和资源词，只 describe 一个候选操作。
 - 选择能回答问题的最少 API；独立读取可并行执行，并用筛选和分页控制结果大小。
-- 只能请求 /api/v1 下由已启用 Skill 或实时 catalog 确认的 API；不要猜测未确认的路径。
+- 只能请求 /api/v1 下由版本匹配的已启用 Skill 或兼容 catalog 确认的 API；不要猜测未确认的路径。
 - 默认优先使用 GET 读取真实数据；写操作只有在 connector policy 和外部系统确认允许时才能请求。
 - API 返回失败时，根据错误调整参数或说明无法完成，不要绕过策略。
 - 最终回答必须基于 CLI 返回的真实结果，用用户语言简洁说明关键结论。

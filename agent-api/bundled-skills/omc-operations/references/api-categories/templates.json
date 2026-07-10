@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "1.0",
+  "category": "templates",
+  "title": "模板",
+  "operations": [
+    {
+      "operationId": "delete.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/templates/:id",
+      "title": "模板 - 删除",
+      "summary": "模板 - 删除",
+      "description": "模板：删除指定资源记录 Handler: Delete handles DELETE /api/v1/templates/:id.",
+      "intents": [
+        "模板 - 删除",
+        "模板：删除指定资源记录 Handler: Delete handles DELETE /api/v1/templates/:id.",
+        "templates",
+        "模板"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.templates.by_id.json"
+    },
+    {
+      "operationId": "get.templates",
+      "method": "GET",
+      "path": "/api/v1/templates",
+      "title": "模板 - 列表",
+      "summary": "模板 - 列表",
+      "description": "模板：按筛选条件查询资源列表 Handler: List handles GET /api/v1/templates.",
+      "intents": [
+        "模板 - 列表",
+        "模板：按筛选条件查询资源列表 Handler: List handles GET /api/v1/templates.",
+        "templates",
+        "模板"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.templates.json"
+    },
+    {
+      "operationId": "get.templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/templates/:id",
+      "title": "模板 - 详情",
+      "summary": "模板 - 详情",
+      "description": "模板：查询指定资源的详细信息 Handler: Get handles GET /api/v1/templates/:id.",
+      "intents": [
+        "模板 - 详情",
+        "模板：查询指定资源的详细信息 Handler: Get handles GET /api/v1/templates/:id.",
+        "templates",
+        "模板"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.templates.by_id.json"
+    },
+    {
+      "operationId": "post.templates",
+      "method": "POST",
+      "path": "/api/v1/templates",
+      "title": "模板 - 创建",
+      "summary": "模板 - 创建",
+      "description": "模板：创建新的资源记录 Handler: Create handles POST /api/v1/templates.",
+      "intents": [
+        "模板 - 创建",
+        "模板：创建新的资源记录 Handler: Create handles POST /api/v1/templates.",
+        "templates",
+        "模板"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.templates.json"
+    },
+    {
+      "operationId": "post.templates.by_id.dispatch",
+      "method": "POST",
+      "path": "/api/v1/templates/:id/dispatch",
+      "title": "模板 - POST",
+      "summary": "模板 - POST",
+      "description": "模板：执行 POST 请求对应的业务操作 Handler: Dispatch handles POST /api/v1/templates/:id/dispatch (T-0120).\n显式选模板 + 选设备 → Path A 强制下发；每设备独立成败（与 T-0102-c 同 pattern）。",
+      "intents": [
+        "模板 - POST",
+        "模板：执行 POST 请求对应的业务操作 Handler: Dispatch handles POST /api/v1/templates/:id/dispatch (T-0120).\n显式选模板 + 选设备 → Path A 强制下发；每设备独立成败（与 T-0102-c 同 pattern）。",
+        "templates",
+        "模板",
+        "dispatch"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.templates.by_id.dispatch.json"
+    },
+    {
+      "operationId": "put.templates.by_id",
+      "method": "PUT",
+      "path": "/api/v1/templates/:id",
+      "title": "模板 - 更新",
+      "summary": "模板 - 更新",
+      "description": "模板：更新指定资源的完整配置 Handler: Update handles PUT /api/v1/templates/:id.",
+      "intents": [
+        "模板 - 更新",
+        "模板：更新指定资源的完整配置 Handler: Update handles PUT /api/v1/templates/:id.",
+        "templates",
+        "模板"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.templates.by_id.json"
+    }
+  ]
+}

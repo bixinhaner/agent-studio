@@ -1,0 +1,1065 @@
+{
+  "schemaVersion": "1.0",
+  "category": "mml",
+  "title": "MML",
+  "operations": [
+    {
+      "operationId": "delete.mml.admin.commands.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id",
+      "title": "MML - 命令删除",
+      "summary": "MML - 命令删除",
+      "description": "MML：查询或维护指定对象的命令删除数据 Handler: DeleteCommand DELETE /api/v1/mml/admin/commands/:id",
+      "intents": [
+        "MML - 命令删除",
+        "MML：查询或维护指定对象的命令删除数据 Handler: DeleteCommand DELETE /api/v1/mml/admin/commands/:id",
+        "mml",
+        "admin",
+        "commands"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.admin.commands.by_id.json"
+    },
+    {
+      "operationId": "delete.mml.admin.commands.by_id.sub_fields.by_sid",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "title": "MML - sub字段删除",
+      "summary": "MML - sub字段删除",
+      "description": "MML：查询或维护指定对象的sub字段删除数据 Handler: DeleteSubField DELETE /api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "intents": [
+        "MML - sub字段删除",
+        "MML：查询或维护指定对象的sub字段删除数据 Handler: DeleteSubField DELETE /api/v1/mml/admin/commands/:id/sub-fields/:sid",
+        "mml",
+        "admin",
+        "commands",
+        "sub-fields",
+        "sub fields"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.admin.commands.by_id.sub_fields.by_sid.json"
+    },
+    {
+      "operationId": "delete.mml.admin.groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/admin/groups/:id",
+      "title": "MML - 分组删除",
+      "summary": "MML - 分组删除",
+      "description": "MML：查询或维护指定对象的分组删除数据 Handler: DeleteGroup DELETE /api/v1/mml/admin/groups/:id",
+      "intents": [
+        "MML - 分组删除",
+        "MML：查询或维护指定对象的分组删除数据 Handler: DeleteGroup DELETE /api/v1/mml/admin/groups/:id",
+        "mml",
+        "admin",
+        "groups"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.admin.groups.by_id.json"
+    },
+    {
+      "operationId": "delete.mml.scripts.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/scripts/:id",
+      "title": "MML - 脚本删除",
+      "summary": "MML - 脚本删除",
+      "description": "MML：查询或维护指定对象的脚本删除数据 Handler: DeleteScript handles DELETE /api/v1/mml/scripts/:id.",
+      "intents": [
+        "MML - 脚本删除",
+        "MML：查询或维护指定对象的脚本删除数据 Handler: DeleteScript handles DELETE /api/v1/mml/scripts/:id.",
+        "mml",
+        "scripts"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.scripts.by_id.json"
+    },
+    {
+      "operationId": "delete.mml.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/tasks/:id",
+      "title": "MML - 删除",
+      "summary": "MML - 删除",
+      "description": "MML：删除指定资源记录 Handler: DeleteTask handles DELETE /api/v1/mml/tasks/:id.",
+      "intents": [
+        "MML - 删除",
+        "MML：删除指定资源记录 Handler: DeleteTask handles DELETE /api/v1/mml/tasks/:id.",
+        "mml",
+        "tasks"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.tasks.by_id.json"
+    },
+    {
+      "operationId": "delete.mml.templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/mml/templates/:id",
+      "title": "MML - 删除",
+      "summary": "MML - 删除",
+      "description": "MML：删除指定资源记录 Handler: DeleteTemplate handles DELETE /api/v1/mml/templates/:id.\n\n鉴权见 §4.3：仅 owner 或 super_admin 可删；private + public 同一规则\n（修复历史 G2 — \"删别人的 private\"以前误放行）。",
+      "intents": [
+        "MML - 删除",
+        "MML：删除指定资源记录 Handler: DeleteTemplate handles DELETE /api/v1/mml/templates/:id.\n\n鉴权见 §4.3：仅 owner 或 super_admin 可删；private + public 同一规则\n（修复历史 G2 — \"删别人的 private\"以前误放行）。",
+        "mml",
+        "templates"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.templates.by_id.json"
+    },
+    {
+      "operationId": "delete.mml.templates.by_id.paths.by_pathId",
+      "method": "DELETE",
+      "path": "/api/v1/mml/templates/:id/paths/:pathId",
+      "title": "MML - 删除",
+      "summary": "MML - 删除",
+      "description": "MML：删除指定资源记录 Handler: DeleteTemplatePath handles DELETE /api/v1/mml/templates/:id/paths/:pathId.\n删单条关联（owner/super 才能写）。",
+      "intents": [
+        "MML - 删除",
+        "MML：删除指定资源记录 Handler: DeleteTemplatePath handles DELETE /api/v1/mml/templates/:id/paths/:pathId.\n删单条关联（owner/super 才能写）。",
+        "mml",
+        "templates",
+        "paths"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.mml.templates.by_id.paths.by_pathId.json"
+    },
+    {
+      "operationId": "get.mml.admin.commands",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/commands",
+      "title": "MML - 命令",
+      "summary": "MML - 命令",
+      "description": "MML：查询或执行命令定义 Handler: ListCommands GET /admin/commands?group_id=\u0026source=\u0026category=\u0026q=\u0026page=\u0026page_size=",
+      "intents": [
+        "MML - 命令",
+        "MML：查询或执行命令定义 Handler: ListCommands GET /admin/commands?group_id=\u0026source=\u0026category=\u0026q=\u0026page=\u0026page_size=",
+        "mml",
+        "admin",
+        "commands"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.commands.json"
+    },
+    {
+      "operationId": "get.mml.admin.commands.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/commands/:id",
+      "title": "MML - 命令详情",
+      "summary": "MML - 命令详情",
+      "description": "MML：查询或维护指定对象的命令详情数据 Handler: GetCommand GET /admin/commands/:id — 单条命令详情（含完整字段，便于编辑表单 prefill）。",
+      "intents": [
+        "MML - 命令详情",
+        "MML：查询或维护指定对象的命令详情数据 Handler: GetCommand GET /admin/commands/:id — 单条命令详情（含完整字段，便于编辑表单 prefill）。",
+        "mml",
+        "admin",
+        "commands"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.commands.by_id.json"
+    },
+    {
+      "operationId": "get.mml.admin.commands.by_id.sub_fields",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields",
+      "title": "MML - sub字段",
+      "summary": "MML - sub字段",
+      "description": "MML：处理sub字段相关数据 Handler: ListSubFields GET /admin/commands/:id/sub-fields\nadmin 视角 sub_field 列表（含 is_supported=false 行；与 console 端 GET\n/commands/:id/sub-fields 区别在不过滤）。",
+      "intents": [
+        "MML - sub字段",
+        "MML：处理sub字段相关数据 Handler: ListSubFields GET /admin/commands/:id/sub-fields\nadmin 视角 sub_field 列表（含 is_supported=false 行；与 console 端 GET\n/commands/:id/sub-fields 区别在不过滤）。",
+        "mml",
+        "admin",
+        "commands",
+        "sub-fields",
+        "sub fields"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.commands.by_id.sub_fields.json"
+    },
+    {
+      "operationId": "get.mml.admin.groups",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/groups",
+      "title": "MML - 分组",
+      "summary": "MML - 分组",
+      "description": "MML：查询或维护分组数据 Handler: ListGroups GET /admin/groups?source=\u0026param_version=\u0026q=\nadmin 视角全集 group（与 console group_tree 区别：不过滤 chapter:%）。",
+      "intents": [
+        "MML - 分组",
+        "MML：查询或维护分组数据 Handler: ListGroups GET /admin/groups?source=\u0026param_version=\u0026q=\nadmin 视角全集 group（与 console group_tree 区别：不过滤 chapter:%）。",
+        "mml",
+        "admin",
+        "groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.groups.json"
+    },
+    {
+      "operationId": "get.mml.admin.standard_params",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/standard-params",
+      "title": "MML - standard参数",
+      "summary": "MML - standard参数",
+      "description": "MML：处理standard参数相关数据 Handler: ListStandardParams GET /admin/standard-params?q=\u0026entry_type=\u0026page=\u0026page_size=\u0026sort_by=\u0026sort_dir=\n返 standard_params 全量字段（含 description / range），前端 path 下拉 + autofill 用。",
+      "intents": [
+        "MML - standard参数",
+        "MML：处理standard参数相关数据 Handler: ListStandardParams GET /admin/standard-params?q=\u0026entry_type=\u0026page=\u0026page_size=\u0026sort_by=\u0026sort_dir=\n返 standard_params 全量字段（含 description / range），前端 path 下拉 + autofill 用。",
+        "mml",
+        "admin",
+        "standard-params",
+        "standard params"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.standard_params.json"
+    },
+    {
+      "operationId": "get.mml.admin.standard_params.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/admin/standard-params/:id",
+      "title": "MML - standard参数详情",
+      "summary": "MML - standard参数详情",
+      "description": "MML：查询或维护指定对象的standard参数详情数据 Handler: GetStandardParam GET /admin/standard-params/:id",
+      "intents": [
+        "MML - standard参数详情",
+        "MML：查询或维护指定对象的standard参数详情数据 Handler: GetStandardParam GET /admin/standard-params/:id",
+        "mml",
+        "admin",
+        "standard-params",
+        "standard params"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.admin.standard_params.by_id.json"
+    },
+    {
+      "operationId": "get.mml.commands",
+      "method": "GET",
+      "path": "/api/v1/mml/commands",
+      "title": "MML - 命令",
+      "summary": "MML - 命令",
+      "description": "MML：查询或执行命令定义 Handler: ListCommands handles GET /api/v1/mml/commands.",
+      "intents": [
+        "MML - 命令",
+        "MML：查询或执行命令定义 Handler: ListCommands handles GET /api/v1/mml/commands.",
+        "mml",
+        "commands"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.commands.json"
+    },
+    {
+      "operationId": "get.mml.commands.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/commands/:id",
+      "title": "MML - 命令详情",
+      "summary": "MML - 命令详情",
+      "description": "MML：查询或维护指定对象的命令详情数据 Handler: GetCommand handles GET /api/v1/mml/commands/:id.",
+      "intents": [
+        "MML - 命令详情",
+        "MML：查询或维护指定对象的命令详情数据 Handler: GetCommand handles GET /api/v1/mml/commands/:id.",
+        "mml",
+        "commands"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.commands.by_id.json"
+    },
+    {
+      "operationId": "get.mml.commands.by_id.param_paths",
+      "method": "GET",
+      "path": "/api/v1/mml/commands/:id/param-paths",
+      "title": "MML - 参数路径",
+      "summary": "MML - 参数路径",
+      "description": "MML：查询参数路径集合 Handler: GetCommandParamPaths handles GET /api/v1/mml/commands/:id/param-paths.",
+      "intents": [
+        "MML - 参数路径",
+        "MML：查询参数路径集合 Handler: GetCommandParamPaths handles GET /api/v1/mml/commands/:id/param-paths.",
+        "mml",
+        "commands",
+        "param-paths",
+        "param paths"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.commands.by_id.param_paths.json"
+    },
+    {
+      "operationId": "get.mml.commands.by_id.sub_fields",
+      "method": "GET",
+      "path": "/api/v1/mml/commands/:id/sub-fields",
+      "title": "MML - sub字段",
+      "summary": "MML - sub字段",
+      "description": "MML：处理sub字段相关数据 Handler: GetCommandSubFields 返回命令的 sub-fields（含 JOIN standard_params 元数据），\n按 sort_order 排序。lang 派生顶级 label / constraint_text。\n\n入参优先级（service 内实现）：\n  - ?product_class=\u003cclass\u003e  console 主用（与命令树命令名计数口径对齐）\n  - ?device_sn=\u003csn\u003e / ?device_id=\u003cuuid\u003e  admin / omcctl 兼容路径\n  - 都不传 → admin 视图全集",
+      "intents": [
+        "MML - sub字段",
+        "MML：处理sub字段相关数据 Handler: GetCommandSubFields 返回命令的 sub-fields（含 JOIN standard_params 元数据），\n按 sort_order 排序。lang 派生顶级 label / constraint_text。\n\n入参优先级（service 内实现）：\n  - ?product_class=\u003cclass\u003e  console 主用（与命令树命令名计数口径对齐）\n  - ?device_sn=\u003csn\u003e / ?device_id=\u003cuuid\u003e  admin / omcctl 兼容路径\n  - 都不传 → admin 视图全集",
+        "mml",
+        "commands",
+        "sub-fields",
+        "sub fields"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.commands.by_id.sub_fields.json"
+    },
+    {
+      "operationId": "get.mml.commands.search",
+      "method": "GET",
+      "path": "/api/v1/mml/commands/search",
+      "title": "MML - 搜索",
+      "summary": "MML - 搜索",
+      "description": "MML：按关键字搜索业务数据 Handler: SearchCommands 按关键字模糊匹配命令，复用 CommandTree 搜索 + AddTemplateModal 选 path 场景。\n\n行为：\n  - q 空 / 仅空白 → 返 200 空数组（不消耗服务端 CPU 做\"全表 LIMIT 50\"）\n  - q 非空 → ILIKE %q% 联合 SELECT，按 (chapter, display_order, op_type, code) 排序\n  - limit 缺省 50，硬上限 200（由 repo 兜底）\n\n错误码：\n  - 503 — search service 未配置（启动期 SearchRepo 为 nil；理论上不应发生）\n  - 500 — DB 查询错",
+      "intents": [
+        "MML - 搜索",
+        "MML：按关键字搜索业务数据 Handler: SearchCommands 按关键字模糊匹配命令，复用 CommandTree 搜索 + AddTemplateModal 选 path 场景。\n\n行为：\n  - q 空 / 仅空白 → 返 200 空数组（不消耗服务端 CPU 做\"全表 LIMIT 50\"）\n  - q 非空 → ILIKE %q% 联合 SELECT，按 (chapter, display_order, op_type, code) 排序\n  - limit 缺省 50，硬上限 200（由 repo 兜底）\n\n错误码：\n  - 503 — search service 未配置（启动期 SearchRepo 为 nil；理论上不应发生）\n  - 500 — DB 查询错",
+        "mml",
+        "commands",
+        "search"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.commands.search.json"
+    },
+    {
+      "operationId": "get.mml.console.command_compatibility",
+      "method": "GET",
+      "path": "/api/v1/mml/console/command-compatibility",
+      "title": "MML - commandcompatibility",
+      "summary": "MML - commandcompatibility",
+      "description": "MML：处理commandcompatibility相关数据 Handler: GetCommandCompatibility 返回指定 product_class 下不兼容的命令 ID 列表。\n\n错误码：\n  - 400 product_class 缺失\n  - 503 compatibility service 未配置（启动期 nil 注入）\n  - 500 其他内部错误\n\nT-0177：孤儿 productClass（ProductRegistry 未匹配）不再返 404，而是返 200 +\nparamModelID=零值 + 全部 unsupported；前端据 paramModelID 是否零值提示\n\"未配置参数模型\" vs \"全部不兼容\"。",
+      "intents": [
+        "MML - commandcompatibility",
+        "MML：处理commandcompatibility相关数据 Handler: GetCommandCompatibility 返回指定 product_class 下不兼容的命令 ID 列表。\n\n错误码：\n  - 400 product_class 缺失\n  - 503 compatibility service 未配置（启动期 nil 注入）\n  - 500 其他内部错误\n\nT-0177：孤儿 productClass（ProductRegistry 未匹配）不再返 404，而是返 200 +\nparamModelID=零值 + 全部 unsupported；前端据 paramModelID 是否零值提示\n\"未配置参数模型\" vs \"全部不兼容\"。",
+        "mml",
+        "console",
+        "command-compatibility",
+        "command compatibility"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.console.command_compatibility.json"
+    },
+    {
+      "operationId": "get.mml.dangerous_check",
+      "method": "GET",
+      "path": "/api/v1/mml/dangerous-check",
+      "title": "MML - 危险命令检查",
+      "summary": "MML - 危险命令检查",
+      "description": "MML：校验命令是否属于高风险操作 Handler: DangerousCheck handles GET /api/v1/mml/dangerous-check.",
+      "intents": [
+        "MML - 危险命令检查",
+        "MML：校验命令是否属于高风险操作 Handler: DangerousCheck handles GET /api/v1/mml/dangerous-check.",
+        "mml",
+        "dangerous-check",
+        "dangerous check"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.dangerous_check.json"
+    },
+    {
+      "operationId": "get.mml.group_tree",
+      "method": "GET",
+      "path": "/api/v1/mml/group-tree",
+      "title": "MML - group树形结构",
+      "summary": "MML - group树形结构",
+      "description": "MML：处理group树形结构相关数据 Handler: GetGroupTree 返回命令树。\n  - format=flat：Task #4 扁平格式（章节 + 命令 + 内联 object_path / 约束）\n  - 其他·缺省：3 列布局左侧递归树（含每节点 commands[]，原有合同）",
+      "intents": [
+        "MML - group树形结构",
+        "MML：处理group树形结构相关数据 Handler: GetGroupTree 返回命令树。\n  - format=flat：Task #4 扁平格式（章节 + 命令 + 内联 object_path / 约束）\n  - 其他·缺省：3 列布局左侧递归树（含每节点 commands[]，原有合同）",
+        "mml",
+        "group-tree",
+        "group tree"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.group_tree.json"
+    },
+    {
+      "operationId": "get.mml.scripts",
+      "method": "GET",
+      "path": "/api/v1/mml/scripts",
+      "title": "MML - 脚本",
+      "summary": "MML - 脚本",
+      "description": "MML：查询或维护脚本内容 Handler: ListScripts handles GET /api/v1/mml/scripts.",
+      "intents": [
+        "MML - 脚本",
+        "MML：查询或维护脚本内容 Handler: ListScripts handles GET /api/v1/mml/scripts.",
+        "mml",
+        "scripts"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.scripts.json"
+    },
+    {
+      "operationId": "get.mml.scripts.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/scripts/:id",
+      "title": "MML - 脚本详情",
+      "summary": "MML - 脚本详情",
+      "description": "MML：查询或维护指定对象的脚本详情数据 Handler: GetScript handles GET /api/v1/mml/scripts/:id.",
+      "intents": [
+        "MML - 脚本详情",
+        "MML：查询或维护指定对象的脚本详情数据 Handler: GetScript handles GET /api/v1/mml/scripts/:id.",
+        "mml",
+        "scripts"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.scripts.by_id.json"
+    },
+    {
+      "operationId": "get.mml.scripts.by_id.runs",
+      "method": "GET",
+      "path": "/api/v1/mml/scripts/:id/runs",
+      "title": "MML - 执行历史",
+      "summary": "MML - 执行历史",
+      "description": "MML：查询脚本或命令执行历史 Handler: ListScriptRuns handles GET /api/v1/mml/scripts/:id/runs.\n返回该脚本关联的全部 mml_tasks（模板 + periodic 子实例），倒序分页。\n前端脚本详情页\"历史执行\"tab 消费该接口（P4 C11）。",
+      "intents": [
+        "MML - 执行历史",
+        "MML：查询脚本或命令执行历史 Handler: ListScriptRuns handles GET /api/v1/mml/scripts/:id/runs.\n返回该脚本关联的全部 mml_tasks（模板 + periodic 子实例），倒序分页。\n前端脚本详情页\"历史执行\"tab 消费该接口（P4 C11）。",
+        "mml",
+        "scripts",
+        "runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.scripts.by_id.runs.json"
+    },
+    {
+      "operationId": "get.mml.tasks",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks",
+      "title": "MML - 列表",
+      "summary": "MML - 列表",
+      "description": "MML：按筛选条件查询资源列表 Handler: ListTasks handles GET /api/v1/mml/tasks.",
+      "intents": [
+        "MML - 列表",
+        "MML：按筛选条件查询资源列表 Handler: ListTasks handles GET /api/v1/mml/tasks.",
+        "mml",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.tasks.json"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id",
+      "title": "MML - 详情",
+      "summary": "MML - 详情",
+      "description": "MML：查询指定资源的详细信息 Handler: GetTask handles GET /api/v1/mml/tasks/:id.",
+      "intents": [
+        "MML - 详情",
+        "MML：查询指定资源的详细信息 Handler: GetTask handles GET /api/v1/mml/tasks/:id.",
+        "mml",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.tasks.by_id.json"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id.devices.by_sn.export.download",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/devices/:sn/export/download",
+      "title": "MML - 导出下载",
+      "summary": "MML - 导出下载",
+      "description": "MML：下载文件或导出结果 Handler: DownloadTaskDeviceResults handles GET /api/v1/mml/tasks/:id/devices/:sn/export/download —— 同源流式下载单设备 CSV。",
+      "intents": [
+        "MML - 导出下载",
+        "MML：下载文件或导出结果 Handler: DownloadTaskDeviceResults handles GET /api/v1/mml/tasks/:id/devices/:sn/export/download —— 同源流式下载单设备 CSV。",
+        "mml",
+        "tasks",
+        "devices",
+        "export",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.tasks.by_id.devices.by_sn.export.download.json"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id.export.download",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/export/download",
+      "title": "MML - 导出下载",
+      "summary": "MML - 导出下载",
+      "description": "MML：下载文件或导出结果 Handler: DownloadTaskResults handles GET /api/v1/mml/tasks/:id/export/download —— 同源流式下载全设备汇总 CSV。\n替代「预签名 MinIO URL」方案：浏览器从 app 同源拿数据，跨主机/反代访问也可靠。",
+      "intents": [
+        "MML - 导出下载",
+        "MML：下载文件或导出结果 Handler: DownloadTaskResults handles GET /api/v1/mml/tasks/:id/export/download —— 同源流式下载全设备汇总 CSV。\n替代「预签名 MinIO URL」方案：浏览器从 app 同源拿数据，跨主机/反代访问也可靠。",
+        "mml",
+        "tasks",
+        "export",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.tasks.by_id.export.download.json"
+    },
+    {
+      "operationId": "get.mml.tasks.by_id.results",
+      "method": "GET",
+      "path": "/api/v1/mml/tasks/:id/results",
+      "title": "MML - 结果",
+      "summary": "MML - 结果",
+      "description": "MML：查询任务执行结果 Handler: GetTaskResults handles GET /api/v1/mml/tasks/:id/results.",
+      "intents": [
+        "MML - 结果",
+        "MML：查询任务执行结果 Handler: GetTaskResults handles GET /api/v1/mml/tasks/:id/results.",
+        "mml",
+        "tasks",
+        "results"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.tasks.by_id.results.json"
+    },
+    {
+      "operationId": "get.mml.templates",
+      "method": "GET",
+      "path": "/api/v1/mml/templates",
+      "title": "MML - 列表",
+      "summary": "MML - 列表",
+      "description": "MML：按筛选条件查询资源列表 Handler: ListTemplates handles GET /api/v1/mml/templates.",
+      "intents": [
+        "MML - 列表",
+        "MML：按筛选条件查询资源列表 Handler: ListTemplates handles GET /api/v1/mml/templates.",
+        "mml",
+        "templates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.templates.json"
+    },
+    {
+      "operationId": "get.mml.templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/mml/templates/:id",
+      "title": "MML - 详情",
+      "summary": "MML - 详情",
+      "description": "MML：查询指定资源的详细信息 Handler: GetTemplate handles GET /api/v1/mml/templates/:id.",
+      "intents": [
+        "MML - 详情",
+        "MML：查询指定资源的详细信息 Handler: GetTemplate handles GET /api/v1/mml/templates/:id.",
+        "mml",
+        "templates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.templates.by_id.json"
+    },
+    {
+      "operationId": "get.mml.templates.by_id.paths",
+      "method": "GET",
+      "path": "/api/v1/mml/templates/:id/paths",
+      "title": "MML - GET",
+      "summary": "MML - GET",
+      "description": "MML：执行 GET 请求对应的业务操作 Handler: ListTemplatePaths handles GET /api/v1/mml/templates/:id/paths.\n列出自定义命令的 path 关联（JOIN standard_params 富化）。读操作经端点级 RBAC 收敛。",
+      "intents": [
+        "MML - GET",
+        "MML：执行 GET 请求对应的业务操作 Handler: ListTemplatePaths handles GET /api/v1/mml/templates/:id/paths.\n列出自定义命令的 path 关联（JOIN standard_params 富化）。读操作经端点级 RBAC 收敛。",
+        "mml",
+        "templates",
+        "paths"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.templates.by_id.paths.json"
+    },
+    {
+      "operationId": "get.mml.unsupported_paths",
+      "method": "GET",
+      "path": "/api/v1/mml/unsupported-paths",
+      "title": "MML - unsupportedpaths",
+      "summary": "MML - unsupportedpaths",
+      "description": "MML：处理unsupportedpaths相关数据 Handler: GetUnsupportedPaths 返回某产品已记录的「不支持参数 PATH」列表（含读/写标记）。\n\n\tGET /api/v1/mml/unsupported-paths?product_id=\u003cuuid\u003e   （前端主用，产品下拉直给）\n\tGET /api/v1/mml/unsupported-paths?device_sn=\u003csn\u003e      （兼容：后端反算 product_id）\n\n来源：product_unsupported_paths（MML 执行 path 不支持类故障自学习）。前端据此在「选择命令 /\n配置参数」按命令读/写类型过滤掉对应 path。",
+      "intents": [
+        "MML - unsupportedpaths",
+        "MML：处理unsupportedpaths相关数据 Handler: GetUnsupportedPaths 返回某产品已记录的「不支持参数 PATH」列表（含读/写标记）。\n\n\tGET /api/v1/mml/unsupported-paths?product_id=\u003cuuid\u003e   （前端主用，产品下拉直给）\n\tGET /api/v1/mml/unsupported-paths?device_sn=\u003csn\u003e      （兼容：后端反算 product_id）\n\n来源：product_unsupported_paths（MML 执行 path 不支持类故障自学习）。前端据此在「选择命令 /\n配置参数」按命令读/写类型过滤掉对应 path。",
+        "mml",
+        "unsupported-paths",
+        "unsupported paths"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.mml.unsupported_paths.json"
+    },
+    {
+      "operationId": "patch.mml.admin.commands.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/mml/admin/commands/:id",
+      "title": "MML - 命令部分更新",
+      "summary": "MML - 命令部分更新",
+      "description": "MML：查询或维护指定对象的命令部分更新数据 Handler: UpdateCommand PATCH /api/v1/mml/admin/commands/:id",
+      "intents": [
+        "MML - 命令部分更新",
+        "MML：查询或维护指定对象的命令部分更新数据 Handler: UpdateCommand PATCH /api/v1/mml/admin/commands/:id",
+        "mml",
+        "admin",
+        "commands"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.mml.admin.commands.by_id.json"
+    },
+    {
+      "operationId": "patch.mml.admin.commands.by_id.sub_fields.by_sid",
+      "method": "PATCH",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "title": "MML - sub字段部分更新",
+      "summary": "MML - sub字段部分更新",
+      "description": "MML：查询或维护指定对象的sub字段部分更新数据 Handler: UpdateSubField PATCH /api/v1/mml/admin/commands/:id/sub-fields/:sid",
+      "intents": [
+        "MML - sub字段部分更新",
+        "MML：查询或维护指定对象的sub字段部分更新数据 Handler: UpdateSubField PATCH /api/v1/mml/admin/commands/:id/sub-fields/:sid",
+        "mml",
+        "admin",
+        "commands",
+        "sub-fields",
+        "sub fields"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.mml.admin.commands.by_id.sub_fields.by_sid.json"
+    },
+    {
+      "operationId": "patch.mml.admin.groups.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/mml/admin/groups/:id",
+      "title": "MML - 分组部分更新",
+      "summary": "MML - 分组部分更新",
+      "description": "MML：查询或维护指定对象的分组部分更新数据 Handler: UpdateGroup PATCH /api/v1/mml/admin/groups/:id",
+      "intents": [
+        "MML - 分组部分更新",
+        "MML：查询或维护指定对象的分组部分更新数据 Handler: UpdateGroup PATCH /api/v1/mml/admin/groups/:id",
+        "mml",
+        "admin",
+        "groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.mml.admin.groups.by_id.json"
+    },
+    {
+      "operationId": "patch.mml.templates.by_id.paths.by_pathId",
+      "method": "PATCH",
+      "path": "/api/v1/mml/templates/:id/paths/:pathId",
+      "title": "MML - 部分更新",
+      "summary": "MML - 部分更新",
+      "description": "MML：更新指定资源的部分字段 Handler: UpdateTemplatePath handles PATCH /api/v1/mml/templates/:id/paths/:pathId.\n改单条关联的 default_selected / sort_order（owner/super 才能写）。",
+      "intents": [
+        "MML - 部分更新",
+        "MML：更新指定资源的部分字段 Handler: UpdateTemplatePath handles PATCH /api/v1/mml/templates/:id/paths/:pathId.\n改单条关联的 default_selected / sort_order（owner/super 才能写）。",
+        "mml",
+        "templates",
+        "paths"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.mml.templates.by_id.paths.by_pathId.json"
+    },
+    {
+      "operationId": "post.mml.admin.commands",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/commands",
+      "title": "MML - 命令",
+      "summary": "MML - 命令",
+      "description": "MML：查询或执行命令定义 Handler: CreateCommand POST /api/v1/mml/admin/commands",
+      "intents": [
+        "MML - 命令",
+        "MML：查询或执行命令定义 Handler: CreateCommand POST /api/v1/mml/admin/commands",
+        "mml",
+        "admin",
+        "commands"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.admin.commands.json"
+    },
+    {
+      "operationId": "post.mml.admin.commands.by_id.sub_fields",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields",
+      "title": "MML - sub字段",
+      "summary": "MML - sub字段",
+      "description": "MML：处理sub字段相关数据 Handler: CreateSubField POST /api/v1/mml/admin/commands/:id/sub-fields",
+      "intents": [
+        "MML - sub字段",
+        "MML：处理sub字段相关数据 Handler: CreateSubField POST /api/v1/mml/admin/commands/:id/sub-fields",
+        "mml",
+        "admin",
+        "commands",
+        "sub-fields",
+        "sub fields"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.admin.commands.by_id.sub_fields.json"
+    },
+    {
+      "operationId": "post.mml.admin.commands.by_id.sub_fields.batch",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/commands/:id/sub-fields/batch",
+      "title": "MML - 批量",
+      "summary": "MML - 批量",
+      "description": "MML：对多个对象执行批量操作 Handler: BatchCreateSubFields POST /admin/commands/:id/sub-fields/batch\nbody: { \"standard_path_ids\": [\"uuid\", ...] }\n后端按 standard_params 元数据自动派生 mml_code / label / sort_order。",
+      "intents": [
+        "MML - 批量",
+        "MML：对多个对象执行批量操作 Handler: BatchCreateSubFields POST /admin/commands/:id/sub-fields/batch\nbody: { \"standard_path_ids\": [\"uuid\", ...] }\n后端按 standard_params 元数据自动派生 mml_code / label / sort_order。",
+        "mml",
+        "admin",
+        "commands",
+        "sub-fields",
+        "batch",
+        "sub fields"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.admin.commands.by_id.sub_fields.batch.json"
+    },
+    {
+      "operationId": "post.mml.admin.groups",
+      "method": "POST",
+      "path": "/api/v1/mml/admin/groups",
+      "title": "MML - 分组",
+      "summary": "MML - 分组",
+      "description": "MML：查询或维护分组数据 Handler: CreateGroup POST /api/v1/mml/admin/groups",
+      "intents": [
+        "MML - 分组",
+        "MML：查询或维护分组数据 Handler: CreateGroup POST /api/v1/mml/admin/groups",
+        "mml",
+        "admin",
+        "groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.admin.groups.json"
+    },
+    {
+      "operationId": "post.mml.console.execute_statements_structured",
+      "method": "POST",
+      "path": "/api/v1/mml/console/execute-statements-structured",
+      "title": "MML - 执行statementsstructured",
+      "summary": "MML - 执行statementsstructured",
+      "description": "MML：处理执行statementsstructured相关数据 Handler: PostExecuteStatementsStructured 接收结构化入参（paths/values/instanceIndices）执行。\n\n与旧 PostExecuteStatements 错误映射的差异：\n  - ErrUnknownPaths / ErrInstanceSelectorsNotImplemented → 422 + unknown_paths 元数据\n  - 其余错误（ErrCommandNotFound / ErrMixedProductClass / ...）复用旧 handler 同款映射",
+      "intents": [
+        "MML - 执行statementsstructured",
+        "MML：处理执行statementsstructured相关数据 Handler: PostExecuteStatementsStructured 接收结构化入参（paths/values/instanceIndices）执行。\n\n与旧 PostExecuteStatements 错误映射的差异：\n  - ErrUnknownPaths / ErrInstanceSelectorsNotImplemented → 422 + unknown_paths 元数据\n  - 其余错误（ErrCommandNotFound / ErrMixedProductClass / ...）复用旧 handler 同款映射",
+        "mml",
+        "console",
+        "execute-statements-structured",
+        "execute statements structured"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.console.execute_statements_structured.json"
+    },
+    {
+      "operationId": "post.mml.execute",
+      "method": "POST",
+      "path": "/api/v1/mml/execute",
+      "title": "MML - 执行",
+      "summary": "MML - 执行",
+      "description": "MML：执行指定命令、脚本或任务 Handler: Execute handles POST /api/v1/mml/execute.\n「临时执行命令」入口；command_code、script_id、commands 三者至少其一，\n都缺则 400 + warn 日志。命令源全空意味着 mml_tasks 没有任何东西可下发。",
+      "intents": [
+        "MML - 执行",
+        "MML：执行指定命令、脚本或任务 Handler: Execute handles POST /api/v1/mml/execute.\n「临时执行命令」入口；command_code、script_id、commands 三者至少其一，\n都缺则 400 + warn 日志。命令源全空意味着 mml_tasks 没有任何东西可下发。",
+        "mml",
+        "execute"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.execute.json"
+    },
+    {
+      "operationId": "post.mml.execute_statements",
+      "method": "POST",
+      "path": "/api/v1/mml/execute-statements",
+      "title": "MML - 执行statements",
+      "summary": "MML - 执行statements",
+      "description": "MML：处理执行statements相关数据 Handler: PostExecuteStatements 把 N 设备 × M statements 编译为 MMLTask 并 fanout 执行。\n多 statement → sequential=true；单 statement → 并发。",
+      "intents": [
+        "MML - 执行statements",
+        "MML：处理执行statements相关数据 Handler: PostExecuteStatements 把 N 设备 × M statements 编译为 MMLTask 并 fanout 执行。\n多 statement → sequential=true；单 statement → 并发。",
+        "mml",
+        "execute-statements",
+        "execute statements"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.execute_statements.json"
+    },
+    {
+      "operationId": "post.mml.groups.by_id.execute",
+      "method": "POST",
+      "path": "/api/v1/mml/groups/:id/execute",
+      "title": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+      "summary": "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+      "description": "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+      "intents": [
+        "MML - 执行",
+        "按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）",
+        "将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个\nmml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到\n目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。 Handler: ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.\n把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。\ndevice_sns 必填；其他字段缺省走 ExecuteImmediate。\n\n@Summary      按组批量执行 mml_command_groups 下的全部命令\n@Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集\n@Tags         MML\n@Security     BearerAuth\n@Param        id    path  string                        true   \"mml_command_groups.id (uuid)\"\n@Param        body  body  ExecuteGroupHTTPRequest       true   \"执行参数\"\n@Success      201  {object}  MMLTask\n@Failure      400  {string}  string  \"device_sns 缺失 / group_id 无效\"\n@Failure      401  {string}  string  \"未授权\"\n@Failure      404  {string}  string  \"group 不存在\"\n@Router       /api/v1/mml/groups/{id}/execute [post]",
+        "mml",
+        "groups",
+        "execute"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.groups.by_id.execute.json"
+    },
+    {
+      "operationId": "post.mml.parse",
+      "method": "POST",
+      "path": "/api/v1/mml/parse",
+      "title": "MML - 创建",
+      "summary": "MML - 创建",
+      "description": "MML：创建新的资源记录 Handler: PostParse 把 MML 字符串解析为 statements（双向绑定 inbound）。\n单条 statement 解析失败累入 ParseErrors 不中断整体；HTTP 始终 200。",
+      "intents": [
+        "MML - 创建",
+        "MML：创建新的资源记录 Handler: PostParse 把 MML 字符串解析为 statements（双向绑定 inbound）。\n单条 statement 解析失败累入 ParseErrors 不中断整体；HTTP 始终 200。",
+        "mml",
+        "parse"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.parse.json"
+    },
+    {
+      "operationId": "post.mml.render",
+      "method": "POST",
+      "path": "/api/v1/mml/render",
+      "title": "MML - 创建",
+      "summary": "MML - 创建",
+      "description": "MML：创建新的资源记录 Handler: PostRender 把 RenderRequest 渲染为 MML 字符串（双向绑定 outbound）。",
+      "intents": [
+        "MML - 创建",
+        "MML：创建新的资源记录 Handler: PostRender 把 RenderRequest 渲染为 MML 字符串（双向绑定 outbound）。",
+        "mml",
+        "render"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.render.json"
+    },
+    {
+      "operationId": "post.mml.scripts",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts",
+      "title": "MML - 脚本",
+      "summary": "MML - 脚本",
+      "description": "MML：查询或维护脚本内容 Handler: CreateScript handles POST /api/v1/mml/scripts.",
+      "intents": [
+        "MML - 脚本",
+        "MML：查询或维护脚本内容 Handler: CreateScript handles POST /api/v1/mml/scripts.",
+        "mml",
+        "scripts"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.scripts.json"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/cancel",
+      "title": "MML - 取消",
+      "summary": "MML - 取消",
+      "description": "MML：取消未完成的任务或操作 Handler: CancelScript handles POST /api/v1/mml/scripts/:id/cancel.",
+      "intents": [
+        "MML - 取消",
+        "MML：取消未完成的任务或操作 Handler: CancelScript handles POST /api/v1/mml/scripts/:id/cancel.",
+        "mml",
+        "scripts",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.scripts.by_id.cancel.json"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.pause",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/pause",
+      "title": "MML - POST",
+      "summary": "MML - POST",
+      "description": "MML：执行 POST 请求对应的业务操作 Handler: PauseScript handles POST /api/v1/mml/scripts/:id/pause.",
+      "intents": [
+        "MML - POST",
+        "MML：执行 POST 请求对应的业务操作 Handler: PauseScript handles POST /api/v1/mml/scripts/:id/pause.",
+        "mml",
+        "scripts",
+        "pause"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.scripts.by_id.pause.json"
+    },
+    {
+      "operationId": "post.mml.scripts.by_id.start",
+      "method": "POST",
+      "path": "/api/v1/mml/scripts/:id/start",
+      "title": "MML - 启动",
+      "summary": "MML - 启动",
+      "description": "MML：启动任务、流程或服务 Handler: StartScript handles POST /api/v1/mml/scripts/:id/start.",
+      "intents": [
+        "MML - 启动",
+        "MML：启动任务、流程或服务 Handler: StartScript handles POST /api/v1/mml/scripts/:id/start.",
+        "mml",
+        "scripts",
+        "start"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.scripts.by_id.start.json"
+    },
+    {
+      "operationId": "post.mml.tasks",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks",
+      "title": "MML - 创建",
+      "summary": "MML - 创建",
+      "description": "MML：创建新的资源记录 Handler: CreateTask handles POST /api/v1/mml/tasks（脚本任务登记）。\ncommand_code 不强制，但 script_id / commands / command_code 三者至少其一；\n否则任务没有任何命令可下发，device_tasks 无法派生。",
+      "intents": [
+        "MML - 创建",
+        "MML：创建新的资源记录 Handler: CreateTask handles POST /api/v1/mml/tasks（脚本任务登记）。\ncommand_code 不强制，但 script_id / commands / command_code 三者至少其一；\n否则任务没有任何命令可下发，device_tasks 无法派生。",
+        "mml",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.json"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/cancel",
+      "title": "MML - 取消",
+      "summary": "MML - 取消",
+      "description": "MML：取消未完成的任务或操作 Handler: CancelTask handles POST /api/v1/mml/tasks/:id/cancel.",
+      "intents": [
+        "MML - 取消",
+        "MML：取消未完成的任务或操作 Handler: CancelTask handles POST /api/v1/mml/tasks/:id/cancel.",
+        "mml",
+        "tasks",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.by_id.cancel.json"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.devices.by_sn.export",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/devices/:sn/export",
+      "title": "MML - 导出",
+      "summary": "MML - 导出",
+      "description": "MML：按条件导出业务数据 Handler: ExportTaskDeviceResults handles POST /api/v1/mml/tasks/:id/devices/:sn/export ——\n生成单设备 CSV 落 MinIO、地址记入 mml_tasks.device_export_objects[sn]，返回下载 URL。",
+      "intents": [
+        "MML - 导出",
+        "MML：按条件导出业务数据 Handler: ExportTaskDeviceResults handles POST /api/v1/mml/tasks/:id/devices/:sn/export ——\n生成单设备 CSV 落 MinIO、地址记入 mml_tasks.device_export_objects[sn]，返回下载 URL。",
+        "mml",
+        "tasks",
+        "devices",
+        "export"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.by_id.devices.by_sn.export.json"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.export",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/export",
+      "title": "MML - 导出",
+      "summary": "MML - 导出",
+      "description": "MML：按条件导出业务数据 Handler: ExportTaskResults handles POST /api/v1/mml/tasks/:id/export —— 生成全设备汇总 CSV\n落 MinIO（mml-results/ 目录）、地址记入 mml_tasks.export_object，返回预签名下载 URL。",
+      "intents": [
+        "MML - 导出",
+        "MML：按条件导出业务数据 Handler: ExportTaskResults handles POST /api/v1/mml/tasks/:id/export —— 生成全设备汇总 CSV\n落 MinIO（mml-results/ 目录）、地址记入 mml_tasks.export_object，返回预签名下载 URL。",
+        "mml",
+        "tasks",
+        "export"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.by_id.export.json"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.pause",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/pause",
+      "title": "MML - POST",
+      "summary": "MML - POST",
+      "description": "MML：执行 POST 请求对应的业务操作 Handler: PauseTask handles POST /api/v1/mml/tasks/:id/pause.",
+      "intents": [
+        "MML - POST",
+        "MML：执行 POST 请求对应的业务操作 Handler: PauseTask handles POST /api/v1/mml/tasks/:id/pause.",
+        "mml",
+        "tasks",
+        "pause"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.by_id.pause.json"
+    },
+    {
+      "operationId": "post.mml.tasks.by_id.start",
+      "method": "POST",
+      "path": "/api/v1/mml/tasks/:id/start",
+      "title": "MML - 启动",
+      "summary": "MML - 启动",
+      "description": "MML：启动任务、流程或服务 Handler: StartTask handles POST /api/v1/mml/tasks/:id/start.",
+      "intents": [
+        "MML - 启动",
+        "MML：启动任务、流程或服务 Handler: StartTask handles POST /api/v1/mml/tasks/:id/start.",
+        "mml",
+        "tasks",
+        "start"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.tasks.by_id.start.json"
+    },
+    {
+      "operationId": "post.mml.templates",
+      "method": "POST",
+      "path": "/api/v1/mml/templates",
+      "title": "MML - 创建",
+      "summary": "MML - 创建",
+      "description": "MML：创建新的资源记录 Handler: CreateTemplate handles POST /api/v1/mml/templates.",
+      "intents": [
+        "MML - 创建",
+        "MML：创建新的资源记录 Handler: CreateTemplate handles POST /api/v1/mml/templates.",
+        "mml",
+        "templates"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.templates.json"
+    },
+    {
+      "operationId": "post.mml.templates.by_id.clone",
+      "method": "POST",
+      "path": "/api/v1/mml/templates/:id/clone",
+      "title": "MML - 克隆",
+      "summary": "MML - 克隆",
+      "description": "MML：复制现有配置生成新记录 Handler: CloneTemplate handles POST /api/v1/mml/templates/:id/clone.",
+      "intents": [
+        "MML - 克隆",
+        "MML：复制现有配置生成新记录 Handler: CloneTemplate handles POST /api/v1/mml/templates/:id/clone.",
+        "mml",
+        "templates",
+        "clone"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.templates.by_id.clone.json"
+    },
+    {
+      "operationId": "post.mml.templates.by_id.paths.batch",
+      "method": "POST",
+      "path": "/api/v1/mml/templates/:id/paths/batch",
+      "title": "MML - 批量",
+      "summary": "MML - 批量",
+      "description": "MML：对多个对象执行批量操作 Handler: BatchAddTemplatePaths handles POST /api/v1/mml/templates/:id/paths/batch.\n批量追加 path（owner/super 才能写）。已关联的 path 静默跳过。",
+      "intents": [
+        "MML - 批量",
+        "MML：对多个对象执行批量操作 Handler: BatchAddTemplatePaths handles POST /api/v1/mml/templates/:id/paths/batch.\n批量追加 path（owner/super 才能写）。已关联的 path 静默跳过。",
+        "mml",
+        "templates",
+        "paths",
+        "batch"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.mml.templates.by_id.paths.batch.json"
+    },
+    {
+      "operationId": "put.mml.scripts.by_id",
+      "method": "PUT",
+      "path": "/api/v1/mml/scripts/:id",
+      "title": "MML - 脚本更新",
+      "summary": "MML - 脚本更新",
+      "description": "MML：查询或维护指定对象的脚本更新数据 Handler: UpdateScript handles PUT /api/v1/mml/scripts/:id.",
+      "intents": [
+        "MML - 脚本更新",
+        "MML：查询或维护指定对象的脚本更新数据 Handler: UpdateScript handles PUT /api/v1/mml/scripts/:id.",
+        "mml",
+        "scripts"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.mml.scripts.by_id.json"
+    },
+    {
+      "operationId": "put.mml.templates.by_id",
+      "method": "PUT",
+      "path": "/api/v1/mml/templates/:id",
+      "title": "MML - 更新",
+      "summary": "MML - 更新",
+      "description": "MML：更新指定资源的完整配置 Handler: UpdateTemplate handles PUT /api/v1/mml/templates/:id.\n\n鉴权 + 唯一性见 docs/design/mml-user-private-template-crud-20260520.md §4.3。\nscope 在 service 层强制保留原值（用户决策 D6 — 不允许编辑模式切 scope）。",
+      "intents": [
+        "MML - 更新",
+        "MML：更新指定资源的完整配置 Handler: UpdateTemplate handles PUT /api/v1/mml/templates/:id.\n\n鉴权 + 唯一性见 docs/design/mml-user-private-template-crud-20260520.md §4.3。\nscope 在 service 层强制保留原值（用户决策 D6 — 不允许编辑模式切 scope）。",
+        "mml",
+        "templates"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.mml.templates.by_id.json"
+    }
+  ]
+}

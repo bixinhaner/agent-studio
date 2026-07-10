@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.users.by_id.lock",
+  "method": "POST",
+  "path": "/api/v1/admin/users/:id/lock",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*Handler).LockUser-fm",
+  "category": "users",
+  "title": "Lock a user account",
+  "summary": "Lock a user account",
+  "description": "用户：锁定指定资源或账号",
+  "intents": [
+    "用户 - 锁定",
+    "Lock a user account",
+    "用户：锁定指定资源或账号",
+    "users",
+    "用户",
+    "admin",
+    "lock"
+  ],
+  "tags": [
+    "users",
+    "用户",
+    "admin",
+    "lock"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Lock a user account",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "description": "User locked"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "403": {
+      "$ref": "#/components/responses/Forbidden"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

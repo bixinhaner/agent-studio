@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.users.by_id.unlock",
+  "method": "POST",
+  "path": "/api/v1/admin/users/:id/unlock",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*Handler).UnlockUser-fm",
+  "category": "users",
+  "title": "Unlock a user account",
+  "summary": "Unlock a user account",
+  "description": "用户：解除资源或账号锁定",
+  "intents": [
+    "用户 - 解锁",
+    "Unlock a user account",
+    "用户：解除资源或账号锁定",
+    "users",
+    "用户",
+    "admin",
+    "unlock"
+  ],
+  "tags": [
+    "users",
+    "用户",
+    "admin",
+    "unlock"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Unlock a user account",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "description": "User unlocked"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "403": {
+      "$ref": "#/components/responses/Forbidden"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

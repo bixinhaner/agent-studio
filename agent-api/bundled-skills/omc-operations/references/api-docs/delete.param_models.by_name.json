@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.param_models.by_name",
+  "method": "DELETE",
+  "path": "/api/v1/param-models/:name",
+  "handler": "github.com/omcgo/omcgo/internal/config/parammodel.(*Handler).DeleteModel-fm",
+  "category": "param-models",
+  "title": "param-models - 删除",
+  "summary": "param-models - 删除",
+  "description": "param-models：删除指定资源记录 Handler: DeleteModel 删除 paramModel。\n\nXML 管理重构:取消 builtin/custom 删除守门,所有文件均可删除。\n\n流程:\n 1. 取出 loaded_from 定位物理文件\n 2. per-filename mutex 与 Upload / 单文件 Reload 互斥\n 3. 物理 rename → \"\u003cfile\u003e.deleted.\u003c14位ts\u003e\" 备份(可回滚)\n    · ENOENT 容忍:文件已被外部 rm,视为\"已备份\",继续删 DB\n    · 其他 errno(EACCES/ENOSPC/EROFS):保守回滚(用户决策 4)→ 500\n    ErrCodeParamModelBackupFailed,不删 DB\n 4. DELETE param_models 行\n    · CASCADE 删 param_mappings、SET NULL 写 products.param_model_id\n    · DB 失败 → 反向 rename(backup → original)+ 500\n 5. registry.Refresh + 结构化审计日志(audit_action)",
+  "intents": [
+    "param-models - 删除",
+    "param-models：删除指定资源记录 Handler: DeleteModel 删除 paramModel。\n\nXML 管理重构:取消 builtin/custom 删除守门,所有文件均可删除。\n\n流程:\n 1. 取出 loaded_from 定位物理文件\n 2. per-filename mutex 与 Upload / 单文件 Reload 互斥\n 3. 物理 rename → \"\u003cfile\u003e.deleted.\u003c14位ts\u003e\" 备份(可回滚)\n    · ENOENT 容忍:文件已被外部 rm,视为\"已备份\",继续删 DB\n    · 其他 errno(EACCES/ENOSPC/EROFS):保守回滚(用户决策 4)→ 500\n    ErrCodeParamModelBackupFailed,不删 DB\n 4. DELETE param_models 行\n    · CASCADE 删 param_mappings、SET NULL 写 products.param_model_id\n    · DB 失败 → 反向 rename(backup → original)+ 500\n 5. registry.Refresh + 结构化审计日志(audit_action)",
+    "param-models",
+    "param models"
+  ],
+  "tags": [
+    "param-models"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：param-models - 删除",
+  "pathParams": [
+    {
+      "name": "name",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :name"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

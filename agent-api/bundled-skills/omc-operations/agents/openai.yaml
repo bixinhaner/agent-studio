@@ -1,4 +1,4 @@
 interface:
   display_name: "OMC Operations"
-  short_description: "Query and operate OMC through its live API catalog"
-  default_prompt: "Use $omc-operations to complete the OMC request. Reuse its already-loaded instructions within the same thread, use hot routes directly, and open Skill files only for an unfamiliar operation."
+  short_description: "Query and operate OMC through its complete local API handbook"
+  default_prompt: "Use $omc-operations to complete the OMC request. Reuse proven operations in the same thread; otherwise verify the local handbook version, search one category index, read one operation document, and call the documented API directly."

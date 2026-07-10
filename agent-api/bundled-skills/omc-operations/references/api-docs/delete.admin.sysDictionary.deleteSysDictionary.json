@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.admin.sysDictionary.deleteSysDictionary",
+  "method": "DELETE",
+  "path": "/api/v1/admin/sysDictionary/deleteSysDictionary",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*DictionaryHandler).DeleteDictionary-fm",
+  "category": "sysDictionary",
+  "title": "字典 - 删除字典",
+  "summary": "字典 - 删除字典",
+  "description": "处理删除字典相关数据 Handler: DeleteDictionary handles DELETE /sysDictionary/deleteSysDictionary?id=123",
+  "intents": [
+    "字典 - 删除字典",
+    "处理删除字典相关数据 Handler: DeleteDictionary handles DELETE /sysDictionary/deleteSysDictionary?id=123",
+    "sysDictionary",
+    "字典",
+    "admin",
+    "deleteSysDictionary"
+  ],
+  "tags": [
+    "sysDictionary",
+    "字典",
+    "admin",
+    "deleteSysDictionary"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：字典 - 删除字典",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "id",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

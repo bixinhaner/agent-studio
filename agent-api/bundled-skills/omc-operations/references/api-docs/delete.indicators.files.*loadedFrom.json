@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.indicators.files.*loadedFrom",
+  "method": "DELETE",
+  "path": "/api/v1/indicators/files/*loadedFrom",
+  "handler": "github.com/omcgo/omcgo/internal/pm/indicator.(*FileHandler).DeleteFile-fm",
+  "category": "indicators",
+  "title": "indicators - 批量删除",
+  "summary": "indicators - 批量删除",
+  "description": "indicators：批量删除资源记录 Handler: DeleteFile DELETE /api/v1/indicators/files/{loadedFrom}\n\n2026-06-03 用户决策:取消 builtin/custom 区分,所有文件可删(无来源守门)。\n\n流程:\n 1. URL 解码 + 去前导 / 得到 loadedFrom 相对路径\n 2. parseFileTech → 推断 tech (enb/gsm/gnb) + 路径深度/防遍历校验\n 3. CountByLoadedFrom → 0 行 且 文件也不存在 → 404\n 4. acquireFileLock(basename) 持锁直到 return\n 5. 物理 rename \"\u003cfile\u003e.deleted.\u003c14位ts\u003e\" 备份;失败保守回滚返 500 + ErrCodeIndicatorBackupFailed\n 6. DB 单事务级联 DELETE formula/enabled/main(三表),失败 rename 回滚\n 7. 审计日志(audit_action) + 返回 200 + {deleted, loaded_from, backup, rows_affected}",
+  "intents": [
+    "indicators - 批量删除",
+    "indicators：批量删除资源记录 Handler: DeleteFile DELETE /api/v1/indicators/files/{loadedFrom}\n\n2026-06-03 用户决策:取消 builtin/custom 区分,所有文件可删(无来源守门)。\n\n流程:\n 1. URL 解码 + 去前导 / 得到 loadedFrom 相对路径\n 2. parseFileTech → 推断 tech (enb/gsm/gnb) + 路径深度/防遍历校验\n 3. CountByLoadedFrom → 0 行 且 文件也不存在 → 404\n 4. acquireFileLock(basename) 持锁直到 return\n 5. 物理 rename \"\u003cfile\u003e.deleted.\u003c14位ts\u003e\" 备份;失败保守回滚返 500 + ErrCodeIndicatorBackupFailed\n 6. DB 单事务级联 DELETE formula/enabled/main(三表),失败 rename 回滚\n 7. 审计日志(audit_action) + 返回 200 + {deleted, loaded_from, backup, rows_affected}",
+    "indicators",
+    "files",
+    "*loadedFrom"
+  ],
+  "tags": [
+    "indicators",
+    "files",
+    "*loadedFrom"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：indicators - 批量删除",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

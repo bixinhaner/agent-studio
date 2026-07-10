@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "1.0",
+  "category": "groups",
+  "title": "groups",
+  "operations": [
+    {
+      "operationId": "delete.groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/groups/:id",
+      "title": "Delete a group",
+      "summary": "Delete a group",
+      "description": "用户组：删除指定资源记录 Handler: DeleteGroup handles DELETE /device-groups/:id.",
+      "intents": [
+        "用户组 - 删除",
+        "Delete a group",
+        "用户组：删除指定资源记录 Handler: DeleteGroup handles DELETE /device-groups/:id.",
+        "groups"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.groups.by_id.json"
+    },
+    {
+      "operationId": "delete.groups.by_id.devices.by_deviceId",
+      "method": "DELETE",
+      "path": "/api/v1/groups/:id/devices/:deviceId",
+      "title": "用户组 - 删除",
+      "summary": "用户组 - 删除",
+      "description": "用户组：删除指定资源记录 Handler: RemoveDevice handles DELETE /groups/:id/devices/:deviceId (legacy).",
+      "intents": [
+        "用户组 - 删除",
+        "用户组：删除指定资源记录 Handler: RemoveDevice handles DELETE /groups/:id/devices/:deviceId (legacy).",
+        "groups",
+        "devices"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.groups.by_id.devices.by_deviceId.json"
+    },
+    {
+      "operationId": "get.admin.groups",
+      "method": "GET",
+      "path": "/api/v1/admin/groups",
+      "title": "用户组 - 列表",
+      "summary": "用户组 - 列表",
+      "description": "用户组：按筛选条件查询资源列表",
+      "intents": [
+        "用户组 - 列表",
+        "用户组：按筛选条件查询资源列表",
+        "groups",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.groups.json"
+    },
+    {
+      "operationId": "get.admin.groups.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/groups/:id",
+      "title": "用户组 - 详情",
+      "summary": "用户组 - 详情",
+      "description": "用户组：查询指定资源的详细信息",
+      "intents": [
+        "用户组 - 详情",
+        "用户组：查询指定资源的详细信息",
+        "groups",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.groups.by_id.json"
+    },
+    {
+      "operationId": "get.groups",
+      "method": "GET",
+      "path": "/api/v1/groups",
+      "title": "Get device group tree",
+      "summary": "Get device group tree",
+      "description": "用户组：按筛选条件查询资源列表 Handler: ListTree handles GET /groups (legacy, no counts).",
+      "intents": [
+        "用户组 - 列表",
+        "Get device group tree",
+        "用户组：按筛选条件查询资源列表 Handler: ListTree handles GET /groups (legacy, no counts).",
+        "groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.groups.json"
+    },
+    {
+      "operationId": "get.groups.by_id",
+      "method": "GET",
+      "path": "/api/v1/groups/:id",
+      "title": "Get group by ID",
+      "summary": "Get group by ID",
+      "description": "用户组：查询指定资源的详细信息 Handler: Get handles GET /device-groups/:id.",
+      "intents": [
+        "用户组 - 详情",
+        "Get group by ID",
+        "用户组：查询指定资源的详细信息 Handler: Get handles GET /device-groups/:id.",
+        "groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.groups.by_id.json"
+    },
+    {
+      "operationId": "get.groups.by_id.devices",
+      "method": "GET",
+      "path": "/api/v1/groups/:id/devices",
+      "title": "用户组 - GET",
+      "summary": "用户组 - GET",
+      "description": "用户组：执行 GET 请求对应的业务操作 Handler: ListDevices handles GET /device-groups/:id/devices.",
+      "intents": [
+        "用户组 - GET",
+        "用户组：执行 GET 请求对应的业务操作 Handler: ListDevices handles GET /device-groups/:id/devices.",
+        "groups",
+        "devices"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.groups.by_id.devices.json"
+    },
+    {
+      "operationId": "post.groups",
+      "method": "POST",
+      "path": "/api/v1/groups",
+      "title": "Create a device group",
+      "summary": "Create a device group",
+      "description": "用户组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+      "intents": [
+        "用户组 - 创建",
+        "Create a device group",
+        "用户组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+        "groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.groups.json"
+    },
+    {
+      "operationId": "post.groups.by_id.devices",
+      "method": "POST",
+      "path": "/api/v1/groups/:id/devices",
+      "title": "用户组 - POST",
+      "summary": "用户组 - POST",
+      "description": "用户组：执行 POST 请求对应的业务操作 Handler: AddDevice handles POST /groups/:id/devices (legacy single device).",
+      "intents": [
+        "用户组 - POST",
+        "用户组：执行 POST 请求对应的业务操作 Handler: AddDevice handles POST /groups/:id/devices (legacy single device).",
+        "groups",
+        "devices"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.groups.by_id.devices.json"
+    },
+    {
+      "operationId": "put.groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/groups/:id",
+      "title": "Update a group",
+      "summary": "Update a group",
+      "description": "用户组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+      "intents": [
+        "用户组 - 更新",
+        "Update a group",
+        "用户组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+        "groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.groups.by_id.json"
+    }
+  ]
+}

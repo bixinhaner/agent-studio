@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0",
+  "category": "station-logs",
+  "title": "station-logs",
+  "operations": [
+    {
+      "operationId": "delete.station_logs.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/station-logs/:id",
+      "title": "station-logs - 删除",
+      "summary": "station-logs - 删除",
+      "description": "station-logs：删除指定资源记录 Handler: Delete godoc\n@Summary  删除日志文件（MinIO 文件 + 标记记录已删除）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id} [delete]",
+      "intents": [
+        "station-logs - 删除",
+        "station-logs：删除指定资源记录 Handler: Delete godoc\n@Summary  删除日志文件（MinIO 文件 + 标记记录已删除）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id} [delete]",
+        "station-logs",
+        "station logs"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.station_logs.by_id.json"
+    },
+    {
+      "operationId": "get.station_logs",
+      "method": "GET",
+      "path": "/api/v1/station-logs",
+      "title": "station-logs - 列表",
+      "summary": "station-logs - 列表",
+      "description": "station-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary  查询日志文件列表\n@Tags     station-logs\n@Produce  json\n@Param    device_id  query  string  false  \"设备 ID（UUID）\"\n@Param    log_type   query  string  false  \"日志类型: running | fault\"\n@Param    page       query  int     false  \"页码，默认 1\"\n@Param    page_size  query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs [get]",
+      "intents": [
+        "station-logs - 列表",
+        "station-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary  查询日志文件列表\n@Tags     station-logs\n@Produce  json\n@Param    device_id  query  string  false  \"设备 ID（UUID）\"\n@Param    log_type   query  string  false  \"日志类型: running | fault\"\n@Param    page       query  int     false  \"页码，默认 1\"\n@Param    page_size  query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs [get]",
+        "station-logs",
+        "station logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.station_logs.json"
+    },
+    {
+      "operationId": "get.station_logs.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/station-logs/:id/download",
+      "title": "station-logs - 下载",
+      "summary": "station-logs - 下载",
+      "description": "station-logs：下载文件或导出结果 Handler: Download godoc\n@Summary  获取日志文件预签名下载 URL（有效期 1 小时）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Param    redirect  query  string  false  \"传 true 时 302 跳转到下载地址\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id}/download [get]",
+      "intents": [
+        "station-logs - 下载",
+        "station-logs：下载文件或导出结果 Handler: Download godoc\n@Summary  获取日志文件预签名下载 URL（有效期 1 小时）\n@Tags     station-logs\n@Param    id        path   string  true   \"日志文件 ID（UUID）\"\n@Param    log_type  query  string  false  \"日志类型: running（默认）| fault\"\n@Param    redirect  query  string  false  \"传 true 时 302 跳转到下载地址\"\n@Success  200 {object} map[string]interface{}\n@Router   /station-logs/{id}/download [get]",
+        "station-logs",
+        "download",
+        "station logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.station_logs.by_id.download.json"
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.pm.files.batch_delete",
+  "method": "POST",
+  "path": "/api/v1/pm/files/batch-delete",
+  "handler": "github.com/omcgo/omcgo/internal/pm.(*Handler).BatchDeletePMFiles-fm",
+  "category": "pm",
+  "title": "性能 PM - 批量删除",
+  "summary": "性能 PM - 批量删除",
+  "description": "性能 PM：处理批量删除相关数据 Handler: BatchDeletePMFiles handles POST /pm/files/batch-delete.\n流程：每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG\n（MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。",
+  "intents": [
+    "性能 PM - 批量删除",
+    "性能 PM：处理批量删除相关数据 Handler: BatchDeletePMFiles handles POST /pm/files/batch-delete.\n流程：每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG\n（MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。",
+    "pm",
+    "性能",
+    "files",
+    "batch-delete",
+    "batch delete"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "files",
+    "batch-delete"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：性能 PM - 批量删除",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "BatchDeletePMFilesRequest",
+      "properties": {
+        "serial_numbers": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "serial_numbers"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

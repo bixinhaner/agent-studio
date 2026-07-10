@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.param_models.upload_xml",
+  "method": "POST",
+  "path": "/api/v1/param-models/upload-xml",
+  "handler": "github.com/omcgo/omcgo/internal/config/parammodel.(*Handler).UploadXML-fm",
+  "category": "param-models",
+  "title": "param-models - 上传xml",
+  "summary": "param-models - 上传xml",
+  "description": "param-models：处理上传xml相关数据 Handler: UploadXML 导入 paramModel XML —— \"导入 XML\" 合并端点(三库 XML 导入重构 D3/D5/D6)。\n\nPOST /api/v1/param-models/upload-xml[?force=true]\nContent-Type: multipart/form-data\nFields: file(XML 内容)\n\n名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML \u003cparameterModel paramModel=\"...\"\u003e\n属性,文件名 = \u003cparamModel\u003e.xml,直接写 builtin 目录(Loader 扫描的同一目录 param-mappings/)。\n上传文件自身的 filename 被忽略。\n\n重复允许覆盖(2026-06-05 调整,需前端二次确认):\n  - 重复判定:paramModel 名已在 DB(GetParamModelByName 定位归属文件)或 \u003cparamModel\u003e.xml 已在盘上\n  - 无 ?force=true → 409,响应 data.overwritable=true,前端弹确认框\n  - ?force=true → 覆盖归属文件(原文件先备份 .bak.\u003cts\u003e);覆盖内置保持 builtin 身份\n    (不写 sidecar,仍不可删),覆盖自定义保持 custom\n\n校验链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):\n 1. 大小:file.Size \u003c= MaxUploadXMLSize (1 MiB)\n 2. 内容:validateUploadXML 根元素 = \u003cparameterModel\u003e\n 3. 名称:paramModel 属性必填;validateUploadFilename(\u003cparamModel\u003e+\".xml\") 白名单正则 + 保留名拦截\n 4. 路径:目标路径经 pathContainedIn 二次验证不逃逸\n 5. 重复 + force 判定(见上)\n\n写入流程(全程 per-filename 锁):\n 1. 确保 builtinDir 存在(MkdirAll,首次上传场景)\n 2. 写 tmp 文件:targetPath + .tmp.\u003cuuid\u003e → 原子 rename 上线\n 3. 写 sidecar(\u003cname\u003e.xml.custom 空标记);失败回滚 XML → 500\n 4. destructiveReload:全量 ReloadOne + 删孤儿 + registry.Refresh\n    (文件已落地,reload 失败只 Warn,响应 reloaded 字段反映状态)\n\n安全:\n  - 文件名正则拒绝路径分隔符 / 点开头 / 空白 / 多扩展名\n  - pathContainedIn 二次防御 filepath.Clean 解释差异\n  - encoding/xml Strict + 不处理外部实体(Go 标准库默认安全,无 XXE)\n  - 单文件大小硬上限 1 MiB(Gin engine MaxMultipartMemory 应配 4 MiB)\n  - per-filename 锁保证同名 Upload/Delete/Reload 串行",
+  "intents": [
+    "param-models - 上传xml",
+    "param-models：处理上传xml相关数据 Handler: UploadXML 导入 paramModel XML —— \"导入 XML\" 合并端点(三库 XML 导入重构 D3/D5/D6)。\n\nPOST /api/v1/param-models/upload-xml[?force=true]\nContent-Type: multipart/form-data\nFields: file(XML 内容)\n\n名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML \u003cparameterModel paramModel=\"...\"\u003e\n属性,文件名 = \u003cparamModel\u003e.xml,直接写 builtin 目录(Loader 扫描的同一目录 param-mappings/)。\n上传文件自身的 filename 被忽略。\n\n重复允许覆盖(2026-06-05 调整,需前端二次确认):\n  - 重复判定:paramModel 名已在 DB(GetParamModelByName 定位归属文件)或 \u003cparamModel\u003e.xml 已在盘上\n  - 无 ?force=true → 409,响应 data.overwritable=true,前端弹确认框\n  - ?force=true → 覆盖归属文件(原文件先备份 .bak.\u003cts\u003e);覆盖内置保持 builtin 身份\n    (不写 sidecar,仍不可删),覆盖自定义保持 custom\n\n校验链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):\n 1. 大小:file.Size \u003c= MaxUploadXMLSize (1 MiB)\n 2. 内容:validateUploadXML 根元素 = \u003cparameterModel\u003e\n 3. 名称:paramModel 属性必填;validateUploadFilename(\u003cparamModel\u003e+\".xml\") 白名单正则 + 保留名拦截\n 4. 路径:目标路径经 pathContainedIn 二次验证不逃逸\n 5. 重复 + force 判定(见上)\n\n写入流程(全程 per-filename 锁):\n 1. 确保 builtinDir 存在(MkdirAll,首次上传场景)\n 2. 写 tmp 文件:targetPath + .tmp.\u003cuuid\u003e → 原子 rename 上线\n 3. 写 sidecar(\u003cname\u003e.xml.custom 空标记);失败回滚 XML → 500\n 4. destructiveReload:全量 ReloadOne + 删孤儿 + registry.Refresh\n    (文件已落地,reload 失败只 Warn,响应 reloaded 字段反映状态)\n\n安全:\n  - 文件名正则拒绝路径分隔符 / 点开头 / 空白 / 多扩展名\n  - pathContainedIn 二次防御 filepath.Clean 解释差异\n  - encoding/xml Strict + 不处理外部实体(Go 标准库默认安全,无 XXE)\n  - 单文件大小硬上限 1 MiB(Gin engine MaxMultipartMemory 应配 4 MiB)\n  - per-filename 锁保证同名 Upload/Delete/Reload 串行",
+    "param-models",
+    "upload-xml",
+    "param models",
+    "upload xml"
+  ],
+  "tags": [
+    "param-models",
+    "upload-xml"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：param-models - 上传xml",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "force",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [
+    {
+      "name": "file",
+      "in": "form",
+      "required": false,
+      "type": "file"
+    }
+  ],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

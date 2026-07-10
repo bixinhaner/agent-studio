@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "category": "indicator-groups",
+  "title": "indicator-groups",
+  "operations": [
+    {
+      "operationId": "delete.indicator_groups.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/indicator-groups/:id",
+      "title": "indicator-groups - 删除",
+      "summary": "indicator-groups - 删除",
+      "description": "indicator-groups：删除指定资源记录",
+      "intents": [
+        "indicator-groups - 删除",
+        "indicator-groups：删除指定资源记录",
+        "indicator-groups",
+        "indicator groups"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.indicator_groups.by_id.json"
+    },
+    {
+      "operationId": "get.indicator_groups",
+      "method": "GET",
+      "path": "/api/v1/indicator-groups",
+      "title": "indicator-groups - 列表",
+      "summary": "indicator-groups - 列表",
+      "description": "indicator-groups：按筛选条件查询资源列表",
+      "intents": [
+        "indicator-groups - 列表",
+        "indicator-groups：按筛选条件查询资源列表",
+        "indicator-groups",
+        "indicator groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.indicator_groups.json"
+    },
+    {
+      "operationId": "post.indicator_groups",
+      "method": "POST",
+      "path": "/api/v1/indicator-groups",
+      "title": "indicator-groups - 创建",
+      "summary": "indicator-groups - 创建",
+      "description": "indicator-groups：创建新的资源记录",
+      "intents": [
+        "indicator-groups - 创建",
+        "indicator-groups：创建新的资源记录",
+        "indicator-groups",
+        "indicator groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.indicator_groups.json"
+    },
+    {
+      "operationId": "put.indicator_groups.by_id",
+      "method": "PUT",
+      "path": "/api/v1/indicator-groups/:id",
+      "title": "indicator-groups - 更新",
+      "summary": "indicator-groups - 更新",
+      "description": "indicator-groups：更新指定资源的完整配置",
+      "intents": [
+        "indicator-groups - 更新",
+        "indicator-groups：更新指定资源的完整配置",
+        "indicator-groups",
+        "indicator groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.indicator_groups.by_id.json"
+    }
+  ]
+}

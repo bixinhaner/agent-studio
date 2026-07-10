@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "1.0",
+  "category": "firmware",
+  "title": "firmware",
+  "operations": [
+    {
+      "operationId": "delete.firmware.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/firmware/:id",
+      "title": "Delete firmware",
+      "summary": "Delete firmware",
+      "description": "固件：删除指定资源记录",
+      "intents": [
+        "固件 - 删除",
+        "Delete firmware",
+        "固件：删除指定资源记录",
+        "firmware",
+        "固件"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.firmware.by_id.json"
+    },
+    {
+      "operationId": "get.firmware",
+      "method": "GET",
+      "path": "/api/v1/firmware",
+      "title": "List firmware versions",
+      "summary": "List firmware versions",
+      "description": "固件：按筛选条件查询资源列表",
+      "intents": [
+        "固件 - 列表",
+        "List firmware versions",
+        "固件：按筛选条件查询资源列表",
+        "firmware",
+        "固件"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.firmware.json"
+    },
+    {
+      "operationId": "get.firmware.by_id",
+      "method": "GET",
+      "path": "/api/v1/firmware/:id",
+      "title": "Get firmware by ID",
+      "summary": "Get firmware by ID",
+      "description": "固件：查询指定资源的详细信息",
+      "intents": [
+        "固件 - 详情",
+        "Get firmware by ID",
+        "固件：查询指定资源的详细信息",
+        "firmware",
+        "固件"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.firmware.by_id.json"
+    },
+    {
+      "operationId": "get.firmware.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/firmware/:id/download",
+      "title": "固件 - 下载",
+      "summary": "固件 - 下载",
+      "description": "固件：下载文件或导出结果",
+      "intents": [
+        "固件 - 下载",
+        "固件：下载文件或导出结果",
+        "firmware",
+        "固件",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.firmware.by_id.download.json"
+    },
+    {
+      "operationId": "post.firmware",
+      "method": "POST",
+      "path": "/api/v1/firmware",
+      "title": "Upload firmware",
+      "summary": "Upload firmware",
+      "description": "固件：创建新的资源记录",
+      "intents": [
+        "固件 - 创建",
+        "Upload firmware",
+        "固件：创建新的资源记录",
+        "firmware",
+        "固件"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.firmware.json"
+    },
+    {
+      "operationId": "post.firmware.batch_download",
+      "method": "POST",
+      "path": "/api/v1/firmware/batch-download",
+      "title": "固件 - 批量下载",
+      "summary": "固件 - 批量下载",
+      "description": "固件：处理批量下载相关数据",
+      "intents": [
+        "固件 - 批量下载",
+        "固件：处理批量下载相关数据",
+        "firmware",
+        "固件",
+        "batch-download",
+        "batch download"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.firmware.batch_download.json"
+    },
+    {
+      "operationId": "put.firmware.by_id",
+      "method": "PUT",
+      "path": "/api/v1/firmware/:id",
+      "title": "固件 - 更新",
+      "summary": "固件 - 更新",
+      "description": "固件：更新指定资源的完整配置",
+      "intents": [
+        "固件 - 更新",
+        "固件：更新指定资源的完整配置",
+        "firmware",
+        "固件"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.firmware.by_id.json"
+    },
+    {
+      "operationId": "put.firmware.by_id.recommend",
+      "method": "PUT",
+      "path": "/api/v1/firmware/:id/recommend",
+      "title": "固件 - 设为推荐",
+      "summary": "固件 - 设为推荐",
+      "description": "固件：将指定配置标记为推荐项",
+      "intents": [
+        "固件 - 设为推荐",
+        "固件：将指定配置标记为推荐项",
+        "firmware",
+        "固件",
+        "recommend"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.firmware.by_id.recommend.json"
+    }
+  ]
+}

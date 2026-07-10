@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.northbound.push.targets.by_id",
+  "method": "DELETE",
+  "path": "/api/v1/northbound/push/targets/:id",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*Router).removeTarget-fm",
+  "category": "northbound",
+  "title": "Delete a push target",
+  "summary": "Delete a push target",
+  "description": "北向接口：查询或维护指定对象的推送目标删除数据",
+  "intents": [
+    "北向接口 - 推送目标删除",
+    "Delete a push target",
+    "北向接口：查询或维护指定对象的推送目标删除数据",
+    "northbound",
+    "北向接口",
+    "push",
+    "targets"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "push",
+    "targets"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Delete a push target",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "204": {
+      "description": "Push target deleted"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

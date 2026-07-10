@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.northbound.export.alarms",
+  "method": "POST",
+  "path": "/api/v1/northbound/export/alarms",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*AlarmHandler).ExportAlarms-fm",
+  "category": "northbound",
+  "title": "Export alarm data",
+  "summary": "Export alarm data",
+  "description": "北向接口：查询或维护告警相关数据 Handler: ExportAlarms handles alarm data export for northbound consumers.",
+  "intents": [
+    "北向接口 - 导出告警",
+    "Export alarm data",
+    "北向接口：查询或维护告警相关数据 Handler: ExportAlarms handles alarm data export for northbound consumers.",
+    "northbound",
+    "北向接口",
+    "export",
+    "alarms"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "export",
+    "alarms"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Export alarm data",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": false,
+    "schema": {
+      "properties": {
+        "device_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "end_time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "json",
+            "csv",
+            "xml"
+          ],
+          "type": "string"
+        },
+        "start_time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        }
+      },
+      "description": "Alarm data exported"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

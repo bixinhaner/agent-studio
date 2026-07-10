@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.dictload.reload",
+  "method": "POST",
+  "path": "/api/v1/admin/dictload/reload",
+  "handler": "github.com/omcgo/omcgo/cmd/app/provider.registerDictLoadAdminRoutes.func1",
+  "category": "dictload",
+  "title": "热重载单个 dictload Loader（Sprint B-1）",
+  "summary": "热重载单个 dictload Loader（Sprint B-1）",
+  "description": "触发指定 dictload Loader 重新加载，仅 superAdmin 可调用。\n`mml-standard` Loader 支持基于 sha256 的增量重载：内容未变化时\n毫秒级返回 `rows_affected:0`（F-3 增量重载）。\n其他可选 loader：`param-model` / `indicator` / `alarm-definition` /\n`product`。",
+  "intents": [
+    "dictload - 创建",
+    "热重载单个 dictload Loader（Sprint B-1）",
+    "触发指定 dictload Loader 重新加载，仅 superAdmin 可调用。\n`mml-standard` Loader 支持基于 sha256 的增量重载：内容未变化时\n毫秒级返回 `rows_affected:0`（F-3 增量重载）。\n其他可选 loader：`param-model` / `indicator` / `alarm-definition` /\n`product`。",
+    "dictload",
+    "admin",
+    "reload"
+  ],
+  "tags": [
+    "dictload",
+    "admin",
+    "reload",
+    "MML"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：热重载单个 dictload Loader（Sprint B-1）",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "name",
+      "in": "query",
+      "required": true,
+      "type": "string",
+      "description": "要重载的 Loader 名（dictloader.Registry 注册名）",
+      "enum": [
+        "mml-standard",
+        "param-model",
+        "indicator",
+        "alarm-definition",
+        "product"
+      ],
+      "schema": {
+        "enum": [
+          "mml-standard",
+          "param-model",
+          "indicator",
+          "alarm-definition",
+          "product"
+        ],
+        "type": "string"
+      }
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "elapsed_ms": {
+                "example": 464,
+                "type": "integer"
+              },
+              "errors": {
+                "items": {
+                  "type": "string"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "files_loaded": {
+                "example": 1,
+                "type": "integer"
+              },
+              "files_skipped": {
+                "example": 0,
+                "type": "integer"
+              },
+              "loader": {
+                "example": "mml-standard",
+                "type": "string"
+              },
+              "rows_affected": {
+                "example": 3093,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "description": "重载完成"
+    },
+    "400": {
+      "description": "name 参数缺失或不在白名单"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "403": {
+      "description": "仅 superAdmin 可调用"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi"
+  ]
+}

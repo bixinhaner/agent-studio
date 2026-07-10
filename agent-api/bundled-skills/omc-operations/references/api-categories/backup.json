@@ -1,0 +1,717 @@
+{
+  "schemaVersion": "1.0",
+  "category": "backup",
+  "title": "备份",
+  "operations": [
+    {
+      "operationId": "delete.backup.config_snapshots.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "title": "备份 - 配置snapshots删除",
+      "summary": "备份 - 配置snapshots删除",
+      "description": "备份：查询或维护指定对象的配置snapshots删除数据 Handler: DeleteSnapshot handles DELETE /api/v1/backup/config-snapshots/:sn",
+      "intents": [
+        "备份 - 配置snapshots删除",
+        "备份：查询或维护指定对象的配置snapshots删除数据 Handler: DeleteSnapshot handles DELETE /api/v1/backup/config-snapshots/:sn",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "config snapshots"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.backup.config_snapshots.by_sn.json"
+    },
+    {
+      "operationId": "delete.backup.device_licenses.by_sn",
+      "method": "DELETE",
+      "path": "/api/v1/backup/device-licenses/:sn",
+      "title": "备份 - devicelicenses删除",
+      "summary": "备份 - devicelicenses删除",
+      "description": "备份：查询或维护指定对象的devicelicenses删除数据 Handler: DeleteLicense DELETE /api/v1/backup/device-licenses/:sn",
+      "intents": [
+        "备份 - devicelicenses删除",
+        "备份：查询或维护指定对象的devicelicenses删除数据 Handler: DeleteLicense DELETE /api/v1/backup/device-licenses/:sn",
+        "backup",
+        "备份",
+        "device-licenses",
+        "device licenses"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.backup.device_licenses.by_sn.json"
+    },
+    {
+      "operationId": "delete.backup.ftp_configs.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/ftp-configs/:id",
+      "title": "备份 - ftpconfigs删除",
+      "summary": "备份 - ftpconfigs删除",
+      "description": "备份：查询或维护指定对象的ftpconfigs删除数据 Handler: DeleteFTPConfig handles DELETE /api/v1/backup/ftp-configs/:id.",
+      "intents": [
+        "备份 - ftpconfigs删除",
+        "备份：查询或维护指定对象的ftpconfigs删除数据 Handler: DeleteFTPConfig handles DELETE /api/v1/backup/ftp-configs/:id.",
+        "backup",
+        "备份",
+        "ftp-configs",
+        "ftp configs"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.backup.ftp_configs.by_id.json"
+    },
+    {
+      "operationId": "delete.backup.schedules.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/schedules/:id",
+      "title": "备份 - 删除",
+      "summary": "备份 - 删除",
+      "description": "备份：删除指定资源记录 Handler: DeleteSchedule handles DELETE /api/v1/backup/schedules/:id.",
+      "intents": [
+        "备份 - 删除",
+        "备份：删除指定资源记录 Handler: DeleteSchedule handles DELETE /api/v1/backup/schedules/:id.",
+        "backup",
+        "备份",
+        "schedules"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.backup.schedules.by_id.json"
+    },
+    {
+      "operationId": "delete.backup.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/backup/tasks/:id",
+      "title": "备份 - 删除",
+      "summary": "备份 - 删除",
+      "description": "备份：删除指定资源记录 Handler: DeleteTask handles DELETE /api/v1/backup/tasks/:id.",
+      "intents": [
+        "备份 - 删除",
+        "备份：删除指定资源记录 Handler: DeleteTask handles DELETE /api/v1/backup/tasks/:id.",
+        "backup",
+        "备份",
+        "tasks"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.backup.tasks.by_id.json"
+    },
+    {
+      "operationId": "get.backup.config_snapshots",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots",
+      "title": "备份 - 配置snapshots",
+      "summary": "备份 - 配置snapshots",
+      "description": "备份：处理配置snapshots相关数据 Handler: ListSnapshots handles GET /api/v1/backup/config-snapshots\n\nQuery 参数：\n\n\tserial_number      string   模糊\n\tenb_name           string   模糊\n\tproduct_type       string   精确\n\tsource             string   \"backup\" | \"manual_upload\"\n\tupdated_after      RFC3339\n\tupdated_before     RFC3339\n\tpage / page_size / sort_by / sort_dir  通用分页",
+      "intents": [
+        "备份 - 配置snapshots",
+        "备份：处理配置snapshots相关数据 Handler: ListSnapshots handles GET /api/v1/backup/config-snapshots\n\nQuery 参数：\n\n\tserial_number      string   模糊\n\tenb_name           string   模糊\n\tproduct_type       string   精确\n\tsource             string   \"backup\" | \"manual_upload\"\n\tupdated_after      RFC3339\n\tupdated_before     RFC3339\n\tpage / page_size / sort_by / sort_dir  通用分页",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "config snapshots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.config_snapshots.json"
+    },
+    {
+      "operationId": "get.backup.config_snapshots.by_sn",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots/:sn",
+      "title": "备份 - 配置snapshots详情",
+      "summary": "备份 - 配置snapshots详情",
+      "description": "备份：查询或维护指定对象的配置snapshots详情数据 Handler: GetSnapshot handles GET /api/v1/backup/config-snapshots/:sn",
+      "intents": [
+        "备份 - 配置snapshots详情",
+        "备份：查询或维护指定对象的配置snapshots详情数据 Handler: GetSnapshot handles GET /api/v1/backup/config-snapshots/:sn",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "config snapshots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.config_snapshots.by_sn.json"
+    },
+    {
+      "operationId": "get.backup.config_snapshots.by_sn.download",
+      "method": "GET",
+      "path": "/api/v1/backup/config-snapshots/:sn/download",
+      "title": "备份 - 下载",
+      "summary": "备份 - 下载",
+      "description": "备份：下载文件或导出结果 Handler: DownloadSnapshot handles GET /api/v1/backup/config-snapshots/:sn/download.\nIt streams the object through the authenticated API origin so browsers do not\nneed direct access to the MinIO public endpoint.",
+      "intents": [
+        "备份 - 下载",
+        "备份：下载文件或导出结果 Handler: DownloadSnapshot handles GET /api/v1/backup/config-snapshots/:sn/download.\nIt streams the object through the authenticated API origin so browsers do not\nneed direct access to the MinIO public endpoint.",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "download",
+        "config snapshots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.config_snapshots.by_sn.download.json"
+    },
+    {
+      "operationId": "get.backup.device_licenses",
+      "method": "GET",
+      "path": "/api/v1/backup/device-licenses",
+      "title": "备份 - devicelicenses",
+      "summary": "备份 - devicelicenses",
+      "description": "备份：处理devicelicenses相关数据 Handler: ListLicenses GET /api/v1/backup/device-licenses",
+      "intents": [
+        "备份 - devicelicenses",
+        "备份：处理devicelicenses相关数据 Handler: ListLicenses GET /api/v1/backup/device-licenses",
+        "backup",
+        "备份",
+        "device-licenses",
+        "device licenses"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.device_licenses.json"
+    },
+    {
+      "operationId": "get.backup.device_licenses.by_sn",
+      "method": "GET",
+      "path": "/api/v1/backup/device-licenses/:sn",
+      "title": "备份 - devicelicenses详情",
+      "summary": "备份 - devicelicenses详情",
+      "description": "备份：查询或维护指定对象的devicelicenses详情数据 Handler: GetLicense GET /api/v1/backup/device-licenses/:sn",
+      "intents": [
+        "备份 - devicelicenses详情",
+        "备份：查询或维护指定对象的devicelicenses详情数据 Handler: GetLicense GET /api/v1/backup/device-licenses/:sn",
+        "backup",
+        "备份",
+        "device-licenses",
+        "device licenses"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.device_licenses.by_sn.json"
+    },
+    {
+      "operationId": "get.backup.device_licenses.by_sn.download",
+      "method": "GET",
+      "path": "/api/v1/backup/device-licenses/:sn/download",
+      "title": "备份 - 下载",
+      "summary": "备份 - 下载",
+      "description": "备份：下载文件或导出结果 Handler: DownloadLicense GET /api/v1/backup/device-licenses/:sn/download",
+      "intents": [
+        "备份 - 下载",
+        "备份：下载文件或导出结果 Handler: DownloadLicense GET /api/v1/backup/device-licenses/:sn/download",
+        "backup",
+        "备份",
+        "device-licenses",
+        "download",
+        "device licenses"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.device_licenses.by_sn.download.json"
+    },
+    {
+      "operationId": "get.backup.ftp_configs",
+      "method": "GET",
+      "path": "/api/v1/backup/ftp-configs",
+      "title": "备份 - ftpconfigs",
+      "summary": "备份 - ftpconfigs",
+      "description": "备份：处理ftpconfigs相关数据 Handler: ListFTPConfigs handles GET /api/v1/backup/ftp-configs.",
+      "intents": [
+        "备份 - ftpconfigs",
+        "备份：处理ftpconfigs相关数据 Handler: ListFTPConfigs handles GET /api/v1/backup/ftp-configs.",
+        "backup",
+        "备份",
+        "ftp-configs",
+        "ftp configs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.ftp_configs.json"
+    },
+    {
+      "operationId": "get.backup.policy",
+      "method": "GET",
+      "path": "/api/v1/backup/policy",
+      "title": "备份 - 列表",
+      "summary": "备份 - 列表",
+      "description": "备份：按筛选条件查询资源列表 Handler: GetPolicy handles GET /api/v1/backup/policy.\nReturns the singleton policy, or DefaultPolicy() when the table is empty\nso first-time callers see canonical defaults.",
+      "intents": [
+        "备份 - 列表",
+        "备份：按筛选条件查询资源列表 Handler: GetPolicy handles GET /api/v1/backup/policy.\nReturns the singleton policy, or DefaultPolicy() when the table is empty\nso first-time callers see canonical defaults.",
+        "backup",
+        "备份",
+        "policy"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.policy.json"
+    },
+    {
+      "operationId": "get.backup.restore_tasks",
+      "method": "GET",
+      "path": "/api/v1/backup/restore-tasks",
+      "title": "备份 - 恢复tasks",
+      "summary": "备份 - 恢复tasks",
+      "description": "备份：处理恢复tasks相关数据 Handler: ListRestoreTasks handles GET /api/v1/backup/restore-tasks.",
+      "intents": [
+        "备份 - 恢复tasks",
+        "备份：处理恢复tasks相关数据 Handler: ListRestoreTasks handles GET /api/v1/backup/restore-tasks.",
+        "backup",
+        "备份",
+        "restore-tasks",
+        "restore tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.restore_tasks.json"
+    },
+    {
+      "operationId": "get.backup.restore_tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/backup/restore-tasks/:id",
+      "title": "备份 - 恢复tasks详情",
+      "summary": "备份 - 恢复tasks详情",
+      "description": "备份：查询或维护指定对象的恢复tasks详情数据 Handler: GetRestoreTask handles GET /api/v1/backup/restore-tasks/:id.",
+      "intents": [
+        "备份 - 恢复tasks详情",
+        "备份：查询或维护指定对象的恢复tasks详情数据 Handler: GetRestoreTask handles GET /api/v1/backup/restore-tasks/:id.",
+        "backup",
+        "备份",
+        "restore-tasks",
+        "restore tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.restore_tasks.by_id.json"
+    },
+    {
+      "operationId": "get.backup.schedules",
+      "method": "GET",
+      "path": "/api/v1/backup/schedules",
+      "title": "备份 - 列表",
+      "summary": "备份 - 列表",
+      "description": "备份：按筛选条件查询资源列表 Handler: ListSchedules handles GET /api/v1/backup/schedules.",
+      "intents": [
+        "备份 - 列表",
+        "备份：按筛选条件查询资源列表 Handler: ListSchedules handles GET /api/v1/backup/schedules.",
+        "backup",
+        "备份",
+        "schedules"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.schedules.json"
+    },
+    {
+      "operationId": "get.backup.tasks",
+      "method": "GET",
+      "path": "/api/v1/backup/tasks",
+      "title": "备份 - 列表",
+      "summary": "备份 - 列表",
+      "description": "备份：按筛选条件查询资源列表 Handler: ListTasks handles GET /api/v1/backup/tasks.",
+      "intents": [
+        "备份 - 列表",
+        "备份：按筛选条件查询资源列表 Handler: ListTasks handles GET /api/v1/backup/tasks.",
+        "backup",
+        "备份",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.tasks.json"
+    },
+    {
+      "operationId": "get.backup.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/backup/tasks/:id",
+      "title": "备份 - 详情",
+      "summary": "备份 - 详情",
+      "description": "备份：查询指定资源的详细信息 Handler: GetTask handles GET /api/v1/backup/tasks/:id.",
+      "intents": [
+        "备份 - 详情",
+        "备份：查询指定资源的详细信息 Handler: GetTask handles GET /api/v1/backup/tasks/:id.",
+        "backup",
+        "备份",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.backup.tasks.by_id.json"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-delete",
+      "title": "备份 - 批量删除",
+      "summary": "备份 - 批量删除",
+      "description": "备份：处理批量删除相关数据 Handler: BatchDeleteSnapshots handles DELETE /api/v1/backup/config-snapshots",
+      "intents": [
+        "备份 - 批量删除",
+        "备份：处理批量删除相关数据 Handler: BatchDeleteSnapshots handles DELETE /api/v1/backup/config-snapshots",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "batch-delete",
+        "config snapshots",
+        "batch delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.config_snapshots.batch_delete.json"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_download",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-download",
+      "title": "备份 - 批量下载",
+      "summary": "备份 - 批量下载",
+      "description": "备份：处理批量下载相关数据",
+      "intents": [
+        "备份 - 批量下载",
+        "备份：处理批量下载相关数据",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "batch-download",
+        "config snapshots",
+        "batch download"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.config_snapshots.batch_download.json"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.batch_get",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/batch-get",
+      "title": "备份 - 批量get",
+      "summary": "备份 - 批量get",
+      "description": "备份：处理批量get相关数据 Handler: BatchGetSnapshots handles POST /api/v1/backup/config-snapshots/batch-get",
+      "intents": [
+        "备份 - 批量get",
+        "备份：处理批量get相关数据 Handler: BatchGetSnapshots handles POST /api/v1/backup/config-snapshots/batch-get",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "batch-get",
+        "config snapshots",
+        "batch get"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.config_snapshots.batch_get.json"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.import",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/import",
+      "title": "备份 - 导入",
+      "summary": "备份 - 导入",
+      "description": "备份：导入外部文件或业务数据 Handler: ImportSnapshots handles POST /api/v1/backup/config-snapshots/import\n\n接收 multipart/form-data，字段名 \"files\"，可挂多个文件。\n每个文件按 \u003cSN\u003e_CFG.{xml,nv} 严格校验；不通过的进入 failed 列表，\n通过的写 MinIO + Upsert。返回 succeeded + failed 两部分。",
+      "intents": [
+        "备份 - 导入",
+        "备份：导入外部文件或业务数据 Handler: ImportSnapshots handles POST /api/v1/backup/config-snapshots/import\n\n接收 multipart/form-data，字段名 \"files\"，可挂多个文件。\n每个文件按 \u003cSN\u003e_CFG.{xml,nv} 严格校验；不通过的进入 failed 列表，\n通过的写 MinIO + Upsert。返回 succeeded + failed 两部分。",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "import",
+        "config snapshots"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.config_snapshots.import.json"
+    },
+    {
+      "operationId": "post.backup.config_snapshots.validate_sns",
+      "method": "POST",
+      "path": "/api/v1/backup/config-snapshots/validate-sns",
+      "title": "备份 - 校验sns",
+      "summary": "备份 - 校验sns",
+      "description": "备份：处理校验sns相关数据 Handler: ValidateImportSNs handles POST /api/v1/backup/config-snapshots/validate-sns",
+      "intents": [
+        "备份 - 校验sns",
+        "备份：处理校验sns相关数据 Handler: ValidateImportSNs handles POST /api/v1/backup/config-snapshots/validate-sns",
+        "backup",
+        "备份",
+        "config-snapshots",
+        "config snapshots"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.config_snapshots.validate_sns.json"
+    },
+    {
+      "operationId": "post.backup.device_licenses.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/batch-delete",
+      "title": "备份 - 批量删除",
+      "summary": "备份 - 批量删除",
+      "description": "备份：处理批量删除相关数据 Handler: BatchDeleteLicenses POST /api/v1/backup/device-licenses/batch-delete",
+      "intents": [
+        "备份 - 批量删除",
+        "备份：处理批量删除相关数据 Handler: BatchDeleteLicenses POST /api/v1/backup/device-licenses/batch-delete",
+        "backup",
+        "备份",
+        "device-licenses",
+        "batch-delete",
+        "device licenses",
+        "batch delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.device_licenses.batch_delete.json"
+    },
+    {
+      "operationId": "post.backup.device_licenses.batch_download",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/batch-download",
+      "title": "备份 - 批量下载",
+      "summary": "备份 - 批量下载",
+      "description": "备份：处理批量下载相关数据",
+      "intents": [
+        "备份 - 批量下载",
+        "备份：处理批量下载相关数据",
+        "backup",
+        "备份",
+        "device-licenses",
+        "batch-download",
+        "device licenses",
+        "batch download"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.device_licenses.batch_download.json"
+    },
+    {
+      "operationId": "post.backup.device_licenses.batch_get",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/batch-get",
+      "title": "备份 - 批量get",
+      "summary": "备份 - 批量get",
+      "description": "备份：处理批量get相关数据 Handler: BatchGetLicenses POST /api/v1/backup/device-licenses/batch-get",
+      "intents": [
+        "备份 - 批量get",
+        "备份：处理批量get相关数据 Handler: BatchGetLicenses POST /api/v1/backup/device-licenses/batch-get",
+        "backup",
+        "备份",
+        "device-licenses",
+        "batch-get",
+        "device licenses",
+        "batch get"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.device_licenses.batch_get.json"
+    },
+    {
+      "operationId": "post.backup.device_licenses.import",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/import",
+      "title": "备份 - 导入",
+      "summary": "备份 - 导入",
+      "description": "备份：导入外部文件或业务数据 Handler: ImportLicenses POST /api/v1/backup/device-licenses/import",
+      "intents": [
+        "备份 - 导入",
+        "备份：导入外部文件或业务数据 Handler: ImportLicenses POST /api/v1/backup/device-licenses/import",
+        "backup",
+        "备份",
+        "device-licenses",
+        "import",
+        "device licenses"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.device_licenses.import.json"
+    },
+    {
+      "operationId": "post.backup.device_licenses.validate_sns",
+      "method": "POST",
+      "path": "/api/v1/backup/device-licenses/validate-sns",
+      "title": "备份 - 校验sns",
+      "summary": "备份 - 校验sns",
+      "description": "备份：处理校验sns相关数据 Handler: ValidateLicenseSNs POST /api/v1/backup/device-licenses/validate-sns",
+      "intents": [
+        "备份 - 校验sns",
+        "备份：处理校验sns相关数据 Handler: ValidateLicenseSNs POST /api/v1/backup/device-licenses/validate-sns",
+        "backup",
+        "备份",
+        "device-licenses",
+        "device licenses"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.device_licenses.validate_sns.json"
+    },
+    {
+      "operationId": "post.backup.ftp_configs",
+      "method": "POST",
+      "path": "/api/v1/backup/ftp-configs",
+      "title": "备份 - ftpconfigs",
+      "summary": "备份 - ftpconfigs",
+      "description": "备份：处理ftpconfigs相关数据 Handler: CreateFTPConfig handles POST /api/v1/backup/ftp-configs.",
+      "intents": [
+        "备份 - ftpconfigs",
+        "备份：处理ftpconfigs相关数据 Handler: CreateFTPConfig handles POST /api/v1/backup/ftp-configs.",
+        "backup",
+        "备份",
+        "ftp-configs",
+        "ftp configs"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.ftp_configs.json"
+    },
+    {
+      "operationId": "post.backup.ftp_configs.by_id.test",
+      "method": "POST",
+      "path": "/api/v1/backup/ftp-configs/:id/test",
+      "title": "备份 - 测试",
+      "summary": "备份 - 测试",
+      "description": "备份：发送测试请求验证配置 Handler: TestFTPConnection handles POST /api/v1/backup/ftp-configs/:id/test.\n\nT-0032: when FTPConnectionTester is wired (SetFTPTester), runs a\ntwo-tier probe (TCP reachability + protocol-specific auth) and\nreturns FTPTestResult JSON. When unwired, returns a clear \"not\nwired\" stub so existing callers still get HTTP 200.",
+      "intents": [
+        "备份 - 测试",
+        "备份：发送测试请求验证配置 Handler: TestFTPConnection handles POST /api/v1/backup/ftp-configs/:id/test.\n\nT-0032: when FTPConnectionTester is wired (SetFTPTester), runs a\ntwo-tier probe (TCP reachability + protocol-specific auth) and\nreturns FTPTestResult JSON. When unwired, returns a clear \"not\nwired\" stub so existing callers still get HTTP 200.",
+        "backup",
+        "备份",
+        "ftp-configs",
+        "test",
+        "ftp configs"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.ftp_configs.by_id.test.json"
+    },
+    {
+      "operationId": "post.backup.restore",
+      "method": "POST",
+      "path": "/api/v1/backup/restore",
+      "title": "备份 - 恢复",
+      "summary": "备份 - 恢复",
+      "description": "恢复备份、回收站记录或任务状态 Handler: CreateRestore handles POST /api/v1/backup/restore.\n\nBody: {\"bucket\": \"config_backup\", \"object_path\": \"backup/...xml.gz\",\n       \"target_device_sns\": [\"SN001\", ...]}\n\nReturns 200 with the persisted RestoreTask. Validation failures map to 400;\nmissing source object maps to 404; service unavailability (DI not wired)\nmaps to 503.",
+      "intents": [
+        "备份 - 恢复",
+        "恢复备份、回收站记录或任务状态 Handler: CreateRestore handles POST /api/v1/backup/restore.\n\nBody: {\"bucket\": \"config_backup\", \"object_path\": \"backup/...xml.gz\",\n       \"target_device_sns\": [\"SN001\", ...]}\n\nReturns 200 with the persisted RestoreTask. Validation failures map to 400;\nmissing source object maps to 404; service unavailability (DI not wired)\nmaps to 503.",
+        "backup",
+        "备份",
+        "restore"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.restore.json"
+    },
+    {
+      "operationId": "post.backup.restore.by_snapshot",
+      "method": "POST",
+      "path": "/api/v1/backup/restore/by-snapshot",
+      "title": "备份 - 恢复bysnapshot",
+      "summary": "备份 - 恢复bysnapshot",
+      "description": "备份：处理bysnapshot相关数据 Handler: CreateRestoreBySnapshot handles POST /api/v1/backup/restore/by-snapshot (T-0164 B5).\n\nBody: {\"target_device_sns\": [\"SN001\", \"SN002\", ...]}\n\nEach target device picks its own latest config_snapshots row as source.\nIntegral rejection: if any SN has no snapshot, returns 404 with the list of\nmissing SNs in the body so the operator can fix and retry.",
+      "intents": [
+        "备份 - 恢复bysnapshot",
+        "备份：处理bysnapshot相关数据 Handler: CreateRestoreBySnapshot handles POST /api/v1/backup/restore/by-snapshot (T-0164 B5).\n\nBody: {\"target_device_sns\": [\"SN001\", \"SN002\", ...]}\n\nEach target device picks its own latest config_snapshots row as source.\nIntegral rejection: if any SN has no snapshot, returns 404 with the list of\nmissing SNs in the body so the operator can fix and retry.",
+        "backup",
+        "备份",
+        "restore",
+        "by-snapshot",
+        "by snapshot"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.restore.by_snapshot.json"
+    },
+    {
+      "operationId": "post.backup.restore.by_task_id",
+      "method": "POST",
+      "path": "/api/v1/backup/restore/by-task-id",
+      "title": "备份 - 恢复bytaskid",
+      "summary": "备份 - 恢复bytaskid",
+      "description": "备份：处理bytaskid相关数据 Handler: CreateRestoreByTaskID handles POST /api/v1/backup/restore/by-task-id (T-0079).\n\nBody: {\"backup_task_id\": \"\u003cuuid\u003e\", \"target_device_sns\": [\"SN001\", ...]}\n\nResolves backup_tasks.file_path for the given task and dispatches the same\nfan-out as POST /backup/restore. Multi-device source backups produce a\nhuman-readable warning in the response body alongside the created\nRestoreTask. Returns 404 when the task hasn't uploaded yet (file_path null).",
+      "intents": [
+        "备份 - 恢复bytaskid",
+        "备份：处理bytaskid相关数据 Handler: CreateRestoreByTaskID handles POST /api/v1/backup/restore/by-task-id (T-0079).\n\nBody: {\"backup_task_id\": \"\u003cuuid\u003e\", \"target_device_sns\": [\"SN001\", ...]}\n\nResolves backup_tasks.file_path for the given task and dispatches the same\nfan-out as POST /backup/restore. Multi-device source backups produce a\nhuman-readable warning in the response body alongside the created\nRestoreTask. Returns 404 when the task hasn't uploaded yet (file_path null).",
+        "backup",
+        "备份",
+        "restore",
+        "by-task-id",
+        "by task id"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.restore.by_task_id.json"
+    },
+    {
+      "operationId": "post.backup.schedules",
+      "method": "POST",
+      "path": "/api/v1/backup/schedules",
+      "title": "备份 - 创建",
+      "summary": "备份 - 创建",
+      "description": "备份：创建新的资源记录 Handler: CreateSchedule handles POST /api/v1/backup/schedules.",
+      "intents": [
+        "备份 - 创建",
+        "备份：创建新的资源记录 Handler: CreateSchedule handles POST /api/v1/backup/schedules.",
+        "backup",
+        "备份",
+        "schedules"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.schedules.json"
+    },
+    {
+      "operationId": "post.backup.tasks",
+      "method": "POST",
+      "path": "/api/v1/backup/tasks",
+      "title": "备份 - 创建",
+      "summary": "备份 - 创建",
+      "description": "备份：创建新的资源记录 Handler: CreateTask handles POST /api/v1/backup/tasks.",
+      "intents": [
+        "备份 - 创建",
+        "备份：创建新的资源记录 Handler: CreateTask handles POST /api/v1/backup/tasks.",
+        "backup",
+        "备份",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.tasks.json"
+    },
+    {
+      "operationId": "post.backup.tasks.by_id.cancel",
+      "method": "POST",
+      "path": "/api/v1/backup/tasks/:id/cancel",
+      "title": "备份 - 取消",
+      "summary": "备份 - 取消",
+      "description": "备份：取消未完成的任务或操作 Handler: CancelTask handles POST /api/v1/backup/tasks/:id/cancel.",
+      "intents": [
+        "备份 - 取消",
+        "备份：取消未完成的任务或操作 Handler: CancelTask handles POST /api/v1/backup/tasks/:id/cancel.",
+        "backup",
+        "备份",
+        "tasks",
+        "cancel"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.backup.tasks.by_id.cancel.json"
+    },
+    {
+      "operationId": "put.backup.ftp_configs.by_id",
+      "method": "PUT",
+      "path": "/api/v1/backup/ftp-configs/:id",
+      "title": "备份 - ftpconfigs更新",
+      "summary": "备份 - ftpconfigs更新",
+      "description": "备份：查询或维护指定对象的ftpconfigs更新数据 Handler: UpdateFTPConfig handles PUT /api/v1/backup/ftp-configs/:id.",
+      "intents": [
+        "备份 - ftpconfigs更新",
+        "备份：查询或维护指定对象的ftpconfigs更新数据 Handler: UpdateFTPConfig handles PUT /api/v1/backup/ftp-configs/:id.",
+        "backup",
+        "备份",
+        "ftp-configs",
+        "ftp configs"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.backup.ftp_configs.by_id.json"
+    },
+    {
+      "operationId": "put.backup.policy",
+      "method": "PUT",
+      "path": "/api/v1/backup/policy",
+      "title": "备份 - 批量更新",
+      "summary": "备份 - 批量更新",
+      "description": "备份：批量更新资源数据 Handler: UpdatePolicy handles PUT /api/v1/backup/policy.\nValidates and upserts the singleton policy.",
+      "intents": [
+        "备份 - 批量更新",
+        "备份：批量更新资源数据 Handler: UpdatePolicy handles PUT /api/v1/backup/policy.\nValidates and upserts the singleton policy.",
+        "backup",
+        "备份",
+        "policy"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.backup.policy.json"
+    },
+    {
+      "operationId": "put.backup.schedules.by_id",
+      "method": "PUT",
+      "path": "/api/v1/backup/schedules/:id",
+      "title": "备份 - 更新",
+      "summary": "备份 - 更新",
+      "description": "备份：更新指定资源的完整配置 Handler: UpdateSchedule handles PUT /api/v1/backup/schedules/:id.",
+      "intents": [
+        "备份 - 更新",
+        "备份：更新指定资源的完整配置 Handler: UpdateSchedule handles PUT /api/v1/backup/schedules/:id.",
+        "backup",
+        "备份",
+        "schedules"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.backup.schedules.by_id.json"
+    }
+  ]
+}

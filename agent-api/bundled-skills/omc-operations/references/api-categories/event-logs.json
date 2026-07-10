@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0",
+  "category": "event-logs",
+  "title": "event-logs",
+  "operations": [
+    {
+      "operationId": "get.event_logs",
+      "method": "GET",
+      "path": "/api/v1/event-logs",
+      "title": "event-logs - 列表",
+      "summary": "event-logs - 列表",
+      "description": "event-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary 查询事件日志列表\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"\n@Param page        query int    false \"页码 默认 1\"\n@Param page_size   query int    false \"每页 默认 20\"",
+      "intents": [
+        "event-logs - 列表",
+        "event-logs：按筛选条件查询资源列表 Handler: List godoc\n@Summary 查询事件日志列表\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"\n@Param page        query int    false \"页码 默认 1\"\n@Param page_size   query int    false \"每页 默认 20\"",
+        "event-logs",
+        "event logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.event_logs.json"
+    },
+    {
+      "operationId": "get.event_logs.by_id",
+      "method": "GET",
+      "path": "/api/v1/event-logs/:id",
+      "title": "event-logs - 详情",
+      "summary": "event-logs - 详情",
+      "description": "event-logs：查询指定资源的详细信息 Handler: Get 详情",
+      "intents": [
+        "event-logs - 详情",
+        "event-logs：查询指定资源的详细信息 Handler: Get 详情",
+        "event-logs",
+        "event logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.event_logs.by_id.json"
+    },
+    {
+      "operationId": "get.event_logs.statistics",
+      "method": "GET",
+      "path": "/api/v1/event-logs/statistics",
+      "title": "event-logs - 统计",
+      "summary": "event-logs - 统计",
+      "description": "event-logs：查询统计汇总数据 Handler: Statistics godoc\n@Summary 按设备聚合事件日志重启次数（跟随过滤条件，不分页）\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"",
+      "intents": [
+        "event-logs - 统计",
+        "event-logs：查询统计汇总数据 Handler: Statistics godoc\n@Summary 按设备聚合事件日志重启次数（跟随过滤条件，不分页）\n@Param device_sn   query string false \"设备 SN（模糊匹配 ILIKE）\"\n@Param event_type  query string false \"事件类型：boot / ...\"\n@Param start_time  query string false \"起始时间 RFC3339\"\n@Param end_time    query string false \"结束时间 RFC3339\"",
+        "event-logs",
+        "statistics",
+        "event logs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.event_logs.statistics.json"
+    }
+  ]
+}

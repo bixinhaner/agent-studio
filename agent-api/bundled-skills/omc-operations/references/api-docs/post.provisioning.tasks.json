@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.provisioning.tasks",
+  "method": "POST",
+  "path": "/api/v1/provisioning/tasks",
+  "handler": "github.com/omcgo/omcgo/internal/provision.(*Handler).Create-fm",
+  "category": "provisioning",
+  "title": "Create a provisioning task",
+  "summary": "Create a provisioning task",
+  "description": "自动开站：创建新的资源记录 Handler: Create handles POST /api/v1/provisioning/tasks (manual provisioning trigger).",
+  "intents": [
+    "自动开站 - 创建",
+    "Create a provisioning task",
+    "自动开站：创建新的资源记录 Handler: Create handles POST /api/v1/provisioning/tasks (manual provisioning trigger).",
+    "provisioning",
+    "自动开站",
+    "tasks"
+  ],
+  "tags": [
+    "provisioning",
+    "自动开站",
+    "tasks"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Create a provisioning task",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/CreateProvisioningTaskRequest"
+    }
+  },
+  "responses": {
+    "201": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/ProvisioningTask"
+          }
+        }
+      },
+      "description": "Task created"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "referencedSchemas": {
+    "CreateProvisioningTaskRequest": {
+      "properties": {
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "task_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "task_type"
+      ],
+      "type": "object"
+    },
+    "ProvisioningTask": {
+      "properties": {
+        "completed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "error_message": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "result": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "retry_count": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "task_type": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

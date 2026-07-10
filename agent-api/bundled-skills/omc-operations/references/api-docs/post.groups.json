@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.groups",
+  "method": "POST",
+  "path": "/api/v1/groups",
+  "handler": "github.com/omcgo/omcgo/internal/topology.(*Handler).CreateGroup-fm",
+  "category": "groups",
+  "title": "Create a device group",
+  "summary": "Create a device group",
+  "description": "用户组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+  "intents": [
+    "用户组 - 创建",
+    "Create a device group",
+    "用户组：创建新的资源记录 Handler: CreateGroup handles POST /device-groups.",
+    "groups"
+  ],
+  "tags": [
+    "groups"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Create a device group",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/CreateGroupRequest"
+    }
+  },
+  "responses": {
+    "201": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/DeviceGroup"
+          }
+        }
+      },
+      "description": "Group created"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "referencedSchemas": {
+    "CreateGroupRequest": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "DeviceGroup": {
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/components/schemas/DeviceGroup"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "member_count": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "format": "uuid",
+          "nullable": true,
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

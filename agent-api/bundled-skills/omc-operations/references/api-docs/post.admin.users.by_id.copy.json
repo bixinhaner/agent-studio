@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.users.by_id.copy",
+  "method": "POST",
+  "path": "/api/v1/admin/users/:id/copy",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*Handler).CopyUser-fm",
+  "category": "users",
+  "title": "用户 - 复制",
+  "summary": "用户 - 复制",
+  "description": "用户：复制现有资源或配置 Handler: CopyUser 复制源用户为新账号；返回新用户对象 + 临时密码（仅这次响应可见）。",
+  "intents": [
+    "用户 - 复制",
+    "用户：复制现有资源或配置 Handler: CopyUser 复制源用户为新账号；返回新用户对象 + 临时密码（仅这次响应可见）。",
+    "users",
+    "用户",
+    "admin",
+    "copy"
+  ],
+  "tags": [
+    "users",
+    "用户",
+    "admin",
+    "copy"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：用户 - 复制",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

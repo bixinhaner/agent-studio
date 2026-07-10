@@ -1,0 +1,870 @@
+{
+  "schemaVersion": "1.0",
+  "category": "devices",
+  "title": "设备",
+  "operations": [
+    {
+      "operationId": "delete.devices.batch",
+      "method": "DELETE",
+      "path": "/api/v1/devices/batch",
+      "title": "设备 - 批量",
+      "summary": "设备 - 批量",
+      "description": "设备：对多个对象执行批量操作 Handler: BatchDeleteDevices handles DELETE /api/v1/devices/batch.\nAccepts a JSON body with a list of device IDs and soft-deletes all of them.",
+      "intents": [
+        "设备 - 批量",
+        "设备：对多个对象执行批量操作 Handler: BatchDeleteDevices handles DELETE /api/v1/devices/batch.\nAccepts a JSON body with a list of device IDs and soft-deletes all of them.",
+        "devices",
+        "设备",
+        "batch"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.devices.batch.json"
+    },
+    {
+      "operationId": "delete.devices.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/:id",
+      "title": "Delete a device",
+      "summary": "Delete a device",
+      "description": "设备：删除指定资源记录 Handler: DeleteDevice handles DELETE /api/v1/devices/:id.",
+      "intents": [
+        "设备 - 删除",
+        "Delete a device",
+        "设备：删除指定资源记录 Handler: DeleteDevice handles DELETE /api/v1/devices/:id.",
+        "devices",
+        "设备"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.devices.by_id.json"
+    },
+    {
+      "operationId": "delete.devices.recycle.permanent",
+      "method": "DELETE",
+      "path": "/api/v1/devices/recycle/permanent",
+      "title": "设备 - 回收站彻底删除",
+      "summary": "设备 - 回收站彻底删除",
+      "description": "设备：从回收站永久删除资源 Handler: PermanentDeleteDevices handles DELETE /api/v1/devices/recycle/permanent.\nPermanently removes devices from the database.",
+      "intents": [
+        "设备 - 回收站彻底删除",
+        "设备：从回收站永久删除资源 Handler: PermanentDeleteDevices handles DELETE /api/v1/devices/recycle/permanent.\nPermanently removes devices from the database.",
+        "devices",
+        "设备",
+        "recycle",
+        "permanent"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.devices.recycle.permanent.json"
+    },
+    {
+      "operationId": "delete.devices.tasks.by_task_id",
+      "method": "DELETE",
+      "path": "/api/v1/devices/tasks/:task_id",
+      "title": "设备 - 删除",
+      "summary": "设备 - 删除",
+      "description": "设备：删除指定资源记录 Handler: CancelTask 取消任务\nDELETE /api/v1/devices/tasks/:task_id",
+      "intents": [
+        "设备 - 删除",
+        "设备：删除指定资源记录 Handler: CancelTask 取消任务\nDELETE /api/v1/devices/tasks/:task_id",
+        "devices",
+        "设备",
+        "tasks"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.devices.tasks.by_task_id.json"
+    },
+    {
+      "operationId": "get.devices",
+      "method": "GET",
+      "path": "/api/v1/devices",
+      "title": "List devices",
+      "summary": "List devices",
+      "description": "设备：按筛选条件查询资源列表 Handler: ListDevices handles GET /api/v1/devices with pagination and filtering.",
+      "intents": [
+        "设备 - 列表",
+        "List devices",
+        "设备：按筛选条件查询资源列表 Handler: ListDevices handles GET /api/v1/devices with pagination and filtering.",
+        "devices",
+        "设备"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.json"
+    },
+    {
+      "operationId": "get.devices.by_id",
+      "method": "GET",
+      "path": "/api/v1/devices/:id",
+      "title": "Get device by ID",
+      "summary": "Get device by ID",
+      "description": "设备：查询指定资源的详细信息 Handler: GetDevice handles GET /api/v1/devices/:id.",
+      "intents": [
+        "设备 - 详情",
+        "Get device by ID",
+        "设备：查询指定资源的详细信息 Handler: GetDevice handles GET /api/v1/devices/:id.",
+        "devices",
+        "设备"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.json"
+    },
+    {
+      "operationId": "get.devices.by_id.detail",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/detail",
+      "title": "设备 - 详情",
+      "summary": "设备 - 详情",
+      "description": "设备：查询指定资源的详细信息 Handler: GetDeviceDetail handles GET /api/v1/devices/:id/detail.\nReturns a composite view aggregating device, device_info, and device_parameters data.",
+      "intents": [
+        "设备 - 详情",
+        "设备：查询指定资源的详细信息 Handler: GetDeviceDetail handles GET /api/v1/devices/:id/detail.\nReturns a composite view aggregating device, device_info, and device_parameters data.",
+        "devices",
+        "设备",
+        "detail"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.detail.json"
+    },
+    {
+      "operationId": "get.devices.by_id.info",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/info",
+      "title": "设备 - 信息",
+      "summary": "设备 - 信息",
+      "description": "设备：查询基础信息 Handler: GetDeviceInfo handles GET /api/v1/devices/:id/info.",
+      "intents": [
+        "设备 - 信息",
+        "设备：查询基础信息 Handler: GetDeviceInfo handles GET /api/v1/devices/:id/info.",
+        "devices",
+        "设备",
+        "info"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.info.json"
+    },
+    {
+      "operationId": "get.devices.by_id.license_params",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/license-params",
+      "title": "设备 - license参数",
+      "summary": "设备 - license参数",
+      "description": "设备：处理license参数相关数据 Handler: ListLicenseParams — GET /api/v1/devices/:id/license-params\n\n200 + { items: [...], total: N }；空列表（设备未上报或无 license 模型）\n也返 200 + items=[]，前端展示空态。",
+      "intents": [
+        "设备 - license参数",
+        "设备：处理license参数相关数据 Handler: ListLicenseParams — GET /api/v1/devices/:id/license-params\n\n200 + { items: [...], total: N }；空列表（设备未上报或无 license 模型）\n也返 200 + items=[]，前端展示空态。",
+        "devices",
+        "设备",
+        "license-params",
+        "license params"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.license_params.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters",
+      "title": "Get device parameters",
+      "summary": "Get device parameters",
+      "description": "查询或维护设备参数 Handler: GetDeviceParameters handles GET /api/v1/devices/:id/parameters.",
+      "intents": [
+        "设备 - 参数",
+        "Get device parameters",
+        "查询或维护设备参数 Handler: GetDeviceParameters handles GET /api/v1/devices/:id/parameters.",
+        "devices",
+        "设备",
+        "parameters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.children",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/children",
+      "title": "设备 - 参数子节点",
+      "summary": "设备 - 参数子节点",
+      "description": "设备：查询树形结构的下级节点 Handler: GetDirectChildren handles GET /api/v1/devices/:id/parameters/children.",
+      "intents": [
+        "设备 - 参数子节点",
+        "设备：查询树形结构的下级节点 Handler: GetDirectChildren handles GET /api/v1/devices/:id/parameters/children.",
+        "devices",
+        "设备",
+        "parameters",
+        "children"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.children.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.schema",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/schema",
+      "title": "设备 - 参数架构",
+      "summary": "设备 - 参数架构",
+      "description": "设备：查询数据结构或参数架构 Handler: GetParameterSchema handles GET /api/v1/devices/:id/parameters/schema.",
+      "intents": [
+        "设备 - 参数架构",
+        "设备：查询数据结构或参数架构 Handler: GetParameterSchema handles GET /api/v1/devices/:id/parameters/schema.",
+        "devices",
+        "设备",
+        "parameters",
+        "schema"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.schema.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.search",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/search",
+      "title": "设备 - 参数搜索",
+      "summary": "设备 - 参数搜索",
+      "description": "设备：按关键字搜索业务数据 Handler: SearchParameters handles GET /api/v1/devices/:id/parameter-tree/search.",
+      "intents": [
+        "设备 - 参数搜索",
+        "设备：按关键字搜索业务数据 Handler: SearchParameters handles GET /api/v1/devices/:id/parameter-tree/search.",
+        "devices",
+        "设备",
+        "parameters",
+        "search"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.search.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.sync_status",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/sync-status",
+      "title": "设备 - 参数同步状态",
+      "summary": "设备 - 参数同步状态",
+      "description": "设备：查询同步任务当前状态 Handler: GetSyncStatus handles GET /api/v1/devices/:id/parameters/sync-status.",
+      "intents": [
+        "设备 - 参数同步状态",
+        "设备：查询同步任务当前状态 Handler: GetSyncStatus handles GET /api/v1/devices/:id/parameters/sync-status.",
+        "devices",
+        "设备",
+        "parameters",
+        "sync-status",
+        "sync status"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.sync_status.json"
+    },
+    {
+      "operationId": "get.devices.by_id.parameters.tree",
+      "method": "GET",
+      "path": "/api/v1/devices/:id/parameters/tree",
+      "title": "设备 - 参数树形结构",
+      "summary": "设备 - 参数树形结构",
+      "description": "设备：查询树形层级数据 Handler: GetParameterTree handles GET /api/v1/devices/:id/parameter-tree.\nReturns device parameters organized as a hierarchical tree structure.",
+      "intents": [
+        "设备 - 参数树形结构",
+        "设备：查询树形层级数据 Handler: GetParameterTree handles GET /api/v1/devices/:id/parameter-tree.\nReturns device parameters organized as a hierarchical tree structure.",
+        "devices",
+        "设备",
+        "parameters",
+        "tree"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.by_id.parameters.tree.json"
+    },
+    {
+      "operationId": "get.devices.enums",
+      "method": "GET",
+      "path": "/api/v1/devices/enums",
+      "title": "设备 - 枚举字典",
+      "summary": "设备 - 枚举字典",
+      "description": "设备：查询页面筛选和表单所需枚举 Handler: GetEnums handles GET /api/v1/devices/enums.",
+      "intents": [
+        "设备 - 枚举字典",
+        "设备：查询页面筛选和表单所需枚举 Handler: GetEnums handles GET /api/v1/devices/enums.",
+        "devices",
+        "设备",
+        "enums"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.enums.json"
+    },
+    {
+      "operationId": "get.devices.export",
+      "method": "GET",
+      "path": "/api/v1/devices/export",
+      "title": "设备 - 导出",
+      "summary": "设备 - 导出",
+      "description": "设备：按条件导出业务数据 Handler: ExportDevices handles GET /devices/export.",
+      "intents": [
+        "设备 - 导出",
+        "设备：按条件导出业务数据 Handler: ExportDevices handles GET /devices/export.",
+        "devices",
+        "设备",
+        "export"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.export.json"
+    },
+    {
+      "operationId": "get.devices.geo",
+      "method": "GET",
+      "path": "/api/v1/devices/geo",
+      "title": "设备 - 地理位置数据",
+      "summary": "设备 - 地理位置数据",
+      "description": "设备：查询地图展示所需地理数据 Handler: ListGeo handles GET /api/v1/devices/geo.\nReturns devices with geographic coordinates for map display.",
+      "intents": [
+        "设备 - 地理位置数据",
+        "设备：查询地图展示所需地理数据 Handler: ListGeo handles GET /api/v1/devices/geo.\nReturns devices with geographic coordinates for map display.",
+        "devices",
+        "设备",
+        "geo"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.geo.json"
+    },
+    {
+      "operationId": "get.devices.geo.stats",
+      "method": "GET",
+      "path": "/api/v1/devices/geo/stats",
+      "title": "设备 - 统计",
+      "summary": "设备 - 统计",
+      "description": "设备：查询统计汇总数据 Handler: GetGeoStats handles GET /api/v1/devices/geo/stats.\nReturns device statistics for map display.\n\n入参与 ListGeo 对齐：group_ids / status 两个筛选都受 stats 影响，避免顶部统计带与地图点位不一致。\ngroup_ids 包含 DefaultLevel2GroupID 时由 service 层 splitGeoGroupIDs 归一化为未分组分支。",
+      "intents": [
+        "设备 - 统计",
+        "设备：查询统计汇总数据 Handler: GetGeoStats handles GET /api/v1/devices/geo/stats.\nReturns device statistics for map display.\n\n入参与 ListGeo 对齐：group_ids / status 两个筛选都受 stats 影响，避免顶部统计带与地图点位不一致。\ngroup_ids 包含 DefaultLevel2GroupID 时由 service 层 splitGeoGroupIDs 归一化为未分组分支。",
+        "devices",
+        "设备",
+        "geo",
+        "stats"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.geo.stats.json"
+    },
+    {
+      "operationId": "get.devices.product_classes",
+      "method": "GET",
+      "path": "/api/v1/devices/product-classes",
+      "title": "设备 - productclasses",
+      "summary": "设备 - productclasses",
+      "description": "设备：处理productclasses相关数据 Handler: ListProductClasses handles GET /api/v1/devices/product-classes.",
+      "intents": [
+        "设备 - productclasses",
+        "设备：处理productclasses相关数据 Handler: ListProductClasses handles GET /api/v1/devices/product-classes.",
+        "devices",
+        "设备",
+        "product-classes",
+        "product classes"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.product_classes.json"
+    },
+    {
+      "operationId": "get.devices.recycle",
+      "method": "GET",
+      "path": "/api/v1/devices/recycle",
+      "title": "设备 - 列表",
+      "summary": "设备 - 列表",
+      "description": "设备：按筛选条件查询资源列表 Handler: ListRecycleBin handles GET /api/v1/devices/recycle.\nReturns a paginated list of soft-deleted devices.",
+      "intents": [
+        "设备 - 列表",
+        "设备：按筛选条件查询资源列表 Handler: ListRecycleBin handles GET /api/v1/devices/recycle.\nReturns a paginated list of soft-deleted devices.",
+        "devices",
+        "设备",
+        "recycle"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.recycle.json"
+    },
+    {
+      "operationId": "get.devices.search",
+      "method": "GET",
+      "path": "/api/v1/devices/search",
+      "title": "设备 - 搜索",
+      "summary": "设备 - 搜索",
+      "description": "设备：按关键字搜索业务数据 Handler: SearchDevices handles GET /api/v1/devices/search.\nSearches devices by keyword for map display.",
+      "intents": [
+        "设备 - 搜索",
+        "设备：按关键字搜索业务数据 Handler: SearchDevices handles GET /api/v1/devices/search.\nSearches devices by keyword for map display.",
+        "devices",
+        "设备",
+        "search"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.search.json"
+    },
+    {
+      "operationId": "get.devices.stats",
+      "method": "GET",
+      "path": "/api/v1/devices/stats",
+      "title": "Get device statistics",
+      "summary": "Get device statistics",
+      "description": "设备：查询统计汇总数据 Handler: GetStats handles GET /api/v1/devices/stats.",
+      "intents": [
+        "设备 - 统计",
+        "Get device statistics",
+        "设备：查询统计汇总数据 Handler: GetStats handles GET /api/v1/devices/stats.",
+        "devices",
+        "设备",
+        "stats"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.stats.json"
+    },
+    {
+      "operationId": "get.devices.tasks",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks",
+      "title": "设备 - 列表",
+      "summary": "设备 - 列表",
+      "description": "设备：按筛选条件查询资源列表 Handler: GetTaskHistory 获取任务历史\nGET /api/v1/devices/tasks?device_sn=xxx",
+      "intents": [
+        "设备 - 列表",
+        "设备：按筛选条件查询资源列表 Handler: GetTaskHistory 获取任务历史\nGET /api/v1/devices/tasks?device_sn=xxx",
+        "devices",
+        "设备",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.tasks.json"
+    },
+    {
+      "operationId": "get.devices.tasks.by_task_id",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks/:task_id",
+      "title": "设备 - 详情",
+      "summary": "设备 - 详情",
+      "description": "设备：查询指定资源的详细信息 Handler: GetTask 获取任务详情\nGET /api/v1/devices/tasks/:task_id",
+      "intents": [
+        "设备 - 详情",
+        "设备：查询指定资源的详细信息 Handler: GetTask 获取任务详情\nGET /api/v1/devices/tasks/:task_id",
+        "devices",
+        "设备",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.tasks.by_task_id.json"
+    },
+    {
+      "operationId": "get.devices.tasks.pending",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks/pending",
+      "title": "设备 - 列表",
+      "summary": "设备 - 列表",
+      "description": "设备：按筛选条件查询资源列表 Handler: GetPendingTasks 获取待处理任务列表\nGET /api/v1/devices/tasks/pending?device_sn=xxx",
+      "intents": [
+        "设备 - 列表",
+        "设备：按筛选条件查询资源列表 Handler: GetPendingTasks 获取待处理任务列表\nGET /api/v1/devices/tasks/pending?device_sn=xxx",
+        "devices",
+        "设备",
+        "tasks",
+        "pending"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.tasks.pending.json"
+    },
+    {
+      "operationId": "get.devices.tasks.stats",
+      "method": "GET",
+      "path": "/api/v1/devices/tasks/stats",
+      "title": "设备 - 统计",
+      "summary": "设备 - 统计",
+      "description": "设备：查询统计汇总数据 Handler: GetTaskStats 获取任务统计\nGET /api/v1/devices/tasks/stats?device_sn=xxx",
+      "intents": [
+        "设备 - 统计",
+        "设备：查询统计汇总数据 Handler: GetTaskStats 获取任务统计\nGET /api/v1/devices/tasks/stats?device_sn=xxx",
+        "devices",
+        "设备",
+        "tasks",
+        "stats"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.devices.tasks.stats.json"
+    },
+    {
+      "operationId": "patch.devices.recycle.restore",
+      "method": "PATCH",
+      "path": "/api/v1/devices/recycle/restore",
+      "title": "设备 - 回收站恢复",
+      "summary": "设备 - 回收站恢复",
+      "description": "设备：恢复备份、回收站记录或任务状态 Handler: RestoreDevices handles PATCH /api/v1/devices/recycle/restore.\nRestores soft-deleted devices.",
+      "intents": [
+        "设备 - 回收站恢复",
+        "设备：恢复备份、回收站记录或任务状态 Handler: RestoreDevices handles PATCH /api/v1/devices/recycle/restore.\nRestores soft-deleted devices.",
+        "devices",
+        "设备",
+        "recycle",
+        "restore"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.devices.recycle.restore.json"
+    },
+    {
+      "operationId": "post.devices",
+      "method": "POST",
+      "path": "/api/v1/devices",
+      "title": "Create a device",
+      "summary": "Create a device",
+      "description": "设备：创建新的资源记录 Handler: CreateDevice handles POST /api/v1/devices.",
+      "intents": [
+        "设备 - 创建",
+        "Create a device",
+        "设备：创建新的资源记录 Handler: CreateDevice handles POST /api/v1/devices.",
+        "devices",
+        "设备"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.json"
+    },
+    {
+      "operationId": "post.devices.batch_import",
+      "method": "POST",
+      "path": "/api/v1/devices/batch-import",
+      "title": "设备 - 批量导入",
+      "summary": "设备 - 批量导入",
+      "description": "设备：处理批量导入相关数据 Handler: BatchImportDevices handles POST /api/v1/devices/batch-import.\n\n接收一组结构化 device 数据，逐条调 service.CreateDevice 落库，跳过失败行继续；\n返回每行成败明细。前端 CSV 解析失败的行不会到这里——前端做基础校验，\n后端只在 DB 唯一性 / 模型校验 / license 等运行时层面给出回执。",
+      "intents": [
+        "设备 - 批量导入",
+        "设备：处理批量导入相关数据 Handler: BatchImportDevices handles POST /api/v1/devices/batch-import.\n\n接收一组结构化 device 数据，逐条调 service.CreateDevice 落库，跳过失败行继续；\n返回每行成败明细。前端 CSV 解析失败的行不会到这里——前端做基础校验，\n后端只在 DB 唯一性 / 模型校验 / license 等运行时层面给出回执。",
+        "devices",
+        "设备",
+        "batch-import",
+        "batch import"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.batch_import.json"
+    },
+    {
+      "operationId": "post.devices.batch_reboot",
+      "method": "POST",
+      "path": "/api/v1/devices/batch-reboot",
+      "title": "设备 - 批量重启",
+      "summary": "设备 - 批量重启",
+      "description": "批量下发设备重启操作 Handler: BatchRebootDevices handles POST /api/v1/devices/batch-reboot.\nAccepts a JSON body with a list of device IDs and queues a Reboot command for each.",
+      "intents": [
+        "设备 - 批量重启",
+        "批量下发设备重启操作 Handler: BatchRebootDevices handles POST /api/v1/devices/batch-reboot.\nAccepts a JSON body with a list of device IDs and queues a Reboot command for each.",
+        "devices",
+        "设备",
+        "batch-reboot",
+        "batch reboot"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.batch_reboot.json"
+    },
+    {
+      "operationId": "post.devices.by_id.config_file.sync",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/config-file/sync",
+      "title": "设备 - 同步",
+      "summary": "设备 - 同步",
+      "description": "设备：从运行态或外部系统同步最新数据 Handler: SyncConfigFile handles POST /api/v1/devices/:id/config-file/sync.",
+      "intents": [
+        "设备 - 同步",
+        "设备：从运行态或外部系统同步最新数据 Handler: SyncConfigFile handles POST /api/v1/devices/:id/config-file/sync.",
+        "devices",
+        "设备",
+        "config-file",
+        "sync",
+        "config file"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.config_file.sync.json"
+    },
+    {
+      "operationId": "post.devices.by_id.license_params.refresh",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/license-params/refresh",
+      "title": "设备 - 刷新令牌",
+      "summary": "设备 - 刷新令牌",
+      "description": "设备：刷新访问令牌并延长会话 Handler: RefreshLicenseParams — POST /api/v1/devices/:id/license-params/refresh\n\n触发异步 GPV 任务。立即返回（202 接受语义），不等 CPE 响应。\n30s 内重复触发会撞 Redis 锁，返 409 + 业务码。",
+      "intents": [
+        "设备 - 刷新令牌",
+        "设备：刷新访问令牌并延长会话 Handler: RefreshLicenseParams — POST /api/v1/devices/:id/license-params/refresh\n\n触发异步 GPV 任务。立即返回（202 接受语义），不等 CPE 响应。\n30s 内重复触发会撞 Redis 锁，返 409 + 业务码。",
+        "devices",
+        "设备",
+        "license-params",
+        "refresh",
+        "license params"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.license_params.refresh.json"
+    },
+    {
+      "operationId": "post.devices.by_id.objects.add",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/objects/add",
+      "title": "设备 - 多实例对象新增",
+      "summary": "设备 - 多实例对象新增",
+      "description": "设备：新增指定资源记录 Handler: AddObject handles POST /api/v1/devices/:id/objects/add.",
+      "intents": [
+        "设备 - 多实例对象新增",
+        "设备：新增指定资源记录 Handler: AddObject handles POST /api/v1/devices/:id/objects/add.",
+        "devices",
+        "设备",
+        "objects",
+        "add"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.objects.add.json"
+    },
+    {
+      "operationId": "post.devices.by_id.objects.delete",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/objects/delete",
+      "title": "设备 - 多实例对象删除",
+      "summary": "设备 - 多实例对象删除",
+      "description": "设备：删除指定资源记录 Handler: DeleteObject handles POST /api/v1/devices/:id/objects/delete.",
+      "intents": [
+        "设备 - 多实例对象删除",
+        "设备：删除指定资源记录 Handler: DeleteObject handles POST /api/v1/devices/:id/objects/delete.",
+        "devices",
+        "设备",
+        "objects",
+        "delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.objects.delete.json"
+    },
+    {
+      "operationId": "post.devices.by_id.parameters.discover",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/parameters/discover",
+      "title": "设备 - 参数探测",
+      "summary": "设备 - 参数探测",
+      "description": "探测设备或参数能力 Handler: TriggerDiscover handles POST /api/v1/devices/:id/parameters/discover.",
+      "intents": [
+        "设备 - 参数探测",
+        "探测设备或参数能力 Handler: TriggerDiscover handles POST /api/v1/devices/:id/parameters/discover.",
+        "devices",
+        "设备",
+        "parameters",
+        "discover"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.parameters.discover.json"
+    },
+    {
+      "operationId": "post.devices.by_id.reboot",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/reboot",
+      "title": "Reboot a device",
+      "summary": "Reboot a device",
+      "description": "下发设备重启操作 Handler: RebootDevice handles POST /api/v1/devices/:id/reboot.",
+      "intents": [
+        "设备 - 重启",
+        "Reboot a device",
+        "下发设备重启操作 Handler: RebootDevice handles POST /api/v1/devices/:id/reboot.",
+        "devices",
+        "设备",
+        "reboot"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.reboot.json"
+    },
+    {
+      "operationId": "post.devices.by_id.rename",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/rename",
+      "title": "设备 - POST",
+      "summary": "设备 - POST",
+      "description": "设备：执行 POST 请求对应的业务操作 Handler: RenameDevice handles POST /api/v1/devices/:id/rename.\n\n按 nameSyncMode 策略决定行为：\n  - auto_omc_to_lmt → 双写网管库 + SPV 下发到基站 + 清 pending\n  - prompt          → 双写网管库 + 置 pending（不下发）\n  - auto_lmt_to_omc → 403 拒绝（请在 LMT 侧改名）",
+      "intents": [
+        "设备 - POST",
+        "设备：执行 POST 请求对应的业务操作 Handler: RenameDevice handles POST /api/v1/devices/:id/rename.\n\n按 nameSyncMode 策略决定行为：\n  - auto_omc_to_lmt → 双写网管库 + SPV 下发到基站 + 清 pending\n  - prompt          → 双写网管库 + 置 pending（不下发）\n  - auto_lmt_to_omc → 403 拒绝（请在 LMT 侧改名）",
+        "devices",
+        "设备",
+        "rename"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.rename.json"
+    },
+    {
+      "operationId": "post.devices.by_id.resolve_name_sync",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/resolve-name-sync",
+      "title": "设备 - resolvename同步",
+      "summary": "设备 - resolvename同步",
+      "description": "设备：处理resolvename同步相关数据 Handler: ResolveNameSync Issue #758: 设备名称同步人工处理端点。\n\nPOST /api/v1/devices/:id/resolve-name-sync\nBody: {\"action\": \"use_lmt\" | \"use_omc\" | \"ignore\"}\n响应 200: {\"success\": true}\n响应 400: 无效参数\n响应 404: 设备不存在\n\n当设备名称同步配置为 prompt=true 时，LMT 名称与网管名称不一致会标记\nname_sync_pending=true（前端显示小红点）。用户通过此端点人工确认处理方式。",
+      "intents": [
+        "设备 - resolvename同步",
+        "设备：处理resolvename同步相关数据 Handler: ResolveNameSync Issue #758: 设备名称同步人工处理端点。\n\nPOST /api/v1/devices/:id/resolve-name-sync\nBody: {\"action\": \"use_lmt\" | \"use_omc\" | \"ignore\"}\n响应 200: {\"success\": true}\n响应 400: 无效参数\n响应 404: 设备不存在\n\n当设备名称同步配置为 prompt=true 时，LMT 名称与网管名称不一致会标记\nname_sync_pending=true（前端显示小红点）。用户通过此端点人工确认处理方式。",
+        "devices",
+        "设备",
+        "resolve-name-sync",
+        "resolve name sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.resolve_name_sync.json"
+    },
+    {
+      "operationId": "post.devices.by_id.sync_params",
+      "method": "POST",
+      "path": "/api/v1/devices/:id/sync-params",
+      "title": "设备 - 同步参数",
+      "summary": "设备 - 同步参数",
+      "description": "设备：处理同步参数相关数据 Handler: SyncDeviceParams T-0126: 手动触发设备参数 Path B 全量同步。\n\nPOST /api/v1/devices/:id/sync-params\nBody (可选)：{\"force\": true}（预留供未来节流绕过；当前 manual 端点天然不走 Redis 节流）\n响应 202：{\"status\": \"queued\", \"source_id\": \"manual:UUID\", \"device_id\": \"UUID\"}\n响应 404：device 不存在\n响应 503：Path B 不可用（设备 productClass 未路由 / MappingSet 缺失）\n\n替代旧 /param-sync 端点（Path A 已下线），完整接入触发链：\nreason=\"manual\" → 差异日志 (T-0127) + last_param_sync_at 回写 (T-0124) + Translator (T-0098)。",
+      "intents": [
+        "设备 - 同步参数",
+        "设备：处理同步参数相关数据 Handler: SyncDeviceParams T-0126: 手动触发设备参数 Path B 全量同步。\n\nPOST /api/v1/devices/:id/sync-params\nBody (可选)：{\"force\": true}（预留供未来节流绕过；当前 manual 端点天然不走 Redis 节流）\n响应 202：{\"status\": \"queued\", \"source_id\": \"manual:UUID\", \"device_id\": \"UUID\"}\n响应 404：device 不存在\n响应 503：Path B 不可用（设备 productClass 未路由 / MappingSet 缺失）\n\n替代旧 /param-sync 端点（Path A 已下线），完整接入触发链：\nreason=\"manual\" → 差异日志 (T-0127) + last_param_sync_at 回写 (T-0124) + Translator (T-0098)。",
+        "devices",
+        "设备",
+        "sync-params",
+        "sync params"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.by_id.sync_params.json"
+    },
+    {
+      "operationId": "post.devices.tasks",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks",
+      "title": "设备 - 创建",
+      "summary": "设备 - 创建",
+      "description": "设备：创建新的资源记录 Handler: CreateTask 创建任务\nPOST /api/v1/devices/tasks?device_sn=xxx",
+      "intents": [
+        "设备 - 创建",
+        "设备：创建新的资源记录 Handler: CreateTask 创建任务\nPOST /api/v1/devices/tasks?device_sn=xxx",
+        "devices",
+        "设备",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.tasks.json"
+    },
+    {
+      "operationId": "post.devices.tasks.batch",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/batch",
+      "title": "设备 - 批量",
+      "summary": "设备 - 批量",
+      "description": "设备：对多个对象执行批量操作 Handler: BatchCreateTasks 批量创建任务\nPOST /api/v1/devices/tasks/batch?device_sn=xxx",
+      "intents": [
+        "设备 - 批量",
+        "设备：对多个对象执行批量操作 Handler: BatchCreateTasks 批量创建任务\nPOST /api/v1/devices/tasks/batch?device_sn=xxx",
+        "devices",
+        "设备",
+        "tasks",
+        "batch"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.tasks.batch.json"
+    },
+    {
+      "operationId": "post.devices.tasks.by_task_id.retry",
+      "method": "POST",
+      "path": "/api/v1/devices/tasks/:task_id/retry",
+      "title": "设备 - 重试",
+      "summary": "设备 - 重试",
+      "description": "设备：重试失败任务或消息 Handler: RetryTask 重试任务\nPOST /api/v1/devices/tasks/:task_id/retry",
+      "intents": [
+        "设备 - 重试",
+        "设备：重试失败任务或消息 Handler: RetryTask 重试任务\nPOST /api/v1/devices/tasks/:task_id/retry",
+        "devices",
+        "设备",
+        "tasks",
+        "retry"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.devices.tasks.by_task_id.retry.json"
+    },
+    {
+      "operationId": "put.devices.by_id",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id",
+      "title": "Update a device",
+      "summary": "Update a device",
+      "description": "设备：更新指定资源的完整配置 Handler: UpdateDevice handles PUT /api/v1/devices/:id.",
+      "intents": [
+        "设备 - 更新",
+        "Update a device",
+        "设备：更新指定资源的完整配置 Handler: UpdateDevice handles PUT /api/v1/devices/:id.",
+        "devices",
+        "设备"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.json"
+    },
+    {
+      "operationId": "put.devices.by_id.activate",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/activate",
+      "title": "设备 - 激活",
+      "summary": "设备 - 激活",
+      "description": "设备：激活指定资源，使其进入可用状态 Handler: ActivateDevice handles PUT /api/v1/devices/:id/activate.",
+      "intents": [
+        "设备 - 激活",
+        "设备：激活指定资源，使其进入可用状态 Handler: ActivateDevice handles PUT /api/v1/devices/:id/activate.",
+        "devices",
+        "设备",
+        "activate"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.activate.json"
+    },
+    {
+      "operationId": "put.devices.by_id.deactivate",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/deactivate",
+      "title": "设备 - 停用",
+      "summary": "设备 - 停用",
+      "description": "设备：停用指定资源 Handler: DeactivateDevice handles PUT /api/v1/devices/:id/deactivate.",
+      "intents": [
+        "设备 - 停用",
+        "设备：停用指定资源 Handler: DeactivateDevice handles PUT /api/v1/devices/:id/deactivate.",
+        "devices",
+        "设备",
+        "deactivate"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.deactivate.json"
+    },
+    {
+      "operationId": "put.devices.by_id.info",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/info",
+      "title": "设备 - 信息",
+      "summary": "设备 - 信息",
+      "description": "设备：查询基础信息 Handler: UpdateDeviceInfo handles PUT /api/v1/devices/:id/info.",
+      "intents": [
+        "设备 - 信息",
+        "设备：查询基础信息 Handler: UpdateDeviceInfo handles PUT /api/v1/devices/:id/info.",
+        "devices",
+        "设备",
+        "info"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.info.json"
+    },
+    {
+      "operationId": "put.devices.by_id.parameters",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/parameters",
+      "title": "设备 - 参数",
+      "summary": "设备 - 参数",
+      "description": "查询或维护设备参数 Handler: SetParameterValues handles PUT /api/v1/devices/:id/parameter-tree.",
+      "intents": [
+        "设备 - 参数",
+        "查询或维护设备参数 Handler: SetParameterValues handles PUT /api/v1/devices/:id/parameter-tree.",
+        "devices",
+        "设备",
+        "parameters"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.parameters.json"
+    },
+    {
+      "operationId": "put.devices.by_id.rf_switch",
+      "method": "PUT",
+      "path": "/api/v1/devices/:id/rf-switch",
+      "title": "设备 - rfswitch",
+      "summary": "设备 - rfswitch",
+      "description": "设备：处理rfswitch相关数据 Handler: SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.",
+      "intents": [
+        "设备 - rfswitch",
+        "设备：处理rfswitch相关数据 Handler: SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.",
+        "devices",
+        "设备",
+        "rf-switch",
+        "rf switch"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.devices.by_id.rf_switch.json"
+    }
+  ]
+}

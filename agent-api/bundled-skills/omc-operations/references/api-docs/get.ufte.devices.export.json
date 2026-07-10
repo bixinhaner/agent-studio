@@ -1,0 +1,169 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.ufte.devices.export",
+  "method": "GET",
+  "path": "/api/v1/ufte/devices/export",
+  "handler": "github.com/omcgo/omcgo/internal/ufte.(*Handler).ExportDevices-fm",
+  "category": "ufte",
+  "title": "ufte - 导出",
+  "summary": "ufte - 导出",
+  "description": "ufte：按条件导出业务数据 Handler: ExportDevices 真流式导出设备子任务列表为 CSV。\n\n复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，\n每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，\n大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。\n\n为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存\n膨胀 ③ 客户端拼 CSV 字段含 , \" 换行 时转义易错。后端 csv.Writer 标准库自动转义。",
+  "intents": [
+    "ufte - 导出",
+    "ufte：按条件导出业务数据 Handler: ExportDevices 真流式导出设备子任务列表为 CSV。\n\n复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，\n每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，\n大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。\n\n为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存\n膨胀 ③ 客户端拼 CSV 字段含 , \" 换行 时转义易错。后端 csv.Writer 标准库自动转义。",
+    "ufte",
+    "devices",
+    "export"
+  ],
+  "tags": [
+    "ufte",
+    "devices",
+    "export"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "category",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "keyword",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "page",
+      "in": "query",
+      "required": false,
+      "type": "integer",
+      "schema": {
+        "goType": "int",
+        "type": "integer"
+      }
+    },
+    {
+      "name": "page_size",
+      "in": "query",
+      "required": false,
+      "type": "integer",
+      "schema": {
+        "goType": "int",
+        "type": "integer"
+      }
+    },
+    {
+      "name": "productName",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "ProductName #524：设备列表筛选改按产品名（DeviceItem.ProductName 由 mapDeviceItem\n经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)\n二选一，优先 ProductName。列表与 CSV 导出共用本过滤器，故两条路径同时生效。",
+      "schema": {
+        "description": "ProductName #524：设备列表筛选改按产品名（DeviceItem.ProductName 由 mapDeviceItem\n经 productNameLookup 回填）。前端「产品名称」下拉传此参数；与 ProductType(productClass)\n二选一，优先 ProductName。列表与 CSV 导出共用本过滤器，故两条路径同时生效。",
+        "type": "string"
+      }
+    },
+    {
+      "name": "productType",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "taskId",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "TaskID #615：按主任务 ID 精确收窄（任务详情抽屉「已选设备列表」用）。\n复用 /ufte/devices 端点 + matchesDeviceFilter，不新增路由；空值 ≡ 原有\"全量\"行为，\n完全向后兼容。底层来自 upgrade_sub_tasks.task_id（mapDeviceItem 已回填到 DeviceItem.TaskID）。",
+      "schema": {
+        "description": "TaskID #615：按主任务 ID 精确收窄（任务详情抽屉「已选设备列表」用）。\n复用 /ufte/devices 端点 + matchesDeviceFilter，不新增路由；空值 ≡ 原有\"全量\"行为，\n完全向后兼容。底层来自 upgrade_sub_tasks.task_id（mapDeviceItem 已回填到 DeviceItem.TaskID）。",
+        "type": "string"
+      }
+    },
+    {
+      "name": "typeCode",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "view",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

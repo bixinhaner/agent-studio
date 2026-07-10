@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0",
+  "category": "cell",
+  "title": "小区",
+  "operations": [
+    {
+      "operationId": "get.cell.perfmgmt.kpimanage.isIndicatorInTemplate",
+      "method": "GET",
+      "path": "/api/v1/cell/perfmgmt/kpimanage/isIndicatorInTemplate",
+      "title": "小区 - 列表",
+      "summary": "小区 - 列表",
+      "description": "小区：按筛选条件查询资源列表 Handler: IsIndicatorInTemplate handles GET /cell/perfmgmt/kpimanage/isIndicatorInTemplate.",
+      "intents": [
+        "小区 - 列表",
+        "小区：按筛选条件查询资源列表 Handler: IsIndicatorInTemplate handles GET /cell/perfmgmt/kpimanage/isIndicatorInTemplate.",
+        "cell",
+        "小区",
+        "perfmgmt",
+        "kpimanage",
+        "isIndicatorInTemplate"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.cell.perfmgmt.kpimanage.isIndicatorInTemplate.json"
+    },
+    {
+      "operationId": "post.cell.perfmgmt.kpimanage.disableIndicator",
+      "method": "POST",
+      "path": "/api/v1/cell/perfmgmt/kpimanage/disableIndicator",
+      "title": "小区 - KPI 管理禁用指标",
+      "summary": "小区 - KPI 管理禁用指标",
+      "description": "小区：处理禁用指标相关数据 Handler: DisableIndicator handles POST /cell/perfmgmt/kpimanage/disableIndicator.",
+      "intents": [
+        "小区 - KPI 管理禁用指标",
+        "小区：处理禁用指标相关数据 Handler: DisableIndicator handles POST /cell/perfmgmt/kpimanage/disableIndicator.",
+        "cell",
+        "小区",
+        "perfmgmt",
+        "kpimanage",
+        "disableIndicator"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.cell.perfmgmt.kpimanage.disableIndicator.json"
+    },
+    {
+      "operationId": "post.cell.perfmgmt.kpimanage.enableIndicator",
+      "method": "POST",
+      "path": "/api/v1/cell/perfmgmt/kpimanage/enableIndicator",
+      "title": "小区 - KPI 管理启用指标",
+      "summary": "小区 - KPI 管理启用指标",
+      "description": "小区：处理启用指标相关数据 Handler: EnableIndicator handles POST /cell/perfmgmt/kpimanage/enableIndicator.",
+      "intents": [
+        "小区 - KPI 管理启用指标",
+        "小区：处理启用指标相关数据 Handler: EnableIndicator handles POST /cell/perfmgmt/kpimanage/enableIndicator.",
+        "cell",
+        "小区",
+        "perfmgmt",
+        "kpimanage",
+        "enableIndicator"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.cell.perfmgmt.kpimanage.enableIndicator.json"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.config.sync.status.by_deviceId",
+  "method": "GET",
+  "path": "/api/v1/config/sync/status/:deviceId",
+  "handler": "github.com/omcgo/omcgo/internal/config.(*SyncHandler).GetSyncStatus-fm",
+  "category": "config",
+  "title": "Get configuration sync status for a device",
+  "summary": "Get configuration sync status for a device",
+  "description": "配置：查询指定资源的详细信息 Handler: GetSyncStatus returns the number of pending commands for a device.",
+  "intents": [
+    "配置 - 详情",
+    "Get configuration sync status for a device",
+    "配置：查询指定资源的详细信息 Handler: GetSyncStatus returns the number of pending commands for a device.",
+    "config",
+    "配置",
+    "sync",
+    "status"
+  ],
+  "tags": [
+    "config",
+    "配置",
+    "sync",
+    "status",
+    "ConfigSync"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [
+    {
+      "name": "deviceId",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :deviceId",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "device_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "error_message": {
+                "type": "string"
+              },
+              "last_sync_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "synced",
+                  "pending",
+                  "out_of_sync",
+                  "error"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "description": "Sync status"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

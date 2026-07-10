@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.notifications.read_all",
+  "method": "PUT",
+  "path": "/api/v1/notifications/read-all",
+  "handler": "github.com/omcgo/omcgo/internal/notification.(*Handler).MarkAllRead-fm",
+  "category": "notifications",
+  "title": "通知 - 标记已读全量",
+  "summary": "通知 - 标记已读全量",
+  "description": "通知：处理标记已读全量相关数据 Handler: MarkAllRead handles PUT /notifications/read-all.",
+  "intents": [
+    "通知 - 标记已读全量",
+    "通知：处理标记已读全量相关数据 Handler: MarkAllRead handles PUT /notifications/read-all.",
+    "notifications",
+    "通知",
+    "read-all",
+    "read all"
+  ],
+  "tags": [
+    "notifications",
+    "通知",
+    "read-all"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：通知 - 标记已读全量",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

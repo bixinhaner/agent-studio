@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.alarm_definitions.files.*loadedFrom",
+  "method": "DELETE",
+  "path": "/api/v1/alarm-definitions/files/*loadedFrom",
+  "handler": "github.com/omcgo/omcgo/internal/alarm/definition.(*FileHandler).DeleteFile-fm",
+  "category": "alarm-definitions",
+  "title": "alarm-definitions - 批量删除",
+  "summary": "alarm-definitions - 批量删除",
+  "description": "alarm-definitions：批量删除资源记录 Handler: DeleteFile DELETE /api/v1/alarm-definitions/files/{loadedFrom}\n\n单目录 + sidecar:仅 custom(有 sidecar)可删,builtin / unknown 一律 403。守门链:\n 1. 解码 + normalize loaded_from\n 2. validAlarmFilePath 二次防遍历(唯一合法前缀 alarm-definitions/)\n 3. IsDeletable 守门:builtin / unknown → 403 + ErrCodeAlarmBuiltinNotDeletable\n 4. CountByLoadedFrom=0 且 文件不存在 → 404\n 5. acquireFileLock 持锁\n 6. 物理 rename .deleted.\u003cts\u003e 备份;失败保守回滚返 500 + ErrCodeAlarmBackupFailed\n 7. DeleteByLoadedFrom;失败 rename 回滚\n 8. 移除 sidecar 标记 + RefreshCache + 审计日志 + 200",
+  "intents": [
+    "alarm-definitions - 批量删除",
+    "alarm-definitions：批量删除资源记录 Handler: DeleteFile DELETE /api/v1/alarm-definitions/files/{loadedFrom}\n\n单目录 + sidecar:仅 custom(有 sidecar)可删,builtin / unknown 一律 403。守门链:\n 1. 解码 + normalize loaded_from\n 2. validAlarmFilePath 二次防遍历(唯一合法前缀 alarm-definitions/)\n 3. IsDeletable 守门:builtin / unknown → 403 + ErrCodeAlarmBuiltinNotDeletable\n 4. CountByLoadedFrom=0 且 文件不存在 → 404\n 5. acquireFileLock 持锁\n 6. 物理 rename .deleted.\u003cts\u003e 备份;失败保守回滚返 500 + ErrCodeAlarmBackupFailed\n 7. DeleteByLoadedFrom;失败 rename 回滚\n 8. 移除 sidecar 标记 + RefreshCache + 审计日志 + 200",
+    "alarm-definitions",
+    "files",
+    "*loadedFrom",
+    "alarm definitions"
+  ],
+  "tags": [
+    "alarm-definitions",
+    "files",
+    "*loadedFrom"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：alarm-definitions - 批量删除",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

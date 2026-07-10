@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.groups.by_id",
+  "method": "PUT",
+  "path": "/api/v1/groups/:id",
+  "handler": "github.com/omcgo/omcgo/internal/topology.(*Handler).UpdateGroup-fm",
+  "category": "groups",
+  "title": "Update a group",
+  "summary": "Update a group",
+  "description": "用户组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+  "intents": [
+    "用户组 - 更新",
+    "Update a group",
+    "用户组：更新指定资源的完整配置 Handler: UpdateGroup handles PUT /device-groups/:id.",
+    "groups"
+  ],
+  "tags": [
+    "groups"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Update a group",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/UpdateGroupRequest"
+    }
+  },
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/DeviceGroup"
+          }
+        }
+      },
+      "description": "Group updated"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "referencedSchemas": {
+    "DeviceGroup": {
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/components/schemas/DeviceGroup"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "member_count": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "format": "uuid",
+          "nullable": true,
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "UpdateGroupRequest": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

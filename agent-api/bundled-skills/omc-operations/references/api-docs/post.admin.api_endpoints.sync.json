@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.admin.api_endpoints.sync",
+  "method": "POST",
+  "path": "/api/v1/admin/api-endpoints/sync",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*Handler).SyncApiEndpoints-fm",
+  "category": "api-endpoints",
+  "title": "API 端点 - 同步",
+  "summary": "API 端点 - 同步",
+  "description": "API 端点：从运行态或外部系统同步最新数据 Handler: SyncApiEndpoints triggers a sync of Gin routes into the database.",
+  "intents": [
+    "API 端点 - 同步",
+    "API 端点：从运行态或外部系统同步最新数据 Handler: SyncApiEndpoints triggers a sync of Gin routes into the database.",
+    "api-endpoints",
+    "API 端点",
+    "admin",
+    "sync",
+    "api endpoints"
+  ],
+  "tags": [
+    "api-endpoints",
+    "API 端点",
+    "admin",
+    "sync"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：API 端点 - 同步",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

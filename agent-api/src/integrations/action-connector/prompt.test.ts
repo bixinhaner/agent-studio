@@ -76,11 +76,13 @@ describe("buildActionConnectorRuntimePrompt", () => {
     expect(prompt).toContain("可用 CLI");
     expect(prompt).toContain("优先遵循已启用 Skill");
     expect(prompt).toContain("同一对话中已读取的 Skill 不要重复打开");
-    expect(prompt).toContain("仅当操作未知时才搜索 catalog");
-    expect(prompt).toContain("只有参数、路径变量、请求体或写入语义不明确时才 describe");
-    expect(prompt).toContain("先选分类，再用一到两个路径或资源词搜索");
-    expect(prompt).toContain("不要先做无分类的自然语言搜索");
+    expect(prompt).toContain("完整本地 API 手册");
+    expect(prompt).toContain("校验手册版本");
+    expect(prompt).toContain("读取一个分类索引和一个操作文档");
+    expect(prompt).toContain("版本匹配时不要调用 catalog 或 describe");
+    expect(prompt).toContain("只有未启用完整本地手册的 Connector 才使用 catalog/describe");
     expect(prompt).not.toContain("先用 catalog/describe");
+    expect(prompt).not.toContain("仅当操作未知时才搜索 catalog");
     expect(prompt).not.toContain("Use this legacy connector prompt.");
   });
 });

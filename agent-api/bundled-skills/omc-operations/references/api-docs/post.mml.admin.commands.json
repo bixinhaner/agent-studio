@@ -1,0 +1,157 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.mml.admin.commands",
+  "method": "POST",
+  "path": "/api/v1/mml/admin/commands",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*AdminHandler).CreateCommand-fm",
+  "category": "mml",
+  "title": "MML - 命令",
+  "summary": "MML - 命令",
+  "description": "MML：查询或执行命令定义 Handler: CreateCommand POST /api/v1/mml/admin/commands",
+  "intents": [
+    "MML - 命令",
+    "MML：查询或执行命令定义 Handler: CreateCommand POST /api/v1/mml/admin/commands",
+    "mml",
+    "admin",
+    "commands"
+  ],
+  "tags": [
+    "mml",
+    "admin",
+    "commands"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：MML - 命令",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateCommandReq",
+      "properties": {
+        "category": {
+          "maxLength": 10,
+          "type": "string"
+        },
+        "command_code": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "command_name": {
+          "maxLength": 500,
+          "type": "string"
+        },
+        "command_name_i18n": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "confirm_msg_i18n": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "group_id": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        },
+        "help_doc": {
+          "type": "string"
+        },
+        "logical_code": {
+          "maxLength": 100,
+          "type": "string"
+        },
+        "logical_name_i18n": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "operation_type": {
+          "enum": [
+            "LST",
+            "MOD",
+            "ADD",
+            "RMV"
+          ],
+          "type": "string"
+        },
+        "require_confirm": {
+          "type": "boolean"
+        },
+        "rpc_method": {
+          "maxLength": 50,
+          "type": "string"
+        },
+        "target_object": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_code",
+        "command_name",
+        "operation_type"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

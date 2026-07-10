@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.admin.users.import.template",
+  "method": "GET",
+  "path": "/api/v1/admin/users/import/template",
+  "handler": "github.com/omcgo/omcgo/internal/admin.(*Handler).DownloadImportTemplate-fm",
+  "category": "users",
+  "title": "用户 - 模板",
+  "summary": "用户 - 模板",
+  "description": "用户：查询或维护模板数据 Handler: DownloadImportTemplate 返回一份 .xlsx 模板供前端下载。\n模板包含表头 + 一行示例 + 字段说明 sheet。",
+  "intents": [
+    "用户 - 模板",
+    "用户：查询或维护模板数据 Handler: DownloadImportTemplate 返回一份 .xlsx 模板供前端下载。\n模板包含表头 + 一行示例 + 字段说明 sheet。",
+    "users",
+    "用户",
+    "admin",
+    "import",
+    "template"
+  ],
+  "tags": [
+    "users",
+    "用户",
+    "admin",
+    "import",
+    "template"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

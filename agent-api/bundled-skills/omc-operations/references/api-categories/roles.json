@@ -1,0 +1,263 @@
+{
+  "schemaVersion": "1.0",
+  "category": "roles",
+  "title": "roles",
+  "operations": [
+    {
+      "operationId": "delete.admin.roles.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/roles/:id",
+      "title": "Delete a role",
+      "summary": "Delete a role",
+      "description": "角色：删除指定资源记录",
+      "intents": [
+        "角色 - 删除",
+        "Delete a role",
+        "角色：删除指定资源记录",
+        "roles",
+        "角色",
+        "admin"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.roles.by_id.json"
+    },
+    {
+      "operationId": "get.admin.roles",
+      "method": "GET",
+      "path": "/api/v1/admin/roles",
+      "title": "List roles",
+      "summary": "List roles",
+      "description": "角色：按筛选条件查询资源列表",
+      "intents": [
+        "角色 - 列表",
+        "List roles",
+        "角色：按筛选条件查询资源列表",
+        "roles",
+        "角色",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.json"
+    },
+    {
+      "operationId": "get.admin.roles.all",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/all",
+      "title": "角色 - 全量",
+      "summary": "角色 - 全量",
+      "description": "角色：查询全量数据集合 Handler: ListAllRoles 返回所有角色（不分页，用于下拉框）",
+      "intents": [
+        "角色 - 全量",
+        "角色：查询全量数据集合 Handler: ListAllRoles 返回所有角色（不分页，用于下拉框）",
+        "roles",
+        "角色",
+        "admin",
+        "all"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.all.json"
+    },
+    {
+      "operationId": "get.admin.roles.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id",
+      "title": "Get role by ID",
+      "summary": "Get role by ID",
+      "description": "角色：查询指定资源的详细信息",
+      "intents": [
+        "角色 - 详情",
+        "Get role by ID",
+        "角色：查询指定资源的详细信息",
+        "roles",
+        "角色",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.by_id.json"
+    },
+    {
+      "operationId": "get.admin.roles.by_id.api_permissions",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id/api-permissions",
+      "title": "角色 - api权限",
+      "summary": "角色 - api权限",
+      "description": "角色：处理api权限相关数据 Handler: GetRoleApiPermissions returns API endpoint IDs granted to a role.",
+      "intents": [
+        "角色 - api权限",
+        "角色：处理api权限相关数据 Handler: GetRoleApiPermissions returns API endpoint IDs granted to a role.",
+        "roles",
+        "角色",
+        "admin",
+        "api-permissions",
+        "api permissions"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.by_id.api_permissions.json"
+    },
+    {
+      "operationId": "get.admin.roles.by_id.device_groups",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id/device-groups",
+      "title": "角色 - device分组",
+      "summary": "角色 - device分组",
+      "description": "角色：处理device分组相关数据 Handler: GetRoleDeviceGroups handles GET /roles/:id/device-groups.",
+      "intents": [
+        "角色 - device分组",
+        "角色：处理device分组相关数据 Handler: GetRoleDeviceGroups handles GET /roles/:id/device-groups.",
+        "roles",
+        "角色",
+        "admin",
+        "device-groups",
+        "device groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.by_id.device_groups.json"
+    },
+    {
+      "operationId": "get.admin.roles.by_id.menus",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id/menus",
+      "title": "角色 - GET",
+      "summary": "角色 - GET",
+      "description": "角色：执行 GET 请求对应的业务操作 Handler: GetRoleMenus handles GET /roles/:id/menus.\n\n返回角色当前绑定的菜单 ID 列表（仅 UUID 字符串，不返回完整 Menu 对象）。\n响应契约：{ menu_ids: [string, ...] } —— 与前端 fetchRoleMenuIds + RolePermission\n编辑页 setCheckedPermissionKeys 严格对齐。历史上曾返回 {data:[Menu, ...]} 与前端\n契约不符，导致角色编辑保存后重开菜单权限树全部空回显。",
+      "intents": [
+        "角色 - GET",
+        "角色：执行 GET 请求对应的业务操作 Handler: GetRoleMenus handles GET /roles/:id/menus.\n\n返回角色当前绑定的菜单 ID 列表（仅 UUID 字符串，不返回完整 Menu 对象）。\n响应契约：{ menu_ids: [string, ...] } —— 与前端 fetchRoleMenuIds + RolePermission\n编辑页 setCheckedPermissionKeys 严格对齐。历史上曾返回 {data:[Menu, ...]} 与前端\n契约不符，导致角色编辑保存后重开菜单权限树全部空回显。",
+        "roles",
+        "角色",
+        "admin",
+        "menus"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.by_id.menus.json"
+    },
+    {
+      "operationId": "get.admin.roles.by_id.users",
+      "method": "GET",
+      "path": "/api/v1/admin/roles/:id/users",
+      "title": "角色 - GET",
+      "summary": "角色 - GET",
+      "description": "角色：执行 GET 请求对应的业务操作 Handler: ListRoleUsers handles GET /roles/:id/users — returns paginated users in a role.",
+      "intents": [
+        "角色 - GET",
+        "角色：执行 GET 请求对应的业务操作 Handler: ListRoleUsers handles GET /roles/:id/users — returns paginated users in a role.",
+        "roles",
+        "角色",
+        "admin",
+        "users"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.roles.by_id.users.json"
+    },
+    {
+      "operationId": "post.admin.roles",
+      "method": "POST",
+      "path": "/api/v1/admin/roles",
+      "title": "Create a role",
+      "summary": "Create a role",
+      "description": "角色：创建新的资源记录",
+      "intents": [
+        "角色 - 创建",
+        "Create a role",
+        "角色：创建新的资源记录",
+        "roles",
+        "角色",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.roles.json"
+    },
+    {
+      "operationId": "post.admin.roles.by_id.copy",
+      "method": "POST",
+      "path": "/api/v1/admin/roles/:id/copy",
+      "title": "角色 - 复制",
+      "summary": "角色 - 复制",
+      "description": "角色：复制现有资源或配置 Handler: CopyRole handles POST /roles/:id/copy（roles.md §7 P2 #9）。\n一键复制角色：name 自动加 _copy / _copy_2... 后缀；permissions / role_menus /\nrole_device_groups / role_api_permissions 全部复制；is_system 强制为 false。",
+      "intents": [
+        "角色 - 复制",
+        "角色：复制现有资源或配置 Handler: CopyRole handles POST /roles/:id/copy（roles.md §7 P2 #9）。\n一键复制角色：name 自动加 _copy / _copy_2... 后缀；permissions / role_menus /\nrole_device_groups / role_api_permissions 全部复制；is_system 强制为 false。",
+        "roles",
+        "角色",
+        "admin",
+        "copy"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.roles.by_id.copy.json"
+    },
+    {
+      "operationId": "put.admin.roles.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id",
+      "title": "Update a role",
+      "summary": "Update a role",
+      "description": "角色：更新指定资源的完整配置",
+      "intents": [
+        "角色 - 更新",
+        "Update a role",
+        "角色：更新指定资源的完整配置",
+        "roles",
+        "角色",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.roles.by_id.json"
+    },
+    {
+      "operationId": "put.admin.roles.by_id.api_permissions",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id/api-permissions",
+      "title": "角色 - api权限",
+      "summary": "角色 - api权限",
+      "description": "角色：处理api权限相关数据 Handler: SetRoleApiPermissions sets API endpoint permissions for a role.",
+      "intents": [
+        "角色 - api权限",
+        "角色：处理api权限相关数据 Handler: SetRoleApiPermissions sets API endpoint permissions for a role.",
+        "roles",
+        "角色",
+        "admin",
+        "api-permissions",
+        "api permissions"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.roles.by_id.api_permissions.json"
+    },
+    {
+      "operationId": "put.admin.roles.by_id.device_groups",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id/device-groups",
+      "title": "角色 - device分组",
+      "summary": "角色 - device分组",
+      "description": "角色：处理device分组相关数据 Handler: SetRoleDeviceGroups handles PUT /roles/:id/device-groups.",
+      "intents": [
+        "角色 - device分组",
+        "角色：处理device分组相关数据 Handler: SetRoleDeviceGroups handles PUT /roles/:id/device-groups.",
+        "roles",
+        "角色",
+        "admin",
+        "device-groups",
+        "device groups"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.roles.by_id.device_groups.json"
+    },
+    {
+      "operationId": "put.admin.roles.by_id.menus",
+      "method": "PUT",
+      "path": "/api/v1/admin/roles/:id/menus",
+      "title": "角色 - PUT",
+      "summary": "角色 - PUT",
+      "description": "角色：执行 PUT 请求对应的业务操作 Handler: SetRoleMenus handles PUT /roles/:id/menus.",
+      "intents": [
+        "角色 - PUT",
+        "角色：执行 PUT 请求对应的业务操作 Handler: SetRoleMenus handles PUT /roles/:id/menus.",
+        "roles",
+        "角色",
+        "admin",
+        "menus"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.roles.by_id.menus.json"
+    }
+  ]
+}

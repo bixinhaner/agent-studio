@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.northbound.sync.full",
+  "method": "GET",
+  "path": "/api/v1/northbound/sync/full",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*Router).fullSync-fm",
+  "category": "northbound",
+  "title": "Get full northbound sync data",
+  "summary": "Get full northbound sync data",
+  "description": "北向接口：触发全量数据同步",
+  "intents": [
+    "北向接口 - 全量同步",
+    "Get full northbound sync data",
+    "北向接口：触发全量数据同步",
+    "northbound",
+    "北向接口",
+    "sync",
+    "full"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "sync",
+    "full"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "data_type",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "default": "device"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        }
+      },
+      "description": "Full sync data"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "openapi"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

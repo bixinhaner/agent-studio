@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.ops.command_records",
+  "method": "POST",
+  "path": "/api/v1/ops/command-records",
+  "handler": "github.com/omcgo/omcgo/internal/ops.(*Handler).CreateCommandRecord-fm",
+  "category": "ops",
+  "title": "运维任务 - command记录",
+  "summary": "运维任务 - command记录",
+  "description": "运维任务：处理command记录相关数据 Handler: CreateCommandRecord handles POST /api/v1/ops/command-records.",
+  "intents": [
+    "运维任务 - command记录",
+    "运维任务：处理command记录相关数据 Handler: CreateCommandRecord handles POST /api/v1/ops/command-records.",
+    "ops",
+    "运维任务",
+    "command-records",
+    "command records"
+  ],
+  "tags": [
+    "ops",
+    "运维任务",
+    "command-records"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：运维任务 - command记录",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateCommandRecordRequest",
+      "properties": {
+        "command_text": {
+          "type": "string"
+        },
+        "device_name": {
+          "type": "string"
+        },
+        "device_sn": {
+          "type": "string"
+        },
+        "duration": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "error_message": {
+          "nullable": true,
+          "type": "string"
+        },
+        "execute_time": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command_text",
+        "device_sn"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

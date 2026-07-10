@@ -1,6 +1,6 @@
 # Common OMC Operations
 
-These are stable, high-frequency fast paths. Call them directly when they match the user intent. Use the live catalog for every other operation.
+These are stable, high-frequency fast paths. Call them directly when they match the user intent. Use the local handbook index and selected operation document for every other operation.
 
 ## Device status totals
 
@@ -64,7 +64,7 @@ Use for actual site records. Do not substitute the device list when the user exp
 node "$CLI" request GET /api/v1/ops/tasks '{"operationId":"get.ops.tasks","query":{"page":1,"page_size":20},"reason":"List current operations tasks"}'
 ```
 
-Optional filters include `status`, `keyword`, `creator`, and `templateId`. Describe the operation before creating or changing a task.
+Optional filters include `status`, `keyword`, `creator`, and `templateId`. Read the corresponding operation document before creating or changing a task.
 
 ## System runtime information
 

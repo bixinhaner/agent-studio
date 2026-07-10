@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.mml.tasks.by_id.devices.by_sn.export",
+  "method": "POST",
+  "path": "/api/v1/mml/tasks/:id/devices/:sn/export",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*Handler).ExportTaskDeviceResults-fm",
+  "category": "mml",
+  "title": "MML - 导出",
+  "summary": "MML - 导出",
+  "description": "MML：按条件导出业务数据 Handler: ExportTaskDeviceResults handles POST /api/v1/mml/tasks/:id/devices/:sn/export ——\n生成单设备 CSV 落 MinIO、地址记入 mml_tasks.device_export_objects[sn]，返回下载 URL。",
+  "intents": [
+    "MML - 导出",
+    "MML：按条件导出业务数据 Handler: ExportTaskDeviceResults handles POST /api/v1/mml/tasks/:id/devices/:sn/export ——\n生成单设备 CSV 落 MinIO、地址记入 mml_tasks.device_export_objects[sn]，返回下载 URL。",
+    "mml",
+    "tasks",
+    "devices",
+    "export"
+  ],
+  "tags": [
+    "mml",
+    "tasks",
+    "devices",
+    "export"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：MML - 导出",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    },
+    {
+      "name": "sn",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :sn"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

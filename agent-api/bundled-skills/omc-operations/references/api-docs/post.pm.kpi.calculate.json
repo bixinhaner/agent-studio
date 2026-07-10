@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.pm.kpi.calculate",
+  "method": "POST",
+  "path": "/api/v1/pm/kpi/calculate",
+  "handler": "github.com/omcgo/omcgo/internal/pm.(*Handler).CalculateKPI-fm",
+  "category": "pm",
+  "title": "Trigger KPI calculation",
+  "summary": "Trigger KPI calculation",
+  "description": "性能 PM：触发计算并返回计算结果",
+  "intents": [
+    "性能 PM - 计算",
+    "Trigger KPI calculation",
+    "性能 PM：触发计算并返回计算结果",
+    "pm",
+    "性能",
+    "kpi",
+    "calculate"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "kpi",
+    "calculate"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Trigger KPI calculation",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "properties": {
+        "device_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "end_time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "kpi_names": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "start_time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "200": {
+      "description": "KPI calculation triggered"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

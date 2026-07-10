@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "1.0",
+  "category": "api-endpoints",
+  "title": "API 端点",
+  "operations": [
+    {
+      "operationId": "delete.admin.api_endpoints.batch",
+      "method": "DELETE",
+      "path": "/api/v1/admin/api-endpoints/batch",
+      "title": "API 端点 - 批量",
+      "summary": "API 端点 - 批量",
+      "description": "API 端点：对多个对象执行批量操作 Handler: BatchDeleteApiEndpoints removes multiple API endpoints by IDs.",
+      "intents": [
+        "API 端点 - 批量",
+        "API 端点：对多个对象执行批量操作 Handler: BatchDeleteApiEndpoints removes multiple API endpoints by IDs.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "batch",
+        "api endpoints"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.api_endpoints.batch.json"
+    },
+    {
+      "operationId": "delete.admin.api_endpoints.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/api-endpoints/:id",
+      "title": "API 端点 - 删除",
+      "summary": "API 端点 - 删除",
+      "description": "API 端点：删除指定资源记录 Handler: DeleteApiEndpoint removes a single API endpoint by ID.",
+      "intents": [
+        "API 端点 - 删除",
+        "API 端点：删除指定资源记录 Handler: DeleteApiEndpoint removes a single API endpoint by ID.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "api endpoints"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.api_endpoints.by_id.json"
+    },
+    {
+      "operationId": "get.admin.api_endpoints",
+      "method": "GET",
+      "path": "/api/v1/admin/api-endpoints",
+      "title": "API 端点 - 列表",
+      "summary": "API 端点 - 列表",
+      "description": "API 端点：按筛选条件查询资源列表 Handler: ListApiEndpoints returns API endpoints from the database with pagination and filtering.",
+      "intents": [
+        "API 端点 - 列表",
+        "API 端点：按筛选条件查询资源列表 Handler: ListApiEndpoints returns API endpoints from the database with pagination and filtering.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "api endpoints"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.api_endpoints.json"
+    },
+    {
+      "operationId": "get.admin.api_endpoints.groups",
+      "method": "GET",
+      "path": "/api/v1/admin/api-endpoints/groups",
+      "title": "API 端点 - 分组",
+      "summary": "API 端点 - 分组",
+      "description": "API 端点：查询或维护分组数据 Handler: GetApiGroups returns the list of distinct api_group values.",
+      "intents": [
+        "API 端点 - 分组",
+        "API 端点：查询或维护分组数据 Handler: GetApiGroups returns the list of distinct api_group values.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "groups",
+        "api endpoints"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.api_endpoints.groups.json"
+    },
+    {
+      "operationId": "post.admin.api_endpoints",
+      "method": "POST",
+      "path": "/api/v1/admin/api-endpoints",
+      "title": "API 端点 - 创建",
+      "summary": "API 端点 - 创建",
+      "description": "API 端点：创建新的资源记录 Handler: CreateApiEndpoint creates a new API endpoint.",
+      "intents": [
+        "API 端点 - 创建",
+        "API 端点：创建新的资源记录 Handler: CreateApiEndpoint creates a new API endpoint.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "api endpoints"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.api_endpoints.json"
+    },
+    {
+      "operationId": "post.admin.api_endpoints.sync",
+      "method": "POST",
+      "path": "/api/v1/admin/api-endpoints/sync",
+      "title": "API 端点 - 同步",
+      "summary": "API 端点 - 同步",
+      "description": "API 端点：从运行态或外部系统同步最新数据 Handler: SyncApiEndpoints triggers a sync of Gin routes into the database.",
+      "intents": [
+        "API 端点 - 同步",
+        "API 端点：从运行态或外部系统同步最新数据 Handler: SyncApiEndpoints triggers a sync of Gin routes into the database.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "sync",
+        "api endpoints"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.api_endpoints.sync.json"
+    },
+    {
+      "operationId": "put.admin.api_endpoints.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/api-endpoints/:id",
+      "title": "API 端点 - 更新",
+      "summary": "API 端点 - 更新",
+      "description": "API 端点：更新指定资源的完整配置 Handler: UpdateApiEndpoint modifies an existing API endpoint.",
+      "intents": [
+        "API 端点 - 更新",
+        "API 端点：更新指定资源的完整配置 Handler: UpdateApiEndpoint modifies an existing API endpoint.",
+        "api-endpoints",
+        "API 端点",
+        "admin",
+        "api endpoints"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.api_endpoints.by_id.json"
+    }
+  ]
+}

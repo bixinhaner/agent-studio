@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1.0",
+  "category": "sysConfig",
+  "title": "系统配置",
+  "operations": [
+    {
+      "operationId": "delete.admin.sysConfig.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/sysConfig/:id",
+      "title": "系统配置 - 删除",
+      "summary": "系统配置 - 删除",
+      "description": "系统配置：删除指定资源记录",
+      "intents": [
+        "系统配置 - 删除",
+        "系统配置：删除指定资源记录",
+        "sysConfig",
+        "系统配置",
+        "admin"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.sysConfig.by_id.json"
+    },
+    {
+      "operationId": "get.admin.sysConfig",
+      "method": "GET",
+      "path": "/api/v1/admin/sysConfig",
+      "title": "系统配置 - 列表",
+      "summary": "系统配置 - 列表",
+      "description": "系统配置：按筛选条件查询资源列表",
+      "intents": [
+        "系统配置 - 列表",
+        "系统配置：按筛选条件查询资源列表",
+        "sysConfig",
+        "系统配置",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.sysConfig.json"
+    },
+    {
+      "operationId": "get.admin.sysConfig.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/sysConfig/:id",
+      "title": "系统配置 - 详情",
+      "summary": "系统配置 - 详情",
+      "description": "系统配置：查询指定资源的详细信息",
+      "intents": [
+        "系统配置 - 详情",
+        "系统配置：查询指定资源的详细信息",
+        "sysConfig",
+        "系统配置",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.sysConfig.by_id.json"
+    },
+    {
+      "operationId": "post.admin.sysConfig",
+      "method": "POST",
+      "path": "/api/v1/admin/sysConfig",
+      "title": "系统配置 - 创建",
+      "summary": "系统配置 - 创建",
+      "description": "系统配置：创建新的资源记录",
+      "intents": [
+        "系统配置 - 创建",
+        "系统配置：创建新的资源记录",
+        "sysConfig",
+        "系统配置",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.sysConfig.json"
+    },
+    {
+      "operationId": "post.admin.sysConfig.batch",
+      "method": "POST",
+      "path": "/api/v1/admin/sysConfig/batch",
+      "title": "系统配置 - 批量",
+      "summary": "系统配置 - 批量",
+      "description": "系统配置：对多个对象执行批量操作 Handler: BatchUpdate 按 category 批量 upsert 一组 (key,value) 配置项 — system/config 页面\"保存\"用。\n参 docs/prd/system/config.md §5.2。\n\nvalidator 校验失败的错误已被 SysConfigService.BatchUpsert 包 ErrInvalidInput，\n走 HTTPStatusFromError 自动映射成 HTTP 400（issue #548 切片 2）。",
+      "intents": [
+        "系统配置 - 批量",
+        "系统配置：对多个对象执行批量操作 Handler: BatchUpdate 按 category 批量 upsert 一组 (key,value) 配置项 — system/config 页面\"保存\"用。\n参 docs/prd/system/config.md §5.2。\n\nvalidator 校验失败的错误已被 SysConfigService.BatchUpsert 包 ErrInvalidInput，\n走 HTTPStatusFromError 自动映射成 HTTP 400（issue #548 切片 2）。",
+        "sysConfig",
+        "系统配置",
+        "admin",
+        "batch"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.sysConfig.batch.json"
+    },
+    {
+      "operationId": "put.admin.sysConfig.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/sysConfig/:id",
+      "title": "系统配置 - 更新",
+      "summary": "系统配置 - 更新",
+      "description": "系统配置：更新指定资源的完整配置",
+      "intents": [
+        "系统配置 - 更新",
+        "系统配置：更新指定资源的完整配置",
+        "sysConfig",
+        "系统配置",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.sysConfig.by_id.json"
+    }
+  ]
+}

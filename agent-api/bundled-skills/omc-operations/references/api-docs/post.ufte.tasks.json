@@ -1,0 +1,134 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.ufte.tasks",
+  "method": "POST",
+  "path": "/api/v1/ufte/tasks",
+  "handler": "github.com/omcgo/omcgo/internal/ufte.(*Handler).CreateTask-fm",
+  "category": "ufte",
+  "title": "ufte - 创建",
+  "summary": "ufte - 创建",
+  "description": "ufte：创建新的资源记录",
+  "intents": [
+    "ufte - 创建",
+    "ufte：创建新的资源记录",
+    "ufte",
+    "tasks"
+  ],
+  "tags": [
+    "ufte",
+    "tasks"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：ufte - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateTaskRequest",
+      "properties": {
+        "concurrency": {
+          "description": "Concurrency 任务内设备并发执行数，仅固件下载类（升级/PATCH/FPGA）生效，\n透传 software.BatchUpgradeRequest.Concurrency；≤0 由 software 层兜底默认值。",
+          "goType": "int",
+          "type": "integer"
+        },
+        "deviceCount": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "deviceIds": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "executionMode": {
+          "type": "string"
+        },
+        "firmwareId": {
+          "format": "uuid",
+          "goType": "uuid.UUID",
+          "nullable": true,
+          "type": "string"
+        },
+        "isKeepConfig": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        },
+        "productType": {
+          "type": "string"
+        },
+        "scheduledAt": {
+          "description": "ScheduledAt 仅在 ExecutionMode=\"scheduled\" 时使用，ISO 8601 字符串（前端 dayjs.toISOString()）。\n解析失败 / 时间已过 → 退化为 immediate（不阻断主流程，由 service 层兜底）。",
+          "type": "string"
+        },
+        "taskName": {
+          "type": "string"
+        },
+        "typeCode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceIds",
+        "executionMode",
+        "taskName",
+        "typeCode"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -1,0 +1,156 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.pm.thresholds.by_id",
+  "method": "PUT",
+  "path": "/api/v1/pm/thresholds/:id",
+  "handler": "github.com/omcgo/omcgo/internal/pm.(*ThresholdHandler).UpdateThreshold-fm",
+  "category": "pm",
+  "title": "Update a KPI threshold",
+  "summary": "Update a KPI threshold",
+  "description": "性能 PM：查询或维护指定对象的阈值更新数据 Handler: UpdateThreshold handles PUT /thresholds/:id.",
+  "intents": [
+    "性能 PM - 阈值更新",
+    "Update a KPI threshold",
+    "性能 PM：查询或维护指定对象的阈值更新数据 Handler: UpdateThreshold handles PUT /thresholds/:id.",
+    "pm",
+    "性能",
+    "thresholds"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "thresholds",
+    "KPIThresholds"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Update a KPI threshold",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Resource UUID",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/UpdateKPIThresholdRequest"
+    }
+  },
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/KPIThreshold"
+          }
+        }
+      },
+      "description": "KPI threshold updated"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "referencedSchemas": {
+    "KPIThreshold": {
+      "properties": {
+        "carrier": {
+          "type": "string"
+        },
+        "comparison": {
+          "enum": [
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq"
+          ],
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "critical_threshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "kpi_name": {
+          "type": "string"
+        },
+        "technology": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "warning_threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "UpdateKPIThresholdRequest": {
+      "properties": {
+        "comparison": {
+          "enum": [
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq"
+          ],
+          "type": "string"
+        },
+        "critical_threshold": {
+          "format": "double",
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "warning_threshold": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

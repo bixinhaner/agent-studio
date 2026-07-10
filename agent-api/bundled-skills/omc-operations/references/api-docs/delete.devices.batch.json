@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "delete.devices.batch",
+  "method": "DELETE",
+  "path": "/api/v1/devices/batch",
+  "handler": "github.com/omcgo/omcgo/internal/device.(*Handler).BatchDeleteDevices-fm",
+  "category": "devices",
+  "title": "设备 - 批量",
+  "summary": "设备 - 批量",
+  "description": "设备：对多个对象执行批量操作 Handler: BatchDeleteDevices handles DELETE /api/v1/devices/batch.\nAccepts a JSON body with a list of device IDs and soft-deletes all of them.",
+  "intents": [
+    "设备 - 批量",
+    "设备：对多个对象执行批量操作 Handler: BatchDeleteDevices handles DELETE /api/v1/devices/batch.\nAccepts a JSON body with a list of device IDs and soft-deletes all of them.",
+    "devices",
+    "设备",
+    "batch"
+  ],
+  "tags": [
+    "devices",
+    "设备",
+    "batch"
+  ],
+  "risk": "high",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：设备 - 批量",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "BatchIDsRequest",
+      "properties": {
+        "ids": {
+          "items": {
+            "format": "uuid",
+            "goType": "uuid.UUID",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

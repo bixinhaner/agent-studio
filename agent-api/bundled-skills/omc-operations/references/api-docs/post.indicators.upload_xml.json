@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.indicators.upload_xml",
+  "method": "POST",
+  "path": "/api/v1/indicators/upload-xml",
+  "handler": "github.com/omcgo/omcgo/internal/pm/indicator.(*FileHandler).UploadXML-fm",
+  "category": "indicators",
+  "title": "indicators - 上传xml",
+  "summary": "indicators - 上传xml",
+  "description": "indicators：处理上传xml相关数据 Handler: UploadXML POST /api/v1/indicators/upload-xml?tech=enb|gsm|gnb[\u0026force=true]\n\nmultipart/form-data;字段 file = XML 字节流。\n\n名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML\n\u003cindicatorModel platform=\"...\"\u003e 属性,文件名 = \u003cplatform\u003e.xml;落地目录仅 ENB\n分子目录(enb/),GSM/GNB 直接落 indicator-library/ 根级。上传文件自身的 filename 被忽略。\n\n重复允许覆盖(2026-06-05 调整,需前端二次确认):\n  - 重复判定:platform 已在该 tech 的 formula 表(LoadedFromsByPlatform 定位归属文件,\n    如 GSM 出厂 platform=BSC 归属 GSM.xml)或目标路径已在盘上\n  - 无 \u0026force=true → 409,响应 data.overwritable=true,前端弹确认框\n  - \u0026force=true → 覆盖归属文件(原文件先备份 .bak.\u003cts\u003e);覆盖内置保持 builtin 身份\n    (不写 sidecar,仍不可删),覆盖自定义保持 custom\n\n守门链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):\n 1. ?tech= 校验在 enb/gsm/gnb\n 2. file part 必填 + file.Size \u003c= MaxUploadXMLSize\n 3. XML 内容 validateUploadXML(body, tech):根 = \u003cindicatorModel\u003e +\n    platform 必填 + deviceType 与 tech 一致(GSM/GNB 必填,ENB 缺省容忍)\n 4. 名称:validateUploadFilename(\u003cplatform\u003e+\".xml\") 白名单正则\n 5. 目标路径经 pathContainedIn 二次校验不逃逸目标目录\n 6/7. 重复 + force 判定(见上)\n\n写入流程(全程 per-filename 锁):\n 1. MkdirAll targetDir(首次上传场景)\n 2. [覆盖时先备份旧文件 .bak.\u003cts\u003e →] 写 tmp → 原子 rename 上线(失败回滚备份)\n 3. sidecar(\u003cplatform\u003e.xml.custom 空标记)仅新建写入;失败回滚 XML → 500\n 4. destructive 重载(PerformReloadWithOrphans:全量 UPSERT + 删孤儿)+ BumpCacheVersion\n    重载/缓存失败仅 Warn,Upload 不回滚(用户可重试),响应体反映 reloaded 状态\n 5. audit log + 201 响应 + filename / loaded_from / platform / overwritten / reloaded / orphans",
+  "intents": [
+    "indicators - 上传xml",
+    "indicators：处理上传xml相关数据 Handler: UploadXML POST /api/v1/indicators/upload-xml?tech=enb|gsm|gnb[\u0026force=true]\n\nmultipart/form-data;字段 file = XML 字节流。\n\n名称取消手填(2026-06-05 导入 XML 调整):唯一名称取自 XML\n\u003cindicatorModel platform=\"...\"\u003e 属性,文件名 = \u003cplatform\u003e.xml;落地目录仅 ENB\n分子目录(enb/),GSM/GNB 直接落 indicator-library/ 根级。上传文件自身的 filename 被忽略。\n\n重复允许覆盖(2026-06-05 调整,需前端二次确认):\n  - 重复判定:platform 已在该 tech 的 formula 表(LoadedFromsByPlatform 定位归属文件,\n    如 GSM 出厂 platform=BSC 归属 GSM.xml)或目标路径已在盘上\n  - 无 \u0026force=true → 409,响应 data.overwritable=true,前端弹确认框\n  - \u0026force=true → 覆盖归属文件(原文件先备份 .bak.\u003cts\u003e);覆盖内置保持 builtin 身份\n    (不写 sidecar,仍不可删),覆盖自定义保持 custom\n\n守门链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):\n 1. ?tech= 校验在 enb/gsm/gnb\n 2. file part 必填 + file.Size \u003c= MaxUploadXMLSize\n 3. XML 内容 validateUploadXML(body, tech):根 = \u003cindicatorModel\u003e +\n    platform 必填 + deviceType 与 tech 一致(GSM/GNB 必填,ENB 缺省容忍)\n 4. 名称:validateUploadFilename(\u003cplatform\u003e+\".xml\") 白名单正则\n 5. 目标路径经 pathContainedIn 二次校验不逃逸目标目录\n 6/7. 重复 + force 判定(见上)\n\n写入流程(全程 per-filename 锁):\n 1. MkdirAll targetDir(首次上传场景)\n 2. [覆盖时先备份旧文件 .bak.\u003cts\u003e →] 写 tmp → 原子 rename 上线(失败回滚备份)\n 3. sidecar(\u003cplatform\u003e.xml.custom 空标记)仅新建写入;失败回滚 XML → 500\n 4. destructive 重载(PerformReloadWithOrphans:全量 UPSERT + 删孤儿)+ BumpCacheVersion\n    重载/缓存失败仅 Warn,Upload 不回滚(用户可重试),响应体反映 reloaded 状态\n 5. audit log + 201 响应 + filename / loaded_from / platform / overwritten / reloaded / orphans",
+    "indicators",
+    "upload-xml",
+    "upload xml"
+  ],
+  "tags": [
+    "indicators",
+    "upload-xml"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：indicators - 上传xml",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "force",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "tech",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [
+    {
+      "name": "file",
+      "in": "form",
+      "required": false,
+      "type": "file"
+    }
+  ],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

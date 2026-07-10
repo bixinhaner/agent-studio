@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "category": "quicksettings",
+  "title": "quicksettings",
+  "operations": [
+    {
+      "operationId": "get.quicksettings.groups",
+      "method": "GET",
+      "path": "/api/v1/quicksettings/groups",
+      "title": "quicksettings - 分组",
+      "summary": "quicksettings - 分组",
+      "description": "quicksettings：查询或维护分组数据 Handler: GetGroups handles GET /api/v1/quicksettings/groups?device_id={uuid}.\n\n响应:{\"param_model\": \"\u003cname\u003e\", \"groups\": [Group, ...]}\n错误状态:\n\n\t400 — 缺/非法 device_id\n\t404 — 设备不存在 / productClass 未匹配任何 product\n\t422 — 设备 product 未配置 paramModel\n\t500 — 内部反查失败",
+      "intents": [
+        "quicksettings - 分组",
+        "quicksettings：查询或维护分组数据 Handler: GetGroups handles GET /api/v1/quicksettings/groups?device_id={uuid}.\n\n响应:{\"param_model\": \"\u003cname\u003e\", \"groups\": [Group, ...]}\n错误状态:\n\n\t400 — 缺/非法 device_id\n\t404 — 设备不存在 / productClass 未匹配任何 product\n\t422 — 设备 product 未配置 paramModel\n\t500 — 内部反查失败",
+        "quicksettings",
+        "groups"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.quicksettings.groups.json"
+    }
+  ]
+}

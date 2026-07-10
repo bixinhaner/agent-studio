@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.pm.metrics.aggregated",
+  "method": "GET",
+  "path": "/api/v1/pm/metrics/aggregated",
+  "handler": "github.com/omcgo/omcgo/internal/pm.(*Handler).ListAggregatedMetrics-fm",
+  "category": "pm",
+  "title": "性能 PM - 聚合",
+  "summary": "性能 PM - 聚合",
+  "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+  "intents": [
+    "性能 PM - 聚合",
+    "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+    "pm",
+    "性能",
+    "metrics",
+    "aggregated"
+  ],
+  "tags": [
+    "pm",
+    "性能",
+    "metrics",
+    "aggregated"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "device_group_id",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "device_oui",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "device_sn",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "dimension",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "end_time",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "fill_empty",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "granularity",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "hours",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "metric_path",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "metric_paths",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "metric_type",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "object_ldns",
+      "in": "query",
+      "required": false,
+      "type": "array"
+    },
+    {
+      "name": "offset",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "start_time",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "name": "weekdays",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

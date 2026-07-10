@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.mml.console.command_compatibility",
+  "method": "GET",
+  "path": "/api/v1/mml/console/command-compatibility",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*ConsoleHandler).GetCommandCompatibility-fm",
+  "category": "mml",
+  "title": "MML - commandcompatibility",
+  "summary": "MML - commandcompatibility",
+  "description": "MML：处理commandcompatibility相关数据 Handler: GetCommandCompatibility 返回指定 product_class 下不兼容的命令 ID 列表。\n\n错误码：\n  - 400 product_class 缺失\n  - 503 compatibility service 未配置（启动期 nil 注入）\n  - 500 其他内部错误\n\nT-0177：孤儿 productClass（ProductRegistry 未匹配）不再返 404，而是返 200 +\nparamModelID=零值 + 全部 unsupported；前端据 paramModelID 是否零值提示\n\"未配置参数模型\" vs \"全部不兼容\"。",
+  "intents": [
+    "MML - commandcompatibility",
+    "MML：处理commandcompatibility相关数据 Handler: GetCommandCompatibility 返回指定 product_class 下不兼容的命令 ID 列表。\n\n错误码：\n  - 400 product_class 缺失\n  - 503 compatibility service 未配置（启动期 nil 注入）\n  - 500 其他内部错误\n\nT-0177：孤儿 productClass（ProductRegistry 未匹配）不再返 404，而是返 200 +\nparamModelID=零值 + 全部 unsupported；前端据 paramModelID 是否零值提示\n\"未配置参数模型\" vs \"全部不兼容\"。",
+    "mml",
+    "console",
+    "command-compatibility",
+    "command compatibility"
+  ],
+  "tags": [
+    "mml",
+    "console",
+    "command-compatibility"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "product_class",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

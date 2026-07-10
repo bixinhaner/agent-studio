@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.indicators.files",
+  "method": "GET",
+  "path": "/api/v1/indicators/files",
+  "handler": "github.com/omcgo/omcgo/internal/pm/indicator.(*FileHandler).ListFiles-fm",
+  "category": "indicators",
+  "title": "indicators - 列表",
+  "summary": "indicators - 列表",
+  "description": "indicators：按筛选条件查询资源列表 Handler: ListFiles GET /api/v1/indicators/files?tech=enb|gsm|gnb\n\n行为(对标 PRD §2.3 \"管理 XML 文件\" Modal):\n 1. 从 DB GROUP BY loaded_from 拉所有已入库文件 + indicator 计数\n 2. 物理扫两个目录(builtin + custom)合并补 uploaded-but-not-loaded 的文件(count=0)\n 3. 每行派生 Source(ClassifySource) + Deletable(IsDeletable),前端不重新推导\n 4. 按 loaded_from 字典序排序",
+  "intents": [
+    "indicators - 列表",
+    "indicators：按筛选条件查询资源列表 Handler: ListFiles GET /api/v1/indicators/files?tech=enb|gsm|gnb\n\n行为(对标 PRD §2.3 \"管理 XML 文件\" Modal):\n 1. 从 DB GROUP BY loaded_from 拉所有已入库文件 + indicator 计数\n 2. 物理扫两个目录(builtin + custom)合并补 uploaded-but-not-loaded 的文件(count=0)\n 3. 每行派生 Source(ClassifySource) + Deletable(IsDeletable),前端不重新推导\n 4. 按 loaded_from 字典序排序",
+    "indicators",
+    "files"
+  ],
+  "tags": [
+    "indicators",
+    "files"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "tech",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

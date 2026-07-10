@@ -1,0 +1,1078 @@
+{
+  "schemaVersion": "1.0",
+  "category": "pm",
+  "title": "性能 PM",
+  "operations": [
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "title": "性能 PM - 删除",
+      "summary": "性能 PM - 删除",
+      "description": "性能 PM：删除指定资源记录 Handler: Cancel DELETE /pm/adhoc/tasks/:id",
+      "intents": [
+        "性能 PM - 删除",
+        "性能 PM：删除指定资源记录 Handler: Cancel DELETE /pm/adhoc/tasks/:id",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.pm.adhoc.tasks.by_id.json"
+    },
+    {
+      "operationId": "delete.pm.adhoc.tasks.by_id.definition",
+      "method": "DELETE",
+      "path": "/api/v1/pm/adhoc/tasks/:id/definition",
+      "title": "性能 PM - DELETE",
+      "summary": "性能 PM - DELETE",
+      "description": "性能 PM：执行 DELETE 请求对应的业务操作 Handler: Delete DELETE /pm/adhoc/tasks/:id/definition\n\n硬删终态（succeeded/failed/canceled）自建（is_builtin=false）adhoc 任务的定义行（#392）。\n只删 pm_tasks 定义行，结果数据交 TimescaleDB retention 自然过期（不级联删）。\n  - 非终态（pending/running/scheduled）任务返 409（仍活跃，应走「取消」）。\n  - 内置任务返 403（永不可删）。\n  - 行不存在返 404。",
+      "intents": [
+        "性能 PM - DELETE",
+        "性能 PM：执行 DELETE 请求对应的业务操作 Handler: Delete DELETE /pm/adhoc/tasks/:id/definition\n\n硬删终态（succeeded/failed/canceled）自建（is_builtin=false）adhoc 任务的定义行（#392）。\n只删 pm_tasks 定义行，结果数据交 TimescaleDB retention 自然过期（不级联删）。\n  - 非终态（pending/running/scheduled）任务返 409（仍活跃，应走「取消」）。\n  - 内置任务返 403（永不可删）。\n  - 行不存在返 404。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "definition"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.pm.adhoc.tasks.by_id.definition.json"
+    },
+    {
+      "operationId": "delete.pm.exports.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/exports/:id",
+      "title": "性能 PM - 删除",
+      "summary": "性能 PM - 删除",
+      "description": "性能 PM：删除指定资源记录 Handler: Delete DELETE /pm/exports/:id — 删除任务记录。",
+      "intents": [
+        "性能 PM - 删除",
+        "性能 PM：删除指定资源记录 Handler: Delete DELETE /pm/exports/:id — 删除任务记录。",
+        "pm",
+        "性能",
+        "exports"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.pm.exports.by_id.json"
+    },
+    {
+      "operationId": "delete.pm.query_templates.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/query-templates/:id",
+      "title": "性能 PM - querytemplates删除",
+      "summary": "性能 PM - querytemplates删除",
+      "description": "性能 PM：查询或维护指定对象的querytemplates删除数据 Handler: Delete DELETE /pm/query-templates/:id",
+      "intents": [
+        "性能 PM - querytemplates删除",
+        "性能 PM：查询或维护指定对象的querytemplates删除数据 Handler: Delete DELETE /pm/query-templates/:id",
+        "pm",
+        "性能",
+        "query-templates",
+        "query templates"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.pm.query_templates.by_id.json"
+    },
+    {
+      "operationId": "delete.pm.thresholds.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/pm/thresholds/:id",
+      "title": "Delete a KPI threshold",
+      "summary": "Delete a KPI threshold",
+      "description": "性能 PM：查询或维护指定对象的阈值删除数据 Handler: DeleteThreshold handles DELETE /thresholds/:id.",
+      "intents": [
+        "性能 PM - 阈值删除",
+        "Delete a KPI threshold",
+        "性能 PM：查询或维护指定对象的阈值删除数据 Handler: DeleteThreshold handles DELETE /thresholds/:id.",
+        "pm",
+        "性能",
+        "thresholds"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.pm.thresholds.by_id.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\u0026all=true\n\nT-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（\"我的任务\"），\nadmin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/adhoc/tasks?mode=\u0026status=\u0026limit=\u0026offset=\u0026all=true\n\nT-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（\"我的任务\"），\nadmin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "title": "性能 PM - 详情",
+      "summary": "性能 PM - 详情",
+      "description": "性能 PM：查询指定资源的详细信息 Handler: Get GET /pm/adhoc/tasks/:id",
+      "intents": [
+        "性能 PM - 详情",
+        "性能 PM：查询指定资源的详细信息 Handler: Get GET /pm/adhoc/tasks/:id",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.by_id.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id.filter_options",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id/filter-options",
+      "title": "性能 PM - filteroptions",
+      "summary": "性能 PM - filteroptions",
+      "description": "性能 PM：处理filteroptions相关数据 Handler: FilterOptions GET /pm/adhoc/tasks/:id/filter-options\n\n按选中任务的聚合维度，列出\"该任务实际聚合了哪些产品/设备组/频段\"的权威子集清单（走 SELECT DISTINCT，\n与结果分页/上限解耦，不被截断）。前端据此渲染对应维度的多选筛选框。\n维度为 device/aggregate_group/network 时返回空 options（前端不渲染筛选框）。",
+      "intents": [
+        "性能 PM - filteroptions",
+        "性能 PM：处理filteroptions相关数据 Handler: FilterOptions GET /pm/adhoc/tasks/:id/filter-options\n\n按选中任务的聚合维度，列出\"该任务实际聚合了哪些产品/设备组/频段\"的权威子集清单（走 SELECT DISTINCT，\n与结果分页/上限解耦，不被截断）。前端据此渲染对应维度的多选筛选框。\n维度为 device/aggregate_group/network 时返回空 options（前端不渲染筛选框）。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "filter-options",
+        "filter options"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.by_id.filter_options.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id.progress",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id/progress",
+      "title": "性能 PM - GET",
+      "summary": "性能 PM - GET",
+      "description": "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
+      "intents": [
+        "性能 PM - GET",
+        "性能 PM：执行 GET 请求对应的业务操作 Handler: Progress GET /pm/adhoc/tasks/:id/progress（SSE）\n\n订阅 pm.adhoc.progress 与 pm.adhoc.completed 主题，过滤匹配 task_id 的事件流给客户端。\n客户端 EventSource 'progress'/'completed' 事件名分别接收。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "progress"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.by_id.progress.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id.results",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id/results",
+      "title": "性能 PM - 结果",
+      "summary": "性能 PM - 结果",
+      "description": "性能 PM：查询任务执行结果 Handler: Results GET /pm/adhoc/tasks/:id/results?device_sn=\u0026metric_path=\u0026granularity=\u0026start_time=\u0026end_time=\u0026limit=\u0026offset=",
+      "intents": [
+        "性能 PM - 结果",
+        "性能 PM：查询任务执行结果 Handler: Results GET /pm/adhoc/tasks/:id/results?device_sn=\u0026metric_path=\u0026granularity=\u0026start_time=\u0026end_time=\u0026limit=\u0026offset=",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "results"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.by_id.results.json"
+    },
+    {
+      "operationId": "get.pm.adhoc.tasks.by_id.runs",
+      "method": "GET",
+      "path": "/api/v1/pm/adhoc/tasks/:id/runs",
+      "title": "性能 PM - 执行历史",
+      "summary": "性能 PM - 执行历史",
+      "description": "性能 PM：查询脚本或命令执行历史 Handler: Runs GET /pm/adhoc/tasks/:id/runs?limit=\u0026offset=\n\n返回该任务运行历史，倒序 started_at，支持分页（T-0186）。",
+      "intents": [
+        "性能 PM - 执行历史",
+        "性能 PM：查询脚本或命令执行历史 Handler: Runs GET /pm/adhoc/tasks/:id/runs?limit=\u0026offset=\n\n返回该任务运行历史，倒序 started_at，支持分页（T-0186）。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "runs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.adhoc.tasks.by_id.runs.json"
+    },
+    {
+      "operationId": "get.pm.counters",
+      "method": "GET",
+      "path": "/api/v1/pm/counters",
+      "title": "List PM counters",
+      "summary": "List PM counters",
+      "description": "性能 PM：查询性能计数器数据",
+      "intents": [
+        "性能 PM - 计数器",
+        "List PM counters",
+        "性能 PM：查询性能计数器数据",
+        "pm",
+        "性能",
+        "counters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.counters.json"
+    },
+    {
+      "operationId": "get.pm.counters.aggregated",
+      "method": "GET",
+      "path": "/api/v1/pm/counters/aggregated",
+      "title": "Get aggregated PM counters",
+      "summary": "Get aggregated PM counters",
+      "description": "性能 PM：查询聚合后的统计数据",
+      "intents": [
+        "性能 PM - 聚合",
+        "Get aggregated PM counters",
+        "性能 PM：查询聚合后的统计数据",
+        "pm",
+        "性能",
+        "counters",
+        "aggregated"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.counters.aggregated.json"
+    },
+    {
+      "operationId": "get.pm.exports",
+      "method": "GET",
+      "path": "/api/v1/pm/exports",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/exports — 列导出任务（任务管理 Tab）。",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: List GET /pm/exports — 列导出任务（任务管理 Tab）。",
+        "pm",
+        "性能",
+        "exports"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.exports.json"
+    },
+    {
+      "operationId": "get.pm.exports.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/:id/download",
+      "title": "性能 PM - 下载",
+      "summary": "性能 PM - 下载",
+      "description": "性能 PM：下载文件或导出结果 Handler: Download GET /pm/exports/:id/download — 默认同源流式下载 KPI 导出 CSV。\n\n兼容旧调用：?mode=url 仍返回对象存储签名 GET 链接。\n\n文件未就绪（非 succeeded 或 file_path 为空）返 4xx，不 500 崩溃。",
+      "intents": [
+        "性能 PM - 下载",
+        "性能 PM：下载文件或导出结果 Handler: Download GET /pm/exports/:id/download — 默认同源流式下载 KPI 导出 CSV。\n\n兼容旧调用：?mode=url 仍返回对象存储签名 GET 链接。\n\n文件未就绪（非 succeeded 或 file_path 为空）返 4xx，不 500 崩溃。",
+        "pm",
+        "性能",
+        "exports",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.exports.by_id.download.json"
+    },
+    {
+      "operationId": "get.pm.exports.files",
+      "method": "GET",
+      "path": "/api/v1/pm/exports/files",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: ListFiles GET /pm/exports/files — 列已成功的导出文件（文件管理 Tab）。\n只筛 status='succeeded' 且 file_path 非空。",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: ListFiles GET /pm/exports/files — 列已成功的导出文件（文件管理 Tab）。\n只筛 status='succeeded' 且 file_path 非空。",
+        "pm",
+        "性能",
+        "exports",
+        "files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.exports.files.json"
+    },
+    {
+      "operationId": "get.pm.files",
+      "method": "GET",
+      "path": "/api/v1/pm/files",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: ListPMFiles handles GET /pm/files.",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: ListPMFiles handles GET /pm/files.",
+        "pm",
+        "性能",
+        "files"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.files.json"
+    },
+    {
+      "operationId": "get.pm.files.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/pm/files/:id/download",
+      "title": "性能 PM - 下载",
+      "summary": "性能 PM - 下载",
+      "description": "性能 PM：下载文件或导出结果 Handler: DownloadPMFile handles GET /pm/files/:id/download.",
+      "intents": [
+        "性能 PM - 下载",
+        "性能 PM：下载文件或导出结果 Handler: DownloadPMFile handles GET /pm/files/:id/download.",
+        "pm",
+        "性能",
+        "files",
+        "download"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.files.by_id.download.json"
+    },
+    {
+      "operationId": "get.pm.files.devices",
+      "method": "GET",
+      "path": "/api/v1/pm/files/devices",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: ListPMFileDevices 给 File Management → PM Tab 主列表用。每行 1 个设备 +\n该设备 pm_files 起止 collect_time + 文件数 + reporting 标志 + 站名/产品类。",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: ListPMFileDevices 给 File Management → PM Tab 主列表用。每行 1 个设备 +\n该设备 pm_files 起止 collect_time + 文件数 + reporting 标志 + 站名/产品类。",
+        "pm",
+        "性能",
+        "files",
+        "devices"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.files.devices.json"
+    },
+    {
+      "operationId": "get.pm.indicatormg.getIndicatorUnitList",
+      "method": "GET",
+      "path": "/api/v1/pm/indicatormg/getIndicatorUnitList",
+      "title": "性能 PM - 指标管理查询Indicator Unit List",
+      "summary": "性能 PM - 指标管理查询Indicator Unit List",
+      "description": "性能 PM：处理查询Indicator Unit List相关数据 Handler: GetIndicatorUnitList handles GET /pm/indicatormg/getIndicatorUnitList.",
+      "intents": [
+        "性能 PM - 指标管理查询Indicator Unit List",
+        "性能 PM：处理查询Indicator Unit List相关数据 Handler: GetIndicatorUnitList handles GET /pm/indicatormg/getIndicatorUnitList.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorUnitList"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.indicatormg.getIndicatorUnitList.json"
+    },
+    {
+      "operationId": "get.pm.kpi",
+      "method": "GET",
+      "path": "/api/v1/pm/kpi",
+      "title": "List KPI values",
+      "summary": "List KPI values",
+      "description": "性能 PM：查询或维护 KPI 数据",
+      "intents": [
+        "性能 PM - KPI",
+        "List KPI values",
+        "性能 PM：查询或维护 KPI 数据",
+        "pm",
+        "性能",
+        "kpi"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.kpi.json"
+    },
+    {
+      "operationId": "get.pm.kpi.definitions",
+      "method": "GET",
+      "path": "/api/v1/pm/kpi/definitions",
+      "title": "List KPI definitions",
+      "summary": "List KPI definitions",
+      "description": "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+      "intents": [
+        "性能 PM - 定义",
+        "List KPI definitions",
+        "性能 PM：查询或维护定义数据 Handler: ListKPIDefinitions 返回 KPI 元数据目录，供前端\"性能管理→指标列表\"等界面消费。\n\nT-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。\n现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），\nplatform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，\n这里只暴露\"系统支持哪些 KPI 指标\"。\n\n查询参数（向后兼容老前端的 carrier 模糊搜索）：\n  - keyword：name/cn_name/id 模糊匹配\n  - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）\n  - include_counters：可选开关（缺省 false）。false 时维持 is_counter='0'（仅 KPI），\n    行为与历史完全一致；true 时不按 is_counter 过滤，返回 KPI + 计数器，供向导穿梭框消费。\n\n响应每条在历史字段（name/display_name/formula/unit）之外，补 id（= perf_indicators 行 ID，\nK/C 编号）与 is_counter（\"0\" KPI / \"1\" 计数器）。默认调用方只读历史字段，零回归。",
+        "pm",
+        "性能",
+        "kpi",
+        "definitions"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.kpi.definitions.json"
+    },
+    {
+      "operationId": "get.pm.metrics.aggregated",
+      "method": "GET",
+      "path": "/api/v1/pm/metrics/aggregated",
+      "title": "性能 PM - 聚合",
+      "summary": "性能 PM - 聚合",
+      "description": "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+      "intents": [
+        "性能 PM - 聚合",
+        "性能 PM：查询聚合后的统计数据 Handler: ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，\n15min 退回 pm_metrics 原表）。device_group 维度可选。\n\nQuery params：\n  - granularity（必填）: 15min / hourly / daily / weekly / monthly\n  - dimension（可选）: device（默认）/ device_group\n  - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）\n  - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）\n  - metric_type：counter / kpi\n  - start_time / end_time：RFC3339\n  - limit / offset\n\n没注入 aggregator（兼容老部署）时返 503。",
+        "pm",
+        "性能",
+        "metrics",
+        "aggregated"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.metrics.aggregated.json"
+    },
+    {
+      "operationId": "get.pm.metrics.objects",
+      "method": "GET",
+      "path": "/api/v1/pm/metrics/objects",
+      "title": "性能 PM - 多实例对象",
+      "summary": "性能 PM - 多实例对象",
+      "description": "性能 PM：查询或维护 TR-069 多实例对象 Handler: ListMetricObjects handles GET /pm/metrics/objects（T-0193）。\n\n#18 分层收敛：SQL 查询下沉到 DeviceQueryService（handler → service →\nrepository），Handler 只做参数解析 + 响应组装。",
+      "intents": [
+        "性能 PM - 多实例对象",
+        "性能 PM：查询或维护 TR-069 多实例对象 Handler: ListMetricObjects handles GET /pm/metrics/objects（T-0193）。\n\n#18 分层收敛：SQL 查询下沉到 DeviceQueryService（handler → service →\nrepository），Handler 只做参数解析 + 响应组装。",
+        "pm",
+        "性能",
+        "metrics",
+        "objects"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.metrics.objects.json"
+    },
+    {
+      "operationId": "get.pm.query_templates",
+      "method": "GET",
+      "path": "/api/v1/pm/query-templates",
+      "title": "性能 PM - querytemplates",
+      "summary": "性能 PM - querytemplates",
+      "description": "性能 PM：处理querytemplates相关数据 Handler: List GET /pm/query-templates",
+      "intents": [
+        "性能 PM - querytemplates",
+        "性能 PM：处理querytemplates相关数据 Handler: List GET /pm/query-templates",
+        "pm",
+        "性能",
+        "query-templates",
+        "query templates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.query_templates.json"
+    },
+    {
+      "operationId": "get.pm.query_templates.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/query-templates/:id",
+      "title": "性能 PM - querytemplates详情",
+      "summary": "性能 PM - querytemplates详情",
+      "description": "性能 PM：查询或维护指定对象的querytemplates详情数据 Handler: Get GET /pm/query-templates/:id",
+      "intents": [
+        "性能 PM - querytemplates详情",
+        "性能 PM：查询或维护指定对象的querytemplates详情数据 Handler: Get GET /pm/query-templates/:id",
+        "pm",
+        "性能",
+        "query-templates",
+        "query templates"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.query_templates.by_id.json"
+    },
+    {
+      "operationId": "get.pm.tasks",
+      "method": "GET",
+      "path": "/api/v1/pm/tasks",
+      "title": "性能 PM - 列表",
+      "summary": "性能 PM - 列表",
+      "description": "性能 PM：按筛选条件查询资源列表 Handler: ListTasks handles GET /pm/tasks.",
+      "intents": [
+        "性能 PM - 列表",
+        "性能 PM：按筛选条件查询资源列表 Handler: ListTasks handles GET /pm/tasks.",
+        "pm",
+        "性能",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.tasks.json"
+    },
+    {
+      "operationId": "get.pm.thresholds",
+      "method": "GET",
+      "path": "/api/v1/pm/thresholds",
+      "title": "List KPI thresholds",
+      "summary": "List KPI thresholds",
+      "description": "性能 PM：查询或维护阈值配置 Handler: ListThresholds handles GET /thresholds.",
+      "intents": [
+        "性能 PM - 阈值",
+        "List KPI thresholds",
+        "性能 PM：查询或维护阈值配置 Handler: ListThresholds handles GET /thresholds.",
+        "pm",
+        "性能",
+        "thresholds"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.thresholds.json"
+    },
+    {
+      "operationId": "get.pm.thresholds.by_id",
+      "method": "GET",
+      "path": "/api/v1/pm/thresholds/:id",
+      "title": "Get KPI threshold by ID",
+      "summary": "Get KPI threshold by ID",
+      "description": "性能 PM：查询或维护指定对象的阈值详情数据 Handler: GetThreshold handles GET /thresholds/:id.",
+      "intents": [
+        "性能 PM - 阈值详情",
+        "Get KPI threshold by ID",
+        "性能 PM：查询或维护指定对象的阈值详情数据 Handler: GetThreshold handles GET /thresholds/:id.",
+        "pm",
+        "性能",
+        "thresholds"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.pm.thresholds.by_id.json"
+    },
+    {
+      "operationId": "patch.pm.adhoc.tasks.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/adhoc/tasks/:id",
+      "title": "性能 PM - 部分更新",
+      "summary": "性能 PM - 部分更新",
+      "description": "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+      "intents": [
+        "性能 PM - 部分更新",
+        "性能 PM：更新指定资源的部分字段 Handler: Update PATCH /pm/adhoc/tasks/:id\n\n编辑任务定义（T-0194）。先取既有任务确定 is_builtin / mode / technology（结构性字段不可改，\n用既有值做校验基准）：\n  - 内置任务：只更新 metric_paths，其余传入字段忽略，跳过结构性校验（设备/粒度/时窗不变）。\n  - 自建任务：复用创建校验——单粒度、device/aggregate_group 维度设备非空、oneshot 时窗 end\u003estart、改设备后拒跨制式。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.pm.adhoc.tasks.by_id.json"
+    },
+    {
+      "operationId": "patch.pm.query_templates.by_id",
+      "method": "PATCH",
+      "path": "/api/v1/pm/query-templates/:id",
+      "title": "性能 PM - querytemplates部分更新",
+      "summary": "性能 PM - querytemplates部分更新",
+      "description": "性能 PM：查询或维护指定对象的querytemplates部分更新数据 Handler: Update PATCH /pm/query-templates/:id",
+      "intents": [
+        "性能 PM - querytemplates部分更新",
+        "性能 PM：查询或维护指定对象的querytemplates部分更新数据 Handler: Update PATCH /pm/query-templates/:id",
+        "pm",
+        "性能",
+        "query-templates",
+        "query templates"
+      ],
+      "risk": "low",
+      "document": "api-docs/patch.pm.query_templates.by_id.json"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks",
+      "title": "性能 PM - 创建",
+      "summary": "性能 PM - 创建",
+      "description": "性能 PM：创建新的资源记录 Handler: Create POST /pm/adhoc/tasks",
+      "intents": [
+        "性能 PM - 创建",
+        "性能 PM：创建新的资源记录 Handler: Create POST /pm/adhoc/tasks",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.adhoc.tasks.json"
+    },
+    {
+      "operationId": "post.pm.adhoc.tasks.by_id.resume",
+      "method": "POST",
+      "path": "/api/v1/pm/adhoc/tasks/:id/resume",
+      "title": "性能 PM - POST",
+      "summary": "性能 PM - POST",
+      "description": "性能 PM：执行 POST 请求对应的业务操作 Handler: Resume POST /pm/adhoc/tasks/:id/resume\n\n恢复已取消的 adhoc 任务（#674）：\n  - continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）\n  - oneshot → pending（让 worker 直接捞）\n  - 非 canceled 状态调用返回 409 Conflict。",
+      "intents": [
+        "性能 PM - POST",
+        "性能 PM：执行 POST 请求对应的业务操作 Handler: Resume POST /pm/adhoc/tasks/:id/resume\n\n恢复已取消的 adhoc 任务（#674）：\n  - continuous → scheduled（让 ContinuousScheduler 下次 sweep 推 pending）\n  - oneshot → pending（让 worker 直接捞）\n  - 非 canceled 状态调用返回 409 Conflict。",
+        "pm",
+        "性能",
+        "adhoc",
+        "tasks",
+        "resume"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.adhoc.tasks.by_id.resume.json"
+    },
+    {
+      "operationId": "post.pm.aggregation.recompute",
+      "method": "POST",
+      "path": "/api/v1/pm/aggregation/recompute",
+      "title": "性能 PM - 创建",
+      "summary": "性能 PM - 创建",
+      "description": "性能 PM：创建新的资源记录",
+      "intents": [
+        "性能 PM - 创建",
+        "性能 PM：创建新的资源记录",
+        "pm",
+        "性能",
+        "aggregation",
+        "recompute"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.aggregation.recompute.json"
+    },
+    {
+      "operationId": "post.pm.exports",
+      "method": "POST",
+      "path": "/api/v1/pm/exports",
+      "title": "性能 PM - 创建",
+      "summary": "性能 PM - 创建",
+      "description": "性能 PM：创建新的资源记录 Handler: Create POST /pm/exports",
+      "intents": [
+        "性能 PM - 创建",
+        "性能 PM：创建新的资源记录 Handler: Create POST /pm/exports",
+        "pm",
+        "性能",
+        "exports"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.exports.json"
+    },
+    {
+      "operationId": "post.pm.files.batch_delete",
+      "method": "POST",
+      "path": "/api/v1/pm/files/batch-delete",
+      "title": "性能 PM - 批量删除",
+      "summary": "性能 PM - 批量删除",
+      "description": "性能 PM：处理批量删除相关数据 Handler: BatchDeletePMFiles handles POST /pm/files/batch-delete.\n流程：每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG\n（MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。",
+      "intents": [
+        "性能 PM - 批量删除",
+        "性能 PM：处理批量删除相关数据 Handler: BatchDeletePMFiles handles POST /pm/files/batch-delete.\n流程：每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG\n（MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。",
+        "pm",
+        "性能",
+        "files",
+        "batch-delete",
+        "batch delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.files.batch_delete.json"
+    },
+    {
+      "operationId": "post.pm.files.batch_download",
+      "method": "POST",
+      "path": "/api/v1/pm/files/batch-download",
+      "title": "性能 PM - 批量下载",
+      "summary": "性能 PM - 批量下载",
+      "description": "性能 PM：处理批量下载相关数据",
+      "intents": [
+        "性能 PM - 批量下载",
+        "性能 PM：处理批量下载相关数据",
+        "pm",
+        "性能",
+        "files",
+        "batch-download",
+        "batch download"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.files.batch_download.json"
+    },
+    {
+      "operationId": "post.pm.files.by_id.batch_download",
+      "method": "POST",
+      "path": "/api/v1/pm/files/by-id/batch-download",
+      "title": "性能 PM - 批量下载",
+      "summary": "性能 PM - 批量下载",
+      "description": "性能 PM：处理批量下载相关数据",
+      "intents": [
+        "性能 PM - 批量下载",
+        "性能 PM：处理批量下载相关数据",
+        "pm",
+        "性能",
+        "files",
+        "by-id",
+        "batch-download",
+        "by id",
+        "batch download"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.files.by_id.batch_download.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.addIndicatorGroup",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/addIndicatorGroup",
+      "title": "性能 PM - 指标管理新增指标分组",
+      "summary": "性能 PM - 指标管理新增指标分组",
+      "description": "性能 PM：处理新增指标分组相关数据 Handler: CreateGroup handles POST /pm/indicatormg/addIndicatorGroup.",
+      "intents": [
+        "性能 PM - 指标管理新增指标分组",
+        "性能 PM：处理新增指标分组相关数据 Handler: CreateGroup handles POST /pm/indicatormg/addIndicatorGroup.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "addIndicatorGroup"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.addIndicatorGroup.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.addOrModifyIndicator",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/addOrModifyIndicator",
+      "title": "性能 PM - 指标管理新增或修改指标",
+      "summary": "性能 PM - 指标管理新增或修改指标",
+      "description": "性能 PM：处理新增或修改指标相关数据 Handler: AddOrModifyIndicator handles POST /pm/indicatormg/addOrModifyIndicator.\nIf the request contains an ID, it updates; otherwise it creates.",
+      "intents": [
+        "性能 PM - 指标管理新增或修改指标",
+        "性能 PM：处理新增或修改指标相关数据 Handler: AddOrModifyIndicator handles POST /pm/indicatormg/addOrModifyIndicator.\nIf the request contains an ID, it updates; otherwise it creates.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "addOrModifyIndicator"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.addOrModifyIndicator.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.delIndicator",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/delIndicator",
+      "title": "性能 PM - 指标管理删除指标",
+      "summary": "性能 PM - 指标管理删除指标",
+      "description": "性能 PM：处理删除指标相关数据 Handler: DeleteIndicator handles POST /pm/indicatormg/delIndicator.",
+      "intents": [
+        "性能 PM - 指标管理删除指标",
+        "性能 PM：处理删除指标相关数据 Handler: DeleteIndicator handles POST /pm/indicatormg/delIndicator.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "delIndicator"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.delIndicator.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.delIndicatorGroup",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/delIndicatorGroup",
+      "title": "性能 PM - 指标管理删除指标分组",
+      "summary": "性能 PM - 指标管理删除指标分组",
+      "description": "性能 PM：处理删除指标分组相关数据 Handler: DeleteGroup handles POST /pm/indicatormg/delIndicatorGroup.",
+      "intents": [
+        "性能 PM - 指标管理删除指标分组",
+        "性能 PM：处理删除指标分组相关数据 Handler: DeleteGroup handles POST /pm/indicatormg/delIndicatorGroup.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "delIndicatorGroup"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.delIndicatorGroup.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.exportAllIndicator",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/exportAllIndicator",
+      "title": "性能 PM - 指标管理导出全部指标",
+      "summary": "性能 PM - 指标管理导出全部指标",
+      "description": "性能 PM：处理导出全部指标相关数据 Handler: ExportAllIndicator handles POST /pm/indicatormg/exportAllIndicator.",
+      "intents": [
+        "性能 PM - 指标管理导出全部指标",
+        "性能 PM：处理导出全部指标相关数据 Handler: ExportAllIndicator handles POST /pm/indicatormg/exportAllIndicator.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "exportAllIndicator"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.exportAllIndicator.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getEffectiveIndicators",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getEffectiveIndicators",
+      "title": "性能 PM - 指标管理查询Effective Indicators",
+      "summary": "性能 PM - 指标管理查询Effective Indicators",
+      "description": "性能 PM：处理查询Effective Indicators相关数据 Handler: GetEffectiveIndicators handles POST /pm/indicatormg/getEffectiveIndicators.",
+      "intents": [
+        "性能 PM - 指标管理查询Effective Indicators",
+        "性能 PM：处理查询Effective Indicators相关数据 Handler: GetEffectiveIndicators handles POST /pm/indicatormg/getEffectiveIndicators.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getEffectiveIndicators"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getEffectiveIndicators.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorGroupInfo",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorGroupInfo",
+      "title": "性能 PM - 指标管理查询指标分组信息",
+      "summary": "性能 PM - 指标管理查询指标分组信息",
+      "description": "性能 PM：处理查询指标分组信息相关数据 Handler: GetGroupInfo handles POST /pm/indicatormg/getIndicatorGroupInfo.",
+      "intents": [
+        "性能 PM - 指标管理查询指标分组信息",
+        "性能 PM：处理查询指标分组信息相关数据 Handler: GetGroupInfo handles POST /pm/indicatormg/getIndicatorGroupInfo.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorGroupInfo"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorGroupInfo.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorGroupList",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorGroupList",
+      "title": "性能 PM - 指标管理查询Indicator Group List",
+      "summary": "性能 PM - 指标管理查询Indicator Group List",
+      "description": "性能 PM：处理查询Indicator Group List相关数据 Handler: GetIndicatorGroupList handles POST /pm/indicatormg/getIndicatorGroupList.",
+      "intents": [
+        "性能 PM - 指标管理查询Indicator Group List",
+        "性能 PM：处理查询Indicator Group List相关数据 Handler: GetIndicatorGroupList handles POST /pm/indicatormg/getIndicatorGroupList.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorGroupList"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorGroupList.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorGroupTree",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorGroupTree",
+      "title": "性能 PM - 指标管理查询指标分组树",
+      "summary": "性能 PM - 指标管理查询指标分组树",
+      "description": "性能 PM：处理查询指标分组树相关数据 Handler: GetIndicatorGroupTree handles POST /pm/indicatormg/getIndicatorGroupTree.",
+      "intents": [
+        "性能 PM - 指标管理查询指标分组树",
+        "性能 PM：处理查询指标分组树相关数据 Handler: GetIndicatorGroupTree handles POST /pm/indicatormg/getIndicatorGroupTree.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorGroupTree"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorGroupTree.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorInfo",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorInfo",
+      "title": "性能 PM - 指标管理查询指标信息",
+      "summary": "性能 PM - 指标管理查询指标信息",
+      "description": "性能 PM：处理查询指标信息相关数据 Handler: GetIndicatorInfo handles POST /pm/indicatormg/getIndicatorInfo.",
+      "intents": [
+        "性能 PM - 指标管理查询指标信息",
+        "性能 PM：处理查询指标信息相关数据 Handler: GetIndicatorInfo handles POST /pm/indicatormg/getIndicatorInfo.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorInfo"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorInfo.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorListByPage",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorListByPage",
+      "title": "性能 PM - 指标管理查询指标分页列表",
+      "summary": "性能 PM - 指标管理查询指标分页列表",
+      "description": "性能 PM：处理查询指标分页列表相关数据 Handler: GetIndicatorListByPage handles POST /pm/indicatormg/getIndicatorListByPage.",
+      "intents": [
+        "性能 PM - 指标管理查询指标分页列表",
+        "性能 PM：处理查询指标分页列表相关数据 Handler: GetIndicatorListByPage handles POST /pm/indicatormg/getIndicatorListByPage.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorListByPage"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorListByPage.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.getIndicatorTypes",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/getIndicatorTypes",
+      "title": "性能 PM - 指标管理查询Indicator Types",
+      "summary": "性能 PM - 指标管理查询Indicator Types",
+      "description": "性能 PM：处理查询Indicator Types相关数据 Handler: GetIndicatorTypes handles POST /pm/indicatormg/getIndicatorTypes.",
+      "intents": [
+        "性能 PM - 指标管理查询Indicator Types",
+        "性能 PM：处理查询Indicator Types相关数据 Handler: GetIndicatorTypes handles POST /pm/indicatormg/getIndicatorTypes.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "getIndicatorTypes"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.getIndicatorTypes.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.modifyIndicatorGroup",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/modifyIndicatorGroup",
+      "title": "性能 PM - 指标管理修改指标分组",
+      "summary": "性能 PM - 指标管理修改指标分组",
+      "description": "性能 PM：处理修改指标分组相关数据 Handler: ModifyGroup handles POST /pm/indicatormg/modifyIndicatorGroup.",
+      "intents": [
+        "性能 PM - 指标管理修改指标分组",
+        "性能 PM：处理修改指标分组相关数据 Handler: ModifyGroup handles POST /pm/indicatormg/modifyIndicatorGroup.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "modifyIndicatorGroup"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.modifyIndicatorGroup.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.updateBaseKpiCustName",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/updateBaseKpiCustName",
+      "title": "性能 PM - 指标管理更新基础 KPI 自定义名",
+      "summary": "性能 PM - 指标管理更新基础 KPI 自定义名",
+      "description": "性能 PM：处理更新基础 KPI 自定义名相关数据 Handler: UpdateBaseKpiCustName handles POST /pm/indicatormg/updateBaseKpiCustName.",
+      "intents": [
+        "性能 PM - 指标管理更新基础 KPI 自定义名",
+        "性能 PM：处理更新基础 KPI 自定义名相关数据 Handler: UpdateBaseKpiCustName handles POST /pm/indicatormg/updateBaseKpiCustName.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "updateBaseKpiCustName"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.updateBaseKpiCustName.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.updateEnbIndicatorsName",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/updateEnbIndicatorsName",
+      "title": "性能 PM - 指标管理更新Enb Indicators Name",
+      "summary": "性能 PM - 指标管理更新Enb Indicators Name",
+      "description": "性能 PM：处理更新Enb Indicators Name相关数据 Handler: UpdateEnbIndicatorsName handles POST /pm/indicatormg/updateEnbIndicatorsName.",
+      "intents": [
+        "性能 PM - 指标管理更新Enb Indicators Name",
+        "性能 PM：处理更新Enb Indicators Name相关数据 Handler: UpdateEnbIndicatorsName handles POST /pm/indicatormg/updateEnbIndicatorsName.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "updateEnbIndicatorsName"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.updateEnbIndicatorsName.json"
+    },
+    {
+      "operationId": "post.pm.indicatormg.updateGsmIndicatorsName",
+      "method": "POST",
+      "path": "/api/v1/pm/indicatormg/updateGsmIndicatorsName",
+      "title": "性能 PM - 指标管理更新Gsm Indicators Name",
+      "summary": "性能 PM - 指标管理更新Gsm Indicators Name",
+      "description": "性能 PM：处理更新Gsm Indicators Name相关数据 Handler: UpdateGsmIndicatorsName handles POST /pm/indicatormg/updateGsmIndicatorsName.",
+      "intents": [
+        "性能 PM - 指标管理更新Gsm Indicators Name",
+        "性能 PM：处理更新Gsm Indicators Name相关数据 Handler: UpdateGsmIndicatorsName handles POST /pm/indicatormg/updateGsmIndicatorsName.",
+        "pm",
+        "性能",
+        "indicatormg",
+        "updateGsmIndicatorsName"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.indicatormg.updateGsmIndicatorsName.json"
+    },
+    {
+      "operationId": "post.pm.kpi.calculate",
+      "method": "POST",
+      "path": "/api/v1/pm/kpi/calculate",
+      "title": "Trigger KPI calculation",
+      "summary": "Trigger KPI calculation",
+      "description": "性能 PM：触发计算并返回计算结果",
+      "intents": [
+        "性能 PM - 计算",
+        "Trigger KPI calculation",
+        "性能 PM：触发计算并返回计算结果",
+        "pm",
+        "性能",
+        "kpi",
+        "calculate"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.kpi.calculate.json"
+    },
+    {
+      "operationId": "post.pm.query_templates",
+      "method": "POST",
+      "path": "/api/v1/pm/query-templates",
+      "title": "性能 PM - querytemplates",
+      "summary": "性能 PM - querytemplates",
+      "description": "性能 PM：处理querytemplates相关数据 Handler: Create POST /pm/query-templates",
+      "intents": [
+        "性能 PM - querytemplates",
+        "性能 PM：处理querytemplates相关数据 Handler: Create POST /pm/query-templates",
+        "pm",
+        "性能",
+        "query-templates",
+        "query templates"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.query_templates.json"
+    },
+    {
+      "operationId": "post.pm.tasks",
+      "method": "POST",
+      "path": "/api/v1/pm/tasks",
+      "title": "性能 PM - 创建",
+      "summary": "性能 PM - 创建",
+      "description": "性能 PM：创建新的资源记录 Handler: CreateTask handles POST /pm/tasks.",
+      "intents": [
+        "性能 PM - 创建",
+        "性能 PM：创建新的资源记录 Handler: CreateTask handles POST /pm/tasks.",
+        "pm",
+        "性能",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.tasks.json"
+    },
+    {
+      "operationId": "post.pm.thresholds",
+      "method": "POST",
+      "path": "/api/v1/pm/thresholds",
+      "title": "Create a KPI threshold",
+      "summary": "Create a KPI threshold",
+      "description": "性能 PM：查询或维护阈值配置 Handler: CreateThreshold handles POST /thresholds.",
+      "intents": [
+        "性能 PM - 阈值",
+        "Create a KPI threshold",
+        "性能 PM：查询或维护阈值配置 Handler: CreateThreshold handles POST /thresholds.",
+        "pm",
+        "性能",
+        "thresholds"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.pm.thresholds.json"
+    },
+    {
+      "operationId": "put.pm.thresholds.by_id",
+      "method": "PUT",
+      "path": "/api/v1/pm/thresholds/:id",
+      "title": "Update a KPI threshold",
+      "summary": "Update a KPI threshold",
+      "description": "性能 PM：查询或维护指定对象的阈值更新数据 Handler: UpdateThreshold handles PUT /thresholds/:id.",
+      "intents": [
+        "性能 PM - 阈值更新",
+        "Update a KPI threshold",
+        "性能 PM：查询或维护指定对象的阈值更新数据 Handler: UpdateThreshold handles PUT /thresholds/:id.",
+        "pm",
+        "性能",
+        "thresholds"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.pm.thresholds.by_id.json"
+    }
+  ]
+}

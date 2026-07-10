@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.northbound.servers.by_role",
+  "method": "PUT",
+  "path": "/api/v1/northbound/servers/:role",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*ServerHandler).UpdateServer-fm",
+  "category": "northbound",
+  "title": "北向接口 - 更新",
+  "summary": "北向接口 - 更新",
+  "description": "北向接口：更新指定资源的完整配置 Handler: UpdateServer 处理 PUT /northbound/servers/:role。\n\n请求体：{\"host\": string, \"port\": int, \"description\": string}。\n不动 is_active；切换激活组走 SwitchActive。\n\n错误语义：\n  - role 不合法（非 primary/standby）→ 400\n  - body 校验失败（host 空 / port 超界 / description 过长）→ 400\n  - role 不存在 → 404\n  - 其他 → 500",
+  "intents": [
+    "北向接口 - 更新",
+    "北向接口：更新指定资源的完整配置 Handler: UpdateServer 处理 PUT /northbound/servers/:role。\n\n请求体：{\"host\": string, \"port\": int, \"description\": string}。\n不动 is_active；切换激活组走 SwitchActive。\n\n错误语义：\n  - role 不合法（非 primary/standby）→ 400\n  - body 校验失败（host 空 / port 超界 / description 过长）→ 400\n  - role 不存在 → 404\n  - 其他 → 500",
+    "northbound",
+    "北向接口",
+    "servers"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "servers"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：北向接口 - 更新",
+  "pathParams": [
+    {
+      "name": "role",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :role"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "UpdateServerRequest",
+      "properties": {
+        "description": {
+          "maxLength": 255,
+          "type": "string"
+        },
+        "host": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        },
+        "port": {
+          "goType": "int",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

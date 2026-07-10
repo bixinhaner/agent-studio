@@ -1,0 +1,155 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.devices",
+  "method": "POST",
+  "path": "/api/v1/devices",
+  "handler": "github.com/omcgo/omcgo/internal/device.(*Handler).CreateDevice-fm",
+  "category": "devices",
+  "title": "Create a device",
+  "summary": "Create a device",
+  "description": "设备：创建新的资源记录 Handler: CreateDevice handles POST /api/v1/devices.",
+  "intents": [
+    "设备 - 创建",
+    "Create a device",
+    "设备：创建新的资源记录 Handler: CreateDevice handles POST /api/v1/devices.",
+    "devices",
+    "设备"
+  ],
+  "tags": [
+    "devices",
+    "设备"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：Create a device",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "$ref": "#/components/schemas/CreateDeviceRequest"
+    }
+  },
+  "responses": {
+    "201": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/Device"
+          }
+        }
+      },
+      "description": "Device created"
+    },
+    "400": {
+      "$ref": "#/components/responses/BadRequest"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    }
+  },
+  "referencedSchemas": {
+    "CreateDeviceRequest": {
+      "properties": {
+        "carrier": {
+          "type": "string"
+        },
+        "manufacturer": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "oui": {
+          "type": "string"
+        },
+        "product_class": {
+          "type": "string"
+        },
+        "serial_number": {
+          "type": "string"
+        },
+        "technology": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "serial_number",
+        "oui"
+      ],
+      "type": "object"
+    },
+    "Device": {
+      "properties": {
+        "carrier": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "hardware_version": {
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ip_address": {
+          "type": "string"
+        },
+        "last_contact": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "manufacturer": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "oui": {
+          "type": "string"
+        },
+        "product_class": {
+          "type": "string"
+        },
+        "serial_number": {
+          "type": "string"
+        },
+        "software_version": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "online",
+            "offline",
+            "provisioning",
+            "error"
+          ],
+          "type": "string"
+        },
+        "technology": {
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

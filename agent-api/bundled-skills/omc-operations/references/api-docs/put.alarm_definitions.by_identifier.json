@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "put.alarm_definitions.by_identifier",
+  "method": "PUT",
+  "path": "/api/v1/alarm-definitions/:identifier",
+  "handler": "github.com/omcgo/omcgo/internal/alarm/definition.(*Handler).Update-fm",
+  "category": "alarm-definitions",
+  "title": "alarm-definitions - 更新",
+  "summary": "alarm-definitions - 更新",
+  "description": "alarm-definitions：更新指定资源的完整配置 Handler: Update PUT /api/v1/alarm-definitions/:identifier",
+  "intents": [
+    "alarm-definitions - 更新",
+    "alarm-definitions：更新指定资源的完整配置 Handler: Update PUT /api/v1/alarm-definitions/:identifier",
+    "alarm-definitions",
+    "alarm definitions"
+  ],
+  "tags": [
+    "alarm-definitions"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": true,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：alarm-definitions - 更新",
+  "pathParams": [
+    {
+      "name": "identifier",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :identifier"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "updateReq",
+      "properties": {
+        "cn_name": {
+          "nullable": true,
+          "type": "string"
+        },
+        "cn_probable_cause": {
+          "nullable": true,
+          "type": "string"
+        },
+        "description": {
+          "nullable": true,
+          "type": "string"
+        },
+        "en_name": {
+          "nullable": true,
+          "type": "string"
+        },
+        "en_probable_cause": {
+          "nullable": true,
+          "type": "string"
+        },
+        "event_type": {
+          "goType": "int",
+          "nullable": true,
+          "type": "integer"
+        },
+        "is_show": {
+          "nullable": true,
+          "type": "boolean"
+        },
+        "ne_type": {
+          "nullable": true,
+          "type": "string"
+        },
+        "severity_code": {
+          "goType": "int",
+          "nullable": true,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "1.0",
+  "category": "config",
+  "title": "配置",
+  "operations": [
+    {
+      "operationId": "delete.config.baselines.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/config/baselines/:id",
+      "title": "配置 - 删除",
+      "summary": "配置 - 删除",
+      "description": "配置：删除指定资源记录 Handler: DeleteBaseline handles DELETE /api/v1/config/baselines/:id.",
+      "intents": [
+        "配置 - 删除",
+        "配置：删除指定资源记录 Handler: DeleteBaseline handles DELETE /api/v1/config/baselines/:id.",
+        "config",
+        "配置",
+        "baselines"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.config.baselines.by_id.json"
+    },
+    {
+      "operationId": "get.config.baselines",
+      "method": "GET",
+      "path": "/api/v1/config/baselines",
+      "title": "配置 - 列表",
+      "summary": "配置 - 列表",
+      "description": "配置：按筛选条件查询资源列表 Handler: ListBaselines handles GET /api/v1/config/baselines.",
+      "intents": [
+        "配置 - 列表",
+        "配置：按筛选条件查询资源列表 Handler: ListBaselines handles GET /api/v1/config/baselines.",
+        "config",
+        "配置",
+        "baselines"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.config.baselines.json"
+    },
+    {
+      "operationId": "get.config.baselines.by_id",
+      "method": "GET",
+      "path": "/api/v1/config/baselines/:id",
+      "title": "配置 - 详情",
+      "summary": "配置 - 详情",
+      "description": "配置：查询指定资源的详细信息 Handler: GetBaseline handles GET /api/v1/config/baselines/:id.",
+      "intents": [
+        "配置 - 详情",
+        "配置：查询指定资源的详细信息 Handler: GetBaseline handles GET /api/v1/config/baselines/:id.",
+        "config",
+        "配置",
+        "baselines"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.config.baselines.by_id.json"
+    },
+    {
+      "operationId": "get.config.neighbors",
+      "method": "GET",
+      "path": "/api/v1/config/neighbors",
+      "title": "配置 - 列表",
+      "summary": "配置 - 列表",
+      "description": "配置：按筛选条件查询资源列表 Handler: ListNeighbors handles GET /api/v1/config/neighbors.",
+      "intents": [
+        "配置 - 列表",
+        "配置：按筛选条件查询资源列表 Handler: ListNeighbors handles GET /api/v1/config/neighbors.",
+        "config",
+        "配置",
+        "neighbors"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.config.neighbors.json"
+    },
+    {
+      "operationId": "get.config.sync.status.by_deviceId",
+      "method": "GET",
+      "path": "/api/v1/config/sync/status/:deviceId",
+      "title": "Get configuration sync status for a device",
+      "summary": "Get configuration sync status for a device",
+      "description": "配置：查询指定资源的详细信息 Handler: GetSyncStatus returns the number of pending commands for a device.",
+      "intents": [
+        "配置 - 详情",
+        "Get configuration sync status for a device",
+        "配置：查询指定资源的详细信息 Handler: GetSyncStatus returns the number of pending commands for a device.",
+        "config",
+        "配置",
+        "sync",
+        "status"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.config.sync.status.by_deviceId.json"
+    },
+    {
+      "operationId": "get.config.tasks",
+      "method": "GET",
+      "path": "/api/v1/config/tasks",
+      "title": "配置 - 列表",
+      "summary": "配置 - 列表",
+      "description": "配置：按筛选条件查询资源列表 Handler: ListConfigTasks handles GET /api/v1/config/tasks.",
+      "intents": [
+        "配置 - 列表",
+        "配置：按筛选条件查询资源列表 Handler: ListConfigTasks handles GET /api/v1/config/tasks.",
+        "config",
+        "配置",
+        "tasks"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.config.tasks.json"
+    },
+    {
+      "operationId": "post.config.baselines",
+      "method": "POST",
+      "path": "/api/v1/config/baselines",
+      "title": "配置 - 创建",
+      "summary": "配置 - 创建",
+      "description": "配置：创建新的资源记录 Handler: CreateBaseline handles POST /api/v1/config/baselines.",
+      "intents": [
+        "配置 - 创建",
+        "配置：创建新的资源记录 Handler: CreateBaseline handles POST /api/v1/config/baselines.",
+        "config",
+        "配置",
+        "baselines"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.config.baselines.json"
+    },
+    {
+      "operationId": "post.config.sync.pull.by_deviceId",
+      "method": "POST",
+      "path": "/api/v1/config/sync/pull/:deviceId",
+      "title": "Pull configuration from a device",
+      "summary": "Pull configuration from a device",
+      "description": "配置：从设备或外部系统拉取数据 Handler: PullConfig queues GetParameterValues commands for a device.\n\n走 GPVBatcher：按统一 batchSize 拆批，commandKey 用 \"sync-gpv-{sn}-{i}\" 前缀，\n即可享受 ACS handler.tryRecoverGPVFault 的 Fault 自愈循环（剔除坏 path 续查）。",
+      "intents": [
+        "配置 - 拉取",
+        "Pull configuration from a device",
+        "配置：从设备或外部系统拉取数据 Handler: PullConfig queues GetParameterValues commands for a device.\n\n走 GPVBatcher：按统一 batchSize 拆批，commandKey 用 \"sync-gpv-{sn}-{i}\" 前缀，\n即可享受 ACS handler.tryRecoverGPVFault 的 Fault 自愈循环（剔除坏 path 续查）。",
+        "config",
+        "配置",
+        "sync",
+        "pull"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.config.sync.pull.by_deviceId.json"
+    },
+    {
+      "operationId": "post.config.sync.push.by_deviceId",
+      "method": "POST",
+      "path": "/api/v1/config/sync/push/:deviceId",
+      "title": "Push configuration to a device",
+      "summary": "Push configuration to a device",
+      "description": "配置：向设备或外部系统推送数据 Handler: PushConfig queues SetParameterValues commands for a device.",
+      "intents": [
+        "配置 - 推送",
+        "Push configuration to a device",
+        "配置：向设备或外部系统推送数据 Handler: PushConfig queues SetParameterValues commands for a device.",
+        "config",
+        "配置",
+        "sync",
+        "push"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.config.sync.push.by_deviceId.json"
+    },
+    {
+      "operationId": "post.config.tasks",
+      "method": "POST",
+      "path": "/api/v1/config/tasks",
+      "title": "配置 - 创建",
+      "summary": "配置 - 创建",
+      "description": "配置：创建新的资源记录 Handler: CreateConfigTask handles POST /api/v1/config/tasks.",
+      "intents": [
+        "配置 - 创建",
+        "配置：创建新的资源记录 Handler: CreateConfigTask handles POST /api/v1/config/tasks.",
+        "config",
+        "配置",
+        "tasks"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.config.tasks.json"
+    },
+    {
+      "operationId": "put.config.baselines.by_id",
+      "method": "PUT",
+      "path": "/api/v1/config/baselines/:id",
+      "title": "配置 - 更新",
+      "summary": "配置 - 更新",
+      "description": "更新指定资源的完整配置 Handler: UpdateBaseline handles PUT /api/v1/config/baselines/:id.",
+      "intents": [
+        "配置 - 更新",
+        "更新指定资源的完整配置 Handler: UpdateBaseline handles PUT /api/v1/config/baselines/:id.",
+        "config",
+        "配置",
+        "baselines"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.config.baselines.by_id.json"
+    }
+  ]
+}

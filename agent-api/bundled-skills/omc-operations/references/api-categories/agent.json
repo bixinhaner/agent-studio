@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1.0",
+  "category": "agent",
+  "title": "agent",
+  "operations": [
+    {
+      "operationId": "get.agent.config",
+      "method": "GET",
+      "path": "/api/v1/agent/config",
+      "title": "agent - 配置",
+      "summary": "agent - 配置",
+      "description": "agent：查询或维护配置数据",
+      "intents": [
+        "agent - 配置",
+        "agent：查询或维护配置数据",
+        "agent",
+        "config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.config.json"
+    },
+    {
+      "operationId": "get.agent.conversation",
+      "method": "GET",
+      "path": "/api/v1/agent/conversation",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "conversation"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.conversation.json"
+    },
+    {
+      "operationId": "get.agent.handbook.routes",
+      "method": "GET",
+      "path": "/api/v1/agent/handbook/routes",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent",
+        "handbook",
+        "routes"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.handbook.routes.json"
+    },
+    {
+      "operationId": "get.agent.health",
+      "method": "GET",
+      "path": "/api/v1/agent/health",
+      "title": "agent - 健康检查",
+      "summary": "agent - 健康检查",
+      "description": "agent：查询服务健康状态",
+      "intents": [
+        "agent - 健康检查",
+        "agent：查询服务健康状态",
+        "agent",
+        "health"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.health.json"
+    },
+    {
+      "operationId": "get.agent.visibility",
+      "method": "GET",
+      "path": "/api/v1/agent/visibility",
+      "title": "agent - 列表",
+      "summary": "agent - 列表",
+      "description": "agent：按筛选条件查询资源列表",
+      "intents": [
+        "agent - 列表",
+        "agent：按筛选条件查询资源列表",
+        "agent"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.agent.visibility.json"
+    },
+    {
+      "operationId": "post.agent.chat.stream",
+      "method": "POST",
+      "path": "/api/v1/agent/chat/stream",
+      "title": "agent - SSE 推送流",
+      "summary": "agent - SSE 推送流",
+      "description": "agent：建立实时事件推送连接",
+      "intents": [
+        "agent - SSE 推送流",
+        "agent：建立实时事件推送连接",
+        "agent",
+        "chat",
+        "stream"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.chat.stream.json"
+    },
+    {
+      "operationId": "post.agent.conversation",
+      "method": "POST",
+      "path": "/api/v1/agent/conversation",
+      "title": "agent - 创建",
+      "summary": "agent - 创建",
+      "description": "agent：创建新的资源记录",
+      "intents": [
+        "agent - 创建",
+        "agent：创建新的资源记录",
+        "agent",
+        "conversation"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.agent.conversation.json"
+    }
+  ]
+}

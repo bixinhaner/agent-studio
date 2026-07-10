@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.mml.tasks.by_id.export",
+  "method": "POST",
+  "path": "/api/v1/mml/tasks/:id/export",
+  "handler": "github.com/omcgo/omcgo/internal/mml.(*Handler).ExportTaskResults-fm",
+  "category": "mml",
+  "title": "MML - 导出",
+  "summary": "MML - 导出",
+  "description": "MML：按条件导出业务数据 Handler: ExportTaskResults handles POST /api/v1/mml/tasks/:id/export —— 生成全设备汇总 CSV\n落 MinIO（mml-results/ 目录）、地址记入 mml_tasks.export_object，返回预签名下载 URL。",
+  "intents": [
+    "MML - 导出",
+    "MML：按条件导出业务数据 Handler: ExportTaskResults handles POST /api/v1/mml/tasks/:id/export —— 生成全设备汇总 CSV\n落 MinIO（mml-results/ 目录）、地址记入 mml_tasks.export_object，返回预签名下载 URL。",
+    "mml",
+    "tasks",
+    "export"
+  ],
+  "tags": [
+    "mml",
+    "tasks",
+    "export"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：MML - 导出",
+  "pathParams": [
+    {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :id"
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "path-only",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

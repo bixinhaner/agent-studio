@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1.0",
+  "category": "device-abnormal-reboots",
+  "title": "device-abnormal-reboots",
+  "operations": [
+    {
+      "operationId": "delete.device_abnormal_reboots.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/device-abnormal-reboots/:id",
+      "title": "device-abnormal-reboots - 删除",
+      "summary": "device-abnormal-reboots - 删除",
+      "description": "device-abnormal-reboots：删除指定资源记录 Handler: DeleteAbnormalReboot godoc\n@Summary  删除异常重启记录（软删 + 清理 MinIO 文件）\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [delete]",
+      "intents": [
+        "device-abnormal-reboots - 删除",
+        "device-abnormal-reboots：删除指定资源记录 Handler: DeleteAbnormalReboot godoc\n@Summary  删除异常重启记录（软删 + 清理 MinIO 文件）\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [delete]",
+        "device-abnormal-reboots",
+        "device abnormal reboots"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.device_abnormal_reboots.by_id.json"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots",
+      "title": "device-abnormal-reboots - 列表",
+      "summary": "device-abnormal-reboots - 列表",
+      "description": "device-abnormal-reboots：按筛选条件查询资源列表 Handler: ListAbnormalReboots godoc\n@Summary  查询异常重启记录列表\n@Tags     device-abnormal-reboots\n@Produce  json\n@Param    device_id      query  string  false  \"设备 ID（UUID）\"\n@Param    device_sn      query  string  false  \"设备 SN\"\n@Param    record_status  query  string  false  \"记录状态: detected | file_received | collection_failed\"\n@Param    device_type    query  string  false  \"设备类型: eNB | gNB\"\n@Param    start_time     query  string  false  \"起始时间（RFC3339）\"\n@Param    end_time       query  string  false  \"结束时间（RFC3339）\"\n@Param    page           query  int     false  \"页码，默认 1\"\n@Param    page_size      query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots [get]",
+      "intents": [
+        "device-abnormal-reboots - 列表",
+        "device-abnormal-reboots：按筛选条件查询资源列表 Handler: ListAbnormalReboots godoc\n@Summary  查询异常重启记录列表\n@Tags     device-abnormal-reboots\n@Produce  json\n@Param    device_id      query  string  false  \"设备 ID（UUID）\"\n@Param    device_sn      query  string  false  \"设备 SN\"\n@Param    record_status  query  string  false  \"记录状态: detected | file_received | collection_failed\"\n@Param    device_type    query  string  false  \"设备类型: eNB | gNB\"\n@Param    start_time     query  string  false  \"起始时间（RFC3339）\"\n@Param    end_time       query  string  false  \"结束时间（RFC3339）\"\n@Param    page           query  int     false  \"页码，默认 1\"\n@Param    page_size      query  int     false  \"每页数量，默认 20\"\n@Success  200 {object} map[string]interface{}\n@Router   /device-abnormal-reboots [get]",
+        "device-abnormal-reboots",
+        "device abnormal reboots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_abnormal_reboots.json"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots.by_id",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id",
+      "title": "device-abnormal-reboots - 详情",
+      "summary": "device-abnormal-reboots - 详情",
+      "description": "device-abnormal-reboots：查询指定资源的详细信息 Handler: GetAbnormalReboot godoc\n@Summary  获取异常重启记录详情\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Failure  404 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [get]",
+      "intents": [
+        "device-abnormal-reboots - 详情",
+        "device-abnormal-reboots：查询指定资源的详细信息 Handler: GetAbnormalReboot godoc\n@Summary  获取异常重启记录详情\n@Tags     device-abnormal-reboots\n@Param    id  path  string  true  \"记录 ID（UUID）\"\n@Success  200 {object} map[string]interface{}\n@Failure  404 {object} map[string]interface{}\n@Router   /device-abnormal-reboots/{id} [get]",
+        "device-abnormal-reboots",
+        "device abnormal reboots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_abnormal_reboots.by_id.json"
+    },
+    {
+      "operationId": "get.device_abnormal_reboots.by_id.download",
+      "method": "GET",
+      "path": "/api/v1/device-abnormal-reboots/:id/download",
+      "title": "device-abnormal-reboots - 下载",
+      "summary": "device-abnormal-reboots - 下载",
+      "description": "device-abnormal-reboots：下载文件或导出结果 Handler: DownloadAbnormalReboot godoc\n@Summary  下载异常重启日志文件（仅 file_received 状态有文件）\n@Tags     device-abnormal-reboots\n@Param    id        path   string  true   \"记录 ID（UUID）\"\n@Param    redirect  query  string  false  \"传 true 时 302 跳转到下载地址\"\n@Success  200 {object} map[string]interface{}\n@Failure  409 {object} map[string]interface{} \"记录处于 detected 状态，尚无文件\"\n@Router   /device-abnormal-reboots/{id}/download [get]",
+      "intents": [
+        "device-abnormal-reboots - 下载",
+        "device-abnormal-reboots：下载文件或导出结果 Handler: DownloadAbnormalReboot godoc\n@Summary  下载异常重启日志文件（仅 file_received 状态有文件）\n@Tags     device-abnormal-reboots\n@Param    id        path   string  true   \"记录 ID（UUID）\"\n@Param    redirect  query  string  false  \"传 true 时 302 跳转到下载地址\"\n@Success  200 {object} map[string]interface{}\n@Failure  409 {object} map[string]interface{} \"记录处于 detected 状态，尚无文件\"\n@Router   /device-abnormal-reboots/{id}/download [get]",
+        "device-abnormal-reboots",
+        "download",
+        "device abnormal reboots"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.device_abnormal_reboots.by_id.download.json"
+    }
+  ]
+}

@@ -1,0 +1,398 @@
+{
+  "schemaVersion": "1.0",
+  "catalogVersion": "2cfad43927ded505",
+  "totalOperations": 686,
+  "searchIndex": "api-index.jsonl",
+  "categories": [
+    {
+      "id": "agent",
+      "title": "agent",
+      "count": 7,
+      "file": "api-categories/agent.json"
+    },
+    {
+      "id": "agent-config",
+      "title": "agent-config",
+      "count": 4,
+      "file": "api-categories/agent-config.json"
+    },
+    {
+      "id": "alarm-definitions",
+      "title": "alarm-definitions",
+      "count": 10,
+      "file": "api-categories/alarm-definitions.json"
+    },
+    {
+      "id": "alarm-severity-levels",
+      "title": "alarm-severity-levels",
+      "count": 1,
+      "file": "api-categories/alarm-severity-levels.json"
+    },
+    {
+      "id": "alarms",
+      "title": "告警",
+      "count": 21,
+      "file": "api-categories/alarms.json"
+    },
+    {
+      "id": "alerts",
+      "title": "alerts",
+      "count": 1,
+      "file": "api-categories/alerts.json"
+    },
+    {
+      "id": "api-endpoints",
+      "title": "API 端点",
+      "count": 7,
+      "file": "api-categories/api-endpoints.json"
+    },
+    {
+      "id": "api-keys",
+      "title": "API 密钥",
+      "count": 3,
+      "file": "api-categories/api-keys.json"
+    },
+    {
+      "id": "audit-logs",
+      "title": "audit-logs",
+      "count": 1,
+      "file": "api-categories/audit-logs.json"
+    },
+    {
+      "id": "auth",
+      "title": "认证",
+      "count": 8,
+      "file": "api-categories/auth.json"
+    },
+    {
+      "id": "backup",
+      "title": "备份",
+      "count": 39,
+      "file": "api-categories/backup.json"
+    },
+    {
+      "id": "cell",
+      "title": "小区",
+      "count": 3,
+      "file": "api-categories/cell.json"
+    },
+    {
+      "id": "column-configs",
+      "title": "列配置",
+      "count": 2,
+      "file": "api-categories/column-configs.json"
+    },
+    {
+      "id": "config",
+      "title": "配置",
+      "count": 11,
+      "file": "api-categories/config.json"
+    },
+    {
+      "id": "dashboard",
+      "title": "仪表盘",
+      "count": 16,
+      "file": "api-categories/dashboard.json"
+    },
+    {
+      "id": "dead-letters",
+      "title": "死信队列",
+      "count": 4,
+      "file": "api-categories/dead-letters.json"
+    },
+    {
+      "id": "device-abnormal-reboots",
+      "title": "device-abnormal-reboots",
+      "count": 4,
+      "file": "api-categories/device-abnormal-reboots.json"
+    },
+    {
+      "id": "device-groups",
+      "title": "设备分组",
+      "count": 12,
+      "file": "api-categories/device-groups.json"
+    },
+    {
+      "id": "device-registrations",
+      "title": "设备预登记",
+      "count": 3,
+      "file": "api-categories/device-registrations.json"
+    },
+    {
+      "id": "devices",
+      "title": "设备",
+      "count": 49,
+      "file": "api-categories/devices.json"
+    },
+    {
+      "id": "dictload",
+      "title": "dictload",
+      "count": 1,
+      "file": "api-categories/dictload.json"
+    },
+    {
+      "id": "enabled-indicators",
+      "title": "enabled-indicators",
+      "count": 2,
+      "file": "api-categories/enabled-indicators.json"
+    },
+    {
+      "id": "event-logs",
+      "title": "event-logs",
+      "count": 3,
+      "file": "api-categories/event-logs.json"
+    },
+    {
+      "id": "events",
+      "title": "事件",
+      "count": 1,
+      "file": "api-categories/events.json"
+    },
+    {
+      "id": "files",
+      "title": "文件",
+      "count": 6,
+      "file": "api-categories/files.json"
+    },
+    {
+      "id": "firmware",
+      "title": "firmware",
+      "count": 8,
+      "file": "api-categories/firmware.json"
+    },
+    {
+      "id": "gnb",
+      "title": "gNB",
+      "count": 12,
+      "file": "api-categories/gnb.json"
+    },
+    {
+      "id": "groups",
+      "title": "groups",
+      "count": 10,
+      "file": "api-categories/groups.json"
+    },
+    {
+      "id": "indicator-groups",
+      "title": "indicator-groups",
+      "count": 4,
+      "file": "api-categories/indicator-groups.json"
+    },
+    {
+      "id": "indicators",
+      "title": "indicators",
+      "count": 16,
+      "file": "api-categories/indicators.json"
+    },
+    {
+      "id": "interop",
+      "title": "互操作",
+      "count": 5,
+      "file": "api-categories/interop.json"
+    },
+    {
+      "id": "logs",
+      "title": "日志",
+      "count": 5,
+      "file": "api-categories/logs.json"
+    },
+    {
+      "id": "menus",
+      "title": "菜单",
+      "count": 7,
+      "file": "api-categories/menus.json"
+    },
+    {
+      "id": "mml",
+      "title": "MML",
+      "count": 62,
+      "file": "api-categories/mml.json"
+    },
+    {
+      "id": "mr",
+      "title": "测量报告 MR",
+      "count": 20,
+      "file": "api-categories/mr.json"
+    },
+    {
+      "id": "northbound",
+      "title": "northbound",
+      "count": 15,
+      "file": "api-categories/northbound.json"
+    },
+    {
+      "id": "notifications",
+      "title": "通知",
+      "count": 14,
+      "file": "api-categories/notifications.json"
+    },
+    {
+      "id": "ops",
+      "title": "运维任务",
+      "count": 40,
+      "file": "api-categories/ops.json"
+    },
+    {
+      "id": "param-models",
+      "title": "param-models",
+      "count": 16,
+      "file": "api-categories/param-models.json"
+    },
+    {
+      "id": "permissions",
+      "title": "permissions",
+      "count": 1,
+      "file": "api-categories/permissions.json"
+    },
+    {
+      "id": "pm",
+      "title": "性能 PM",
+      "count": 59,
+      "file": "api-categories/pm.json"
+    },
+    {
+      "id": "products",
+      "title": "products",
+      "count": 22,
+      "file": "api-categories/products.json"
+    },
+    {
+      "id": "provisioning",
+      "title": "provisioning",
+      "count": 4,
+      "file": "api-categories/provisioning.json"
+    },
+    {
+      "id": "public",
+      "title": "public",
+      "count": 2,
+      "file": "api-categories/public.json"
+    },
+    {
+      "id": "quicksettings",
+      "title": "quicksettings",
+      "count": 1,
+      "file": "api-categories/quicksettings.json"
+    },
+    {
+      "id": "reboot-records",
+      "title": "reboot-records",
+      "count": 2,
+      "file": "api-categories/reboot-records.json"
+    },
+    {
+      "id": "reports",
+      "title": "报表",
+      "count": 9,
+      "file": "api-categories/reports.json"
+    },
+    {
+      "id": "roles",
+      "title": "roles",
+      "count": 14,
+      "file": "api-categories/roles.json"
+    },
+    {
+      "id": "sites",
+      "title": "站点",
+      "count": 3,
+      "file": "api-categories/sites.json"
+    },
+    {
+      "id": "station-logs",
+      "title": "station-logs",
+      "count": 3,
+      "file": "api-categories/station-logs.json"
+    },
+    {
+      "id": "sysConfig",
+      "title": "系统配置",
+      "count": 6,
+      "file": "api-categories/sysConfig.json"
+    },
+    {
+      "id": "sysDictionary",
+      "title": "字典",
+      "count": 9,
+      "file": "api-categories/sysDictionary.json"
+    },
+    {
+      "id": "sysDictionaryDetail",
+      "title": "字典明细",
+      "count": 5,
+      "file": "api-categories/sysDictionaryDetail.json"
+    },
+    {
+      "id": "system",
+      "title": "system",
+      "count": 1,
+      "file": "api-categories/system.json"
+    },
+    {
+      "id": "system-license",
+      "title": "system-license",
+      "count": 3,
+      "file": "api-categories/system-license.json"
+    },
+    {
+      "id": "task",
+      "title": "task",
+      "count": 8,
+      "file": "api-categories/task.json"
+    },
+    {
+      "id": "tasks",
+      "title": "任务",
+      "count": 1,
+      "file": "api-categories/tasks.json"
+    },
+    {
+      "id": "templates",
+      "title": "模板",
+      "count": 6,
+      "file": "api-categories/templates.json"
+    },
+    {
+      "id": "topology",
+      "title": "拓扑",
+      "count": 15,
+      "file": "api-categories/topology.json"
+    },
+    {
+      "id": "trace",
+      "title": "trace",
+      "count": 11,
+      "file": "api-categories/trace.json"
+    },
+    {
+      "id": "ufte",
+      "title": "ufte",
+      "count": 16,
+      "file": "api-categories/ufte.json"
+    },
+    {
+      "id": "upgrade-sub-tasks",
+      "title": "升级子任务",
+      "count": 2,
+      "file": "api-categories/upgrade-sub-tasks.json"
+    },
+    {
+      "id": "upgrade-tasks",
+      "title": "升级任务",
+      "count": 14,
+      "file": "api-categories/upgrade-tasks.json"
+    },
+    {
+      "id": "uploads",
+      "title": "uploads",
+      "count": 1,
+      "file": "api-categories/uploads.json"
+    },
+    {
+      "id": "users",
+      "title": "users",
+      "count": 15,
+      "file": "api-categories/users.json"
+    }
+  ]
+}

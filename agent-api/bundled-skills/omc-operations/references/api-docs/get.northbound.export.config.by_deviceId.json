@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "get.northbound.export.config.by_deviceId",
+  "method": "GET",
+  "path": "/api/v1/northbound/export/config/:deviceId",
+  "handler": "github.com/omcgo/omcgo/internal/northbound.(*ConfigHandler).ExportConfig-fm",
+  "category": "northbound",
+  "title": "Export device configuration",
+  "summary": "Export device configuration",
+  "description": "北向接口：查询或维护指定对象的导出配置详情数据 Handler: ExportConfig handles config snapshot export for a specific device.",
+  "intents": [
+    "北向接口 - 导出配置详情",
+    "Export device configuration",
+    "北向接口：查询或维护指定对象的导出配置详情数据 Handler: ExportConfig handles config snapshot export for a specific device.",
+    "northbound",
+    "北向接口",
+    "export",
+    "config"
+  ],
+  "tags": [
+    "northbound",
+    "北向接口",
+    "export",
+    "config"
+  ],
+  "risk": "read",
+  "confirmationRequired": false,
+  "idempotent": true,
+  "sideEffects": "无；该操作只读取当前用户可见数据。",
+  "pathParams": [
+    {
+      "name": "deviceId",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "替换 URL 路径中的 :deviceId",
+      "schema": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  ],
+  "queryParams": [],
+  "formParams": [],
+  "responses": {
+    "200": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        }
+      },
+      "description": "Device configuration export"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    }
+  },
+  "contractCoverage": {
+    "request": "openapi",
+    "response": "openapi"
+  },
+  "emptyResult": "空数组或 total=0 表示当前用户权限和过滤条件下没有可见记录；除非接口另有明确语义，不要改用其他接口猜测数据。",
+  "sources": [
+    "runtime-route",
+    "openapi",
+    "go-handler"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "category": "enabled-indicators",
+  "title": "enabled-indicators",
+  "operations": [
+    {
+      "operationId": "get.enabled_indicators",
+      "method": "GET",
+      "path": "/api/v1/enabled-indicators",
+      "title": "enabled-indicators - 列表",
+      "summary": "enabled-indicators - 列表",
+      "description": "enabled-indicators：按筛选条件查询资源列表",
+      "intents": [
+        "enabled-indicators - 列表",
+        "enabled-indicators：按筛选条件查询资源列表",
+        "enabled-indicators",
+        "enabled indicators"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.enabled_indicators.json"
+    },
+    {
+      "operationId": "put.enabled_indicators",
+      "method": "PUT",
+      "path": "/api/v1/enabled-indicators",
+      "title": "enabled-indicators - 批量更新",
+      "summary": "enabled-indicators - 批量更新",
+      "description": "enabled-indicators：批量更新资源数据",
+      "intents": [
+        "enabled-indicators - 批量更新",
+        "enabled-indicators：批量更新资源数据",
+        "enabled-indicators",
+        "enabled indicators"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.enabled_indicators.json"
+    }
+  ]
+}

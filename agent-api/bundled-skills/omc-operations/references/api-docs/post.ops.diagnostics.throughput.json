@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.ops.diagnostics.throughput",
+  "method": "POST",
+  "path": "/api/v1/ops/diagnostics/throughput",
+  "handler": "github.com/omcgo/omcgo/internal/ops.(*ExtHandler).DiagThroughput-fm",
+  "category": "ops",
+  "title": "运维任务 - 创建",
+  "summary": "运维任务 - 创建",
+  "description": "运维任务：创建新的资源记录",
+  "intents": [
+    "运维任务 - 创建",
+    "运维任务：创建新的资源记录",
+    "ops",
+    "运维任务",
+    "diagnostics",
+    "throughput"
+  ],
+  "tags": [
+    "ops",
+    "运维任务",
+    "diagnostics",
+    "throughput"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：运维任务 - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "DiagThroughputRequest",
+      "properties": {
+        "device_sn": {
+          "type": "string"
+        },
+        "direction": {
+          "description": "download / upload",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_sn",
+        "url"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

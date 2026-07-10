@@ -1,0 +1,286 @@
+{
+  "schemaVersion": "1.0",
+  "category": "users",
+  "title": "users",
+  "operations": [
+    {
+      "operationId": "delete.admin.users.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id",
+      "title": "Delete a user",
+      "summary": "Delete a user",
+      "description": "用户：删除指定资源记录",
+      "intents": [
+        "用户 - 删除",
+        "Delete a user",
+        "用户：删除指定资源记录",
+        "users",
+        "用户",
+        "admin"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.users.by_id.json"
+    },
+    {
+      "operationId": "delete.admin.users.by_id.roles.by_roleId",
+      "method": "DELETE",
+      "path": "/api/v1/admin/users/:id/roles/:roleId",
+      "title": "Remove a role from a user",
+      "summary": "Remove a role from a user",
+      "description": "用户：删除指定资源记录",
+      "intents": [
+        "用户 - 删除",
+        "Remove a role from a user",
+        "用户：删除指定资源记录",
+        "users",
+        "用户",
+        "admin",
+        "roles"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.admin.users.by_id.roles.by_roleId.json"
+    },
+    {
+      "operationId": "get.admin.users",
+      "method": "GET",
+      "path": "/api/v1/admin/users",
+      "title": "List users",
+      "summary": "List users",
+      "description": "用户：按筛选条件查询资源列表",
+      "intents": [
+        "用户 - 列表",
+        "List users",
+        "用户：按筛选条件查询资源列表",
+        "users",
+        "用户",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.users.json"
+    },
+    {
+      "operationId": "get.admin.users.by_id",
+      "method": "GET",
+      "path": "/api/v1/admin/users/:id",
+      "title": "Get user by ID",
+      "summary": "Get user by ID",
+      "description": "用户：查询指定资源的详细信息",
+      "intents": [
+        "用户 - 详情",
+        "Get user by ID",
+        "用户：查询指定资源的详细信息",
+        "users",
+        "用户",
+        "admin"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.users.by_id.json"
+    },
+    {
+      "operationId": "get.admin.users.import.template",
+      "method": "GET",
+      "path": "/api/v1/admin/users/import/template",
+      "title": "用户 - 模板",
+      "summary": "用户 - 模板",
+      "description": "用户：查询或维护模板数据 Handler: DownloadImportTemplate 返回一份 .xlsx 模板供前端下载。\n模板包含表头 + 一行示例 + 字段说明 sheet。",
+      "intents": [
+        "用户 - 模板",
+        "用户：查询或维护模板数据 Handler: DownloadImportTemplate 返回一份 .xlsx 模板供前端下载。\n模板包含表头 + 一行示例 + 字段说明 sheet。",
+        "users",
+        "用户",
+        "admin",
+        "import",
+        "template"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.users.import.template.json"
+    },
+    {
+      "operationId": "post.admin.users",
+      "method": "POST",
+      "path": "/api/v1/admin/users",
+      "title": "Create a user",
+      "summary": "Create a user",
+      "description": "用户：创建新的资源记录",
+      "intents": [
+        "用户 - 创建",
+        "Create a user",
+        "用户：创建新的资源记录",
+        "users",
+        "用户",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.json"
+    },
+    {
+      "operationId": "post.admin.users.assign_roles",
+      "method": "POST",
+      "path": "/api/v1/admin/users/assign-roles",
+      "title": "用户 - assignroles",
+      "summary": "用户 - assignroles",
+      "description": "用户：处理assignroles相关数据 Handler: BatchAssignRoles 把请求体里的 RoleIDs 整体替换为每个 UserIDs 当前的角色集。",
+      "intents": [
+        "用户 - assignroles",
+        "用户：处理assignroles相关数据 Handler: BatchAssignRoles 把请求体里的 RoleIDs 整体替换为每个 UserIDs 当前的角色集。",
+        "users",
+        "用户",
+        "admin",
+        "assign-roles",
+        "assign roles"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.assign_roles.json"
+    },
+    {
+      "operationId": "post.admin.users.by_id.copy",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/copy",
+      "title": "用户 - 复制",
+      "summary": "用户 - 复制",
+      "description": "用户：复制现有资源或配置 Handler: CopyUser 复制源用户为新账号；返回新用户对象 + 临时密码（仅这次响应可见）。",
+      "intents": [
+        "用户 - 复制",
+        "用户：复制现有资源或配置 Handler: CopyUser 复制源用户为新账号；返回新用户对象 + 临时密码（仅这次响应可见）。",
+        "users",
+        "用户",
+        "admin",
+        "copy"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.by_id.copy.json"
+    },
+    {
+      "operationId": "post.admin.users.by_id.lock",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/lock",
+      "title": "Lock a user account",
+      "summary": "Lock a user account",
+      "description": "用户：锁定指定资源或账号",
+      "intents": [
+        "用户 - 锁定",
+        "Lock a user account",
+        "用户：锁定指定资源或账号",
+        "users",
+        "用户",
+        "admin",
+        "lock"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.by_id.lock.json"
+    },
+    {
+      "operationId": "post.admin.users.by_id.reset_password",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/reset-password",
+      "title": "Reset a user's password",
+      "summary": "Reset a user's password",
+      "description": "管理员重置指定用户密码",
+      "intents": [
+        "用户 - 重置密码",
+        "Reset a user's password",
+        "管理员重置指定用户密码",
+        "users",
+        "用户",
+        "admin",
+        "reset-password",
+        "reset password"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.by_id.reset_password.json"
+    },
+    {
+      "operationId": "post.admin.users.by_id.roles",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/roles",
+      "title": "Assign roles to a user",
+      "summary": "Assign roles to a user",
+      "description": "用户：执行 POST 请求对应的业务操作",
+      "intents": [
+        "用户 - POST",
+        "Assign roles to a user",
+        "用户：执行 POST 请求对应的业务操作",
+        "users",
+        "用户",
+        "admin",
+        "roles"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.by_id.roles.json"
+    },
+    {
+      "operationId": "post.admin.users.by_id.unlock",
+      "method": "POST",
+      "path": "/api/v1/admin/users/:id/unlock",
+      "title": "Unlock a user account",
+      "summary": "Unlock a user account",
+      "description": "用户：解除资源或账号锁定",
+      "intents": [
+        "用户 - 解锁",
+        "Unlock a user account",
+        "用户：解除资源或账号锁定",
+        "users",
+        "用户",
+        "admin",
+        "unlock"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.by_id.unlock.json"
+    },
+    {
+      "operationId": "post.admin.users.force_logout",
+      "method": "POST",
+      "path": "/api/v1/admin/users/force-logout",
+      "title": "用户 - 强制下线",
+      "summary": "用户 - 强制下线",
+      "description": "强制指定用户会话失效 Handler: ForceLogout 强制指定用户下线（批量）。所有受影响 token 在下一次中间件校验时失败。",
+      "intents": [
+        "用户 - 强制下线",
+        "强制指定用户会话失效 Handler: ForceLogout 强制指定用户下线（批量）。所有受影响 token 在下一次中间件校验时失败。",
+        "users",
+        "用户",
+        "admin",
+        "force-logout",
+        "force logout"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.force_logout.json"
+    },
+    {
+      "operationId": "post.admin.users.import",
+      "method": "POST",
+      "path": "/api/v1/admin/users/import",
+      "title": "用户 - 导入",
+      "summary": "用户 - 导入",
+      "description": "用户：导入外部文件或业务数据 Handler: ImportUsers 解析 multipart/form-data 中的 xlsx 文件，逐行调用 service.CreateUser。\n部分行失败不会阻塞其他行；最终返回汇总。",
+      "intents": [
+        "用户 - 导入",
+        "用户：导入外部文件或业务数据 Handler: ImportUsers 解析 multipart/form-data 中的 xlsx 文件，逐行调用 service.CreateUser。\n部分行失败不会阻塞其他行；最终返回汇总。",
+        "users",
+        "用户",
+        "admin",
+        "import"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.users.import.json"
+    },
+    {
+      "operationId": "put.admin.users.by_id",
+      "method": "PUT",
+      "path": "/api/v1/admin/users/:id",
+      "title": "Update a user",
+      "summary": "Update a user",
+      "description": "用户：更新指定资源的完整配置",
+      "intents": [
+        "用户 - 更新",
+        "Update a user",
+        "用户：更新指定资源的完整配置",
+        "users",
+        "用户",
+        "admin"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.admin.users.by_id.json"
+    }
+  ]
+}

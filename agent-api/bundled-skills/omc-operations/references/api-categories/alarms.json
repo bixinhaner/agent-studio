@@ -1,0 +1,390 @@
+{
+  "schemaVersion": "1.0",
+  "category": "alarms",
+  "title": "告警",
+  "operations": [
+    {
+      "operationId": "delete.alarms.alarm_filters.by_id",
+      "method": "DELETE",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "title": "告警 - alarmfilters删除",
+      "summary": "告警 - alarmfilters删除",
+      "description": "告警：查询或维护指定对象的alarmfilters删除数据",
+      "intents": [
+        "告警 - alarmfilters删除",
+        "告警：查询或维护指定对象的alarmfilters删除数据",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "alarm filters"
+      ],
+      "risk": "high",
+      "document": "api-docs/delete.alarms.alarm_filters.by_id.json"
+    },
+    {
+      "operationId": "get.alarms.active",
+      "method": "GET",
+      "path": "/api/v1/alarms/active",
+      "title": "List active alarms",
+      "summary": "List active alarms",
+      "description": "告警：按筛选条件查询资源列表",
+      "intents": [
+        "告警 - 列表",
+        "List active alarms",
+        "告警：按筛选条件查询资源列表",
+        "alarms",
+        "告警",
+        "active"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.active.json"
+    },
+    {
+      "operationId": "get.alarms.alarm_filters",
+      "method": "GET",
+      "path": "/api/v1/alarms/alarm-filters",
+      "title": "告警 - alarmfilters",
+      "summary": "告警 - alarmfilters",
+      "description": "告警：处理alarmfilters相关数据",
+      "intents": [
+        "告警 - alarmfilters",
+        "告警：处理alarmfilters相关数据",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "alarm filters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.alarm_filters.json"
+    },
+    {
+      "operationId": "get.alarms.alarm_filters.by_id",
+      "method": "GET",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "title": "告警 - alarmfilters详情",
+      "summary": "告警 - alarmfilters详情",
+      "description": "告警：查询或维护指定对象的alarmfilters详情数据",
+      "intents": [
+        "告警 - alarmfilters详情",
+        "告警：查询或维护指定对象的alarmfilters详情数据",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "alarm filters"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.alarm_filters.by_id.json"
+    },
+    {
+      "operationId": "get.alarms.by_id",
+      "method": "GET",
+      "path": "/api/v1/alarms/:id",
+      "title": "Get alarm by ID",
+      "summary": "Get alarm by ID",
+      "description": "告警：查询指定资源的详细信息",
+      "intents": [
+        "告警 - 详情",
+        "Get alarm by ID",
+        "告警：查询指定资源的详细信息",
+        "alarms",
+        "告警"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.by_id.json"
+    },
+    {
+      "operationId": "get.alarms.history",
+      "method": "GET",
+      "path": "/api/v1/alarms/history",
+      "title": "List alarm history",
+      "summary": "List alarm history",
+      "description": "告警：查询历史数据或操作记录",
+      "intents": [
+        "告警 - 历史记录",
+        "List alarm history",
+        "告警：查询历史数据或操作记录",
+        "alarms",
+        "告警",
+        "history"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.history.json"
+    },
+    {
+      "operationId": "get.alarms.history.statistics",
+      "method": "GET",
+      "path": "/api/v1/alarms/history/statistics",
+      "title": "告警 - 历史统计",
+      "summary": "告警 - 历史统计",
+      "description": "告警：查询统计汇总数据",
+      "intents": [
+        "告警 - 历史统计",
+        "告警：查询统计汇总数据",
+        "alarms",
+        "告警",
+        "history",
+        "statistics"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.history.statistics.json"
+    },
+    {
+      "operationId": "get.alarms.statistics",
+      "method": "GET",
+      "path": "/api/v1/alarms/statistics",
+      "title": "Get alarm statistics",
+      "summary": "Get alarm statistics",
+      "description": "告警：查询统计汇总数据",
+      "intents": [
+        "告警 - 统计",
+        "Get alarm statistics",
+        "告警：查询统计汇总数据",
+        "alarms",
+        "告警",
+        "statistics"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.alarms.statistics.json"
+    },
+    {
+      "operationId": "post.alarms.active.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/acknowledge",
+      "title": "告警 - 批量确认",
+      "summary": "告警 - 批量确认",
+      "description": "确认指定告警，记录处理状态 Handler: BatchAcknowledge handles POST /alarms/active/batch/acknowledge.",
+      "intents": [
+        "告警 - 批量确认",
+        "确认指定告警，记录处理状态 Handler: BatchAcknowledge handles POST /alarms/active/batch/acknowledge.",
+        "alarms",
+        "告警",
+        "active",
+        "batch",
+        "acknowledge"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.active.batch.acknowledge.json"
+    },
+    {
+      "operationId": "post.alarms.active.batch.clear",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/clear",
+      "title": "告警 - 批量清除",
+      "summary": "告警 - 批量清除",
+      "description": "告警：清除指定状态或记录 Handler: BatchClear handles POST /alarms/active/batch/clear.",
+      "intents": [
+        "告警 - 批量清除",
+        "告警：清除指定状态或记录 Handler: BatchClear handles POST /alarms/active/batch/clear.",
+        "alarms",
+        "告警",
+        "active",
+        "batch",
+        "clear"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.active.batch.clear.json"
+    },
+    {
+      "operationId": "post.alarms.active.batch.unacknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/batch/unacknowledge",
+      "title": "告警 - 批量取消确认",
+      "summary": "告警 - 批量取消确认",
+      "description": "撤销告警确认状态 Handler: BatchUnacknowledge handles POST /alarms/active/batch/unacknowledge.",
+      "intents": [
+        "告警 - 批量取消确认",
+        "撤销告警确认状态 Handler: BatchUnacknowledge handles POST /alarms/active/batch/unacknowledge.",
+        "alarms",
+        "告警",
+        "active",
+        "batch",
+        "unacknowledge"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.active.batch.unacknowledge.json"
+    },
+    {
+      "operationId": "post.alarms.active.by_id.read",
+      "method": "POST",
+      "path": "/api/v1/alarms/active/:id/read",
+      "title": "告警 - 标记已读",
+      "summary": "告警 - 标记已读",
+      "description": "告警：将通知或消息标记为已读 Handler: MarkRead handles POST /alarms/active/:id/read.",
+      "intents": [
+        "告警 - 标记已读",
+        "告警：将通知或消息标记为已读 Handler: MarkRead handles POST /alarms/active/:id/read.",
+        "alarms",
+        "告警",
+        "active",
+        "read"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.active.by_id.read.json"
+    },
+    {
+      "operationId": "post.alarms.alarm_filters",
+      "method": "POST",
+      "path": "/api/v1/alarms/alarm-filters",
+      "title": "告警 - alarmfilters",
+      "summary": "告警 - alarmfilters",
+      "description": "告警：处理alarmfilters相关数据",
+      "intents": [
+        "告警 - alarmfilters",
+        "告警：处理alarmfilters相关数据",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "alarm filters"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.alarm_filters.json"
+    },
+    {
+      "operationId": "post.alarms.alarm_filters.by_id.toggle",
+      "method": "POST",
+      "path": "/api/v1/alarms/alarm-filters/:id/toggle",
+      "title": "告警 - 切换启用状态",
+      "summary": "告警 - 切换启用状态",
+      "description": "告警：切换资源启用或禁用状态",
+      "intents": [
+        "告警 - 切换启用状态",
+        "告警：切换资源启用或禁用状态",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "toggle",
+        "alarm filters"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.alarm_filters.by_id.toggle.json"
+    },
+    {
+      "operationId": "post.alarms.by_id.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/:id/acknowledge",
+      "title": "Acknowledge an alarm",
+      "summary": "Acknowledge an alarm",
+      "description": "确认指定告警，记录处理状态",
+      "intents": [
+        "告警 - 确认",
+        "Acknowledge an alarm",
+        "确认指定告警，记录处理状态",
+        "alarms",
+        "告警",
+        "acknowledge"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.by_id.acknowledge.json"
+    },
+    {
+      "operationId": "post.alarms.by_id.clear",
+      "method": "POST",
+      "path": "/api/v1/alarms/:id/clear",
+      "title": "Clear an alarm",
+      "summary": "Clear an alarm",
+      "description": "告警：清除指定状态或记录",
+      "intents": [
+        "告警 - 清除",
+        "Clear an alarm",
+        "告警：清除指定状态或记录",
+        "alarms",
+        "告警",
+        "clear"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.by_id.clear.json"
+    },
+    {
+      "operationId": "post.alarms.history.batch.acknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/acknowledge",
+      "title": "告警 - 批量确认",
+      "summary": "告警 - 批量确认",
+      "description": "确认指定告警，记录处理状态 Handler: BatchHistoryAcknowledge handles POST /alarms/history/batch/acknowledge.",
+      "intents": [
+        "告警 - 批量确认",
+        "确认指定告警，记录处理状态 Handler: BatchHistoryAcknowledge handles POST /alarms/history/batch/acknowledge.",
+        "alarms",
+        "告警",
+        "history",
+        "batch",
+        "acknowledge"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.history.batch.acknowledge.json"
+    },
+    {
+      "operationId": "post.alarms.history.batch.delete",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/delete",
+      "title": "告警 - 批量删除",
+      "summary": "告警 - 批量删除",
+      "description": "告警：删除指定资源记录 Handler: BatchHistoryDelete handles POST /alarms/history/batch/delete.",
+      "intents": [
+        "告警 - 批量删除",
+        "告警：删除指定资源记录 Handler: BatchHistoryDelete handles POST /alarms/history/batch/delete.",
+        "alarms",
+        "告警",
+        "history",
+        "batch",
+        "delete"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.history.batch.delete.json"
+    },
+    {
+      "operationId": "post.alarms.history.batch.unacknowledge",
+      "method": "POST",
+      "path": "/api/v1/alarms/history/batch/unacknowledge",
+      "title": "告警 - 批量取消确认",
+      "summary": "告警 - 批量取消确认",
+      "description": "撤销告警确认状态 Handler: BatchHistoryUnacknowledge handles POST /alarms/history/batch/unacknowledge.",
+      "intents": [
+        "告警 - 批量取消确认",
+        "撤销告警确认状态 Handler: BatchHistoryUnacknowledge handles POST /alarms/history/batch/unacknowledge.",
+        "alarms",
+        "告警",
+        "history",
+        "batch",
+        "unacknowledge"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.history.batch.unacknowledge.json"
+    },
+    {
+      "operationId": "post.alarms.sync.by_device_sn",
+      "method": "POST",
+      "path": "/api/v1/alarms/sync/:device_sn",
+      "title": "告警 - 同步",
+      "summary": "告警 - 同步",
+      "description": "告警：从运行态或外部系统同步最新数据 Handler: TriggerSync handles POST /alarms/sync/:device_sn.\nIt triggers an alarm synchronization for the specified device.",
+      "intents": [
+        "告警 - 同步",
+        "告警：从运行态或外部系统同步最新数据 Handler: TriggerSync handles POST /alarms/sync/:device_sn.\nIt triggers an alarm synchronization for the specified device.",
+        "alarms",
+        "告警",
+        "sync"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.alarms.sync.by_device_sn.json"
+    },
+    {
+      "operationId": "put.alarms.alarm_filters.by_id",
+      "method": "PUT",
+      "path": "/api/v1/alarms/alarm-filters/:id",
+      "title": "告警 - alarmfilters更新",
+      "summary": "告警 - alarmfilters更新",
+      "description": "告警：查询或维护指定对象的alarmfilters更新数据",
+      "intents": [
+        "告警 - alarmfilters更新",
+        "告警：查询或维护指定对象的alarmfilters更新数据",
+        "alarms",
+        "告警",
+        "alarm-filters",
+        "alarm filters"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.alarms.alarm_filters.by_id.json"
+    }
+  ]
+}

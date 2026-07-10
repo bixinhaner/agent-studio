@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.devices.tasks",
+  "method": "POST",
+  "path": "/api/v1/devices/tasks",
+  "handler": "github.com/omcgo/omcgo/internal/task.(*Handler).CreateTask-fm",
+  "category": "devices",
+  "title": "设备 - 创建",
+  "summary": "设备 - 创建",
+  "description": "设备：创建新的资源记录 Handler: CreateTask 创建任务\nPOST /api/v1/devices/tasks?device_sn=xxx",
+  "intents": [
+    "设备 - 创建",
+    "设备：创建新的资源记录 Handler: CreateTask 创建任务\nPOST /api/v1/devices/tasks?device_sn=xxx",
+    "devices",
+    "设备",
+    "tasks"
+  ],
+  "tags": [
+    "devices",
+    "设备",
+    "tasks"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：设备 - 创建",
+  "pathParams": [],
+  "queryParams": [
+    {
+      "name": "device_sn",
+      "in": "query",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateTaskRequest",
+      "properties": {
+        "command_index": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "command_key": {
+          "description": "TR069 CommandKey（预设的命令标识）",
+          "type": "string"
+        },
+        "creator_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "device_index": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "device_sn": {
+          "type": "string"
+        },
+        "expires_in": {
+          "description": "过期时间（秒）",
+          "goType": "int",
+          "type": "integer"
+        },
+        "has_path_translation_miss": {
+          "description": "路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）",
+          "type": "boolean"
+        },
+        "max_retries": {
+          "description": "MaxRetries 用指针区分\"未设置\"（nil → 默认 3）与\"显式 0\"（禁止重试）。\n旧实现用 int + (\u003e0) 判定，无法表达\"调用方显式要 0 次重试\"，0 被静默改回 3。",
+          "goType": "int",
+          "nullable": true,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "goType": "json.RawMessage",
+          "type": "object"
+        },
+        "path_translation_miss_count": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "path_translation_source": {
+          "description": "T-0168",
+          "type": "string"
+        },
+        "priority": {
+          "goType": "int",
+          "type": "integer"
+        },
+        "source": {
+          "goType": "TaskSource",
+          "type": "string"
+        },
+        "source_id": {
+          "description": "任务来源外键（对应 device_tasks.source_id；Source='mml' 时为 mml_tasks.id）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_sn",
+        "method"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

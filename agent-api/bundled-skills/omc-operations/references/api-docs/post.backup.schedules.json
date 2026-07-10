@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0",
+  "operationId": "post.backup.schedules",
+  "method": "POST",
+  "path": "/api/v1/backup/schedules",
+  "handler": "github.com/omcgo/omcgo/internal/backup.(*Handler).CreateSchedule-fm",
+  "category": "backup",
+  "title": "备份 - 创建",
+  "summary": "备份 - 创建",
+  "description": "备份：创建新的资源记录 Handler: CreateSchedule handles POST /api/v1/backup/schedules.",
+  "intents": [
+    "备份 - 创建",
+    "备份：创建新的资源记录 Handler: CreateSchedule handles POST /api/v1/backup/schedules.",
+    "backup",
+    "备份",
+    "schedules"
+  ],
+  "tags": [
+    "backup",
+    "备份",
+    "schedules"
+  ],
+  "risk": "low",
+  "confirmationRequired": true,
+  "idempotent": false,
+  "sideEffects": "会修改业务状态或触发任务；执行前确认目标、范围和影响。操作语义：备份 - 创建",
+  "pathParams": [],
+  "queryParams": [],
+  "formParams": [],
+  "requestBody": {
+    "contentType": "application/json",
+    "required": true,
+    "schema": {
+      "goType": "CreateScheduleRequest",
+      "properties": {
+        "cron_expr": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "target_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target_type": {
+          "type": "string"
+        },
+        "task_type": {
+          "goType": "TaskType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cron_expr",
+        "name",
+        "task_type"
+      ],
+      "type": "object"
+    }
+  },
+  "responses": {
+    "2xx": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "properties": {
+              "data": {
+                "description": "该 Handler 返回的真实业务结果；以实际 API JSON 为准。"
+              },
+              "msg": {
+                "example": "ok",
+                "type": "string"
+              },
+              "ret": {
+                "const": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ret",
+              "msg",
+              "data"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "成功。JSON 接口使用 OMC 标准响应信封；文件或 SSE 接口按 Content-Type 返回二进制或事件流。"
+    },
+    "4xx": {
+      "description": "请求参数、身份、权限或 Agent policy 不允许。不要绕过限制。"
+    },
+    "5xx": {
+      "description": "OMC 内部处理失败。不要编造结果或自动重试非幂等写操作。"
+    }
+  },
+  "contractCoverage": {
+    "request": "go-handler",
+    "response": "standard-envelope"
+  },
+  "sources": [
+    "runtime-route",
+    "go-handler"
+  ]
+}

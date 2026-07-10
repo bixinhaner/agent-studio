@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "category": "column-configs",
+  "title": "列配置",
+  "operations": [
+    {
+      "operationId": "get.column_configs.by_pageKey",
+      "method": "GET",
+      "path": "/api/v1/column-configs/:pageKey",
+      "title": "列配置 - 详情",
+      "summary": "列配置 - 详情",
+      "description": "列配置：查询指定资源的详细信息 Handler: GetColumnConfig handles GET /column-configs/:pageKey.",
+      "intents": [
+        "列配置 - 详情",
+        "列配置：查询指定资源的详细信息 Handler: GetColumnConfig handles GET /column-configs/:pageKey.",
+        "column-configs",
+        "column configs"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.column_configs.by_pageKey.json"
+    },
+    {
+      "operationId": "put.column_configs.by_pageKey",
+      "method": "PUT",
+      "path": "/api/v1/column-configs/:pageKey",
+      "title": "列配置 - 更新",
+      "summary": "列配置 - 更新",
+      "description": "列配置：更新指定资源的完整配置 Handler: SaveColumnConfig handles PUT /column-configs/:pageKey.",
+      "intents": [
+        "列配置 - 更新",
+        "列配置：更新指定资源的完整配置 Handler: SaveColumnConfig handles PUT /column-configs/:pageKey.",
+        "column-configs",
+        "column configs"
+      ],
+      "risk": "low",
+      "document": "api-docs/put.column_configs.by_pageKey.json"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "category": "agent-config",
+  "title": "agent-config",
+  "operations": [
+    {
+      "operationId": "get.admin.agent_config",
+      "method": "GET",
+      "path": "/api/v1/admin/agent-config",
+      "title": "agent-config - 列表",
+      "summary": "agent-config - 列表",
+      "description": "agent-config：按筛选条件查询资源列表",
+      "intents": [
+        "agent-config - 列表",
+        "agent-config：按筛选条件查询资源列表",
+        "agent-config",
+        "admin",
+        "agent config"
+      ],
+      "risk": "read",
+      "document": "api-docs/get.admin.agent_config.json"
+    },
+    {
+      "operationId": "post.admin.agent_config",
+      "method": "POST",
+      "path": "/api/v1/admin/agent-config",
+      "title": "agent-config - 创建",
+      "summary": "agent-config - 创建",
+      "description": "agent-config：创建新的资源记录",
+      "intents": [
+        "agent-config - 创建",
+        "agent-config：创建新的资源记录",
+        "agent-config",
+        "admin",
+        "agent config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.agent_config.json"
+    },
+    {
+      "operationId": "post.admin.agent_config.sync",
+      "method": "POST",
+      "path": "/api/v1/admin/agent-config/sync",
+      "title": "agent-config - 同步",
+      "summary": "agent-config - 同步",
+      "description": "agent-config：从运行态或外部系统同步最新数据",
+      "intents": [
+        "agent-config - 同步",
+        "agent-config：从运行态或外部系统同步最新数据",
+        "agent-config",
+        "admin",
+        "sync",
+        "agent config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.agent_config.sync.json"
+    },
+    {
+      "operationId": "post.admin.agent_config.test",
+      "method": "POST",
+      "path": "/api/v1/admin/agent-config/test",
+      "title": "agent-config - 测试",
+      "summary": "agent-config - 测试",
+      "description": "agent-config：发送测试请求验证配置",
+      "intents": [
+        "agent-config - 测试",
+        "agent-config：发送测试请求验证配置",
+        "agent-config",
+        "admin",
+        "test",
+        "agent config"
+      ],
+      "risk": "low",
+      "document": "api-docs/post.admin.agent_config.test.json"
+    }
+  ]
+}
