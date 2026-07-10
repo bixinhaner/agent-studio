@@ -22,9 +22,16 @@ import {
   createRunProfile,
   createSkillPackage,
   fetchAgentModes,
+  fetchRuntimeModelCatalog,
   fetchRunProfiles,
   fetchSkillPackages
 } from "./api";
+import {
+  modelOptionsFromCatalog,
+  normalizeReasoningEffortForModel,
+  reasoningOptionsForModel,
+  type RuntimeModelCatalog
+} from "../../lib/model-config";
 import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
 import { openWarningConfirm } from "../../lib/warning-modal";
@@ -82,7 +89,7 @@ type CreatePanelState =
       status: string;
       defaultModel: string;
       allowedModels: string[];
-      defaultReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+      defaultReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
       approvalPolicy: "never" | "on-request" | "on-failure" | "untrusted";
       networkAccessEnabled: boolean;
@@ -121,15 +128,6 @@ const CREATE_STATUS_OPTIONS = [
 const CREATE_VISIBILITY_OPTIONS = [
   { label: "仅管理员", value: "hidden" },
   { label: "对用户可见", value: "visible" }
-];
-
-const CREATE_REASONING_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" }
 ];
 
 const CREATE_SANDBOX_OPTIONS = [
@@ -469,6 +467,7 @@ export function CapabilityCenterShell() {
   const [runProfiles, setRunProfiles] = useState<RunProfileRecord[]>([]);
   const [skillPackages, setSkillPackages] = useState<SkillPackageRecord[]>([]);
   const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<RuntimeModelCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
   const [tab, setTab] = useState<CapabilityCenterTab>("agent_mode");
@@ -495,15 +494,17 @@ export function CapabilityCenterShell() {
       setLoading(true);
       setErrorText("");
       try {
-        const [runProfileResponse, skillPackageResponse, agentModeResponse] = await Promise.all([
+        const [runProfileResponse, skillPackageResponse, agentModeResponse, nextModelCatalog] = await Promise.all([
           fetchRunProfiles(),
           fetchSkillPackages(),
-          fetchAgentModes()
+          fetchAgentModes(),
+          fetchRuntimeModelCatalog()
         ]);
         if (!active) return;
         setRunProfiles(runProfileResponse.runProfiles);
         setSkillPackages(skillPackageResponse.skillPackages);
         setAgentModes(agentModeResponse.agentModes);
+        setModelCatalog(nextModelCatalog);
       } catch (error) {
         if (active) {
           setErrorText(error instanceof Error ? error.message : "加载智能体配置失败");
@@ -750,8 +751,18 @@ export function CapabilityCenterShell() {
     const modelsFromProfiles = runProfiles.flatMap((profile) => [profile.defaultModel, ...profile.allowedModels]);
     const modelsFromCreatePanel =
       createPanel?.kind === "run_profile" ? [createPanel.defaultModel, ...createPanel.allowedModels] : [];
-    return buildRunProfileModelOptions([...modelsFromProfiles, ...modelsFromCreatePanel]);
-  }, [createPanel, runProfiles]);
+    return buildRunProfileModelOptions(
+      [...modelsFromProfiles, ...modelsFromCreatePanel],
+      modelOptionsFromCatalog(modelCatalog)
+    );
+  }, [createPanel, modelCatalog, runProfiles]);
+  const createReasoningOptions = useMemo(
+    () =>
+      createPanel?.kind === "run_profile"
+        ? reasoningOptionsForModel(createPanel.defaultModel, modelOptionsFromCatalog(modelCatalog))
+        : [],
+    [createPanel, modelCatalog]
+  );
 
   useEffect(() => {
     if (createStep <= maxCreateStep) return;
@@ -820,7 +831,11 @@ export function CapabilityCenterShell() {
             </div>
           )}
         >
-          <RunProfileDetailViewLazy runProfile={selectedRunProfile} onRunProfileUpdated={handleRunProfileUpdated} />
+          <RunProfileDetailViewLazy
+            runProfile={selectedRunProfile}
+            modelOptions={modelOptionsFromCatalog(modelCatalog)}
+            onRunProfileUpdated={handleRunProfileUpdated}
+          />
         </Suspense>
       );
     }
@@ -1140,6 +1155,11 @@ export function CapabilityCenterShell() {
                               ? {
                                   ...current,
                                   defaultModel: value,
+                                  defaultReasoningEffort: normalizeReasoningEffortForModel(
+                                    value,
+                                    current.defaultReasoningEffort,
+                                    modelOptionsFromCatalog(modelCatalog)
+                                  ),
                                   allowedModels: current.allowedModels.includes(value)
                                     ? current.allowedModels
                                     : [...current.allowedModels, value]
@@ -1177,7 +1197,7 @@ export function CapabilityCenterShell() {
                         aria-label="推理强度"
                         value={createPanel.defaultReasoningEffort}
                         disabled={createSaving}
-                        options={CREATE_REASONING_OPTIONS}
+                        options={createReasoningOptions}
                         onChange={(value) =>
                           setCreatePanel((current) =>
                             current && current.kind === "run_profile"

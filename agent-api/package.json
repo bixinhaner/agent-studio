@@ -19,7 +19,7 @@
     "dev:seed": "tsx prisma/seed-dev.ts"
   },
   "dependencies": {
-    "@openai/codex-sdk": "0.139.0",
+    "@openai/codex-sdk": "0.144.1",
     "@prisma/client": "^6.6.0",
     "cors": "^2.8.5",
     "dingtalk-stream": "^2.1.6-beta.1",

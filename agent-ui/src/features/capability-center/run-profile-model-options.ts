@@ -1,17 +1,18 @@
-import { DEFAULT_MODEL, MODEL_OPTIONS } from "../../lib/model-config";
+import { DEFAULT_MODEL, MODEL_OPTIONS, type ModelOption } from "../../lib/model-config";
 
 type SelectOption = {
   label: string;
   value: string;
 };
 
-const MODEL_LABEL_MAP = new Map(MODEL_OPTIONS.map((option) => [option.value, option.label] as const));
-
 export const DEFAULT_RUN_PROFILE_MODEL = DEFAULT_MODEL;
 
-export function buildRunProfileModelOptions(extraModels: string[] = []): SelectOption[] {
+export function buildRunProfileModelOptions(extraModels: string[] = [], catalogModels: readonly ModelOption[] = MODEL_OPTIONS): SelectOption[] {
   const seen = new Set<string>();
   const options: SelectOption[] = [];
+  const modelLabelMap = new Map(
+    [...MODEL_OPTIONS, ...catalogModels].map((option) => [option.value, option.label] as const)
+  );
 
   function append(model: string) {
     const normalized = model.trim();
@@ -19,11 +20,11 @@ export function buildRunProfileModelOptions(extraModels: string[] = []): SelectO
     seen.add(normalized);
     options.push({
       value: normalized,
-      label: MODEL_LABEL_MAP.get(normalized) ?? normalized
+      label: modelLabelMap.get(normalized) ?? normalized
     });
   }
 
-  MODEL_OPTIONS.forEach((option) => append(option.value));
+  catalogModels.forEach((option) => append(option.value));
   extraModels.forEach((model) => append(model));
 
   return options;

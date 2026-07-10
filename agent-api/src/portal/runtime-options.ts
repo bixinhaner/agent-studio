@@ -1,8 +1,9 @@
 import type { PortalRuntimeOptionServiceResult } from "./runtime-option-service.js";
+import type { CodexModelCatalog } from "../model-config.js";
 
-export type PortalRuntimeOptions = PortalRuntimeOptionServiceResult;
+export type PortalRuntimeOptions = PortalRuntimeOptionServiceResult & { modelCatalog: CodexModelCatalog };
 
-export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult): PortalRuntimeOptions {
+export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult, modelCatalog: CodexModelCatalog): PortalRuntimeOptions {
   return {
     modes: input.modes.map((mode) => ({
       id: mode.id,
@@ -17,6 +18,7 @@ export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult):
     canUpload: input.canUpload,
     defaults: {
       mode: input.defaults.mode
-    }
+    },
+    modelCatalog
   };
 }

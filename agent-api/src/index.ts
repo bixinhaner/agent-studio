@@ -50,6 +50,7 @@ import { appConfig, resolveWorkspace } from "./config.js";
 import { createAdminBillingRouter, createPortalBillingRouter } from "./billing/router.js";
 import { BillingService } from "./billing/service.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
 import {
@@ -113,7 +114,7 @@ import {
   type RuntimeStreamEvent,
   type RuntimeUsageSnapshot
 } from "./live-runtime-session.js";
-import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
+import { REASONING_EFFORT_VALUES, fallbackModelCatalog, normalizeModel, normalizeReasoningEffortForModel } from "./model-config.js";
 import { importLegacyThreadsFromJson } from "./persistence/json-import.js";
 import { createServiceTokenMiddleware } from "./service-token.js";
 import {
@@ -2744,6 +2745,14 @@ async function resolveProviderSnapshot(input?: {
   }
   return await codexProviders.resolveActiveProviderSnapshot();
 }
+
+const codexModelCatalog = new CodexModelCatalogService({
+  listModels: async () => {
+    const snapshot = await resolveProviderSnapshot();
+    return await createRuntimeForProviderSnapshot(snapshot).listModels();
+  },
+  fallbackCatalog: fallbackModelCatalog
+});
 
 function createThreadPublicShareToken(): string {
   return randomBytes(18).toString("base64url");
@@ -9267,7 +9276,8 @@ registerCommonApiRoutes(app, {
     skillPackages,
     agentModes,
     resourcePolicies,
-    nativeCodexSkills
+    nativeCodexSkills,
+    modelCatalog: codexModelCatalog
   }),
   codexMemoryAdminRouter: createCodexMemoryAdminRouter({
     sessionHomeRoot: appConfig.codex.sessionHomeRoot,
@@ -9304,6 +9314,7 @@ registerCommonApiRoutes(app, {
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
+    modelCatalog: codexModelCatalog,
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     productFeedback,
     customerExperienceIssues,

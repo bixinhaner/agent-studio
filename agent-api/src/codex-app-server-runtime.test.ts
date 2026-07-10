@@ -3,7 +3,10 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
+import {
+  resolveCodexAppServerBinaryPath,
+  shutdownCodexAppServerRuntime
+} from "./codex-app-server-runtime.js";
 import { CodexRuntime, type CodexStreamEvent } from "./codex-runtime.js";
 
 const testTempDir = path.resolve(process.cwd(), "..", "temp", "codex-app-server-runtime-test");
@@ -57,6 +60,51 @@ rl.on("line", (line) => {
     const threadId = "thread-" + nextThreadId++;
     threads.add(threadId);
     respond(id, { thread: { id: threadId } });
+    return;
+  }
+  if (message.method === "model/list") {
+    const cursor = typeof params.cursor === "string" ? params.cursor : "";
+    if (!cursor) {
+      respond(id, {
+        data: [{
+          id: "gpt-5.6-sol",
+          model: "gpt-5.6-sol",
+          displayName: "GPT-5.6-Sol",
+          description: "Frontier capability",
+          hidden: false,
+          supportedReasoningEfforts: [
+            { reasoningEffort: "low", description: "Fast" },
+            { reasoningEffort: "ultra", description: "Deepest" }
+          ],
+          defaultReasoningEffort: "low",
+          contextWindow: 1050000,
+          inputModalities: ["text", "image"],
+          supportsPersonality: true,
+          serviceTiers: [{ id: "priority", name: "Fast", description: "Priority processing" }],
+          defaultServiceTier: null,
+          isDefault: true
+        }],
+        nextCursor: "page-2"
+      });
+      return;
+    }
+    respond(id, {
+      data: [{
+        id: "gpt-5.6-luna",
+        model: "gpt-5.6-luna",
+        displayName: "GPT-5.6-Luna",
+        description: "Efficient workloads",
+        hidden: false,
+        supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Balanced" }],
+        defaultReasoningEffort: "medium",
+        inputModalities: ["text", "image"],
+        supportsPersonality: true,
+        serviceTiers: [],
+        defaultServiceTier: null,
+        isDefault: false
+      }],
+      nextCursor: null
+    });
     return;
   }
   if (message.method === "thread/resume") {
@@ -172,7 +220,8 @@ rl.on("line", (line) => {
         turnId,
         tokenUsage: {
           total: { inputTokens: 12, cachedInputTokens: 3, outputTokens: 7 },
-          last: { inputTokens: 12, cachedInputTokens: 3, outputTokens: 7 }
+          last: { inputTokens: 12, cachedInputTokens: 3, outputTokens: 7 },
+          modelContextWindow: 353400
         }
       });
       notify("turn/completed", { threadId, turn: { id: turnId } });
@@ -212,6 +261,14 @@ describe("Codex app-server runtime", () => {
     restoreEnv();
   });
 
+  it("prefers the project-pinned Codex binary when no override is configured", () => {
+    delete process.env.CODEX_APP_SERVER_BINARY;
+
+    expect(resolveCodexAppServerBinaryPath()).toBe(
+      path.resolve(process.cwd(), "node_modules/.bin/codex")
+    );
+  });
+
   it("streams agent deltas, image-generation items, and usage from app-server", async () => {
     const runtime = new CodexRuntime({
       envOverrides: {
@@ -238,7 +295,10 @@ describe("Codex app-server runtime", () => {
       "Hello"
     );
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
-    expect(events.some((event) => event.type === "token_count")).toBe(true);
+    expect(events.some((event) => {
+      const raw = event.raw as { info?: { model_context_window?: number } } | undefined;
+      return event.type === "token_count" && raw?.info?.model_context_window === 353400;
+    })).toBe(true);
     expect(
       events.some((event) => {
         const raw = event.raw as { item?: { type?: string; saved_path?: string } } | undefined;
@@ -251,6 +311,25 @@ describe("Codex app-server runtime", () => {
         return event.type === "raw_response_item.completed" && raw?.item?.type === "image_generation_call" && raw.item.name === "image_generation";
       })
     ).toBe(true);
+  });
+
+  it("lists every app-server model page with capabilities", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-model-list")
+      }
+    });
+
+    const catalog = await runtime.listModels();
+
+    expect(catalog.map((model) => model.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-luna"]);
+    expect(catalog[0]).toMatchObject({
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: ["low", "ultra"],
+      contextLimit: 1_050_000,
+      inputModalities: ["text", "image"],
+      serviceTiers: [{ id: "priority", label: "Fast" }]
+    });
   });
 
   it("preserves markdown-significant whitespace in app-server agent deltas", async () => {

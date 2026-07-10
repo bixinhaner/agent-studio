@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Codex } from "./patched-codex-sdk.js";
-import type { ReasoningEffort } from "./model-config.js";
+import type { CodexModelCapability, ReasoningEffort } from "./model-config.js";
 import { CodexAppServerRuntime, isAppServerRuntimeEnabled } from "./codex-app-server-runtime.js";
 
 export type CodexStreamEvent = {
@@ -126,6 +126,13 @@ export class CodexRuntime {
       throw new Error("startThread() without options is not supported by the app-server runtime");
     }
     return await Promise.resolve(this.codex.startThread());
+  }
+
+  async listModels(): Promise<CodexModelCapability[]> {
+    if (!this.appServerRuntime) {
+      throw new Error("model/list requires the Codex app-server runtime");
+    }
+    return await this.appServerRuntime.listModels();
   }
 
   async startThreadWithOptions(options: {

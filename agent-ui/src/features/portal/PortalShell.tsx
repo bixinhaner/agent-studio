@@ -91,6 +91,7 @@ import { reportAutoRefreshActivityState } from "../../lib/build-version-refresh"
 import {
   DEFAULT_MODEL,
   contextLimitForModel,
+  modelOptionsFromCatalog,
   normalizeReasoningEffortForModel,
   type ReasoningEffort
 } from "../../lib/model-config";
@@ -2345,13 +2346,14 @@ function findRuntimeMode(options: PortalRuntimeOptions | null, modeId: string) {
   return options.modes.find((mode) => mode.id === modeId);
 }
 
-function normalizeRuntimeConfig(cfg: AppliedConfig): AppliedConfig {
+function normalizeRuntimeConfig(cfg: AppliedConfig, runtimeOptions?: PortalRuntimeOptions | null): AppliedConfig {
   const model = cfg.model.trim() || DEFAULT_MODEL;
   const workspace = cfg.workspace.trim() || DEFAULT_WORKSPACE;
+  const modelOptions = modelOptionsFromCatalog(runtimeOptions?.modelCatalog);
   return {
     ...cfg,
     model,
-    reasoningEffort: normalizeReasoningEffortForModel(model, cfg.reasoningEffort),
+    reasoningEffort: normalizeReasoningEffortForModel(model, cfg.reasoningEffort, modelOptions),
     workspace
   };
 }
@@ -6107,7 +6109,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           model: runtimeProfile?.defaultModel || prev.model,
           reasoningEffort: normalizeReasoningEffortForModel(
             runtimeProfile?.defaultModel || prev.model,
-            (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort
+            (runtimeProfile?.defaultReasoningEffort as ReasoningEffort | undefined) || prev.reasoningEffort,
+            modelOptionsFromCatalog(next.modelCatalog)
           ),
           sandboxMode: (runtimeProfile?.sandboxMode as SandboxMode | undefined) || prev.sandboxMode,
           approvalPolicy: (runtimeProfile?.approvalPolicy as ApprovalPolicy | undefined) || prev.approvalPolicy,
@@ -6245,7 +6248,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         model: selectedMode.runtimeProfile.defaultModel,
         reasoningEffort: normalizeReasoningEffortForModel(
           selectedMode.runtimeProfile.defaultModel,
-          selectedMode.runtimeProfile.defaultReasoningEffort as ReasoningEffort
+          selectedMode.runtimeProfile.defaultReasoningEffort as ReasoningEffort,
+          modelOptionsFromCatalog(runtimeOptions?.modelCatalog)
         ),
         sandboxMode: selectedMode.runtimeProfile.sandboxMode as SandboxMode,
         approvalPolicy: selectedMode.runtimeProfile.approvalPolicy as ApprovalPolicy,
@@ -6561,7 +6565,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         };
       },
       async initialize(threadId: string) {
-        const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
+        const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
@@ -7090,7 +7094,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         updateRunningStage(RUNNING_STAGE_RECEIVED_TEXT, { kind: "text" });
         startRunningStageWaitTimers();
 
-        const cfg = normalizeRuntimeConfig(appliedConfigRef.current);
+        const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
         const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
         const selectedSkillIds = new Set(enabledSkillIdsRef.current);
@@ -7824,14 +7828,39 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               }
             }
 
-            if (eventType === "turn.completed") {
-              const usage = parseTurnUsage(raw?.usage ?? payload?.usage);
-              if (usage) {
+            if (eventType === "token_count") {
+              const usageInfo = asRecord(raw?.info);
+              const runtimeUsage = parseTurnUsage(usageInfo?.last_token_usage ?? usageInfo?.total_token_usage);
+              const runtimeContextLimit = toTokenCount(usageInfo?.model_context_window);
+              if (runtimeUsage && runtimeContextLimit !== null && runtimeContextLimit > 0) {
                 const usageModel = String(session.model || cfg.model || "").trim();
                 const snapshot: ContextUsageSnapshot = {
                   threadId,
                   model: usageModel || "unknown",
-                  contextLimit: contextLimitForModel(usageModel),
+                  contextLimit: runtimeContextLimit,
+                  ...runtimeUsage,
+                  updatedAt: new Date().toISOString()
+                };
+                usageByThreadRef.current[threadId] = snapshot;
+                setContextUsage(snapshot);
+              }
+            }
+
+            if (eventType === "turn.completed") {
+              const usage = parseTurnUsage(raw?.usage ?? payload?.usage);
+              if (usage) {
+                const usageModel = String(session.model || cfg.model || "").trim();
+                const runtimeSnapshot = usageByThreadRef.current[threadId];
+                const snapshot: ContextUsageSnapshot = {
+                  threadId,
+                  model: usageModel || "unknown",
+                  contextLimit:
+                    runtimeSnapshot?.model === (usageModel || "unknown")
+                      ? runtimeSnapshot.contextLimit
+                      : contextLimitForModel(
+                          usageModel,
+                          modelOptionsFromCatalog(runtimeOptionsRef.current?.modelCatalog)
+                        ),
                   inputTokens: usage.inputTokens,
                   cachedInputTokens: usage.cachedInputTokens,
                   outputTokens: usage.outputTokens,

@@ -6,6 +6,12 @@ import { IntegrationBindingsEditor } from "./IntegrationBindingsEditor";
 import { IntegrationPolicyEditor } from "./IntegrationPolicyEditor";
 import { IntegrationValidationHistory } from "./IntegrationValidationHistory";
 import type { IntegrationDetail, OpenAICodexConfigDraft } from "./types";
+import {
+  MODEL_OPTIONS,
+  normalizeReasoningEffortForModel,
+  reasoningOptionsForModel,
+  type ReasoningEffort
+} from "../../lib/model-config";
 
 type OpenAITab = "basic" | "bindings" | "policies" | "history";
 
@@ -20,15 +26,6 @@ const STATUS_OPTIONS = [
   { label: "active", value: "active" },
   { label: "disabled", value: "disabled" },
   { label: "draft", value: "draft" }
-];
-
-const REASONING_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" }
 ];
 
 const PROVIDER_KIND_OPTIONS = [
@@ -278,15 +275,31 @@ export function OpenAICodexIntegrationView(props: {
                         <span className="field-label">默认模型</span>
                         <Input
                           value={draft.defaultModel}
+                          list="openai-codex-model-options"
                           disabled={saving}
                           onChange={(event) => setDraft((current) => ({ ...current, defaultModel: event.target.value }))}
+                          onBlur={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              defaultReasoningEffort: normalizeReasoningEffortForModel(
+                                current.defaultModel,
+                                current.defaultReasoningEffort as ReasoningEffort
+                              )
+                            }))
+                          }
                         />
+                        <datalist id="openai-codex-model-options">
+                          {MODEL_OPTIONS.map((option) => <option key={option.value} value={option.value} />)}
+                        </datalist>
                       </label>
                       <label className="field">
                         <span className="field-label">默认推理强度</span>
                         <Select
                           value={draft.defaultReasoningEffort}
-                          options={optionsWithCurrent(REASONING_OPTIONS, draft.defaultReasoningEffort)}
+                          options={optionsWithCurrent(
+                            reasoningOptionsForModel(draft.defaultModel),
+                            draft.defaultReasoningEffort
+                          )}
                           disabled={saving}
                           onChange={(value) =>
                             setDraft((current) => ({ ...current, defaultReasoningEffort: value }))

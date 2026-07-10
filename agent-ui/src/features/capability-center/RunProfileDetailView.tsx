@@ -4,6 +4,11 @@ import { Alert, Button, Card, Input, Segmented, Select, Switch, Tag } from "antd
 import { updateRunProfile } from "./api";
 import { CapabilityPolicyEditor } from "./CapabilityPolicyEditor";
 import { buildRunProfileModelOptions, normalizeRunProfileAllowedModels } from "./run-profile-model-options";
+import {
+  normalizeReasoningEffortForModel,
+  reasoningOptionsForModel,
+  type ModelOption
+} from "../../lib/model-config";
 import type {
   ApprovalPolicy,
   ReasoningEffort,
@@ -16,6 +21,7 @@ import type {
 type RunProfileDetailViewProps = {
   runProfile: RunProfileRecord;
   onRunProfileUpdated: (runProfile: RunProfileRecord) => void;
+  modelOptions: ModelOption[];
 };
 
 type RunProfileTab = "basic" | "bindings" | "policies";
@@ -29,15 +35,6 @@ const RUN_PROFILE_TABS: Array<{ id: RunProfileTab; label: string }> = [
 const STATUS_OPTIONS = [
   { label: "active", value: "active" },
   { label: "disabled", value: "disabled" }
-];
-
-const REASONING_OPTIONS = [
-  { label: "none", value: "none" },
-  { label: "minimal", value: "minimal" },
-  { label: "low", value: "low" },
-  { label: "medium", value: "medium" },
-  { label: "high", value: "high" },
-  { label: "xhigh", value: "xhigh" }
 ];
 
 const SANDBOX_OPTIONS = [
@@ -70,7 +67,7 @@ function buildInstructionPreview(profile: RunProfileRecord) {
   ].join("\n");
 }
 
-export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunProfileDetailViewProps) {
+export function RunProfileDetailView({ runProfile, modelOptions: catalogModelOptions, onRunProfileUpdated }: RunProfileDetailViewProps) {
   const [activeTab, setActiveTab] = useState<RunProfileTab>("basic");
   const [name, setName] = useState(runProfile.name);
   const [slug, setSlug] = useState(runProfile.slug);
@@ -121,8 +118,12 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
   }, []);
 
   const modelOptions = useMemo(
-    () => buildRunProfileModelOptions([defaultModel, ...allowedModels]),
-    [allowedModels, defaultModel]
+    () => buildRunProfileModelOptions([defaultModel, ...allowedModels], catalogModelOptions),
+    [allowedModels, catalogModelOptions, defaultModel]
+  );
+  const reasoningOptions = useMemo(
+    () => reasoningOptionsForModel(defaultModel, catalogModelOptions),
+    [catalogModelOptions, defaultModel]
   );
 
   const instructionPreview = useMemo(
@@ -256,6 +257,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
                   optionFilterProp="label"
                   onChange={(value) => {
                     setDefaultModel(value);
+                    setReasoningEffort((current) => normalizeReasoningEffortForModel(value, current, catalogModelOptions));
                     setAllowedModels((current) => (current.includes(value) ? current : [...current, value]));
                   }}
                 />
@@ -282,7 +284,7 @@ export function RunProfileDetailView({ runProfile, onRunProfileUpdated }: RunPro
                   aria-label="推理强度"
                   value={reasoningEffort}
                   disabled={saving}
-                  options={REASONING_OPTIONS}
+                  options={reasoningOptions}
                   onChange={(value) => setReasoningEffort(value as ReasoningEffort)}
                 />
               </label>

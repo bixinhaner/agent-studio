@@ -1,4 +1,5 @@
 import { api } from "../../lib/api";
+import type { RuntimeModelCatalog } from "../../lib/model-config";
 
 import type {
   AgentModeInstructionSourceInput,
@@ -37,6 +38,10 @@ function capabilityPolicyPath(resourceType: CapabilityResourceType, resourceId: 
 
 export async function fetchRunProfiles(): Promise<RunProfileListResponse> {
   return api<RunProfileListResponse>("/api/admin/run-profiles");
+}
+
+export async function fetchRuntimeModelCatalog(refresh = false): Promise<RuntimeModelCatalog> {
+  return api<RuntimeModelCatalog>(`/api/admin/model-catalog${refresh ? "?refresh=1" : ""}`);
 }
 
 export async function createRunProfile(input: CreateRunProfileInput): Promise<RunProfileResponse> {

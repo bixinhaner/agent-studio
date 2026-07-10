@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 
-import { REASONING_EFFORT_VALUES } from "../model-config.js";
+import { REASONING_EFFORT_VALUES, validateModelCapabilitySelection } from "../model-config.js";
 import { getDbClient } from "../db/client.js";
 import type { ResourcePolicyResourceType } from "../persistence/resource-policy-repository.js";
 import {
@@ -13,6 +13,7 @@ import { listWorkspaceAgentsMdTemplates } from "../agent-mode/workspace-agents-m
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
+import type { CodexModelCatalogService } from "../codex-model-catalog.js";
 
 function detailFromError(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -338,6 +339,7 @@ export function createModeAdminRouter(options: {
     getBaseHome(): string;
     getSkillsRoot(): string;
   };
+  modelCatalog?: Pick<CodexModelCatalogService, "getCatalog">;
 }): Router {
   const router = Router();
   let systemSettingsRepository: SystemSettingsRepository | undefined;
@@ -393,8 +395,26 @@ export function createModeAdminRouter(options: {
     return published?.payload.safety;
   }
 
+  async function validateRunProfileModel(input: RunProfileWritableRecord): Promise<string | undefined> {
+    if (!options.modelCatalog) return undefined;
+    return validateModelCapabilitySelection({
+      catalog: await options.modelCatalog.getCatalog(),
+      defaultModel: input.defaultModel,
+      allowedModels: input.allowedModels,
+      defaultReasoningEffort: input.defaultReasoningEffort
+    });
+  }
+
   router.get("/run-profiles", async (_req: Request, res: Response) => {
     res.json({ runProfiles: await options.runProfiles.list() });
+  });
+
+  router.get("/model-catalog", async (req: Request, res: Response) => {
+    if (!options.modelCatalog) {
+      res.status(503).json({ detail: "Codex 模型目录未配置" });
+      return;
+    }
+    res.json(await options.modelCatalog.getCatalog({ refresh: req.query.refresh === "1" }));
   });
 
   router.post("/run-profiles", async (req: Request, res: Response) => {
@@ -404,6 +424,11 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
+      const modelViolation = await validateRunProfileModel(parsed.data);
+      if (modelViolation) {
+        res.status(400).json({ detail: modelViolation });
+        return;
+      }
       const safetyLimits = await resolvePublishedSafetyLimits();
       if (safetyLimits) {
         const violation = buildRunProfileSafetyViolationDetail(parsed.data, safetyLimits);
@@ -440,6 +465,11 @@ export function createModeAdminRouter(options: {
         ...(existing as RunProfileWritableRecord),
         ...parsed.data
       };
+      const modelViolation = await validateRunProfileModel(nextInput);
+      if (modelViolation) {
+        res.status(400).json({ detail: modelViolation });
+        return;
+      }
       if (safetyLimits) {
         const violation = buildRunProfileSafetyViolationDetail(nextInput, safetyLimits);
         if (violation) {
@@ -486,6 +516,11 @@ export function createModeAdminRouter(options: {
         ...(existing as RunProfileWritableRecord),
         ...parsed.data
       };
+      const modelViolation = await validateRunProfileModel(nextInput);
+      if (modelViolation) {
+        res.status(400).json({ detail: modelViolation });
+        return;
+      }
       if (safetyLimits) {
         const violation = buildRunProfileSafetyViolationDetail(nextInput, safetyLimits);
         if (violation) {

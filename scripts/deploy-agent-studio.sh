@@ -742,6 +742,9 @@ build_backend() {
   log_step "Installing backend dependencies"
   run_as_app_user_shell "cd '$APP_API_DIR' && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_PREFER_OFFLINE=true npm ci"
 
+  log_step "Verifying project-pinned Codex runtime"
+  run_as_app_user_shell "cd '$APP_API_DIR' && expected=\$(node -p \"require('./node_modules/@openai/codex-sdk/package.json').version\") && package_version=\$(node -p \"require('./node_modules/@openai/codex/package.json').version\") && runtime_version=\$(node_modules/.bin/codex --version) && test \"\$package_version\" = \"\$expected\" && test \"\$runtime_version\" = \"codex-cli \$expected\" && printf 'Codex SDK, package and runtime verified at %s\\n' \"\$expected\""
+
   log_step "Generating Prisma client"
   run_as_app_user_shell "cd '$APP_API_DIR' && npm run prisma:generate"
 

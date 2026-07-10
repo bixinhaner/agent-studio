@@ -8,6 +8,7 @@ import type { SubscriptionEntitlementService } from "../operations/subscription-
 import type { ProductFeedbackRepository } from "../persistence/product-feedback-repository.js";
 import { toPortalRuntimeOptions } from "./runtime-options.js";
 import type { PortalRuntimeOptionService } from "./runtime-option-service.js";
+import type { CodexModelCatalogService } from "../codex-model-catalog.js";
 
 const MAX_PRODUCT_FEEDBACK_IMAGES = 3;
 const MAX_PRODUCT_FEEDBACK_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -101,6 +102,7 @@ function audienceFromOrganizationType(organizationType: string | null | undefine
 
 export function createPortalRouter(options: {
   runtimeOptions: Pick<PortalRuntimeOptionService, "resolve">;
+  modelCatalog: Pick<CodexModelCatalogService, "getCatalog">;
   listDepartmentIdsForUser(userId: string): Promise<string[]>;
   productFeedback?: Pick<ProductFeedbackRepository, "create">;
   customerExperienceIssues?: Pick<CustomerExperienceIssueReporter, "reportProductFeedback">;
@@ -124,13 +126,16 @@ export function createPortalRouter(options: {
       const departmentIds = isInternalOrganizationType(req.currentOrganization?.type)
         ? await options.listDepartmentIdsForUser(currentUser.id)
         : [];
-      const resolved = await options.runtimeOptions.resolve({
-        organizationId: req.currentOrganization?.id,
-        userId: currentUser.id,
-        roleIds,
-        departmentIds
-      });
-      res.json(toPortalRuntimeOptions(resolved));
+      const [resolved, modelCatalog] = await Promise.all([
+        options.runtimeOptions.resolve({
+          organizationId: req.currentOrganization?.id,
+          userId: currentUser.id,
+          roleIds,
+          departmentIds
+        }),
+        options.modelCatalog.getCatalog({ maxWaitMs: 100 })
+      ]);
+      res.json(toPortalRuntimeOptions(resolved, modelCatalog));
     } catch (error) {
       res.status(500).json({
         detail: error instanceof Error ? error.message : "failed to resolve portal runtime options"

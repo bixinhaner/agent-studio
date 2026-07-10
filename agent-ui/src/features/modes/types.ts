@@ -1,3 +1,5 @@
+import type { RuntimeModelCatalog } from "../../lib/model-config";
+
 export type RuntimeProfileSnapshot = {
   id?: string;
   name?: string;
@@ -44,4 +46,5 @@ export type PortalRuntimeOptions = {
   defaults: {
     mode: string;
   };
+  modelCatalog: RuntimeModelCatalog;
 };

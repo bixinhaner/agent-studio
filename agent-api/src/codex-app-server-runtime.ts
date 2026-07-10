@@ -2,11 +2,16 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 import os from "node:os";
 import path from "node:path";
 
-import type { ReasoningEffort } from "./model-config.js";
+import {
+  REASONING_EFFORT_VALUES,
+  type CodexModelCapability,
+  type ReasoningEffort
+} from "./model-config.js";
 import type { CodexRuntimeOptions, CodexStreamEvent } from "./codex-runtime.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -83,6 +88,54 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function asReasoningEffort(value: unknown): ReasoningEffort | undefined {
+  const normalized = trimOrUndefined(value);
+  return REASONING_EFFORT_VALUES.find((effort) => effort === normalized);
+}
+
+function asPositiveInteger(value: unknown): number | undefined {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
+function modelCapabilityFromAppServer(value: unknown): CodexModelCapability | undefined {
+  const model = asRecord(value);
+  const id = trimOrUndefined(model?.model) ?? trimOrUndefined(model?.id);
+  if (!id) return undefined;
+  const reasoningOptions = Array.isArray(model?.supportedReasoningEfforts)
+    ? model.supportedReasoningEfforts
+    : [];
+  const supportedReasoningEfforts = reasoningOptions
+    .map((item) => asReasoningEffort(asRecord(item)?.reasoningEffort ?? item))
+    .filter((item): item is ReasoningEffort => Boolean(item));
+  const defaultReasoningEffort =
+    asReasoningEffort(model?.defaultReasoningEffort) ?? supportedReasoningEfforts[0] ?? "high";
+  const serviceTiers = Array.isArray(model?.serviceTiers)
+    ? model.serviceTiers.flatMap((item) => {
+        const tier = asRecord(item);
+        const tierId = trimOrUndefined(tier?.id);
+        if (!tierId) return [];
+        return [{
+          id: tierId,
+          label: trimOrUndefined(tier?.name) ?? tierId,
+          description: trimOrUndefined(tier?.description)
+        }];
+      })
+    : [];
+  return {
+    id,
+    label: trimOrUndefined(model?.displayName) ?? id,
+    description: trimOrUndefined(model?.description),
+    hidden: model?.hidden === true,
+    isDefault: model?.isDefault === true,
+    defaultReasoningEffort,
+    supportedReasoningEfforts,
+    inputModalities: asStringArray(model?.inputModalities),
+    serviceTiers,
+    contextLimit: asPositiveInteger(model?.contextWindow ?? model?.contextLimit)
+  };
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -230,15 +283,19 @@ function effectiveEnv(options: CodexRuntimeOptions): Record<string, string> {
   return env;
 }
 
-function appServerBinaryPath(): string {
+export function resolveCodexAppServerBinaryPath(): string {
   const configured = trimOrUndefined(process.env.CODEX_APP_SERVER_BINARY);
   if (configured) return configured;
 
-  const candidates = [
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const projectBinary = path.resolve(moduleDir, "../node_modules/.bin/codex");
+  if (existsSync(projectBinary)) return projectBinary;
+
+  const globalLinuxCandidates = [
     "/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
     "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
   ];
-  for (const candidate of candidates) {
+  for (const candidate of globalLinuxCandidates) {
     if (os.platform() === "linux" && existsSync(candidate)) return candidate;
   }
   return "codex";
@@ -253,7 +310,7 @@ function runtimeBaseConfig(options: CodexRuntimeOptions): Record<string, unknown
 
 function runtimeScope(options: CodexRuntimeOptions): RuntimeScope {
   const env = effectiveEnv(options);
-  const binaryPath = appServerBinaryPath();
+  const binaryPath = resolveCodexAppServerBinaryPath();
   const config = runtimeBaseConfig(options);
   const scopeIdentity = {
     binaryPath,
@@ -473,10 +530,11 @@ function tokenUsageEvent(message: JsonRecord): CodexStreamEvent | undefined {
   const usage = asRecord(params?.tokenUsage);
   const total = asRecord(usage?.total);
   const last = asRecord(usage?.last);
-  if (!params || !total || !last) return undefined;
+  if (!params || !usage || !total || !last) return undefined;
   const toSnake = (value: Record<string, unknown>) => ({
     input_tokens: value.inputTokens,
     cached_input_tokens: value.cachedInputTokens,
+    ...(value.cacheWriteTokens !== undefined ? { cache_write_tokens: value.cacheWriteTokens } : {}),
     output_tokens: value.outputTokens
   });
   const raw = {
@@ -485,7 +543,10 @@ function tokenUsageEvent(message: JsonRecord): CodexStreamEvent | undefined {
     turn_id: params.turnId,
     info: {
       total_token_usage: toSnake(total),
-      last_token_usage: toSnake(last)
+      last_token_usage: toSnake(last),
+      ...(usage.modelContextWindow !== undefined
+        ? { model_context_window: usage.modelContextWindow }
+        : {})
     }
   };
   return { type: "token_count", raw };
@@ -849,6 +910,27 @@ class CodexAppServerManager {
   private readonly lockedThreads = new Set<string>();
   private readonly threadWaiters = new Map<string, Array<() => void>>();
 
+  async listModels(options: CodexRuntimeOptions): Promise<CodexModelCapability[]> {
+    const process = await this.getProcess(runtimeScope(options));
+    const models: CodexModelCapability[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = asRecord(await process.request("model/list", {
+        includeHidden: false,
+        limit: 100,
+        ...(cursor ? { cursor } : {})
+      }));
+      const page = Array.isArray(result?.data) ? result.data : [];
+      models.push(
+        ...page
+          .map(modelCapabilityFromAppServer)
+          .filter((model): model is CodexModelCapability => Boolean(model))
+      );
+      cursor = trimOrUndefined(result?.nextCursor);
+    } while (cursor);
+    return models;
+  }
+
   async startThread(options: CodexRuntimeOptions, threadOptions: AppServerThreadOptions): Promise<CodexAppServerThread> {
     const scope = runtimeScope(options);
     const process = await this.getProcess(scope);
@@ -1124,6 +1206,10 @@ export class CodexAppServerRuntime {
 
   async startThreadWithOptions(options: AppServerThreadOptions): Promise<CodexAppServerThread> {
     return await appServerManager.startThread(this.options, options);
+  }
+
+  async listModels(): Promise<CodexModelCapability[]> {
+    return await appServerManager.listModels(this.options);
   }
 
   async resumeThreadWithOptions(options: AppServerThreadOptions & { threadId: string }): Promise<CodexAppServerThread> {
