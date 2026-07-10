@@ -59,7 +59,10 @@ describe("buildOperationsInsights", () => {
         outputTokens: 80,
         estimatedCost: "1.250000",
         internalCost: "2.500000",
-        metadata: { source: "chat_stream" },
+        metadata: {
+          source: "chat_stream",
+          _costProfile: { costCompleteness: "partial_missing_cache_write_tokens" }
+        },
         createdAt: "2026-04-15T01:00:00.000Z"
       }),
       makeUsageEvent({
@@ -155,6 +158,7 @@ describe("buildOperationsInsights", () => {
     expect(response.summary.totalTokens).toBe(440);
     expect(response.summary.internalCost).toBe("5.100000");
     expect(response.summary.avgInternalCostPerRequest).toBe("1.700000");
+    expect(response.summary.incompleteCostRequestCount).toBe(1);
 
     expect(response.breakdowns.paths[0]?.label).toBe("AI 助手工作台 · 管理台集成 · Azure OpenAI · azure-openai");
     expect(response.breakdowns.entries.map((item) => item.label)).toContain("外部 OpenAI API");

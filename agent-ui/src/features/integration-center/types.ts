@@ -390,6 +390,7 @@ export type ExternalApiUsageSummary = {
   streamRate: number;
   totalInputTokens: number;
   totalCachedInputTokens: number;
+  totalCacheWriteTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
   averageTokensPerRequest: number;
@@ -436,6 +437,7 @@ export type ExternalApiUsageRecord = {
   messageCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: string;

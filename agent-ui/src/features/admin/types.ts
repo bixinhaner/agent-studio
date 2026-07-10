@@ -485,6 +485,7 @@ export type AdminApiAuditRecord = {
   metrics: {
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens: number;
     outputTokens: number;
     totalTokens: number;
     estimatedCost: string;

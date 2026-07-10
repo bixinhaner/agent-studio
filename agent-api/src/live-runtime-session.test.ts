@@ -21,6 +21,7 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
         total_token_usage: {
           input_tokens: 10_000,
           cached_input_tokens: 8000,
+          cache_write_tokens: 1000,
           output_tokens: 500
         },
         last_token_usage: {
@@ -32,6 +33,7 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
     })).toEqual({
       inputTokens: 10_000,
       cachedInputTokens: 8000,
+      cacheWriteTokens: 1000,
       outputTokens: 500,
       kind: "cumulative_snapshot",
       cumulativeInputTokens: undefined,

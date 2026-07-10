@@ -29,6 +29,7 @@ export type OperationsInsightsSessionSortKey =
   | "requestCount"
   | "inputTokens"
   | "cachedInputTokens"
+  | "cacheWriteTokens"
   | "outputTokens"
   | "totalTokens"
   | "estimatedCost"
@@ -42,10 +43,12 @@ export type OperationsInsightsSummary = {
   totalRequests: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  incompleteCostRequestCount: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
@@ -133,6 +136,7 @@ export type OperationsInsightsSessionRow = {
   requestCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: string;
@@ -212,10 +216,12 @@ type NormalizedEvent = {
   pathLabel: string;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: number;
   internalCost: number;
+  incompleteCost: boolean;
   resultStatus: string;
 };
 
@@ -249,6 +255,7 @@ type SessionAggregateState = {
   requestCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: number;
@@ -311,6 +318,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function hasIncompleteCost(metadata: unknown): boolean {
+  const costProfile = asRecord(asRecord(metadata)?._costProfile);
+  return costProfile?.costCompleteness === "partial_missing_cache_write_tokens";
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -369,6 +381,9 @@ function compareSessionRows(
       break;
     case "cachedInputTokens":
       ranked = left.cachedInputTokens - right.cachedInputTokens;
+      break;
+    case "cacheWriteTokens":
+      ranked = left.cacheWriteTokens - right.cacheWriteTokens;
       break;
     case "outputTokens":
       ranked = left.outputTokens - right.outputTokens;
@@ -579,10 +594,12 @@ function normalizeEvents(input: BuildOperationsInsightsInput): NormalizedEvent[]
       pathLabel: path.label,
       inputTokens: record.inputTokens,
       cachedInputTokens: record.cachedInputTokens,
+      cacheWriteTokens: record.cacheWriteTokens ?? 0,
       outputTokens: record.outputTokens,
       totalTokens,
       estimatedCost: toNumber(record.estimatedCost),
       internalCost: toNumber(record.internalCost),
+      incompleteCost: hasIncompleteCost(record.metadata),
       resultStatus: record.resultStatus
     };
 
@@ -664,16 +681,20 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
 
   let inputTokens = 0;
   let cachedInputTokens = 0;
+  let cacheWriteTokens = 0;
   let outputTokens = 0;
   let estimatedCost = 0;
   let internalCost = 0;
+  let incompleteCostRequestCount = 0;
 
   for (const record of filtered) {
     inputTokens += record.inputTokens;
     cachedInputTokens += record.cachedInputTokens;
+    cacheWriteTokens += record.cacheWriteTokens;
     outputTokens += record.outputTokens;
     estimatedCost += record.estimatedCost;
     internalCost += record.internalCost;
+    if (record.incompleteCost) incompleteCostRequestCount += 1;
 
     pathLabels.set(record.pathKey, record.pathLabel);
     modelLabels.set(record.model, record.model);
@@ -688,6 +709,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       sessionExisting.requestCount += 1;
       sessionExisting.inputTokens += record.inputTokens;
       sessionExisting.cachedInputTokens += record.cachedInputTokens;
+      sessionExisting.cacheWriteTokens += record.cacheWriteTokens;
       sessionExisting.outputTokens += record.outputTokens;
       sessionExisting.totalTokens += record.totalTokens;
       sessionExisting.estimatedCost += record.estimatedCost;
@@ -718,6 +740,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
         requestCount: 1,
         inputTokens: record.inputTokens,
         cachedInputTokens: record.cachedInputTokens,
+        cacheWriteTokens: record.cacheWriteTokens,
         outputTokens: record.outputTokens,
         totalTokens: record.totalTokens,
         estimatedCost: record.estimatedCost,
@@ -961,6 +984,7 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       requestCount: bucket.requestCount,
       inputTokens: bucket.inputTokens,
       cachedInputTokens: bucket.cachedInputTokens,
+      cacheWriteTokens: bucket.cacheWriteTokens,
       outputTokens: bucket.outputTokens,
       totalTokens: bucket.totalTokens,
       estimatedCost: formatDecimal(bucket.estimatedCost),
@@ -1025,10 +1049,12 @@ export function buildOperationsInsights(input: BuildOperationsInsightsInput): Op
       totalRequests: summaryRequestCount,
       inputTokens,
       cachedInputTokens,
+      cacheWriteTokens,
       outputTokens,
       totalTokens,
       estimatedCost: formatDecimal(estimatedCost),
       internalCost: formatDecimal(internalCost),
+      incompleteCostRequestCount,
       avgRequestsPerSession: formatAverage(totalSessions ? summaryRequestCount / totalSessions : 0),
       avgTokensPerSession: formatAverage(totalSessions ? totalTokens / totalSessions : 0),
       avgInternalCostPerSession: formatDecimal(totalSessions ? internalCost / totalSessions : 0),

@@ -9,6 +9,7 @@ export type UsageEventRecord = {
   featureType: string;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   estimatedCost: string;
   internalCost: string;
@@ -28,6 +29,7 @@ export type CreateUsageEventInput = {
   featureType: string;
   inputTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   estimatedCost?: string;
   internalCost?: string;
@@ -73,6 +75,7 @@ type UsageEventRow = {
   featureType: string;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   estimatedCost: unknown;
   internalCost: unknown;
@@ -152,6 +155,7 @@ function mapUsageEvent(row: UsageEventRow): UsageEventRecord {
     featureType: row.featureType,
     inputTokens: row.inputTokens,
     cachedInputTokens: row.cachedInputTokens,
+    cacheWriteTokens: row.cacheWriteTokens ?? 0,
     outputTokens: row.outputTokens,
     estimatedCost: formatDecimal(row.estimatedCost),
     internalCost: formatDecimal(row.internalCost),
@@ -184,6 +188,7 @@ export class UsageEventRepository {
         featureType,
         inputTokens: input.inputTokens ?? 0,
         cachedInputTokens: input.cachedInputTokens ?? 0,
+        cacheWriteTokens: input.cacheWriteTokens ?? 0,
         outputTokens: input.outputTokens ?? 0,
         estimatedCost: trimOrUndefined(input.estimatedCost) ?? "0.000000",
         internalCost: trimOrUndefined(input.internalCost) ?? "0.000000",

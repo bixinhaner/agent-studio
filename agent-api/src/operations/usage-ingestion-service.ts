@@ -15,6 +15,7 @@ export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "in
   codexRuntimeCumulativeUsage?: {
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens?: number;
     outputTokens: number;
   };
   codexThreadId?: string;
@@ -28,11 +29,13 @@ type CodexRuntimeUsageMetadata = {
   kind: "cumulative_snapshot" | "turn_delta";
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   codexThreadId?: string;
   cumulative?: {
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens?: number;
     outputTokens: number;
   };
 };
@@ -57,12 +60,14 @@ function toTokenCount(value: unknown): number | undefined {
 function codexRuntimeUsageMetadata(input: {
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   kind?: CodexRuntimeUsageMetadata["kind"];
   codexThreadId?: string;
   cumulative?: {
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens?: number;
     outputTokens: number;
   };
 }): CodexRuntimeUsageMetadata {
@@ -71,6 +76,9 @@ function codexRuntimeUsageMetadata(input: {
     kind: input.kind ?? "cumulative_snapshot",
     inputTokens: Math.max(0, Math.round(input.inputTokens)),
     cachedInputTokens: Math.max(0, Math.round(input.cachedInputTokens)),
+    ...(input.cacheWriteTokens !== undefined
+      ? { cacheWriteTokens: Math.max(0, Math.round(input.cacheWriteTokens)) }
+      : {}),
     outputTokens: Math.max(0, Math.round(input.outputTokens)),
     ...(trimOrUndefined(input.codexThreadId) ? { codexThreadId: trimOrUndefined(input.codexThreadId) } : {}),
     ...(input.cumulative
@@ -78,6 +86,9 @@ function codexRuntimeUsageMetadata(input: {
           cumulative: {
             inputTokens: Math.max(0, Math.round(input.cumulative.inputTokens)),
             cachedInputTokens: Math.max(0, Math.round(input.cumulative.cachedInputTokens)),
+            ...(input.cumulative.cacheWriteTokens !== undefined
+              ? { cacheWriteTokens: Math.max(0, Math.round(input.cumulative.cacheWriteTokens)) }
+              : {}),
             outputTokens: Math.max(0, Math.round(input.cumulative.outputTokens))
           }
         }
@@ -93,11 +104,13 @@ function snapshotFromMetadata(value: unknown): CodexRuntimeUsageMetadata | undef
   if (!cumulative) return undefined;
   const inputTokens = toTokenCount(cumulative.inputTokens);
   const cachedInputTokens = toTokenCount(cumulative.cachedInputTokens);
+  const cacheWriteTokens = toTokenCount(cumulative.cacheWriteTokens);
   const outputTokens = toTokenCount(cumulative.outputTokens);
   if (inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) return undefined;
   return codexRuntimeUsageMetadata({
     inputTokens,
     cachedInputTokens,
+    cacheWriteTokens,
     outputTokens,
     codexThreadId: typeof snapshot.codexThreadId === "string" ? snapshot.codexThreadId : undefined
   });
@@ -124,18 +137,25 @@ function codexThreadIdFromMetadata(value: unknown): string | undefined {
 function sanitizeUsage(input: {
   inputTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
 }): {
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
 } {
   const inputTokens = Math.max(0, Math.round(input.inputTokens ?? 0));
   const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.round(input.cachedInputTokens ?? 0)));
+  const cacheWriteTokens = Math.min(
+    Math.max(0, inputTokens - cachedInputTokens),
+    Math.max(0, Math.round(input.cacheWriteTokens ?? 0))
+  );
   const outputTokens = Math.max(0, Math.round(input.outputTokens ?? 0));
   return {
     inputTokens,
     cachedInputTokens,
+    cacheWriteTokens,
     outputTokens
   };
 }
@@ -143,23 +163,33 @@ function sanitizeUsage(input: {
 function metadataWithCostProfile(input: {
   metadata?: unknown;
   profile: CostProfileRecord | null;
+  cacheWriteTelemetryAvailable: boolean;
+  longContextApplied: boolean;
 }): Record<string, unknown> {
+  const cacheWritePrice = parseDecimal(input.profile?.cacheWriteTokenPrice);
   const profileMetadata = input.profile
     ? Object.fromEntries(
         Object.entries({
-          version: 1,
+          version: 2,
           matched: true,
           profileId: input.profile.id,
           organizationId: input.profile.organizationId,
           model: input.profile.model,
           inputTokenPrice: input.profile.inputTokenPrice,
           cachedInputTokenPrice: input.profile.cachedInputTokenPrice,
+          cacheWriteTokenPrice: input.profile.cacheWriteTokenPrice,
           outputTokenPrice: input.profile.outputTokenPrice,
-          internalCostMultiplier: input.profile.internalCostMultiplier
+          longContextThresholdTokens: input.profile.longContextThresholdTokens,
+          longContextInputMultiplier: input.profile.longContextInputMultiplier,
+          longContextOutputMultiplier: input.profile.longContextOutputMultiplier,
+          longContextApplied: input.longContextApplied,
+          internalCostMultiplier: input.profile.internalCostMultiplier,
+          costCompleteness:
+            cacheWritePrice > 0 && !input.cacheWriteTelemetryAvailable ? "partial_missing_cache_write_tokens" : "complete"
         }).filter(([, value]) => value !== undefined)
       )
     : {
-        version: 1,
+        version: 2,
         matched: false
       };
   return {
@@ -193,30 +223,46 @@ function calculateEstimatedCost(input: {
   profile: CostProfileRecord | null;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
-}): { estimatedCost: string; internalCost: string } {
+}): { estimatedCost: string; internalCost: string; longContextApplied: boolean } {
   if (!input.profile) {
     return {
       estimatedCost: "0.000000",
-      internalCost: "0.000000"
+      internalCost: "0.000000",
+      longContextApplied: false
     };
   }
 
   const inputTokenPrice = pricePerToken(parseDecimal(input.profile.inputTokenPrice));
   const cachedInputTokenPrice = pricePerToken(parseDecimal(input.profile.cachedInputTokenPrice));
+  const cacheWriteTokenPrice = pricePerToken(parseDecimal(input.profile.cacheWriteTokenPrice));
   const outputTokenPrice = pricePerToken(parseDecimal(input.profile.outputTokenPrice));
+  const longContextThresholdTokens = input.profile.longContextThresholdTokens ?? 0;
+  const longContextApplied = longContextThresholdTokens > 0 && input.inputTokens > longContextThresholdTokens;
+  const inputPriceMultiplier = longContextApplied
+    ? parseDecimal(input.profile.longContextInputMultiplier, 1)
+    : 1;
+  const outputPriceMultiplier = longContextApplied
+    ? parseDecimal(input.profile.longContextOutputMultiplier, 1)
+    : 1;
   const internalCostMultiplier = parseDecimal(input.profile.internalCostMultiplier, 1);
-  const uncachedInputTokens = billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens);
+  const uncachedInputTokens = Math.max(
+    0,
+    billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens) - input.cacheWriteTokens
+  );
 
   const estimated =
-    uncachedInputTokens * inputTokenPrice +
-    input.cachedInputTokens * cachedInputTokenPrice +
-    input.outputTokens * outputTokenPrice;
+    uncachedInputTokens * inputTokenPrice * inputPriceMultiplier +
+    input.cachedInputTokens * cachedInputTokenPrice * inputPriceMultiplier +
+    input.cacheWriteTokens * cacheWriteTokenPrice * inputPriceMultiplier +
+    input.outputTokens * outputTokenPrice * outputPriceMultiplier;
   const internal = estimated * internalCostMultiplier;
 
   return {
     estimatedCost: formatCost(estimated),
-    internalCost: formatCost(internal)
+    internalCost: formatCost(internal),
+    longContextApplied
   };
 }
 
@@ -243,12 +289,14 @@ export class UsageIngestionService {
     const usage = sanitizeUsage({
       inputTokens: input.inputTokens,
       cachedInputTokens: input.cachedInputTokens,
+      cacheWriteTokens: input.cacheWriteTokens,
       outputTokens: input.outputTokens
     });
     const costs = calculateEstimatedCost({
       profile,
       inputTokens: usage.inputTokens,
       cachedInputTokens: usage.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
       outputTokens: usage.outputTokens
     });
 
@@ -258,13 +306,16 @@ export class UsageIngestionService {
       featureType,
       inputTokens: usage.inputTokens,
       cachedInputTokens: usage.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
       outputTokens: usage.outputTokens,
       estimatedCost: costs.estimatedCost,
       internalCost: costs.internalCost,
       resultStatus: trimOrUndefined(input.resultStatus) ?? "success",
       metadata: metadataWithCostProfile({
         metadata: input.metadata,
-        profile
+        profile,
+        cacheWriteTelemetryAvailable: input.cacheWriteTokens !== undefined,
+        longContextApplied: costs.longContextApplied
       })
     });
     await this.dependencies.afterRecord?.(created);
@@ -279,6 +330,7 @@ export class UsageIngestionService {
     const currentSnapshot = codexRuntimeUsageMetadata({
       inputTokens: input.inputTokens ?? 0,
       cachedInputTokens: input.cachedInputTokens ?? 0,
+      cacheWriteTokens: input.cacheWriteTokens,
       outputTokens: input.outputTokens ?? 0,
       kind: input.codexRuntimeUsageKind ?? "cumulative_snapshot",
       codexThreadId,
@@ -290,6 +342,7 @@ export class UsageIngestionService {
         ...input,
         inputTokens: currentSnapshot.inputTokens,
         cachedInputTokens: currentSnapshot.cachedInputTokens,
+        cacheWriteTokens: currentSnapshot.cacheWriteTokens,
         outputTokens: currentSnapshot.outputTokens,
         metadata: metadataWithCodexRuntimeSnapshot({
           metadata: {
@@ -318,6 +371,7 @@ export class UsageIngestionService {
         ? codexRuntimeUsageMetadata({
             inputTokens: previousEvent.inputTokens,
             cachedInputTokens: previousEvent.cachedInputTokens,
+            cacheWriteTokens: previousEvent.cacheWriteTokens,
             outputTokens: previousEvent.outputTokens
           })
         : undefined
@@ -327,6 +381,10 @@ export class UsageIngestionService {
       ...input,
       inputTokens: deltaFromCumulative(currentSnapshot.inputTokens, previousSnapshot?.inputTokens),
       cachedInputTokens: deltaFromCumulative(currentSnapshot.cachedInputTokens, previousSnapshot?.cachedInputTokens),
+      cacheWriteTokens:
+        currentSnapshot.cacheWriteTokens === undefined
+          ? undefined
+          : deltaFromCumulative(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
       outputTokens: deltaFromCumulative(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
       metadata: metadataWithCodexRuntimeSnapshot({
         metadata: {

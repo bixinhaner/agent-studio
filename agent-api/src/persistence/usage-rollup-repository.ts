@@ -13,6 +13,7 @@ export type UsageDailyRollupRecord = {
   failureCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   estimatedCost: string;
   internalCost: string;
@@ -33,6 +34,7 @@ export type UsageDailyRollupInput = {
   failureCount?: number;
   inputTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   estimatedCost?: string;
   internalCost?: string;
@@ -67,6 +69,7 @@ type UsageDailyRollupRow = {
   failureCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   estimatedCost: unknown;
   internalCost: unknown;
@@ -155,6 +158,7 @@ function mapUsageDailyRollup(row: UsageDailyRollupRow): UsageDailyRollupRecord {
     failureCount: row.failureCount,
     inputTokens: row.inputTokens,
     cachedInputTokens: row.cachedInputTokens,
+    cacheWriteTokens: row.cacheWriteTokens ?? 0,
     outputTokens: row.outputTokens,
     estimatedCost: formatDecimal(row.estimatedCost),
     internalCost: formatDecimal(row.internalCost),
@@ -200,6 +204,7 @@ export class UsageRollupRepository {
           failureCount: record.failureCount ?? 0,
           inputTokens: record.inputTokens ?? 0,
           cachedInputTokens: record.cachedInputTokens ?? 0,
+          cacheWriteTokens: record.cacheWriteTokens ?? 0,
           outputTokens: record.outputTokens ?? 0,
           estimatedCost: trimOrUndefined(record.estimatedCost) ?? "0.000000",
           internalCost: trimOrUndefined(record.internalCost) ?? "0.000000",

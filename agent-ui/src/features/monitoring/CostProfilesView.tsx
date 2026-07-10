@@ -12,19 +12,66 @@ type CostProfilePreset = {
   model: string;
   inputTokenPrice: string;
   cachedInputTokenPrice: string;
+  cacheWriteTokenPrice: string;
   outputTokenPrice: string;
+  longContextThresholdTokens: string;
+  longContextInputMultiplier: string;
+  longContextOutputMultiplier: string;
   internalCostMultiplier: string;
 };
 
 const CUSTOM_PRESET_KEY = "custom";
 const COST_PROFILE_PRESETS: CostProfilePreset[] = [
   {
+    key: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    model: "gpt-5.6-sol",
+    inputTokenPrice: "5.000000",
+    cachedInputTokenPrice: "0.500000",
+    cacheWriteTokenPrice: "6.250000",
+    outputTokenPrice: "30.000000",
+    longContextThresholdTokens: "272000",
+    longContextInputMultiplier: "2.0000",
+    longContextOutputMultiplier: "1.5000",
+    internalCostMultiplier: "1.0000"
+  },
+  {
+    key: "gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    model: "gpt-5.6-terra",
+    inputTokenPrice: "2.500000",
+    cachedInputTokenPrice: "0.250000",
+    cacheWriteTokenPrice: "3.125000",
+    outputTokenPrice: "15.000000",
+    longContextThresholdTokens: "272000",
+    longContextInputMultiplier: "2.0000",
+    longContextOutputMultiplier: "1.5000",
+    internalCostMultiplier: "1.0000"
+  },
+  {
+    key: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    model: "gpt-5.6-luna",
+    inputTokenPrice: "1.000000",
+    cachedInputTokenPrice: "0.100000",
+    cacheWriteTokenPrice: "1.250000",
+    outputTokenPrice: "6.000000",
+    longContextThresholdTokens: "272000",
+    longContextInputMultiplier: "2.0000",
+    longContextOutputMultiplier: "1.5000",
+    internalCostMultiplier: "1.0000"
+  },
+  {
     key: "gpt-5.5",
     label: "GPT-5.5",
     model: "gpt-5.5",
     inputTokenPrice: "5.000000",
     cachedInputTokenPrice: "0.500000",
+    cacheWriteTokenPrice: "0.000000",
     outputTokenPrice: "30.000000",
+    longContextThresholdTokens: "272000",
+    longContextInputMultiplier: "2.0000",
+    longContextOutputMultiplier: "1.5000",
     internalCostMultiplier: "1.0000"
   },
   {
@@ -33,7 +80,11 @@ const COST_PROFILE_PRESETS: CostProfilePreset[] = [
     model: "gpt-5.4",
     inputTokenPrice: "2.500000",
     cachedInputTokenPrice: "0.250000",
+    cacheWriteTokenPrice: "0.000000",
     outputTokenPrice: "15.000000",
+    longContextThresholdTokens: "272000",
+    longContextInputMultiplier: "2.0000",
+    longContextOutputMultiplier: "1.5000",
     internalCostMultiplier: "1.0000"
   },
   {
@@ -42,12 +93,16 @@ const COST_PROFILE_PRESETS: CostProfilePreset[] = [
     model: "gpt-5.4-mini",
     inputTokenPrice: "0.750000",
     cachedInputTokenPrice: "0.075000",
+    cacheWriteTokenPrice: "0.000000",
     outputTokenPrice: "4.500000",
+    longContextThresholdTokens: "",
+    longContextInputMultiplier: "1.0000",
+    longContextOutputMultiplier: "1.0000",
     internalCostMultiplier: "1.0000"
   }
 ];
 
-const DEFAULT_COST_PROFILE_PRESET = COST_PROFILE_PRESETS[0];
+const DEFAULT_COST_PROFILE_PRESET = COST_PROFILE_PRESETS.find((preset) => preset.key === "gpt-5.5")!;
 const COST_PROFILE_PRESET_MAP = new Map(COST_PROFILE_PRESETS.map((preset) => [preset.key, preset]));
 
 export function CostProfilesView() {
@@ -58,7 +113,11 @@ export function CostProfilesView() {
   const [model, setModel] = useState(DEFAULT_COST_PROFILE_PRESET.model);
   const [inputTokenPrice, setInputTokenPrice] = useState(DEFAULT_COST_PROFILE_PRESET.inputTokenPrice);
   const [cachedInputTokenPrice, setCachedInputTokenPrice] = useState(DEFAULT_COST_PROFILE_PRESET.cachedInputTokenPrice);
+  const [cacheWriteTokenPrice, setCacheWriteTokenPrice] = useState(DEFAULT_COST_PROFILE_PRESET.cacheWriteTokenPrice);
   const [outputTokenPrice, setOutputTokenPrice] = useState(DEFAULT_COST_PROFILE_PRESET.outputTokenPrice);
+  const [longContextThresholdTokens, setLongContextThresholdTokens] = useState(DEFAULT_COST_PROFILE_PRESET.longContextThresholdTokens);
+  const [longContextInputMultiplier, setLongContextInputMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.longContextInputMultiplier);
+  const [longContextOutputMultiplier, setLongContextOutputMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.longContextOutputMultiplier);
   const [internalCostMultiplier, setInternalCostMultiplier] = useState(DEFAULT_COST_PROFILE_PRESET.internalCostMultiplier);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -89,7 +148,11 @@ export function CostProfilesView() {
     setModel(preset.model);
     setInputTokenPrice(preset.inputTokenPrice);
     setCachedInputTokenPrice(preset.cachedInputTokenPrice);
+    setCacheWriteTokenPrice(preset.cacheWriteTokenPrice);
     setOutputTokenPrice(preset.outputTokenPrice);
+    setLongContextThresholdTokens(preset.longContextThresholdTokens);
+    setLongContextInputMultiplier(preset.longContextInputMultiplier);
+    setLongContextOutputMultiplier(preset.longContextOutputMultiplier);
     setInternalCostMultiplier(preset.internalCostMultiplier);
   }
 
@@ -114,7 +177,11 @@ export function CostProfilesView() {
         model,
         inputTokenPrice,
         cachedInputTokenPrice,
+        cacheWriteTokenPrice,
         outputTokenPrice,
+        longContextThresholdTokens: longContextThresholdTokens || undefined,
+        longContextInputMultiplier,
+        longContextOutputMultiplier,
         internalCostMultiplier
       });
       setMessage("模型定价已保存");
@@ -143,7 +210,7 @@ export function CostProfilesView() {
           <Typography.Title level={4} className="admin-card-heading">
             模型定价
           </Typography.Title>
-          <Typography.Paragraph>按每 1M tokens 配置输入、缓存输入、输出价格，金额单位为美元 USD；内部系数用于内部价值折算。</Typography.Paragraph>
+          <Typography.Paragraph>按每 1M tokens 配置输入、缓存读取、缓存写入和输出价格，金额单位为美元 USD。</Typography.Paragraph>
         </div>
       </div>
       <form className="monitoring-form" onSubmit={handleSubmit}>
@@ -205,6 +272,19 @@ export function CostProfilesView() {
           />
         </label>
         <label className="field">
+          <span className="field-label">缓存写入 / 1M tokens (USD)</span>
+          <input
+            className="field-input"
+            aria-label="缓存写入 / 1M tokens (USD)"
+            value={cacheWriteTokenPrice}
+            onChange={(event) => {
+              setPresetKey(CUSTOM_PRESET_KEY);
+              setCacheWriteTokenPrice(event.target.value);
+            }}
+          />
+          <small className="field-help">上游未返回缓存写入 token 时，系统会把该次费用标记为部分估算。</small>
+        </label>
+        <label className="field">
           <span className="field-label">输出 / 1M tokens (USD)</span>
           <input
             className="field-input"
@@ -228,6 +308,44 @@ export function CostProfilesView() {
             }}
           />
         </label>
+        <label className="field">
+          <span className="field-label">长上下文阈值 (tokens)</span>
+          <input
+            className="field-input"
+            aria-label="长上下文阈值 (tokens)"
+            value={longContextThresholdTokens}
+            placeholder="留空表示不启用"
+            onChange={(event) => {
+              setPresetKey(CUSTOM_PRESET_KEY);
+              setLongContextThresholdTokens(event.target.value);
+            }}
+          />
+          <small className="field-help">仅当单次输入超过此阈值时应用下面的输入和输出倍率。</small>
+        </label>
+        <label className="field">
+          <span className="field-label">长上下文输入倍率</span>
+          <input
+            className="field-input"
+            aria-label="长上下文输入倍率"
+            value={longContextInputMultiplier}
+            onChange={(event) => {
+              setPresetKey(CUSTOM_PRESET_KEY);
+              setLongContextInputMultiplier(event.target.value);
+            }}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">长上下文输出倍率</span>
+          <input
+            className="field-input"
+            aria-label="长上下文输出倍率"
+            value={longContextOutputMultiplier}
+            onChange={(event) => {
+              setPresetKey(CUSTOM_PRESET_KEY);
+              setLongContextOutputMultiplier(event.target.value);
+            }}
+          />
+        </label>
         <Button className="monitoring-action-btn" type="primary" htmlType="submit" aria-label="保存模型定价" loading={saving}>
           {saving ? "保存中..." : "保存模型定价"}
         </Button>
@@ -247,7 +365,9 @@ export function CostProfilesView() {
               <th>模型</th>
               <th>输入 / 1M (USD)</th>
               <th>缓存 / 1M (USD)</th>
+              <th>缓存写入 / 1M (USD)</th>
               <th>输出 / 1M (USD)</th>
+              <th>长上下文规则</th>
               <th>内部系数</th>
               <th>状态</th>
               <th>操作</th>
@@ -259,7 +379,13 @@ export function CostProfilesView() {
                 <td>{profile.model}</td>
                 <td>{formatUsdAmount(profile.inputTokenPrice)}</td>
                 <td>{formatUsdAmount(profile.cachedInputTokenPrice)}</td>
+                <td>{formatUsdAmount(profile.cacheWriteTokenPrice)}</td>
                 <td>{formatUsdAmount(profile.outputTokenPrice)}</td>
+                <td>
+                  {profile.longContextThresholdTokens
+                    ? `>${profile.longContextThresholdTokens.toLocaleString()} · 输入 ${profile.longContextInputMultiplier ?? "1.0000"}x · 输出 ${profile.longContextOutputMultiplier ?? "1.0000"}x`
+                    : "—"}
+                </td>
                 <td>{profile.internalCostMultiplier}</td>
                 <td>
                   <Tag color={profile.isActive ? "success" : "default"}>{profile.isActive ? "启用" : "停用"}</Tag>

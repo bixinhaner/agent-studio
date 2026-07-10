@@ -79,6 +79,7 @@ function aggregateEvents(
     const failureCount = event.resultStatus === "success" ? 0 : 1;
     const inputTokens = event.inputTokens ?? 0;
     const cachedInputTokens = event.cachedInputTokens ?? 0;
+    const cacheWriteTokens = event.cacheWriteTokens ?? 0;
     const outputTokens = event.outputTokens ?? 0;
     const estimatedCost = formatDecimal(event.estimatedCost);
     const internalCost = formatDecimal(event.internalCost);
@@ -95,6 +96,7 @@ function aggregateEvents(
       failureCount,
       inputTokens,
       cachedInputTokens,
+      cacheWriteTokens,
       outputTokens,
       estimatedCost,
       internalCost
@@ -113,6 +115,7 @@ function aggregateEvents(
         failureCount,
         inputTokens,
         cachedInputTokens,
+        cacheWriteTokens,
         outputTokens,
         estimatedCost,
         internalCost
@@ -132,6 +135,7 @@ function aggregateEvents(
         failureCount,
         inputTokens,
         cachedInputTokens,
+        cacheWriteTokens,
         outputTokens,
         estimatedCost,
         internalCost
@@ -150,6 +154,7 @@ function aggregateEvents(
       failureCount,
       inputTokens,
       cachedInputTokens,
+      cacheWriteTokens,
       outputTokens,
       estimatedCost,
       internalCost
@@ -167,6 +172,7 @@ function aggregateEvents(
       failureCount,
       inputTokens,
       cachedInputTokens,
+      cacheWriteTokens,
       outputTokens,
       estimatedCost,
       internalCost
@@ -190,6 +196,7 @@ function accumulate(
     failureCount: number;
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens: number;
     outputTokens: number;
     estimatedCost: string;
     internalCost: string;
@@ -219,6 +226,7 @@ function accumulate(
       failureCount: input.failureCount,
       inputTokens: input.inputTokens,
       cachedInputTokens: input.cachedInputTokens,
+      cacheWriteTokens: input.cacheWriteTokens,
       outputTokens: input.outputTokens,
       estimatedCost: input.estimatedCost,
       internalCost: input.internalCost,
@@ -233,6 +241,7 @@ function accumulate(
   existing.failureCount += input.failureCount;
   existing.inputTokens += input.inputTokens;
   existing.cachedInputTokens += input.cachedInputTokens;
+  existing.cacheWriteTokens = (existing.cacheWriteTokens ?? 0) + input.cacheWriteTokens;
   existing.outputTokens += input.outputTokens;
   existing.estimatedCost = addDecimals(existing.estimatedCost, input.estimatedCost);
   existing.internalCost = addDecimals(existing.internalCost, input.internalCost);

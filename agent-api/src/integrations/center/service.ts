@@ -145,6 +145,7 @@ export type IntegrationCenterService = {
       streamRate: number;
       totalInputTokens: number;
       totalCachedInputTokens: number;
+      totalCacheWriteTokens: number;
       totalOutputTokens: number;
       totalTokens: number;
       averageTokensPerRequest: number;
@@ -220,6 +221,7 @@ export type IntegrationCenterService = {
       messageCount: number;
       inputTokens: number;
       cachedInputTokens: number;
+      cacheWriteTokens: number;
       outputTokens: number;
       totalTokens: number;
       estimatedCost: string;
@@ -1122,6 +1124,7 @@ export function createIntegrationCenterService(options: {
       let streamCount = 0;
       let totalInputTokens = 0;
       let totalCachedInputTokens = 0;
+      let totalCacheWriteTokens = 0;
       let totalOutputTokens = 0;
       let totalEstimatedCost = 0;
       let totalInternalCost = 0;
@@ -1182,6 +1185,7 @@ export function createIntegrationCenterService(options: {
         }
         totalInputTokens += record.inputTokens;
         totalCachedInputTokens += record.cachedInputTokens;
+        totalCacheWriteTokens += record.cacheWriteTokens ?? 0;
         totalOutputTokens += record.outputTokens;
         totalEstimatedCost += toNumber(record.estimatedCost);
         totalInternalCost += toNumber(record.internalCost);
@@ -1203,6 +1207,7 @@ export function createIntegrationCenterService(options: {
           messageCount: Number(metadata?.messageCount ?? 0) || 0,
           inputTokens: record.inputTokens,
           cachedInputTokens: record.cachedInputTokens,
+          cacheWriteTokens: record.cacheWriteTokens ?? 0,
           outputTokens: record.outputTokens,
           totalTokens: usageTotalTokens(record.inputTokens, record.outputTokens),
           estimatedCost: record.estimatedCost,
@@ -1246,6 +1251,7 @@ export function createIntegrationCenterService(options: {
           streamRate: roundRatio(streamCount, totalRequests),
           totalInputTokens,
           totalCachedInputTokens,
+          totalCacheWriteTokens,
           totalOutputTokens,
           totalTokens,
           averageTokensPerRequest: totalRequests > 0 ? Math.round(totalTokens / totalRequests) : 0,

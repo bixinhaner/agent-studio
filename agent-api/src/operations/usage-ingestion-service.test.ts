@@ -9,6 +9,7 @@ const profile: CostProfileRecord = {
   model: "gpt-5.4",
   inputTokenPrice: "2.500000",
   cachedInputTokenPrice: "0.250000",
+  cacheWriteTokenPrice: "0.000000",
   outputTokenPrice: "15.000000",
   internalCostMultiplier: "1.2000",
   isActive: true,
@@ -74,6 +75,144 @@ describe("UsageIngestionService", () => {
         outputTokenPrice: "15.000000",
         internalCostMultiplier: "1.2000"
       }
+    });
+  });
+
+  it("prices GPT-5.6 cache writes separately when runtime telemetry provides them", async () => {
+    const gpt56Profile: CostProfileRecord = {
+      ...profile,
+      id: "profile-gpt-56-terra",
+      model: "gpt-5.6-terra",
+      cacheWriteTokenPrice: "3.125000"
+    };
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; internalCost: string }) | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return gpt56Profile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; internalCost: string };
+          return {
+            id: "usage-cache-write",
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            cacheWriteTokens: input.cacheWriteTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-07-10T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.record({
+      model: "gpt-5.6-terra",
+      featureType: "chat",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 200_000,
+      cacheWriteTokens: 100_000,
+      outputTokens: 100_000
+    });
+
+    expect(createdInput?.estimatedCost).toBe("3.612500");
+    expect(createdInput?.cacheWriteTokens).toBe(100_000);
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: { costCompleteness: "complete" }
+    });
+  });
+
+  it("marks GPT-5.6 cost as partial when app-server omits cache-write telemetry", async () => {
+    const gpt56Profile: CostProfileRecord = {
+      ...profile,
+      id: "profile-gpt-56-sol",
+      model: "gpt-5.6-sol",
+      cacheWriteTokenPrice: "6.250000"
+    };
+    let metadata: unknown;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return gpt56Profile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          metadata = input.metadata;
+          return {
+            id: "usage-partial",
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-07-10T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.record({
+      model: "gpt-5.6-sol",
+      featureType: "chat",
+      inputTokens: 1000,
+      cachedInputTokens: 200,
+      outputTokens: 100
+    });
+
+    expect(metadata).toMatchObject({
+      _costProfile: { costCompleteness: "partial_missing_cache_write_tokens" }
+    });
+  });
+
+  it("applies configured long-context multipliers in the shared pricing path", async () => {
+    const longContextProfile = {
+      ...profile,
+      id: "profile-gpt-56-terra-long-context",
+      model: "gpt-5.6-terra",
+      longContextThresholdTokens: 272_000,
+      longContextInputMultiplier: "2.0000",
+      longContextOutputMultiplier: "1.5000"
+    } as CostProfileRecord;
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; metadata?: unknown }) | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return longContextProfile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; metadata?: unknown };
+          return {
+            id: "usage-long-context",
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-07-10T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.record({
+      model: "gpt-5.6-terra",
+      featureType: "chat",
+      inputTokens: 300_000,
+      outputTokens: 100_000
+    });
+
+    expect(createdInput?.estimatedCost).toBe("3.750000");
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: { longContextApplied: true }
     });
   });
 

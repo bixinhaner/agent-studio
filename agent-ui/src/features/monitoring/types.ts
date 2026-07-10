@@ -19,10 +19,12 @@ export type OperationsInsightsSummary = {
   totalRequests: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: string;
   internalCost: string;
+  incompleteCostRequestCount: number;
   avgRequestsPerSession: number;
   avgTokensPerSession: number;
   avgInternalCostPerSession: string;
@@ -110,6 +112,7 @@ export type OperationsInsightsSessionRow = {
   requestCount: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   totalTokens: number;
   estimatedCost: string;
@@ -260,7 +263,11 @@ export type CostProfileRecord = {
   model: string;
   inputTokenPrice: string;
   cachedInputTokenPrice: string;
+  cacheWriteTokenPrice: string;
   outputTokenPrice: string;
+  longContextThresholdTokens?: number;
+  longContextInputMultiplier?: string;
+  longContextOutputMultiplier?: string;
   internalCostMultiplier: string;
   isActive: boolean;
 };
@@ -273,7 +280,11 @@ export type CreateCostProfileInput = {
   model: string;
   inputTokenPrice: string | number;
   cachedInputTokenPrice: string | number;
+  cacheWriteTokenPrice?: string | number;
   outputTokenPrice: string | number;
+  longContextThresholdTokens?: string | number;
+  longContextInputMultiplier?: string | number;
+  longContextOutputMultiplier?: string | number;
   internalCostMultiplier?: string | number;
   isActive?: boolean;
 };
@@ -281,7 +292,11 @@ export type CreateCostProfileInput = {
 export type UpdateCostProfileInput = {
   inputTokenPrice?: string | number;
   cachedInputTokenPrice?: string | number;
+  cacheWriteTokenPrice?: string | number;
   outputTokenPrice?: string | number;
+  longContextThresholdTokens?: string | number | null;
+  longContextInputMultiplier?: string | number;
+  longContextOutputMultiplier?: string | number;
   internalCostMultiplier?: string | number;
   isActive?: boolean;
 };

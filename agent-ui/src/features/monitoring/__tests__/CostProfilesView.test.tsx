@@ -36,6 +36,7 @@ describe("CostProfilesView", () => {
           model: "gpt-5.5",
           inputTokenPrice: "5.000000",
           cachedInputTokenPrice: "0.500000",
+          cacheWriteTokenPrice: "0.000000",
           outputTokenPrice: "30.000000",
           internalCostMultiplier: "1.0000",
           isActive: true
@@ -48,6 +49,7 @@ describe("CostProfilesView", () => {
         model: "gpt-5.5",
         inputTokenPrice: "5.000000",
         cachedInputTokenPrice: "0.500000",
+        cacheWriteTokenPrice: "0.000000",
         outputTokenPrice: "30.000000",
         internalCostMultiplier: "1.0000",
         isActive: true
@@ -66,20 +68,23 @@ describe("CostProfilesView", () => {
     const inputPriceInput = screen.getByLabelText("输入 / 1M tokens (USD)") as HTMLInputElement;
     const cachedInputPriceInput = screen.getByLabelText("缓存输入 / 1M tokens (USD)") as HTMLInputElement;
     const outputPriceInput = screen.getByLabelText("输出 / 1M tokens (USD)") as HTMLInputElement;
+    const longContextThresholdInput = screen.getByLabelText("长上下文阈值 (tokens)") as HTMLInputElement;
 
     expect(presetSelect.value).toBe("gpt-5.5");
     expect(modelInput.value).toBe("gpt-5.5");
     expect(inputPriceInput.value).toBe("5.000000");
     expect(cachedInputPriceInput.value).toBe("0.500000");
     expect(outputPriceInput.value).toBe("30.000000");
+    expect(longContextThresholdInput.value).toBe("272000");
 
-    fireEvent.change(presetSelect, { target: { value: "gpt-5.4" } });
+    fireEvent.change(presetSelect, { target: { value: "gpt-5.6-terra" } });
 
-    expect(presetSelect.value).toBe("gpt-5.4");
-    expect(modelInput.value).toBe("gpt-5.4");
+    expect(presetSelect.value).toBe("gpt-5.6-terra");
+    expect(modelInput.value).toBe("gpt-5.6-terra");
     expect(inputPriceInput.value).toBe("2.500000");
     expect(cachedInputPriceInput.value).toBe("0.250000");
     expect(outputPriceInput.value).toBe("15.000000");
+    expect(longContextThresholdInput.value).toBe("272000");
   });
 
   it("switches to custom mode after manual edits and submits the overridden pricing", async () => {
@@ -101,7 +106,11 @@ describe("CostProfilesView", () => {
         model: "gpt-5.5",
         inputTokenPrice: "9.999999",
         cachedInputTokenPrice: "0.500000",
+        cacheWriteTokenPrice: "0.000000",
         outputTokenPrice: "30.000000",
+        longContextThresholdTokens: "272000",
+        longContextInputMultiplier: "2.0000",
+        longContextOutputMultiplier: "1.5000",
         internalCostMultiplier: "1.0000"
       })
     );

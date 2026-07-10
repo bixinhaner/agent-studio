@@ -40,6 +40,7 @@ function cumulativeUsageFromSnapshot(usage: RuntimeUsageSnapshot | undefined): R
   return {
     inputTokens: usage.cumulativeInputTokens,
     cachedInputTokens: usage.cumulativeCachedInputTokens,
+    cacheWriteTokens: usage.cumulativeCacheWriteTokens,
     outputTokens: usage.cumulativeOutputTokens
   };
 }
@@ -71,6 +72,7 @@ export class UsageRecorder {
       featureType: input.featureType ?? "chat",
       inputTokens: input.usage?.inputTokens ?? 0,
       cachedInputTokens: input.usage?.cachedInputTokens ?? 0,
+      cacheWriteTokens: input.usage?.cacheWriteTokens,
       outputTokens: input.usage?.outputTokens ?? 0,
       codexRuntimeUsageKind: input.usage?.kind ?? "turn_delta",
       codexRuntimeCumulativeUsage: cumulativeUsageFromSnapshot(input.usage),

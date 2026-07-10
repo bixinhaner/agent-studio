@@ -235,6 +235,7 @@ type ApiAuditRecord = {
   metrics: {
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteTokens: number;
     outputTokens: number;
     totalTokens: number;
     estimatedCost: string;
@@ -1508,6 +1509,7 @@ function buildApiAuditRecord(
     metrics: {
       inputTokens: row.inputTokens,
       cachedInputTokens: row.cachedInputTokens,
+      cacheWriteTokens: row.cacheWriteTokens ?? 0,
       outputTokens: row.outputTokens,
       totalTokens: usageTotalTokens(row.inputTokens, row.outputTokens),
       estimatedCost: formatDecimal(row.estimatedCost),

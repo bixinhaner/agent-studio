@@ -497,7 +497,10 @@ export function ExternalApiUsageView(props: { instanceId: string }) {
                       <div className="external-api-usage-cell-stack">
                         <strong>{formatCount(record.totalTokens)}</strong>
                         <span>
-                          in {formatCount(record.inputTokens + record.cachedInputTokens)} / out {formatCount(record.outputTokens)}
+                          in {formatCount(record.inputTokens)} / out {formatCount(record.outputTokens)}
+                        </span>
+                        <span>
+                          缓存读取 {formatCount(record.cachedInputTokens)} / 写入 {formatCount(record.cacheWriteTokens)}
                         </span>
                         <span>输出字符 {formatCount(record.outputChars)}</span>
                       </div>

@@ -3,10 +3,12 @@ import type { ReasoningEffort } from "./model-config.js";
 export type RuntimeUsageSnapshot = {
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   outputTokens: number;
   kind?: "turn_delta" | "cumulative_snapshot";
   cumulativeInputTokens?: number;
   cumulativeCachedInputTokens?: number;
+  cumulativeCacheWriteTokens?: number;
   cumulativeOutputTokens?: number;
   codexThreadId?: string;
 };
@@ -106,6 +108,7 @@ function parseUsageRecord(
 
   const inputTokens = toTokenCount(usage.input_tokens);
   const cachedInputTokens = toTokenCount(usage.cached_input_tokens);
+  const cacheWriteTokens = toTokenCount(usage.cache_write_tokens ?? usage.cacheWriteTokens);
   const outputTokens = toTokenCount(usage.output_tokens);
   if (inputTokens === undefined || cachedInputTokens === undefined || outputTokens === undefined) {
     return undefined;
@@ -114,10 +117,14 @@ function parseUsageRecord(
   return {
     inputTokens,
     cachedInputTokens,
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
     outputTokens,
     kind,
     cumulativeInputTokens: options.cumulative?.inputTokens,
     cumulativeCachedInputTokens: options.cumulative?.cachedInputTokens,
+    ...(options.cumulative?.cacheWriteTokens !== undefined
+      ? { cumulativeCacheWriteTokens: options.cumulative.cacheWriteTokens }
+      : {}),
     cumulativeOutputTokens: options.cumulative?.outputTokens,
     codexThreadId: options.codexThreadId
   };

@@ -65,6 +65,7 @@ type SessionSortKey =
   | "requestCount"
   | "inputTokens"
   | "cachedInputTokens"
+  | "cacheWriteTokens"
   | "outputTokens"
   | "totalTokens"
   | "estimatedCost"
@@ -498,7 +499,10 @@ function SessionTable(props: {
               <SortableHeader label="输入" sortKey="inputTokens" sort={props.sort} onSort={props.onSort} />
             </th>
             <th aria-sort={sortAria(props.sort, "cachedInputTokens")}>
-              <SortableHeader label="缓存" sortKey="cachedInputTokens" sort={props.sort} onSort={props.onSort} />
+              <SortableHeader label="缓存读取" sortKey="cachedInputTokens" sort={props.sort} onSort={props.onSort} />
+            </th>
+            <th aria-sort={sortAria(props.sort, "cacheWriteTokens")}>
+              <SortableHeader label="缓存写入" sortKey="cacheWriteTokens" sort={props.sort} onSort={props.onSort} />
             </th>
             <th aria-sort={sortAria(props.sort, "outputTokens")}>
               <SortableHeader label="输出" sortKey="outputTokens" sort={props.sort} onSort={props.onSort} />
@@ -546,6 +550,7 @@ function SessionTable(props: {
                 <td>{formatCount(row.requestCount)}</td>
                 <td>{formatCount(row.inputTokens)}</td>
                 <td>{formatCount(row.cachedInputTokens)}</td>
+                <td>{formatCount(row.cacheWriteTokens)}</td>
                 <td>{formatCount(row.outputTokens)}</td>
                 <td>
                   <div className="ops-analytics-cell-stack">
@@ -761,8 +766,21 @@ export function OperationsAnalyticsView() {
               value={formatUsdAmount(data.summary.internalCost)}
               meta={`平均 ${formatUsdAmount(data.summary.avgInternalCostPerRequest)} /问题`}
             />
-            <MetricItem label="缓存占比" value={formatPercent(data.summary.cacheShare)} meta={`平均 ${data.summary.avgTokensPerRequest} tokens/问题`} />
+            <MetricItem
+              label="缓存占比"
+              value={formatPercent(data.summary.cacheShare)}
+              meta={`缓存写入 ${formatCount(data.summary.cacheWriteTokens)} tokens`}
+            />
           </section>
+        ) : null}
+        {data?.summary.incompleteCostRequestCount ? (
+          <Alert
+            type="warning"
+            showIcon
+            className="admin-alert-inline"
+            message={`有 ${formatCount(data.summary.incompleteCostRequestCount)} 次请求的费用为下限估算`}
+            description="当前 Codex 运行时未提供缓存写入 tokens；已统计可观测费用，但实际费用可能更高。"
+          />
         ) : null}
       </div>
 

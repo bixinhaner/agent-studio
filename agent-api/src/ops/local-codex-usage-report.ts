@@ -23,6 +23,7 @@ type CliOptions = {
 type Price = {
   input: number;
   cachedInput?: number;
+  cacheWrite?: number;
   output: number;
 };
 
@@ -44,6 +45,7 @@ type SessionSummary = {
   requests: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   estimatedCost: number;
@@ -62,6 +64,7 @@ type RequestRecord = {
   longContext: boolean;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   estimatedCost?: number;
@@ -74,6 +77,7 @@ type AggregateRow = {
   requests: number;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   estimatedCost: number;
@@ -91,11 +95,15 @@ const DEFAULT_TOP = 10;
 const PRICING_SOURCE_URL = "https://developers.openai.com/api/docs/pricing";
 const MODEL_NOTES_SOURCE_URLS = [
   "https://developers.openai.com/api/docs/models/gpt-5.5",
-  "https://developers.openai.com/api/docs/models/gpt-5.4"
+  "https://developers.openai.com/api/docs/models/gpt-5.4",
+  "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
 ];
 
 const PRICING: PricingByTier = {
   standard: {
+    "gpt-5.6-sol": withLongContext({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
+    "gpt-5.6-terra": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
+    "gpt-5.6-luna": withLongContext({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
     "gpt-5.5": withLongContext({ input: 5, cachedInput: 0.5, output: 30 }),
     "gpt-5.5-pro": withLongContext({ input: 30, output: 180 }),
     "gpt-5.4": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
@@ -119,6 +127,9 @@ const PRICING: PricingByTier = {
     "o3-mini": { input: 1.1, cachedInput: 0.55, output: 4.4 }
   },
   batch: {
+    "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
+    "gpt-5.6-terra": withLongContext({ input: 1.25, cachedInput: 0.125, cacheWrite: 1.5625, output: 7.5 }),
+    "gpt-5.6-luna": withLongContext({ input: 0.5, cachedInput: 0.05, cacheWrite: 0.625, output: 3 }),
     "gpt-5.5": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
     "gpt-5.5-pro": withLongContext({ input: 15, output: 90 }),
     "gpt-5.4": withLongContext({ input: 1.25, cachedInput: 0.13, output: 7.5 }),
@@ -140,6 +151,9 @@ const PRICING: PricingByTier = {
     "o4-mini": { input: 0.55, output: 2.2 }
   },
   flex: {
+    "gpt-5.6-sol": withLongContext({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
+    "gpt-5.6-terra": withLongContext({ input: 1.25, cachedInput: 0.125, cacheWrite: 1.5625, output: 7.5 }),
+    "gpt-5.6-luna": withLongContext({ input: 0.5, cachedInput: 0.05, cacheWrite: 0.625, output: 3 }),
     "gpt-5.5": withLongContext({ input: 2.5, cachedInput: 0.25, output: 15 }),
     "gpt-5.5-pro": withLongContext({ input: 15, output: 90 }),
     "gpt-5.4": withLongContext({ input: 1.25, cachedInput: 0.13, output: 7.5 }),
@@ -155,6 +169,9 @@ const PRICING: PricingByTier = {
     "o4-mini": { input: 0.55, cachedInput: 0.138, output: 2.2 }
   },
   priority: {
+    "gpt-5.6-sol": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 60 },
+    "gpt-5.6-terra": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 },
+    "gpt-5.6-luna": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
     "gpt-5.5": { input: 12.5, cachedInput: 1.25, output: 75 },
     "gpt-5.4": { input: 5, cachedInput: 0.5, output: 30 },
     "gpt-5.4-mini": { input: 1.5, cachedInput: 0.15, output: 9 },
@@ -179,6 +196,7 @@ function withLongContext(price: Price): PriceProfile {
     longContext: {
       input: price.input * 2,
       cachedInput: price.cachedInput === undefined ? undefined : price.cachedInput * 2,
+      cacheWrite: price.cacheWrite === undefined ? undefined : price.cacheWrite * 2,
       output: price.output * 1.5
     }
   };
@@ -359,6 +377,9 @@ function localDateTime(date: Date, timezone: string): string {
 function normalizeModel(model: string): string {
   const normalized = model.trim();
   for (const base of [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5-pro",
     "gpt-5.5",
     "gpt-5.4-pro",
@@ -404,16 +425,23 @@ function estimatedCost(input: {
   tier: ServiceTier;
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens: number;
   outputTokens: number;
 }): { cost?: number; priceModel?: string; longContext: boolean } {
   const { price, priceModel, longContext } = pricingFor(input.model, input.tier, input.inputTokens);
   if (!price) return { longContext: false };
   const cachedInputTokens = Math.min(input.inputTokens, Math.max(0, input.cachedInputTokens));
-  const uncachedInputTokens = Math.max(0, input.inputTokens - cachedInputTokens);
+  const cacheWriteTokens = Math.min(
+    Math.max(0, input.inputTokens - cachedInputTokens),
+    Math.max(0, input.cacheWriteTokens)
+  );
+  const uncachedInputTokens = Math.max(0, input.inputTokens - cachedInputTokens - cacheWriteTokens);
   const cachedInputPrice = price.cachedInput ?? price.input;
+  const cacheWritePrice = price.cacheWrite ?? price.input;
   const cost =
     (uncachedInputTokens * price.input +
       cachedInputTokens * cachedInputPrice +
+      cacheWriteTokens * cacheWritePrice +
       input.outputTokens * price.output) /
     1_000_000;
   return { cost, priceModel, longContext };
@@ -443,14 +471,20 @@ function usageForLocalRequest(
     inputTokens,
     deltaFromCumulative(usage.cachedInputTokens, previous?.cachedInputTokens)
   );
+  const cacheWriteTokens = Math.min(
+    Math.max(0, inputTokens - cachedInputTokens),
+    deltaFromCumulative(usage.cacheWriteTokens ?? 0, previous?.cacheWriteTokens)
+  );
   return {
     ...usage,
     inputTokens,
     cachedInputTokens,
+    cacheWriteTokens,
     outputTokens: deltaFromCumulative(usage.outputTokens, previous?.outputTokens),
     kind: "turn_delta",
     cumulativeInputTokens: usage.inputTokens,
     cumulativeCachedInputTokens: usage.cachedInputTokens,
+    cumulativeCacheWriteTokens: usage.cacheWriteTokens,
     cumulativeOutputTokens: usage.outputTokens
   };
 }
@@ -520,6 +554,7 @@ async function parseSessionFile(filePath: string, options: CliOptions, state: Pa
       tier: options.tier,
       inputTokens: usage.inputTokens,
       cachedInputTokens: usage.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens ?? 0,
       outputTokens: usage.outputTokens
     });
     const request: RequestRecord = {
@@ -534,6 +569,7 @@ async function parseSessionFile(filePath: string, options: CliOptions, state: Pa
       longContext: cost.longContext,
       inputTokens: usage.inputTokens,
       cachedInputTokens: usage.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens ?? 0,
       outputTokens: usage.outputTokens,
       reasoningOutputTokens: reasoningOutputTokensFromPayload(payload),
       estimatedCost: cost.cost,
@@ -555,6 +591,7 @@ async function parseSessionFile(filePath: string, options: CliOptions, state: Pa
     requests: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheWriteTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     estimatedCost: 0,
@@ -572,6 +609,7 @@ function addUsage(
     | "requests"
     | "inputTokens"
     | "cachedInputTokens"
+    | "cacheWriteTokens"
     | "outputTokens"
     | "reasoningOutputTokens"
     | "estimatedCost"
@@ -582,6 +620,7 @@ function addUsage(
   target.requests += 1;
   target.inputTokens += request.inputTokens;
   target.cachedInputTokens += request.cachedInputTokens;
+  target.cacheWriteTokens += request.cacheWriteTokens;
   target.outputTokens += request.outputTokens;
   target.reasoningOutputTokens += request.reasoningOutputTokens;
   target.estimatedCost += request.estimatedCost ?? 0;
@@ -595,6 +634,7 @@ function addAggregate(map: Map<string, AggregateRow>, key: string, request: Requ
     requests: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheWriteTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     estimatedCost: 0,
@@ -618,6 +658,7 @@ function mergeSessionSummary(target: SessionSummary, source: SessionSummary): vo
   target.requests += source.requests;
   target.inputTokens += source.inputTokens;
   target.cachedInputTokens += source.cachedInputTokens;
+  target.cacheWriteTokens += source.cacheWriteTokens;
   target.outputTokens += source.outputTokens;
   target.reasoningOutputTokens += source.reasoningOutputTokens;
   target.estimatedCost += source.estimatedCost;
@@ -639,7 +680,8 @@ function aggregateToOutput(row: AggregateRow): Record<string, unknown> {
     requests: row.requests,
     inputTokens: row.inputTokens,
     cachedInputTokens: row.cachedInputTokens,
-    uncachedInputTokens: Math.max(0, row.inputTokens - row.cachedInputTokens),
+    cacheWriteTokens: row.cacheWriteTokens,
+    uncachedInputTokens: Math.max(0, row.inputTokens - row.cachedInputTokens - row.cacheWriteTokens),
     outputTokens: row.outputTokens,
     reasoningOutputTokens: row.reasoningOutputTokens,
     totalTokens: row.inputTokens + row.outputTokens,
@@ -743,7 +785,7 @@ async function writeOutputs(input: {
       tier: input.options.tier,
       source: PRICING_SOURCE_URL,
       modelNotes: MODEL_NOTES_SOURCE_URLS,
-      note: "Prices are OpenAI API text-token prices per 1M tokens. GPT-5.5/GPT-5.4 long-context requests apply the documented >272K input-token multipliers."
+      note: "Prices are OpenAI API text-token prices per 1M tokens. GPT-5.6/GPT-5.5/GPT-5.4 long-context requests apply the documented >272K input-token multipliers."
     },
     totals: aggregateToOutput(input.totals),
     byDay: input.byDay.map(aggregateToOutput),
@@ -774,7 +816,8 @@ function sessionToOutput(session: SessionSummary): Record<string, unknown> {
     requests: session.requests,
     inputTokens: session.inputTokens,
     cachedInputTokens: session.cachedInputTokens,
-    uncachedInputTokens: Math.max(0, session.inputTokens - session.cachedInputTokens),
+    cacheWriteTokens: session.cacheWriteTokens,
+    uncachedInputTokens: Math.max(0, session.inputTokens - session.cachedInputTokens - session.cacheWriteTokens),
     outputTokens: session.outputTokens,
     reasoningOutputTokens: session.reasoningOutputTokens,
     totalTokens: session.inputTokens + session.outputTokens,
@@ -798,7 +841,8 @@ function requestToOutput(request: RequestRecord): Record<string, unknown> {
     longContext: request.longContext,
     inputTokens: request.inputTokens,
     cachedInputTokens: request.cachedInputTokens,
-    uncachedInputTokens: Math.max(0, request.inputTokens - request.cachedInputTokens),
+    cacheWriteTokens: request.cacheWriteTokens,
+    uncachedInputTokens: Math.max(0, request.inputTokens - request.cachedInputTokens - request.cacheWriteTokens),
     outputTokens: request.outputTokens,
     reasoningOutputTokens: request.reasoningOutputTokens,
     totalTokens: request.inputTokens + request.outputTokens,
@@ -848,6 +892,7 @@ async function main(): Promise<void> {
     requests: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
+    cacheWriteTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     estimatedCost: 0,
@@ -866,6 +911,7 @@ async function main(): Promise<void> {
     [
       `Input: ${formatInteger(totals.inputTokens)}`,
       `Cached: ${formatInteger(totals.cachedInputTokens)} (${formatPercent(totals.inputTokens > 0 ? totals.cachedInputTokens / totals.inputTokens : 0)})`,
+      `Cache write: ${formatInteger(totals.cacheWriteTokens)}`,
       `Output: ${formatInteger(totals.outputTokens)}`,
       `Reasoning output: ${formatInteger(totals.reasoningOutputTokens)}`,
       `Estimated cost: ${formatUsd(totals.estimatedCost)}`

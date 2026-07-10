@@ -4,7 +4,11 @@ export type CostProfileRecord = {
   model: string;
   inputTokenPrice: string;
   cachedInputTokenPrice: string;
+  cacheWriteTokenPrice?: string;
   outputTokenPrice: string;
+  longContextThresholdTokens?: number;
+  longContextInputMultiplier?: string;
+  longContextOutputMultiplier?: string;
   internalCostMultiplier: string;
   isActive: boolean;
   createdAt: string;
@@ -17,7 +21,11 @@ export type UpsertCostProfileInput = {
   model: string;
   inputTokenPrice: string;
   cachedInputTokenPrice: string;
+  cacheWriteTokenPrice?: string;
   outputTokenPrice: string;
+  longContextThresholdTokens?: number;
+  longContextInputMultiplier?: string;
+  longContextOutputMultiplier?: string;
   internalCostMultiplier?: string;
   isActive?: boolean;
 };
@@ -26,7 +34,11 @@ export type UpdateCostProfileInput = {
   model?: string;
   inputTokenPrice?: string;
   cachedInputTokenPrice?: string;
+  cacheWriteTokenPrice?: string;
   outputTokenPrice?: string;
+  longContextThresholdTokens?: number | null;
+  longContextInputMultiplier?: string;
+  longContextOutputMultiplier?: string;
   internalCostMultiplier?: string;
   isActive?: boolean;
 };
@@ -37,7 +49,11 @@ type CostProfileRow = {
   model: string;
   inputTokenPrice: unknown;
   cachedInputTokenPrice: unknown;
+  cacheWriteTokenPrice?: unknown;
   outputTokenPrice: unknown;
+  longContextThresholdTokens?: number | null;
+  longContextInputMultiplier?: unknown;
+  longContextOutputMultiplier?: unknown;
   internalCostMultiplier: unknown;
   isActive: boolean;
   createdAt: Date | string;
@@ -93,7 +109,11 @@ function mapCostProfile(row: CostProfileRow): CostProfileRecord {
     model: row.model,
     inputTokenPrice: formatDecimal(row.inputTokenPrice, 6),
     cachedInputTokenPrice: formatDecimal(row.cachedInputTokenPrice, 6),
+    cacheWriteTokenPrice: formatDecimal(row.cacheWriteTokenPrice, 6),
     outputTokenPrice: formatDecimal(row.outputTokenPrice, 6),
+    longContextThresholdTokens: row.longContextThresholdTokens ?? undefined,
+    longContextInputMultiplier: formatDecimal(row.longContextInputMultiplier, 4),
+    longContextOutputMultiplier: formatDecimal(row.longContextOutputMultiplier, 4),
     internalCostMultiplier: formatDecimal(row.internalCostMultiplier, 4),
     isActive: row.isActive,
     createdAt: toIsoString(row.createdAt),
@@ -177,7 +197,11 @@ export class CostProfileRepository {
       model,
       inputTokenPrice: trimOrUndefined(input.inputTokenPrice) ?? "0.000000",
       cachedInputTokenPrice: trimOrUndefined(input.cachedInputTokenPrice) ?? "0.000000",
+      cacheWriteTokenPrice: trimOrUndefined(input.cacheWriteTokenPrice) ?? "0.000000",
       outputTokenPrice: trimOrUndefined(input.outputTokenPrice) ?? "0.000000",
+      longContextThresholdTokens: input.longContextThresholdTokens ?? null,
+      longContextInputMultiplier: trimOrUndefined(input.longContextInputMultiplier) ?? "1.0000",
+      longContextOutputMultiplier: trimOrUndefined(input.longContextOutputMultiplier) ?? "1.0000",
       internalCostMultiplier: trimOrUndefined(input.internalCostMultiplier) ?? "1.0000",
       isActive: input.isActive ?? true,
       updatedAt: new Date()
@@ -224,7 +248,19 @@ export class CostProfileRepository {
         ...(input.changes.cachedInputTokenPrice !== undefined
           ? { cachedInputTokenPrice: trimOrUndefined(input.changes.cachedInputTokenPrice) ?? existing.cachedInputTokenPrice }
           : {}),
+        ...(input.changes.cacheWriteTokenPrice !== undefined
+          ? { cacheWriteTokenPrice: trimOrUndefined(input.changes.cacheWriteTokenPrice) ?? existing.cacheWriteTokenPrice ?? "0.000000" }
+          : {}),
         ...(input.changes.outputTokenPrice !== undefined ? { outputTokenPrice: trimOrUndefined(input.changes.outputTokenPrice) ?? existing.outputTokenPrice } : {}),
+        ...(input.changes.longContextThresholdTokens !== undefined
+          ? { longContextThresholdTokens: input.changes.longContextThresholdTokens }
+          : {}),
+        ...(input.changes.longContextInputMultiplier !== undefined
+          ? { longContextInputMultiplier: trimOrUndefined(input.changes.longContextInputMultiplier) ?? "1.0000" }
+          : {}),
+        ...(input.changes.longContextOutputMultiplier !== undefined
+          ? { longContextOutputMultiplier: trimOrUndefined(input.changes.longContextOutputMultiplier) ?? "1.0000" }
+          : {}),
         ...(input.changes.internalCostMultiplier !== undefined
           ? { internalCostMultiplier: trimOrUndefined(input.changes.internalCostMultiplier) ?? existing.internalCostMultiplier }
           : {}),

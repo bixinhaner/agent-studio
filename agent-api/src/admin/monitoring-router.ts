@@ -51,6 +51,7 @@ const OPERATIONS_SESSION_SORT_KEYS = new Set([
   "requestCount",
   "inputTokens",
   "cachedInputTokens",
+  "cacheWriteTokens",
   "outputTokens",
   "totalTokens",
   "estimatedCost",
@@ -93,13 +94,19 @@ function normalizeQuotaPolicyInput(body: Record<string, unknown>): UpsertQuotaPo
 }
 
 function normalizeCostProfileInput(body: Record<string, unknown>): UpsertCostProfileInput {
+  const longContextThreshold = Number(body.longContextThresholdTokens);
   return {
     id: trimOrUndefined(body.id as string | null | undefined),
     organizationId: trimOrUndefined(body.organizationId as string | null | undefined),
     model: String(body.model ?? ""),
     inputTokenPrice: String(body.inputTokenPrice ?? "0"),
     cachedInputTokenPrice: String(body.cachedInputTokenPrice ?? "0"),
+    cacheWriteTokenPrice: String(body.cacheWriteTokenPrice ?? "0"),
     outputTokenPrice: String(body.outputTokenPrice ?? "0"),
+    longContextThresholdTokens:
+      Number.isInteger(longContextThreshold) && longContextThreshold > 0 ? longContextThreshold : undefined,
+    longContextInputMultiplier: String(body.longContextInputMultiplier ?? "1"),
+    longContextOutputMultiplier: String(body.longContextOutputMultiplier ?? "1"),
     internalCostMultiplier: String(body.internalCostMultiplier ?? "1"),
     isActive: typeof body.isActive === "boolean" ? body.isActive : undefined
   };
@@ -334,7 +341,11 @@ export function createMonitoringRouter(options: MonitoringRouterOptions): Router
           "model",
           "inputTokenPrice",
           "cachedInputTokenPrice",
+          "cacheWriteTokenPrice",
           "outputTokenPrice",
+          "longContextThresholdTokens",
+          "longContextInputMultiplier",
+          "longContextOutputMultiplier",
           "internalCostMultiplier",
           "isActive"
         ])
