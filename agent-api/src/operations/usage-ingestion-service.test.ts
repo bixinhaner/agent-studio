@@ -126,20 +126,20 @@ describe("UsageIngestionService", () => {
     });
   });
 
-  it("marks GPT-5.6 cost as partial when app-server omits cache-write telemetry", async () => {
+  it("uses the cache-write upper bound when app-server omits cache-write telemetry", async () => {
     const gpt56Profile: CostProfileRecord = {
       ...profile,
       id: "profile-gpt-56-sol",
       model: "gpt-5.6-sol",
       cacheWriteTokenPrice: "6.250000"
     };
-    let metadata: unknown;
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; internalCost: string }) | undefined;
     const service = new UsageIngestionService({
       costProfiles: { async getActiveByModel() { return gpt56Profile; } },
       usageEvents: {
         async list() { return []; },
         async create(input) {
-          metadata = input.metadata;
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; internalCost: string };
           return {
             id: "usage-partial",
             model: input.model,
@@ -165,8 +165,10 @@ describe("UsageIngestionService", () => {
       outputTokens: 100
     });
 
-    expect(metadata).toMatchObject({
-      _costProfile: { costCompleteness: "partial_missing_cache_write_tokens" }
+    expect(createdInput?.estimatedCost).toBe("0.006550");
+    expect(createdInput?.cacheWriteTokens).toBe(0);
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: { costCompleteness: "upper_bound_missing_cache_write_tokens" }
     });
   });
 

@@ -185,7 +185,9 @@ function metadataWithCostProfile(input: {
           longContextApplied: input.longContextApplied,
           internalCostMultiplier: input.profile.internalCostMultiplier,
           costCompleteness:
-            cacheWritePrice > 0 && !input.cacheWriteTelemetryAvailable ? "partial_missing_cache_write_tokens" : "complete"
+            cacheWritePrice > 0 && !input.cacheWriteTelemetryAvailable
+              ? "upper_bound_missing_cache_write_tokens"
+              : "complete"
         }).filter(([, value]) => value !== undefined)
       )
     : {
@@ -224,6 +226,7 @@ function calculateEstimatedCost(input: {
   inputTokens: number;
   cachedInputTokens: number;
   cacheWriteTokens: number;
+  cacheWriteTelemetryAvailable: boolean;
   outputTokens: number;
 }): { estimatedCost: string; internalCost: string; longContextApplied: boolean } {
   if (!input.profile) {
@@ -247,15 +250,18 @@ function calculateEstimatedCost(input: {
     ? parseDecimal(input.profile.longContextOutputMultiplier, 1)
     : 1;
   const internalCostMultiplier = parseDecimal(input.profile.internalCostMultiplier, 1);
-  const uncachedInputTokens = Math.max(
-    0,
-    billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens) - input.cacheWriteTokens
-  );
+  const billableUncachedTokens = billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens);
+  const cacheWriteTokens = input.cacheWriteTelemetryAvailable
+    ? input.cacheWriteTokens
+    : cacheWriteTokenPrice > 0
+      ? billableUncachedTokens
+      : 0;
+  const uncachedInputTokens = Math.max(0, billableUncachedTokens - cacheWriteTokens);
 
   const estimated =
     uncachedInputTokens * inputTokenPrice * inputPriceMultiplier +
     input.cachedInputTokens * cachedInputTokenPrice * inputPriceMultiplier +
-    input.cacheWriteTokens * cacheWriteTokenPrice * inputPriceMultiplier +
+    cacheWriteTokens * cacheWriteTokenPrice * inputPriceMultiplier +
     input.outputTokens * outputTokenPrice * outputPriceMultiplier;
   const internal = estimated * internalCostMultiplier;
 
@@ -297,6 +303,7 @@ export class UsageIngestionService {
       inputTokens: usage.inputTokens,
       cachedInputTokens: usage.cachedInputTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
+      cacheWriteTelemetryAvailable: input.cacheWriteTokens !== undefined,
       outputTokens: usage.outputTokens
     });
 

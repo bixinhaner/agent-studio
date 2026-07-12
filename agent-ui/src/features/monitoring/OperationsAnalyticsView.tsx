@@ -773,15 +773,6 @@ export function OperationsAnalyticsView() {
             />
           </section>
         ) : null}
-        {data?.summary.incompleteCostRequestCount ? (
-          <Alert
-            type="warning"
-            showIcon
-            className="admin-alert-inline"
-            message={`有 ${formatCount(data.summary.incompleteCostRequestCount)} 次请求的费用为下限估算`}
-            description="当前 Codex 运行时未提供缓存写入 tokens；已统计可观测费用，但实际费用可能更高。"
-          />
-        ) : null}
       </div>
 
       {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}

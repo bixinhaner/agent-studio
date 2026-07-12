@@ -282,7 +282,7 @@ export function CostProfilesView() {
               setCacheWriteTokenPrice(event.target.value);
             }}
           />
-          <small className="field-help">上游未返回缓存写入 token 时，系统会把该次费用标记为部分估算。</small>
+          <small className="field-help">上游未返回缓存写入 token 时，未缓存输入按缓存写入单价计算费用上限。</small>
         </label>
         <label className="field">
           <span className="field-label">输出 / 1M tokens (USD)</span>
