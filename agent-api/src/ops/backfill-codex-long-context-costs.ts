@@ -204,6 +204,7 @@ async function loadRolloutUsage(file: string): Promise<{ threadId?: string; reco
   const text = await fs.readFile(file, "utf8");
   let threadId: string | undefined;
   const records: RolloutUsage[] = [];
+  const seenCumulativeUsage = new Set<string>();
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let row: Record<string, unknown>;
@@ -221,6 +222,14 @@ async function loadRolloutUsage(file: string): Promise<{ threadId?: string; reco
     const total = parseTokenUsage(info?.total_token_usage);
     const last = parseTokenUsage(info?.last_token_usage);
     if (!total || !last) continue;
+    const cumulativeUsageKey = [
+      total.inputTokens,
+      total.cachedInputTokens,
+      total.cacheWriteTokens ?? "",
+      total.outputTokens
+    ].join(":");
+    if (seenCumulativeUsage.has(cumulativeUsageKey)) continue;
+    seenCumulativeUsage.add(cumulativeUsageKey);
     records.push({
       total,
       last,
