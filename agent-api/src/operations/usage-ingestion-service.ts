@@ -18,6 +18,13 @@ export type RecordUsageInput = Omit<CreateUsageEventInput, "estimatedCost" | "in
     cacheWriteTokens?: number;
     outputTokens: number;
   };
+  codexRuntimeModelInvocations?: Array<{
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteTokens?: number;
+    outputTokens: number;
+    modelContextWindow?: number;
+  }>;
   codexThreadId?: string;
 };
 
@@ -164,13 +171,19 @@ function metadataWithCostProfile(input: {
   metadata?: unknown;
   profile: CostProfileRecord | null;
   cacheWriteTelemetryAvailable: boolean;
-  longContextApplied: boolean;
+  pricing: Pick<CalculatedUsageCost,
+    | "longContextApplied"
+    | "longContextInvocationCount"
+    | "maxInvocationInputTokens"
+    | "longContextPricingBasis"
+    | "longContextPricingComplete"
+  >;
 }): Record<string, unknown> {
   const cacheWritePrice = parseDecimal(input.profile?.cacheWriteTokenPrice);
   const profileMetadata = input.profile
     ? Object.fromEntries(
         Object.entries({
-          version: 2,
+          version: 3,
           matched: true,
           profileId: input.profile.id,
           organizationId: input.profile.organizationId,
@@ -182,7 +195,11 @@ function metadataWithCostProfile(input: {
           longContextThresholdTokens: input.profile.longContextThresholdTokens,
           longContextInputMultiplier: input.profile.longContextInputMultiplier,
           longContextOutputMultiplier: input.profile.longContextOutputMultiplier,
-          longContextApplied: input.longContextApplied,
+          longContextApplied: input.pricing.longContextApplied,
+          longContextInvocationCount: input.pricing.longContextInvocationCount,
+          maxInvocationInputTokens: input.pricing.maxInvocationInputTokens,
+          longContextPricingBasis: input.pricing.longContextPricingBasis,
+          longContextPricingComplete: input.pricing.longContextPricingComplete,
           internalCostMultiplier: input.profile.internalCostMultiplier,
           costCompleteness:
             cacheWritePrice > 0 && !input.cacheWriteTelemetryAvailable
@@ -221,19 +238,92 @@ function pricePerToken(pricePerMillionTokens: number): number {
   return pricePerMillionTokens / 1_000_000;
 }
 
-function calculateEstimatedCost(input: {
+export type CalculatedUsageCost = {
+  estimatedCost: string;
+  internalCost: string;
+  longContextApplied: boolean;
+  longContextInvocationCount: number;
+  maxInvocationInputTokens: number;
+  longContextPricingBasis: "aggregate_request" | "model_invocation";
+  longContextPricingComplete: boolean;
+};
+
+type PricingInvocation = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+};
+
+function invocationCost(input: {
+  usage: PricingInvocation;
+  inputTokenPrice: number;
+  cachedInputTokenPrice: number;
+  cacheWriteTokenPrice: number;
+  outputTokenPrice: number;
+  cacheWriteTelemetryAvailable: boolean;
+}): number {
+  const billableUncachedTokens = billableUncachedInputTokens(input.usage.inputTokens, input.usage.cachedInputTokens);
+  const cacheWriteTokens = input.cacheWriteTelemetryAvailable
+    ? input.usage.cacheWriteTokens
+    : input.cacheWriteTokenPrice > 0
+      ? billableUncachedTokens
+      : 0;
+  const uncachedInputTokens = Math.max(0, billableUncachedTokens - cacheWriteTokens);
+  return (
+    uncachedInputTokens * input.inputTokenPrice +
+    input.usage.cachedInputTokens * input.cachedInputTokenPrice +
+    cacheWriteTokens * input.cacheWriteTokenPrice +
+    input.usage.outputTokens * input.outputTokenPrice
+  );
+}
+
+function sanitizePricingInvocations(input: {
+  invocations: RecordUsageInput["codexRuntimeModelInvocations"];
+  aggregate: PricingInvocation;
+}): { invocations: PricingInvocation[]; complete: boolean } {
+  if (!input.invocations) return { invocations: [], complete: false };
+  const invocations = input.invocations.map((invocation) => sanitizeUsage(invocation));
+  const totals = invocations.reduce(
+    (sum, invocation) => ({
+      inputTokens: sum.inputTokens + invocation.inputTokens,
+      cachedInputTokens: sum.cachedInputTokens + invocation.cachedInputTokens,
+      cacheWriteTokens: sum.cacheWriteTokens + invocation.cacheWriteTokens,
+      outputTokens: sum.outputTokens + invocation.outputTokens
+    }),
+    { inputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0 }
+  );
+  const withinAggregate =
+    totals.inputTokens <= input.aggregate.inputTokens &&
+    totals.cachedInputTokens <= input.aggregate.cachedInputTokens &&
+    totals.cacheWriteTokens <= input.aggregate.cacheWriteTokens &&
+    totals.outputTokens <= input.aggregate.outputTokens;
+  return {
+    invocations: withinAggregate ? invocations : [],
+    complete: withinAggregate && totals.inputTokens === input.aggregate.inputTokens && totals.outputTokens === input.aggregate.outputTokens
+  };
+}
+
+export function calculateEstimatedCost(input: {
   profile: CostProfileRecord | null;
   inputTokens: number;
   cachedInputTokens: number;
   cacheWriteTokens: number;
   cacheWriteTelemetryAvailable: boolean;
   outputTokens: number;
-}): { estimatedCost: string; internalCost: string; longContextApplied: boolean } {
+  modelInvocations?: RecordUsageInput["codexRuntimeModelInvocations"];
+  longContextPricingBasis?: "aggregate_request" | "model_invocation";
+}): CalculatedUsageCost {
+  const longContextPricingBasis = input.longContextPricingBasis ?? "aggregate_request";
   if (!input.profile) {
     return {
       estimatedCost: "0.000000",
       internalCost: "0.000000",
-      longContextApplied: false
+      longContextApplied: false,
+      longContextInvocationCount: 0,
+      maxInvocationInputTokens: 0,
+      longContextPricingBasis,
+      longContextPricingComplete: longContextPricingBasis === "aggregate_request"
     };
   }
 
@@ -242,33 +332,53 @@ function calculateEstimatedCost(input: {
   const cacheWriteTokenPrice = pricePerToken(parseDecimal(input.profile.cacheWriteTokenPrice));
   const outputTokenPrice = pricePerToken(parseDecimal(input.profile.outputTokenPrice));
   const longContextThresholdTokens = input.profile.longContextThresholdTokens ?? 0;
-  const longContextApplied = longContextThresholdTokens > 0 && input.inputTokens > longContextThresholdTokens;
-  const inputPriceMultiplier = longContextApplied
-    ? parseDecimal(input.profile.longContextInputMultiplier, 1)
-    : 1;
-  const outputPriceMultiplier = longContextApplied
-    ? parseDecimal(input.profile.longContextOutputMultiplier, 1)
-    : 1;
+  const inputPriceMultiplier = parseDecimal(input.profile.longContextInputMultiplier, 1);
+  const outputPriceMultiplier = parseDecimal(input.profile.longContextOutputMultiplier, 1);
   const internalCostMultiplier = parseDecimal(input.profile.internalCostMultiplier, 1);
-  const billableUncachedTokens = billableUncachedInputTokens(input.inputTokens, input.cachedInputTokens);
-  const cacheWriteTokens = input.cacheWriteTelemetryAvailable
-    ? input.cacheWriteTokens
-    : cacheWriteTokenPrice > 0
-      ? billableUncachedTokens
-      : 0;
-  const uncachedInputTokens = Math.max(0, billableUncachedTokens - cacheWriteTokens);
-
-  const estimated =
-    uncachedInputTokens * inputTokenPrice * inputPriceMultiplier +
-    input.cachedInputTokens * cachedInputTokenPrice * inputPriceMultiplier +
-    cacheWriteTokens * cacheWriteTokenPrice * inputPriceMultiplier +
-    input.outputTokens * outputTokenPrice * outputPriceMultiplier;
+  const aggregateUsage = sanitizeUsage(input);
+  const baseEstimated = invocationCost({
+    usage: aggregateUsage,
+    inputTokenPrice,
+    cachedInputTokenPrice,
+    cacheWriteTokenPrice,
+    outputTokenPrice,
+    cacheWriteTelemetryAvailable: input.cacheWriteTelemetryAvailable
+  });
+  const pricingInvocations = sanitizePricingInvocations({
+    invocations: input.modelInvocations,
+    aggregate: aggregateUsage
+  });
+  const candidates = longContextPricingBasis === "model_invocation"
+    ? pricingInvocations.invocations
+    : [aggregateUsage];
+  const longInvocations = longContextThresholdTokens > 0
+    ? candidates.filter((invocation) => invocation.inputTokens > longContextThresholdTokens)
+    : [];
+  const longContextExtra = longInvocations.reduce((sum, invocation) => {
+    const normalInputCost = invocationCost({
+      usage: { ...invocation, outputTokens: 0 },
+      inputTokenPrice,
+      cachedInputTokenPrice,
+      cacheWriteTokenPrice,
+      outputTokenPrice,
+      cacheWriteTelemetryAvailable: input.cacheWriteTelemetryAvailable
+    });
+    const normalOutputCost = invocation.outputTokens * outputTokenPrice;
+    return sum + normalInputCost * (inputPriceMultiplier - 1) + normalOutputCost * (outputPriceMultiplier - 1);
+  }, 0);
+  const estimated = baseEstimated + longContextExtra;
   const internal = estimated * internalCostMultiplier;
+  const maxInvocationInputTokens = candidates.reduce((max, invocation) => Math.max(max, invocation.inputTokens), 0);
 
   return {
     estimatedCost: formatCost(estimated),
     internalCost: formatCost(internal),
-    longContextApplied
+    longContextApplied: longInvocations.length > 0,
+    longContextInvocationCount: longInvocations.length,
+    maxInvocationInputTokens,
+    longContextPricingBasis,
+    longContextPricingComplete:
+      longContextPricingBasis === "aggregate_request" || pricingInvocations.complete
   };
 }
 
@@ -304,7 +414,11 @@ export class UsageIngestionService {
       cachedInputTokens: usage.cachedInputTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
       cacheWriteTelemetryAvailable: input.cacheWriteTokens !== undefined,
-      outputTokens: usage.outputTokens
+      outputTokens: usage.outputTokens,
+      modelInvocations: input.codexRuntimeModelInvocations,
+      longContextPricingBasis: input.codexRuntimeModelInvocations !== undefined
+        ? "model_invocation"
+        : "aggregate_request"
     });
 
     const created = await this.dependencies.usageEvents.create({
@@ -322,7 +436,7 @@ export class UsageIngestionService {
         metadata: input.metadata,
         profile,
         cacheWriteTelemetryAvailable: input.cacheWriteTokens !== undefined,
-        longContextApplied: costs.longContextApplied
+        pricing: costs
       })
     });
     await this.dependencies.afterRecord?.(created);
@@ -349,8 +463,9 @@ export class UsageIngestionService {
         ...input,
         inputTokens: currentSnapshot.inputTokens,
         cachedInputTokens: currentSnapshot.cachedInputTokens,
-        cacheWriteTokens: currentSnapshot.cacheWriteTokens,
-        outputTokens: currentSnapshot.outputTokens,
+      cacheWriteTokens: currentSnapshot.cacheWriteTokens,
+      outputTokens: currentSnapshot.outputTokens,
+      codexRuntimeModelInvocations: input.codexRuntimeModelInvocations ?? [],
         metadata: metadataWithCodexRuntimeSnapshot({
           metadata: {
             ...(asRecord(input.metadata) ?? {}),
@@ -393,6 +508,7 @@ export class UsageIngestionService {
           ? undefined
           : deltaFromCumulative(currentSnapshot.cacheWriteTokens, previousSnapshot?.cacheWriteTokens),
       outputTokens: deltaFromCumulative(currentSnapshot.outputTokens, previousSnapshot?.outputTokens),
+      codexRuntimeModelInvocations: input.codexRuntimeModelInvocations ?? [],
       metadata: metadataWithCodexRuntimeSnapshot({
         metadata: {
           ...(asRecord(input.metadata) ?? {}),

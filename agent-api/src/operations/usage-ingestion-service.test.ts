@@ -214,7 +214,124 @@ describe("UsageIngestionService", () => {
 
     expect(createdInput?.estimatedCost).toBe("3.750000");
     expect(createdInput?.metadata).toMatchObject({
-      _costProfile: { longContextApplied: true }
+      _costProfile: {
+        longContextApplied: true,
+        longContextPricingBasis: "aggregate_request"
+      }
+    });
+  });
+
+  it("does not apply long-context multipliers when a Codex turn exceeds 272k only in aggregate", async () => {
+    const longContextProfile = {
+      ...profile,
+      id: "profile-gpt-56-sol-invocations",
+      model: "gpt-5.6-sol",
+      longContextThresholdTokens: 272_000,
+      longContextInputMultiplier: "2.0000",
+      longContextOutputMultiplier: "1.5000"
+    } as CostProfileRecord;
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; metadata?: unknown }) | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return longContextProfile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; metadata?: unknown };
+          return {
+            id: "usage-codex-aggregate",
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-07-13T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.recordCodexRuntimeUsage({
+      sessionId: "session-codex-aggregate",
+      model: "gpt-5.6-sol",
+      featureType: "chat",
+      inputTokens: 450_000,
+      outputTokens: 2500,
+      codexRuntimeModelInvocations: [
+        { inputTokens: 200_000, cachedInputTokens: 0, outputTokens: 1000 },
+        { inputTokens: 250_000, cachedInputTokens: 0, outputTokens: 1500 }
+      ]
+    });
+
+    expect(createdInput?.estimatedCost).toBe("1.162500");
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: {
+        longContextApplied: false,
+        longContextInvocationCount: 0,
+        maxInvocationInputTokens: 250_000,
+        longContextPricingBasis: "model_invocation",
+        longContextPricingComplete: true
+      }
+    });
+  });
+
+  it("applies long-context multipliers only to the Codex model invocation over 272k", async () => {
+    const longContextProfile = {
+      ...profile,
+      id: "profile-gpt-56-sol-mixed-invocations",
+      model: "gpt-5.6-sol",
+      longContextThresholdTokens: 272_000,
+      longContextInputMultiplier: "2.0000",
+      longContextOutputMultiplier: "1.5000"
+    } as CostProfileRecord;
+    let createdInput: (CreateUsageEventInput & { estimatedCost: string; metadata?: unknown }) | undefined;
+    const service = new UsageIngestionService({
+      costProfiles: { async getActiveByModel() { return longContextProfile; } },
+      usageEvents: {
+        async list() { return []; },
+        async create(input) {
+          createdInput = input as CreateUsageEventInput & { estimatedCost: string; metadata?: unknown };
+          return {
+            id: "usage-codex-mixed",
+            model: input.model,
+            featureType: input.featureType,
+            inputTokens: input.inputTokens ?? 0,
+            cachedInputTokens: input.cachedInputTokens ?? 0,
+            outputTokens: input.outputTokens ?? 0,
+            estimatedCost: input.estimatedCost ?? "0.000000",
+            internalCost: input.internalCost ?? "0.000000",
+            resultStatus: input.resultStatus,
+            metadata: input.metadata,
+            createdAt: "2026-07-13T00:00:00.000Z"
+          };
+        }
+      }
+    });
+
+    await service.recordCodexRuntimeUsage({
+      sessionId: "session-codex-mixed",
+      model: "gpt-5.6-sol",
+      featureType: "chat",
+      inputTokens: 400_000,
+      outputTokens: 150_000,
+      codexRuntimeModelInvocations: [
+        { inputTokens: 300_000, cachedInputTokens: 0, outputTokens: 100_000 },
+        { inputTokens: 100_000, cachedInputTokens: 0, outputTokens: 50_000 }
+      ]
+    });
+
+    expect(createdInput?.estimatedCost).toBe("4.750000");
+    expect(createdInput?.metadata).toMatchObject({
+      _costProfile: {
+        longContextApplied: true,
+        longContextInvocationCount: 1,
+        maxInvocationInputTokens: 300_000,
+        longContextPricingBasis: "model_invocation",
+        longContextPricingComplete: true
+      }
     });
   });
 

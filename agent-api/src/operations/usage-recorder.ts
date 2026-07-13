@@ -76,6 +76,7 @@ export class UsageRecorder {
       outputTokens: input.usage?.outputTokens ?? 0,
       codexRuntimeUsageKind: input.usage?.kind ?? "turn_delta",
       codexRuntimeCumulativeUsage: cumulativeUsageFromSnapshot(input.usage),
+      codexRuntimeModelInvocations: input.usage?.modelInvocations,
       codexThreadId,
       resultStatus: input.resultStatus,
       createdAt: input.createdAt,

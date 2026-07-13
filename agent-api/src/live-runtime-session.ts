@@ -11,6 +11,16 @@ export type RuntimeUsageSnapshot = {
   cumulativeCacheWriteTokens?: number;
   cumulativeOutputTokens?: number;
   codexThreadId?: string;
+  modelContextWindow?: number;
+  modelInvocations?: RuntimeModelInvocationUsage[];
+};
+
+export type RuntimeModelInvocationUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens?: number;
+  outputTokens: number;
+  modelContextWindow?: number;
 };
 
 export type RuntimeStreamEvent = {
@@ -135,7 +145,35 @@ function parseTokenCountUsage(event: Record<string, unknown>, raw: Record<string
   const info = asRecord(source.info);
   const codexThreadId = trimOrUndefined(typeof source.thread_id === "string" ? source.thread_id : undefined);
   const cumulative = parseUsageRecord(info?.total_token_usage, "cumulative_snapshot", { codexThreadId });
-  return cumulative ?? parseUsageRecord(info?.last_token_usage, "turn_delta", { codexThreadId });
+  const last = parseUsageRecord(info?.last_token_usage, "turn_delta", { codexThreadId });
+  const modelContextWindow = toTokenCount(info?.model_context_window);
+  const modelInvocation = last
+    ? {
+        inputTokens: last.inputTokens,
+        cachedInputTokens: last.cachedInputTokens,
+        ...(last.cacheWriteTokens !== undefined ? { cacheWriteTokens: last.cacheWriteTokens } : {}),
+        outputTokens: last.outputTokens,
+        ...(modelContextWindow !== undefined ? { modelContextWindow } : {})
+      }
+    : undefined;
+  const selected = cumulative ?? last;
+  if (!selected) return undefined;
+  return {
+    ...selected,
+    ...(modelContextWindow !== undefined ? { modelContextWindow } : {}),
+    ...(modelInvocation ? { modelInvocations: [modelInvocation] } : {})
+  };
+}
+
+function cumulativeUsageKey(usage: RuntimeUsageSnapshot): string | undefined {
+  if (usage.kind !== "cumulative_snapshot") return undefined;
+  return [
+    usage.codexThreadId ?? "",
+    usage.inputTokens,
+    usage.cachedInputTokens,
+    usage.cacheWriteTokens ?? "",
+    usage.outputTokens
+  ].join(":");
 }
 
 function completedAgentMessageText(event: RuntimeStreamEvent): string | undefined {
@@ -224,6 +262,8 @@ export async function collectRuntimeCompletion(input: {
   let fallbackAnswer = "";
   let finalAgentAnswer: string | undefined;
   let latestUsage: RuntimeUsageSnapshot | undefined;
+  const modelInvocations: RuntimeModelInvocationUsage[] = [];
+  const seenCumulativeUsage = new Set<string>();
   const textMode = input.textMode ?? "append";
   const iterator = input.events[Symbol.asyncIterator]();
 
@@ -232,8 +272,18 @@ export async function collectRuntimeCompletion(input: {
       const next = await nextRuntimeEvent(iterator, input.signal);
       if (next.done) break;
       const event = next.value;
-      const usage = extractRuntimeUsageFromStreamEvent(event);
-      if (usage) {
+      const extractedUsage = extractRuntimeUsageFromStreamEvent(event);
+      if (extractedUsage) {
+        const usageKey = cumulativeUsageKey(extractedUsage);
+        const shouldCaptureInvocations = !usageKey || !seenCumulativeUsage.has(usageKey);
+        if (usageKey) seenCumulativeUsage.add(usageKey);
+        if (shouldCaptureInvocations && extractedUsage.modelInvocations) {
+          modelInvocations.push(...extractedUsage.modelInvocations);
+        }
+        const usage = {
+          ...extractedUsage,
+          ...(modelInvocations.length > 0 ? { modelInvocations: [...modelInvocations] } : {})
+        };
         latestUsage = usage;
         await input.onUsage?.(usage, event);
       }

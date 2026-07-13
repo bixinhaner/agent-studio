@@ -39,7 +39,12 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       cumulativeInputTokens: undefined,
       cumulativeCachedInputTokens: undefined,
       cumulativeOutputTokens: undefined,
-      codexThreadId: "codex-thread-1"
+      codexThreadId: "codex-thread-1",
+      modelInvocations: [{
+        inputTokens: 1200,
+        cachedInputTokens: 900,
+        outputTokens: 80
+      }]
     });
   });
 
@@ -62,7 +67,12 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       cumulativeInputTokens: undefined,
       cumulativeCachedInputTokens: undefined,
       cumulativeOutputTokens: undefined,
-      codexThreadId: "codex-thread-1"
+      codexThreadId: "codex-thread-1",
+      modelInvocations: [{
+        inputTokens: 1200,
+        cachedInputTokens: 900,
+        outputTokens: 80
+      }]
     });
   });
 
@@ -216,6 +226,50 @@ describe("streamRuntimeCompletionWithBestEffortUsage", () => {
       outputTokens: 40,
       kind: "cumulative_snapshot"
     }), "failed");
+  });
+
+  it("collects and deduplicates per-model-call usage for pricing while retaining cumulative totals", async () => {
+    const onDone = vi.fn();
+    const tokenCount = (totalInput: number, totalOutput: number, lastInput: number, lastOutput: number) => ({
+      type: "token_count",
+      thread_id: "codex-thread-1",
+      info: {
+        total_token_usage: {
+          input_tokens: totalInput,
+          cached_input_tokens: totalInput - 100,
+          output_tokens: totalOutput
+        },
+        last_token_usage: {
+          input_tokens: lastInput,
+          cached_input_tokens: lastInput - 100,
+          output_tokens: lastOutput
+        },
+        model_context_window: 353_400
+      }
+    });
+
+    await streamRuntimeCompletionWithBestEffortUsage({
+      events: events([
+        tokenCount(200_000, 1000, 200_000, 1000),
+        tokenCount(450_000, 2500, 250_000, 1500),
+        tokenCount(450_000, 2500, 250_000, 1500)
+      ]),
+      onEvent: vi.fn(),
+      onDone
+    });
+
+    expect(onDone).toHaveBeenCalledWith({
+      answer: "",
+      usage: expect.objectContaining({
+        inputTokens: 450_000,
+        outputTokens: 2500,
+        modelContextWindow: 353_400,
+        modelInvocations: [
+          expect.objectContaining({ inputTokens: 200_000, outputTokens: 1000 }),
+          expect.objectContaining({ inputTokens: 250_000, outputTokens: 1500 })
+        ]
+      })
+    });
   });
 });
 
