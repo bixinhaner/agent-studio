@@ -352,7 +352,7 @@ async function main(): Promise<void> {
 
     const candidateIds = new Set(candidates.map((event) => event.id));
     const corrections: Correction[] = [];
-    const skipped: Array<{ eventId: string; reason: string }> = [];
+    const skipped: Array<{ eventId: string; reason: string; detail?: string }> = [];
     for (const [threadId, events] of eventsByThread) {
       const rollout = rolloutByThread.get(threadId);
       let cursor = -1;
@@ -379,7 +379,17 @@ async function main(): Promise<void> {
           total.cachedInputTokens !== event.cachedInputTokens ||
           total.outputTokens !== event.outputTokens
         ) {
-          skipped.push({ eventId: event.id, reason: "invocation_totals_do_not_match_event" });
+          skipped.push({
+            eventId: event.id,
+            reason: "invocation_totals_do_not_match_event",
+            detail: [
+              `thread=${threadId}`,
+              `cursor=${cursor}`,
+              `current=${currentIndex}`,
+              `event=${event.inputTokens}/${event.cachedInputTokens}/${event.outputTokens}`,
+              `invocations=${total.inputTokens}/${total.cachedInputTokens}/${total.outputTokens}`
+            ].join("|")
+          });
           cursor = currentIndex;
           continue;
         }
@@ -459,6 +469,9 @@ async function main(): Promise<void> {
     }, new Map<string, number>());
     for (const [reason, count] of skippedByReason) {
       console.log(`skipped|${reason}|${count}`);
+    }
+    for (const item of skipped) {
+      console.log(`skipped_detail|${item.eventId}|${item.reason}${item.detail ? `|${item.detail}` : ""}`);
     }
 
     if (options.apply && skipped.length > 0) {
