@@ -117,7 +117,8 @@ export const systemSettingsSafetySchema = z.object({
   allowNetworkAccess: z.boolean(),
   allowLiveWebSearch: z.boolean(),
   allowCustomAdditionalDirectories: z.boolean(),
-  allowFilesystemMutations: z.boolean()
+  allowFilesystemMutations: z.boolean(),
+  showAdminOperationsAndConversationMenus: z.boolean().default(true)
 });
 
 export const systemSettingsOrganizationDefaultsSchema = z.object({
@@ -378,7 +379,8 @@ export const DEFAULT_SYSTEM_SETTINGS_PAYLOAD = {
     allowNetworkAccess: true,
     allowLiveWebSearch: true,
     allowCustomAdditionalDirectories: false,
-    allowFilesystemMutations: true
+    allowFilesystemMutations: true,
+    showAdminOperationsAndConversationMenus: true
   },
   organizationDefaults: {
     orgSyncIntervalMinutes: 24 * 60

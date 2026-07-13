@@ -12,6 +12,9 @@ type SystemSettingsBrandingReader = {
 
 export type PublicBrandingResponse = {
   branding: SystemSettingsBranding;
+  adminConsole: {
+    showOperationsAndConversationMenus: boolean;
+  };
   behavior: {
     portalWelcomeMessageDesktop: string;
     portalWelcomeMessageMobile: string;
@@ -53,6 +56,9 @@ export async function resolvePublicBranding(reader: SystemSettingsBrandingReader
   const behavior = payload.behavior;
   return {
     branding: systemSettingsBrandingSchema.parse(payload.branding ?? defaultBranding()),
+    adminConsole: {
+      showOperationsAndConversationMenus: payload.safety.showAdminOperationsAndConversationMenus
+    },
     behavior: {
       portalWelcomeMessageDesktop: behavior.portalWelcomeMessageDesktop,
       portalWelcomeMessageMobile: behavior.portalWelcomeMessageMobile,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { applyDocumentBranding, BRANDING_STORAGE_KEY, readStoredBrandingResponse } from "../runtime";
 import { resolveBrandingAssetUrl } from "../asset-url";
-import { DEFAULT_BRANDING } from "../types";
+import { DEFAULT_ADMIN_CONSOLE_CONFIG, DEFAULT_BRANDING } from "../types";
 
 describe("branding runtime", () => {
   afterEach(() => {
@@ -87,6 +87,7 @@ describe("branding runtime", () => {
         platformName: "Bailey",
         externalLoginCopy: "Welcome aboard."
       },
+      adminConsole: DEFAULT_ADMIN_CONSOLE_CONFIG,
       behavior: expect.objectContaining({
         portalWelcomeMessageDesktop: expect.any(String),
         portalWelcomeMessageMobile: expect.any(String),
@@ -94,5 +95,18 @@ describe("branding runtime", () => {
       }),
       publishedAt: undefined
     });
+  });
+
+  it("preserves the published admin navigation visibility setting", () => {
+    window.localStorage.setItem(
+      BRANDING_STORAGE_KEY,
+      JSON.stringify({
+        branding: {},
+        adminConsole: { showOperationsAndConversationMenus: false },
+        behavior: {}
+      })
+    );
+
+    expect(readStoredBrandingResponse()?.adminConsole.showOperationsAndConversationMenus).toBe(false);
   });
 });

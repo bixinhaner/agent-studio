@@ -74,6 +74,7 @@ export type SystemSettingsSafety = {
   allowLiveWebSearch: boolean;
   allowCustomAdditionalDirectories: boolean;
   allowFilesystemMutations: boolean;
+  showAdminOperationsAndConversationMenus: boolean;
 };
 
 export type SystemSettingsOrganizationDefaults = {

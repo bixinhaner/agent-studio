@@ -1,6 +1,7 @@
 import { normalizeBrandingResponse } from "./normalize";
 import {
   DEFAULT_BRANDING,
+  DEFAULT_ADMIN_CONSOLE_CONFIG,
   DEFAULT_PORTAL_BEHAVIOR,
   type PublicBranding,
   type PublicBrandingResponse
@@ -12,6 +13,7 @@ export const BRANDING_STORAGE_KEY = "agent-studio-public-branding";
 export function fallbackBrandingResponse(): PublicBrandingResponse {
   return {
     branding: DEFAULT_BRANDING,
+    adminConsole: DEFAULT_ADMIN_CONSOLE_CONFIG,
     behavior: DEFAULT_PORTAL_BEHAVIOR
   };
 }

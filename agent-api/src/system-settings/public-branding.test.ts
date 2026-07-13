@@ -36,6 +36,9 @@ describe("resolvePublicBranding", () => {
                 enabledForInternalUsers: true,
                 prompt: "Did this solve it?"
               }
+            },
+            safety: {
+              showAdminOperationsAndConversationMenus: false
             }
           }),
           createdAt: new Date().toISOString(),
@@ -51,6 +54,7 @@ describe("resolvePublicBranding", () => {
     expect(response.branding.externalLoginCopy).toBe("Welcome. Sign in to continue.");
     expect(response.branding.loginBackgroundUrl).toBe("/assets/login-bg.png");
     expect(response.branding.portalWelcomeIllustrationUrl).toBe("/assets/portal-hero.png");
+    expect(response.adminConsole.showOperationsAndConversationMenus).toBe(false);
     expect(response.behavior).toEqual({
       portalWelcomeMessageDesktop: "Hello from {{assistantName}} on {{platformName}}.",
       portalWelcomeMessageMobile: "Hello from mobile.",
@@ -93,6 +97,7 @@ describe("resolvePublicBranding", () => {
     expect(normalized.enterpriseContext.enabled).toBe(false);
     expect(normalized.enterpriseContext.channels.portal).toBe(true);
     expect(normalized.enterpriseContext.fields.contact).toBe(false);
+    expect(normalized.safety.showAdminOperationsAndConversationMenus).toBe(true);
     expect("welcomeSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
     expect("usageSummary" in (normalized.behavior as Record<string, unknown>)).toBe(false);
   });

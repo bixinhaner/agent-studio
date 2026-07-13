@@ -1,5 +1,6 @@
 import {
   DEFAULT_BRANDING,
+  DEFAULT_ADMIN_CONSOLE_CONFIG,
   DEFAULT_PORTAL_BEHAVIOR,
   type PublicBranding,
   type PublicBrandingResponse,
@@ -75,6 +76,12 @@ export function normalizeBrandingResponse(
 ): PublicBrandingResponse {
   return {
     branding: normalizeBranding(value?.branding),
+    adminConsole: {
+      showOperationsAndConversationMenus:
+        typeof value?.adminConsole?.showOperationsAndConversationMenus === "boolean"
+          ? value.adminConsole.showOperationsAndConversationMenus
+          : DEFAULT_ADMIN_CONSOLE_CONFIG.showOperationsAndConversationMenus
+    },
     behavior: normalizeBehavior(value?.behavior),
     publishedAt: asString(value?.publishedAt) || undefined
   };

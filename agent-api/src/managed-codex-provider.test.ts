@@ -213,7 +213,8 @@ describe("ManagedCodexProviderResolver", () => {
                 allowNetworkAccess: true,
                 allowLiveWebSearch: true,
                 allowCustomAdditionalDirectories: false,
-                allowFilesystemMutations: true
+                allowFilesystemMutations: true,
+                showAdminOperationsAndConversationMenus: true
               },
               organizationDefaults: {
                 orgSyncIntervalMinutes: 60
@@ -362,7 +363,8 @@ describe("resolveManagedCodexDefaults", () => {
             allowNetworkAccess: true,
             allowLiveWebSearch: true,
             allowCustomAdditionalDirectories: false,
-            allowFilesystemMutations: true
+            allowFilesystemMutations: true,
+            showAdminOperationsAndConversationMenus: true
           },
           organizationDefaults: {
             orgSyncIntervalMinutes: 60

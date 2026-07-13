@@ -7,10 +7,11 @@ import {
   readStoredBrandingResponse,
   writeStoredBrandingResponse
 } from "./runtime";
-import type { PublicBranding, PublicPortalBehavior } from "./types";
+import type { PublicAdminConsoleConfig, PublicBranding, PublicPortalBehavior } from "./types";
 
 type BrandingContextValue = {
   branding: PublicBranding;
+  adminConsole: PublicAdminConsoleConfig;
   behavior: PublicPortalBehavior;
   loading: boolean;
   error: string;
@@ -22,6 +23,7 @@ const BrandingContext = createContext<BrandingContextValue | null>(null);
 export function BrandingProvider({ children }: PropsWithChildren) {
   const initial = readStoredBrandingResponse() ?? fallbackBrandingResponse();
   const [branding, setBranding] = useState<PublicBranding>(initial.branding);
+  const [adminConsole, setAdminConsole] = useState<PublicAdminConsoleConfig>(initial.adminConsole);
   const [behavior, setBehavior] = useState<PublicPortalBehavior>(initial.behavior);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -32,11 +34,13 @@ export function BrandingProvider({ children }: PropsWithChildren) {
     try {
       const response = await fetchPublicBranding();
       setBranding(response.branding);
+      setAdminConsole(response.adminConsole);
       setBehavior(response.behavior);
       writeStoredBrandingResponse(response);
     } catch (nextError) {
       const fallback = readStoredBrandingResponse() ?? fallbackBrandingResponse();
       setBranding(fallback.branding);
+      setAdminConsole(fallback.adminConsole);
       setBehavior(fallback.behavior);
       setError(nextError instanceof Error ? nextError.message : "Failed to load branding");
     } finally {
@@ -55,12 +59,13 @@ export function BrandingProvider({ children }: PropsWithChildren) {
   const value = useMemo<BrandingContextValue>(
     () => ({
       branding,
+      adminConsole,
       behavior,
       loading,
       error,
       reload
     }),
-    [behavior, branding, error, loading, reload]
+    [adminConsole, behavior, branding, error, loading, reload]
   );
 
   return <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>;

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Tabs, Typography, Tag, Space, Spin } from "antd";
 import { Settings2, HardDrive, ShieldCheck, Users, Box, History, Save, Send, FileCheck2, Gauge } from "lucide-react";
 
+import { useBranding } from "../branding/BrandingProvider";
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft, uploadSystemSettingsBrandingAsset, type BrandingAssetKind } from "./api";
 import { ArtifactAccessSettingsView } from "./ArtifactAccessSettingsView";
 import { BrandingSettingsView } from "./BrandingSettingsView";
@@ -114,6 +115,7 @@ function applySystemSettingsResponse(
 }
 
 export function SystemSettingsShell() {
+  const { reload: reloadRuntimeConfig } = useBranding();
   const [section, setSection] = useState<SystemSettingsSection>("branding");
   const [draftRecord, setDraftRecord] = useState<SystemSettingsVersionRecord | null>(null);
   const [publishedRecord, setPublishedRecord] = useState<SystemSettingsVersionRecord | null>(null);
@@ -267,6 +269,7 @@ export function SystemSettingsShell() {
       if (!saved) return;
       const response = await publishSystemSettings();
       applySystemSettingsResponse(response, { setDraftRecord, setPublishedRecord, setDraftMeta, setPublishedMeta });
+      await reloadRuntimeConfig();
       setFieldErrors({});
       setSuccessText("设置已发布");
     } catch (error) {

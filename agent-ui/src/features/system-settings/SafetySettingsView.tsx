@@ -21,6 +21,18 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
       <div className="system-settings-toggle-grid">
         <label className="field checkbox-field system-settings-toggle-row">
           <Switch
+            checked={value.showAdminOperationsAndConversationMenus}
+            disabled={disabled}
+            onChange={(checked) => onChange({ showAdminOperationsAndConversationMenus: checked })}
+          />
+          <span>
+            <span className="field-label">显示运营分析和对话记录</span>
+            <span className="field-help">关闭后，从管理后台导航和搜索中隐藏这两个入口；不会变更底层 API 权限。</span>
+          </span>
+        </label>
+
+        <label className="field checkbox-field system-settings-toggle-row">
+          <Switch
             checked={value.allowDangerFullAccess}
             disabled={disabled}
             onChange={(checked) => onChange({ allowDangerFullAccess: checked })}

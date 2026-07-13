@@ -284,6 +284,14 @@ const NAVIGATION_GROUPS: AdminNavigationGroupView[] = GROUPS.map((group) => ({
   items: SECTION_ORDER.map((sectionId) => SECTION_META[sectionId]).filter((item) => item.group === group.id)
 }));
 
+const SENSITIVE_ACTIVITY_SECTIONS = new Set<AdminConsoleSection>(["analytics", "conversations"]);
+
+export function visibleAdminSectionIds(showOperationsAndConversationMenus: boolean): AdminConsoleSection[] {
+  return showOperationsAndConversationMenus
+    ? SECTION_ORDER
+    : SECTION_ORDER.filter((section) => !SENSITIVE_ACTIVITY_SECTIONS.has(section));
+}
+
 function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
   const rawValue = hash.slice(ADMIN_HASH_PREFIX.length).split("?")[0] ?? "";
@@ -303,12 +311,16 @@ function AdminSectionLazyFallback() {
 
 function AdminNavigation(props: {
   activeSection: AdminConsoleSection;
+  visibleSections: Set<AdminConsoleSection>;
   collapsed: boolean;
   onNavigate: (section: AdminConsoleSection) => void;
 }) {
   return (
     <div className="admin-sidebar-content">
-      {NAVIGATION_GROUPS.map((group) => (
+      {NAVIGATION_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => props.visibleSections.has(item.id))
+      })).filter((group) => group.items.length > 0).map((group) => (
         <div key={group.id} style={{ marginBottom: 24 }}>
           {!props.collapsed ? (
             <div
@@ -459,7 +471,7 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
 }
 
 export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () => void; onSignOut?: () => void }) {
-  const { branding } = useBranding();
+  const { adminConsole, branding } = useBranding();
   const [section, setSection] = useState<AdminConsoleSection>(() => {
     if (typeof window === "undefined") return "analytics";
     return sectionFromHash(window.location.hash) ?? "analytics";
@@ -469,6 +481,17 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [cmdSearch, setCmdSearch] = useState("");
   const isNarrowScreen = useIsNarrowScreen(1080);
+  const visibleSectionIds = useMemo(
+    () => visibleAdminSectionIds(adminConsole.showOperationsAndConversationMenus),
+    [adminConsole.showOperationsAndConversationMenus]
+  );
+  const visibleSections = useMemo(() => new Set(visibleSectionIds), [visibleSectionIds]);
+
+  useEffect(() => {
+    if (!visibleSections.has(section)) {
+      setSection(visibleSectionIds[0] ?? "system-settings");
+    }
+  }, [section, visibleSectionIds, visibleSections]);
 
   const currentSectionMeta = SECTION_META[section];
   const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
@@ -518,14 +541,15 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
 
   const filteredCmdItems = useMemo(() => {
     const query = cmdSearch.trim().toLowerCase();
-    if (!query) return Object.values(SECTION_META);
-    return Object.values(SECTION_META).filter(
+    const visibleItems = Object.values(SECTION_META).filter((item) => visibleSections.has(item.id));
+    if (!query) return visibleItems;
+    return visibleItems.filter(
       (item) =>
         item.title.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query) ||
         item.keywords.some((keyword) => keyword.toLowerCase().includes(query))
     );
-  }, [cmdSearch]);
+  }, [cmdSearch, visibleSections]);
 
   const brandLogoUrl = branding.logoUrl || branding.iconUrl;
 
@@ -537,7 +561,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
           <span>{branding.platformName}</span>
         </div>
       </div>
-      <AdminNavigation activeSection={section} collapsed={false} onNavigate={handleNavClick} />
+      <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={false} onNavigate={handleNavClick} />
       <div className="admin-sidebar-footer" style={{ padding: 16, borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
         {props.currentUser ? <UserIdentitySummary user={props.currentUser} compact onSignOut={props.onSignOut} /> : null}
       </div>
@@ -564,7 +588,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
                   />
                 ) : null}
             </div>
-            <AdminNavigation activeSection={section} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
+            <AdminNavigation activeSection={section} visibleSections={visibleSections} collapsed={sidebarCollapsed} onNavigate={handleNavClick} />
             <div className={`admin-sidebar-footer ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ borderTop: '1px solid var(--admin-color-border)', marginTop: 'auto' }}>
               {!sidebarCollapsed && props.currentUser ? (
                 <div style={{ padding: 16 }}>

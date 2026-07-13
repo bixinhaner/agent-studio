@@ -29,8 +29,17 @@ export type PublicPortalBehavior = {
 
 export type PublicBrandingResponse = {
   branding: PublicBranding;
+  adminConsole: PublicAdminConsoleConfig;
   behavior: PublicPortalBehavior;
   publishedAt?: string;
+};
+
+export type PublicAdminConsoleConfig = {
+  showOperationsAndConversationMenus: boolean;
+};
+
+export const DEFAULT_ADMIN_CONSOLE_CONFIG: PublicAdminConsoleConfig = {
+  showOperationsAndConversationMenus: true
 };
 
 export const DEFAULT_BRANDING: PublicBranding = {
