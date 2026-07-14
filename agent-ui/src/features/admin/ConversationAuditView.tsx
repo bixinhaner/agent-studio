@@ -492,14 +492,19 @@ function roleLabel(role: AdminConversationTranscriptMessage["role"]): string {
   return "系统";
 }
 
-function turnStatusLabel(status: AdminConversationTranscriptMessage["turnStatus"]): string {
+function turnStatusLabel(
+  status: AdminConversationTranscriptMessage["turnStatus"],
+  role: AdminConversationTranscriptMessage["role"]
+): string {
+  if (status === "running") return "处理中";
   if (status === "cancelled") return "已中断";
-  if (status === "disconnected") return "请求未完成";
+  if (status === "disconnected") return role === "user" ? "未生成回复" : "未完整结束";
   if (status === "failed") return "执行失败";
   return "";
 }
 
 function turnStatusClassName(status: AdminConversationTranscriptMessage["turnStatus"]): string {
+  if (status === "running") return "is-running";
   if (status === "cancelled") return "is-cancelled";
   if (status === "disconnected") return "is-disconnected";
   if (status === "failed") return "is-failed";
@@ -1103,7 +1108,9 @@ function TranscriptMessageBubble(props: {
   const isAssistant = props.message.role === "assistant";
   const attachmentCount = props.message.attachments.length;
   const processRows = Array.isArray(props.message.processRows) ? props.message.processRows : [];
-  const statusLabel = props.message.turnStatus === "completed" ? "" : turnStatusLabel(props.message.turnStatus);
+  const statusLabel = props.message.turnStatus === "completed"
+    ? ""
+    : turnStatusLabel(props.message.turnStatus, props.message.role);
   
   // Exclude system/tool for cleaner view unless needed
   if (!isUser && !isAssistant && !props.message.text && attachmentCount === 0 && processRows.length === 0) return null;

@@ -162,7 +162,7 @@ type ConversationTranscriptMessage = {
     detail?: string;
     at?: string;
   }>;
-  turnStatus: "completed" | "cancelled" | "disconnected" | "failed";
+  turnStatus: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason: string | null;
   parentId: string | null;
   createdAt: string | null;
@@ -1235,7 +1235,8 @@ function transcriptPreviewText(message: ConversationTranscriptMessage): string {
 type ConversationTurnStatus = Pick<ConversationTranscriptMessage, "turnStatus" | "turnStatusReason">;
 
 const USER_TURN_DISCONNECTED_REASON =
-  "用户消息已保存，但没有对应助手回复；可能是页面关闭、网络断开、请求启动失败或被后续消息替代。";
+  "未找到对应助手消息；可能是请求失败、连接中断或历史记录缺失。";
+const USER_TURN_RUNNING_REASON = "运行时仍在处理该请求，助手回复完成后会自动更新。";
 const ASSISTANT_CANCELLED_REASON = "用户发送了新消息或取消了上一轮生成，本轮未完成。";
 const ASSISTANT_FAILED_REASON = "运行时异常，用户侧已显示通用失败提示。";
 const ASSISTANT_INCOMPLETE_REASON = "助手回复未完整结束，可能是连接断开或运行中途停止。";
@@ -1248,19 +1249,26 @@ function normalizedStatusField(status: Record<string, unknown> | null, key: "typ
   return trimOrUndefined(status?.[key])?.toLowerCase();
 }
 
+function messageIndicatesStopped(message: unknown): boolean {
+  const row = asRecord(message);
+  const metadata = asRecord(row?.metadata);
+  const custom = asRecord(metadata?.custom);
+  return metadata?.stopped === true || custom?.stopped === true;
+}
+
 export function projectConversationTurnStatus(
   message: unknown,
   role: ConversationTranscriptMessage["role"],
-  options?: { hasAssistantResponse?: boolean }
+  options?: { hasAssistantResponse?: boolean; activeTurn?: boolean }
 ): ConversationTurnStatus {
   const status = messageStatusRecord(message);
   const statusType = normalizedStatusField(status, "type");
   const statusReason = normalizedStatusField(status, "reason");
 
   if (role === "user") {
-    return options?.hasAssistantResponse
-      ? { turnStatus: "completed", turnStatusReason: null }
-      : { turnStatus: "disconnected", turnStatusReason: USER_TURN_DISCONNECTED_REASON };
+    if (options?.hasAssistantResponse) return { turnStatus: "completed", turnStatusReason: null };
+    if (options?.activeTurn) return { turnStatus: "running", turnStatusReason: USER_TURN_RUNNING_REASON };
+    return { turnStatus: "disconnected", turnStatusReason: USER_TURN_DISCONNECTED_REASON };
   }
 
   if (role !== "assistant") {
@@ -1269,6 +1277,10 @@ export function projectConversationTurnStatus(
 
   if (statusType === "error" || statusReason === "error") {
     return { turnStatus: "failed", turnStatusReason: ASSISTANT_FAILED_REASON };
+  }
+
+  if (messageIndicatesStopped(message)) {
+    return { turnStatus: "cancelled", turnStatusReason: ASSISTANT_CANCELLED_REASON };
   }
 
   if (statusType === "incomplete") {
@@ -1299,7 +1311,11 @@ function toTranscriptMessage(threadId: string, item: StoredMessageItem, index: n
   };
 }
 
-function buildTranscriptMessages(threadId: string, messages: StoredMessageItem[]): ConversationTranscriptMessage[] {
+export function buildTranscriptMessages(
+  threadId: string,
+  messages: StoredMessageItem[],
+  options: { activeTurn?: boolean } = {}
+): ConversationTranscriptMessage[] {
   const transcript = messages.map((item, index) => toTranscriptMessage(threadId, item, index));
   return transcript.map((message, index) => {
     if (message.role !== "user") return message;
@@ -1310,9 +1326,14 @@ function buildTranscriptMessages(threadId: string, messages: StoredMessageItem[]
     const hasAssistantResponse = transcript
       .slice(index + 1, searchEnd)
       .some((candidate) => candidate.role === "assistant");
+    const activeTurn = options.activeTurn === true && nextUserIndex < 0 && !hasAssistantResponse;
     return {
       ...message,
-      ...projectConversationTurnStatus({ status: { type: "completed" } }, "user", { hasAssistantResponse })
+      ...projectConversationTurnStatus(
+        { status: { type: "completed" } },
+        "user",
+        { hasAssistantResponse, activeTurn }
+      )
     };
   });
 }
@@ -1761,6 +1782,7 @@ function buildProductFeedbackAggregateSummary(records: ProductFeedbackRecord[]):
 export function createConversationAuditRouter(options: {
   db?: ConversationAuditDb;
   getDb?: () => ConversationAuditDb;
+  isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
 } = {}): Router {
   const router = Router();
   let cachedDb: ConversationAuditDb | null = options.db ?? null;
@@ -2162,7 +2184,10 @@ export function createConversationAuditRouter(options: {
       const [binding] = bindings;
       const integrationMap = new Map(integrationRows.map((item) => [item.id, item] as const));
       const agentModeMap = new Map(agentModeRows.map((item) => [item.id, item] as const));
-      const transcript = buildTranscriptMessages(thread.id, thread.messages);
+      const activeTurn = await options.isThreadActive?.(thread.id);
+      const transcript = buildTranscriptMessages(thread.id, thread.messages, {
+        activeTurn: activeTurn === true
+      });
 
       res.json({
         conversation: buildConversationSummary(thread, user, buildConversationChannelSummary(binding, integrationMap), agentModeMap),

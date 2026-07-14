@@ -367,6 +367,27 @@ function hasActiveRuntimeTurnForThread(threadId: string): boolean {
   return Array.from(activeRuntimeTurns.values()).some((turn) => turn.threadId === normalizedThreadId);
 }
 
+async function isThreadActiveForAdmin(threadId: string): Promise<boolean> {
+  if (runsChatService) return hasActiveRuntimeTurnForThread(threadId);
+  const statusUrl = trimOrUndefined(process.env.AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL);
+  if (!statusUrl) return false;
+  try {
+    const response = await fetch(statusUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(1000)
+    });
+    if (!response.ok) return false;
+    const payload = asRecord(await response.json());
+    const turns = Array.isArray(payload?.turns) ? payload.turns : [];
+    return turns.some((turn) => {
+      const activeThreadId = asRecord(turn)?.thread_id;
+      return trimOrUndefined(typeof activeThreadId === "string" ? activeThreadId : undefined) === threadId;
+    });
+  } catch {
+    return false;
+  }
+}
+
 let codexMemoryEngine: CodexMemoryEngine;
 const codexExecution = new CodexExecutionService({
   runtimeTurnTracker: {
@@ -3917,6 +3938,7 @@ function actionConnectorStoredMessage(
     role,
     content: [{ type: "text", text }, ...contentParts],
     createdAt: new Date().toISOString(),
+    ...(role === "assistant" ? { status: { type: "completed" } } : {}),
     metadata: {
       channel: ACTION_CONNECTOR_CHANNEL,
       ...metadata
@@ -4887,6 +4909,7 @@ function crestStoredMessage(
   attachments: PreparedCrestAttachment[] = [],
   contentParts: Record<string, unknown>[] = []
 ) {
+  const stopped = role === "assistant" && metadata.stopped === true;
   const storedAttachments = attachments.map((attachment) => ({
     type: crestAttachmentKind(attachment.mimeType),
     name: attachment.name,
@@ -4910,6 +4933,9 @@ function crestStoredMessage(
     content: [{ type: "text", text }, ...contentParts],
     ...(storedAttachments.length > 0 ? { attachments: storedAttachments } : {}),
     createdAt: new Date().toISOString(),
+    ...(role === "assistant"
+      ? { status: stopped ? { type: "incomplete", reason: "cancelled" } : { type: "completed" } }
+      : {}),
     metadata: {
       channel: "crest",
       ...metadata
@@ -6333,6 +6359,7 @@ function zendeskMessage(input: {
     ],
     ...(attachments.length > 0 ? { attachments } : {}),
     createdAt,
+    ...(input.role === "assistant" ? { status: { type: "completed" } } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {})
   };
 }
@@ -7072,6 +7099,7 @@ function dingtalkMessage(input: {
       ...(input.contentParts ?? [])
     ],
     createdAt: (input.createdAt ?? new Date()).toISOString(),
+    ...(input.role === "assistant" ? { status: { type: "completed" } } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {})
   };
 }
@@ -9389,6 +9417,7 @@ registerCommonApiRoutes(app, {
   adminRouter: createAdminRouter({
     users,
     threads,
+    isThreadActive: isThreadActiveForAdmin,
     sessions: {
       countActive: async () => liveRuntimeThreads.size
     },

@@ -80,6 +80,7 @@ type AdminRouterOptions = {
   recoveryRouter?: Router;
   securityDomains?: SecurityDomainService;
   securityDomainAccess?: SecurityDomainAccessControl;
+  isThreadActive?: (threadId: string) => boolean | Promise<boolean>;
 };
 
 type UserRow = {
@@ -744,7 +745,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
 
   router.use(
     createConversationAuditRouter({
-      getDb: () => getDbInstance() as never
+      getDb: () => getDbInstance() as never,
+      isThreadActive: options.isThreadActive
     })
   );
 

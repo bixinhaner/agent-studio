@@ -2874,6 +2874,18 @@
   color: #9a5b05;
 }
 
+.admin-chat-turn-status.is-running {
+  border-color: color-mix(in srgb, var(--admin-color-accent) 28%, transparent);
+  background: color-mix(in srgb, var(--admin-color-accent) 10%, transparent);
+  color: var(--admin-color-accent);
+}
+
+.admin-chat-turn-status.is-cancelled {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: #9a5b05;
+}
+
 .admin-chat-turn-status.is-failed {
   border-color: rgba(220, 38, 38, 0.28);
   background: rgba(239, 68, 68, 0.1);

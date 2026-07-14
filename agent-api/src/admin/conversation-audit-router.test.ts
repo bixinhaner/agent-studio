@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentModeIdFromRunConfig,
+  buildTranscriptMessages,
   enabledSkillNamesFromRunConfig,
   extractMessageAttachments,
   extractMessageProcessRows,
@@ -236,6 +237,13 @@ describe("projectConversationTurnStatus", () => {
     });
   });
 
+  it("recognizes historical stopped messages without a status field", () => {
+    expect(projectConversationTurnStatus({ role: "assistant", metadata: { channel: "crest", stopped: true } }, "assistant")).toEqual({
+      turnStatus: "cancelled",
+      turnStatusReason: "用户发送了新消息或取消了上一轮生成，本轮未完成。"
+    });
+  });
+
   it("marks errored assistant messages as failed", () => {
     expect(projectConversationTurnStatus({ role: "assistant", status: { type: "error" } }, "assistant")).toEqual({
       turnStatus: "failed",
@@ -246,8 +254,61 @@ describe("projectConversationTurnStatus", () => {
   it("marks unmatched user messages as disconnected", () => {
     expect(projectConversationTurnStatus({ role: "user" }, "user", { hasAssistantResponse: false })).toEqual({
       turnStatus: "disconnected",
-      turnStatusReason: "用户消息已保存，但没有对应助手回复；可能是页面关闭、网络断开、请求启动失败或被后续消息替代。"
+      turnStatusReason: "未找到对应助手消息；可能是请求失败、连接中断或历史记录缺失。"
     });
+  });
+
+  it("marks an unmatched user message as running when its runtime turn is active", () => {
+    expect(projectConversationTurnStatus({ role: "user" }, "user", { hasAssistantResponse: false, activeTurn: true })).toEqual({
+      turnStatus: "running",
+      turnStatusReason: "运行时仍在处理该请求，助手回复完成后会自动更新。"
+    });
+  });
+});
+
+describe("buildTranscriptMessages", () => {
+  it("marks only the latest unmatched user turn as running", () => {
+    const messages = buildTranscriptMessages(
+      "thread-123",
+      [
+        {
+          parentId: null,
+          message: { id: "user-1", role: "user", content: [{ type: "text", text: "first" }] }
+        },
+        {
+          parentId: "user-1",
+          message: { id: "user-2", role: "user", content: [{ type: "text", text: "second" }] }
+        }
+      ],
+      { activeTurn: true }
+    );
+
+    expect(messages.map((message) => message.turnStatus)).toEqual(["disconnected", "running"]);
+  });
+
+  it("keeps a user turn completed when an assistant response exists", () => {
+    const messages = buildTranscriptMessages(
+      "thread-123",
+      [
+        {
+          parentId: null,
+          message: { id: "user-1", role: "user", content: [{ type: "text", text: "question" }] }
+        },
+        {
+          parentId: "user-1",
+          message: {
+            id: "assistant-1",
+            role: "assistant",
+            content: [{ type: "text", text: "answer" }],
+            status: { type: "completed" }
+          }
+        }
+      ],
+      { activeTurn: true }
+    );
+
+    expect(messages[0]?.turnStatus).toBe("completed");
+    expect(messages[1]?.turnStatus).toBe("completed");
   });
 });
 

@@ -450,7 +450,7 @@ export type AdminConversationTranscriptMessage = {
   text: string;
   attachments: AdminConversationTranscriptAttachment[];
   processRows?: AdminConversationTranscriptProcessRow[];
-  turnStatus?: "completed" | "cancelled" | "disconnected" | "failed";
+  turnStatus?: "completed" | "running" | "cancelled" | "disconnected" | "failed";
   turnStatusReason?: string | null;
   parentId: string | null;
   createdAt: string | null;

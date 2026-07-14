@@ -14,7 +14,8 @@ module.exports = {
         NODE_ENV: "production",
         HOST: "__API_HOST__",
         PORT: "__ADMIN_API_PORT__",
-        AGENT_STUDIO_SERVICE_ROLE: "admin"
+        AGENT_STUDIO_SERVICE_ROLE: "admin",
+        AGENT_STUDIO_CHAT_INTERNAL_STATUS_URL: "http://127.0.0.1:__CHAT_API_PORT__/internal/deploy/drain-status"
       }
     },
     {
