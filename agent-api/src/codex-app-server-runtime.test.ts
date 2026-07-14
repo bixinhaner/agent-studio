@@ -115,6 +115,14 @@ rl.on("line", (line) => {
     respond(id, { thread: { id: params.threadId } });
     return;
   }
+  if (message.method === "turn/interrupt") {
+    respond(id, {});
+    notify("turn/completed", {
+      threadId: params.threadId,
+      turn: { id: params.turnId, status: "interrupted" }
+    });
+    return;
+  }
   if (message.method === "turn/start") {
     const threadId = params.threadId;
     if (!threads.has(threadId)) {
@@ -529,6 +537,10 @@ describe("Codex app-server runtime", () => {
       expect.objectContaining({
         category: "client_aborted"
       })
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "codex app-server turn interrupt failed",
+      expect.anything()
     );
     warnSpy.mockRestore();
   });

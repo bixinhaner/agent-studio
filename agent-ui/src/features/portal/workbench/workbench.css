@@ -2036,10 +2036,33 @@ button.session-rail-new-btn:active,
   background: #ffffff;
   cursor: pointer;
   text-decoration: none;
+  gap: 5px;
 }
 
 .assistant-file-change-btn:hover {
   background: #eff6ff;
+}
+
+.assistant-file-change-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.assistant-file-change-spinner {
+  animation: assistant-file-change-spin 0.9s linear infinite;
+}
+
+@keyframes assistant-file-change-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.assistant-file-change-error {
+  margin: 8px 0 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .assistant-inline-file-link-card {

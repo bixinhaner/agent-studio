@@ -3808,6 +3808,41 @@ const ProcessDataFallback: FC<any> = ({
   const [uninstallingSkillId, setUninstallingSkillId] = useState("");
   const [installedSkillsByPath, setInstalledSkillsByPath] = useState<Record<string, CodexManagedSkill>>({});
   const [skillInstallError, setSkillInstallError] = useState("");
+  const [downloadingArtifactPath, setDownloadingArtifactPath] = useState("");
+  const [artifactDownloadError, setArtifactDownloadError] = useState("");
+
+  const downloadLatestArtifact = async (downloadHref: string, filePath: string, displayName: string) => {
+    if (!downloadHref || downloadingArtifactPath) return;
+    setDownloadingArtifactPath(filePath);
+    setArtifactDownloadError("");
+    try {
+      const response = await fetch(downloadHref, {
+        credentials: "include",
+        headers: authHeaders()
+      });
+      if (!response.ok) {
+        notifyAuthInvalidStatus(response.status);
+        const rawText = await response.text();
+        const body = parseUploadResponse(rawText);
+        const detail = typeof body.detail === "string" ? body.detail.trim() : "";
+        throw new Error(detail || `Download failed (${response.status}). Try again.`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = displayName;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      setArtifactDownloadError(error instanceof Error ? error.message : "Download failed. Try again.");
+    } finally {
+      setDownloadingArtifactPath("");
+    }
+  };
 
   useEffect(() => {
     if (name !== "codex_file_change") return;
@@ -4027,15 +4062,30 @@ const ProcessDataFallback: FC<any> = ({
                     </button>
                   ) : null}
                   {downloadHref ? (
-                    <a className="assistant-file-change-btn" href={downloadHref}>
-                      Download
-                    </a>
+                    <button
+                      type="button"
+                      className="assistant-file-change-btn"
+                      disabled={Boolean(downloadingArtifactPath)}
+                      onClick={() => void downloadLatestArtifact(downloadHref, item.path, imageName)}
+                    >
+                      {downloadingArtifactPath === item.path ? (
+                        <Loader2Icon size={14} aria-hidden="true" className="assistant-file-change-spinner" />
+                      ) : (
+                        <DownloadIcon size={14} aria-hidden="true" />
+                      )}
+                      {downloadingArtifactPath === item.path ? "Downloading..." : "Download latest"}
+                    </button>
                   ) : null}
                 </div>
               </li>
             );
           })}
         </ul>
+        {artifactDownloadError ? (
+          <p className="assistant-file-change-error" role="alert">
+            {artifactDownloadError}
+          </p>
+        ) : null}
         {skillRootPaths.length > 0 ? (
           <div className="assistant-file-change-skill-submit">
             <p>

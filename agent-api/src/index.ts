@@ -361,6 +361,12 @@ function activeRuntimeTurnStatus() {
   };
 }
 
+function hasActiveRuntimeTurnForThread(threadId: string): boolean {
+  const normalizedThreadId = trimOrUndefined(threadId);
+  if (!normalizedThreadId) return false;
+  return Array.from(activeRuntimeTurns.values()).some((turn) => turn.threadId === normalizedThreadId);
+}
+
 let codexMemoryEngine: CodexMemoryEngine;
 const codexExecution = new CodexExecutionService({
   runtimeTurnTracker: {
@@ -8568,6 +8574,80 @@ function detectSecretLikeContent(buffer: Buffer): string | undefined {
   return undefined;
 }
 
+type ArtifactFileInspection = {
+  missing: boolean;
+  updating: boolean;
+  sizeBytes?: number;
+  modifiedAt?: Date;
+  fileBuffer?: Buffer;
+  checksum?: string;
+  blockedReason?: string;
+};
+
+async function inspectArtifactFileForPolicy(input: {
+  absolutePath: string;
+  relativePath: string;
+  policy: ResolvedArtifactAccessPolicy;
+  approvedChecksum?: string;
+}): Promise<ArtifactFileInspection> {
+  const statBefore = await fs.stat(input.absolutePath).catch(() => null);
+  if (!statBefore || !statBefore.isFile()) {
+    return { missing: true, updating: false };
+  }
+
+  let blockedReason =
+    detectBlockedArtifactPath(input.relativePath, input.policy) ||
+    (statBefore.size > input.policy.maxFileBytes ? "File is larger than the artifact size limit" : undefined);
+  let fileBuffer: Buffer | undefined;
+  let checksum: string | undefined;
+  if (!blockedReason || input.policy.blockKnowledgeSetCopies) {
+    fileBuffer = await fs.readFile(input.absolutePath).catch(() => undefined);
+    if (!fileBuffer) return { missing: true, updating: false };
+    const statAfter = await fs.stat(input.absolutePath).catch(() => null);
+    if (
+      !statAfter ||
+      !statAfter.isFile() ||
+      statAfter.size !== statBefore.size ||
+      statAfter.mtimeMs !== statBefore.mtimeMs
+    ) {
+      return { missing: false, updating: true };
+    }
+    checksum = createHash("sha256").update(fileBuffer).digest("hex");
+  }
+
+  const contentAlreadyApproved = Boolean(checksum && checksum === trimOrUndefined(input.approvedChecksum));
+  if (
+    !blockedReason &&
+    !contentAlreadyApproved &&
+    input.policy.blockKnowledgeSetCopies &&
+    checksum &&
+    await checksumExistsInKnowledgeSets(checksum)
+  ) {
+    blockedReason = "File matches a managed knowledge-set source file";
+  }
+  const extension = extensionForArtifact(input.relativePath);
+  if (
+    !blockedReason &&
+    !contentAlreadyApproved &&
+    input.policy.secretScanEnabled &&
+    fileBuffer &&
+    ARTIFACT_TEXT_SCAN_EXTENSIONS.has(extension) &&
+    fileBuffer.length <= 2 * 1024 * 1024
+  ) {
+    blockedReason = detectSecretLikeContent(fileBuffer);
+  }
+
+  return {
+    missing: false,
+    updating: false,
+    sizeBytes: statBefore.size,
+    modifiedAt: statBefore.mtime,
+    fileBuffer,
+    checksum,
+    blockedReason
+  };
+}
+
 async function checksumExistsInKnowledgeSets(checksum: string): Promise<boolean> {
   const normalizedChecksum = trimOrUndefined(checksum);
   if (!normalizedChecksum) return false;
@@ -8704,37 +8784,14 @@ async function registerGeneratedArtifactsForThread(input: {
     if (seen.has(resolved.relativePath)) continue;
     seen.add(resolved.relativePath);
 
-    const stat = await fs.stat(resolved.absolutePath).catch(() => null);
-    if (!stat || !stat.isFile()) continue;
+    const inspection = await inspectArtifactFileForPolicy({
+      absolutePath: resolved.absolutePath,
+      relativePath: resolved.relativePath,
+      policy
+    });
+    if (inspection.missing || inspection.updating || inspection.sizeBytes === undefined) continue;
 
-    let blockedReason = detectBlockedArtifactPath(resolved.relativePath, policy);
-    if (!blockedReason && stat.size > policy.maxFileBytes) {
-      blockedReason = "File is larger than the artifact size limit";
-    }
-
-    let fileBuffer: Buffer | undefined;
-    let checksum: string | undefined;
-    if (!blockedReason || policy.blockKnowledgeSetCopies) {
-      fileBuffer = await fs.readFile(resolved.absolutePath);
-      checksum = createHash("sha256").update(fileBuffer).digest("hex");
-    }
-    const extension = extensionForArtifact(resolved.relativePath);
-
-    if (!blockedReason && policy.blockKnowledgeSetCopies && checksum && await checksumExistsInKnowledgeSets(checksum)) {
-      blockedReason = "File matches a managed knowledge-set source file";
-    }
-
-    if (
-      !blockedReason &&
-      policy.secretScanEnabled &&
-      fileBuffer &&
-      ARTIFACT_TEXT_SCAN_EXTENSIONS.has(extension) &&
-      fileBuffer.length <= 2 * 1024 * 1024
-    ) {
-      blockedReason = detectSecretLikeContent(fileBuffer);
-    }
-
-    const status = blockedReason ? "blocked" : "ready";
+    const status = inspection.blockedReason ? "blocked" : "ready";
     const artifactMetadata: Record<string, unknown> = {
       changeKind: change.kind,
       originalPath: change.path
@@ -8754,11 +8811,11 @@ async function registerGeneratedArtifactsForThread(input: {
         relativePath: resolved.relativePath,
         displayName: path.basename(resolved.relativePath),
         mimeType: mimeTypeForArtifactPath(resolved.relativePath),
-        sizeBytes: stat.size,
-        checksum,
+        sizeBytes: inspection.sizeBytes,
+        checksum: inspection.checksum,
         previewStatus: status,
         downloadStatus: status,
-        blockedReason,
+        blockedReason: inspection.blockedReason,
         metadata: artifactMetadata,
         expiresAt: addDays(new Date(), policy.retentionDays)
       })
@@ -8933,21 +8990,6 @@ async function sendThreadArtifactContent(input: {
     return;
   }
 
-  const status = actionType === "download" ? artifact.downloadStatus : artifact.previewStatus;
-  if (status !== "ready") {
-    await recordAccess(artifact.id, "denied", { reason: artifact.blockedReason ?? "artifact_blocked" });
-    input.res.status(403).json({ detail: artifact.blockedReason || "Artifact is blocked by policy" });
-    return;
-  }
-  if (artifact.expiresAt) {
-    const expiresAt = new Date(artifact.expiresAt);
-    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
-      await recordAccess(artifact.id, "denied", { reason: "artifact_expired" });
-      input.res.status(410).json({ detail: "Artifact has expired" });
-      return;
-    }
-  }
-
   const resolved = resolveWorkspaceFilePath({ workspacePath, filePath: artifact.relativePath });
   if (resolved.relativePath !== artifact.relativePath) {
     await recordAccess(artifact.id, "denied", { reason: "artifact_path_mismatch" });
@@ -8955,41 +8997,102 @@ async function sendThreadArtifactContent(input: {
     return;
   }
 
-  const stat = await fs.stat(resolved.absolutePath).catch(() => null);
-  if (!stat || !stat.isFile()) {
+  const inspection = await inspectArtifactFileForPolicy({
+    absolutePath: resolved.absolutePath,
+    relativePath: artifact.relativePath,
+    policy,
+    approvedChecksum:
+      artifact.previewStatus === "ready" && artifact.downloadStatus === "ready" && !artifact.blockedReason
+        ? artifact.checksum
+        : undefined
+  });
+  if (inspection.missing) {
     input.res.status(404).json({ detail: "Artifact file does not exist" });
     return;
   }
-
-  const currentPolicyBlockReason =
-    detectBlockedArtifactPath(artifact.relativePath, policy) ||
-    (stat.size > policy.maxFileBytes ? "File is larger than the artifact size limit" : undefined);
-  if (currentPolicyBlockReason) {
-    await recordAccess(artifact.id, "denied", { reason: currentPolicyBlockReason });
-    input.res.status(403).json({ detail: currentPolicyBlockReason });
+  if (inspection.updating) {
+    await recordAccess(artifact.id, "denied", { reason: "artifact_changed_during_download" });
+    input.res.status(409).json({ detail: "This file is still being updated. Try the download again in a moment." });
     return;
   }
 
-  const fileName = artifact.displayName || path.basename(resolved.absolutePath);
-  const fileBuffer = await fs.readFile(resolved.absolutePath);
-  if (artifact.checksum) {
-    const currentChecksum = createHash("sha256").update(fileBuffer).digest("hex");
-    if (currentChecksum !== artifact.checksum) {
-      await recordAccess(artifact.id, "denied", { reason: "artifact_checksum_mismatch" });
-      input.res.status(409).json({ detail: "Artifact file changed after approval" });
+  const currentChecksum = inspection.checksum;
+  const versionChanged = Boolean(currentChecksum && currentChecksum !== artifact.checksum);
+  if (versionChanged && hasActiveRuntimeTurnForThread(threadId)) {
+    await recordAccess(artifact.id, "denied", { reason: "artifact_is_updating" });
+    input.res.status(409).json({
+      detail: "This file is still being updated. Try the download again when the current response is complete."
+    });
+    return;
+  }
+  const currentStatus = inspection.blockedReason ? "blocked" : "ready";
+  const registeredStatus = actionType === "download" ? artifact.downloadStatus : artifact.previewStatus;
+  const registrationNeedsRefresh =
+    versionChanged ||
+    artifact.sizeBytes !== inspection.sizeBytes ||
+    registeredStatus !== currentStatus ||
+    artifact.blockedReason !== inspection.blockedReason;
+  if (registrationNeedsRefresh) {
+    const previousMetadata = asRecord(artifact.metadata) ?? {};
+    artifact = await threadArtifacts.upsertForThreadPath({
+      organizationId: artifact.organizationId ?? thread.organizationId ?? input.currentUser.organizationId,
+      threadId,
+      userId: artifact.userId ?? thread.userId ?? input.currentUser.id,
+      source: artifact.source,
+      relativePath: artifact.relativePath,
+      displayName: artifact.displayName,
+      mimeType: mimeTypeForArtifactPath(artifact.relativePath),
+      sizeBytes: inspection.sizeBytes,
+      checksum: currentChecksum,
+      previewStatus: currentStatus,
+      downloadStatus: currentStatus,
+      blockedReason: inspection.blockedReason,
+      metadata: {
+        ...previousMetadata,
+        latestVersionApprovedAt: new Date().toISOString(),
+        latestFileModifiedAt: inspection.modifiedAt?.toISOString(),
+        refreshedOnAccess: true
+      },
+      expiresAt: versionChanged ? addDays(new Date(), policy.retentionDays) : artifact.expiresAt ? new Date(artifact.expiresAt) : undefined
+    });
+  }
+
+  if (inspection.blockedReason) {
+    await recordAccess(artifact.id, "denied", {
+      reason: inspection.blockedReason,
+      latest_version_revalidated: registrationNeedsRefresh
+    });
+    input.res.status(403).json({ detail: `The latest version cannot be downloaded: ${inspection.blockedReason}` });
+    return;
+  }
+  if (!inspection.fileBuffer) {
+    input.res.status(409).json({ detail: "This file is not ready to download yet. Try again in a moment." });
+    return;
+  }
+  if (artifact.expiresAt) {
+    const expiresAt = new Date(artifact.expiresAt);
+    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now()) {
+      await recordAccess(artifact.id, "denied", { reason: "artifact_expired" });
+      input.res.status(410).json({ detail: "This file is no longer available. Ask the assistant to generate it again." });
       return;
     }
   }
 
-  await recordAccess(artifact.id, "success", { disposition: actionType });
-  input.res.setHeader("Cache-Control", "private, max-age=60");
+  const fileName = artifact.displayName || path.basename(resolved.absolutePath);
+  await recordAccess(artifact.id, "success", {
+    disposition: actionType,
+    latest_version_revalidated: registrationNeedsRefresh,
+    checksum: currentChecksum
+  });
+  input.res.setHeader("Cache-Control", "private, no-store");
   input.res.setHeader("X-Content-Type-Options", "nosniff");
+  if (inspection.modifiedAt) input.res.setHeader("X-Artifact-Updated-At", inspection.modifiedAt.toISOString());
   input.res.setHeader(
     "Content-Disposition",
     `${actionType === "download" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(fileName)}`
   );
   input.res.type(artifact.mimeType || path.extname(fileName) || "application/octet-stream");
-  input.res.status(200).send(fileBuffer);
+  input.res.status(200).send(inspection.fileBuffer);
 }
 
 function findWhitelistRoot(candidate: string): string | undefined {
@@ -10572,7 +10675,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   };
   const heartbeat = setInterval(() => sendTrackedSSE("ping", { now: new Date().toISOString() }), 15000);
   const explicitCancel = new AbortController();
-  const runAbort = mergeAbortSignals([streamAbort.signal, explicitCancel.signal]);
+  // A transport disconnect is recoverable: keep the runtime turn alive so the
+  // result can be persisted and the explicit cancel endpoint can still find it.
+  const runAbort = mergeAbortSignals([explicitCancel.signal]);
   let directInputLength: number | undefined;
   let unregisterPortalRun: (() => void) | undefined;
   let portalRuntimeSession: SessionRecord | undefined;
@@ -10952,14 +11057,14 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       disconnectReason: streamAbort.reason
     });
   } finally {
-    const cancelled = explicitCancel.signal.aborted || streamAbort.disconnected;
+    const cancelled = explicitCancel.signal.aborted;
     const portalRuntimeSessionId = trimOrUndefined(portalRuntimeSession?.sessionId);
     if (cancelled && portalThreadId && portalUserMessageId && portalRuntimeSessionId && !portalAssistantMessageWritten) {
       await appendPortalStoppedAssistant({
         threadId: portalThreadId,
         userMessageId: portalUserMessageId,
         sessionId: portalRuntimeSessionId,
-        reason: explicitCancel.signal.aborted ? "explicit_cancel" : "client_disconnected"
+        reason: "explicit_cancel"
       }).catch((error) => {
         console.warn("portal chat failed to append stopped assistant", {
           threadId: portalThreadId,
@@ -10972,7 +11077,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     if (cancelled) {
       await retireLiveRuntimeSession(portalRuntimeSession, {
         status: "ended",
-        reason: explicitCancel.signal.aborted ? "portal explicit cancel" : "portal client disconnected",
+        reason: "portal explicit cancel",
         logLabel: "portal chat"
       });
     } else if (portalRuntimeFailure) {

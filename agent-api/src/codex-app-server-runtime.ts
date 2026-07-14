@@ -982,6 +982,7 @@ class CodexAppServerManager {
     let abortReject: ((error: Error) => void) | undefined;
     let abortHandler: (() => void) | undefined;
     let failureLogged = false;
+    let failureSettled = false;
     const startedAtMs = Date.now();
     const lastEvents: RuntimeEventSummary[] = [];
     const bufferedBeforeTurnId: CodexStreamEvent[] = [];
@@ -1016,19 +1017,34 @@ class CodexAppServerManager {
       });
     };
 
-    const bestEffortCancel = () => {
+    const bestEffortCancel = async () => {
       if (!turnId) return;
-      process.notify("turn/cancel", { threadId: thread.id, turnId });
+      await process.request("turn/interrupt", { threadId: thread.id, turnId }).catch((error) => {
+        console.warn("codex app-server turn interrupt failed", {
+          threadId: thread.id,
+          turnId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
     };
 
     const failTurn = (error: CodexAppServerTurnError) => {
       logFailure(error);
-      bestEffortCancel();
       if (error.category === "turn_timeout" && process.activeTurns <= 1) {
         process.stop("turn timeout");
       }
-      queue.error(error);
-      abortReject?.(error);
+      const settleFailure = () => {
+        if (failureSettled) return;
+        failureSettled = true;
+        queue.error(error);
+        abortReject?.(error);
+      };
+      if (error.category === "client_aborted" && turnId) {
+        void bestEffortCancel().finally(settleFailure);
+        return;
+      }
+      void bestEffortCancel();
+      settleFailure();
     };
 
     const resetIdleTimer = () => {
