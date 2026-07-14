@@ -41,6 +41,11 @@ type NotificationStore = {
 
 type Logger = Pick<Console, "warn">;
 
+type ExperienceUserIdentity = {
+  displayName?: string;
+  email?: string;
+};
+
 type ExperienceAudience = "internal" | "external" | "unknown";
 
 export type CustomerExperienceIssueInput = {
@@ -143,6 +148,7 @@ export class CustomerExperienceIssueReporter {
       notifications: NotificationStore;
       sendWorkNotice(input: { userIds?: string[]; message: string }): Promise<void>;
       listSuperAdminDingTalkUserIds(input: { organizationId?: string }): Promise<string[]>;
+      resolveUserIdentity(userId: string): Promise<ExperienceUserIdentity | undefined>;
       logger?: Logger;
     }
   ) {}
@@ -173,13 +179,17 @@ export class CustomerExperienceIssueReporter {
       };
     }
 
+    const [adminRecipientUserIds, userIdentity] = await Promise.all([
+      this.deps.listSuperAdminDingTalkUserIds({
+        organizationId: normalized.organizationId
+      }),
+      this.resolveUserIdentity(normalized.userId)
+    ]);
     const recipientUserIds = uniqueStrings([
       ...(normalized.recipientUserIds ?? []),
-      ...(await this.deps.listSuperAdminDingTalkUserIds({
-        organizationId: normalized.organizationId
-      }))
+      ...adminRecipientUserIds
     ]);
-    const payload = buildNotificationPayload(normalized, recoveryCase.id, recipientUserIds);
+    const payload = buildNotificationPayload(normalized, recoveryCase.id, recipientUserIds, userIdentity);
     const notification = await this.deps.notifications.create({
       organizationId: normalized.organizationId,
       channelType: "dingtalk",
@@ -225,6 +235,19 @@ export class CustomerExperienceIssueReporter {
         recoveryCaseId: recoveryCase.id,
         notification: { status: "failed", notificationId: notification.id, detail }
       };
+    }
+  }
+
+  private async resolveUserIdentity(userId?: string): Promise<ExperienceUserIdentity | undefined> {
+    if (!userId) return undefined;
+    try {
+      return await this.deps.resolveUserIdentity(userId);
+    } catch (error) {
+      this.deps.logger?.warn("customer experience issue user identity lookup failed", {
+        userId,
+        detail: errorDetail(error, "user identity lookup failed")
+      });
+      return undefined;
     }
   }
 
@@ -370,7 +393,8 @@ function issueMetadata(input: NormalizedCustomerExperienceIssue): Record<string,
 function buildNotificationPayload(
   input: NormalizedCustomerExperienceIssue,
   recoveryCaseId: string,
-  recipientUserIds: string[]
+  recipientUserIds: string[],
+  userIdentity?: ExperienceUserIdentity
 ): Record<string, unknown> {
   return compactRecord({
     category: input.notificationCategory,
@@ -383,6 +407,8 @@ function buildNotificationPayload(
     severity: input.severity,
     organizationId: input.organizationId,
     userId: input.userId,
+    userDisplayName: trimOrUndefined(userIdentity?.displayName),
+    userEmail: trimOrUndefined(userIdentity?.email),
     threadId: input.threadId,
     sessionId: input.sessionId,
     userMessageId: input.userMessageId,
@@ -402,12 +428,22 @@ function buildNotificationPayload(
 function buildDingTalkMessage(payload: Record<string, unknown>): string {
   const detailLabel = asText(payload.detailLabel) || "说明";
   const previewLabel = asText(payload.previewLabel) || "内容预览";
+  const userId = asText(payload.userId);
+  const userDisplayName = asText(payload.userDisplayName);
+  const userEmail = asText(payload.userEmail);
+  const userLabel = userDisplayName && userEmail
+    ? `${userDisplayName} <${userEmail}>`
+    : userDisplayName || userEmail || userId || "-";
+  const userLines = [`用户：${userLabel}`];
+  if ((userDisplayName || userEmail) && userId) {
+    userLines.push(`用户 ID：${userId}`);
+  }
   return [
     asText(payload.headline) || "[AgentStudio] 用户体验事件待跟进",
     "",
     `渠道：${asText(payload.channelLabel) || asText(payload.channel) || "-"}`,
     `组织：${asText(payload.organizationId) || "-"}`,
-    `用户：${asText(payload.userId) || "-"}`,
+    ...userLines,
     `Thread：${asText(payload.threadId) || "-"}`,
     `Session：${asText(payload.sessionId) || "-"}`,
     `消息 ID：${asText(payload.userMessageId) || asText(payload.externalMessageId) || "-"}`,

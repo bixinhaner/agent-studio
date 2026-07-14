@@ -700,6 +700,14 @@ const customerExperienceIssues = new CustomerExperienceIssueReporter({
   notifications: notificationRecords,
   sendWorkNotice: sendActiveDingTalkWorkNotice,
   listSuperAdminDingTalkUserIds,
+  resolveUserIdentity: async (userId) => {
+    const user = await users.getById(userId);
+    if (!user) return undefined;
+    return {
+      displayName: user.displayName,
+      email: user.email
+    };
+  },
   logger: console
 });
 const visibleConversationFailureReporter = new VisibleConversationFailureReporter({

@@ -26,16 +26,22 @@ function testReporter() {
   const notifications = testNotifications();
   const sendWorkNotice = vi.fn(async () => undefined);
   const listSuperAdminDingTalkUserIds = vi.fn(async () => ["admin-1"]);
+  const resolveUserIdentity = vi.fn(async () => ({
+    displayName: "Example User",
+    email: "example@baicells.com"
+  }));
   return {
     recovery,
     notifications,
     sendWorkNotice,
     listSuperAdminDingTalkUserIds,
+    resolveUserIdentity,
     reporter: new CustomerExperienceIssueReporter({
       recovery,
       notifications,
       sendWorkNotice,
-      listSuperAdminDingTalkUserIds
+      listSuperAdminDingTalkUserIds,
+      resolveUserIdentity
     })
   };
 }
@@ -87,7 +93,7 @@ describe("CustomerExperienceIssueReporter", () => {
     );
     expect(sendWorkNotice).toHaveBeenCalledWith({
       userIds: ["admin-1"],
-      message: expect.stringContaining("[AgentStudio] 用户体验反馈待跟进")
+      message: expect.stringContaining("用户：Example User <example@baicells.com>\n用户 ID：user-1")
     });
   });
 

@@ -24,12 +24,14 @@ function testIssues(input: {
   notifications: ReturnType<typeof testNotifications>;
   sendWorkNotice: ReturnType<typeof vi.fn>;
   listSuperAdminDingTalkUserIds: ReturnType<typeof vi.fn>;
+  resolveUserIdentity?: ReturnType<typeof vi.fn>;
 }) {
   return new CustomerExperienceIssueReporter({
     recovery: input.recovery,
     notifications: input.notifications,
     sendWorkNotice: input.sendWorkNotice,
-    listSuperAdminDingTalkUserIds: input.listSuperAdminDingTalkUserIds
+    listSuperAdminDingTalkUserIds: input.listSuperAdminDingTalkUserIds,
+    resolveUserIdentity: input.resolveUserIdentity ?? vi.fn(async () => undefined)
   });
 }
 
@@ -39,8 +41,12 @@ describe("VisibleConversationFailureReporter", () => {
     const notifications = testNotifications();
     const sendWorkNotice = vi.fn(async () => undefined);
     const listSuperAdminDingTalkUserIds = vi.fn(async () => ["admin-1"]);
+    const resolveUserIdentity = vi.fn(async () => ({
+      displayName: "Simbarashe Tsiga",
+      email: "simbatsigah@baicells.com"
+    }));
     const reporter = new VisibleConversationFailureReporter({
-      issues: testIssues({ recovery, notifications, sendWorkNotice, listSuperAdminDingTalkUserIds })
+      issues: testIssues({ recovery, notifications, sendWorkNotice, listSuperAdminDingTalkUserIds, resolveUserIdentity })
     });
 
     const result = await reporter.report({
@@ -96,13 +102,15 @@ describe("VisibleConversationFailureReporter", () => {
           category: "conversation_visible_failure",
           channelLabel: "站内聊天",
           recoveryCaseId: "case-1",
-          recipientUserIds: ["admin-1"]
+          recipientUserIds: ["admin-1"],
+          userDisplayName: "Simbarashe Tsiga",
+          userEmail: "simbatsigah@baicells.com"
         })
       })
     );
     expect(sendWorkNotice).toHaveBeenCalledWith({
       userIds: ["admin-1"],
-      message: expect.stringContaining("[AgentStudio] 用户侧回答失败")
+      message: expect.stringContaining("用户：Simbarashe Tsiga <simbatsigah@baicells.com>\n用户 ID：user-1")
     });
     expect(notifications.update).toHaveBeenCalledWith({
       id: "notification-1",
