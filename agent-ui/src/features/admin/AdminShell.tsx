@@ -22,7 +22,7 @@ import {
   Wrench
 } from "lucide-react";
 import { Breadcrumb, Button, Col, ConfigProvider, Drawer, Input, List, Modal, Row, Spin } from "antd";
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
@@ -31,6 +31,7 @@ import { UserIdentitySummary } from "../auth/UserIdentitySummary";
 import { BrandMark } from "../branding/BrandMark";
 import { useBranding } from "../branding/BrandingProvider";
 import { ADMIN_PREMIUM_THEME } from "./admin-theme";
+import { lockAdminSecurityDomains } from "./api";
 import type { AdminSection } from "./types";
 import "./admin-console.css";
 
@@ -307,6 +308,16 @@ export function visibleAdminSectionIds(showOperationsAndConversationMenus: boole
     : SECTION_ORDER.filter((section) => !SENSITIVE_ACTIVITY_SECTIONS.has(section));
 }
 
+export async function lockSecurityDomainsBeforeNavigation(
+  currentSection: AdminConsoleSection,
+  targetSection: AdminConsoleSection,
+  lock: () => Promise<void> = lockAdminSecurityDomains
+): Promise<void> {
+  if (currentSection === "security-domains" && targetSection !== currentSection) {
+    await lock();
+  }
+}
+
 function sectionFromHash(hash: string): AdminConsoleSection | null {
   if (!hash.startsWith(ADMIN_HASH_PREFIX)) return null;
   const rawValue = hash.slice(ADMIN_HASH_PREFIX.length).split("?")[0] ?? "";
@@ -517,14 +528,38 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   const currentSectionMeta = SECTION_META[section];
   const currentGroupMeta = GROUPS.find((item) => item.id === currentSectionMeta.group) ?? GROUPS[0];
 
+  const navigateToSection = useCallback(
+    async (targetSection: AdminConsoleSection) => {
+      if (targetSection === section) {
+        setCmdPaletteOpen(false);
+        setMobileNavOpen(false);
+        return;
+      }
+      try {
+        await lockSecurityDomainsBeforeNavigation(section, targetSection);
+      } catch (error) {
+        window.history.replaceState(null, "", `${ADMIN_HASH_PREFIX}${encodeURIComponent(section)}`);
+        Modal.error({
+          title: "无法离开保密域",
+          content: error instanceof Error ? `${error.message}。请重试。` : "锁定保密域失败，请重试。"
+        });
+        return;
+      }
+      setSection(targetSection);
+      setCmdPaletteOpen(false);
+      setMobileNavOpen(false);
+    },
+    [section]
+  );
+
   useEffect(() => {
     const onHashChange = () => {
       const fromHash = sectionFromHash(window.location.hash);
-      if (fromHash) setSection(fromHash);
+      if (fromHash) void navigateToSection(fromHash);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  }, [navigateToSection]);
 
   useEffect(() => {
     const nextHash = `${ADMIN_HASH_PREFIX}${encodeURIComponent(section)}`;
@@ -555,9 +590,20 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   }, [isNarrowScreen]);
 
   const handleNavClick = (targetSection: AdminConsoleSection) => {
-    setSection(targetSection);
-    setCmdPaletteOpen(false);
-    setMobileNavOpen(false);
+    void navigateToSection(targetSection);
+  };
+
+  const handleOpenPortal = async () => {
+    try {
+      await lockSecurityDomainsBeforeNavigation(section, "analytics");
+    } catch (error) {
+      Modal.error({
+        title: "无法离开保密域",
+        content: error instanceof Error ? `${error.message}。请重试。` : "锁定保密域失败，请重试。"
+      });
+      return;
+    }
+    props.onOpenPortal?.();
   };
 
   const filteredCmdItems = useMemo(() => {
@@ -661,7 +707,7 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
                 <span className="admin-cmd-kbd">⌘K</span>
               </button>
               {props.onOpenPortal ? (
-                <Button style={{ borderRadius: "var(--admin-radius-full)" }} onClick={props.onOpenPortal}>
+                <Button style={{ borderRadius: "var(--admin-radius-full)" }} onClick={() => void handleOpenPortal()}>
                   返回工作台
                 </Button>
               ) : null}

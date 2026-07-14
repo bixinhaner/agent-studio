@@ -189,6 +189,8 @@ describe("OrgSyncService", () => {
       }))
     };
 
+    const upsertDepartments = vi.fn(async () => undefined);
+    const refreshSecurityDomains = vi.fn(async () => undefined);
     const service = new OrgSyncService({
       provider: {
         fetchFullOrganization: vi.fn(async () => snapshot),
@@ -196,7 +198,7 @@ describe("OrgSyncService", () => {
         fetchUserScope: vi.fn(async () => snapshot)
       },
       departments: {
-        upsertMany: vi.fn(async () => undefined)
+        upsertMany: upsertDepartments
       },
       users: {},
       memberships: {
@@ -214,12 +216,20 @@ describe("OrgSyncService", () => {
         markSucceeded: vi.fn(async () => undefined),
         markFailed: vi.fn(async () => undefined),
         touch: vi.fn(async () => undefined)
-      }
+      },
+      afterSuccessfulSync: refreshSecurityDomains
     } as unknown as ConstructorParameters<typeof OrgSyncService>[0]);
 
     const result = await service.run({ scopeType: "full", triggerType: "manual" });
 
     expect(result).toEqual({ jobId: "job-1", status: "succeeded" });
+    expect(upsertDepartments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        organizationId: "org_internal",
+        externalId: "dept-1"
+      })
+    ]);
+    expect(refreshSecurityDomains).toHaveBeenCalledOnce();
     expect(db.user.create).not.toHaveBeenCalled();
     expect(db.user.update).toHaveBeenCalledWith({
       where: { id: "login-user" },

@@ -1118,6 +1118,7 @@ export class OrgSyncService {
     const now = new Date();
     const internalOrganizationId = await this.resolveInternalOrganizationId();
     const departmentUpserts = snapshot.departments.map((department) => ({
+      organizationId: internalOrganizationId,
       externalId: department.externalId,
       name: department.name,
       parentExternalId: department.parentExternalId,

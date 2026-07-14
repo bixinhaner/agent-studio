@@ -41,6 +41,7 @@ export type DepartmentRepositoryDb = {
 };
 
 type UpsertDepartmentInput = {
+  organizationId?: string;
   externalId: string;
   name: string;
   parentExternalId?: string | null;
@@ -94,6 +95,7 @@ export class DepartmentRepository {
       }
 
       return {
+        organizationId: trimOrUndefined(item.organizationId),
         externalId,
         name: item.name,
         parentExternalId: trimOrUndefined(item.parentExternalId) ?? null,
@@ -109,6 +111,7 @@ export class DepartmentRepository {
       for (const item of normalized) {
         const existing = await tx.department.findUnique({ where: { externalId: item.externalId } });
         const data = {
+          ...(item.organizationId ? { organizationId: item.organizationId } : {}),
           externalId: item.externalId,
           name: item.name,
           sortOrder: item.sortOrder,
