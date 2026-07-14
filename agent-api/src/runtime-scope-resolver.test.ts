@@ -39,6 +39,24 @@ describe("runtime scope resolver", () => {
     })).toBe(true);
   });
 
+  it("adds the portal security domain only to the workspace scope", () => {
+    const workspacePath = buildUserAgentWorkspacePath({
+      rootPath: "/var/lib/agent-studio/sessions",
+      actor,
+      modeId: "support",
+      securityDomainId: "finance/confidential"
+    });
+
+    expect(workspacePath).toBe(path.join(
+      "/var/lib/agent-studio/sessions",
+      "acme_global",
+      "security-domains",
+      "finance_confidential",
+      "user_42",
+      "agent-support"
+    ));
+  });
+
   it("uses a stable integration-agent workspace path", () => {
     const workspacePath = buildIntegrationAgentWorkspacePath({
       rootPath: "/var/lib/agent-studio/sessions",

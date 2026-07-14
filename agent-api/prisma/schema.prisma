@@ -64,6 +64,7 @@ model User {
   accessRequestEvents AccessRequestEvent[] @relation("AccessRequestEventActorUser")
   crestDelegationCredential CrestDelegationCredential?
   enterpriseProfile EnterpriseUserProfile?
+  securityDomainMembership SecurityDomainMember?
 
   @@index([email])
   @@index([status, role])
@@ -88,9 +89,57 @@ model Organization {
   roleAssignments OrganizationRoleAssignment[] @relation("OrganizationRoleAssignmentOrganization")
   productFeedback ProductFeedback[] @relation("ProductFeedbackOrganization")
   accessRequests  AccessRequest[]             @relation("AccessRequestTargetOrganization")
+  securityDomains SecurityDomain[]
 
   @@index([type, status])
   @@map("organizations")
+}
+
+model SecurityDomain {
+  id             String                 @id @default(cuid())
+  organizationId String                 @map("organization_id")
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  status         String                 @default("active")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  rules          SecurityDomainRule[]
+  members        SecurityDomainMember[]
+  threads        Thread[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
+  @@map("security_domains")
+}
+
+model SecurityDomainRule {
+  id              String         @id @default(cuid())
+  securityDomainId String         @map("security_domain_id")
+  securityDomain  SecurityDomain @relation(fields: [securityDomainId], references: [id], onDelete: Cascade)
+  subjectType     String         @map("subject_type")
+  subjectId       String         @map("subject_id")
+  includeChildren Boolean        @default(false) @map("include_children")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@unique([securityDomainId, subjectType, subjectId])
+  @@index([subjectType, subjectId])
+  @@map("security_domain_rules")
+}
+
+model SecurityDomainMember {
+  id               String         @id @default(cuid())
+  securityDomainId String         @map("security_domain_id")
+  securityDomain   SecurityDomain @relation(fields: [securityDomainId], references: [id], onDelete: Cascade)
+  userId           String         @unique @map("user_id")
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceType       String         @map("source_type")
+  sourceId         String         @map("source_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  @@index([securityDomainId, createdAt])
+  @@map("security_domain_members")
 }
 
 model SubscriptionPlan {
@@ -639,6 +688,8 @@ model Thread {
   id              String            @id @default(cuid())
   organizationId  String?           @map("organization_id")
   userId          String?           @map("user_id")
+  securityDomainId String?           @map("security_domain_id")
+  channel         String?
   title           String?
   status          ThreadStatus      @default(active)
   model           String?
@@ -651,6 +702,7 @@ model Thread {
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
   user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  securityDomain  SecurityDomain?   @relation(fields: [securityDomainId], references: [id], onDelete: SetNull)
   messages        Message[]
   artifacts       ThreadArtifact[]
   runtimeSessions RuntimeSession[]
@@ -666,6 +718,8 @@ model Thread {
 
   @@index([organizationId, createdAt])
   @@index([organizationId, userId, createdAt])
+  @@index([securityDomainId, createdAt])
+  @@index([channel, createdAt])
   @@index([userId])
   @@map("threads")
 }

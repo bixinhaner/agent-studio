@@ -13,5 +13,6 @@ describe("AdminShell navigation visibility", () => {
     expect(sections).not.toContain("analytics");
     expect(sections).not.toContain("conversations");
     expect(sections).toContain("system-settings");
+    expect(sections).toContain("security-domains");
   });
 });

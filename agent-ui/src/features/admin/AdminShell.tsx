@@ -9,6 +9,7 @@ import {
   Database,
   FileUser,
   LogOutIcon,
+  LockKeyhole,
   Menu,
   MessageSquareText,
   Network,
@@ -52,6 +53,9 @@ const AccessRequestsWorkspaceLazy = lazy(() =>
   import("../access-requests/AccessRequestsWorkspace").then((module) => ({ default: module.AccessRequestsWorkspace }))
 );
 const UsersViewLazy = lazy(() => import("./UsersView").then((module) => ({ default: module.UsersView })));
+const SecurityDomainsViewLazy = lazy(() =>
+  import("./SecurityDomainsView").then((module) => ({ default: module.SecurityDomainsView }))
+);
 const DepartmentTreeViewLazy = lazy(() =>
   import("./DepartmentTreeView").then((module) => ({ default: module.DepartmentTreeView }))
 );
@@ -116,6 +120,7 @@ const SECTION_ORDER: AdminConsoleSection[] = [
   "access-requests",
   "broadcasts",
   "users",
+  "security-domains",
   "organization",
   "rbac",
   "resources",
@@ -196,6 +201,16 @@ const SECTION_META: Record<AdminConsoleSection, AdminSectionMeta> = {
     group: "governance",
     keywords: ["用户", "成员", "账号"],
     icon: <Users size={18} />
+  },
+  "security-domains": {
+    id: "security-domains",
+    title: "保密域",
+    description: "按部门或用户隔离 Portal 会话、文件与工作区。",
+    scope: "Portal 数据边界",
+    cadence: "按组织变更维护",
+    group: "governance",
+    keywords: ["保密", "隔离", "security", "portal"],
+    icon: <LockKeyhole size={18} />
   },
   organization: {
     id: "organization",
@@ -366,6 +381,12 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
           <UsersViewLazy />
+        </Suspense>
+      );
+    case "security-domains":
+      return (
+        <Suspense fallback={<AdminSectionLazyFallback />}>
+          <SecurityDomainsViewLazy />
         </Suspense>
       );
     case "conversations":

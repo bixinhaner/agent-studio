@@ -279,6 +279,7 @@ import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
 import { resolvePublicBranding, resolvePublicPlatformName } from "./system-settings/public-branding.js";
 import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
+import { SecurityDomainService } from "./security-domains/service.js";
 import {
   buildThreadPublicShareSnapshot,
   buildThreadPublicShareSnapshotFromLeadMessageIds,
@@ -372,6 +373,7 @@ const codexExecution = new CodexExecutionService({
 });
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
 const db = getDbClient();
+const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
 const threads = new ThreadRepository(db as unknown as ThreadRepositoryDb);
 const organizations = new OrganizationRepository(db as unknown as OrganizationRepositoryDb);
@@ -1502,7 +1504,8 @@ const collaborationReadService = new ThreadCollaborationService({
   directory: {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
-    ensureUsersExist
+    ensureUsersExist,
+    getSecurityDomainIdForUser: (userId) => securityDomains.getDomainIdForUser(userId)
   },
   authorizer: createThreadCollaborationAuthorizer("collaboration.read")
 });
@@ -1515,7 +1518,8 @@ const collaborationCommentService = new ThreadCollaborationService({
   directory: {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
-    ensureUsersExist
+    ensureUsersExist,
+    getSecurityDomainIdForUser: (userId) => securityDomains.getDomainIdForUser(userId)
   },
   authorizer: createThreadCollaborationAuthorizer("collaboration.comment")
 });
@@ -1528,7 +1532,8 @@ const collaborationShareService = new ThreadCollaborationService({
   directory: {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
-    ensureUsersExist
+    ensureUsersExist,
+    getSecurityDomainIdForUser: (userId) => securityDomains.getDomainIdForUser(userId)
   },
   authorizer: createThreadCollaborationAuthorizer("collaboration.share")
 });
@@ -1541,7 +1546,8 @@ const collaborationAssignService = new ThreadCollaborationService({
   directory: {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
-    ensureUsersExist
+    ensureUsersExist,
+    getSecurityDomainIdForUser: (userId) => securityDomains.getDomainIdForUser(userId)
   },
   authorizer: createThreadCollaborationAuthorizer("collaboration.assign")
 });
@@ -1554,7 +1560,8 @@ const collaborationCaptureService = new ThreadCollaborationService({
   directory: {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId),
     listUserIdsForDepartment,
-    ensureUsersExist
+    ensureUsersExist,
+    getSecurityDomainIdForUser: (userId) => securityDomains.getDomainIdForUser(userId)
   },
   authorizer: createThreadCollaborationAuthorizer("collaboration.capture_mark.write")
 });
@@ -1623,7 +1630,8 @@ const orgSyncService = new OrgSyncService({
   organizations,
   organizationMemberships,
   jobs: syncJobs,
-  resourceAccessLogs
+  resourceAccessLogs,
+  afterSuccessfulSync: () => securityDomains.refreshAll()
 });
 const orgSyncScheduler = new OrgSyncScheduler(orgSyncService, syncJobs, {
   enabled: appConfig.orgSync.enabled,
@@ -5106,6 +5114,22 @@ async function listDepartmentIdsForActor(actor: CurrentActor): Promise<string[]>
   return listDepartmentSubjectIdsForUser(actor.id);
 }
 
+async function portalSecurityDomainIdForActor(actor: CurrentActor): Promise<string | undefined> {
+  return (await securityDomains.getForUser({
+    organizationId: actor.organizationId,
+    userId: actor.id
+  }))?.id;
+}
+
+async function getPortalOwnedThread(threadId: string, actor: CurrentActor): Promise<ThreadRecord | undefined> {
+  const [thread, securityDomainId] = await Promise.all([
+    threads.getOwned(threadId, actor.id, actor.organizationId),
+    portalSecurityDomainIdForActor(actor)
+  ]);
+  if (!thread) return undefined;
+  return trimOrUndefined(thread.securityDomainId) === trimOrUndefined(securityDomainId) ? thread : undefined;
+}
+
 function roleIdsForActor(actor: CurrentActor): string[] {
   return resolveResourceRoleIds({
     platformRole: actor.role,
@@ -5240,6 +5264,7 @@ async function materializeSharedIntegrationCodexHomeForRunConfig(input: {
 async function allocateUserAgentWorkspacePath(input: {
   currentUser: CurrentActor;
   modeHint?: string;
+  securityDomainId?: string;
 }): Promise<ModeSelection & { workspacePath: string }> {
   const selection = await resolveModeSelection({
     currentUser: input.currentUser,
@@ -5252,7 +5277,8 @@ async function allocateUserAgentWorkspacePath(input: {
       organizationSlug: input.currentUser.organizationSlug,
       userId: input.currentUser.id
     },
-    modeId: selection.modeId
+    modeId: selection.modeId,
+    securityDomainId: input.securityDomainId
   });
   await fs.mkdir(workspacePath, { recursive: true });
   return {
@@ -5264,6 +5290,7 @@ async function allocateUserAgentWorkspacePath(input: {
 function userAgentWorkspacePathForSelection(input: {
   currentUser: CurrentActor;
   selection: ModeSelection;
+  securityDomainId?: string;
 }): string {
   return buildUserAgentWorkspacePath({
     rootPath: input.selection.workspaceRootPath,
@@ -5272,7 +5299,8 @@ function userAgentWorkspacePathForSelection(input: {
       organizationSlug: input.currentUser.organizationSlug,
       userId: input.currentUser.id
     },
-    modeId: input.selection.modeId
+    modeId: input.selection.modeId,
+    securityDomainId: input.securityDomainId
   });
 }
 
@@ -5703,7 +5731,8 @@ async function ensureThreadSession(
     force_run_profile_controls?: boolean;
     resume_codex_thread_id?: string;
   },
-  timing?: RuntimeStartupTimer
+  timing?: RuntimeStartupTimer,
+  enforcePortalSecurityDomain = false
 ) {
   const time = async <T>(
     name: string,
@@ -5711,7 +5740,9 @@ async function ensureThreadSession(
     metadata?: Record<string, unknown>
   ): Promise<T> => (timing ? timing.time(name, action, metadata) : action());
   const thread = await time("ensure_thread_session.load_thread", () =>
-    threads.getOwned(threadId, currentUser.id, currentUser.organizationId)
+    enforcePortalSecurityDomain
+      ? getPortalOwnedThread(threadId, currentUser)
+      : threads.getOwned(threadId, currentUser.id, currentUser.organizationId)
   );
   if (!thread) throw new Error("Thread does not exist");
   timing?.updateContext({
@@ -5742,12 +5773,30 @@ async function ensureThreadSession(
     }),
     { modeHint }
   );
-  const workspacePath =
-    trimOrUndefined(thread.workspace) ||
-    userAgentWorkspacePathForSelection({
-      currentUser,
-      selection: modeSelection
+  const scopedWorkspacePath = userAgentWorkspacePathForSelection({
+    currentUser,
+    selection: modeSelection,
+    securityDomainId: thread.securityDomainId
+  });
+  const existingWorkspacePath = trimOrUndefined(thread.workspace);
+  const workspacePath = thread.securityDomainId ? scopedWorkspacePath : existingWorkspacePath || scopedWorkspacePath;
+  if (
+    thread.securityDomainId &&
+    existingWorkspacePath &&
+    path.resolve(existingWorkspacePath) !== path.resolve(scopedWorkspacePath)
+  ) {
+    await time("ensure_thread_session.migrate_security_domain_workspace", async () => {
+      const existingStat = await fs.stat(existingWorkspacePath).catch(() => undefined);
+      if (existingStat?.isDirectory()) {
+        await fs.mkdir(scopedWorkspacePath, { recursive: true });
+        await fs.cp(existingWorkspacePath, scopedWorkspacePath, {
+          recursive: true,
+          force: false,
+          errorOnExist: false
+        });
+      }
     });
+  }
   await time("ensure_thread_session.prepare_workspace", () => fs.mkdir(workspacePath, { recursive: true }));
   const enabledSkills = await time("ensure_thread_session.resolve_enabled_skills", () =>
     resolveEnabledSkillsForMode({
@@ -8806,6 +8855,7 @@ async function sendThreadArtifactContent(input: {
   artifactId?: string;
   filePath?: string;
   disposition?: "inline" | "attachment";
+  enforcePortalSecurityDomain?: boolean;
   res: Response;
 }): Promise<void> {
   const threadId = trimOrUndefined(input.threadId);
@@ -8833,7 +8883,9 @@ async function sendThreadArtifactContent(input: {
   }
 
   const [thread, policy] = await Promise.all([
-    threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
+    input.enforcePortalSecurityDomain
+      ? getPortalOwnedThread(threadId, input.currentUser)
+      : threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
     resolveArtifactPolicyForActor(input.currentUser)
   ]);
   if (!thread) {
@@ -9154,7 +9206,7 @@ app.locals.resolveCodexSkillThreadPath = async (input: {
   requestedPath: string;
 }): Promise<string> => {
   const currentUser = currentActorFromRequest(input.req);
-  const thread = await threads.getOwned(input.threadId, currentUser.id, currentUser.organizationId);
+  const thread = await getPortalOwnedThread(input.threadId, currentUser);
   if (!thread) {
     throw new Error("Thread does not exist");
   }
@@ -9238,7 +9290,8 @@ registerCommonApiRoutes(app, {
       service: broadcastService,
       requirePermission
     }),
-    recoveryRouter: createConversationRecoveryRouter(conversationRecovery)
+    recoveryRouter: createConversationRecoveryRouter(conversationRecovery),
+    securityDomains
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,
@@ -9454,7 +9507,7 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
       return;
     }
 
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -9478,7 +9531,8 @@ app.post("/api/threads/:threadId/attachments", uploadRawParser, async (req: Requ
     if (!workspacePath) {
       const allocated = await allocateUserAgentWorkspacePath({
         currentUser,
-        modeHint: modeIdFromRunConfig(thread.codexRunConfig)
+        modeHint: modeIdFromRunConfig(thread.codexRunConfig),
+        securityDomainId: thread.securityDomainId
       });
       workspacePath = allocated.workspacePath;
       await applyWorkspaceAgentsMdForMode(allocated.modeId, workspacePath);
@@ -9529,7 +9583,7 @@ app.get("/api/threads/:threadId/attachments/:attachmentId/content", async (req: 
       relative_path: typeof req.query.relative_path === "string" ? req.query.relative_path : undefined
     });
 
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -9593,7 +9647,7 @@ app.get("/api/threads/:threadId/files/content", async (req: Request, res: Respon
       path: typeof req.query.path === "string" ? req.query.path : undefined
     });
 
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -9647,7 +9701,7 @@ app.get("/api/threads/:threadId/artifacts", async (req: Request, res: Response) 
       return;
     }
 
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -9672,7 +9726,7 @@ app.get("/api/threads/:threadId/artifacts/resolve", async (req: Request, res: Re
     const query = artifactResolveQuerySchema.parse({
       path: typeof req.query.path === "string" ? req.query.path : ""
     });
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -9718,6 +9772,7 @@ app.get("/api/threads/:threadId/artifacts/content", async (req: Request, res: Re
       threadId,
       filePath: query.path,
       disposition: query.disposition,
+      enforcePortalSecurityDomain: true,
       res
     });
   } catch (error) {
@@ -9739,6 +9794,7 @@ app.get("/api/threads/:threadId/artifacts/:artifactId/content", async (req: Requ
       threadId,
       artifactId,
       disposition: query.disposition,
+      enforcePortalSecurityDomain: true,
       res
     });
   } catch (error) {
@@ -9750,6 +9806,7 @@ app.get("/api/threads/:threadId/artifacts/:artifactId/content", async (req: Requ
 app.post("/api/session", async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
+    const securityDomainId = await portalSecurityDomainIdForActor(currentUser);
     const input = createSessionSchema.parse(req.body || {});
     const existingId = (input.session_id || "").trim();
     if (existingId) {
@@ -9805,18 +9862,26 @@ app.post("/api/session", async (req: Request, res: Response) => {
             });
             modeId = selection.modeId;
             runtimeProfile = selection.runtimeProfile;
-            const ownedThread = await threads.getOwned(
-              existingForComparison.threadId,
-              currentUser.id,
-              currentUser.organizationId
-            );
-            workspace =
-              trimOrUndefined(ownedThread?.workspace) ||
-              trimOrUndefined(workspace) ||
-              userAgentWorkspacePathForSelection({
-                currentUser,
-                selection
-              });
+            const ownedThread = await getPortalOwnedThread(existingForComparison.threadId, currentUser);
+            if (!ownedThread) throw new Error("Thread does not exist");
+            const existingWorkspace = trimOrUndefined(ownedThread.workspace) || trimOrUndefined(workspace);
+            const scopedWorkspace = userAgentWorkspacePathForSelection({
+              currentUser,
+              selection,
+              securityDomainId
+            });
+            workspace = ownedThread.securityDomainId ? scopedWorkspace : existingWorkspace || scopedWorkspace;
+            if (
+              ownedThread.securityDomainId &&
+              existingWorkspace &&
+              path.resolve(existingWorkspace) !== path.resolve(scopedWorkspace)
+            ) {
+              const existingStat = await fs.stat(existingWorkspace).catch(() => undefined);
+              if (existingStat?.isDirectory()) {
+                await fs.mkdir(scopedWorkspace, { recursive: true });
+                await fs.cp(existingWorkspace, scopedWorkspace, { recursive: true, force: false, errorOnExist: false });
+              }
+            }
             await fs.mkdir(workspace, { recursive: true });
             if (ownedThread && trimOrUndefined(ownedThread.workspace) !== workspace) {
               await threads.update(existingForComparison.threadId, { workspace });
@@ -9824,7 +9889,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
           } else if (input.codex_run_config || !workspace || !modeId) {
             const allocated = await allocateUserAgentWorkspacePath({
               currentUser,
-              modeHint
+              modeHint,
+              securityDomainId
             });
             workspace = allocated.workspacePath;
             modeId = allocated.modeId;
@@ -9929,7 +9995,8 @@ app.post("/api/session", async (req: Request, res: Response) => {
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
     const allocated = await allocateUserAgentWorkspacePath({
       currentUser,
-      modeHint
+      modeHint,
+      securityDomainId
     });
     const sessionOptions = await resolveSessionOptions(
       {
@@ -10026,7 +10093,13 @@ app.get("/public-api/thread-shares/:token/files/content", async (req: Request, r
 
 app.get("/api/threads", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
-  const list = await threads.listForUser(currentUser.id, currentUser.organizationId, true);
+  const securityDomainId = await portalSecurityDomainIdForActor(currentUser);
+  const list = await threads.listForUserInSecurityDomain(
+    currentUser.id,
+    currentUser.organizationId,
+    securityDomainId ?? null,
+    true
+  );
   res.json({
     threads: list.map((thread) => threadOut(thread))
   });
@@ -10046,11 +10119,15 @@ app.post("/api/threads", async (req: Request, res: Response) => {
     const input = createThreadSchema.parse(req.body || {});
     const threadId = randomUUID().replace(/-/g, "");
     timing.updateContext({ threadId });
+    const securityDomainId = await timing.time("create_thread.resolve_security_domain", () =>
+      portalSecurityDomainIdForActor(currentUser)
+    );
     const modeHint = modeIdFromRunConfig(input.codex_run_config);
     const allocated = await timing.time("create_thread.allocate_workspace", () =>
       allocateUserAgentWorkspacePath({
         currentUser,
-        modeHint
+        modeHint,
+        securityDomainId
       }),
       { modeHint }
     );
@@ -10082,6 +10159,8 @@ app.post("/api/threads", async (req: Request, res: Response) => {
         id: threadId,
         organizationId: currentUser.organizationId,
         userId: currentUser.id,
+        securityDomainId,
+        channel: "portal",
         title: input.title?.trim() || undefined,
         externalId: input.external_id?.trim() || undefined,
         model: options.model,
@@ -10120,7 +10199,7 @@ app.post("/api/threads", async (req: Request, res: Response) => {
 
 app.get("/api/threads/:threadId", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
-  const thread = await threads.getOwned(String(req.params.threadId || "").trim(), currentUser.id, currentUser.organizationId);
+  const thread = await getPortalOwnedThread(String(req.params.threadId || "").trim(), currentUser);
   if (!thread) {
     res.status(404).json({ detail: "Thread does not exist" });
     return;
@@ -10133,7 +10212,7 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
     const input = patchThreadSchema.parse(req.body || {});
-    const existing = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const existing = await getPortalOwnedThread(threadId, currentUser);
     if (!existing) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10175,7 +10254,7 @@ app.delete("/api/threads/:threadId", async (req: Request, res: Response) => {
     const thread =
       deleteMode.mode === "hard"
         ? await threads.get(threadId, currentUser.organizationId)
-        : await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+        : await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10219,7 +10298,7 @@ app.post("/api/threads/:threadId/session", async (req: Request, res: Response) =
     const currentUser = currentActorFromRequest(req);
     timing.updateContext({ organizationType: currentUser.organizationType });
     const input = ensureThreadSessionSchema.parse(req.body || {});
-    const session = await ensureThreadSession(currentUser, threadId, input, timing);
+    const session = await ensureThreadSession(currentUser, threadId, input, timing, true);
     timing.updateContext({ sessionId: session.sessionId, model: session.model });
     res.json({ session: sessionOut(session) });
     timing.finish("success");
@@ -10233,7 +10312,7 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10261,9 +10340,13 @@ app.post("/api/threads/:threadId/public-share", async (req: Request, res: Respon
     const currentUser = currentActorFromRequest(req);
     const profileUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+    if (thread.securityDomainId) {
+      res.status(403).json({ detail: "保密域会话不能创建公开链接" });
       return;
     }
 
@@ -10301,7 +10384,7 @@ app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) 
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10332,7 +10415,7 @@ app.put("/api/threads/:threadId/messages", async (req: Request, res: Response) =
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10360,7 +10443,7 @@ app.post("/api/threads/:threadId/feedback", async (req: Request, res: Response) 
   try {
     const currentUser = currentActorFromRequest(req);
     const threadId = String(req.params.threadId || "").trim();
-    const thread = await threads.getOwned(threadId, currentUser.id, currentUser.organizationId);
+    const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
@@ -10535,6 +10618,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     let session = await timing.time("chat_stream.load_session", () =>
       sessions.getOwned(input.session_id, currentUser.id, currentUser.organizationId)
     );
+    if (session?.threadId && !(await getPortalOwnedThread(session.threadId, currentUser))) {
+      session = undefined;
+    }
     timing.updateContext({
       sessionId: session?.sessionId,
       threadId: session?.threadId ?? input.thread_id,

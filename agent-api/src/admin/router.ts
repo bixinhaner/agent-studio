@@ -24,6 +24,8 @@ import { SystemSettingsService } from "../system-settings/service.js";
 import { BrandingAssetStorage } from "../system-settings/branding-assets.js";
 import type { AlertEvaluationService } from "../operations/alert-evaluation-service.js";
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
+import { createSecurityDomainAdminRouter } from "../security-domains/admin-router.js";
+import type { SecurityDomainService } from "../security-domains/service.js";
 
 type AdminDb =
   UserRepositoryDb &
@@ -75,6 +77,7 @@ type AdminRouterOptions = {
   orgSyncConfig?: { enabled: boolean; intervalMinutes: number };
   broadcastRouter?: Router;
   recoveryRouter?: Router;
+  securityDomains?: SecurityDomainService;
 };
 
 type UserRow = {
@@ -748,6 +751,10 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       getDb: () => getDbInstance() as never
     })
   );
+
+  if (options.securityDomains) {
+    router.use("/security-domains", createSecurityDomainAdminRouter(options.securityDomains));
+  }
 
   router.use(options.recoveryRouter ?? Router());
 

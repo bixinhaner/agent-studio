@@ -1793,17 +1793,18 @@ export function createConversationAuditRouter(options: {
       db.integrationInstance.findMany(),
       db.agentMode.findMany({ orderBy: { createdAt: "asc" } })
     ]);
+    const visibleThreads = threads.filter((thread) => !thread.securityDomainId);
     const userMap = new Map(users.map((item) => [item.id, normalizeUser(item)]));
     const integrationMap = new Map(integrations.map((item) => [item.id, item] as const));
     const agentModeMap = new Map(agentModes.map((item) => [item.id, item] as const));
-    const bindings = await records.listExternalConversationBindingsByThreadIds(threads.map((thread) => thread.id));
+    const bindings = await records.listExternalConversationBindingsByThreadIds(visibleThreads.map((thread) => thread.id));
     const bindingByThreadId = new Map<string, ExternalConversationBindingRecord>();
     for (const binding of bindings) {
       if (!bindingByThreadId.has(binding.threadId)) {
         bindingByThreadId.set(binding.threadId, binding);
       }
     }
-    return threads.map((thread) =>
+    return visibleThreads.map((thread) =>
       buildConversationSummary(
         thread,
         userMap.get(thread.userId ?? "") ?? null,
@@ -2096,7 +2097,7 @@ export function createConversationAuditRouter(options: {
       }
 
       const thread = await conversationRecords().getThread(threadId);
-      if (!thread) {
+      if (!thread || thread.securityDomainId) {
         res.status(404).json({ detail: "thread 不存在" });
         return;
       }
@@ -2146,7 +2147,7 @@ export function createConversationAuditRouter(options: {
       const db = getDb();
       const records = conversationRecords();
       const thread = await records.getThread(threadId);
-      if (!thread) {
+      if (!thread || thread.securityDomainId) {
         res.status(404).json({ detail: "thread 不存在" });
         return;
       }

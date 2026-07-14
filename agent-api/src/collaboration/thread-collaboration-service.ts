@@ -29,6 +29,7 @@ type CollaborationDirectory = {
   listDepartmentIdsForUser?: (userId: string) => Promise<string[]>;
   listUserIdsForDepartment?: (departmentId: string) => Promise<string[]>;
   ensureUsersExist?: (userIds: string[]) => Promise<void>;
+  getSecurityDomainIdForUser?: (userId: string) => Promise<string | undefined>;
 };
 
 type CollaborationAuthorizer = {
@@ -117,6 +118,7 @@ export class ThreadCollaborationService {
       sharedByUserId: input.actorUserId,
       permissionLevel: "read_comment" as const
     }));
+    await this.assertUsersInThreadDomain(thread, await this.resolveShareRecipients(normalizedShares));
     const created = await this.deps.shares.replaceForThread(thread.id, normalizedShares, input.actorUserId);
     const recipients = difference(await this.resolveShareRecipients(created), previousRecipients);
     await this.project({
@@ -203,6 +205,7 @@ export class ThreadCollaborationService {
     await this.assertCanManage(thread, input.actorUserId);
     const followerIds = input.followerIds ? uniqueUserIds(input.followerIds) : undefined;
     await this.deps.directory?.ensureUsersExist?.([input.ownerUserId, ...(followerIds ?? [])]);
+    await this.assertUsersInThreadDomain(thread, [input.ownerUserId, ...(followerIds ?? [])]);
 
     await this.deps.collaboration.setAssignment({
       threadId: thread.id,
@@ -249,6 +252,7 @@ export class ThreadCollaborationService {
     const thread = await this.requireThread(input.threadId);
     await this.assertCanManage(thread, input.actorUserId);
     await this.deps.directory?.ensureUsersExist?.(input.followerIds);
+    await this.assertUsersInThreadDomain(thread, input.followerIds);
 
     const followers = await this.deps.collaboration.replaceFollowers(thread.id, input.followerIds, input.actorUserId);
 
@@ -352,6 +356,10 @@ export class ThreadCollaborationService {
       return { canRead: false, canComment: false, canRun: false, isOwner: false, canManage: false };
     }
     const ownerUserId = trimOrUndefined(input.thread.userId);
+    const actorSecurityDomainId = await this.deps.directory?.getSecurityDomainIdForUser?.(actorUserId);
+    if (trimOrUndefined(input.thread.securityDomainId) !== trimOrUndefined(actorSecurityDomainId)) {
+      return { canRead: false, canComment: false, canRun: false, isOwner: false, canManage: false };
+    }
     const isOwner = ownerUserId === actorUserId;
     if (isOwner) {
       return { canRead: true, canComment: true, canRun: true, isOwner: true, canManage: true };
@@ -400,7 +408,9 @@ export class ThreadCollaborationService {
     };
   }
 
-  private async resolveShareRecipients(shares: ThreadShareRecord[]): Promise<string[]> {
+  private async resolveShareRecipients(
+    shares: Array<Pick<ThreadShareRecord, "subjectType" | "subjectId">>
+  ): Promise<string[]> {
     const recipients: string[] = [];
     for (const share of shares) {
       if (share.subjectType === "user") {
@@ -429,6 +439,16 @@ export class ThreadCollaborationService {
       }
     }
     return accessible;
+  }
+
+  private async assertUsersInThreadDomain(thread: ThreadRecord, userIds: string[]): Promise<void> {
+    if (!this.deps.directory?.getSecurityDomainIdForUser) return;
+    const expected = trimOrUndefined(thread.securityDomainId);
+    const uniqueIds = uniqueUserIds(userIds);
+    const actual = await Promise.all(uniqueIds.map((userId) => this.deps.directory!.getSecurityDomainIdForUser!(userId)));
+    if (actual.some((securityDomainId) => trimOrUndefined(securityDomainId) !== expected)) {
+      throw new Error("保密域会话只能与同一保密域成员协作");
+    }
   }
 
   private async project(input: CollaborationInboxProjectionInput): Promise<void> {

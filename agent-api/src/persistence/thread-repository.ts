@@ -28,6 +28,8 @@ export type ThreadRecord = {
   id: string;
   organizationId?: string;
   userId?: string;
+  securityDomainId?: string;
+  channel?: string;
   externalId?: string;
   status: ThreadStatus;
   title?: string;
@@ -47,6 +49,8 @@ type CreateThreadPayload = {
   id?: string;
   organizationId?: string;
   userId?: string;
+  securityDomainId?: string;
+  channel?: string;
   title?: string;
   externalId?: string;
   model: string;
@@ -75,6 +79,8 @@ type ThreadRow = {
   id: string;
   organizationId: string | null;
   userId: string | null;
+  securityDomainId?: string | null;
+  channel?: string | null;
   externalId: string | null;
   title: string | null;
   status: string | null;
@@ -109,7 +115,7 @@ type ThreadTable = {
   count(args?: unknown): Promise<number>;
   findUnique(args: { where: { id: string } } | { where: { externalId: string } }): Promise<ThreadRow | null>;
   findMany(args?: {
-    where?: { status?: "active" | "archived"; userId?: string | null; organizationId?: string | null };
+    where?: { status?: "active" | "archived"; userId?: string | null; organizationId?: string | null; securityDomainId?: string | null };
     orderBy?: { updatedAt: "asc" | "desc" };
   }): Promise<ThreadRow[]>;
   create(args: { data: Record<string, unknown> }): Promise<ThreadRow>;
@@ -293,6 +299,24 @@ export class ThreadRepository {
     return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
   }
 
+  async listForUserInSecurityDomain(
+    userId: string,
+    organizationId: string,
+    securityDomainId: string | null,
+    includeArchived = false
+  ): Promise<ThreadRecord[]> {
+    const rows = await this.db.thread.findMany({
+      where: {
+        userId,
+        organizationId,
+        securityDomainId,
+        ...(includeArchived ? {} : { status: "active" })
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+    return Promise.all(rows.map(async (row) => this.loadThreadRecord(this.db, row)));
+  }
+
   async create(payload: CreateThreadPayload): Promise<ThreadRecord> {
     const title = trimOrUndefined(payload.title);
     const created = await this.db.thread.create({
@@ -300,6 +324,8 @@ export class ThreadRepository {
         id: payload.id,
         organizationId: trimOrUndefined(payload.organizationId) ?? null,
         userId: trimOrUndefined(payload.userId) ?? null,
+        securityDomainId: trimOrUndefined(payload.securityDomainId) ?? null,
+        channel: trimOrUndefined(payload.channel) ?? null,
         externalId: trimOrUndefined(payload.externalId) ?? null,
         title: title ?? null,
         status: mapThreadStatusToDb(payload.status) ?? "active",
@@ -329,6 +355,8 @@ export class ThreadRepository {
           id: record.id,
           organizationId: trimOrUndefined(record.organizationId) ?? null,
           userId: trimOrUndefined(record.userId) ?? null,
+          securityDomainId: trimOrUndefined(record.securityDomainId) ?? null,
+          channel: trimOrUndefined(record.channel) ?? null,
           externalId: record.externalId ?? null,
           title: record.title ?? null,
           status: mapThreadStatusToDb(record.status) ?? "active",
@@ -625,6 +653,8 @@ export class ThreadRepository {
       id: row.id,
       organizationId: trimOrUndefined(row.organizationId ?? undefined),
       userId: row.userId ?? undefined,
+      securityDomainId: trimOrUndefined(row.securityDomainId ?? undefined),
+      channel: trimOrUndefined(row.channel ?? undefined),
       externalId: row.externalId ?? undefined,
       status: mapThreadStatusFromDb(row.status),
       title: row.title ?? undefined,

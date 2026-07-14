@@ -138,10 +138,16 @@ export function buildUserAgentWorkspacePath(input: {
   rootPath: string;
   actor: RuntimeScopeActor;
   modeId: string;
+  securityDomainId?: string;
 }): string {
+  const securityDomainId = trimOrUndefined(input.securityDomainId);
+  const domainSegments = securityDomainId
+    ? ["security-domains", sanitizePathSegment(securityDomainId, "domain")]
+    : [];
   return path.join(
     input.rootPath,
     sanitizePathSegment(organizationKeyOf(input.actor), "organization"),
+    ...domainSegments,
     sanitizePathSegment(input.actor.userId, "user"),
     `agent-${sanitizePathSegment(input.modeId, "default")}`
   );

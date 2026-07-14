@@ -5,6 +5,7 @@ export type AdminSection =
   | "billing"
   | "access-requests"
   | "users"
+  | "security-domains"
   | "resources"
   | "capabilities"
   | "codex-memory"
@@ -1159,6 +1160,34 @@ export type AdminDepartmentNode = {
 
 export type DepartmentTreeResponse = {
   departments: AdminDepartmentNode[];
+};
+
+export type AdminSecurityDomainRule = {
+  id: string;
+  subjectType: "user" | "department";
+  subjectId: string;
+  includeChildren: boolean;
+};
+
+export type AdminSecurityDomain = {
+  id: string;
+  organizationId: string;
+  name: string;
+  status: "active" | "inactive";
+  rules: AdminSecurityDomainRule[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminSecurityDomainInput = {
+  name: string;
+  status: "active" | "inactive";
+  rules: Array<{
+    subject_type: "user" | "department";
+    subject_id: string;
+    include_children?: boolean;
+  }>;
 };
 
 export type OrgSyncConfig = {

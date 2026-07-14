@@ -82,6 +82,7 @@ type OrgSyncRepositories = {
       metadata?: unknown;
     }): Promise<unknown>;
   };
+  afterSuccessfulSync?: () => Promise<void>;
 };
 
 type DepartmentSnapshot = NormalizedOrgSnapshot["departments"][number];
@@ -849,6 +850,18 @@ export class OrgSyncService {
       });
 
       await this.dependencies.jobs.markSucceeded(jobId, diffData.summary);
+      if (this.dependencies.afterSuccessfulSync) {
+        try {
+          await this.dependencies.afterSuccessfulSync();
+        } catch (error) {
+          await this.dependencies.jobs.appendEvent(jobId, {
+            level: "warn",
+            eventType: "security_domain_refresh_failed",
+            message: "Organization sync succeeded, but security domain membership needs attention",
+            payload: { detail: error instanceof Error ? error.message : String(error) }
+          });
+        }
+      }
       if (this.dependencies.resourceAccessLogs) {
         await this.dependencies.resourceAccessLogs.record({
           userId: trimOrUndefined(input.triggeredByUserId),

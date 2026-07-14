@@ -24,6 +24,8 @@ import type {
   AdminProductFeedbackListInput,
   AdminProductFeedbackListResponse,
   AdminProductFeedbackStatus,
+  AdminSecurityDomain,
+  AdminSecurityDomainInput,
   AdminSubscriptionDenialsResponse,
   AdminSubscriptionGrantDetailResponse,
   AdminSubscriptionGrantInput,
@@ -547,6 +549,29 @@ export async function createAdminOrganizationInvite(input: AdminExternalInviteIn
 
 export async function fetchDepartmentTree(): Promise<DepartmentTreeResponse> {
   return api<DepartmentTreeResponse>("/api/admin/departments/tree");
+}
+
+export async function fetchAdminSecurityDomains(): Promise<{ domains: AdminSecurityDomain[] }> {
+  return api<{ domains: AdminSecurityDomain[] }>("/api/admin/security-domains");
+}
+
+export async function createAdminSecurityDomain(input: AdminSecurityDomainInput): Promise<AdminSecurityDomain> {
+  const response = await api<{ domain: AdminSecurityDomain }>("/api/admin/security-domains", {
+    method: "POST",
+    json: input
+  });
+  return response.domain;
+}
+
+export async function updateAdminSecurityDomain(
+  domainId: string,
+  input: AdminSecurityDomainInput
+): Promise<AdminSecurityDomain> {
+  const response = await api<{ domain: AdminSecurityDomain }>(
+    `/api/admin/security-domains/${encodeURIComponent(domainId)}`,
+    { method: "PUT", json: input }
+  );
+  return response.domain;
 }
 
 export async function fetchOrgSyncConfig(): Promise<OrgSyncConfigResponse> {
