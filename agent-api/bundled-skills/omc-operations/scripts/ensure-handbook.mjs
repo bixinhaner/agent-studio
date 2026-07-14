@@ -204,12 +204,28 @@ async function validCache(cacheDirectory, expected) {
   try {
     const marker = JSON.parse(await readFile(path.join(cacheDirectory, ".complete.json"), "utf8"));
     await stat(path.join(cacheDirectory, "references", "manifest.json"));
+    await stat(path.join(cacheDirectory, "references", "api-index.jsonl"));
+    await stat(path.join(cacheDirectory, "references", "common-operations.md"));
     return marker.handbookDigest === expected.handbookDigest &&
       marker.catalogVersion === expected.catalogVersion &&
       marker.totalOperations === expected.totalOperations;
   } catch {
     return false;
   }
+}
+
+function handbookResult(status, cacheDirectory, metadata) {
+  const handbookRoot = path.join(cacheDirectory, "references");
+  return {
+    status,
+    handbookRoot,
+    indexPath: path.join(handbookRoot, "api-index.jsonl"),
+    commonOperationsPath: path.join(handbookRoot, "common-operations.md"),
+    manifestPath: path.join(handbookRoot, "manifest.json"),
+    handbookDigest: metadata.handbookDigest,
+    catalogVersion: metadata.catalogVersion,
+    totalOperations: metadata.totalOperations
+  };
 }
 
 async function sleep(milliseconds) {
@@ -295,20 +311,20 @@ export async function ensureHandbook({ cliPath, workspace = process.cwd() }) {
   const cacheDirectory = path.join(cacheRoot, metadata.digestHex);
   await mkdir(cacheRoot, { recursive: true });
   if (await validCache(cacheDirectory, metadata)) {
-    return { status: "cached", handbookRoot: path.join(cacheDirectory, "references"), handbookDigest: metadata.handbookDigest };
+    return handbookResult("cached", cacheDirectory, metadata);
   }
 
   const lockPath = `${cacheDirectory}.lock`;
   const ownsLock = await acquireLock(lockPath, cacheDirectory, metadata);
   if (!ownsLock) {
-    return { status: "cached", handbookRoot: path.join(cacheDirectory, "references"), handbookDigest: metadata.handbookDigest };
+    return handbookResult("cached", cacheDirectory, metadata);
   }
   try {
     if (!(await validCache(cacheDirectory, metadata))) await downloadHandbook(absoluteCli, cacheDirectory, metadata);
   } finally {
     await rm(lockPath, { recursive: true, force: true });
   }
-  return { status: "downloaded", handbookRoot: path.join(cacheDirectory, "references"), handbookDigest: metadata.handbookDigest };
+  return handbookResult("downloaded", cacheDirectory, metadata);
 }
 
 function cliArgument(argv, name) {

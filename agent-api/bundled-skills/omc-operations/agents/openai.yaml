@@ -1,4 +1,4 @@
 interface:
   display_name: "OMC Operations"
-  short_description: "Operate each OMC through its own version-matched API handbook"
-  default_prompt: "Use $omc-operations to complete the OMC request. Reuse the handbook and proven operations already active in this thread. For an unseen handbook digest, run the Skill loader once, then search one compact index, read one operation document, and call the documented API directly."
+  short_description: "Help operations users inspect, diagnose, and safely change their managed network"
+  default_prompt: "Use $omc-operations to complete the operational request. Reuse the active handbook and proven operations, prefer its common-operation fast paths, and stop when evidence is sufficient. Answer in clear operational language with the conclusion, impact, and useful next action; hide APIs, tools, handbook internals, and execution details unless the user explicitly asks for diagnostics."

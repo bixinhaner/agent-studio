@@ -71,6 +71,7 @@ async function fixtureWorkspace() {
   const archive = tarArchive({
     "references/manifest.json": JSON.stringify(manifest),
     "references/api-index.jsonl": '{"operationId":"get.devices.stats"}\n',
+    "references/common-operations.md": "# Common operations\n",
     "references/api-categories/devices.json": '{"category":"devices"}',
     "references/api-docs/get.devices.stats.json": '{"operationId":"get.devices.stats"}'
   });
@@ -129,16 +130,38 @@ describe("bundled OMC handbook loader", () => {
     const fixture = await fixtureWorkspace();
     const first = await runLoader(fixture.workspace, fixture.cliPath, fixture.fixturePath, fixture.logPath);
     expect(first.code, first.stderr).toBe(0);
-    const firstResult = JSON.parse(first.stdout) as { status: string; handbookRoot: string; handbookDigest: string };
+    const firstResult = JSON.parse(first.stdout) as {
+      status: string;
+      handbookRoot: string;
+      indexPath: string;
+      commonOperationsPath: string;
+      manifestPath: string;
+      handbookDigest: string;
+      catalogVersion: string;
+      totalOperations: number;
+    };
     expect(firstResult.status).toBe("downloaded");
     expect(firstResult.handbookDigest).toBe(fixture.digest);
+    expect(firstResult.catalogVersion).toBe("0123456789abcdef");
+    expect(firstResult.totalOperations).toBe(1);
+    expect(firstResult.indexPath).toBe(path.join(firstResult.handbookRoot, "api-index.jsonl"));
+    expect(firstResult.commonOperationsPath).toBe(path.join(firstResult.handbookRoot, "common-operations.md"));
+    expect(firstResult.manifestPath).toBe(path.join(firstResult.handbookRoot, "manifest.json"));
     await expect(readFile(path.join(firstResult.handbookRoot, "api-docs/get.devices.stats.json"), "utf8"))
       .resolves.toContain("get.devices.stats");
     expect((await readFile(fixture.logPath, "utf8")).trim().split("\n")).toHaveLength(3);
 
     const second = await runLoader(fixture.workspace, fixture.cliPath, fixture.fixturePath, fixture.logPath);
     expect(second.code, second.stderr).toBe(0);
-    expect(JSON.parse(second.stdout).status).toBe("cached");
+    expect(JSON.parse(second.stdout)).toMatchObject({
+      status: "cached",
+      indexPath: firstResult.indexPath,
+      commonOperationsPath: firstResult.commonOperationsPath,
+      manifestPath: firstResult.manifestPath,
+      handbookDigest: fixture.digest,
+      catalogVersion: "0123456789abcdef",
+      totalOperations: 1
+    });
     expect((await readFile(fixture.logPath, "utf8")).trim().split("\n")).toHaveLength(3);
   });
 
