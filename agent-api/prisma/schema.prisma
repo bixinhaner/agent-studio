@@ -90,9 +90,22 @@ model Organization {
   productFeedback ProductFeedback[] @relation("ProductFeedbackOrganization")
   accessRequests  AccessRequest[]             @relation("AccessRequestTargetOrganization")
   securityDomains SecurityDomain[]
+  securityDomainAccessPolicy SecurityDomainAccessPolicy?
 
   @@index([type, status])
   @@map("organizations")
+}
+
+model SecurityDomainAccessPolicy {
+  organizationId  String       @id @map("organization_id")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  passwordDigest  String       @map("password_digest")
+  passwordVersion Int          @default(1) @map("password_version")
+  updatedByUserId String?      @map("updated_by_user_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  @@map("security_domain_access_policies")
 }
 
 model SecurityDomain {

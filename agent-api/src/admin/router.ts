@@ -26,6 +26,7 @@ import type { AlertEvaluationService } from "../operations/alert-evaluation-serv
 import type { QuotaEvaluationService } from "../operations/quota-evaluation-service.js";
 import { createSecurityDomainAdminRouter } from "../security-domains/admin-router.js";
 import type { SecurityDomainService } from "../security-domains/service.js";
+import type { SecurityDomainAccessControl } from "../security-domains/access-control.js";
 
 type AdminDb =
   UserRepositoryDb &
@@ -78,6 +79,7 @@ type AdminRouterOptions = {
   broadcastRouter?: Router;
   recoveryRouter?: Router;
   securityDomains?: SecurityDomainService;
+  securityDomainAccess?: SecurityDomainAccessControl;
 };
 
 type UserRow = {
@@ -752,8 +754,8 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
     })
   );
 
-  if (options.securityDomains) {
-    router.use("/security-domains", createSecurityDomainAdminRouter(options.securityDomains));
+  if (options.securityDomains && options.securityDomainAccess) {
+    router.use("/security-domains", createSecurityDomainAdminRouter(options.securityDomains, options.securityDomainAccess));
   }
 
   router.use(options.recoveryRouter ?? Router());

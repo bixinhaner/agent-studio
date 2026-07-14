@@ -1190,6 +1190,13 @@ export type AdminSecurityDomainInput = {
   }>;
 };
 
+export type AdminSecurityDomainAccessStatus = {
+  configured: boolean;
+  unlocked: boolean;
+  canInitialize: boolean;
+  expiresInMinutes: number;
+};
+
 export type OrgSyncConfig = {
   enabled: boolean;
   intervalMinutes: number;

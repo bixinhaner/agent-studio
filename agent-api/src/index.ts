@@ -10,6 +10,7 @@ import { registerCommonApiRoutes } from "./app-routes.js";
 import { createBroadcastAdminRouter } from "./admin/broadcast-router.js";
 import { createConversationRecoveryRouter } from "./admin/conversation-recovery-router.js";
 import { createAdminRouter } from "./admin/router.js";
+import { SecurityDomainAccessControl } from "./security-domains/access-control.js";
 import { createMonitoringRouter } from "./admin/monitoring-router.js";
 import { createRbacRouter } from "./admin/rbac-router.js";
 import { createAdminAccessRequestRouter } from "./access-requests/admin-router.js";
@@ -1643,6 +1644,11 @@ const sessionCookies = createSessionCookieManager({
   maxAgeMs: appConfig.sessionCookie.maxAgeMs,
   secure: appConfig.sessionCookie.secure,
   sameSite: "lax"
+});
+const securityDomainAccess = new SecurityDomainAccessControl(db, {
+  cookieName: `${appConfig.sessionCookie.name}_security_domain_access`,
+  secret: appConfig.sessionCookie.secret,
+  secure: appConfig.sessionCookie.secure
 });
 const oauthStates = createOAuthStateCookieManager({
   cookieName: `${appConfig.sessionCookie.name}_oauth_state`,
@@ -9291,7 +9297,8 @@ registerCommonApiRoutes(app, {
       requirePermission
     }),
     recoveryRouter: createConversationRecoveryRouter(conversationRecovery),
-    securityDomains
+    securityDomains,
+    securityDomainAccess
   }),
   integrationCenterRouter: createIntegrationCenterRouter({
     service: integrationCenter,

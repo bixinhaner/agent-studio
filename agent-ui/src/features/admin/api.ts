@@ -25,6 +25,7 @@ import type {
   AdminProductFeedbackListResponse,
   AdminProductFeedbackStatus,
   AdminSecurityDomain,
+  AdminSecurityDomainAccessStatus,
   AdminSecurityDomainInput,
   AdminSubscriptionDenialsResponse,
   AdminSubscriptionGrantDetailResponse,
@@ -43,6 +44,26 @@ import type {
   OrgSyncJobListResponse,
   OrgSyncTriggerResponse
 } from "./types";
+
+export async function fetchAdminSecurityDomainAccess(): Promise<AdminSecurityDomainAccessStatus> {
+  return api<AdminSecurityDomainAccessStatus>("/api/admin/security-domains/access");
+}
+
+export async function initializeAdminSecurityDomainAccess(password: string): Promise<void> {
+  await api("/api/admin/security-domains/access/initialize", { method: "POST", json: { password } });
+}
+
+export async function unlockAdminSecurityDomains(password: string): Promise<void> {
+  await api("/api/admin/security-domains/access/unlock", { method: "POST", json: { password } });
+}
+
+export async function lockAdminSecurityDomains(): Promise<void> {
+  await api("/api/admin/security-domains/access/lock", { method: "POST" });
+}
+
+export async function changeAdminSecurityDomainPassword(password: string): Promise<void> {
+  await api("/api/admin/security-domains/access/password", { method: "PUT", json: { password } });
+}
 
 type CreateAdminInvitePayload = {
   invite: {
