@@ -824,6 +824,86 @@ function escapeCssIdSelector(value: string): string {
   return value.replace(/[ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, "\\$&");
 }
 
+type PreviewTargetBlock = "start" | "center";
+
+export function alignPreviewTarget(
+  target: HTMLElement,
+  block: PreviewTargetBlock,
+  behavior: ScrollBehavior
+): void {
+  const scroller = target.closest<HTMLElement>(".preview-viewer-body");
+  if (!scroller) {
+    target.scrollIntoView({ block, behavior });
+    return;
+  }
+  const scrollerRect = scroller.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const targetTop = scroller.scrollTop + targetRect.top - scrollerRect.top;
+  const top = block === "center"
+    ? targetTop - Math.max(0, (scroller.clientHeight - targetRect.height) / 2)
+    : targetTop - 12;
+  scroller.scrollTo({ top: Math.max(0, top), behavior });
+}
+
+function keepPreviewTargetAligned(input: {
+  root: HTMLElement;
+  target: HTMLElement;
+  block: PreviewTargetBlock;
+  behavior: ScrollBehavior;
+  stabilize: boolean;
+}): () => void {
+  const scroller = input.target.closest<HTMLElement>(".preview-viewer-body");
+  let cancelled = false;
+  let resizeFrame = 0;
+  const timeouts: number[] = [];
+
+  const align = (behavior: ScrollBehavior) => {
+    if (cancelled || !input.target.isConnected) return;
+    alignPreviewTarget(input.target, input.block, behavior);
+  };
+  const stopAutomaticAlignment = () => {
+    cancelled = true;
+  };
+  const onContentLoad = () => align("auto");
+
+  const firstFrame = requestAnimationFrame(() => {
+    requestAnimationFrame(() => align(input.behavior));
+  });
+  let resizeObserver: ResizeObserver | undefined;
+  let settleTimeout = 0;
+  if (input.stabilize) {
+    for (const delay of [160, 480, 1000]) {
+      timeouts.push(window.setTimeout(() => align("auto"), delay));
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => align("auto"));
+      });
+      resizeObserver.observe(input.root);
+      if (scroller) resizeObserver.observe(scroller);
+    }
+    input.root.addEventListener("load", onContentLoad, true);
+    scroller?.addEventListener("wheel", stopAutomaticAlignment, { passive: true });
+    scroller?.addEventListener("touchstart", stopAutomaticAlignment, { passive: true });
+    scroller?.addEventListener("pointerdown", stopAutomaticAlignment, { passive: true });
+    settleTimeout = window.setTimeout(stopAutomaticAlignment, 1800);
+  }
+
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(firstFrame);
+    cancelAnimationFrame(resizeFrame);
+    timeouts.forEach((timeout) => window.clearTimeout(timeout));
+    if (settleTimeout) window.clearTimeout(settleTimeout);
+    resizeObserver?.disconnect();
+    input.root.removeEventListener("load", onContentLoad, true);
+    scroller?.removeEventListener("wheel", stopAutomaticAlignment);
+    scroller?.removeEventListener("touchstart", stopAutomaticAlignment);
+    scroller?.removeEventListener("pointerdown", stopAutomaticAlignment);
+  };
+}
+
 function PreviewMarkdown(props: {
   text: string;
   filePath: string;
@@ -834,6 +914,7 @@ function PreviewMarkdown(props: {
   onNavigate(target: { filePath: string; anchor: string }): void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const alignedAnchorRef = useRef("");
   const normalizedAnchor = useMemo(() => normalizeMarkdownAnchor(props.anchor), [props.anchor]);
   const processedText = useMemo(() => preprocessPreviewMarkdown(props.text), [props.text]);
 
@@ -872,8 +953,18 @@ function PreviewMarkdown(props: {
       element.classList.remove("preview-markdown-anchor-hit");
     });
     target.classList.add("preview-markdown-anchor-hit");
-    target.scrollIntoView({ block: "start", behavior: "smooth" });
-  }, [normalizedAnchor, processedText, props.jumpToken]);
+    const requestKey = `${props.filePath}#${normalizedAnchor}`;
+    const repeatedJump = alignedAnchorRef.current === requestKey;
+    alignedAnchorRef.current = requestKey;
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    return keepPreviewTargetAligned({
+      root,
+      target,
+      block: "start",
+      behavior: repeatedJump && !prefersReducedMotion ? "smooth" : "auto",
+      stabilize: !repeatedJump
+    });
+  }, [normalizedAnchor, processedText, props.filePath, props.jumpToken, props.text]);
 
   const components = useMemo(
     () => ({
@@ -974,28 +1065,40 @@ function PreviewMarkdown(props: {
   );
 }
 
-function PreviewText(props: { text: string; anchor: string; jumpToken: number }) {
+function PreviewText(props: { text: string; filePath: string; anchor: string; jumpToken: number }) {
   const normalizedAnchor = useMemo(() => normalizeMarkdownAnchor(props.anchor), [props.anchor]);
   const targetLine = useMemo(() => parseLineAnchor(normalizedAnchor), [normalizedAnchor]);
   const lines = useMemo(() => props.text.split(/\r?\n/g), [props.text]);
   const targetLineRef = useRef<HTMLSpanElement | null>(null);
+  const rootRef = useRef<HTMLPreElement | null>(null);
+  const alignedAnchorRef = useRef("");
 
   useEffect(() => {
-    if (!targetLine || !targetLineRef.current) return;
+    if (!targetLine || !targetLineRef.current || !rootRef.current) return;
     const target = targetLineRef.current;
     target.classList.remove("preview-text-line-hit");
     // Force class reflow so repeated clicks can re-trigger highlight animation.
     void target.offsetWidth;
     target.classList.add("preview-text-line-hit");
-    target.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [targetLine, props.text, props.jumpToken]);
+    const requestKey = `${props.filePath}#${normalizedAnchor}`;
+    const repeatedJump = alignedAnchorRef.current === requestKey;
+    alignedAnchorRef.current = requestKey;
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    return keepPreviewTargetAligned({
+      root: rootRef.current,
+      target,
+      block: "center",
+      behavior: repeatedJump && !prefersReducedMotion ? "smooth" : "auto",
+      stabilize: !repeatedJump
+    });
+  }, [normalizedAnchor, props.filePath, props.jumpToken, props.text, targetLine]);
 
   if (!targetLine) {
     return <pre className="preview-text">{props.text || "(File is empty)"}</pre>;
   }
 
   return (
-    <pre className="preview-text preview-text-with-lines">
+    <pre ref={rootRef} className="preview-text preview-text-with-lines">
       {(lines.length > 0 ? lines : [""]).map((line, index) => {
         const lineNo = index + 1;
         const isTarget = lineNo === targetLine;
@@ -1364,7 +1467,12 @@ export function PreviewWorkbenchPanel(props: {
               ) : null}
 
               {activePreview?.kind === "text" ? (
-                <PreviewText text={activePreview.text} anchor={selectedAnchor} jumpToken={anchorJumpToken} />
+                <PreviewText
+                  text={activePreview.text}
+                  filePath={activeFilePath}
+                  anchor={selectedAnchor}
+                  jumpToken={anchorJumpToken}
+                />
               ) : null}
 
               {activePreview?.kind === "markdown" ? (
