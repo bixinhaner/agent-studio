@@ -264,6 +264,28 @@ describe("projectConversationTurnStatus", () => {
       turnStatusReason: "运行时仍在处理该请求，助手回复完成后会自动更新。"
     });
   });
+
+  it("uses a fresh persisted in-progress status when the runtime status endpoint is unavailable", () => {
+    expect(projectConversationTurnStatus(
+      { role: "user", status: { type: "in_progress", at: "2026-07-14T12:00:00.000Z" } },
+      "user",
+      { hasAssistantResponse: false, activeTurn: false, nowMs: Date.parse("2026-07-14T12:01:00.000Z") }
+    )).toEqual({
+      turnStatus: "running",
+      turnStatusReason: "运行时仍在处理该请求，助手回复完成后会自动更新。"
+    });
+  });
+
+  it("does not leave a stale persisted in-progress status running forever", () => {
+    expect(projectConversationTurnStatus(
+      { role: "user", status: { type: "in_progress", at: "2026-07-14T09:00:00.000Z" } },
+      "user",
+      { hasAssistantResponse: false, activeTurn: false, nowMs: Date.parse("2026-07-14T12:01:00.000Z") }
+    )).toEqual({
+      turnStatus: "disconnected",
+      turnStatusReason: "未找到对应助手消息；可能是请求失败、连接中断或历史记录缺失。"
+    });
+  });
 });
 
 describe("buildTranscriptMessages", () => {

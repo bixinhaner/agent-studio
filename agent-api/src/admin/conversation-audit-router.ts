@@ -1240,6 +1240,7 @@ const USER_TURN_RUNNING_REASON = "运行时仍在处理该请求，助手回复�
 const ASSISTANT_CANCELLED_REASON = "用户发送了新消息或取消了上一轮生成，本轮未完成。";
 const ASSISTANT_FAILED_REASON = "运行时异常，用户侧已显示通用失败提示。";
 const ASSISTANT_INCOMPLETE_REASON = "助手回复未完整结束，可能是连接断开或运行中途停止。";
+const PERSISTED_RUNNING_STATUS_MAX_AGE_MS = 2 * 60 * 60_000;
 
 function messageStatusRecord(message: unknown): Record<string, unknown> | null {
   return asRecord(asRecord(message)?.status);
@@ -1259,7 +1260,7 @@ function messageIndicatesStopped(message: unknown): boolean {
 export function projectConversationTurnStatus(
   message: unknown,
   role: ConversationTranscriptMessage["role"],
-  options?: { hasAssistantResponse?: boolean; activeTurn?: boolean }
+  options?: { hasAssistantResponse?: boolean; activeTurn?: boolean; nowMs?: number }
 ): ConversationTurnStatus {
   const status = messageStatusRecord(message);
   const statusType = normalizedStatusField(status, "type");
@@ -1267,6 +1268,22 @@ export function projectConversationTurnStatus(
 
   if (role === "user") {
     if (options?.hasAssistantResponse) return { turnStatus: "completed", turnStatusReason: null };
+    if (statusType === "error" || statusType === "failed") {
+      return { turnStatus: "failed", turnStatusReason: ASSISTANT_FAILED_REASON };
+    }
+    if (statusType === "incomplete") {
+      if (statusReason === "cancelled" || statusReason === "aborted" || statusReason === "abort") {
+        return { turnStatus: "cancelled", turnStatusReason: ASSISTANT_CANCELLED_REASON };
+      }
+      return { turnStatus: "disconnected", turnStatusReason: USER_TURN_DISCONNECTED_REASON };
+    }
+    const statusAt = parseDateString(trimOrUndefined(status?.at));
+    const nowMs = options?.nowMs ?? Date.now();
+    const persistedRunning =
+      (statusType === "in_progress" || statusType === "running" || statusType === "pending") &&
+      Boolean(statusAt) &&
+      Math.max(0, nowMs - new Date(statusAt!).getTime()) <= PERSISTED_RUNNING_STATUS_MAX_AGE_MS;
+    if (persistedRunning) return { turnStatus: "running", turnStatusReason: USER_TURN_RUNNING_REASON };
     if (options?.activeTurn) return { turnStatus: "running", turnStatusReason: USER_TURN_RUNNING_REASON };
     return { turnStatus: "disconnected", turnStatusReason: USER_TURN_DISCONNECTED_REASON };
   }
@@ -1330,7 +1347,7 @@ export function buildTranscriptMessages(
     return {
       ...message,
       ...projectConversationTurnStatus(
-        { status: { type: "completed" } },
+        messages[index]?.message,
         "user",
         { hasAssistantResponse, activeTurn }
       )

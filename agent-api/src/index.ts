@@ -8063,6 +8063,10 @@ function portalUserMessage(input: {
       id: input.id,
       role: "user",
       createdAt: typeof payload.createdAt === "string" ? payload.createdAt : now,
+      status: {
+        type: "in_progress",
+        at: now
+      },
       metadata: {
         ...baseMetadata,
         custom: {
@@ -8085,6 +8089,10 @@ function portalUserMessage(input: {
     ],
     attachments: [],
     createdAt: now,
+    status: {
+      type: "in_progress",
+      at: now
+    },
     metadata: {
       custom: {
         channel: "portal",
@@ -8095,10 +8103,54 @@ function portalUserMessage(input: {
   };
 }
 
+function portalFailedAssistantMessage(input: {
+  id: string;
+  sessionId: string;
+}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id,
+    role: "assistant",
+    content: [
+      {
+        type: "text",
+        text: "I couldn't complete this response. Please try again."
+      }
+    ],
+    status: {
+      type: "error",
+      reason: "runtime_error"
+    },
+    createdAt: now,
+    metadata: {
+      unstable_state: {},
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {
+        channel: "portal",
+        sessionId: input.sessionId,
+        serverPersisted: true,
+        failed: true
+      }
+    }
+  };
+}
+
 function findStoredMessageById(
-  repository: { messages: { message: unknown }[] },
+  repository: {
+    messages: Array<{
+      message: unknown;
+      parentId?: string | null;
+      runConfig?: Record<string, unknown>;
+    }>;
+  },
   messageId?: string
-): { message: unknown } | undefined {
+): {
+  message: unknown;
+  parentId?: string | null;
+  runConfig?: Record<string, unknown>;
+} | undefined {
   const normalizedId = trimOrUndefined(messageId);
   if (!normalizedId) return undefined;
   return repository.messages.find((item) => storedMessageId(item.message) === normalizedId);
@@ -8131,6 +8183,22 @@ async function ensurePortalStreamUserMessage(input: {
         if (storedMessageRole(existingUserMessage.message) !== "user") {
           throw new Error("Existing portal message id is not a user message");
         }
+        await conversationRecords.appendMessage({
+          threadId: input.threadId,
+          parentId: existingUserMessage.parentId ?? null,
+          message: portalUserMessage({
+            id: userMessageId,
+            message: existingUserMessage.message,
+            displayText,
+            sessionId: input.sessionId
+          }),
+          runConfig: {
+            ...(existingUserMessage.runConfig ?? {}),
+            channel: "portal",
+            sessionId: input.sessionId,
+            serverPersisted: true
+          }
+        });
         return userMessageId;
       }
 
@@ -8195,6 +8263,41 @@ async function appendPortalStoppedAssistant(input: {
       sessionId: input.sessionId,
       serverPersisted: true,
       stopped: true
+    }
+  });
+  return true;
+}
+
+async function appendPortalFailedAssistant(input: {
+  threadId: string;
+  userMessageId: string;
+  sessionId: string;
+}): Promise<boolean> {
+  const parentId = await requirePortalUserMessageParent({
+    threadId: input.threadId,
+    userMessageId: input.userMessageId
+  });
+  const repository = await conversationRecords.getMessageRepository(input.threadId);
+  const existingAssistant = repository.messages.find((item) => {
+    return item.parentId === parentId && storedMessageRole(item.message) === "assistant";
+  });
+  if (existingAssistant) return false;
+  const assistantId = `portal-assistant-failed-${createHash("sha256")
+    .update(`${input.threadId}:${parentId}:${input.sessionId}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+  await conversationRecords.appendMessage({
+    threadId: input.threadId,
+    parentId,
+    message: portalFailedAssistantMessage({
+      id: assistantId,
+      sessionId: input.sessionId
+    }),
+    runConfig: {
+      channel: "portal",
+      sessionId: input.sessionId,
+      serverPersisted: true,
+      failed: true
     }
   });
   return true;
@@ -10728,6 +10831,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
   let portalAssistantMessageWritten = false;
   let portalRuntimeStarted = false;
   let portalRuntimeFailure: string | undefined;
+  let portalTurnFailure: string | undefined;
   const logPortalStream = (stage: string, details: Record<string, unknown> = {}) => {
     logPortalStreamLifecycle(stage, {
       trace_id: portalStreamTraceId,
@@ -11044,6 +11148,9 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    if (portalUserMessageId && !explicitCancel.signal.aborted) {
+      portalTurnFailure = detail;
+    }
     if (portalRuntimeSession && portalRuntimeStarted && !explicitCancel.signal.aborted) {
       portalRuntimeFailure = detail;
     }
@@ -11104,6 +11211,20 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
         reason: "explicit_cancel"
       }).catch((error) => {
         console.warn("portal chat failed to append stopped assistant", {
+          threadId: portalThreadId,
+          userMessageId: portalUserMessageId,
+          sessionId: portalRuntimeSession?.sessionId,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
+    if (!cancelled && portalTurnFailure && portalThreadId && portalUserMessageId && portalRuntimeSessionId && !portalAssistantMessageWritten) {
+      await appendPortalFailedAssistant({
+        threadId: portalThreadId,
+        userMessageId: portalUserMessageId,
+        sessionId: portalRuntimeSessionId
+      }).catch((error) => {
+        console.warn("portal chat failed to append failed assistant", {
           threadId: portalThreadId,
           userMessageId: portalUserMessageId,
           sessionId: portalRuntimeSession?.sessionId,
