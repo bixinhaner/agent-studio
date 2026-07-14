@@ -1,4 +1,4 @@
 interface:
   display_name: "OMC Operations"
-  short_description: "Query and operate OMC through its complete local API handbook"
-  default_prompt: "Use $omc-operations to complete the OMC request. Reuse proven operations in the same thread; otherwise verify the local handbook version, search one category index, read one operation document, and call the documented API directly."
+  short_description: "Operate each OMC through its own version-matched API handbook"
+  default_prompt: "Use $omc-operations to complete the OMC request. Reuse the handbook and proven operations already active in this thread. For an unseen handbook digest, run the Skill loader once, then search one compact index, read one operation document, and call the documented API directly."

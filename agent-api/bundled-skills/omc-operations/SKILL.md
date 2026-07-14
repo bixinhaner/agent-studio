@@ -1,81 +1,69 @@
 ---
 name: omc-operations
-description: Query, diagnose, configure, and operate OMC network management systems through the Action Connector CLI. Use for any OMC request involving devices, alarms, topology, performance, MML, configuration, software, files, tasks, users, logs, integrations, or system administration. Includes a complete versioned /api/v1 handbook with local category indexes and one detailed document per operation.
+description: Query, diagnose, configure, and operate any connected OMC through its version-matched API handbook and the Action Connector CLI. Use for OMC devices, alarms, topology, performance, MML, configuration, software, files, tasks, users, logs, integrations, or system administration.
 ---
 
 # OMC Operations
 
-Use the local API handbook to select an operation, then use the Action Connector CLI to execute it as the current OMC user. OMC remains authoritative for identity, permissions, policy, and business data.
+Use the handbook published by the connected OMC, then execute the selected operation through the Action Connector CLI as the current OMC user. OMC remains authoritative for API contracts, identity, permissions, policy, and business data.
 
-## Follow the shortest safe path
+## Prepare the matching handbook
 
-1. Reuse an operation and parameters that already succeeded in this conversation when they still answer the request.
-2. For a common intent, read [common-operations.md](references/common-operations.md) and call its operation directly.
-3. For any other intent, verify the handbook version, search one local category index, and read only the selected operation document.
-4. Call the smallest set of business APIs needed. Run independent reads concurrently; keep dependent reads sequential.
-5. Stop when returned evidence is sufficient. Do not rediscover or repeat unchanged reads unless freshness matters.
+The request context includes `externalIdentity.metadata.apiHandbook`. It identifies the exact handbook with `handbookDigest` and provides the package endpoints. The runtime prompt also provides the absolute Action Connector CLI path.
 
-Never call a remote API catalog or describe endpoint during normal discovery. The complete API inventory and contracts are local Skill references.
-
-## Verify the handbook once per version
-
-The request context contains `externalIdentity.metadata.apiHandbook` with:
-
-- `schemaVersion`
-- `catalogVersion`
-- `totalRoutes`
-
-Read [manifest.json](references/manifest.json) before the first unfamiliar operation in a conversation. Its `schemaVersion`, `catalogVersion`, and `totalOperations` must match the connected OMC metadata. Reuse that result for later turns while the version remains unchanged.
-
-If any value differs, do not guess a path and do not use an older remote-discovery workflow. Explain that the Agent API handbook does not match the connected OMC version and that an administrator must synchronize the `omc-operations` Skill before this operation can be performed safely.
-
-## Load API knowledge progressively
-
-The Skill is organized in three local layers:
-
-- `references/api-index.jsonl`: one compact searchable line for every operation across all domains.
-- `references/api-categories/<category>.json`: compact intent index for every operation in one domain.
-- `references/api-docs/<operationId>.json`: the selected operation's method, path, parameters, request body, response contract, risk, side effects, idempotency, and source evidence.
-
-Set the materialized Skill path once when shell access needs an absolute path:
+Set these paths once when shell commands need them:
 
 ```bash
 SKILL_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/omc-operations"
+CLI=.agent-studio/action-connector-cli.mjs
 ```
 
-Use one or two domain nouns from the user's intent to search the compact global index locally. Each matching line includes the operation ID, category, method, path, semantics, risk, and detailed document path:
+Before the first unfamiliar OMC operation in a conversation, run:
 
 ```bash
-rg -i 'device|online|status' "$SKILL_ROOT/references/api-index.jsonl"
+node "$SKILL_ROOT/scripts/ensure-handbook.mjs" --cli "$CLI"
 ```
 
-When the global result is ambiguous, use its `category` value to read the corresponding `references/api-categories/<category>.json` and compare only that domain's candidates. Never search all detailed documents.
+The command prints compact JSON containing `handbookRoot`, `handbookDigest`, and `status`. Keep those values in the conversation. If later request context has the same `handbookDigest`, reuse that `handbookRoot` without running the loader again. If the digest changes, run the loader again. A fresh conversation may run it once; the content-addressed workspace cache then returns immediately without downloading the package.
 
-Choose the narrowest matching operation and read exactly its `document` path:
+Do not use an older handbook, guess an API path, call catalog/describe, or download the package manually. If package metadata is unavailable, invalid, or cannot be verified, explain that this OMC must be upgraded to publish its versioned Agent API handbook.
+
+## Find one operation progressively
+
+The returned `handbookRoot` contains:
+
+- `api-index.jsonl`: one compact searchable line for every operation.
+- `api-categories/<category>.json`: the candidates in one domain.
+- `api-docs/<operationId>.json`: the complete contract for one operation.
+- `manifest.json`: the verified handbook version and inventory.
+
+Follow the shortest safe path:
+
+1. Reuse an operation and parameters that already succeeded in this conversation when they still answer the request.
+2. Search the compact global index with one or two domain nouns from the user's intent.
+3. If results are ambiguous, read one category index.
+4. Read only the selected operation document.
+5. Call the smallest set of business APIs needed and stop when evidence is sufficient.
+
+Example discovery:
 
 ```bash
-sed -n '1,240p' "$SKILL_ROOT/references/api-docs/get.devices.stats.json"
+rg -i 'device|online|status' "$HANDBOOK_ROOT/api-index.jsonl"
+sed -n '1,240p' "$HANDBOOK_ROOT/api-docs/get.devices.stats.json"
 ```
 
 Use the operation document as follows:
 
-- `summary`, `description`, and `intents`: confirm that the operation answers the user's actual goal.
-- `pathParams`: replace every `:name` segment with a real identifier from the user or an earlier API result.
-- `queryParams`: send only relevant filters and pagination; respect type, enum, default, minimum, and maximum metadata.
+- `summary`, `description`, and `intents`: confirm it answers the user's goal.
+- `pathParams`: replace every `:name` with a real identifier.
+- `queryParams`: send only relevant filters and pagination.
 - `requestBody` and `formParams`: construct the documented shape exactly.
-- `responses` and `referencedSchemas`: interpret returned fields when schemas are available.
-- `emptyResult`: distinguish a valid empty result from missing or failed data.
-- `risk`, `confirmationRequired`, `sideEffects`, and `idempotent`: apply write safety before execution.
+- `responses`, `referencedSchemas`, and `emptyResult`: interpret evidence correctly.
+- `risk`, `confirmationRequired`, `sideEffects`, and `idempotent`: apply write safety.
 
-If several candidates remain after reading one category index, compare their summaries there. Open at most the documents needed to resolve the ambiguity; do not scan the full handbook.
+Never scan all detailed documents. Compare summaries in one category and open only enough operation documents to resolve ambiguity.
 
-## Use the connector CLI
-
-The runtime injects the absolute CLI path into the request prompt. Use that path when present; otherwise set:
-
-```bash
-CLI=.agent-studio/action-connector-cli.mjs
-```
+## Execute through the connector
 
 Inspect external identity only when user or instance identity affects the answer:
 
@@ -89,39 +77,28 @@ Execute the documented operation directly:
 node "$CLI" request GET /api/v1/devices/stats '{"operationId":"get.devices.stats","reason":"Read device status totals"}'
 ```
 
-Include `query` and `body` only when the operation document requires them:
+Include `query` and `body` only when documented:
 
 ```bash
 node "$CLI" request GET /api/v1/devices '{"operationId":"get.devices","query":{"page":1,"page_size":20,"status":"online"},"reason":"List visible online devices"}'
 ```
 
-For independent reads, start them together and label their outputs. Never parallelize calls when a later path or parameter depends on an earlier result.
-
-## Plan multi-step work
-
-- Prefer a purpose-built summary operation over downloading a list and counting locally.
-- Use list operations when the user needs records, names, identifiers, filters, or evidence.
-- For a dependent workflow, use the first result to select identifiers or parameters for the next documented operation.
-- Keep payloads small with filters and pagination. Do not request broad lists speculatively.
-- Reuse valid results already present in the conversation. Repeat a read only when the requested value is time-sensitive or the user asks to refresh it.
-- Web search may be available, but never use Web results as a substitute for OMC business state or API execution. Use Web only when the user explicitly needs external public information.
+For independent reads, start them together and label their outputs. Keep dependent calls sequential. Prefer a purpose-built summary operation over downloading a broad list and counting locally.
 
 ## Respect identity and policy
 
-- Every request executes as the current external OMC user and is checked against that user's permissions plus the configured Agent policy.
+- Every request runs as the current external OMC user and is checked against that user's permissions and the configured Agent policy.
 - Never construct an OMC host, authorization header, token, database query, or alternate transport.
-- Request only the exact `/api/v1` method and path documented by this version-matched handbook.
+- Request only the exact `/api/v1` method and path in the verified handbook.
 - Default to reads when the user's goal is informational.
-- Before any operation with `confirmationRequired: true`, state the exact target, change, and expected impact, then obtain explicit user confirmation.
-- Execute a write only when both the connector policy and OMC permissions allow its method and risk level.
-- Never automatically retry a non-idempotent write.
-- Do not work around a denied method, blocked path, permission error, or handbook version mismatch.
+- Before `confirmationRequired: true`, state the exact target, change, and expected impact, then obtain explicit confirmation.
+- Execute writes only when both Connector policy and OMC permissions allow the method and risk.
+- Never automatically retry a non-idempotent write or work around a denial.
 
 ## Answer from evidence
 
 - Put the conclusion first and use the user's language.
-- Summarize relevant values and affected objects; do not paste raw JSON or narrate routine handbook lookup.
-- Follow operation-specific empty-result guidance. If no special guidance exists, report the observed limitation instead of guessing.
-- If a read fails because one clearly invalid parameter was supplied, correct it once from the operation document. Otherwise explain what prevented completion.
+- Summarize relevant values and affected objects; do not paste raw JSON or narrate routine handbook loading.
+- Distinguish a valid empty result from unavailable data using the operation contract.
+- Correct one clearly invalid parameter from the document; otherwise explain what prevented completion.
 - Never fabricate API output, hidden resources, or successful writes.
-- Mention confirmation requirements only when the requested action would change the system.
