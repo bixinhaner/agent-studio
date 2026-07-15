@@ -462,6 +462,40 @@ function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function billingDateLabel(value: Date | string | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return "Not set";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeZone: "UTC"
+  }).format(date);
+}
+
+function billingEmailHeading(triggerType: string, offsetDays: number): string {
+  if (triggerType === "auto_renew_failed") return "Automatic renewal needs attention";
+  if (triggerType === "expired") return "Access has ended";
+  if (offsetDays === 1) return "Access ends tomorrow";
+  return `Access ends in ${Math.max(1, offsetDays)} days`;
+}
+
+function billingRenewalSummary(input: {
+  state: "automatic" | "manual" | "failed";
+  amountDue: string;
+  renewalDate: string;
+}): string {
+  if (input.state === "failed") {
+    return input.amountDue
+      ? `We could not process the ${input.amountDue} renewal payment. Update your payment method to keep access active.`
+      : "We could not process the renewal payment. Update your payment method to keep access active.";
+  }
+  if (input.state === "automatic") {
+    const amount = input.amountDue ? ` for ${input.amountDue}` : "";
+    const date = input.renewalDate && input.renewalDate !== "Not set" ? ` on ${input.renewalDate}` : "";
+    return `Auto-renew is on and the plan is scheduled to renew${amount}${date}.`;
+  }
+  return "Auto-renew is off. Choose a plan before the access end date to avoid interruption.";
+}
+
 function isStripeCheckoutSession(value: unknown): value is StripeCheckoutSession {
   return Boolean(value && typeof value === "object" && typeof (value as StripeCheckoutSession).id === "string");
 }
@@ -1338,17 +1372,19 @@ export class BillingService {
     const now = input.now ?? new Date();
     const config = await this.resolveBillingConfig();
     const expiresAt = addDays(now, Math.max(1, rule.triggerType === "expires_in_days" ? rule.offsetDays : 1));
-    const expiresAtLocal = new Intl.DateTimeFormat("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: "UTC"
-    }).format(expiresAt);
+    const accessEndDate = billingDateLabel(expiresAt);
+    const amountDue = centsLabel(99900, config.defaultCurrency);
+    const renewalState = rule.triggerType === "auto_renew_failed" ? "failed" : "automatic";
     const variables = await this.buildEmailVariables({
       config,
       companyName: "Example Customer",
-      planName: "Plus",
-      expiresAtLocal: `${expiresAtLocal} UTC`,
-      amountDue: centsLabel(9900, config.defaultCurrency)
+      planName: "Standard Edition",
+      expiresAtLocal: accessEndDate,
+      accessEndDate,
+      renewalDate: accessEndDate,
+      emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
+      renewalSummary: billingRenewalSummary({ state: renewalState, amountDue, renewalDate: accessEndDate }),
+      amountDue
     });
     const targetRef = `billing-email-test:${rule.id}:${recipient}:${Date.now()}`;
     const notification = await this.db.notificationRecord.create({
@@ -2259,11 +2295,14 @@ export class BillingService {
         continue;
       }
       try {
-        const organization = await this.db.organization.findUnique({
-          where: { id: grant.principalId },
-          select: { id: true, name: true, slug: true, ownerUserId: true }
-        });
-        const customer = await this.db.billingCustomer.findUnique({ where: { organizationId: grant.principalId } });
+        const [organization, customer, autoRenewal] = await Promise.all([
+          this.db.organization.findUnique({
+            where: { id: grant.principalId },
+            select: { id: true, name: true, slug: true, ownerUserId: true }
+          }),
+          this.db.billingCustomer.findUnique({ where: { organizationId: grant.principalId } }),
+          this.db.billingAutoRenewal.findUnique({ where: { organizationId: grant.principalId } })
+        ]);
         const recipients = input.testEmail
           ? [input.testEmail]
           : await this.resolveReminderRecipients(grant.principalId, customer, rule.audienceJson);
@@ -2271,15 +2310,24 @@ export class BillingService {
           skipped += 1;
           continue;
         }
-        const expiresAtLocal = grant.expiresAt
-          ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(grant.expiresAt)
-          : "not set";
+        const accessEndDate = billingDateLabel(grant.expiresAt);
+        const amountDue = grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : "";
+        const automaticRenewal = autoRenewal?.status === "enabled" && autoRenewal.cancelAtPeriodEnd !== true;
+        const renewalDate = billingDateLabel(autoRenewal?.nextRenewalAt ?? grant.expiresAt);
         const variables = await this.buildEmailVariables({
           config,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
           planName: grant.plan?.name ?? "Agent Studio",
-          expiresAtLocal: `${expiresAtLocal} UTC`,
-          amountDue: grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : ""
+          expiresAtLocal: accessEndDate,
+          accessEndDate,
+          renewalDate,
+          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
+          renewalSummary: billingRenewalSummary({
+            state: automaticRenewal ? "automatic" : "manual",
+            amountDue,
+            renewalDate
+          }),
+          amountDue
         });
         const notification = await this.db.notificationRecord.create({
           data: {
@@ -2369,12 +2417,17 @@ export class BillingService {
           skipped += 1;
           continue;
         }
+        const amountDue = plan?.billingPriceCents ? centsLabel(plan.billingPriceCents, plan.billingCurrency) : "";
+        const renewalDate = billingDateLabel(renewal.lastPaymentFailedAt ?? renewal.nextRenewalAt);
         const variables = await this.buildEmailVariables({
           config,
           companyName: organization?.name ?? customer?.companyName ?? "your organization",
           planName: plan?.name ?? "Agent Studio",
-          expiresAtLocal: renewal.nextRenewalAt ? `${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(renewal.nextRenewalAt)} UTC` : "",
-          amountDue: plan?.billingPriceCents ? centsLabel(plan.billingPriceCents, plan.billingCurrency) : ""
+          expiresAtLocal: renewalDate,
+          renewalDate,
+          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
+          renewalSummary: billingRenewalSummary({ state: "failed", amountDue, renewalDate }),
+          amountDue
         });
         const notification = await this.db.notificationRecord.create({
           data: {
@@ -2461,6 +2514,10 @@ export class BillingService {
     companyName: string | null | undefined;
     planName: string | null | undefined;
     expiresAtLocal: string;
+    accessEndDate?: string;
+    renewalDate?: string;
+    emailHeading?: string;
+    renewalSummary?: string;
     amountDue: string;
   }): Promise<Record<string, string>> {
     const brandName = await this.resolveBrandName();
@@ -2469,6 +2526,10 @@ export class BillingService {
       company_name: trimOrUndefined(input.companyName) ?? "your organization",
       plan_name: trimOrUndefined(input.planName) ?? brandName,
       expires_at_local: input.expiresAtLocal,
+      access_end_date: trimOrUndefined(input.accessEndDate) ?? input.expiresAtLocal,
+      renewal_date: trimOrUndefined(input.renewalDate) ?? input.expiresAtLocal,
+      email_heading: trimOrUndefined(input.emailHeading) ?? "Review your billing",
+      renewal_summary: trimOrUndefined(input.renewalSummary) ?? "Open billing to review your access and renewal settings.",
       renew_url: this.resolvePortalBillingUrl(input.config),
       amount_due: input.amountDue
     };

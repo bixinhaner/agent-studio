@@ -158,7 +158,8 @@ function createDbMock(initialBillingCustomer: Record<string, unknown> | null = n
       }))
     },
     billingAutoRenewal: {
-      findMany: vi.fn(async (): Promise<unknown[]> => [])
+      findMany: vi.fn(async (): Promise<unknown[]> => []),
+      findUnique: vi.fn(async (_args?: unknown): Promise<unknown | null> => null)
     },
     promotionCode: {
       findMany: vi.fn(async (): Promise<unknown[]> => [])
@@ -380,8 +381,8 @@ describe("BillingService Stripe admin settings", () => {
       status: "disabled",
       audienceJson: { billingContacts: true },
       subject: "{{brand_name}} subscription expires in 14 days",
-      bodyText: "Open billing: {{renew_url}}",
-      bodyHtml: '<table><tr><td>{{brand_name}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
+      bodyText: "{{email_heading}}: {{plan_name}} for {{company_name}} ends on {{access_end_date}}. {{renewal_summary}} Open billing: {{renew_url}}",
+      bodyHtml: '<table><tr><td>{{brand_name}}</td><td>{{plan_name}}</td><td>{{amount_due}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
       lastRunAt: null,
       createdAt: new Date("2026-06-12T00:00:00.000Z"),
       updatedAt: new Date("2026-06-12T00:00:00.000Z")
@@ -404,13 +405,53 @@ describe("BillingService Stripe admin settings", () => {
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       to: ["like@baicells.com"],
       subject: "Bailey subscription expires in 14 days",
-      text: "Open billing: https://bailey.baicells.com/?billing=renew",
+      text: expect.stringContaining("Access ends in 14 days: Standard Edition for Example Customer ends on Jun 26, 2026."),
       debugLabel: "billing-email-reminder-test"
     }));
+    expect(send.mock.calls[0]?.[0]?.text).toContain("Auto-renew is on and the plan is scheduled to renew for $999.00 on Jun 26, 2026.");
     const html = send.mock.calls[0]?.[0]?.html ?? "";
     expect(html).toContain("Bailey");
+    expect(html).toContain("Standard Edition");
+    expect(html).toContain("$999.00");
     expect(html).toContain("https://bailey.baicells.com/?billing=renew");
     expect(raw.billingEmailRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it("renders the automatic-renewal failure test with the dynamic plan and amount", async () => {
+    const { db, raw } = createDbMock();
+    raw.billingEmailRule.findUnique.mockResolvedValueOnce({
+      id: "billing-email-rule-auto-renew-failed-0",
+      triggerType: "auto_renew_failed",
+      offsetDays: 0,
+      status: "disabled",
+      audienceJson: { billingContacts: true },
+      subject: "{{brand_name}} automatic renewal payment needs attention",
+      bodyText: "{{email_heading}}. {{plan_name}}. {{renewal_summary}} Review billing: {{renew_url}}",
+      bodyHtml: "<p>{{email_heading}}</p><p>{{plan_name}}</p><p>{{renewal_summary}}</p><a href=\"{{renew_url}}\">Review billing</a>",
+      lastRunAt: null,
+      createdAt: new Date("2026-06-12T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-12T00:00:00.000Z")
+    });
+    const send = vi.fn(async (_input: Parameters<AuthEmailSender["send"]>[0]) => ({ delivered: true, mode: "smtp" as const }));
+    const service = new BillingService({
+      db,
+      config: createBillingConfig(),
+      emailSender: { send },
+      resolveBrandName: async () => "Bailey"
+    });
+
+    await service.sendReminderTestEmail({
+      ruleId: "billing-email-rule-auto-renew-failed-0",
+      testEmail: "billing@example.com",
+      now: new Date("2026-06-12T00:00:00.000Z")
+    });
+
+    const message = send.mock.calls[0]?.[0];
+    expect(message?.subject).toBe("Bailey automatic renewal payment needs attention");
+    expect(message?.text).toContain("Automatic renewal needs attention. Standard Edition.");
+    expect(message?.text).toContain("We could not process the $999.00 renewal payment.");
+    expect(message?.text).toContain("https://bailey.baicells.com/?billing=renew");
+    expect(`${message?.text}${message?.html}`).not.toContain("{{");
   });
 
   it("sends expired reminders for grants that ended in the previous 24 hours", async () => {
@@ -423,7 +464,7 @@ describe("BillingService Stripe admin settings", () => {
       contactName: null,
       countryRegion: null,
       sn: null,
-      salesContact: null,
+      salesContact: "sales@baicells.com",
       stripeCustomerId: null,
       defaultAutoRenew: true,
       metadataJson: null
@@ -434,10 +475,10 @@ describe("BillingService Stripe admin settings", () => {
         triggerType: "expired",
         offsetDays: 0,
         status: "enabled",
-        audienceJson: { billingContacts: true },
+        audienceJson: { billingContacts: true, salesContact: false },
         subject: "{{brand_name}} expired",
-        bodyText: "Renew {{company_name}} at {{renew_url}}",
-        bodyHtml: '<table><tr><td>{{company_name}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
+        bodyText: "{{email_heading}}: {{plan_name}} for {{company_name}} ended on {{access_end_date}}. {{renewal_summary}} {{renew_url}}",
+        bodyHtml: '<table><tr><td>{{company_name}}</td><td>{{renewal_summary}}</td><td><a href="{{renew_url}}">Renew</a></td></tr></table>',
         lastRunAt: null,
         createdAt: new Date("2026-06-12T00:00:00.000Z"),
         updatedAt: new Date("2026-06-12T00:00:00.000Z")
@@ -483,7 +524,9 @@ describe("BillingService Stripe admin settings", () => {
     expect(findManyArgs.where.expiresAt.gte.toISOString()).toBe("2026-06-11T00:00:00.000Z");
     expect(findManyArgs.where.expiresAt.lt.toISOString()).toBe("2026-06-12T00:00:00.000Z");
     const html = send.mock.calls[0]?.[0]?.html ?? "";
+    expect(send.mock.calls[0]?.[0]?.to).toEqual(["customer@example.com"]);
     expect(html).toContain("Customer &lt;Inc&gt;");
+    expect(html).toContain("Auto-renew is off. Choose a plan before the access end date to avoid interruption.");
     expect(html).toContain("https://bailey.baicells.com/?billing=renew");
   });
 

@@ -1926,7 +1926,18 @@ export function BillingWorkspace() {
               />
             </Form.Item>
             <div className="admin-billing-template-vars">
-              {["{{brand_name}}", "{{company_name}}", "{{plan_name}}", "{{expires_at_local}}", "{{renew_url}}", "{{amount_due}}"].map((item) => (
+              {[
+                "{{brand_name}}",
+                "{{company_name}}",
+                "{{plan_name}}",
+                "{{email_heading}}",
+                "{{access_end_date}}",
+                "{{renewal_date}}",
+                "{{renewal_summary}}",
+                "{{amount_due}}",
+                "{{renew_url}}",
+                "{{expires_at_local}}"
+              ].map((item) => (
                 <Tag key={item}>{item}</Tag>
               ))}
             </div>
