@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { billingPlanFamilyKey, groupBillingPlans, planForBillingCycle, type BillingPlanLike } from "./plan-presentation";
+import {
+  billingPlanFamilyKey,
+  groupBillingPlans,
+  planForBillingCycle,
+  recommendedBillingPlanFamily,
+  type BillingPlanLike
+} from "./plan-presentation";
 
 function plan(overrides: Partial<BillingPlanLike> & Pick<BillingPlanLike, "id" | "slug" | "name">): BillingPlanLike {
   return {
@@ -57,5 +63,15 @@ describe("billing plan presentation", () => {
     ]);
 
     expect(family.title).toBe("Renamed by Marketing");
+  });
+
+  it("recommends the middle-priced family without depending on its display name", () => {
+    const families = groupBillingPlans([
+      plan({ id: "entry", slug: "entry-annual", name: "Entry", billingPriceCents: 59900 }),
+      plan({ id: "growth", slug: "growth-annual", name: "Marketing can rename this", billingPriceCents: 99900 }),
+      plan({ id: "scale", slug: "scale-annual", name: "Scale", billingPriceCents: 299900 })
+    ]);
+
+    expect(recommendedBillingPlanFamily(families, "year")?.key).toBe("growth");
   });
 });

@@ -93,3 +93,17 @@ export function planForBillingCycle<TPlan extends BillingPlanLike>(
     ? family.annual ?? family.monthly ?? family.other[0] ?? null
     : family.monthly ?? family.annual ?? family.other[0] ?? null;
 }
+
+export function recommendedBillingPlanFamily<TPlan extends BillingPlanLike>(
+  families: BillingPlanFamily<TPlan>[],
+  cycle: BillingCycle
+): BillingPlanFamily<TPlan> | null {
+  const purchasable = families
+    .filter((family) => planForBillingCycle(family, cycle)?.billingPriceCents != null)
+    .sort((left, right) => {
+      const leftPrice = planForBillingCycle(left, cycle)?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
+      const rightPrice = planForBillingCycle(right, cycle)?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
+      return leftPrice - rightPrice || left.title.localeCompare(right.title);
+    });
+  return purchasable[Math.floor(purchasable.length / 2)] ?? families[0] ?? null;
+}
