@@ -3872,6 +3872,16 @@ function actionConnectorRuntimeOwnerId(connectorId: string): string {
   return `integration:${ACTION_CONNECTOR_CHANNEL}:${connectorId}`;
 }
 
+function isActionConnectorRuntimeOwner(session: SessionRecord, actor: CurrentActor): boolean {
+  const actionConnector = asRecord(asRecord(session.codexRunConfig)?.actionConnector);
+  const connectorId = trimOrUndefined(
+    typeof actionConnector?.integrationInstanceId === "string"
+      ? actionConnector.integrationInstanceId
+      : undefined
+  );
+  return Boolean(connectorId && actor.id === actionConnectorRuntimeOwnerId(connectorId));
+}
+
 function actionConnectorRuntimeActor(input: ActionConnectorCodexRunnerInput): CurrentActor {
   return {
     id: actionConnectorRuntimeOwnerId(input.connector.id),
@@ -4307,7 +4317,6 @@ async function startActionConnectorRuntimeSession(input: {
 
   const session = await sessions.create({
     organizationId: trimOrUndefined(input.runner.connector.organizationId ?? undefined),
-    userId: input.runtimeOwner.id,
     threadId: input.thread.id,
     model: input.runtime.model,
     reasoningEffort: input.runtime.reasoningEffort,
@@ -9016,7 +9025,14 @@ async function registerGeneratedArtifactsForSession(input: {
   if (!thread) return [];
   if (
     input.currentUser.userType === "service" &&
-    (trimOrUndefined(input.session.threadId) !== thread.id || trimOrUndefined(input.session.userId) !== input.currentUser.id)
+    (
+      trimOrUndefined(input.session.threadId) !== thread.id ||
+      (
+        trimOrUndefined(input.session.userId)
+          ? trimOrUndefined(input.session.userId) !== input.currentUser.id
+          : !isActionConnectorRuntimeOwner(input.session, input.currentUser)
+      )
+    )
   ) return [];
 
   return await registerGeneratedArtifactsForThread({
