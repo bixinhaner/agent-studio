@@ -215,6 +215,10 @@ import {
   projectActionConnectorRuntimeEvents
 } from "./integrations/action-connector/runtime-events.js";
 import { createActionConnectorProvisionRouter } from "./integrations/action-connector/provision-router.js";
+import {
+  ActionConnectorAttachmentStore,
+  type MaterializedActionConnectorAttachment
+} from "./integrations/action-connector/attachment-store.js";
 import { createCrestRouter, issueCrestProxyTokenLease } from "./integrations/crest/router.js";
 import { crestCommentaryEntryToThoughtPayload } from "./integrations/crest/stream-events.js";
 import { createOpenAICompatibleRouter } from "./integrations/openai-compatible-router.js";
@@ -291,6 +295,9 @@ const app = express();
 const runsAdminService = appConfig.serviceRole !== "chat";
 const runsChatService = appConfig.serviceRole !== "admin";
 const runtime = new CodexRuntime();
+const actionConnectorAttachments = new ActionConnectorAttachmentStore(
+  path.join(appConfig.sessionWorkspaceRoot, ".action-connector-attachments")
+);
 type ActiveRuntimeTurn = {
   id: string;
   operation: CodexRuntimeTurnTrackerInput["operation"];
@@ -3848,6 +3855,7 @@ type ActionConnectorRuntimeOptions = {
 };
 
 type ActionConnectorPreparedTurn = {
+  connectorId: string;
   runId: string;
   conversationId: string;
   externalConversationKey: string;
@@ -4110,7 +4118,7 @@ async function materializeActionConnectorRuntimeFiles(input: {
 
 async function resolveActionConnectorRuntimeOptions(
   input: ActionConnectorCodexRunnerInput,
-  context: { runId: string; bridgeToken?: string; identity: unknown }
+  context: { runId: string; conversationId: string; bridgeToken?: string; identity: ConnectorIdentity }
 ): Promise<ActionConnectorRuntimeOptions> {
   const agentModeId = trimOrUndefined(input.config.agentModeId) ?? "default";
   const agentMode = await agentModes.get(agentModeId);
@@ -4128,12 +4136,17 @@ async function resolveActionConnectorRuntimeOptions(
     (runProfile.defaultReasoningEffort as ReasoningEffort | undefined) || appConfig.defaultReasoningEffort
   );
   const workspaceRoot = await resolveEffectiveSessionWorkspaceRootPath();
-  const workspace = buildIntegrationAgentWorkspacePath({
+  const integrationWorkspace = buildIntegrationAgentWorkspacePath({
     rootPath: workspaceRoot,
     provider: ACTION_CONNECTOR_CHANNEL,
     integrationInstanceId: input.connector.id,
     modeId: agentModeId
   });
+  const conversationScope = createHash("sha256")
+    .update(`${actionConnectorExternalUserKey(context.identity)}:${context.conversationId}`)
+    .digest("hex")
+    .slice(0, 24);
+  const workspace = path.join(integrationWorkspace, "conversations", conversationScope);
   await fs.mkdir(workspace, { recursive: true });
   const workspaceAgentsMd = await applyWorkspaceAgentsMdForMode(agentModeId, workspace);
   const files = await materializeActionConnectorRuntimeFiles({
@@ -4294,6 +4307,7 @@ async function startActionConnectorRuntimeSession(input: {
 
   const session = await sessions.create({
     organizationId: trimOrUndefined(input.runner.connector.organizationId ?? undefined),
+    userId: input.runtimeOwner.id,
     threadId: input.thread.id,
     model: input.runtime.model,
     reasoningEffort: input.runtime.reasoningEffort,
@@ -4355,6 +4369,7 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
   try {
     const runtime = await resolveActionConnectorRuntimeOptions(input, {
       runId,
+      conversationId,
       bridgeToken: bridgeRegistration?.bridgeToken,
       identity
     });
@@ -4404,6 +4419,7 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
       }
     });
     return {
+      connectorId: input.connector.id,
       runId,
       conversationId,
       externalConversationKey,
@@ -4423,13 +4439,146 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
 
 function actionConnectorRuntimePrompt(input: ActionConnectorCodexRunnerInput & {
   prepared: ActionConnectorPreparedTurn;
+  attachments: MaterializedActionConnectorAttachment[];
 }): string {
-  return buildActionConnectorRuntimePrompt({
+  const base = buildActionConnectorRuntimePrompt({
     config: input.config,
     request: input.request,
     conversationId: input.prepared.conversationId,
     runId: input.prepared.runId,
     cliPath: input.prepared.runtime.cliPath
+  });
+  if (!input.attachments.length) return base;
+  return [
+    base,
+    "",
+    "Attached files",
+    "The external user attached the following files. Read them from the exact workspace-relative paths when relevant. Do not search the filesystem for alternate copies.",
+    ...input.attachments.map((file) =>
+      `- ${file.filename} | ${file.mimeType} | ${file.sizeBytes} bytes | ${file.relativePath}`
+    )
+  ].join("\n");
+}
+
+async function materializeActionConnectorTurnAttachments(input: {
+  request: ActionConnectorCodexRunnerInput["request"];
+  prepared: ActionConnectorPreparedTurn;
+}): Promise<MaterializedActionConnectorAttachment[]> {
+  const attachmentIds = (input.request.attachments ?? []).map((item) => item.attachmentId);
+  if (!attachmentIds.length) return [];
+  return await actionConnectorAttachments.materialize({
+    connectorId: input.prepared.connectorId,
+    externalUserId: actionConnectorExternalUserKey(input.prepared.identity),
+    conversationId: input.prepared.conversationId,
+    attachmentIds,
+    workspacePath: input.prepared.runtime.workspace
+  });
+}
+
+type ActionConnectorActiveRun = {
+  connectorId: string;
+  externalUserId: string;
+  controller: AbortController;
+  session: SessionRecord;
+};
+
+const actionConnectorActiveRuns = new Map<string, ActionConnectorActiveRun>();
+
+async function cancelActionConnectorRun(input: { connectorId: string; externalUserId: string; runId: string }): Promise<boolean> {
+  const entry = actionConnectorActiveRuns.get(input.runId);
+  if (!entry || entry.connectorId !== input.connectorId || entry.externalUserId !== input.externalUserId) return false;
+  if (!entry.controller.signal.aborted) entry.controller.abort(new Error("action_connector_user_cancelled"));
+  actionConnectorActiveRuns.delete(input.runId);
+  await retireLiveRuntimeSession(entry.session, {
+    status: "ended",
+    reason: "action connector explicit cancel request",
+    logLabel: "action connector chat"
+  });
+  return true;
+}
+
+async function resolveActionConnectorConversation(input: {
+  connectorId: string;
+  externalUserId: string;
+  conversationId: string;
+}): Promise<{ thread: ThreadRecord; externalConversationKey: string }> {
+  const externalConversationKey = actionConnectorConversationKey({
+    connectorId: input.connectorId,
+    externalUserKey: input.externalUserId,
+    conversationId: input.conversationId
+  });
+  const binding = await conversationRecords.getExternalConversationBinding(externalConversationKey);
+  if (!binding || binding.integrationInstanceId !== input.connectorId) {
+    throw new Error("Action connector conversation does not exist");
+  }
+  const thread = await conversationRecords.getThread(binding.threadId, binding.organizationId);
+  if (!thread) throw new Error("Action connector thread does not exist");
+  return { thread, externalConversationKey };
+}
+
+function actionConnectorMessageText(message: Record<string, unknown>): string {
+  const content = Array.isArray(message.content) ? message.content : [];
+  return content
+    .map((part) => asRecord(part))
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => String(part?.text ?? ""))
+    .join("");
+}
+
+function actionConnectorMessageList(value: unknown, key: "attachments" | "artifacts"): Record<string, unknown>[] {
+  const metadata = asRecord(asRecord(value)?.metadata);
+  const items = metadata && Array.isArray(metadata[key]) ? metadata[key] : [];
+  return items.map((item) => asRecord(item)).filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+async function getActionConnectorConversationMessages(input: {
+  connectorId: string;
+  externalUserId: string;
+  conversationId: string;
+}): Promise<Record<string, unknown>> {
+  const { thread } = await resolveActionConnectorConversation(input);
+  const repository = await conversationRecords.getMessageRepository(thread.id);
+  const messages = repository.messages.flatMap((item) => {
+    const message = asRecord(item.message);
+    const role = message?.role === "user" || message?.role === "assistant" ? message.role : undefined;
+    if (!message || !role) return [];
+    return [{
+      id: asString(message.id) || `${role}-${item.createdAt ?? thread.createdAt}`,
+      role,
+      text: actionConnectorMessageText(message),
+      createdAt: asString(message.createdAt) || item.createdAt || thread.createdAt,
+      status: role === "assistant" ? "completed" : undefined,
+      attachments: actionConnectorMessageList(message, "attachments"),
+      artifacts: actionConnectorMessageList(message, "artifacts")
+    }];
+  });
+  return { conversationId: input.conversationId, messages };
+}
+
+async function sendActionConnectorArtifact(input: {
+  connectorId: string;
+  externalUserId: string;
+  conversationId: string;
+  artifactId: string;
+  disposition: "inline" | "attachment";
+  response: Response;
+}): Promise<void> {
+  const { thread } = await resolveActionConnectorConversation(input);
+  const currentUser: CurrentActor = {
+    id: actionConnectorRuntimeOwnerId(input.connectorId),
+    userType: "service",
+    role: "integration",
+    organizationId: trimOrUndefined(thread.organizationId) ?? "",
+    organizationType: "integration",
+    membershipType: "service"
+  };
+  await sendThreadArtifactContent({
+    currentUser,
+    threadId: thread.id,
+    artifactId: input.artifactId,
+    disposition: input.disposition,
+    authorizedThread: thread,
+    res: input.response
   });
 }
 
@@ -4444,6 +4593,17 @@ function emitActionConnectorRuntimeEvent(
 
 async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInput): Promise<void> {
   const prepared = await prepareActionConnectorRuntimeTurn(input);
+  const startedAt = Date.now();
+  const explicitCancel = new AbortController();
+  const mergedAbort = mergeAbortSignals([...(input.signal ? [input.signal] : []), explicitCancel.signal]);
+  const attachments = await materializeActionConnectorTurnAttachments({ request: input.request, prepared });
+  const activeRun: ActionConnectorActiveRun = {
+    connectorId: input.connector.id,
+    externalUserId: actionConnectorExternalUserKey(prepared.identity),
+    controller: explicitCancel,
+    session: prepared.session
+  };
+  actionConnectorActiveRuns.set(prepared.runId, activeRun);
   try {
   input.emit({
     type: "start",
@@ -4465,6 +4625,13 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       conversationId: prepared.conversationId,
       runId: prepared.runId,
       context: input.request.context,
+      attachments: attachments.map((file) => ({
+        attachmentId: file.attachmentId,
+        filename: file.filename,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        sha256: file.sha256
+      })),
       externalUserId,
       externalUserName
     }),
@@ -4483,7 +4650,7 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
     thread: prepared.thread,
     session: prepared.session,
     liveThread: prepared.liveThread,
-    prompt: actionConnectorRuntimePrompt({ ...input, prepared }),
+    prompt: actionConnectorRuntimePrompt({ ...input, prepared, attachments }),
     memoryPrompt: input.request.message,
     memoryMetadata: {
       channel: ACTION_CONNECTOR_CHANNEL,
@@ -4501,15 +4668,30 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
       externalUserId,
       externalUserName
     },
-    signal: input.signal,
+    signal: mergedAbort.signal,
     emptyAnswerText: input.request.locale.toLowerCase().startsWith("zh") ? "没有生成回答。" : "No answer was generated.",
+    artifactScanStartedAt: new Date(startedAt - 2000),
     logLabel: "action connector chat",
     shouldSkipRetry: () => true,
     hasExternalContext: () => true,
     onEvent({ projection }) {
       emitActionConnectorRuntimeEvent(input.emit, projection);
     },
-    async onDone({ answerText, session: sessionForRun, finalizedProcess }) {
+    onArtifacts({ artifacts: generatedArtifacts }) {
+      input.emit({
+        type: "artifact",
+        files: generatedArtifacts.map((artifact) => ({
+          artifactId: artifact.id,
+          filename: artifact.displayName,
+          mimeType: artifact.mimeType ?? null,
+          sizeBytes: artifact.sizeBytes ?? null,
+          previewStatus: artifact.previewStatus,
+          downloadStatus: artifact.downloadStatus,
+          blockedReason: artifact.blockedReason ?? null
+        }))
+      });
+    },
+    async onDone({ answerText, session: sessionForRun, generatedArtifacts, artifactContentPart, finalizedProcess }) {
       for (const event of actionConnectorCommentaryEntriesToEvents(finalizedProcess.liveCommentaryEntries)) {
         input.emit(event);
       }
@@ -4526,9 +4708,18 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
             conversationId: prepared.conversationId,
             runId: prepared.runId,
             sessionId: sessionForRun.sessionId,
-            runtimeOwnerId: prepared.runtimeOwner.id
+            runtimeOwnerId: prepared.runtimeOwner.id,
+            artifacts: generatedArtifacts.map((artifact) => ({
+              artifactId: artifact.id,
+              filename: artifact.displayName,
+              mimeType: artifact.mimeType ?? null,
+              sizeBytes: artifact.sizeBytes ?? null,
+              previewStatus: artifact.previewStatus,
+              downloadStatus: artifact.downloadStatus,
+              blockedReason: artifact.blockedReason ?? null
+            }))
           },
-          finalizedProcess.contentParts
+          artifactContentPart ? [...finalizedProcess.contentParts, artifactContentPart] : finalizedProcess.contentParts
         ),
         runConfig: {
           channel: ACTION_CONNECTOR_CHANNEL,
@@ -4550,7 +4741,7 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
           externalIdentity: prepared.identity ?? null
         }
       });
-      input.emit({ type: "done" });
+      input.emit({ type: "done", durationMs: Date.now() - startedAt });
     },
     onTelemetryError(error) {
       console.warn("action connector chat usage telemetry failed", {
@@ -4561,6 +4752,9 @@ async function runActionConnectorCodexChat(input: ActionConnectorCodexRunnerInpu
     }
   });
   } finally {
+    const current = actionConnectorActiveRuns.get(prepared.runId);
+    if (current === activeRun) actionConnectorActiveRuns.delete(prepared.runId);
+    mergedAbort.dispose();
     prepared.disposeBridge?.();
   }
 }
@@ -8816,8 +9010,14 @@ async function registerGeneratedArtifactsForSession(input: {
   const workspacePath = trimOrUndefined(input.session.workspace);
   if (!threadId || !workspacePath) return [];
 
-  const thread = await threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId);
+  const thread = input.currentUser.userType === "service"
+    ? await threads.get(threadId, input.currentUser.organizationId)
+    : await threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId);
   if (!thread) return [];
+  if (
+    input.currentUser.userType === "service" &&
+    (trimOrUndefined(input.session.threadId) !== thread.id || trimOrUndefined(input.session.userId) !== input.currentUser.id)
+  ) return [];
 
   return await registerGeneratedArtifactsForThread({
     actor: input.currentUser,
@@ -9058,6 +9258,7 @@ async function sendThreadArtifactContent(input: {
   filePath?: string;
   disposition?: "inline" | "attachment";
   enforcePortalSecurityDomain?: boolean;
+  authorizedThread?: ThreadRecord;
   res: Response;
 }): Promise<void> {
   const threadId = trimOrUndefined(input.threadId);
@@ -9085,9 +9286,11 @@ async function sendThreadArtifactContent(input: {
   }
 
   const [thread, policy] = await Promise.all([
-    input.enforcePortalSecurityDomain
-      ? getPortalOwnedThread(threadId, input.currentUser)
-      : threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
+    input.authorizedThread
+      ? Promise.resolve(input.authorizedThread.id === threadId ? input.authorizedThread : undefined)
+      : input.enforcePortalSecurityDomain
+        ? getPortalOwnedThread(threadId, input.currentUser)
+        : threads.getOwned(threadId, input.currentUser.id, input.currentUser.organizationId),
     resolveArtifactPolicyForActor(input.currentUser)
   ]);
   if (!thread) {
@@ -9634,7 +9837,11 @@ registerCommonApiRoutes(app, {
   zendeskRouter: createZendeskAdminRouter(zendesk),
   crestRouter: crestIntegrationRouter,
   actionConnectorProvisionRouter: createActionConnectorProvisionRouter({
-    db: db as unknown as IntegrationInstanceRepositoryDb
+    db: db as unknown as IntegrationInstanceRepositoryDb,
+    attachments: actionConnectorAttachments,
+    getConversationMessages: getActionConnectorConversationMessages,
+    cancelRun: cancelActionConnectorRun,
+    sendArtifact: sendActionConnectorArtifact
   }),
   actionConnectorRuntimeRouter: createActionConnectorRuntimeRouter({
     db: db as unknown as IntegrationInstanceRepositoryDb,

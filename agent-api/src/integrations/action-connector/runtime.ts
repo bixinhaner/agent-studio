@@ -17,10 +17,17 @@ export const actionConnectorChatRequestSchema = z.object({
   }).optional(),
   locale: z.string().trim().min(1).default("en-US"),
   timezone: z.string().trim().min(1).default("UTC"),
+  attachments: z.array(z.object({
+    attachmentId: z.string().trim().min(1),
+    filename: z.string().trim().min(1).max(180).optional()
+  })).max(10).default([]),
   context: z.record(z.string(), z.unknown()).default({})
 });
 
-export type ActionConnectorChatRequest = z.infer<typeof actionConnectorChatRequestSchema>;
+type ParsedActionConnectorChatRequest = z.infer<typeof actionConnectorChatRequestSchema>;
+export type ActionConnectorChatRequest = Omit<ParsedActionConnectorChatRequest, "attachments"> & {
+  attachments?: ParsedActionConnectorChatRequest["attachments"];
+};
 
 export type AgentThoughtStatus = "streaming" | "completed";
 export type AgentProcessKind =
@@ -62,7 +69,30 @@ export type AgentStreamEvent =
   | { type: "action_preview"; callId: string; title: string; summary: string; risk: "read" | "low" | "high"; preview: unknown }
   | { type: "tool_result"; callId: string; status: "ok" | "error"; output?: unknown; error?: { code: string; message: string; retryable?: boolean } }
   | { type: "process"; id?: string; kind: AgentProcessKind; title: string; detail?: unknown; at?: string }
-  | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }
+  | {
+      type: "artifact";
+      files: Array<{
+        artifactId: string;
+        filename: string;
+        mimeType?: string | null;
+        sizeBytes?: number | null;
+        previewStatus?: string | null;
+        downloadStatus?: string | null;
+        blockedReason?: string | null;
+      }>;
+    }
+  | {
+      type: "ui_intent";
+      intent: {
+        kind: "navigate" | "show_records" | "refresh_record" | "toast";
+        route?: string;
+        entity?: string;
+        ids?: string[];
+        query?: Record<string, string>;
+        message?: string;
+      };
+    }
+  | { type: "done"; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }; durationMs?: number }
   | { type: "error"; error: { code: string; message: string; retryable?: boolean } };
 
 type IntegrationConfigRow = {
