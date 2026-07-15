@@ -339,7 +339,7 @@ export async function runAdminBillingEmailReminderSweep(input: { testEmail?: str
 
 export async function sendAdminBillingEmailRuleTest(
   ruleId: string,
-  input: { testEmail: string }
+  input: { testEmail: string; scenario: "trial" | "manual" | "automatic" | "failed" }
 ): Promise<{ ok: true; delivered: boolean; mode: "smtp" | "debug" }> {
   return api(`/api/admin/billing/email-rules/${encodeURIComponent(ruleId)}/test`, {
     method: "POST",

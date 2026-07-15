@@ -129,6 +129,17 @@ type PromotionPreview = {
   message: string | null;
 };
 
+export type BillingEmailScenario = "trial" | "manual" | "automatic" | "failed";
+
+type BillingEmailPlanOption = {
+  id: string;
+  slug: string;
+  name: string;
+  billingPriceCents: number;
+  billingCurrency: string;
+  monthlyCompletedTurnLimit: number | null;
+};
+
 type StripeCustomerCandidate = {
   id: string;
   email: string | null;
@@ -453,9 +464,27 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderHtmlTemplate(template: string, variables: Record<string, string>): string {
-  const escaped = Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, escapeHtml(value)]));
-  return renderTemplate(template, escaped);
+function renderHtmlTemplate(template: string, variables: Record<string, string>, rawKeys: string[] = []): string {
+  const rawKeySet = new Set(rawKeys);
+  const rawEntries = [...rawKeySet].map((key, index) => ({
+    key,
+    token: `__BILLING_RAW_HTML_${index}__`,
+    value: variables[key] ?? ""
+  }));
+  let protectedTemplate = template;
+  for (const entry of rawEntries) {
+    protectedTemplate = protectedTemplate.split(`{{${entry.key}}}`).join(entry.token);
+  }
+  const escaped = Object.fromEntries(
+    Object.entries(variables)
+      .filter(([key]) => !rawKeySet.has(key))
+      .map(([key, value]) => [key, escapeHtml(value)])
+  );
+  let rendered = renderTemplate(protectedTemplate, escaped);
+  for (const entry of rawEntries) {
+    rendered = rendered.split(entry.token).join(entry.value);
+  }
+  return rendered;
 }
 
 function dateKey(date: Date): string {
@@ -471,29 +500,106 @@ function billingDateLabel(value: Date | string | null | undefined): string {
   }).format(date);
 }
 
-function billingEmailHeading(triggerType: string, offsetDays: number): string {
+function billingEmailHeading(triggerType: string, offsetDays: number, scenario: BillingEmailScenario = "manual"): string {
   if (triggerType === "auto_renew_failed") return "Automatic renewal needs attention";
-  if (triggerType === "expired") return "Access has ended";
-  if (offsetDays === 1) return "Access ends tomorrow";
-  return `Access ends in ${Math.max(1, offsetDays)} days`;
+  if (triggerType === "expired") return scenario === "trial" ? "Your free trial has ended" : "Access has ended";
+  if (offsetDays === 1) return scenario === "trial" ? "Your free trial ends tomorrow" : "Access ends tomorrow";
+  return scenario === "trial"
+    ? `Your free trial ends in ${Math.max(1, offsetDays)} days`
+    : `Access ends in ${Math.max(1, offsetDays)} days`;
 }
 
 function billingRenewalSummary(input: {
-  state: "automatic" | "manual" | "failed";
+  state: BillingEmailScenario;
   amountDue: string;
   renewalDate: string;
+  accessEnded?: boolean;
 }): string {
   if (input.state === "failed") {
     return input.amountDue
       ? `We could not process the ${input.amountDue} renewal payment. Update your payment method to keep access active.`
       : "We could not process the renewal payment. Update your payment method to keep access active.";
   }
-  if (input.state === "automatic") {
-    const amount = input.amountDue ? ` for ${input.amountDue}` : "";
-    const date = input.renewalDate && input.renewalDate !== "Not set" ? ` on ${input.renewalDate}` : "";
-    return `Auto-renew is on and the plan is scheduled to renew${amount}${date}.`;
+  if (input.state === "trial") {
+    return input.accessEnded
+      ? "Your free trial does not renew automatically. Choose a plan to restore access."
+      : `Your free trial will not renew automatically. Choose a plan before ${input.renewalDate} to continue without interruption.`;
   }
-  return "Auto-renew is off. Choose a plan before the access end date to avoid interruption.";
+  if (input.state === "automatic") {
+    const amount = input.amountDue ? ` at the current price of ${input.amountDue}` : "";
+    const date = input.renewalDate && input.renewalDate !== "Not set" ? ` on ${input.renewalDate}` : "";
+    return `Auto-renew is on. Your plan is scheduled to renew${date}${amount}. We’ll charge your saved payment method automatically. Review Billing for the latest renewal details.`;
+  }
+  return input.accessEnded
+    ? "This access did not renew automatically. Choose a plan to restore access."
+    : `This access will not renew automatically. Choose a plan before ${input.renewalDate} to avoid interruption.`;
+}
+
+function billingEmailSubjectSuffix(triggerType: string, offsetDays: number, scenario: BillingEmailScenario): string {
+  if (triggerType === "auto_renew_failed") return "automatic renewal payment needs attention";
+  if (triggerType === "expired") return scenario === "trial" ? "free trial has ended" : "access has ended";
+  if (offsetDays === 1) return scenario === "trial" ? "free trial ends tomorrow" : "access ends tomorrow";
+  return scenario === "trial"
+    ? `free trial ends in ${Math.max(1, offsetDays)} days`
+    : `access ends in ${Math.max(1, offsetDays)} days`;
+}
+
+function billingPlanFamily(value: Pick<BillingEmailPlanOption, "slug" | "name">): string {
+  const normalized = `${value.slug} ${value.name}`.toLowerCase();
+  if (normalized.includes("primary")) return "primary";
+  if (normalized.includes("premium") || normalized.includes("pro")) return "premium";
+  if (normalized.includes("standard") || normalized.includes("plus")) return "standard";
+  return normalized;
+}
+
+function billingPlanDifferentiator(family: string): string {
+  if (family === "primary") return "For getting started";
+  if (family === "premium") return "For high-volume operations";
+  return "For growing support teams";
+}
+
+function billingPlanDisplayName(value: string): string {
+  return value.replace(/\s+(Monthly|Annual)$/i, "").trim();
+}
+
+function billingPlanComparison(input: {
+  plans: BillingEmailPlanOption[];
+  scenario: BillingEmailScenario;
+  currentPlanName?: string | null;
+}): { text: string; html: string } {
+  if (input.scenario === "failed" || !input.plans.length) return { text: "", html: "" };
+  const currentFamily = billingPlanFamily({ slug: "", name: input.currentPlanName ?? "" });
+  const title = input.scenario === "automatic" ? "Compare plans" : "Choose a plan";
+  const rows = input.plans.map((plan) => {
+    const family = billingPlanFamily(plan);
+    const badge = input.scenario === "trial"
+      ? family === "standard" ? "Recommended" : ""
+      : family === currentFamily ? "Current" : "";
+    return {
+      name: billingPlanDisplayName(plan.name),
+      price: centsLabel(plan.billingPriceCents, plan.billingCurrency),
+      allowance: plan.monthlyCompletedTurnLimit
+        ? `${plan.monthlyCompletedTurnLimit.toLocaleString("en-US")} AI requests/month`
+        : "Usage allowance configured by agreement",
+      differentiator: billingPlanDifferentiator(family),
+      badge
+    };
+  });
+  const text = `\n${title}\n${rows.map((row) => `${row.name}${row.badge ? ` (${row.badge})` : ""} — ${row.price}/year — ${row.allowance} — ${row.differentiator}`).join("\n")}\n`;
+  const htmlRows = rows.map((row) => `
+    <tr><td style="padding:0 0 10px;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border:1px solid #d9e0ea;border-radius:10px;border-collapse:separate;">
+        <tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+          <div style="font-size:15px;line-height:22px;font-weight:bold;">${escapeHtml(row.name)}${row.badge ? ` <span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#fff1eb;color:#d83a0c;font-size:11px;line-height:16px;">${escapeHtml(row.badge)}</span>` : ""}</div>
+          <div style="margin-top:4px;font-size:14px;line-height:20px;color:#374151;"><strong>${escapeHtml(row.price)}/year</strong> · ${escapeHtml(row.allowance)}</div>
+          <div style="margin-top:2px;font-size:12px;line-height:18px;color:#6b7280;">${escapeHtml(row.differentiator)}</div>
+        </td></tr>
+      </table>
+    </td></tr>`).join("");
+  return {
+    text,
+    html: `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:4px 0 14px;"><tr><td style="padding:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:24px;font-weight:bold;color:#111827;">${escapeHtml(title)}</td></tr>${htmlRows}</table>`
+  };
 }
 
 function isStripeCheckoutSession(value: unknown): value is StripeCheckoutSession {
@@ -1362,29 +1468,48 @@ export class BillingService {
     return { ok: true, results };
   }
 
-  async sendReminderTestEmail(input: { ruleId: string; testEmail: string; now?: Date }) {
+  async sendReminderTestEmail(input: { ruleId: string; testEmail: string; scenario?: BillingEmailScenario; now?: Date }) {
     const recipient = normalizeEmail(input.testEmail);
     if (!recipient) throw new Error("A valid test email is required");
+    if (input.scenario && !["trial", "manual", "automatic", "failed"].includes(input.scenario)) {
+      throw new Error("Billing email scenario must be trial, manual, automatic, or failed");
+    }
 
     const rule = await this.db.billingEmailRule.findUnique({ where: { id: input.ruleId } });
     if (!rule) throw new Error("Billing email rule does not exist");
 
     const now = input.now ?? new Date();
     const config = await this.resolveBillingConfig();
-    const expiresAt = addDays(now, Math.max(1, rule.triggerType === "expires_in_days" ? rule.offsetDays : 1));
+    const scenario: BillingEmailScenario = rule.triggerType === "auto_renew_failed" ? "failed" : input.scenario ?? "automatic";
+    if (scenario === "failed" && rule.triggerType !== "auto_renew_failed") {
+      throw new Error("The failed scenario is only valid for the automatic-renewal failure rule");
+    }
+    const plans = await this.listBillingEmailPlanOptions();
+    const standardPlan = plans.find((plan) => billingPlanFamily(plan) === "standard") ?? plans[0];
+    const expiresAt = rule.triggerType === "expired"
+      ? addDays(now, -1)
+      : rule.triggerType === "auto_renew_failed"
+        ? now
+        : addDays(now, Math.max(1, rule.offsetDays));
     const accessEndDate = billingDateLabel(expiresAt);
-    const amountDue = centsLabel(99900, config.defaultCurrency);
-    const renewalState = rule.triggerType === "auto_renew_failed" ? "failed" : "automatic";
+    const amountDue = scenario === "trial" || scenario === "manual" || !standardPlan
+      ? ""
+      : centsLabel(standardPlan.billingPriceCents, standardPlan.billingCurrency);
+    const planName = scenario === "trial" ? "Standard Edition Trial" : standardPlan?.name ?? "Standard Edition";
     const variables = await this.buildEmailVariables({
       config,
       companyName: "Example Customer",
-      planName: "Standard Edition",
+      planName,
       expiresAtLocal: accessEndDate,
       accessEndDate,
       renewalDate: accessEndDate,
-      emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
-      renewalSummary: billingRenewalSummary({ state: renewalState, amountDue, renewalDate: accessEndDate }),
-      amountDue
+      emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays, scenario),
+      emailSubjectSuffix: billingEmailSubjectSuffix(rule.triggerType, rule.offsetDays, scenario),
+      renewalSummary: billingRenewalSummary({ state: scenario, amountDue, renewalDate: accessEndDate, accessEnded: rule.triggerType === "expired" }),
+      amountDue,
+      scenario,
+      currentPlanName: planName,
+      planOptions: plans
     });
     const targetRef = `billing-email-test:${rule.id}:${recipient}:${Date.now()}`;
     const notification = await this.db.notificationRecord.create({
@@ -1400,7 +1525,8 @@ export class BillingService {
         payload: {
           ruleId: rule.id,
           recipients: [recipient],
-          test: true
+          test: true,
+          scenario
         }
       }
     });
@@ -1411,7 +1537,7 @@ export class BillingService {
         to: [recipient],
         subject: renderTemplate(rule.subject, variables),
         text: renderTemplate(rule.bodyText, variables),
-        html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
+        html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables, ["plan_options_html"]) : undefined,
         debugLabel: "billing-email-reminder-test"
       });
       await this.db.notificationRecord.update({
@@ -1422,7 +1548,8 @@ export class BillingService {
             ruleId: rule.id,
             recipients: [recipient],
             delivery,
-            test: true
+            test: true,
+            scenario
           }
         }
       });
@@ -2267,6 +2394,7 @@ export class BillingService {
       return this.runAutoRenewFailedReminderRule(rule, input);
     }
     const config = await this.resolveBillingConfig();
+    const planOptions = await this.listBillingEmailPlanOptions();
     const windowStart = rule.triggerType === "expired"
       ? addDays(input.now, -1)
       : addDays(input.now, rule.offsetDays);
@@ -2313,6 +2441,9 @@ export class BillingService {
         const accessEndDate = billingDateLabel(grant.expiresAt);
         const amountDue = grant.plan?.billingPriceCents ? centsLabel(grant.plan.billingPriceCents, grant.plan.billingCurrency) : "";
         const automaticRenewal = autoRenewal?.status === "enabled" && autoRenewal.cancelAtPeriodEnd !== true;
+        const scenario: BillingEmailScenario = /trial/i.test(`${grant.plan?.slug ?? ""} ${grant.plan?.name ?? ""}`)
+          ? "trial"
+          : automaticRenewal ? "automatic" : "manual";
         const renewalDate = billingDateLabel(autoRenewal?.nextRenewalAt ?? grant.expiresAt);
         const variables = await this.buildEmailVariables({
           config,
@@ -2321,13 +2452,18 @@ export class BillingService {
           expiresAtLocal: accessEndDate,
           accessEndDate,
           renewalDate,
-          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
+          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays, scenario),
+          emailSubjectSuffix: billingEmailSubjectSuffix(rule.triggerType, rule.offsetDays, scenario),
           renewalSummary: billingRenewalSummary({
-            state: automaticRenewal ? "automatic" : "manual",
+            state: scenario,
             amountDue,
-            renewalDate
+            renewalDate,
+            accessEnded: rule.triggerType === "expired"
           }),
-          amountDue
+          amountDue,
+          scenario,
+          currentPlanName: grant.plan?.name,
+          planOptions
         });
         const notification = await this.db.notificationRecord.create({
           data: {
@@ -2348,7 +2484,7 @@ export class BillingService {
           to: recipients,
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
-          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
+          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables, ["plan_options_html"]) : undefined,
           debugLabel: "billing-email-reminder"
         });
         await this.db.notificationRecord.update({
@@ -2384,6 +2520,7 @@ export class BillingService {
     input: { now: Date; testEmail?: string | null }
   ) {
     const config = await this.resolveBillingConfig();
+    const planOptions = await this.listBillingEmailPlanOptions();
     const failedSince = addDays(input.now, -1);
     const renewals = await this.db.billingAutoRenewal.findMany({
       where: {
@@ -2425,9 +2562,13 @@ export class BillingService {
           planName: plan?.name ?? "Agent Studio",
           expiresAtLocal: renewalDate,
           renewalDate,
-          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays),
+          emailHeading: billingEmailHeading(rule.triggerType, rule.offsetDays, "failed"),
+          emailSubjectSuffix: billingEmailSubjectSuffix(rule.triggerType, rule.offsetDays, "failed"),
           renewalSummary: billingRenewalSummary({ state: "failed", amountDue, renewalDate }),
-          amountDue
+          amountDue,
+          scenario: "failed",
+          currentPlanName: plan?.name,
+          planOptions
         });
         const notification = await this.db.notificationRecord.create({
           data: {
@@ -2448,7 +2589,7 @@ export class BillingService {
           to: recipients,
           subject: renderTemplate(rule.subject, variables),
           text: renderTemplate(rule.bodyText, variables),
-          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables) : undefined,
+          html: rule.bodyHtml ? renderHtmlTemplate(rule.bodyHtml, variables, ["plan_options_html"]) : undefined,
           debugLabel: "billing-auto-renew-failed-email"
         });
         await this.db.notificationRecord.update({
@@ -2517,10 +2658,19 @@ export class BillingService {
     accessEndDate?: string;
     renewalDate?: string;
     emailHeading?: string;
+    emailSubjectSuffix?: string;
     renewalSummary?: string;
     amountDue: string;
+    scenario: BillingEmailScenario;
+    currentPlanName?: string | null;
+    planOptions: BillingEmailPlanOption[];
   }): Promise<Record<string, string>> {
     const brandName = await this.resolveBrandName();
+    const planComparison = billingPlanComparison({
+      plans: input.planOptions,
+      scenario: input.scenario,
+      currentPlanName: input.currentPlanName
+    });
     return {
       brand_name: brandName,
       company_name: trimOrUndefined(input.companyName) ?? "your organization",
@@ -2529,10 +2679,35 @@ export class BillingService {
       access_end_date: trimOrUndefined(input.accessEndDate) ?? input.expiresAtLocal,
       renewal_date: trimOrUndefined(input.renewalDate) ?? input.expiresAtLocal,
       email_heading: trimOrUndefined(input.emailHeading) ?? "Review your billing",
+      email_subject_suffix: trimOrUndefined(input.emailSubjectSuffix) ?? "access needs attention",
       renewal_summary: trimOrUndefined(input.renewalSummary) ?? "Open billing to review your access and renewal settings.",
+      plan_options_text: planComparison.text,
+      plan_options_html: planComparison.html,
       renew_url: this.resolvePortalBillingUrl(input.config),
       amount_due: input.amountDue
     };
+  }
+
+  private async listBillingEmailPlanOptions(): Promise<BillingEmailPlanOption[]> {
+    const plans = await this.db.subscriptionPlan.findMany({
+      where: {
+        status: "active",
+        billingStatus: "active",
+        billingPriceCents: { not: null },
+        billingInterval: "year"
+      },
+      orderBy: [{ billingPriceCents: "asc" }, { name: "asc" }]
+    });
+    return plans
+      .filter((plan): plan is typeof plan & { billingPriceCents: number } => plan.billingPriceCents !== null)
+      .map((plan) => ({
+        id: plan.id,
+        slug: plan.slug,
+        name: plan.name,
+        billingPriceCents: plan.billingPriceCents,
+        billingCurrency: plan.billingCurrency,
+        monthlyCompletedTurnLimit: plan.monthlyCompletedTurnLimit
+      }));
   }
 
   private resolveSuccessUrl(config: BillingResolvedConfig): string {

@@ -65,6 +65,7 @@ import type {
 } from "./types";
 
 type BillingTab = "overview" | "products" | "promotions" | "orders" | "auto-renewals" | "customers" | "email" | "stripe";
+type BillingEmailTestScenario = "trial" | "manual" | "automatic";
 
 type PromotionFormState = {
   code: string;
@@ -535,6 +536,7 @@ export function BillingWorkspace() {
   const [selectedAutoRenewalId, setSelectedAutoRenewalId] = useState("");
   const [manualStripeCustomerId, setManualStripeCustomerId] = useState("");
   const [emailTestAddress, setEmailTestAddress] = useState("like@baicells.com");
+  const [emailTestScenario, setEmailTestScenario] = useState<BillingEmailTestScenario>("trial");
   const [saving, setSaving] = useState(false);
 
   async function loadData(silent = false) {
@@ -969,8 +971,9 @@ export function BillingWorkspace() {
     setSaving(true);
     setErrorText("");
     try {
-      const result = await sendAdminBillingEmailRuleTest(rule.id, { testEmail });
-      setSuccessText(`测试邮件已发送到 ${testEmail}（${result.mode}${result.delivered ? "" : " debug"}）`);
+      const scenario = rule.triggerType === "auto_renew_failed" ? "failed" : emailTestScenario;
+      const result = await sendAdminBillingEmailRuleTest(rule.id, { testEmail, scenario });
+      setSuccessText(`${scenario} 场景邮件已发送到 ${testEmail}（${result.mode}${result.delivered ? "" : " debug"}）`);
       await loadData(true);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "发送测试邮件失败");
@@ -1446,6 +1449,17 @@ export function BillingWorkspace() {
                     value={emailTestAddress}
                     onChange={(event) => setEmailTestAddress(event.target.value)}
                     placeholder="Test recipient email"
+                  />
+                  <Select
+                    aria-label="Email test scenario"
+                    value={emailTestScenario}
+                    onChange={(scenario) => setEmailTestScenario(scenario)}
+                    options={[
+                      { value: "trial", label: "Trial" },
+                      { value: "manual", label: "Manual renewal" },
+                      { value: "automatic", label: "Auto-renew" }
+                    ]}
+                    style={{ minWidth: 170 }}
                   />
                   <span>单条规则测试不要求启用规则，也不会打开生产邮件总开关。</span>
                 </div>
@@ -1931,9 +1945,12 @@ export function BillingWorkspace() {
                 "{{company_name}}",
                 "{{plan_name}}",
                 "{{email_heading}}",
+                "{{email_subject_suffix}}",
                 "{{access_end_date}}",
                 "{{renewal_date}}",
                 "{{renewal_summary}}",
+                "{{plan_options_text}}",
+                "{{plan_options_html}}",
                 "{{amount_due}}",
                 "{{renew_url}}",
                 "{{expires_at_local}}"

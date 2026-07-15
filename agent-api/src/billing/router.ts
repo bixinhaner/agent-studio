@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 
 import type { SubscriptionEntitlementService } from "../operations/subscription-entitlement-service.js";
-import type { BillingService } from "./service.js";
+import type { BillingEmailScenario, BillingService } from "./service.js";
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -301,7 +301,8 @@ export function createAdminBillingRouter(service: BillingService): Router {
     try {
       const result = await service.sendReminderTestEmail({
         ruleId: req.params.ruleId,
-        testEmail: String(req.body?.testEmail ?? "")
+        testEmail: String(req.body?.testEmail ?? ""),
+        scenario: req.body?.scenario as BillingEmailScenario | undefined
       });
       res.json(result);
     } catch (error) {
