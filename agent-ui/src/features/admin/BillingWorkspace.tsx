@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { groupBillingPlans, type BillingPlanFamily } from "../billing/plan-presentation";
 import {
   bindAdminBillingStripeCustomer,
   createAdminBillingPaymentLink,
@@ -100,18 +101,7 @@ type PlanBillingFormState = {
   billingPriceCents: number | null;
 };
 
-type BillingCycle = "month" | "year";
-
-type AdminPlanGroup = {
-  key: string;
-  title: string;
-  subtitle: string;
-  monthly: AdminBillingPlan | null;
-  annual: AdminBillingPlan | null;
-  other: AdminBillingPlan[];
-  limit: number | null;
-  sortOrder: number;
-};
+type AdminPlanGroup = BillingPlanFamily<AdminBillingPlan>;
 
 type StripeSettingsFormState = {
   mode: string;
@@ -339,64 +329,8 @@ function planBillingLabel(plan?: AdminBillingPlan | null): string {
   return `${formatMoney(plan.billingPriceCents, plan.billingCurrency)} / ${interval}`;
 }
 
-function planCycleKey(plan?: AdminBillingPlan | null): BillingCycle | null {
-  if (!plan) return null;
-  if (plan.billingInterval === "month" && plan.billingIntervalCount === 1) return "month";
-  if (plan.billingInterval === "year" && plan.billingIntervalCount === 1) return "year";
-  return null;
-}
-
-function standardPlanTier(plan: AdminBillingPlan): { key: string; title: string; subtitle: string; sortOrder: number } {
-  const input = `${plan.slug} ${plan.name}`.toLowerCase();
-  if (input.includes("plus")) {
-    return {
-      key: "plus",
-      title: "Plus Class",
-      subtitle: "300 AI requests / month",
-      sortOrder: 1
-    };
-  }
-  if (input.includes("pro")) {
-    return {
-      key: "pro",
-      title: "PRO",
-      subtitle: "1000 AI requests / month",
-      sortOrder: 2
-    };
-  }
-  return {
-    key: plan.id,
-    title: plan.name,
-    subtitle: plan.description || "Custom billing product",
-    sortOrder: 20
-  };
-}
-
 function groupAdminPlans(plans: AdminBillingPlan[]): AdminPlanGroup[] {
-  const groups = new Map<string, AdminPlanGroup>();
-  for (const plan of plans) {
-    const tier = standardPlanTier(plan);
-    const current = groups.get(tier.key) ?? {
-      key: tier.key,
-      title: tier.title,
-      subtitle: tier.subtitle,
-      monthly: null,
-      annual: null,
-      other: [],
-      limit: null,
-      sortOrder: tier.sortOrder
-    };
-    current.limit = current.limit ?? plan.monthlyCompletedTurnLimit ?? null;
-    const cycle = planCycleKey(plan);
-    if (cycle === "month") current.monthly = plan;
-    else if (cycle === "year") current.annual = plan;
-    else current.other.push(plan);
-    groups.set(tier.key, current);
-  }
-  return [...groups.values()].sort((a, b) => {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    return a.title.localeCompare(b.title);
-  });
+  return groupBillingPlans(plans);
 }
 
 function planStatusTag(plan?: AdminBillingPlan | null) {
@@ -1353,7 +1287,7 @@ export function BillingWorkspace() {
                   </div>
                   <div className="admin-billing-product-grid">
                     {planGroups.map((group) => (
-                      <div key={group.key} className={group.key === "plus" || group.key === "pro" ? "admin-billing-product-row official" : "admin-billing-product-row"}>
+                      <div key={group.key} className={group.monthly || group.annual ? "admin-billing-product-row official" : "admin-billing-product-row"}>
                         <div className="admin-billing-product-name">
                           <strong>{group.title}</strong>
                           <span>{group.limit ? `${group.limit.toLocaleString()} AI requests / month` : group.subtitle}</span>

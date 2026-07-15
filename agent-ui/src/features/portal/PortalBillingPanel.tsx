@@ -3,6 +3,13 @@ import { CheckCircle2, CreditCard, Gift, RefreshCw, ShieldCheck, TicketPercent, 
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  billingCycleForPlan,
+  groupBillingPlans,
+  planForBillingCycle,
+  type BillingCycle,
+  type BillingPlanFamily
+} from "../billing/plan-presentation";
+import {
   createPortalBillingCheckout,
   fetchPortalBillingSummary,
   previewPortalPromotion,
@@ -26,91 +33,19 @@ function formatMoney(cents: number | null | undefined, currency?: string | null)
   }).format((cents ?? 0) / 100);
 }
 
-type BillingCycle = "month" | "year";
-
-type PortalPlanGroup = {
-  key: string;
-  title: string;
-  subtitle: string;
-  monthly: PortalBillingPlan | null;
-  annual: PortalBillingPlan | null;
-  other: PortalBillingPlan[];
-  limit: number | null;
-  sortOrder: number;
-};
+type PortalPlanGroup = BillingPlanFamily<PortalBillingPlan>;
 
 function planCycleLabel(plan: PortalBillingPlan): string {
   const count = plan.billingIntervalCount > 1 ? `${plan.billingIntervalCount} ` : "";
   return `${count}${plan.billingInterval}${plan.billingIntervalCount > 1 ? "s" : ""}`;
 }
 
-function planCycleKey(plan?: PortalBillingPlan | null): BillingCycle | null {
-  if (!plan) return null;
-  if (plan.billingInterval === "year" && plan.billingIntervalCount === 1) return "year";
-  if (plan.billingInterval === "month" && plan.billingIntervalCount === 1) return "month";
-  return null;
-}
-
-function standardTierKey(plan: PortalBillingPlan): { key: string; title: string; subtitle: string; sortOrder: number } {
-  const input = `${plan.slug} ${plan.name}`.toLowerCase();
-  if (input.includes("plus")) {
-    return {
-      key: "plus",
-      title: "Plus",
-      subtitle: "For teams starting recurring AI operations.",
-      sortOrder: 1
-    };
-  }
-  if (input.includes("pro")) {
-    return {
-      key: "pro",
-      title: "Pro",
-      subtitle: "For heavier monthly automation and support volume.",
-      sortOrder: 2
-    };
-  }
-  return {
-    key: plan.id,
-    title: plan.name,
-    subtitle: plan.description || `${plan.durationDays} days prepaid access`,
-    sortOrder: 20
-  };
-}
-
 function groupPortalPlans(plans: PortalBillingPlan[]): PortalPlanGroup[] {
-  const groups = new Map<string, PortalPlanGroup>();
-  for (const plan of plans) {
-    const tier = standardTierKey(plan);
-    const current = groups.get(tier.key) ?? {
-      key: tier.key,
-      title: tier.title,
-      subtitle: tier.subtitle,
-      monthly: null,
-      annual: null,
-      other: [],
-      limit: null,
-      sortOrder: tier.sortOrder
-    };
-    current.limit = current.limit ?? plan.monthlyCompletedTurnLimit ?? null;
-    const cycle = planCycleKey(plan);
-    if (cycle === "month") current.monthly = plan;
-    else if (cycle === "year") current.annual = plan;
-    else current.other.push(plan);
-    groups.set(tier.key, current);
-  }
-  return [...groups.values()].sort((a, b) => {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
-    const aPrice = a.monthly?.billingPriceCents ?? a.annual?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
-    const bPrice = b.monthly?.billingPriceCents ?? b.annual?.billingPriceCents ?? Number.MAX_SAFE_INTEGER;
-    return aPrice - bPrice;
-  });
+  return groupBillingPlans(plans);
 }
 
 function planForCycle(group: PortalPlanGroup | null | undefined, cycle: BillingCycle): PortalBillingPlan | null {
-  if (!group) return null;
-  return cycle === "year"
-    ? group.annual ?? group.monthly ?? group.other[0] ?? null
-    : group.monthly ?? group.annual ?? group.other[0] ?? null;
+  return planForBillingCycle(group, cycle);
 }
 
 function defaultSelection(summary: PortalBillingSummary | null): { tier: string; cycle: BillingCycle } {
@@ -121,10 +56,9 @@ function defaultSelection(summary: PortalBillingSummary | null): { tier: string;
       [group.monthly, group.annual, ...group.other].some((plan) => plan?.id === currentPlanId)
     );
     const currentPlan = currentGroup ? [currentGroup.monthly, currentGroup.annual, ...currentGroup.other].find((plan) => plan?.id === currentPlanId) : null;
-    if (currentGroup) return { tier: currentGroup.key, cycle: planCycleKey(currentPlan ?? null) ?? "year" };
+    if (currentGroup) return { tier: currentGroup.key, cycle: billingCycleForPlan(currentPlan ?? null) ?? "year" };
   }
-  const plus = groups.find((group) => group.key === "plus");
-  const preferred = plus ?? groups[0];
+  const preferred = groups[0];
   return { tier: preferred?.key ?? "", cycle: preferred?.annual ? "year" : "month" };
 }
 
@@ -146,7 +80,7 @@ function displayPlanName(value?: string | null): string {
 
 function planDescription(group: PortalPlanGroup, plan: PortalBillingPlan | null): string {
   if (!plan) return group.subtitle;
-  if (group.key === "plus" || group.key === "pro") {
+  if (group.monthly || group.annual) {
     const interval = plan.billingInterval === "year" ? "yearly" : plan.billingInterval === "month" ? "monthly" : planCycleLabel(plan);
     return `${group.title} · ${usageLabel(group.limit)} · ${interval} prepaid access`;
   }
@@ -387,7 +321,7 @@ export function PortalBillingPanel(props: {
               >
                 <span className="portal-billing-plan-card-head">
                   <strong>{group.title}</strong>
-                  <Tag color={group.key === "pro" ? "processing" : "success"}>{group.key === "pro" ? "Higher volume" : "Core"}</Tag>
+                  <Tag>{activeCycle === "year" ? "Annual" : "Monthly"}</Tag>
                 </span>
                 <span className="portal-billing-plan-card-price">
                   {plan ? formatMoney(plan.billingPriceCents, plan.billingCurrency) : "Not configured"}
