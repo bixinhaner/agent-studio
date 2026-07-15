@@ -1280,8 +1280,8 @@ export function BillingWorkspace() {
                   <div className="admin-billing-product-head">
                     <div>
                       <span className="admin-billing-kicker">Production catalog</span>
-                      <h3>Plus / PRO 正式售卖矩阵</h3>
-                      <p>生产部署会幂等创建四个价格项；客户侧聚合展示为两个套餐，并在这里维护售卖状态和价格。</p>
+                      <h3>正式售卖套餐</h3>
+                      <p>套餐名称、周期、额度与价格均来自生产配置；客户侧按套餐档位聚合展示可购买的价格项。</p>
                     </div>
                     <Tag color={data?.stripe.mode === "live" ? "success" : "processing"}>{data?.stripe.mode ?? "unknown"} mode</Tag>
                   </div>
