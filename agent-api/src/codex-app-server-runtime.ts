@@ -15,6 +15,7 @@ import {
 import type { CodexRuntimeOptions, CodexStreamEvent } from "./codex-runtime.js";
 
 type JsonRecord = Record<string, unknown>;
+type JsonRpcId = string | number;
 
 type AppServerThreadOptions = {
   model: string;
@@ -73,6 +74,8 @@ const DEFAULT_TURN_MAX_MS = 90 * 60_000;
 const MAX_DIAGNOSTIC_EVENTS = 20;
 const MAX_BUFFERED_PRE_START_EVENTS = 50;
 const TOML_DRIVER_APP_SERVER = "app_server";
+const UNSUPPORTED_INTERACTIVE_TOOL_MESSAGE =
+  "This interactive tool is unavailable in the current channel. Do not retry it. Continue answering with the information already available and clearly state any data limitations.";
 
 function trimOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -729,7 +732,7 @@ class CodexAppServerProcess {
   private nextRequestId = 1;
   private proc: ReturnType<typeof spawn> | undefined;
   private rl: readline.Interface | undefined;
-  private readonly pending = new Map<number, PendingRequest & { timeout: NodeJS.Timeout }>();
+  private readonly pending = new Map<JsonRpcId, PendingRequest & { timeout: NodeJS.Timeout }>();
   private readonly subscribers = new Set<NotificationSubscriber>();
   private readonly turnWaiters: Array<() => void> = [];
   private startPromise: Promise<void> | undefined;
@@ -774,6 +777,14 @@ class CodexAppServerProcess {
 
   notify(method: string, params: Record<string, unknown> = {}): void {
     this.proc?.stdin?.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  private respond(id: JsonRpcId, result: unknown): void {
+    this.proc?.stdin?.write(`${JSON.stringify({ id, result })}\n`);
+  }
+
+  private respondError(id: JsonRpcId, message: string): void {
+    this.proc?.stdin?.write(`${JSON.stringify({ id, error: { code: -32004, message } })}\n`);
   }
 
   getStderrTail(): string | undefined {
@@ -864,10 +875,24 @@ class CodexAppServerProcess {
       return;
     }
 
-    if (Object.prototype.hasOwnProperty.call(message, "id")) {
-      const id = Number(message.id);
+    const hasId = Object.prototype.hasOwnProperty.call(message, "id");
+    const method = trimOrUndefined(message.method);
+    if (hasId && method) {
+      this.handleServerRequest(message, method);
+      return;
+    }
+
+    if (hasId) {
+      const id = message.id;
+      if (typeof id !== "string" && typeof id !== "number") {
+        console.warn("codex app-server response had an invalid id", { id });
+        return;
+      }
       const pending = this.pending.get(id);
-      if (!pending) return;
+      if (!pending) {
+        console.warn("codex app-server response did not match a pending request", { id });
+        return;
+      }
       this.pending.delete(id);
       clearTimeout(pending.timeout);
       const error = asRecord(message.error);
@@ -883,6 +908,49 @@ class CodexAppServerProcess {
     for (const subscriber of [...this.subscribers]) {
       subscriber(message);
     }
+  }
+
+  private handleServerRequest(message: JsonRecord, method: string): void {
+    const id = message.id;
+    if (typeof id !== "string" && typeof id !== "number") {
+      console.warn("codex app-server server request had an invalid id", { id, method });
+      return;
+    }
+
+    const params = asRecord(message.params);
+    const threadId = trimOrUndefined(params?.threadId) ?? trimOrUndefined(params?.conversationId);
+    const turnId = trimOrUndefined(params?.turnId);
+    console.warn("codex app-server interactive request rejected", {
+      method,
+      threadId,
+      turnId,
+      reason: "unsupported_channel_interaction"
+    });
+
+    if (method === "item/tool/call") {
+      this.respond(id, {
+        success: false,
+        contentItems: [{ type: "inputText", text: UNSUPPORTED_INTERACTIVE_TOOL_MESSAGE }]
+      });
+      return;
+    }
+
+    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
+      this.respond(id, { decision: "cancel" });
+      return;
+    }
+
+    if (method === "execCommandApproval" || method === "applyPatchApproval") {
+      this.respond(id, { decision: "denied" });
+      return;
+    }
+
+    if (method === "mcpServer/elicitation/request") {
+      this.respond(id, { action: "cancel", content: null, _meta: null });
+      return;
+    }
+
+    this.respondError(id, UNSUPPORTED_INTERACTIVE_TOOL_MESSAGE);
   }
 
   private handleExit(error: Error): void {

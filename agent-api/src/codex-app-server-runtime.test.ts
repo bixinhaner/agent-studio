@@ -32,6 +32,7 @@ const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity 
 let nextThreadId = 1;
 let nextTurnId = 1;
 const threads = new Set();
+const pendingServerRequests = new Map();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -51,6 +52,39 @@ rl.on("line", (line) => {
     return;
   }
   const id = message.id;
+  if (!message.method && pendingServerRequests.has(id)) {
+    const context = pendingServerRequests.get(id);
+    pendingServerRequests.delete(id);
+    const contentItems = message.result && Array.isArray(message.result.contentItems) ? message.result.contentItems : [];
+    const failureText = contentItems.map((item) => item && item.text || "").join(" ");
+    const errorText = message.error && typeof message.error.message === "string" ? message.error.message : "";
+    const wasRejected = (message.result && message.result.success === false) || Boolean(message.error);
+    if (wasRejected && (failureText || errorText).includes("Continue answering")) {
+      notify("item/agentMessage/delta", {
+        threadId: context.threadId,
+        turnId: context.turnId,
+        itemId: "continued-msg",
+        delta: "Continued with available information"
+      });
+      notify("item/completed", {
+        threadId: context.threadId,
+        turnId: context.turnId,
+        item: { id: "continued-msg", type: "agentMessage", text: "Continued with available information" },
+        completedAtMs: Date.now()
+      });
+      notify("turn/completed", {
+        threadId: context.threadId,
+        turn: { id: context.turnId, last_agent_message: "Continued with available information" }
+      });
+      return;
+    }
+    notify("error", {
+      threadId: context.threadId,
+      turnId: context.turnId,
+      message: "interactive request was not rejected correctly"
+    });
+    return;
+  }
   const params = message.params || {};
   if (message.method === "initialize") {
     respond(id, {});
@@ -159,6 +193,22 @@ rl.on("line", (line) => {
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
       notify("turn/started", { threadId, turn: { id: turnId } });
+      if (inputText === "unsupported-interactive-tool" || inputText === "unsupported-user-input") {
+        const requestId = "server-request-1";
+        pendingServerRequests.set(requestId, { threadId, turnId });
+        write({
+          method: inputText === "unsupported-interactive-tool" ? "item/tool/call" : "item/tool/requestUserInput",
+          id: requestId,
+          params: {
+            threadId,
+            turnId,
+            itemId: "plugin-install-call",
+            tool: "request_plugin_install",
+            arguments: { plugin_id: "google-drive@openai-curated-remote" }
+          }
+        });
+        return;
+      }
       if (inputText === "hang") {
         return;
       }
@@ -406,6 +456,80 @@ describe("Codex app-server runtime", () => {
     expect(events.some((event) => event.type === "error")).toBe(false);
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
     expect(warnSpy).not.toHaveBeenCalledWith("codex app-server turn failed", expect.anything());
+    warnSpy.mockRestore();
+  });
+
+  it("rejects unsupported interactive tools and lets the turn continue", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-unsupported-interaction")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "unsupported-interactive-tool")) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Continued with available information");
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server interactive request rejected",
+      expect.objectContaining({
+        method: "item/tool/call",
+        threadId: thread.id,
+        reason: "unsupported_channel_interaction"
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("returns an actionable error for unsupported user-input requests and lets the turn continue", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-unsupported-user-input")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        networkAccessEnabled: true
+      }
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "unsupported-user-input")) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Continued with available information");
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server interactive request rejected",
+      expect.objectContaining({
+        method: "item/tool/requestUserInput",
+        threadId: thread.id,
+        reason: "unsupported_channel_interaction"
+      })
+    );
     warnSpy.mockRestore();
   });
 
