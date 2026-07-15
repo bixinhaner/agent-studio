@@ -98,10 +98,11 @@ export function CapabilityPolicyEditor({
   return (
     <PolicyRulesEditor
       title={title}
-      description="按单个能力资源维护角色、部门和用户的允许或拒绝策略，角色主体支持内部员工/内部管理员/外部 User/外部 Admin。"
-      emptyText="当前能力资源还没有显式授权策略。"
+      addLabel="添加例外"
+      saveLabel="保存规则"
+      description="添加需要额外允许或拒绝的角色、部门或用户；拒绝规则会优先执行。"
+      emptyText="当前没有额外访问规则。"
       loadingText="加载能力授权中..."
-      saveLabel="保存授权"
       savingLabel="保存中..."
       rules={policies}
       loading={loading}
@@ -109,6 +110,8 @@ export function CapabilityPolicyEditor({
       ready={policiesReady}
       errorText={errorText}
       successText={successText}
+      addInDrawer
+      referenceAccessLayout
       onChange={(nextPolicies) => {
         setPolicies(nextPolicies);
         setSuccessText("");

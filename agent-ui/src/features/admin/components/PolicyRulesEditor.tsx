@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Select } from "antd";
+import { Alert, Button, Card, Drawer, Modal, Select } from "antd";
+import { Building2, MoreHorizontal, ShieldCheck, UserRound, Users } from "lucide-react";
 
 import { openWarningConfirm } from "../../../lib/warning-modal";
 import { fetchAdminUsers, fetchDepartmentTree } from "../api";
@@ -28,6 +29,8 @@ type PolicyRulesEditorProps = {
   ready: boolean;
   errorText?: string;
   successText?: string;
+  addInDrawer?: boolean;
+  referenceAccessLayout?: boolean;
   onChange(rules: PolicyRuleValue[]): void;
   onSave(): void;
 };
@@ -58,14 +61,14 @@ const FALLBACK_ROLE_SUBJECT_LABELS: Record<string, string> = {
 const FALLBACK_ROLE_SUBJECT_IDS = Object.keys(FALLBACK_ROLE_SUBJECT_LABELS);
 
 const SUBJECT_TYPE_OPTIONS: Array<{ label: string; value: PolicyRuleSubjectType }> = [
-  { label: "role", value: "role" },
-  { label: "department", value: "department" },
-  { label: "user", value: "user" }
+  { label: "角色", value: "role" },
+  { label: "部门", value: "department" },
+  { label: "用户", value: "user" }
 ];
 
 const EFFECT_OPTIONS: Array<{ label: string; value: PolicyRuleEffect }> = [
-  { label: "allow", value: "allow" },
-  { label: "deny", value: "deny" }
+  { label: "允许", value: "allow" },
+  { label: "拒绝", value: "deny" }
 ];
 
 const EMPTY_RULE: PolicyRuleValue = {
@@ -155,10 +158,7 @@ async function resolveSubjectDirectory(): Promise<SubjectDirectory> {
         upsertOption(
           roleMap,
           value,
-          buildOptionLabel(
-            FALLBACK_ROLE_SUBJECT_LABELS[value] ?? value,
-            value.startsWith("org_") ? "组织上下文角色" : "legacy role"
-          )
+          FALLBACK_ROLE_SUBJECT_LABELS[value] ?? value
         );
       }
 
@@ -182,7 +182,7 @@ async function resolveSubjectDirectory(): Promise<SubjectDirectory> {
         }
         const localRole = String(user.local?.role || "").trim();
         if (localRole) {
-          upsertOption(roleMap, localRole, buildOptionLabel(localRole, "legacy role"));
+          upsertOption(roleMap, localRole, FALLBACK_ROLE_SUBJECT_LABELS[localRole] ?? localRole);
         }
       }
 
@@ -227,11 +227,15 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
     ready,
     errorText,
     successText,
+    addInDrawer = false,
+    referenceAccessLayout = false,
     onChange,
     onSave
   } = props;
   const [subjectDirectory, setSubjectDirectory] = useState<SubjectDirectory>(EMPTY_SUBJECT_DIRECTORY);
   const [subjectDirectoryLoading, setSubjectDirectoryLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+  const [draftRule, setDraftRule] = useState<PolicyRuleValue>({ ...EMPTY_RULE });
 
   useEffect(() => {
     let active = true;
@@ -294,7 +298,95 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
     onChange(rules.filter((_, ruleIndex) => ruleIndex !== index));
   }
 
+  function subjectDisplay(rule: PolicyRuleValue): string {
+    return subjectOptionMap[rule.subjectType].get(rule.subjectId)?.label || rule.subjectId || "未选择主体";
+  }
+
+  function subjectTypeLabel(subjectType: PolicyRuleSubjectType): string {
+    if (subjectType === "role") return "角色";
+    if (subjectType === "department") return "部门";
+    return "用户";
+  }
+
+  function subjectIcon(subjectType: PolicyRuleSubjectType) {
+    if (subjectType === "role") return <ShieldCheck />;
+    if (subjectType === "department") return <Building2 />;
+    return <UserRound />;
+  }
+
+  if (referenceAccessLayout) {
+    const allowRules = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => rule.effect === "allow");
+    const denyRules = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => rule.effect === "deny");
+    return (
+      <>
+        <div className="access-policy-board">
+          <div className="access-policy-board-header">
+            <div>
+              <h3>{title}</h3>
+              <p>{description}</p>
+            </div>
+            <div>
+              <Button disabled={loading || saving || !ready} onClick={() => { setDraftRule({ ...EMPTY_RULE }); setAddOpen(true); }}>{addLabel}</Button>
+              <Button type="primary" ghost onClick={onSave} disabled={saving || loading || !ready}>{saving ? savingLabel : saveLabel}</Button>
+            </div>
+          </div>
+
+          {loading ? <p className="resource-center-subtle">{loadingText}</p> : null}
+          {errorText ? <Alert type="error" showIcon className="admin-alert-inline" message={errorText} /> : null}
+          {successText ? <Alert type="success" showIcon className="admin-alert-inline" message={successText} /> : null}
+
+          <div className="access-policy-group">
+            <div className="access-policy-group-title"><span><Users />允许使用</span><small>{allowRules.length ? `${allowRules.length} 条显式规则` : "使用默认访问范围"}</small></div>
+            <div className="access-policy-row inherited">
+              <span className="access-policy-row-icon"><Users /></span>
+              <span><strong>组织成员</strong><small>未命中例外时，遵循上方默认访问范围</small></span>
+              <span><small>规则来源</small><b>智能体默认设置</b></span>
+              <span className="access-policy-effect allow">默认</span>
+            </div>
+            {allowRules.map(({ rule, index }) => <div className="access-policy-row" key={`allow-${rule.subjectType}-${rule.subjectId}-${index}`}>
+              <span className="access-policy-row-icon allow">{subjectIcon(rule.subjectType)}</span>
+              <span><strong>{subjectDisplay(rule)}</strong><small>{subjectTypeLabel(rule.subjectType)} · 显式允许</small></span>
+              <span><small>规则来源</small><b>当前智能体</b></span>
+              <span className="access-policy-effect allow">允许</span>
+              <Button type="text" aria-label={`删除 ${subjectDisplay(rule)} 规则`} icon={<MoreHorizontal />} onClick={() => void removeRule(index)} />
+            </div>)}
+          </div>
+
+          <div className="access-policy-group exceptions">
+            <div className="access-policy-group-title"><span><ShieldCheck />拒绝例外</span><small>{denyRules.length ? `${denyRules.length} 条规则优先执行` : "暂无拒绝例外"}</small></div>
+            {denyRules.length ? denyRules.map(({ rule, index }) => <div className="access-policy-row" key={`deny-${rule.subjectType}-${rule.subjectId}-${index}`}>
+              <span className="access-policy-row-icon deny">{subjectIcon(rule.subjectType)}</span>
+              <span><strong>{subjectDisplay(rule)}</strong><small>{subjectTypeLabel(rule.subjectType)} · 显式拒绝</small></span>
+              <span><small>优先级</small><b>高于允许规则</b></span>
+              <span className="access-policy-effect deny">拒绝</span>
+              <Button type="text" aria-label={`删除 ${subjectDisplay(rule)} 规则`} icon={<MoreHorizontal />} onClick={() => void removeRule(index)} />
+            </div>) : <div className="access-policy-empty"><ShieldCheck /><span><strong>没有拒绝例外</strong><small>需要排除特定角色、部门或用户时再添加。</small></span></div>}
+          </div>
+        </div>
+        <Modal
+          className="capability-policy-reference-modal"
+          title="添加例外"
+          width={440}
+          open={addOpen}
+          onCancel={() => setAddOpen(false)}
+          footer={<div className="agent-drawer-footer"><Button onClick={() => setAddOpen(false)}>取消</Button><Button type="primary" disabled={!draftRule.subjectId.trim()} onClick={() => { onChange([...rules, draftRule]); setAddOpen(false); }}>添加到草稿</Button></div>}
+        >
+          <p className="policy-drawer-intro">选择允许或拒绝，再指定需要命中的角色、部门或用户。</p>
+          <div className="policy-drawer-effect-choice">
+            <button type="button" className={draftRule.effect === "allow" ? "active allow" : "allow"} onClick={() => setDraftRule((rule) => ({ ...rule, effect: "allow" }))}><strong>允许访问</strong><small>主体命中时允许继续使用</small></button>
+            <button type="button" className={draftRule.effect === "deny" ? "active deny" : "deny"} onClick={() => setDraftRule((rule) => ({ ...rule, effect: "deny" }))}><strong>拒绝访问</strong><small>拒绝规则优先于允许规则</small></button>
+          </div>
+          <div className="policy-drawer-fields">
+            <label><span>主体类型</span><Select value={draftRule.subjectType} options={SUBJECT_TYPE_OPTIONS} onChange={(value) => setDraftRule((rule) => ({ ...rule, subjectType: value as PolicyRuleSubjectType, subjectId: "" }))} /></label>
+            <label><span>主体标识</span><Select value={draftRule.subjectId || undefined} showSearch optionFilterProp="label" placeholder={subjectIdPlaceholder(draftRule.subjectType)} options={resolveSubjectIdOptions(draftRule)} loading={subjectDirectoryLoading} onChange={(value) => setDraftRule((rule) => ({ ...rule, subjectId: String(value || "") }))} /></label>
+          </div>
+        </Modal>
+      </>
+    );
+  }
+
   return (
+    <>
     <Card className="resource-center-section resource-policy-editor antd-admin-card" size="small">
       <div className="resource-center-section-header">
         <div>
@@ -304,7 +396,14 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
         <Button
           type="default"
           disabled={loading || saving || !ready}
-          onClick={() => onChange([...rules, { ...EMPTY_RULE }])}
+          onClick={() => {
+            if (!addInDrawer) {
+              onChange([...rules, { ...EMPTY_RULE }]);
+              return;
+            }
+            setDraftRule({ ...EMPTY_RULE });
+            setAddOpen(true);
+          }}
         >
           {addLabel}
         </Button>
@@ -378,5 +477,24 @@ export function PolicyRulesEditor(props: PolicyRulesEditorProps) {
         </Button>
       </div>
     </Card>
+    {addInDrawer ? <Drawer
+      className="capability-policy-reference-drawer"
+      title="添加访问规则"
+      width={420}
+      open={addOpen}
+      onClose={() => setAddOpen(false)}
+      footer={<div className="agent-drawer-footer"><Button onClick={() => setAddOpen(false)}>取消</Button><Button type="primary" disabled={!draftRule.subjectId.trim()} onClick={() => { onChange([...rules, draftRule]); setAddOpen(false); }}>添加规则</Button></div>}
+    >
+      <p className="policy-drawer-intro">选择允许或拒绝，再指定需要命中的角色、部门或用户。</p>
+      <div className="policy-drawer-effect-choice">
+        <button className={draftRule.effect === "allow" ? "active allow" : "allow"} onClick={() => setDraftRule((rule) => ({ ...rule, effect: "allow" }))}><strong>允许访问</strong><small>主体命中时允许继续使用</small></button>
+        <button className={draftRule.effect === "deny" ? "active deny" : "deny"} onClick={() => setDraftRule((rule) => ({ ...rule, effect: "deny" }))}><strong>拒绝访问</strong><small>拒绝规则优先于允许规则</small></button>
+      </div>
+      <div className="policy-drawer-fields">
+        <label><span>主体类型</span><Select value={draftRule.subjectType} options={SUBJECT_TYPE_OPTIONS} onChange={(value) => setDraftRule((rule) => ({ ...rule, subjectType: value as PolicyRuleSubjectType, subjectId: "" }))} /></label>
+        <label><span>主体标识</span><Select value={draftRule.subjectId || undefined} showSearch optionFilterProp="label" placeholder={subjectIdPlaceholder(draftRule.subjectType)} options={resolveSubjectIdOptions(draftRule)} loading={subjectDirectoryLoading} onChange={(value) => setDraftRule((rule) => ({ ...rule, subjectId: String(value || "") }))} /></label>
+      </div>
+    </Drawer> : null}
+    </>
   );
 }

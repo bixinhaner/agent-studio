@@ -57,6 +57,16 @@ export type NativeCodexSkillListResponse = {
   skillsRoot: string;
 };
 
+export type CodexSkillContentResponse = {
+  skill: {
+    name?: string;
+    skillName?: string;
+    displayName?: string;
+    description?: string;
+  };
+  content: string;
+};
+
 export type RunProfileRecord = {
   id: string;
   organizationId?: string;
@@ -222,6 +232,18 @@ export type AgentModeResponse = {
   agentMode: AgentModeRecord;
 };
 
+export type AgentConfigurationCheck = {
+  key: string;
+  label: string;
+  pass: boolean;
+  detail: string;
+};
+
+export type AgentConfigurationValidationResponse = {
+  valid: boolean;
+  checks: AgentConfigurationCheck[];
+};
+
 export type CreateAgentModeInput = {
   organizationId?: string;
   name: string;
@@ -233,6 +255,16 @@ export type CreateAgentModeInput = {
 };
 
 export type UpdateAgentModeInput = Partial<CreateAgentModeInput>;
+export type AgentModeConfigurationInput = {
+  agentMode: CreateAgentModeInput;
+  skillPackageIds: string[];
+  instructionSources: AgentModeInstructionSourceInput[];
+};
+export type AgentModeConfigurationUpdateInput = {
+  agentMode: UpdateAgentModeInput;
+  skillPackageIds: string[];
+  instructionSources: AgentModeInstructionSourceInput[];
+};
 export type CopyAgentModeInput = {
   name: string;
   slug: string;

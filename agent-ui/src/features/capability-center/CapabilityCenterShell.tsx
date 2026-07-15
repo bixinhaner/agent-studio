@@ -1,232 +1,80 @@
-import { ReloadOutlined } from "@ant-design/icons";
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
-  Button,
-  Card,
-  Drawer,
-  Empty,
-  Input,
-  Segmented,
-  Select,
-  Space,
-  Spin,
-  Steps,
-  Switch,
-  Tag,
-  Typography
-} from "antd";
+  Archive,
+  Bot,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  CircleDot,
+  Copy,
+  Eye,
+  EyeOff,
+  FileText,
+  Gauge,
+  LockKeyhole,
+  MoreHorizontal,
+  PackageOpen,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal
+} from "lucide-react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Alert, Button, Drawer, Dropdown, Empty, Input, Modal, Select, Spin, Steps, Switch, Tag, message } from "antd";
 
 import {
-  createAgentMode,
+  copyAgentMode,
+  createConfiguredAgentMode,
   createRunProfile,
   createSkillPackage,
   fetchAgentModes,
-  fetchRuntimeModelCatalog,
   fetchRunProfiles,
-  fetchSkillPackages
+  fetchRuntimeModelCatalog,
+  fetchSkillPackages,
+  fetchWorkspaceAgentsTemplates,
 } from "./api";
-import {
-  modelOptionsFromCatalog,
-  normalizeReasoningEffortForModel,
-  reasoningOptionsForModel,
-  type RuntimeModelCatalog
-} from "../../lib/model-config";
-import { deepEqual, normalizeRecordForCompare } from "../../lib/object-utils";
-import { useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
-import { openWarningConfirm } from "../../lib/warning-modal";
-import { MobileFilterDrawer } from "../admin/components/MobileFilterDrawer";
-import {
-  buildRunProfileModelOptions,
-  DEFAULT_RUN_PROFILE_MODEL,
-  normalizeRunProfileAllowedModels
-} from "./run-profile-model-options";
-import type {
-  AgentModeRecord,
-  CapabilityCenterTab,
-  CapabilityStatusFilter,
-  CapabilityVisibilityFilter,
-  CreateAgentModeInput,
-  CreateRunProfileInput,
-  CreateSkillPackageInput,
-  RunProfileRecord,
-  SkillPackageRecord
-} from "./types";
+import { defaultWorkspaceAgentsMdSourceRef } from "./workspace-agents-md-source-ref";
+import { modelOptionsFromCatalog, type ModelOption } from "../../lib/model-config";
+import type { AgentModeRecord, RunProfileRecord, SkillPackageRecord, WorkspaceAgentsTemplateRecord } from "./types";
+import "./agent-workspace.css";
 
-const AgentModeDetailViewLazy = lazy(() =>
-  import("./AgentModeDetailView").then((module) => ({ default: module.AgentModeDetailView }))
+const AgentWorkspaceView = lazy(() =>
+  import("./AgentWorkspaceView").then((module) => ({ default: module.AgentWorkspaceView }))
 );
-const RunProfileDetailViewLazy = lazy(() =>
+const RunProfileDetailView = lazy(() =>
   import("./RunProfileDetailView").then((module) => ({ default: module.RunProfileDetailView }))
 );
-const SkillPackageDetailViewLazy = lazy(() =>
+const SkillPackageDetailView = lazy(() =>
   import("./SkillPackageDetailView").then((module) => ({ default: module.SkillPackageDetailView }))
 );
 
-type CreatePanelState =
-  | {
-      kind: "agent_mode";
-      name: string;
-      slug: string;
-      description: string;
-      status: string;
-      visibleToUsers: boolean;
-      runProfileId: string;
-    }
-  | {
-      kind: "skill_package";
-      name: string;
-      slug: string;
-      description: string;
-      status: string;
-      visibleToUsers: boolean;
-    }
-  | {
-      kind: "run_profile";
-      name: string;
-      slug: string;
-      description: string;
-      status: string;
-      defaultModel: string;
-      allowedModels: string[];
-      defaultReasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-      sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
-      approvalPolicy: "never" | "on-request" | "on-failure" | "untrusted";
-      networkAccessEnabled: boolean;
-      webSearchMode: "disabled" | "cached" | "live";
-    };
-
-const CAPABILITY_TABS: Array<{ id: CapabilityCenterTab; label: string }> = [
-  { id: "agent_mode", label: "Agent Modes" },
-  { id: "skill_package", label: "Skill Packages" },
-  { id: "run_profile", label: "Run Profiles" }
-];
-
-const VISIBILITY_FILTER_LABELS: Record<CapabilityVisibilityFilter, string> = {
-  all: "全部可见性",
-  visible: "仅对用户可见",
-  hidden: "仅管理员可见"
+type CreateDraft = {
+  templateId: string;
+  name: string;
+  slug: string;
+  description: string;
+  status: string;
+  visibleToUsers: boolean;
+  runProfileId: string;
+  skillPackageIds: string[];
+  instructionContent: string;
 };
 
-const STATUS_FILTER_OPTIONS: Array<{ label: string; value: CapabilityStatusFilter }> = [
-  { label: "全部状态", value: "all" },
-  { label: "启用中", value: "active" },
-  { label: "已禁用", value: "disabled" }
-];
+const EMPTY_DRAFT: CreateDraft = {
+  templateId: "blank",
+  name: "",
+  slug: "",
+  description: "",
+  status: "active",
+  visibleToUsers: true,
+  runProfileId: "",
+  skillPackageIds: [],
+  instructionContent: ""
+};
 
-const VISIBILITY_FILTER_OPTIONS: Array<{ label: string; value: CapabilityVisibilityFilter }> = [
-  { label: VISIBILITY_FILTER_LABELS.all, value: "all" },
-  { label: VISIBILITY_FILTER_LABELS.visible, value: "visible" },
-  { label: VISIBILITY_FILTER_LABELS.hidden, value: "hidden" }
-];
-
-const CREATE_STATUS_OPTIONS = [
-  { label: "active", value: "active" },
-  { label: "disabled", value: "disabled" }
-];
-
-const CREATE_VISIBILITY_OPTIONS = [
-  { label: "仅管理员", value: "hidden" },
-  { label: "对用户可见", value: "visible" }
-];
-
-const CREATE_SANDBOX_OPTIONS = [
-  { label: "read-only", value: "read-only" },
-  { label: "workspace-write", value: "workspace-write" },
-  { label: "danger-full-access", value: "danger-full-access" }
-];
-
-const CREATE_APPROVAL_OPTIONS = [
-  { label: "never", value: "never" },
-  { label: "on-request", value: "on-request" },
-  { label: "on-failure", value: "on-failure" },
-  { label: "untrusted", value: "untrusted" }
-];
-
-const CREATE_SEARCH_OPTIONS = [
-  { label: "disabled", value: "disabled" },
-  { label: "cached", value: "cached" },
-  { label: "live", value: "live" }
-];
-
-function panelKindForTab(tab: CapabilityCenterTab): CreatePanelState["kind"] {
-  if (tab === "agent_mode") return "agent_mode";
-  if (tab === "skill_package") return "skill_package";
-  return "run_profile";
-}
-
-function formatLocalDateTime(value?: string) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString();
-}
-
-function matchesSearch(input: string, values: Array<string | undefined | null>) {
-  const normalized = input.trim().toLowerCase();
-  if (!normalized) return true;
-  return values.some((value) => (value ?? "").toLowerCase().includes(normalized));
-}
-
-function resourceTitle(tab: CapabilityCenterTab) {
-  return CAPABILITY_TABS.find((item) => item.id === tab)?.label ?? "能力资源";
-}
-
-function defaultSlugBase(kind: CreatePanelState["kind"]) {
-  if (kind === "agent_mode") return "agent-mode";
-  if (kind === "skill_package") return "skill-package";
-  return "run-profile";
-}
-
-function createStepsForKind(kind: CreatePanelState["kind"]) {
-  if (kind === "agent_mode") {
-    return [
-      { title: "基础信息", description: "名称、slug、描述" },
-      { title: "绑定策略", description: "运行策略与可见性" },
-      { title: "确认创建", description: "检查配置后提交" }
-    ];
-  }
-  if (kind === "skill_package") {
-    return [
-      { title: "基础信息", description: "名称、slug、描述" },
-      { title: "可见性", description: "状态与用户可见范围" },
-      { title: "确认创建", description: "检查配置后提交" }
-    ];
-  }
-  return [
-    { title: "基础信息", description: "名称、slug、描述" },
-    { title: "运行参数", description: "模型与执行策略" },
-    { title: "确认创建", description: "检查配置后提交" }
-  ];
-}
-
-function createStepValidationMessage(
-  panel: CreatePanelState,
-  step: number,
-  runProfileCount: number
-): string | null {
-  if (step === 0) {
-    if (!panel.name.trim()) return "请填写能力名称";
-    if (!panel.slug.trim()) return "请填写能力 slug";
-    return null;
-  }
-
-  if (step !== 1) return null;
-  if (!panel.status.trim()) return "请设置状态";
-  if (panel.kind === "agent_mode") {
-    if (runProfileCount === 0) return "请先创建至少一个运行策略";
-    if (!panel.runProfileId.trim()) return "请绑定运行策略";
-    return null;
-  }
-  if (panel.kind === "run_profile") {
-    if (!panel.defaultModel.trim()) return "请选择默认模型";
-    if (panel.allowedModels.length === 0) return "请至少选择一个可选模型";
-    return null;
-  }
-  return null;
-}
-
-function slugifyValue(value: string) {
+function slugify(value: string) {
   return value
     .trim()
     .toLowerCase()
@@ -235,1086 +83,381 @@ function slugifyValue(value: string) {
     .replace(/-{2,}/g, "-");
 }
 
-function suggestUniqueSlug(base: string, existingSlugs: string[]) {
-  const normalizedBase = slugifyValue(base);
-  const seed = normalizedBase || "resource";
-  const taken = new Set(existingSlugs.map((item) => item.trim().toLowerCase()).filter(Boolean));
-  if (!taken.has(seed)) return seed;
-  let index = 2;
-  let candidate = `${seed}-${index}`;
-  while (taken.has(candidate)) {
-    index += 1;
-    candidate = `${seed}-${index}`;
-  }
-  return candidate;
+function formatLocalDateTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function createInitialPanelState(tab: CapabilityCenterTab, runProfiles: RunProfileRecord[]): CreatePanelState {
-  if (tab === "agent_mode") {
-    return {
-      kind: "agent_mode",
-      name: "",
-      slug: "",
-      description: "",
-      status: "active",
-      visibleToUsers: false,
-      runProfileId: runProfiles[0]?.id ?? ""
-    };
-  }
-  if (tab === "skill_package") {
-    return {
-      kind: "skill_package",
-      name: "",
-      slug: "",
-      description: "",
-      status: "active",
-      visibleToUsers: false
-    };
-  }
-  return {
-    kind: "run_profile",
-    name: "",
-    slug: "",
-    description: "",
-    status: "active",
-    defaultModel: DEFAULT_RUN_PROFILE_MODEL,
-    allowedModels: [DEFAULT_RUN_PROFILE_MODEL],
-    defaultReasoningEffort: "high",
-    sandboxMode: "workspace-write",
-    approvalPolicy: "never",
-    networkAccessEnabled: true,
-    webSearchMode: "live"
-  };
+function initials(name: string) {
+  const normalized = name.trim();
+  return normalized ? normalized.slice(0, 1).toUpperCase() : "A";
 }
 
-function hasCreatePanelChanges(
-  currentPanel: CreatePanelState | null,
-  initialPanel: CreatePanelState | null,
-  currentStep: number
-): boolean {
-  if (!currentPanel || !initialPanel) return false;
-  if (currentStep > 0) return true;
-  return !deepEqual(normalizeRecordForCompare(currentPanel), normalizeRecordForCompare(initialPanel));
-}
-
-function toListText(items: string[]) {
-  return items.length > 0 ? items.join(", ") : "-";
-}
-
-function statusTagColor(status: string): string {
-  if (status === "active") return "success";
-  if (status === "draft") return "warning";
-  if (status === "error") return "error";
-  return "default";
-}
-
-function CapabilitySummaryCard(props: {
-  tab: CapabilityCenterTab;
-  resource: AgentModeRecord | SkillPackageRecord | RunProfileRecord;
-}) {
-  const resource = props.resource;
-  const createdAt = formatLocalDateTime(resource.createdAt);
-  const updatedAt = formatLocalDateTime(resource.updatedAt);
-
-  if (props.tab === "agent_mode") {
-    const agentMode = resource as AgentModeRecord;
-
-    return (
-      <section className="resource-center-section capability-center-summary">
-        <div className="resource-center-section-header">
-          <div>
-            <h3>{agentMode.name}</h3>
-            <p>{agentMode.slug}</p>
-          </div>
-          <Tag color={agentMode.status === "active" ? "success" : "default"}>{agentMode.status}</Tag>
-        </div>
-
-        <div className="capability-center-summary-grid">
-          <div>
-            <span className="field-label">资源类型</span>
-            <p>{resourceTitle(props.tab)}</p>
-          </div>
-          <div>
-            <span className="field-label">更新时间</span>
-            <p>{updatedAt || "-"}</p>
-          </div>
-          <div>
-            <span className="field-label">创建时间</span>
-            <p>{createdAt || "-"}</p>
-          </div>
-        </div>
-
-        <div className="capability-center-summary-grid compact">
-          <div>
-            <span className="field-label">运行策略</span>
-            <p>{agentMode.runProfileId}</p>
-          </div>
-          <div>
-            <span className="field-label">技能包</span>
-            <p>{agentMode.skillPackages.length}</p>
-          </div>
-          <div>
-            <span className="field-label">AGENTS.md 规则</span>
-            <p>{agentMode.instructionSources.length}</p>
-          </div>
-        </div>
-
-        <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
-      </section>
-    );
-  }
-
-  if (props.tab === "skill_package") {
-    const skillPackage = resource as SkillPackageRecord;
-
-    return (
-      <section className="resource-center-section capability-center-summary">
-        <div className="resource-center-section-header">
-          <div>
-            <h3>{skillPackage.name}</h3>
-            <p>{skillPackage.slug}</p>
-          </div>
-          <Tag color={skillPackage.status === "active" ? "success" : "default"}>{skillPackage.status}</Tag>
-        </div>
-
-        <div className="capability-center-summary-grid">
-          <div>
-            <span className="field-label">资源类型</span>
-            <p>{resourceTitle(props.tab)}</p>
-          </div>
-          <div>
-            <span className="field-label">更新时间</span>
-            <p>{updatedAt || "-"}</p>
-          </div>
-          <div>
-            <span className="field-label">创建时间</span>
-            <p>{createdAt || "-"}</p>
-          </div>
-        </div>
-
-        <div className="capability-center-summary-grid compact">
-          <div>
-            <span className="field-label">可见性</span>
-            <p>{skillPackage.visibleToUsers ? "对用户可见" : "仅管理员"}</p>
-          </div>
-          <div>
-            <span className="field-label">能力项</span>
-            <p>{skillPackage.items.length}</p>
-          </div>
-          <div>
-            <span className="field-label">运行绑定</span>
-            <p>{skillPackage.items.reduce((total: number, item) => total + item.runtimeBindings.length, 0)}</p>
-          </div>
-        </div>
-
-        <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
-      </section>
-    );
-  }
-
-  const runProfile = resource as RunProfileRecord;
-
-  return (
-    <section className="resource-center-section capability-center-summary">
-      <div className="resource-center-section-header">
-        <div>
-          <h3>{runProfile.name}</h3>
-          <p>{runProfile.slug}</p>
-        </div>
-        <Tag color={runProfile.status === "active" ? "success" : "default"}>{runProfile.status}</Tag>
-      </div>
-
-      <div className="capability-center-summary-grid">
-        <div>
-          <span className="field-label">资源类型</span>
-          <p>{resourceTitle(props.tab)}</p>
-        </div>
-        <div>
-          <span className="field-label">更新时间</span>
-          <p>{updatedAt || "-"}</p>
-        </div>
-        <div>
-          <span className="field-label">创建时间</span>
-          <p>{createdAt || "-"}</p>
-        </div>
-      </div>
-
-      <div className="capability-center-summary-grid compact">
-        <div>
-          <span className="field-label">默认模型</span>
-          <p>{runProfile.defaultModel}</p>
-        </div>
-        <div>
-          <span className="field-label">可选模型</span>
-          <p>{toListText(runProfile.allowedModels)}</p>
-        </div>
-        <div>
-          <span className="field-label">推理强度</span>
-          <p>{runProfile.defaultReasoningEffort}</p>
-        </div>
-        <div>
-          <span className="field-label">联网</span>
-          <p>{runProfile.networkAccessEnabled ? "启用" : "禁用"}</p>
-        </div>
-      </div>
-
-      <p className="capability-center-detail-note">当前摘要展示基础信息，详细配置请在下方详情编辑区维护。</p>
-    </section>
-  );
+function codexSkillCount(skillPackage: SkillPackageRecord) {
+  return skillPackage.items.reduce((total, item) => total + item.runtimeBindings.filter((binding) => binding.runtimeType === "codex" && binding.bindingType === "codex_skill").length, 0);
 }
 
 export function CapabilityCenterShell() {
+  const [agents, setAgents] = useState<AgentModeRecord[]>([]);
   const [runProfiles, setRunProfiles] = useState<RunProfileRecord[]>([]);
   const [skillPackages, setSkillPackages] = useState<SkillPackageRecord[]>([]);
-  const [agentModes, setAgentModes] = useState<AgentModeRecord[]>([]);
-  const [modelCatalog, setModelCatalog] = useState<RuntimeModelCatalog | null>(null);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [instructionTemplates, setInstructionTemplates] = useState<WorkspaceAgentsTemplateRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
-  const [tab, setTab] = useState<CapabilityCenterTab>("agent_mode");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CapabilityStatusFilter>("all");
-  const [visibilityFilter, setVisibilityFilter] = useState<CapabilityVisibilityFilter>("all");
-  const [selectedAgentModeId, setSelectedAgentModeId] = useState<string | null>(null);
-  const [selectedSkillPackageId, setSelectedSkillPackageId] = useState<string | null>(null);
-  const [selectedRunProfileId, setSelectedRunProfileId] = useState<string | null>(null);
-  const [createPanel, setCreatePanel] = useState<CreatePanelState | null>(null);
-  const [createPanelInitial, setCreatePanelInitial] = useState<CreatePanelState | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [visibility, setVisibility] = useState("all");
+  const [runProfileFilter, setRunProfileFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [createOpen, setCreateOpen] = useState(false);
   const [createStep, setCreateStep] = useState(0);
-  const [createSlugEdited, setCreateSlugEdited] = useState(false);
-  const [createSaving, setCreateSaving] = useState(false);
-  const [createErrorText, setCreateErrorText] = useState("");
-  const [reloadNonce, setReloadNonce] = useState(0);
-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
-  const isNarrowScreen = useIsNarrowScreen(980);
+  const [createDraft, setCreateDraft] = useState<CreateDraft>(EMPTY_DRAFT);
+  const [creating, setCreating] = useState(false);
+  const [assetOpen, setAssetOpen] = useState(false);
+  const [assetType, setAssetType] = useState<"run" | "skill">("run");
+  const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [assetCreateOpen, setAssetCreateOpen] = useState(false);
+  const [assetCreating, setAssetCreating] = useState(false);
+  const [assetDraft, setAssetDraft] = useState({ name: "", slug: "", description: "" });
+  const [messageApi, contextHolder] = message.useMessage();
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      setLoading(true);
-      setErrorText("");
-      try {
-        const [runProfileResponse, skillPackageResponse, agentModeResponse, nextModelCatalog] = await Promise.all([
-          fetchRunProfiles(),
-          fetchSkillPackages(),
-          fetchAgentModes(),
-          fetchRuntimeModelCatalog()
-        ]);
-        if (!active) return;
-        setRunProfiles(runProfileResponse.runProfiles);
-        setSkillPackages(skillPackageResponse.skillPackages);
-        setAgentModes(agentModeResponse.agentModes);
-        setModelCatalog(nextModelCatalog);
-      } catch (error) {
-        if (active) {
-          setErrorText(error instanceof Error ? error.message : "加载智能体配置失败");
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [reloadNonce]);
-
-  useEffect(() => {
-    if (tab === "run_profile" && visibilityFilter !== "all") {
-      setVisibilityFilter("all");
-    }
-  }, [tab, visibilityFilter]);
-
-  useEffect(() => {
-    if (!createPanel) return;
-    if (createPanel.kind === panelKindForTab(tab)) return;
-    const nextInitial = createInitialPanelState(tab, runProfiles);
-    setCreatePanel(nextInitial);
-    setCreatePanelInitial(nextInitial);
-    setCreateStep(0);
-    setCreateSlugEdited(false);
-    setCreateErrorText("");
-    setCreateSaving(false);
-  }, [createPanel, runProfiles, tab]);
-
-  const existingSlugsForCreate = useMemo(() => {
-    if (tab === "agent_mode") {
-      return agentModes.map((item) => item.slug);
-    }
-    if (tab === "skill_package") {
-      return skillPackages.map((item) => item.slug);
-    }
-    return runProfiles.map((item) => item.slug);
-  }, [agentModes, runProfiles, skillPackages, tab]);
-
-  useEffect(() => {
-    if (!createPanel || createPanel.kind !== "agent_mode") return;
-    if (createPanel.runProfileId || runProfiles.length === 0) return;
-    setCreatePanel((current) =>
-      current && current.kind === "agent_mode" ? { ...current, runProfileId: runProfiles[0]?.id ?? "" } : current
-    );
-  }, [createPanel, runProfiles]);
-
-  const visibleItems = useMemo(() => {
-    if (tab === "agent_mode") {
-      return agentModes.filter((item) => {
-        if (statusFilter !== "all" && item.status !== statusFilter) return false;
-        if (visibilityFilter !== "all") {
-          const visible = visibilityFilter === "visible";
-          if (Boolean(item.visibleToUsers) !== visible) return false;
-        }
-        return matchesSearch(search, [
-          item.name,
-          item.slug,
-          item.description,
-          item.runProfileId,
-          item.skillPackages.map((item) => item.skillPackageId).join(" "),
-          item.instructionSources.map((item) => item.sourceRef).join(" ")
-        ]);
-      });
-    }
-    if (tab === "skill_package") {
-      return skillPackages.filter((item) => {
-        if (statusFilter !== "all" && item.status !== statusFilter) return false;
-        if (visibilityFilter !== "all") {
-          const visible = visibilityFilter === "visible";
-          if (Boolean(item.visibleToUsers) !== visible) return false;
-        }
-        return matchesSearch(search, [
-          item.name,
-          item.slug,
-          item.description,
-          item.items.map((item) => item.capabilityKey).join(" ")
-        ]);
-      });
-    }
-    return runProfiles.filter((item) => {
-      if (statusFilter !== "all" && item.status !== statusFilter) return false;
-      return matchesSearch(search, [item.name, item.slug, item.description, item.defaultModel, item.allowedModels.join(" ")]);
-    });
-  }, [agentModes, runProfiles, search, skillPackages, statusFilter, tab, visibilityFilter]);
-
-  const selectedResource = useMemo(() => {
-    if (tab === "agent_mode") {
-      return agentModes.find((item) => item.id === selectedAgentModeId) ?? null;
-    }
-    if (tab === "skill_package") {
-      return skillPackages.find((item) => item.id === selectedSkillPackageId) ?? null;
-    }
-    return runProfiles.find((item) => item.id === selectedRunProfileId) ?? null;
-  }, [agentModes, runProfiles, selectedAgentModeId, selectedRunProfileId, selectedSkillPackageId, skillPackages, tab]);
-
-  const selectedRunProfile = useMemo(() => {
-    return tab === "run_profile" ? runProfiles.find((item) => item.id === selectedRunProfileId) ?? null : null;
-  }, [runProfiles, selectedRunProfileId, tab]);
-
-  const selectedSkillPackage = useMemo(() => {
-    return tab === "skill_package" ? skillPackages.find((item) => item.id === selectedSkillPackageId) ?? null : null;
-  }, [selectedSkillPackageId, skillPackages, tab]);
-
-  const selectedAgentMode = useMemo(() => {
-    return tab === "agent_mode" ? agentModes.find((item) => item.id === selectedAgentModeId) ?? null : null;
-  }, [agentModes, selectedAgentModeId, tab]);
-
-  function resetCreatePanel() {
-    setCreatePanel(null);
-    setCreatePanelInitial(null);
-    setCreateStep(0);
-    setCreateSlugEdited(false);
-    setCreateErrorText("");
-    setCreateSaving(false);
-  }
-
-  async function closeCreatePanel(forceClose = false) {
-    if (
-      !forceClose &&
-      hasCreatePanelChanges(createPanel, createPanelInitial, createStep)
-    ) {
-      const confirmed = await openWarningConfirm({
-        title: "确认关闭创建流程",
-        content: "当前存在未保存内容，关闭后将丢失本次填写。",
-        description: "建议先完成创建，或确认放弃当前输入。",
-        okText: "放弃并关闭",
-        cancelText: "继续编辑",
-        dangerLevel: "warning",
-        okButtonDanger: false
-      });
-      if (!confirmed) return;
-    }
-
-    resetCreatePanel();
-  }
-
-  function openCreatePanel() {
-    const nextInitial = createInitialPanelState(tab, runProfiles);
-    setCreatePanel(nextInitial);
-    setCreatePanelInitial(nextInitial);
-    setCreateStep(0);
-    setCreateSlugEdited(false);
-    setCreateErrorText("");
-    setCreateSaving(false);
-  }
-
-  function selectResource(id: string) {
-    if (tab === "agent_mode") {
-      setSelectedAgentModeId(id);
-      setSelectedSkillPackageId(null);
-      setSelectedRunProfileId(null);
-      if (isNarrowScreen) setMobileDetailOpen(true);
-      return;
-    }
-    if (tab === "skill_package") {
-      setSelectedSkillPackageId(id);
-      setSelectedAgentModeId(null);
-      setSelectedRunProfileId(null);
-      if (isNarrowScreen) setMobileDetailOpen(true);
-      return;
-    }
-    setSelectedRunProfileId(id);
-    setSelectedAgentModeId(null);
-    setSelectedSkillPackageId(null);
-    if (isNarrowScreen) setMobileDetailOpen(true);
-  }
-
-  async function handleCreateSave() {
-    if (!createPanel) return;
-    setCreateSaving(true);
-    setCreateErrorText("");
-
+  async function load() {
+    setLoading(true);
+    setErrorText("");
     try {
-      if (createPanel.kind === "agent_mode") {
-        const payload: CreateAgentModeInput = {
-          name: createPanel.name.trim(),
-          slug: createPanel.slug.trim(),
-          description: createPanel.description.trim(),
-          status: createPanel.status,
-          visibleToUsers: createPanel.visibleToUsers,
-          runProfileId: createPanel.runProfileId.trim()
-        };
-        const response = await createAgentMode(payload);
-        setAgentModes((current) => [...current, response.agentMode]);
-        setSelectedAgentModeId(response.agentMode.id);
-        resetCreatePanel();
-      } else if (createPanel.kind === "skill_package") {
-        const payload: CreateSkillPackageInput = {
-          name: createPanel.name.trim(),
-          slug: createPanel.slug.trim(),
-          description: createPanel.description.trim(),
-          status: createPanel.status,
-          visibleToUsers: createPanel.visibleToUsers
-        };
-        const response = await createSkillPackage(payload);
-        setSkillPackages((current) => [...current, response.skillPackage]);
-        setSelectedSkillPackageId(response.skillPackage.id);
-        resetCreatePanel();
-      } else {
-        const allowedModels = normalizeRunProfileAllowedModels(createPanel.allowedModels, createPanel.defaultModel);
-        const payload: CreateRunProfileInput = {
-          name: createPanel.name.trim(),
-          slug: createPanel.slug.trim(),
-          description: createPanel.description.trim(),
-          status: createPanel.status,
-          defaultModel: createPanel.defaultModel.trim(),
-          allowedModels,
-          defaultReasoningEffort: createPanel.defaultReasoningEffort,
-          sandboxMode: createPanel.sandboxMode,
-          approvalPolicy: createPanel.approvalPolicy,
-          networkAccessEnabled: createPanel.networkAccessEnabled,
-          webSearchMode: createPanel.webSearchMode
-        };
-        const response = await createRunProfile(payload);
-        setRunProfiles((current) => [...current, response.runProfile]);
-        setSelectedRunProfileId(response.runProfile.id);
-        resetCreatePanel();
-      }
+      const [agentResponse, runResponse, skillResponse, catalog, templateResponse] = await Promise.all([
+        fetchAgentModes(),
+        fetchRunProfiles(),
+        fetchSkillPackages(),
+        fetchRuntimeModelCatalog().catch(() => null),
+        fetchWorkspaceAgentsTemplates().catch(() => ({ templates: [] }))
+      ]);
+      setAgents(agentResponse.agentModes);
+      setRunProfiles(runResponse.runProfiles);
+      setSkillPackages(skillResponse.skillPackages);
+      setModelOptions(modelOptionsFromCatalog(catalog));
+      setInstructionTemplates(templateResponse.templates);
+      setCreateDraft((current) => ({
+        ...current,
+        runProfileId: current.runProfileId || runResponse.runProfiles.find((item) => item.status === "active")?.id || runResponse.runProfiles[0]?.id || ""
+      }));
     } catch (error) {
-      setCreateErrorText(error instanceof Error ? error.message : "创建能力资源失败");
-      setCreateSaving(false);
+      setErrorText(error instanceof Error ? error.message : "加载智能体配置失败");
+    } finally {
+      setLoading(false);
     }
-  }
-
-  const visibilityDisabled = tab === "run_profile";
-  const mobileFilterCount = (search.trim() ? 1 : 0) + (statusFilter !== "all" ? 1 : 0) + (visibilityFilter !== "all" ? 1 : 0);
-  const resourceLabel = resourceTitle(tab);
-  const noResultsLabel = tab === "agent_mode" ? "没有可用能力资源" : `当前筛选条件下没有${resourceLabel}`;
-  const visibleCount = visibleItems.length;
-  const enabledCount = visibleItems.filter((item) => item.status === "active").length;
-  const resourceCountLabel = tab === "agent_mode" ? "模式资源总数" : tab === "skill_package" ? "技能包总数" : "运行策略总数";
-  const sidebarTitle = tab === "agent_mode" ? "模式列表" : tab === "skill_package" ? "技能包列表" : "运行策略列表";
-  const selectedResourceSummary = selectedResource?.name ? `已选：${selectedResource.name}` : "未选择";
-  const createPanelKind = createPanel?.kind ?? panelKindForTab(tab);
-  const createSteps = useMemo(() => createStepsForKind(createPanelKind), [createPanelKind]);
-  const maxCreateStep = createSteps.length - 1;
-  const activeCreateStep = Math.min(createStep, maxCreateStep);
-  const runProfileModelOptions = useMemo(() => {
-    const modelsFromProfiles = runProfiles.flatMap((profile) => [profile.defaultModel, ...profile.allowedModels]);
-    const modelsFromCreatePanel =
-      createPanel?.kind === "run_profile" ? [createPanel.defaultModel, ...createPanel.allowedModels] : [];
-    return buildRunProfileModelOptions(
-      [...modelsFromProfiles, ...modelsFromCreatePanel],
-      modelOptionsFromCatalog(modelCatalog)
-    );
-  }, [createPanel, modelCatalog, runProfiles]);
-  const createReasoningOptions = useMemo(
-    () =>
-      createPanel?.kind === "run_profile"
-        ? reasoningOptionsForModel(createPanel.defaultModel, modelOptionsFromCatalog(modelCatalog))
-        : [],
-    [createPanel, modelCatalog]
-  );
-
-  useEffect(() => {
-    if (createStep <= maxCreateStep) return;
-    setCreateStep(maxCreateStep);
-  }, [createStep, maxCreateStep]);
-
-  function handleRunProfileUpdated(updatedRunProfile: RunProfileRecord) {
-    setRunProfiles((current) => current.map((item) => (item.id === updatedRunProfile.id ? updatedRunProfile : item)));
-    setSelectedRunProfileId(updatedRunProfile.id);
-  }
-
-  function handleSkillPackageUpdated(updatedSkillPackage: SkillPackageRecord) {
-    setSkillPackages((current) => current.map((item) => (item.id === updatedSkillPackage.id ? updatedSkillPackage : item)));
-    setSelectedSkillPackageId(updatedSkillPackage.id);
-  }
-
-  function handleCreateNextStep() {
-    if (!createPanel) return;
-    const errorMessage = createStepValidationMessage(createPanel, activeCreateStep, runProfiles.length);
-    if (errorMessage) {
-      setCreateErrorText(errorMessage);
-      return;
-    }
-    setCreateErrorText("");
-    setCreateStep((current) => Math.min(current + 1, maxCreateStep));
-  }
-
-  function handleCreatePreviousStep() {
-    setCreateErrorText("");
-    setCreateStep((current) => Math.max(current - 1, 0));
   }
 
   useEffect(() => {
-    if (!isNarrowScreen) {
-      setMobileDetailOpen(false);
-    }
-  }, [isNarrowScreen]);
+    void load();
+  }, []);
 
-  function renderSelectedDetail() {
-    if (selectedAgentMode) {
-      return (
-        <Suspense
-          fallback={(
-            <div className="admin-workspace-loading">
-              <Spin size="small" />
-            </div>
-          )}
-        >
-          <AgentModeDetailViewLazy
-            agentMode={selectedAgentMode}
-            runProfiles={runProfiles}
-            skillPackages={skillPackages}
-            onAgentModeUpdated={(updatedAgentMode) =>
-              setAgentModes((current) => current.map((item) => (item.id === updatedAgentMode.id ? updatedAgentMode : item)))
-            }
-          />
-        </Suspense>
-      );
+  const selectedAgent = agents.find((item) => item.id === selectedAgentId) ?? null;
+  const runProfileMap = useMemo(() => new Map(runProfiles.map((item) => [item.id, item])), [runProfiles]);
+  const filteredAgents = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return agents.filter((agent) => {
+      if (normalized && ![agent.name, agent.slug, agent.description].some((value) => (value ?? "").toLowerCase().includes(normalized))) return false;
+      if (status !== "all" && agent.status !== status) return false;
+      if (visibility === "visible" && !agent.visibleToUsers) return false;
+      if (visibility === "hidden" && agent.visibleToUsers) return false;
+      if (runProfileFilter !== "all" && agent.runProfileId !== runProfileFilter) return false;
+      return true;
+    });
+  }, [agents, query, runProfileFilter, status, visibility]);
+  const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil(filteredAgents.length / pageSize));
+  const pageAgents = filteredAgents.slice((page - 1) * pageSize, page * pageSize);
+
+  useEffect(() => setPage(1), [query, status, visibility, runProfileFilter]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".create-agent-reference-drawer .ant-drawer-body")?.scrollTo({ top: 0 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [createOpen, createStep]);
+
+  function openCreate() {
+    setCreateStep(0);
+    setCreateDraft({
+      ...EMPTY_DRAFT,
+      runProfileId: runProfiles.find((item) => item.status === "active")?.id || runProfiles[0]?.id || ""
+    });
+    setCreateOpen(true);
+  }
+
+  async function handleCreate() {
+    if (!createDraft.name.trim() || !createDraft.slug.trim() || !createDraft.runProfileId) return;
+    setCreating(true);
+    try {
+      const created = await createConfiguredAgentMode({
+        agentMode: {
+          name: createDraft.name.trim(),
+          slug: createDraft.slug.trim(),
+          description: createDraft.description.trim(),
+          status: createDraft.status,
+          visibleToUsers: createDraft.visibleToUsers,
+          runProfileId: createDraft.runProfileId
+        },
+        skillPackageIds: createDraft.skillPackageIds,
+        instructionSources: [{
+          sourceType: "workspace_agents_md",
+          sourceRef: createDraft.instructionContent.trim()
+            ? JSON.stringify({ version: 1, kind: "inline", content: createDraft.instructionContent.trim() })
+            : defaultWorkspaceAgentsMdSourceRef(),
+          sortOrder: 0
+        }]
+      });
+      await load();
+      setCreateOpen(false);
+      setSelectedAgentId(created.agentMode.id);
+      messageApi.success("智能体已创建");
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "创建智能体失败");
+    } finally {
+      setCreating(false);
     }
-    if (selectedRunProfile) {
-      return (
-        <Suspense
-          fallback={(
-            <div className="admin-workspace-loading">
-              <Spin size="small" />
-            </div>
-          )}
-        >
-          <RunProfileDetailViewLazy
-            runProfile={selectedRunProfile}
-            modelOptions={modelOptionsFromCatalog(modelCatalog)}
-            onRunProfileUpdated={handleRunProfileUpdated}
-          />
-        </Suspense>
-      );
+  }
+
+  async function handleCopy(agent: AgentModeRecord) {
+    try {
+      const copy = await copyAgentMode(agent.id, {
+        name: `${agent.name} 副本`,
+        slug: `${agent.slug}-copy-${Date.now().toString().slice(-4)}`
+      });
+      await load();
+      setSelectedAgentId(copy.agentMode.id);
+      messageApi.success("已复制智能体");
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "复制失败");
     }
-    if (selectedSkillPackage) {
-      return (
-        <Suspense
-          fallback={(
-            <div className="admin-workspace-loading">
-              <Spin size="small" />
-            </div>
-          )}
-        >
-          <SkillPackageDetailViewLazy skillPackage={selectedSkillPackage} onSkillPackageUpdated={handleSkillPackageUpdated} />
-        </Suspense>
-      );
+  }
+
+  function openAssetCreate() {
+    setAssetDraft({ name: "", slug: "", description: "" });
+    setAssetCreateOpen(true);
+  }
+
+  async function handleAssetCreate() {
+    if (!assetDraft.name.trim() || !assetDraft.slug.trim()) return;
+    setAssetCreating(true);
+    try {
+      if (assetType === "run") {
+        const defaultModel = modelOptions[0]?.value || "gpt-5.2";
+        const created = await createRunProfile({
+          name: assetDraft.name.trim(),
+          slug: assetDraft.slug.trim(),
+          description: assetDraft.description.trim(),
+          status: "active",
+          defaultModel,
+          allowedModels: [defaultModel],
+          defaultReasoningEffort: "medium",
+          sandboxMode: "workspace-write",
+          approvalPolicy: "on-request",
+          networkAccessEnabled: false,
+          webSearchMode: "disabled"
+        });
+        setRunProfiles((items) => [...items, created.runProfile]);
+        setSelectedAssetId(created.runProfile.id);
+      } else {
+        const created = await createSkillPackage({
+          name: assetDraft.name.trim(),
+          slug: assetDraft.slug.trim(),
+          description: assetDraft.description.trim(),
+          status: "active",
+          visibleToUsers: false
+        });
+        setSkillPackages((items) => [...items, created.skillPackage]);
+        setSelectedAssetId(created.skillPackage.id);
+      }
+      setAssetCreateOpen(false);
+      messageApi.success(assetType === "run" ? "运行策略已创建" : "技能包已创建");
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "创建配置资产失败");
+    } finally {
+      setAssetCreating(false);
     }
-    if (selectedResource) {
-      return (
-        <CapabilitySummaryCard tab={tab} resource={selectedResource as AgentModeRecord | SkillPackageRecord | RunProfileRecord} />
-      );
-    }
+  }
+
+  if (selectedAgent) {
     return (
-      <div className="resource-center-placeholder empty">
-        <h3>{resourceLabel}</h3>
-        <p>请选择左侧能力资源以继续配置。</p>
-      </div>
+      <Suspense fallback={<div className="agent-loading"><Spin /></div>}>
+        {contextHolder}
+        <AgentWorkspaceView
+          agent={selectedAgent}
+          runProfiles={runProfiles}
+          skillPackages={skillPackages}
+          onBack={() => setSelectedAgentId(null)}
+          onSaved={async () => {
+            await load();
+          }}
+        />
+      </Suspense>
     );
   }
+
+  const selectedRunProfile = runProfiles.find((item) => item.id === selectedAssetId) ?? runProfiles[0];
+  const selectedSkillPackage = skillPackages.find((item) => item.id === selectedAssetId) ?? skillPackages[0];
+  const selectedCreateRunProfile = runProfileMap.get(createDraft.runProfileId);
+  const createSkillPackages = skillPackages.filter((item) => createDraft.skillPackageIds.includes(item.id));
+  const createTemplateLabel = createDraft.templateId === "blank"
+    ? "从空白开始"
+    : instructionTemplates.find((item) => item.id === createDraft.templateId)?.label || "自定义模板";
 
   return (
-    <div className="admin-page-container">
-      <div className="admin-page-header">
+    <div className="agent-workspace agent-overview-page">
+      {contextHolder}
+      <header className="agent-page-header">
         <div>
-          <Typography.Title level={3} style={{ margin: 0, marginBottom: 8 }}>
-            智能体配置
-          </Typography.Title>
-          <Typography.Text type="secondary">统一管理 Agent Modes、Skill Packages 和 Run Profiles。</Typography.Text>
+          <p className="agent-eyebrow">ADMIN CONSOLE</p>
+          <h2>智能体工作室</h2>
+          <p>构建、配置并验证可复用的智能体</p>
         </div>
-        <Space>
-          <Tag color="blue" style={{ borderRadius: 'var(--admin-radius-full)' }}>{resourceCountLabel} {visibleCount}</Tag>
-          <Tag color={enabledCount > 0 ? "success" : "default"} style={{ borderRadius: 'var(--admin-radius-full)' }}>active {enabledCount}</Tag>
-          <Button icon={<ReloadOutlined />} onClick={() => setReloadNonce((current) => current + 1)} loading={loading}>
-            刷新
-          </Button>
-          <Button type="primary" onClick={openCreatePanel} disabled={loading} style={{ borderRadius: 'var(--admin-radius-full)' }}>
-            新建配置
-          </Button>
-        </Space>
-      </div>
+        <div className="agent-header-actions">
+          <Button icon={<Archive size={16} />} onClick={() => setAssetOpen(true)}>配置资产</Button>
+          <Button type="primary" icon={<Plus size={16} />} onClick={openCreate}>新建智能体</Button>
+        </div>
+      </header>
 
-      <div style={{ marginBottom: 16 }}>
-        <Segmented
-          value={tab}
-          options={CAPABILITY_TABS.map((item) => ({ label: item.label, value: item.id }))}
-          onChange={(value) => setTab(value as CapabilityCenterTab)}
-          style={{ padding: 4, background: 'var(--admin-color-surface)' }}
-        />
-      </div>
+      {errorText ? <Alert type="error" showIcon message={errorText} action={<Button onClick={() => void load()}>重试</Button>} /> : null}
 
-      <div className="admin-split-layout">
-        <div className="admin-split-master">
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--admin-color-border)' }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Input
-                prefix={<span style={{ color: 'var(--admin-color-subtle)' }}>🔍</span>}
-                placeholder={`搜索${resourceLabel}...`}
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                allowClear
-                style={{ borderRadius: 'var(--admin-radius-full)' }}
-              />
-              <Space>
-                <Select
-                  value={statusFilter}
-                  options={STATUS_FILTER_OPTIONS}
-                  onChange={(value) => setStatusFilter(value as CapabilityStatusFilter)}
-                  size="small"
-                  style={{ width: 100 }}
-                />
-                <Select
-                  value={visibilityDisabled ? "all" : visibilityFilter}
-                  disabled={visibilityDisabled}
-                  options={VISIBILITY_FILTER_OPTIONS}
-                  onChange={(value) => setVisibilityFilter(value as CapabilityVisibilityFilter)}
-                  size="small"
-                  style={{ width: 110 }}
-                />
-              </Space>
-            </Space>
-          </div>
+      <section className="agent-list-card" aria-label="智能体列表">
+        <div className="agent-filter-bar">
+          <Input
+            allowClear
+            prefix={<Search size={16} />}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索智能体名称或 ID"
+            aria-label="搜索智能体"
+          />
+          <Select aria-label="状态筛选" value={status} onChange={setStatus} options={[
+            { label: "全部状态", value: "all" }, { label: "启用中", value: "active" }, { label: "已停用", value: "disabled" }
+          ]} />
+          <Select aria-label="可见范围筛选" value={visibility} onChange={setVisibility} options={[
+            { label: "全部可见范围", value: "all" }, { label: "用户可见", value: "visible" }, { label: "仅管理员", value: "hidden" }
+          ]} />
+          <Select aria-label="运行策略筛选" value={runProfileFilter} onChange={setRunProfileFilter} options={[
+            { label: "全部运行策略", value: "all" }, ...runProfiles.map((item) => ({ label: item.name, value: item.id }))
+          ]} />
+          <Button className="agent-refresh-button" aria-label="刷新列表" icon={<RefreshCw size={16} />} onClick={() => void load()} loading={loading} />
+        </div>
 
-          <div className="admin-master-list">
-            {loading ? (
-              <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                <Spin size="small" />
-              </div>
-            ) : visibleItems.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noResultsLabel} />
-            ) : (
-              visibleItems.map((item: any) => {
-                const isSelected = 
-                  (tab === "agent_mode" && selectedAgentModeId === item.id) ||
-                  (tab === "skill_package" && selectedSkillPackageId === item.id) ||
-                  (tab === "run_profile" && selectedRunProfileId === item.id);
+        <div className="agent-table-wrap">
+          <table className="agent-table">
+            <thead><tr><th>智能体</th><th>运行策略</th><th>状态</th><th>可见范围</th><th>知识与技能</th><th>最近修改</th><th aria-label="操作" /></tr></thead>
+            <tbody>
+              {pageAgents.map((agent) => {
+                const profile = runProfileMap.get(agent.runProfileId);
                 return (
-                  <div
-                    key={item.id}
-                    className={`admin-master-item ${isSelected ? 'active' : ''}`}
-                    onClick={() => selectResource(item.id)}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                      <strong style={{ fontSize: 14, fontWeight: 600 }}>{item.name}</strong>
-                      <Tag color={statusTagColor(item.status)} style={{ margin: 0, borderRadius: 4 }}>
-                        {item.status}
-                      </Tag>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--admin-color-subtle)', marginBottom: 8 }}>
-                      {item.slug}
-                    </div>
-                    {tab !== "run_profile" && (
-                      <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-                        <Tag style={{ margin: 0, border: 'none', background: 'var(--admin-color-bg)' }}>
-                          {item.visibleToUsers ? "👀 可见" : "🔒 隐藏"}
-                        </Tag>
-                      </div>
-                    )}
-                  </div>
+                  <tr key={agent.id} onClick={() => setSelectedAgentId(agent.id)}>
+                    <td><div className="agent-identity"><span className="agent-avatar">{initials(agent.name)}</span><span><strong>{agent.name}</strong><small>{agent.slug}</small></span></div></td>
+                    <td><strong>{profile?.name ?? "未绑定"}</strong><small>{profile?.defaultModel ?? "—"}</small></td>
+                    <td><Tag color={agent.status === "active" ? "success" : "default"}>{agent.status === "active" ? "启用中" : "已停用"}</Tag></td>
+                    <td>{agent.visibleToUsers ? "用户可见" : "仅管理员"}</td>
+                    <td>{agent.skillPackages.length} 个技能包</td>
+                    <td>{formatLocalDateTime(agent.updatedAt)}</td>
+                    <td onClick={(event) => event.stopPropagation()}>
+                      <Dropdown trigger={["click"]} menu={{ items: [
+                        { key: "open", label: "打开配置", icon: <Settings2 size={15} />, onClick: () => setSelectedAgentId(agent.id) },
+                        { key: "copy", label: "复制智能体", icon: <Copy size={15} />, onClick: () => void handleCopy(agent) }
+                      ] }}><Button type="text" aria-label={`${agent.name} 更多操作`} icon={<MoreHorizontal size={18} />} /></Dropdown>
+                    </td>
+                  </tr>
                 );
-              })
-            )}
-          </div>
+              })}
+            </tbody>
+          </table>
+          {!loading && pageAgents.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有符合条件的智能体" /> : null}
+          {loading ? <div className="agent-loading"><Spin /></div> : null}
         </div>
-
-        <div className="admin-split-detail">
-          {!isNarrowScreen ? (
-            <div style={{ height: '100%', overflow: 'auto' }}>
-              {renderSelectedDetail()}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {isNarrowScreen ? (
-        <Drawer
-          title={selectedResource ? `${resourceLabel}：${selectedResource.name}` : `${resourceLabel}详情`}
-          placement="right"
-          width="94%"
-          open={mobileDetailOpen && Boolean(selectedResource)}
-          onClose={() => setMobileDetailOpen(false)}
-          destroyOnClose={false}
-        >
-          {renderSelectedDetail()}
-        </Drawer>
-      ) : null}
+        <footer className="agent-pagination">
+          <span>共 {filteredAgents.length} 个智能体</span>
+          <div><Button aria-label="上一页" icon={<ChevronLeft size={16} />} disabled={page <= 1} onClick={() => setPage((value) => value - 1)} /><strong>{page}</strong><span>/ {pageCount}</span><Button aria-label="下一页" icon={<ChevronRight size={16} />} disabled={page >= pageCount} onClick={() => setPage((value) => value + 1)} /></div>
+        </footer>
+      </section>
 
       <Drawer
-        title={`新建${resourceLabel}`}
-        width={560}
-        open={Boolean(createPanel)}
-        onClose={() => void closeCreatePanel()}
+        className="create-agent-reference-drawer"
+        title="新建智能体"
+        width={1060}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
         destroyOnClose
-        maskClosable={!createSaving}
-        footer={(
-          <Space>
-            <Button onClick={() => void closeCreatePanel()} disabled={createSaving}>
-              取消
-            </Button>
-            {activeCreateStep > 0 ? (
-              <Button onClick={handleCreatePreviousStep} disabled={createSaving}>
-                上一步
-              </Button>
-            ) : null}
-            {activeCreateStep < maxCreateStep ? (
-              <Button type="primary" onClick={handleCreateNextStep} disabled={createSaving}>
-                下一步
-              </Button>
-            ) : (
-              <Button
-                type="primary"
-                loading={createSaving}
-                disabled={createSaving || (createPanel?.kind === "agent_mode" && runProfiles.length === 0)}
-                onClick={() => void handleCreateSave()}
-              >
-                创建能力
-              </Button>
-            )}
-          </Space>
-        )}
+        footer={<div className="create-drawer-footer"><span>第 {createStep + 1} / 4 步 · {createStep === 0 ? "选择配置起点" : createStep === 1 ? "定义智能体用途" : createStep === 2 ? "装配运行能力" : "检查创建结果"}</span><div><Button onClick={() => setCreateOpen(false)}>取消</Button>{createStep > 0 ? <Button onClick={() => setCreateStep((value) => value - 1)}>上一步</Button> : null}{createStep < 3 ? <Button type="primary" disabled={(createStep === 1 && (!createDraft.name.trim() || !createDraft.slug.trim())) || (createStep === 2 && selectedCreateRunProfile?.status !== "active")} onClick={() => setCreateStep((value) => value + 1)}>{createStep === 0 ? "下一步：定义用途" : createStep === 1 ? "下一步：配置能力" : "下一步：检查配置"}</Button> : <Button type="primary" loading={creating} onClick={() => void handleCreate()}>创建智能体</Button>}</div></div>}
       >
-        {createPanel ? (
-          <Space direction="vertical" size={16} className="admin-full-width">
-            <Steps direction="vertical" size="small" current={activeCreateStep} items={createSteps} />
+        <div className="create-progress"><Steps size="small" current={createStep} items={[{ title: "选择起点" }, { title: "定义用途" }, { title: "配置能力" }, { title: "验证并创建" }]} /></div>
 
-            {createErrorText ? <Alert type="error" showIcon className="admin-alert-inline" message={createErrorText} /> : null}
+        {createStep === 0 ? <div className="create-step-shell">
+          <div className="create-step-intro"><span className="create-step-kicker">01 · SELECT START</span><h3>选择最接近的配置起点</h3><p>起点只负责预填角色规则，不会限制后续可选择的运行策略和技能包。</p></div>
+          <div className="create-start-grid">
+            <button className={createDraft.templateId === "blank" ? "selected" : ""} aria-pressed={createDraft.templateId === "blank"} onClick={() => setCreateDraft((draft) => ({ ...draft, templateId: "blank", instructionContent: "" }))}><span className="create-template-icon"><Plus size={20} /></span><span><strong>从空白开始</strong><small>只创建必要字段，适合需要完全自定义的智能体。</small><em>不预填角色规则</em></span>{createDraft.templateId === "blank" ? <span className="create-selected-mark"><Check size={14} /></span> : null}</button>
+            {instructionTemplates.map((template) => <button key={template.id} className={createDraft.templateId === template.id ? "selected" : ""} aria-pressed={createDraft.templateId === template.id} onClick={() => setCreateDraft((draft) => ({ ...draft, templateId: template.id, instructionContent: template.content }))}><span className="create-template-icon"><FileText size={20} /></span><span><strong>{template.label}</strong><small>从现有角色规则开始，创建前可继续调整。</small><em>已包含初始指令</em></span>{createDraft.templateId === template.id ? <span className="create-selected-mark"><Check size={14} /></span> : null}</button>)}
+          </div>
+          <div className="create-start-note"><ShieldCheck size={17} /><span><strong>创建不会立即对用户产生影响</strong><small>所有配置会在最后一步统一提交，关闭抽屉不会创建任何资源。</small></span></div>
+        </div> : null}
 
-            {activeCreateStep === 0 ? (
-              <Space direction="vertical" size={12} className="admin-full-width">
-                <label className="field">
-                  <span className="field-label">能力名称</span>
-                  <Input
-                    aria-label="能力名称"
-                    maxLength={128}
-                    disabled={createSaving}
-                    value={createPanel.name}
-                    onChange={(event) =>
-                      setCreatePanel((current) => {
-                        if (!current) return current;
-                        const nextName = event.target.value;
-                        if (createSlugEdited) {
-                          return { ...current, name: nextName };
-                        }
-                        const nextSlug = suggestUniqueSlug(
-                          slugifyValue(nextName) || defaultSlugBase(current.kind),
-                          existingSlugsForCreate
-                        );
-                        return { ...current, name: nextName, slug: nextSlug };
-                      })
-                    }
-                  />
-                </label>
+        {createStep === 1 ? <div className="create-reference-layout">
+          <div className="create-form-workspace">
+            <div className="create-origin-banner"><span className="create-template-icon"><FileText size={18} /></span><span><small>当前配置起点</small><strong>{createTemplateLabel}</strong></span><Button type="link" onClick={() => setCreateStep(0)}>更换起点</Button></div>
+            <div className="create-question"><span className="create-step-kicker">02 · DEFINE PURPOSE</span><h3>这个智能体要帮助用户完成什么？</h3><p>名称用于识别，任务描述决定团队成员是否知道什么时候该使用它。</p></div>
+            <div className="create-field-grid">
+              <label><span>智能体名称</span><Input maxLength={50} showCount value={createDraft.name} placeholder="例如：交付方案助手" onChange={(event) => setCreateDraft((draft) => ({ ...draft, name: event.target.value, slug: draft.slug || slugify(event.target.value) }))} /></label>
+              <label><span>智能体 ID</span><Input value={createDraft.slug} placeholder="delivery-solution-agent" onChange={(event) => setCreateDraft((draft) => ({ ...draft, slug: slugify(event.target.value) }))} /></label>
+              <label className="span-2"><span>主要任务</span><Input.TextArea maxLength={200} showCount rows={3} value={createDraft.description} placeholder="说明服务对象、要解决的问题，以及期望产出的结果" onChange={(event) => setCreateDraft((draft) => ({ ...draft, description: event.target.value }))} /></label>
+            </div>
+            <details className="create-advanced"><summary><span><FileText size={16} /><b>角色目标与回答原则</b><small>可选，模板内容已在这里预填</small></span><ChevronRight size={16} /></summary><label><span>角色指令</span><Input.TextArea rows={7} value={createDraft.instructionContent} placeholder="# 身份与目标\n说明智能体的角色、服务对象和回答边界" onChange={(event) => setCreateDraft((draft) => ({ ...draft, instructionContent: event.target.value }))} /></label></details>
+            <section className="create-auto-prepare"><div className="create-section-heading"><span><strong>系统将在下一步准备</strong><small>全部来自当前组织的真实配置资源</small></span></div><div><span><Gauge /></span><p><strong>运行策略</strong><small>模型、推理强度和执行边界</small></p><em>下一步选择</em></div><div><span><PackageOpen /></span><p><strong>技能包</strong><small>为智能体装配完成任务所需的 Skill</small></p><em>下一步选择</em></div><div><span>{createDraft.visibleToUsers ? <Eye /> : <EyeOff />}</span><p><strong>可见范围</strong><small>决定普通用户能否发现该智能体</small></p><Switch checked={createDraft.visibleToUsers} onChange={(checked) => setCreateDraft((draft) => ({ ...draft, visibleToUsers: checked, skillPackageIds: checked ? draft.skillPackageIds.filter((id) => skillPackages.find((item) => item.id === id)?.visibleToUsers) : draft.skillPackageIds }))} /></div></section>
+          </div>
+          <aside className="create-result-panel"><h4>创建后你将得到</h4><div className="create-result-agent"><span className="agent-avatar">{initials(createDraft.name)}</span><span><strong>{createDraft.name || "未命名智能体"}</strong><small>{createDraft.description || "等待填写主要任务"}</small></span></div><div className="create-result-item"><span><Gauge /></span><p><strong>运行策略</strong><small>下一步从组织配置中选择</small></p></div><div className="create-result-item"><span><PackageOpen /></span><p><strong>技能包与技能</strong><small>按实际工作目标装配</small></p></div><dl><div><dt>配置起点</dt><dd>{createTemplateLabel}</dd></div><div><dt>可见范围</dt><dd>{createDraft.visibleToUsers ? "用户可见" : "仅管理员"}</dd></div></dl><div className="create-time-note"><Clock3 /><span><small>预计完成时间</small><strong>约 2–4 分钟</strong></span></div></aside>
+        </div> : null}
 
-                <label className="field">
-                  <span className="field-label">能力 slug</span>
-                  <Input
-                    aria-label="能力 slug"
-                    maxLength={128}
-                    disabled={createSaving}
-                    value={createPanel.slug}
-                    onChange={(event) => {
-                      setCreateSlugEdited(true);
-                      setCreatePanel((current) => (current ? { ...current, slug: event.target.value } : current));
-                    }}
-                  />
-                </label>
+        {createStep === 2 ? <div className="create-reference-layout">
+          <div className="create-form-workspace">
+            <div className="create-question"><span className="create-step-kicker">03 · ASSEMBLE</span><h3>装配智能体的运行能力</h3><p>这里只选择真实后端资源；详细参数可以在创建后的配置页继续调整。</p></div>
+            <section className="create-resource-section"><div className="create-section-heading"><span><strong>运行策略</strong><small>必选 · 只可绑定当前可用的运行策略</small></span><Tag color={selectedCreateRunProfile?.status === "active" ? "success" : "warning"}>{selectedCreateRunProfile?.status === "active" ? "已选择" : "待选择"}</Tag></div><div className="create-runtime-options">{runProfiles.filter((item) => item.status === "active").map((item) => <button key={item.id} className={createDraft.runProfileId === item.id ? "selected" : ""} aria-pressed={createDraft.runProfileId === item.id} onClick={() => setCreateDraft((draft) => ({ ...draft, runProfileId: item.id }))}><span className="create-resource-radio">{createDraft.runProfileId === item.id ? <Check size={12} /> : null}</span><span><strong>{item.name}</strong><small>{item.defaultModel} · {item.defaultReasoningEffort}</small></span><em><LockKeyhole size={13} />{item.sandboxMode}</em></button>)}</div></section>
+            <section className="create-resource-section"><div className="create-section-heading"><span><strong>技能包</strong><small>可选 · 仅显示会进入当前用户运行时的技能包</small></span><Tag>{createDraft.skillPackageIds.length} 个已选</Tag></div><div className="create-package-options">{skillPackages.filter((item) => item.status === "active" && (!createDraft.visibleToUsers || item.visibleToUsers)).map((item) => { const selected = createDraft.skillPackageIds.includes(item.id); return <button key={item.id} className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => setCreateDraft((draft) => ({ ...draft, skillPackageIds: selected ? draft.skillPackageIds.filter((id) => id !== item.id) : [...draft.skillPackageIds, item.id] }))}><span className="create-package-check">{selected ? <Check size={12} /> : null}</span><span><strong>{item.name}</strong><small>{item.description || item.slug}</small></span><em>{codexSkillCount(item)} 个技能</em></button>; })}</div></section>
+          </div>
+          <aside className="create-result-panel create-live-summary"><h4>当前装配结果</h4><div className="create-result-agent"><span className="agent-avatar">{initials(createDraft.name)}</span><span><strong>{createDraft.name}</strong><small>{createDraft.slug}</small></span></div><dl><div><dt>运行策略</dt><dd>{selectedCreateRunProfile?.name ?? "待选择"}</dd></div><div><dt>默认模型</dt><dd>{selectedCreateRunProfile?.defaultModel ?? "—"}</dd></div><div><dt>安全边界</dt><dd>{selectedCreateRunProfile?.sandboxMode ?? "—"}</dd></div><div><dt>技能包</dt><dd>{createSkillPackages.length} 个</dd></div><div><dt>技能</dt><dd>{createSkillPackages.reduce((sum, item) => sum + codexSkillCount(item), 0)} 个</dd></div></dl><Alert type="info" showIcon message="创建后仍可调整" description="运行策略、技能包和访问范围都可以在智能体配置页继续修改。" /></aside>
+        </div> : null}
 
-                <label className="field">
-                  <span className="field-label">能力描述</span>
-                  <Input.TextArea
-                    aria-label="能力描述"
-                    rows={4}
-                    disabled={createSaving}
-                    value={createPanel.description}
-                    onChange={(event) =>
-                      setCreatePanel((current) => (current ? { ...current, description: event.target.value } : current))
-                    }
-                  />
-                </label>
-              </Space>
-            ) : null}
-
-            {activeCreateStep === 1 ? (
-              <Space direction="vertical" size={12} className="admin-full-width">
-                <label className="field">
-                  <span className="field-label">状态</span>
-                  <Select
-                    aria-label="状态"
-                    value={createPanel.status}
-                    disabled={createSaving}
-                    options={CREATE_STATUS_OPTIONS}
-                    onChange={(value) =>
-                      setCreatePanel((current) => (current ? { ...current, status: value } : current))
-                    }
-                  />
-                </label>
-
-                {createPanel.kind !== "run_profile" ? (
-                  <label className="field">
-                    <span className="field-label">对用户可见</span>
-                    <Select
-                      aria-label="对用户可见"
-                      value={createPanel.visibleToUsers ? "visible" : "hidden"}
-                      disabled={createSaving}
-                      options={CREATE_VISIBILITY_OPTIONS}
-                      onChange={(value) =>
-                        setCreatePanel((current) =>
-                          current && current.kind !== "run_profile"
-                            ? { ...current, visibleToUsers: value === "visible" }
-                            : current
-                        )
-                      }
-                    />
-                  </label>
-                ) : null}
-
-                {createPanel.kind === "agent_mode" ? (
-                  <label className="field">
-                    <span className="field-label">运行策略</span>
-                    <Select
-                      aria-label="运行策略"
-                      placeholder="请选择运行策略"
-                      disabled={createSaving || runProfiles.length === 0}
-                      value={createPanel.runProfileId || undefined}
-                      options={runProfiles.map((runProfile) => ({ label: runProfile.name, value: runProfile.id }))}
-                      onChange={(value) =>
-                        setCreatePanel((current) =>
-                          current && current.kind === "agent_mode" ? { ...current, runProfileId: value } : current
-                        )
-                      }
-                    />
-                  </label>
-                ) : null}
-
-                {createPanel.kind === "run_profile" ? (
-                  <>
-                    <label className="field">
-                      <span className="field-label">默认模型</span>
-                      <Select
-                        aria-label="默认模型"
-                        disabled={createSaving}
-                        value={createPanel.defaultModel}
-                        options={runProfileModelOptions}
-                        showSearch
-                        optionFilterProp="label"
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? {
-                                  ...current,
-                                  defaultModel: value,
-                                  defaultReasoningEffort: normalizeReasoningEffortForModel(
-                                    value,
-                                    current.defaultReasoningEffort,
-                                    modelOptionsFromCatalog(modelCatalog)
-                                  ),
-                                  allowedModels: current.allowedModels.includes(value)
-                                    ? current.allowedModels
-                                    : [...current.allowedModels, value]
-                                }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span className="field-label">可选模型</span>
-                      <Select
-                        aria-label="可选模型"
-                        mode="multiple"
-                        disabled={createSaving}
-                        value={createPanel.allowedModels}
-                        options={runProfileModelOptions}
-                        showSearch
-                        optionFilterProp="label"
-                        placeholder="请选择可选模型"
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, allowedModels: value as string[] }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span className="field-label">推理强度</span>
-                      <Select
-                        aria-label="推理强度"
-                        value={createPanel.defaultReasoningEffort}
-                        disabled={createSaving}
-                        options={createReasoningOptions}
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, defaultReasoningEffort: value as CreateRunProfileInput["defaultReasoningEffort"] }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span className="field-label">沙箱模式</span>
-                      <Select
-                        aria-label="沙箱模式"
-                        value={createPanel.sandboxMode}
-                        disabled={createSaving}
-                        options={CREATE_SANDBOX_OPTIONS}
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, sandboxMode: value as CreateRunProfileInput["sandboxMode"] }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span className="field-label">审批策略</span>
-                      <Select
-                        aria-label="审批策略"
-                        value={createPanel.approvalPolicy}
-                        disabled={createSaving}
-                        options={CREATE_APPROVAL_OPTIONS}
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, approvalPolicy: value as CreateRunProfileInput["approvalPolicy"] }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label className="field checkbox-field resource-center-toggle-row">
-                      <Switch
-                        checked={createPanel.networkAccessEnabled}
-                        disabled={createSaving}
-                        checkedChildren="联网"
-                        unCheckedChildren="离线"
-                        onChange={(checked) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, networkAccessEnabled: checked }
-                              : current
-                          )
-                        }
-                      />
-                      <span className="field-label">网络访问</span>
-                    </label>
-
-                    <label className="field">
-                      <span className="field-label">搜索模式</span>
-                      <Select
-                        aria-label="搜索模式"
-                        value={createPanel.webSearchMode}
-                        disabled={createSaving}
-                        options={CREATE_SEARCH_OPTIONS}
-                        onChange={(value) =>
-                          setCreatePanel((current) =>
-                            current && current.kind === "run_profile"
-                              ? { ...current, webSearchMode: value as CreateRunProfileInput["webSearchMode"] }
-                              : current
-                          )
-                        }
-                      />
-                    </label>
-                  </>
-                ) : null}
-              </Space>
-            ) : null}
-
-            {activeCreateStep === 2 ? (
-              <Card size="small" className="admin-workspace-help-card">
-                <Space direction="vertical" size={6} className="admin-full-width">
-                  <Typography.Text strong>{createPanel.name || "-"}</Typography.Text>
-                  <Typography.Text type="secondary">slug: {createPanel.slug || "-"}</Typography.Text>
-                  <Typography.Text type="secondary">状态: {createPanel.status || "-"}</Typography.Text>
-                  {createPanel.kind !== "run_profile" ? (
-                    <Typography.Text type="secondary">
-                      可见性: {createPanel.visibleToUsers ? "对用户可见" : "仅管理员"}
-                    </Typography.Text>
-                  ) : null}
-                  {createPanel.kind === "agent_mode" ? (
-                    <Typography.Text type="secondary">运行策略: {createPanel.runProfileId || "-"}</Typography.Text>
-                  ) : null}
-                  {createPanel.kind === "run_profile" ? (
-                    <>
-                      <Typography.Text type="secondary">默认模型: {createPanel.defaultModel || "-"}</Typography.Text>
-                      <Typography.Text type="secondary">
-                        可选模型: {createPanel.allowedModels.join(", ") || "-"}
-                      </Typography.Text>
-                      <Typography.Text type="secondary">
-                        推理/沙箱/审批: {createPanel.defaultReasoningEffort} / {createPanel.sandboxMode} / {createPanel.approvalPolicy}
-                      </Typography.Text>
-                    </>
-                  ) : null}
-                  <Typography.Paragraph type="secondary" className="resource-center-inline-muted">
-                    {createPanel.description?.trim() || "未填写描述"}
-                  </Typography.Paragraph>
-                </Space>
-              </Card>
-            ) : null}
-
-          </Space>
-        ) : null}
+        {createStep === 3 ? <div className="create-final-layout">
+          <section className="create-review-panel"><div className="create-question"><span className="create-step-kicker">04 · REVIEW</span><h3>检查配置，然后创建智能体</h3><p>创建会写入智能体、技能包绑定和角色指令；完成后直接进入配置页。</p></div><div className="create-review-list"><div><span className="pass"><Check /></span><p><strong>身份信息完整</strong><small>{createDraft.name} · {createDraft.slug}</small></p><Tag color="success">通过</Tag></div><div><span className="pass"><Check /></span><p><strong>运行策略已选择</strong><small>{selectedCreateRunProfile?.name} · {selectedCreateRunProfile?.defaultModel}</small></p><Tag color="success">通过</Tag></div><div><span className={createSkillPackages.length ? "pass" : "optional"}>{createSkillPackages.length ? <Check /> : <PackageOpen />}</span><p><strong>技能包</strong><small>{createSkillPackages.length ? `${createSkillPackages.map((item) => item.name).join("、")} · 共 ${createSkillPackages.reduce((sum, item) => sum + codexSkillCount(item), 0)} 个技能` : "未选择，可在创建后继续添加"}</small></p><Tag>{createSkillPackages.length ? `${createSkillPackages.length} 个` : "可选"}</Tag></div><div><span className={createDraft.instructionContent.trim() ? "pass" : "optional"}>{createDraft.instructionContent.trim() ? <Check /> : <FileText />}</span><p><strong>角色规则</strong><small>{createDraft.instructionContent.trim() ? `已从“${createTemplateLabel}”准备` : "未配置，可在创建后补充"}</small></p><Tag>{createDraft.instructionContent.trim() ? "已配置" : "可选"}</Tag></div></div><Alert type="success" showIcon message="创建条件已满足" description="提交期间请保持页面打开；如果创建失败，已填写内容会保留，便于直接重试。" /></section>
+          <aside className="create-result-panel create-final-result"><h4>即将创建</h4><div className="create-result-agent"><span className="agent-avatar large">{initials(createDraft.name)}</span><span><strong>{createDraft.name}</strong><small>{createDraft.description || "未填写用途描述"}</small></span></div><dl><div><dt>智能体 ID</dt><dd>{createDraft.slug}</dd></div><div><dt>运行策略</dt><dd>{selectedCreateRunProfile?.name}</dd></div><div><dt>技能包 / 技能</dt><dd>{createSkillPackages.length} / {createSkillPackages.reduce((sum, item) => sum + codexSkillCount(item), 0)}</dd></div><div><dt>创建后状态</dt><dd>{createDraft.status === "active" ? "启用中" : "已停用"}</dd></div><div><dt>可见范围</dt><dd>{createDraft.visibleToUsers ? "用户可见" : "仅管理员"}</dd></div></dl><div className="create-time-note ready"><Check /><span><small>下一步</small><strong>创建后进入配置页</strong></span></div></aside>
+        </div> : null}
       </Drawer>
+
+      <Drawer title="配置资产" width={980} open={assetOpen} onClose={() => setAssetOpen(false)}>
+        <div className="agent-asset-shell">
+          <aside>
+            <div className="agent-asset-tabs"><Button type={assetType === "run" ? "primary" : "text"} icon={<SlidersHorizontal size={16} />} onClick={() => { setAssetType("run"); setSelectedAssetId(""); }}>运行策略</Button><Button type={assetType === "skill" ? "primary" : "text"} icon={<PackageOpen size={16} />} onClick={() => { setAssetType("skill"); setSelectedAssetId(""); }}>技能包</Button></div>
+            <Button className="agent-asset-create-button" block icon={<Plus size={15} />} onClick={openAssetCreate}>新建{assetType === "run" ? "运行策略" : "技能包"}</Button>
+            {(assetType === "run" ? runProfiles : skillPackages).map((item) => <button key={item.id} className={(selectedAssetId || (assetType === "run" ? selectedRunProfile?.id : selectedSkillPackage?.id)) === item.id ? "active" : ""} onClick={() => setSelectedAssetId(item.id)}><span>{assetType === "run" ? <CircleDot size={16} /> : <Bot size={16} />}{item.name}</span><small>{item.slug}</small></button>)}
+          </aside>
+          <main><Suspense fallback={<Spin />}>{assetType === "run" && selectedRunProfile ? <RunProfileDetailView runProfile={selectedRunProfile} modelOptions={modelOptions} onRunProfileUpdated={(updated) => setRunProfiles((items) => items.map((item) => item.id === updated.id ? updated : item))} /> : null}{assetType === "skill" && selectedSkillPackage ? <SkillPackageDetailView skillPackage={selectedSkillPackage} onSkillPackageUpdated={(updated) => setSkillPackages((items) => items.map((item) => item.id === updated.id ? updated : item))} /> : null}</Suspense></main>
+        </div>
+      </Drawer>
+      <Modal
+        title={`新建${assetType === "run" ? "运行策略" : "技能包"}`}
+        open={assetCreateOpen}
+        onCancel={() => setAssetCreateOpen(false)}
+        onOk={() => void handleAssetCreate()}
+        okText="创建"
+        cancelText="取消"
+        confirmLoading={assetCreating}
+        okButtonProps={{ disabled: !assetDraft.name.trim() || !assetDraft.slug.trim() }}
+      >
+        <div className="agent-form-stack">
+          <label><span>名称</span><Input value={assetDraft.name} onChange={(event) => setAssetDraft((draft) => ({ ...draft, name: event.target.value, slug: draft.slug || slugify(event.target.value) }))} /></label>
+          <label><span>标识</span><Input value={assetDraft.slug} onChange={(event) => setAssetDraft((draft) => ({ ...draft, slug: slugify(event.target.value) }))} /></label>
+          <label><span>描述</span><Input.TextArea rows={3} value={assetDraft.description} onChange={(event) => setAssetDraft((draft) => ({ ...draft, description: event.target.value }))} /></label>
+          <Alert type="info" showIcon message={assetType === "run" ? "将使用安全默认值创建，随后可在右侧调整模型和权限。" : "默认仅管理员可见，创建后可继续添加 Codex Skills。"} />
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -3,11 +3,15 @@ import type { RuntimeModelCatalog } from "../../lib/model-config";
 
 import type {
   AgentModeInstructionSourceInput,
+  AgentModeConfigurationInput,
+  AgentModeConfigurationUpdateInput,
   AgentModeListResponse,
   AgentModeResponse,
+  AgentConfigurationValidationResponse,
   CapabilityPoliciesResponse,
   CapabilityPolicyInput,
   CapabilityResourceType,
+  CodexSkillContentResponse,
   CopyAgentModeInput,
   CopyRunProfileInput,
   CopySkillPackageInput,
@@ -64,6 +68,13 @@ export async function fetchNativeCodexSkills(): Promise<NativeCodexSkillListResp
   return api<NativeCodexSkillListResponse>("/api/admin/codex-skills");
 }
 
+export async function fetchCodexSkillContent(input: { name: string; managedSkillId?: string }): Promise<CodexSkillContentResponse> {
+  const path = input.managedSkillId
+    ? `/api/admin/codex-managed-skills/${encodeURIComponent(input.managedSkillId)}/content`
+    : `/api/admin/codex-skills/${encodeURIComponent(input.name)}/content`;
+  return api<CodexSkillContentResponse>(path);
+}
+
 export async function createSkillPackage(input: CreateSkillPackageInput): Promise<SkillPackageResponse> {
   return api<SkillPackageResponse>("/api/admin/skill-packages", { method: "POST", json: input });
 }
@@ -98,8 +109,23 @@ export async function createAgentMode(input: CreateAgentModeInput): Promise<Agen
   return api<AgentModeResponse>("/api/admin/agent-modes", { method: "POST", json: input });
 }
 
+export async function createConfiguredAgentMode(input: AgentModeConfigurationInput): Promise<AgentModeResponse> {
+  return api<AgentModeResponse>("/api/admin/agent-modes/configured", { method: "POST", json: input });
+}
+
+export async function validateAgentModeConfiguration(input: AgentModeConfigurationInput): Promise<AgentConfigurationValidationResponse> {
+  return api<AgentConfigurationValidationResponse>("/api/admin/agent-modes/validate-configuration", { method: "POST", json: input });
+}
+
 export async function updateAgentMode(id: string, input: UpdateAgentModeInput): Promise<AgentModeResponse> {
   return api<AgentModeResponse>(`/api/admin/agent-modes/${encodeURIComponent(id)}`, { method: "PATCH", json: input });
+}
+
+export async function updateConfiguredAgentMode(id: string, input: AgentModeConfigurationUpdateInput): Promise<AgentModeResponse> {
+  return api<AgentModeResponse>(`/api/admin/agent-modes/${encodeURIComponent(id)}/configuration`, {
+    method: "PUT",
+    json: input
+  });
 }
 
 export async function copyAgentMode(id: string, input: CopyAgentModeInput): Promise<AgentModeResponse> {

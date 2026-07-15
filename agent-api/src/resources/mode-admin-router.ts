@@ -193,6 +193,18 @@ const agentModeInstructionSourcesReplaceSchema = z.object({
   ).length(1, "instructionSources 仅支持 1 条 workspace_agents_md")
 });
 
+const agentModeConfigurationSchema = z.object({
+  agentMode: agentModeCreateSchema,
+  skillPackageIds: stringListSchema,
+  instructionSources: agentModeInstructionSourcesReplaceSchema.shape.instructionSources
+});
+
+const agentModeConfigurationUpdateSchema = z.object({
+  agentMode: agentModeUpdateSchema,
+  skillPackageIds: stringListSchema,
+  instructionSources: agentModeInstructionSourcesReplaceSchema.shape.instructionSources
+});
+
 type RunProfileRepositoryLike = {
   list(): Promise<unknown[]>;
   create(payload: {
@@ -298,6 +310,35 @@ type AgentModeRepositoryLike = {
       sortOrder?: number;
     }>
   ): Promise<unknown>;
+  createConfigured(input: {
+    agentMode: {
+      organizationId?: string;
+      name: string;
+      slug: string;
+      description?: string;
+      status?: string;
+      visibleToUsers?: boolean;
+      runProfileId: string;
+    };
+    skillPackageIds: string[];
+    instructionSources: Array<{ sourceType: string; sourceRef: string; sortOrder?: number }>;
+  }): Promise<unknown>;
+  updateConfigured(
+    id: string,
+    input: {
+      agentMode: {
+        organizationId?: string;
+        name?: string;
+        slug?: string;
+        description?: string;
+        status?: string;
+        visibleToUsers?: boolean;
+        runProfileId?: string;
+      };
+      skillPackageIds: string[];
+      instructionSources: Array<{ sourceType: string; sourceRef: string; sortOrder?: number }>;
+    }
+  ): Promise<unknown>;
 };
 
 type ResourcePolicyRepositoryLike = {
@@ -336,6 +377,7 @@ export function createModeAdminRouter(options: {
   systemSettings?: SystemSettingsReaderLike;
   nativeCodexSkills?: {
     list(): Promise<NativeCodexSkillRecord[]>;
+    readSkillContent(name: string): Promise<{ skill: NativeCodexSkillRecord; content: string }>;
     getBaseHome(): string;
     getSkillsRoot(): string;
   };
@@ -343,6 +385,84 @@ export function createModeAdminRouter(options: {
 }): Router {
   const router = Router();
   let systemSettingsRepository: SystemSettingsRepository | undefined;
+
+  function belongsToCurrentOrganization(req: Request, record: { organizationId?: string }): boolean {
+    const recordOrganizationId = record.organizationId?.trim();
+    const currentOrganizationId = req.currentOrganization?.id?.trim();
+    return !recordOrganizationId || recordOrganizationId === currentOrganizationId;
+  }
+
+  function withCurrentOrganization<T extends { organizationId?: string }>(req: Request, input: T): T {
+    return { ...input, organizationId: req.currentOrganization?.id };
+  }
+
+  function assertCurrentOrganization(req: Request, record: { organizationId?: string } | undefined, label: string) {
+    if (!record || !belongsToCurrentOrganization(req, record)) {
+      throw new Error(`${label} 不存在`);
+    }
+  }
+
+  async function inspectAgentConfiguration(
+    req: Request,
+    input: {
+      name: string;
+      status?: string;
+      visibleToUsers?: boolean;
+      runProfileId: string;
+      skillPackageIds: string[];
+      instructionSources: Array<{ sourceType: string; sourceRef: string; sortOrder?: number }>;
+    }
+  ) {
+    const checks: Array<{ key: string; label: string; pass: boolean; detail: string }> = [];
+    checks.push({ key: "identity", label: "基础信息完整", pass: Boolean(input.name.trim()), detail: input.name.trim() ? "名称已设置" : "名称不能为空" });
+
+    const runProfile = (await options.runProfiles.get(input.runProfileId)) as
+      | { organizationId?: string; status?: string; name?: string; defaultModel?: string }
+      | undefined;
+    const runProfileAvailable = Boolean(
+      runProfile && belongsToCurrentOrganization(req, runProfile) && runProfile.status === "active"
+    );
+    checks.push({
+      key: "run_profile",
+      label: "运行策略可用",
+      pass: runProfileAvailable,
+      detail: runProfileAvailable
+        ? `${runProfile?.name || input.runProfileId} · ${runProfile?.defaultModel || "模型已配置"}`
+        : "运行策略不存在、已停用或不属于当前组织"
+    });
+
+    const packageRecords = await Promise.all(
+      input.skillPackageIds.map((id) => options.skillPackages.get(id) as Promise<
+        | { id: string; organizationId?: string; name?: string; status?: string; visibleToUsers?: boolean; items?: unknown[] }
+        | undefined
+      >)
+    );
+    const invalidPackages = packageRecords.filter((item) =>
+      !item ||
+      !belongsToCurrentOrganization(req, item) ||
+      item.status !== "active" ||
+      (input.visibleToUsers !== false && !item.visibleToUsers)
+    );
+    checks.push({
+      key: "skill_packages",
+      label: "技能包运行时可用",
+      pass: invalidPackages.length === 0,
+      detail: invalidPackages.length === 0
+        ? input.skillPackageIds.length > 0
+          ? `${input.skillPackageIds.length} 个技能包满足状态、可见范围和组织边界`
+          : "未绑定技能包（可选）"
+        : `${invalidPackages.length} 个技能包不会进入当前智能体的用户运行时`
+    });
+
+    const instructionValid = input.instructionSources.length === 1 && Boolean(input.instructionSources[0]?.sourceRef.trim());
+    checks.push({
+      key: "instructions",
+      label: "角色指令可解析",
+      pass: instructionValid,
+      detail: instructionValid ? "workspace_agents_md 已配置" : "必须配置一条有效的 workspace_agents_md"
+    });
+    return { valid: checks.every((item) => item.pass), checks };
+  }
 
   function requireResourcePolicies(): ResourcePolicyRepositoryLike {
     if (!options.resourcePolicies) {
@@ -405,8 +525,9 @@ export function createModeAdminRouter(options: {
     });
   }
 
-  router.get("/run-profiles", async (_req: Request, res: Response) => {
-    res.json({ runProfiles: await options.runProfiles.list() });
+  router.get("/run-profiles", async (req: Request, res: Response) => {
+    const runProfiles = (await options.runProfiles.list()) as Array<{ organizationId?: string }>;
+    res.json({ runProfiles: runProfiles.filter((item) => belongsToCurrentOrganization(req, item)) });
   });
 
   router.get("/model-catalog", async (req: Request, res: Response) => {
@@ -437,9 +558,7 @@ export function createModeAdminRouter(options: {
           return;
         }
       }
-      const runProfile = await options.runProfiles.create(
-        parsed.data
-      );
+      const runProfile = await options.runProfiles.create(withCurrentOrganization(req, parsed.data));
       res.status(201).json({ runProfile });
     } catch (error) {
       res.status(400).json({ detail: detailFromCreateConflict(error, "run profile") });
@@ -460,6 +579,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
       }
+      assertCurrentOrganization(req, existing, "run profile");
       const safetyLimits = await resolvePublishedSafetyLimits();
       const nextInput: RunProfileWritableRecord = {
         ...(existing as RunProfileWritableRecord),
@@ -511,6 +631,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
       }
+      assertCurrentOrganization(req, existing as { organizationId?: string }, "run profile");
       const safetyLimits = await resolvePublishedSafetyLimits();
       const nextInput: RunProfileWritableRecord = {
         ...(existing as RunProfileWritableRecord),
@@ -528,10 +649,10 @@ export function createModeAdminRouter(options: {
           return;
         }
       }
-      const runProfile = await options.runProfiles.update(
-        req.params.id,
-        parsed.data
-      );
+      const runProfile = await options.runProfiles.update(req.params.id, {
+        ...parsed.data,
+        organizationId: (existing as { organizationId?: string }).organizationId
+      });
       res.json({ runProfile });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -541,6 +662,7 @@ export function createModeAdminRouter(options: {
   router.get("/resources/run-profiles/:id/policies", async (req: Request, res: Response) => {
     try {
       const runProfile = (await options.runProfiles.get(req.params.id)) as { id: string } | undefined;
+      assertCurrentOrganization(req, runProfile as ({ id: string; organizationId?: string } | undefined), "run profile");
       if (!runProfile) {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
@@ -559,6 +681,7 @@ export function createModeAdminRouter(options: {
     }
     try {
       const runProfile = (await options.runProfiles.get(req.params.id)) as { organizationId?: string } | undefined;
+      assertCurrentOrganization(req, runProfile, "run profile");
       if (!runProfile) {
         res.status(404).json({ detail: "run profile 不存在" });
         return;
@@ -571,8 +694,9 @@ export function createModeAdminRouter(options: {
     }
   });
 
-  router.get("/skill-packages", async (_req: Request, res: Response) => {
-    res.json({ skillPackages: await options.skillPackages.list() });
+  router.get("/skill-packages", async (req: Request, res: Response) => {
+    const skillPackages = (await options.skillPackages.list()) as Array<{ organizationId?: string }>;
+    res.json({ skillPackages: skillPackages.filter((item) => belongsToCurrentOrganization(req, item)) });
   });
 
   router.get("/codex-skills", async (_req: Request, res: Response) => {
@@ -591,6 +715,18 @@ export function createModeAdminRouter(options: {
     }
   });
 
+  router.get("/codex-skills/:name/content", async (req: Request, res: Response) => {
+    if (!options.nativeCodexSkills) {
+      res.status(404).json({ detail: "Codex Skill 服务未配置" });
+      return;
+    }
+    try {
+      res.json(await options.nativeCodexSkills.readSkillContent(req.params.name));
+    } catch (error) {
+      res.status(404).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/skill-packages", async (req: Request, res: Response) => {
     const parsed = skillPackageCreateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -598,7 +734,7 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
-      const skillPackage = await options.skillPackages.create(parsed.data);
+      const skillPackage = await options.skillPackages.create(withCurrentOrganization(req, parsed.data));
       res.status(201).json({ skillPackage });
     } catch (error) {
       res.status(400).json({ detail: detailFromCreateConflict(error, "skill package") });
@@ -631,6 +767,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "skill package 不存在" });
         return;
       }
+      assertCurrentOrganization(req, existing, "skill package");
       const created = (await options.skillPackages.create({
         organizationId: existing.organizationId,
         name: parsed.data.name,
@@ -668,7 +805,11 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "skill package 不存在" });
         return;
       }
-      const skillPackage = await options.skillPackages.update(req.params.id, parsed.data);
+      assertCurrentOrganization(req, existing as { organizationId?: string }, "skill package");
+      const skillPackage = await options.skillPackages.update(req.params.id, {
+        ...parsed.data,
+        organizationId: (existing as { organizationId?: string }).organizationId
+      });
       res.json({ skillPackage });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -682,6 +823,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "skill package 不存在" });
         return;
       }
+      assertCurrentOrganization(req, skillPackage as { organizationId?: string }, "skill package");
       res.json({ items: skillPackage.items ?? [] });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -695,6 +837,8 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
+      const existing = await options.skillPackages.get(req.params.id);
+      assertCurrentOrganization(req, existing as ({ organizationId?: string } | undefined), "skill package");
       const items = parsed.data.items.map((item) => ({
         capabilityKey: item.capabilityKey,
         description: item.description,
@@ -721,6 +865,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "skill package 不存在" });
         return;
       }
+      assertCurrentOrganization(req, skillPackage as { organizationId?: string }, "skill package");
       res.json({ policies: await listPoliciesForResource("skill_package", req.params.id) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -735,6 +880,7 @@ export function createModeAdminRouter(options: {
     }
     try {
       const skillPackage = (await options.skillPackages.get(req.params.id)) as { organizationId?: string } | undefined;
+      assertCurrentOrganization(req, skillPackage, "skill package");
       if (!skillPackage) {
         res.status(404).json({ detail: "skill package 不存在" });
         return;
@@ -747,8 +893,9 @@ export function createModeAdminRouter(options: {
     }
   });
 
-  router.get("/agent-modes", async (_req: Request, res: Response) => {
-    res.json({ agentModes: await options.agentModes.list() });
+  router.get("/agent-modes", async (req: Request, res: Response) => {
+    const agentModes = (await options.agentModes.list()) as Array<{ organizationId?: string }>;
+    res.json({ agentModes: agentModes.filter((item) => belongsToCurrentOrganization(req, item)) });
   });
 
   router.get("/agent-modes/workspace-agents-templates", async (_req: Request, res: Response) => {
@@ -768,6 +915,50 @@ export function createModeAdminRouter(options: {
     }
   });
 
+  router.post("/agent-modes/validate-configuration", async (req: Request, res: Response) => {
+    const parsed = agentModeConfigurationSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      res.json(await inspectAgentConfiguration(req, {
+        ...parsed.data.agentMode,
+        skillPackageIds: parsed.data.skillPackageIds,
+        instructionSources: parsed.data.instructionSources
+      }));
+    } catch (error) {
+      res.status(400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.post("/agent-modes/configured", async (req: Request, res: Response) => {
+    const parsed = agentModeConfigurationSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const inspection = await inspectAgentConfiguration(req, {
+        ...parsed.data.agentMode,
+        skillPackageIds: parsed.data.skillPackageIds,
+        instructionSources: parsed.data.instructionSources
+      });
+      if (!inspection.valid) {
+        res.status(400).json({ detail: inspection.checks.filter((item) => !item.pass).map((item) => item.detail).join("；") });
+        return;
+      }
+      const agentMode = await options.agentModes.createConfigured({
+        agentMode: withCurrentOrganization(req, parsed.data.agentMode),
+        skillPackageIds: [...new Set(parsed.data.skillPackageIds)],
+        instructionSources: parsed.data.instructionSources
+      });
+      res.status(201).json({ agentMode });
+    } catch (error) {
+      res.status(400).json({ detail: detailFromCreateConflict(error, "agent mode") });
+    }
+  });
+
   router.post("/agent-modes", async (req: Request, res: Response) => {
     const parsed = agentModeCreateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -775,7 +966,7 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
-      const agentMode = await options.agentModes.create(parsed.data);
+      const agentMode = await options.agentModes.create(withCurrentOrganization(req, parsed.data));
       res.status(201).json({ agentMode });
     } catch (error) {
       res.status(400).json({ detail: detailFromCreateConflict(error, "agent mode") });
@@ -806,6 +997,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "agent mode 不存在" });
         return;
       }
+      assertCurrentOrganization(req, existing, "agent mode");
       const created = (await options.agentModes.create({
         organizationId: existing.organizationId,
         name: parsed.data.name,
@@ -844,7 +1036,46 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "agent mode 不存在" });
         return;
       }
-      const agentMode = await options.agentModes.update(req.params.id, parsed.data);
+      assertCurrentOrganization(req, existing as { organizationId?: string }, "agent mode");
+      const agentMode = await options.agentModes.update(req.params.id, {
+        ...parsed.data,
+        organizationId: (existing as { organizationId?: string }).organizationId
+      });
+      res.json({ agentMode });
+    } catch (error) {
+      res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/agent-modes/:id/configuration", async (req: Request, res: Response) => {
+    const parsed = agentModeConfigurationUpdateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      sendValidationError(res, parsed.error);
+      return;
+    }
+    try {
+      const existing = (await options.agentModes.get(req.params.id)) as
+        | { organizationId?: string; name?: string; status?: string; visibleToUsers?: boolean; runProfileId?: string }
+        | undefined;
+      assertCurrentOrganization(req, existing, "agent mode");
+      const proposed = {
+        name: parsed.data.agentMode.name ?? existing?.name ?? "",
+        status: parsed.data.agentMode.status ?? existing?.status,
+        visibleToUsers: parsed.data.agentMode.visibleToUsers ?? existing?.visibleToUsers,
+        runProfileId: parsed.data.agentMode.runProfileId ?? existing?.runProfileId ?? "",
+        skillPackageIds: parsed.data.skillPackageIds,
+        instructionSources: parsed.data.instructionSources
+      };
+      const inspection = await inspectAgentConfiguration(req, proposed);
+      if (!inspection.valid) {
+        res.status(400).json({ detail: inspection.checks.filter((item) => !item.pass).map((item) => item.detail).join("；") });
+        return;
+      }
+      const agentMode = await options.agentModes.updateConfigured(req.params.id, {
+        agentMode: { ...parsed.data.agentMode, organizationId: existing?.organizationId },
+        skillPackageIds: [...new Set(parsed.data.skillPackageIds)],
+        instructionSources: parsed.data.instructionSources
+      });
       res.json({ agentMode });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -858,6 +1089,8 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
+      const existing = await options.agentModes.get(req.params.id);
+      assertCurrentOrganization(req, existing as ({ organizationId?: string } | undefined), "agent mode");
       const agentMode = await options.agentModes.replaceSkillPackages(req.params.id, parsed.data.skillPackageIds);
       res.json({ agentMode });
     } catch (error) {
@@ -872,6 +1105,8 @@ export function createModeAdminRouter(options: {
       return;
     }
     try {
+      const existing = await options.agentModes.get(req.params.id);
+      assertCurrentOrganization(req, existing as ({ organizationId?: string } | undefined), "agent mode");
       const agentMode = await options.agentModes.replaceInstructionSources(req.params.id, parsed.data.instructionSources);
       res.json({ agentMode });
     } catch (error) {
@@ -886,6 +1121,7 @@ export function createModeAdminRouter(options: {
         res.status(404).json({ detail: "agent mode 不存在" });
         return;
       }
+      assertCurrentOrganization(req, agentMode as { organizationId?: string }, "agent mode");
       res.json({ policies: await listPoliciesForResource("agent_mode", req.params.id) });
     } catch (error) {
       res.status(isNotFoundError(error) ? 404 : 400).json({ detail: detailFromError(error) });
@@ -900,6 +1136,7 @@ export function createModeAdminRouter(options: {
     }
     try {
       const agentMode = (await options.agentModes.get(req.params.id)) as { organizationId?: string } | undefined;
+      assertCurrentOrganization(req, agentMode, "agent mode");
       if (!agentMode) {
         res.status(404).json({ detail: "agent mode 不存在" });
         return;

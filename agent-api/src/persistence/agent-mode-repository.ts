@@ -41,7 +41,7 @@ export type AgentModeRecord = {
   instructionSources: AgentModeInstructionSourceRecord[];
 };
 
-type CreateAgentModePayload = {
+export type CreateAgentModePayload = {
   id?: string;
   organizationId?: string;
   name: string;
@@ -60,7 +60,7 @@ type ReplaceWorkspaceRulesPayload = Array<{
   loadWorkspaceAgentsMd?: boolean;
 }>;
 
-type ReplaceInstructionSourcesPayload = Array<{
+export type ReplaceInstructionSourcesPayload = Array<{
   sourceType: string;
   sourceRef: string;
   sortOrder?: number;
@@ -216,6 +216,41 @@ export class AgentModeRepository {
     return this.loadRecord(this.db, created);
   }
 
+  async createConfigured(input: {
+    agentMode: CreateAgentModePayload;
+    skillPackageIds: string[];
+    instructionSources: ReplaceInstructionSourcesPayload;
+  }): Promise<AgentModeRecord> {
+    return this.db.$transaction(async (tx) => {
+      const created = await tx.agentMode.create({
+        data: {
+          id: trimOrUndefined(input.agentMode.id),
+          organizationId: trimOrUndefined(input.agentMode.organizationId) ?? null,
+          name: input.agentMode.name,
+          slug: input.agentMode.slug,
+          description: trimOrUndefined(input.agentMode.description) ?? null,
+          status: trimOrUndefined(input.agentMode.status) ?? "active",
+          visibleToUsers: input.agentMode.visibleToUsers ?? true,
+          runProfileId: input.agentMode.runProfileId
+        }
+      });
+      for (const skillPackageId of input.skillPackageIds) {
+        await tx.agentModeSkillPackage.create({ data: { agentModeId: created.id, skillPackageId } });
+      }
+      for (const source of input.instructionSources) {
+        await tx.agentModeInstructionSource.create({
+          data: {
+            agentModeId: created.id,
+            sourceType: source.sourceType,
+            sourceRef: source.sourceRef,
+            sortOrder: source.sortOrder ?? 0
+          }
+        });
+      }
+      return this.loadRecord(tx, created);
+    });
+  }
+
   async get(id: string): Promise<AgentModeRecord | undefined> {
     const agentModeId = trimOrUndefined(id);
     if (!agentModeId) return undefined;
@@ -255,6 +290,60 @@ export class AgentModeRepository {
       }
     });
     return this.loadRecord(this.db, updated);
+  }
+
+  async updateConfigured(
+    id: string,
+    input: {
+      agentMode: Partial<CreateAgentModePayload>;
+      skillPackageIds: string[];
+      instructionSources: ReplaceInstructionSourcesPayload;
+    }
+  ): Promise<AgentModeRecord> {
+    return this.db.$transaction(async (tx) => {
+      const existing = await this.requireAgentMode(tx, id);
+      const updated = await tx.agentMode.update({
+        where: { id: existing.id },
+        data: {
+          organizationId:
+            input.agentMode.organizationId === undefined
+              ? existing.organizationId
+              : trimOrUndefined(input.agentMode.organizationId) ?? null,
+          name: input.agentMode.name ?? existing.name,
+          slug: input.agentMode.slug ?? existing.slug,
+          description:
+            input.agentMode.description === undefined
+              ? existing.description
+              : trimOrUndefined(input.agentMode.description) ?? null,
+          status:
+            input.agentMode.status === undefined
+              ? existing.status
+              : trimOrUndefined(input.agentMode.status) ?? "active",
+          visibleToUsers:
+            input.agentMode.visibleToUsers === undefined
+              ? existing.visibleToUsers
+              : input.agentMode.visibleToUsers,
+          runProfileId: input.agentMode.runProfileId ?? existing.runProfileId,
+          updatedAt: new Date()
+        }
+      });
+      await tx.agentModeSkillPackage.deleteMany({ where: { agentModeId: existing.id } });
+      for (const skillPackageId of input.skillPackageIds) {
+        await tx.agentModeSkillPackage.create({ data: { agentModeId: existing.id, skillPackageId } });
+      }
+      await tx.agentModeInstructionSource.deleteMany({ where: { agentModeId: existing.id } });
+      for (const source of input.instructionSources) {
+        await tx.agentModeInstructionSource.create({
+          data: {
+            agentModeId: existing.id,
+            sourceType: source.sourceType,
+            sourceRef: source.sourceRef,
+            sortOrder: source.sortOrder ?? 0
+          }
+        });
+      }
+      return this.loadRecord(tx, updated);
+    });
   }
 
   async replaceSkillPackages(agentModeId: string, skillPackageIds: string[]): Promise<AgentModeRecord> {

@@ -8,6 +8,26 @@ import { describe, expect, it } from "vitest";
 import { NativeCodexSkillService } from "./native-codex-skill-service.js";
 
 describe("NativeCodexSkillService", () => {
+  it("reads SKILL.md content by the catalog skill name", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-skill-content-"));
+    try {
+      const baseHome = path.join(tempRoot, "base-home");
+      const skillRoot = path.join(baseHome, "skills", "support-triage");
+      const content = "---\nname: support-triage\ndescription: Triage support requests\n---\n\n# Workflow\n";
+      await fs.mkdir(skillRoot, { recursive: true });
+      await fs.writeFile(path.join(skillRoot, "SKILL.md"), content, "utf8");
+
+      const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot: path.join(tempRoot, "sessions") });
+      await expect(service.readSkillContent("support-triage")).resolves.toMatchObject({
+        skill: { name: "support-triage", relativePath: "support-triage" },
+        content
+      });
+      await expect(service.readSkillContent("missing")).rejects.toThrow("Codex Skill 不存在");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Codex runtime skill directories writable in session homes", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-skills-"));
     try {

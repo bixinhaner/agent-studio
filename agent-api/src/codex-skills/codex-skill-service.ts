@@ -672,6 +672,20 @@ export class CodexSkillService {
     });
   }
 
+  async readManagedSkillMdForAdmin(input: {
+    skillId: string;
+    organizationId?: string;
+  }): Promise<{ skill: CodexManagedSkillRecord; content: string }> {
+    const skill = await this.dependencies.repository.getManagedSkill(input.skillId);
+    if (!skill) throw new Error("skill 不存在");
+    if (input.organizationId && skill.organizationId && input.organizationId !== skill.organizationId) {
+      throw new Error("不能查看其他组织的 skill");
+    }
+    const sourceDirectoryPath = await resolveSkillDirectoryPath(skill.publishedPath);
+    const content = await fs.readFile(path.join(sourceDirectoryPath, "SKILL.md"), "utf8");
+    return { skill, content };
+  }
+
   async setManagedSkillStatus(input: {
     actor: Actor;
     skillId: string;

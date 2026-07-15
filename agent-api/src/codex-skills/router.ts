@@ -317,6 +317,17 @@ export function createAdminCodexSkillRouter(service: CodexSkillService): Router 
     }
   });
 
+  router.get("/codex-managed-skills/:id/content", async (req: Request, res: Response) => {
+    try {
+      res.json(await service.readManagedSkillMdForAdmin({
+        skillId: req.params.id,
+        organizationId: req.currentOrganization?.id
+      }));
+    } catch (error) {
+      res.status(404).json({ detail: detailFromError(error) });
+    }
+  });
+
   router.post("/codex-managed-skills/:id/status", async (req: Request, res: Response) => {
     const parsed = updateManagedSkillStatusSchema.safeParse(req.body ?? {});
     if (!parsed.success) {

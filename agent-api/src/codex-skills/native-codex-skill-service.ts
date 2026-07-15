@@ -9,6 +9,11 @@ export type NativeCodexSkillRecord = {
   system: boolean;
 };
 
+export type NativeCodexSkillContent = {
+  skill: NativeCodexSkillRecord;
+  content: string;
+};
+
 export type MaterializedCodexSkillInput = {
   name: string;
   sourcePath?: string;
@@ -208,6 +213,15 @@ export class NativeCodexSkillService {
       if (left.system !== right.system) return Number(left.system) - Number(right.system);
       return left.name.localeCompare(right.name, "en", { sensitivity: "base", numeric: true });
     });
+  }
+
+  async readSkillContent(name: string): Promise<NativeCodexSkillContent> {
+    const normalizedName = trimOrUndefined(name);
+    if (!normalizedName) throw new Error("skill 名称不能为空");
+    const skill = (await this.list()).find((item) => item.name === normalizedName);
+    if (!skill) throw new Error("Codex Skill 不存在");
+    const content = await fs.readFile(path.join(skill.sourcePath, "SKILL.md"), "utf8");
+    return { skill, content };
   }
 
   async materializeSessionHome(input: {
