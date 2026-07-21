@@ -112,6 +112,13 @@ function issueLoginCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function isActivePendingInvite(
+  invite: Awaited<ReturnType<OrganizationInviteRepository["listPendingByEmail"]>>[number],
+  now = Date.now()
+): boolean {
+  return invite.status === "pending" && new Date(invite.expiresAt).getTime() > now;
+}
+
 function maskEmail(email: string): string {
   const [localPart, domain] = email.split("@");
   if (!localPart || !domain) return email;
@@ -778,17 +785,30 @@ export function createAuthRouter(options: {
     try {
       const input = requestEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);
-      const invite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
-      const email = toEmail(input.email) ?? invite?.email;
+      const explicitInvite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
+      if (inviteToken && !explicitInvite) {
+        res.status(404).json({ detail: "Invite not found" });
+        return;
+      }
+      const email = toEmail(input.email) ?? explicitInvite?.email;
       if (!email) {
         res.status(400).json({ detail: "email is required" });
         return;
       }
 
-      if (invite && invite.email !== email) {
+      if (explicitInvite && explicitInvite.email !== email) {
         res.status(400).json({ detail: "Invite email does not match" });
         return;
       }
+
+      if (explicitInvite && !isActivePendingInvite(explicitInvite)) {
+        res.status(400).json({ detail: "Invite has expired" });
+        return;
+      }
+
+      const pendingInvites = explicitInvite ? [explicitInvite] : await options.invites.listPendingByEmail(email);
+      const activePendingInvites = pendingInvites.filter((item) => isActivePendingInvite(item));
+      const invite = explicitInvite ?? (activePendingInvites.length === 1 ? activePendingInvites[0] : undefined);
 
       const shouldUseInternalEntry =
         !invite &&
@@ -809,8 +829,13 @@ export function createAuthRouter(options: {
       }
 
       const existingIdentities = await options.identities.listByEmail(email);
-      const pendingInvites = invite ? [invite] : await options.invites.listPendingByEmail(email);
-      if (existingIdentities.length === 0 && pendingInvites.length === 0) {
+      if (!invite && existingIdentities.length === 0 && activePendingInvites.length > 1) {
+        res.status(409).json({
+          detail: "Multiple active invitations were found. Open the invitation for the organization you want to join."
+        });
+        return;
+      }
+      if (existingIdentities.length === 0 && activePendingInvites.length === 0) {
         res.json({ ok: true });
         return;
       }
@@ -856,21 +881,46 @@ export function createAuthRouter(options: {
     try {
       const input = verifyEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);
-      const invite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
+      let invite = inviteToken ? await options.invites.getByTokenHash(hashToken(inviteToken)) : undefined;
+      if (inviteToken && !invite) {
+        res.status(404).json({ detail: "Invite not found" });
+        return;
+      }
       const email = input.email.trim().toLowerCase();
       if (invite && invite.email !== email) {
         res.status(400).json({ detail: "Invite email does not match" });
         return;
       }
 
-      const challenges = await options.challenges.listActive({
+      const challengeHash = hashToken(input.code);
+      const inviteChallenges = await options.challenges.listActive({
         channel: "email",
         targetRef: email,
-        purpose: invite ? "invite_accept" : "email_sign_in"
+        purpose: "invite_accept"
       });
-      const challenge = challenges.find((item) => item.challengeHash === hashToken(input.code));
+      const signInChallenges = invite
+        ? []
+        : await options.challenges.listActive({
+            channel: "email",
+            targetRef: email,
+            purpose: "email_sign_in"
+          });
+      const challenge = [...inviteChallenges, ...signInChallenges].find((item) => item.challengeHash === challengeHash);
       if (!challenge) {
         res.status(400).json({ detail: "Verification code is invalid or expired" });
+        return;
+      }
+
+      if (!invite && challenge.purpose === "invite_accept" && challenge.inviteId) {
+        const pendingInvites = await options.invites.listPendingByEmail(email);
+        invite = pendingInvites.find((item) => item.id === challenge.inviteId);
+      }
+      if (challenge.purpose === "invite_accept" && (!invite || invite.id !== challenge.inviteId)) {
+        res.status(400).json({ detail: "Invitation is no longer available" });
+        return;
+      }
+      if (invite && !isActivePendingInvite(invite)) {
+        res.status(400).json({ detail: "Invite has expired" });
         return;
       }
       await options.challenges.consume(challenge.id);
@@ -894,11 +944,6 @@ export function createAuthRouter(options: {
 
       let activeOrganizationId = trimOrUndefined(user.primaryOrganizationId);
       if (invite) {
-        const expired = new Date(invite.expiresAt).getTime() <= Date.now();
-        if (invite.status !== "pending" || expired) {
-          res.status(400).json({ detail: "Invite has expired" });
-          return;
-        }
         const membershipType =
           invite.roleTemplate && typeof invite.roleTemplate === "object"
             ? trimOrUndefined((invite.roleTemplate as Record<string, unknown>).membershipType)
