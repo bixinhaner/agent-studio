@@ -28,6 +28,8 @@
 
 # large data files
 zendesk-data/
+/docs/
+/outputs/
 
 # Python cache
 **/__pycache__/
