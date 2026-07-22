@@ -122,6 +122,15 @@ describe("bundled OMC handbook loader", () => {
     expect(entries).not.toContain("references");
     expect(skill).toContain("scripts/ensure-handbook.mjs");
     expect(skill).toContain("handbookDigest");
+    expect(skill).toContain("`packageAvailable` is `false`");
+    expect(skill).toContain("scripts/search-catalog.mjs");
+    expect(skill).toContain('node "$CLI" describe');
+    expect(skill).toContain("Continue only while discovery yields new relevant evidence");
+    expect(skill).toContain("results repeat, or the next query lacks evidence");
+    expect(skill).not.toMatch(/at most three|two relevant categories|five candidate documents/);
+    expect(skill).toContain("An empty API result means only");
+    expect(skill.trimEnd().split("\n").length).toBeLessThanOrEqual(86);
+    expect(skill.match(/\S+/g)?.length ?? 0).toBeLessThanOrEqual(665);
     expect(skill).not.toContain("/api/v1/agent/catalog");
     await expect(stat(loaderPath)).resolves.toBeDefined();
   });
