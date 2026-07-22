@@ -18,7 +18,8 @@ const originalEnv = {
   CODEX_APP_SERVER_MAX_PROCESSES: process.env.CODEX_APP_SERVER_MAX_PROCESSES,
   CODEX_APP_SERVER_MAX_ACTIVE_TURNS: process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS,
   CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS: process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS,
-  CODEX_APP_SERVER_TURN_MAX_MS: process.env.CODEX_APP_SERVER_TURN_MAX_MS
+  CODEX_APP_SERVER_TURN_MAX_MS: process.env.CODEX_APP_SERVER_TURN_MAX_MS,
+  CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS: process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS
 };
 
 async function writeFakeAppServer(): Promise<void> {
@@ -33,6 +34,7 @@ let nextThreadId = 1;
 let nextTurnId = 1;
 const threads = new Set();
 const pendingServerRequests = new Map();
+const overloadRecoveryModeByThread = new Map();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -44,6 +46,19 @@ function respond(id, result) {
 
 function notify(method, params) {
   write({ method, params });
+}
+
+function notifyModelCapacity(threadId, turnId) {
+  notify("error", {
+    threadId,
+    turnId,
+    error: {
+      message: "Selected model is at capacity. Please try a different model.",
+      codexErrorInfo: "serverOverloaded",
+      additionalDetails: null
+    },
+    willRetry: false
+  });
 }
 
 rl.on("line", (line) => {
@@ -193,6 +208,37 @@ rl.on("line", (line) => {
     respond(id, { turn: { id: turnId } });
     setTimeout(() => {
       notify("turn/started", { threadId, turn: { id: turnId } });
+      if (inputText === "server-overloaded-then-success") {
+        overloadRecoveryModeByThread.set(threadId, "recover");
+        notifyModelCapacity(threadId, turnId);
+        return;
+      }
+      if (inputText === "server-overloaded-always") {
+        overloadRecoveryModeByThread.set(threadId, "exhaust");
+        notifyModelCapacity(threadId, turnId);
+        return;
+      }
+      if (inputText === "overload-after-final-delta") {
+        overloadRecoveryModeByThread.set(threadId, "recover");
+        notify("item/agentMessage/delta", {
+          threadId,
+          turnId,
+          itemId: "final-msg",
+          phase: "final_answer",
+          delta: "Partial final answer"
+        });
+        setTimeout(() => {
+          notifyModelCapacity(threadId, turnId);
+        }, 10);
+        return;
+      }
+      if (inputText === "continue") {
+        if (overloadRecoveryModeByThread.get(threadId) === "exhaust") {
+          notifyModelCapacity(threadId, turnId);
+          return;
+        }
+        overloadRecoveryModeByThread.delete(threadId);
+      }
       if (inputText === "unsupported-interactive-tool" || inputText === "unsupported-user-input") {
         const requestId = "server-request-1";
         pendingServerRequests.set(requestId, { threadId, turnId });
@@ -312,6 +358,7 @@ describe("Codex app-server runtime", () => {
     process.env.CODEX_APP_SERVER_MAX_ACTIVE_TURNS = "2";
     process.env.CODEX_APP_SERVER_TURN_IDLE_TIMEOUT_MS = "";
     process.env.CODEX_APP_SERVER_TURN_MAX_MS = "";
+    process.env.CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS = "0,0";
   });
 
   afterEach(() => {
@@ -456,6 +503,111 @@ describe("Codex app-server runtime", () => {
     expect(events.some((event) => event.type === "error")).toBe(false);
     expect(events.some((event) => event.type === "turn.completed")).toBe(true);
     expect(warnSpy).not.toHaveBeenCalledWith("codex app-server turn failed", expect.anything());
+    warnSpy.mockRestore();
+  });
+
+  it("continues the same thread after a transient model overload", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-overload-retry") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    const events: CodexStreamEvent[] = [];
+    for await (const event of runtime.runStreamed(thread, "server-overloaded-then-success")) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Hello");
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events.some((event) => event.type === "turn.completed")).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server retrying transient model overload",
+      expect.objectContaining({
+        threadId: thread.id,
+        model: "gpt-5.6-sol",
+        retryAttempt: 1,
+        maxAttempts: 3,
+        delayMs: 0
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("continues after partial answer output when the model is overloaded", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-overload-after-final") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+    const observedEvents: CodexStreamEvent[] = [];
+
+    for await (const event of runtime.runStreamed(thread, "overload-after-final-delta")) {
+      observedEvents.push(event);
+    }
+    expect(observedEvents.find((event) => event.type === "item.agent_message.delta")?.raw).toMatchObject({
+      item: { type: "agent_message", phase: "final_answer" }
+    });
+    expect(observedEvents.filter((event) => event.type === "item.agent_message.delta").map((event) => event.delta).join(""))
+      .toBe("Partial final answerHello");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "codex app-server retrying transient model overload",
+      expect.objectContaining({ retryAttempt: 1 })
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("returns a friendly message after overload recovery is exhausted", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-overload-exhausted") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    await expect(async () => {
+      for await (const _event of runtime.runStreamed(thread, "server-overloaded-always")) {
+        // drain until all recovery attempts are exhausted
+      }
+    }).rejects.toThrow("AI 服务当前繁忙，请稍后再试。");
+    expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient model overload"))
+      .toHaveLength(2);
+    warnSpy.mockRestore();
+  });
+
+  it("does not retry a non-transient runtime error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runtime = new CodexRuntime({
+      envOverrides: { CODEX_HOME: path.join(testTempDir, "codex-home-runtime-error") }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      workspace: testTempDir
+    });
+
+    await expect(async () => {
+      for await (const _event of runtime.runStreamed(thread, "runtime-error")) {
+        // drain until the app-server error is raised
+      }
+    }).rejects.toThrow(/sandbox denied/);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "codex app-server retrying transient model overload",
+      expect.anything()
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
     warnSpy.mockRestore();
   });
 

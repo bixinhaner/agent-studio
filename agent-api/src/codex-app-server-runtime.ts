@@ -71,6 +71,11 @@ const DEFAULT_MAX_ACTIVE_TURNS_PER_PROCESS = 2;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_TURN_IDLE_TIMEOUT_MS = 20 * 60_000;
 const DEFAULT_TURN_MAX_MS = 90 * 60_000;
+const DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+const TRANSIENT_OVERLOAD_RETRY_DELAYS_ENV = "CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS";
+const TRANSIENT_OVERLOAD_RECOVERY_MESSAGE = "continue";
+const TRANSIENT_OVERLOAD_USER_MESSAGE = "AI 服务当前繁忙，请稍后再试。";
+const MAX_TRANSIENT_OVERLOAD_RETRIES = 2;
 const MAX_DIAGNOSTIC_EVENTS = 20;
 const MAX_BUFFERED_PRE_START_EVENTS = 50;
 const TOML_DRIVER_APP_SERVER = "app_server";
@@ -151,6 +156,17 @@ function parsePositiveDurationMs(value: string | undefined, fallback: number): n
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function transientOverloadRetryDelaysMs(): number[] {
+  const configured = process.env[TRANSIENT_OVERLOAD_RETRY_DELAYS_ENV]?.trim();
+  if (!configured) return [...DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS];
+  const delays = configured
+    .split(",")
+    .map((value) => Number.parseInt(value.trim(), 10))
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .slice(0, MAX_TRANSIENT_OVERLOAD_RETRIES);
+  return delays.length > 0 ? delays : [...DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS];
+}
+
 function previewText(value: unknown, maxLength = 240): string | undefined {
   if (typeof value !== "string") return undefined;
   const compact = value.replace(/\s+/g, " ").trim();
@@ -228,6 +244,53 @@ class CodexAppServerTurnError extends Error {
     this.raw = input.raw;
     this.diagnostics = input.diagnostics;
   }
+}
+
+function isTransientModelOverloadPayload(message: string, raw?: unknown): boolean {
+  const rawRecord = asRecord(raw);
+  const nestedError = asRecord(rawRecord?.error);
+  const codexErrorInfo = trimOrUndefined(nestedError?.codexErrorInfo)?.toLowerCase();
+  if (codexErrorInfo === "serveroverloaded") return true;
+
+  const text = `${message}\n${jsonPreview(raw, 4_000)}`.toLowerCase();
+  return text.includes("selected model is at capacity");
+}
+
+function isTransientModelOverloadEvent(event: CodexStreamEvent): boolean {
+  return event.type === "error"
+    && isTransientModelOverloadPayload(event.text || "", event.raw);
+}
+
+function isTransientModelOverload(error: unknown): boolean {
+  const raw = error instanceof CodexAppServerTurnError ? error.raw : undefined;
+  return isTransientModelOverloadPayload(
+    error instanceof Error ? error.message : String(error),
+    raw
+  );
+}
+
+async function waitForRetryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    const error = new Error("Codex app-server retry aborted by client");
+    error.name = "AbortError";
+    throw error;
+  }
+  if (delayMs <= 0) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const error = new Error("Codex app-server retry aborted by client");
+      error.name = "AbortError";
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function stableStringify(value: unknown): string {
@@ -1130,7 +1193,9 @@ class CodexAppServerManager {
       if (isRetryableRuntimeError(event)) {
         return;
       }
-      queue.push(event);
+      if (!isTransientModelOverloadEvent(event)) {
+        queue.push(event);
+      }
       if (event.type === "turn.completed") {
         completed = true;
         setTimeout(() => queue.close(), 150);
@@ -1305,7 +1370,38 @@ export class CodexAppServerRuntime {
     message: string,
     options: { signal?: AbortSignal } = {}
   ): AsyncGenerator<CodexStreamEvent> {
-    yield* appServerManager.runTurn(thread, message, options);
+    const retryDelays = transientOverloadRetryDelaysMs();
+    let turnMessage = message;
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        for await (const event of appServerManager.runTurn(thread, turnMessage, options)) {
+          yield event;
+        }
+        return;
+      } catch (error) {
+        const transientOverload = isTransientModelOverload(error);
+        const delayMs = retryDelays[attempt];
+        if (options.signal?.aborted || !transientOverload) {
+          throw error;
+        }
+        if (delayMs === undefined) {
+          const exhausted = new Error(TRANSIENT_OVERLOAD_USER_MESSAGE);
+          exhausted.name = "CodexModelCapacityError";
+          (exhausted as Error & { cause?: unknown }).cause = error;
+          throw exhausted;
+        }
+        console.warn("codex app-server retrying transient model overload", {
+          threadId: thread.id,
+          model: thread.options.model,
+          retryAttempt: attempt + 1,
+          maxAttempts: retryDelays.length + 1,
+          delayMs
+        });
+        await waitForRetryDelay(delayMs, options.signal);
+        turnMessage = TRANSIENT_OVERLOAD_RECOVERY_MESSAGE;
+      }
+    }
   }
 
   async validateProvider(options: { model: string; reasoningEffort: ReasoningEffort }): Promise<void> {
