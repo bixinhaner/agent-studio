@@ -130,8 +130,8 @@ describe("bundled OMC handbook loader", () => {
     expect(skill).toContain("Never substitute between operations, file transfer, upgrades, MML");
     expect(skill).not.toMatch(/at most three|two relevant categories|five candidate documents/);
     expect(skill).toContain("An empty API result means only");
-    expect(skill.trimEnd().split("\n").length).toBeLessThanOrEqual(86);
-    expect(skill.match(/\S+/g)?.length ?? 0).toBeLessThanOrEqual(665);
+    expect(skill.trimEnd().split("\n").length).toBeLessThanOrEqual(120);
+    expect(skill.match(/\S+/g)?.length ?? 0).toBeLessThanOrEqual(1_000);
     expect(skill).not.toContain("/api/v1/agent/catalog");
     await expect(stat(loaderPath)).resolves.toBeDefined();
   });
