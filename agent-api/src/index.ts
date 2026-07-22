@@ -51,6 +51,7 @@ import { appConfig, resolveWorkspace } from "./config.js";
 import { createAdminBillingRouter, createPortalBillingRouter } from "./billing/router.js";
 import { BillingService } from "./billing/service.js";
 import { CodexRuntime } from "./codex-runtime.js";
+import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
@@ -2291,11 +2292,19 @@ function statusCodeForSessionAccessError(error: unknown): number {
   return detail === QUOTA_ACCESS_DENIED_MESSAGE ? 403 : 400;
 }
 
-function payloadForSessionAccessError(error: unknown, fallbackDetail: string): {
+function payloadForSessionAccessError(error: unknown, fallbackDetail: string, locale?: string | null): {
   detail: string;
   code?: string;
   reason_code?: string;
 } {
+  const runtimeError = presentCodexRuntimeError(error, locale);
+  if (runtimeError) {
+    return {
+      detail: runtimeError.message,
+      code: runtimeError.code,
+      reason_code: runtimeError.code.toLowerCase()
+    };
+  }
   const detail = error instanceof Error ? error.message : fallbackDetail;
   if (isDirectChatMessageTooLargeError(error)) {
     return {
@@ -4953,11 +4962,16 @@ async function handleCrestChatStream(req: Request, res: Response): Promise<void>
     if (crestRuntimeSession && !explicitCancel.signal.aborted) {
       crestRuntimeFailure = error instanceof Error ? error.message : String(error);
     }
+    const runtimeError = presentCodexRuntimeError(error, req.header("accept-language"));
     const errorSent =
       !streamAbort.disconnected &&
       !explicitCancel.signal.aborted &&
       !res.writableEnded &&
-      sendSSE(res, "error", { message: error instanceof Error ? error.message : "Crest chat stream failed" });
+      sendSSE(
+        res,
+        "error",
+        runtimeError ?? { message: error instanceof Error ? error.message : "Crest chat stream failed" }
+      );
     if (errorSent && crestRuntimeFailure) {
       reportVisibleConversationFailure({
         source: "crest_chat_stream",
@@ -11381,7 +11395,10 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       !streamAbort.disconnected &&
       !explicitCancel.signal.aborted &&
       !res.writableEnded &&
-      sendTrackedSSE("error", payloadForSessionAccessError(error, "Chat stream failed"));
+      sendTrackedSSE(
+        "error",
+        payloadForSessionAccessError(error, "Chat stream failed", req.header("accept-language"))
+      );
     if (errorSent && portalRuntimeFailure) {
       reportVisibleConversationFailure({
         source: "portal_chat_stream",

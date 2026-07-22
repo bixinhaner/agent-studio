@@ -12,6 +12,10 @@ import {
   type CodexModelCapability,
   type ReasoningEffort
 } from "./model-config.js";
+import {
+  CODEX_RUNTIME_ERROR_CODE,
+  CodexRuntimeUserError
+} from "./codex-runtime-user-error.js";
 import type { CodexRuntimeOptions, CodexStreamEvent } from "./codex-runtime.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -74,7 +78,6 @@ const DEFAULT_TURN_MAX_MS = 90 * 60_000;
 const DEFAULT_TRANSIENT_OVERLOAD_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const TRANSIENT_OVERLOAD_RETRY_DELAYS_ENV = "CODEX_APP_SERVER_OVERLOAD_RETRY_DELAYS_MS";
 const TRANSIENT_OVERLOAD_RECOVERY_MESSAGE = "continue";
-const TRANSIENT_OVERLOAD_USER_MESSAGE = "AI 服务当前繁忙，请稍后再试。";
 const MAX_TRANSIENT_OVERLOAD_RETRIES = 2;
 const MAX_DIAGNOSTIC_EVENTS = 20;
 const MAX_BUFFERED_PRE_START_EVENTS = 50;
@@ -1386,10 +1389,7 @@ export class CodexAppServerRuntime {
           throw error;
         }
         if (delayMs === undefined) {
-          const exhausted = new Error(TRANSIENT_OVERLOAD_USER_MESSAGE);
-          exhausted.name = "CodexModelCapacityError";
-          (exhausted as Error & { cause?: unknown }).cause = error;
-          throw exhausted;
+          throw new CodexRuntimeUserError(CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY, error);
         }
         console.warn("codex app-server retrying transient model overload", {
           threadId: thread.id,

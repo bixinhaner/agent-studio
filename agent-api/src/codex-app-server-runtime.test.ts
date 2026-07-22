@@ -8,6 +8,7 @@ import {
   shutdownCodexAppServerRuntime
 } from "./codex-app-server-runtime.js";
 import { CodexRuntime, type CodexStreamEvent } from "./codex-runtime.js";
+import { CODEX_RUNTIME_ERROR_CODE, CodexRuntimeUserError } from "./codex-runtime-user-error.js";
 
 const testTempDir = path.resolve(process.cwd(), "..", "temp", "codex-app-server-runtime-test");
 const fakeBinaryPath = path.join(testTempDir, "fake-codex-app-server.mjs");
@@ -581,7 +582,12 @@ describe("Codex app-server runtime", () => {
       for await (const _event of runtime.runStreamed(thread, "server-overloaded-always")) {
         // drain until all recovery attempts are exhausted
       }
-    }).rejects.toThrow("AI 服务当前繁忙，请稍后再试。");
+    }).rejects.toMatchObject({
+      name: "CodexRuntimeUserError",
+      code: CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY,
+      retryable: true,
+      message: CODEX_RUNTIME_ERROR_CODE.AI_SERVICE_BUSY
+    } satisfies Partial<CodexRuntimeUserError>);
     expect(warnSpy.mock.calls.filter(([message]) => message === "codex app-server retrying transient model overload"))
       .toHaveLength(2);
     warnSpy.mockRestore();

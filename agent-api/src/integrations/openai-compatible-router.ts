@@ -5,6 +5,7 @@ import express, { type Request, type Response, type Router } from "express";
 import { z } from "zod";
 
 import { resolveWorkspaceAgentsMdContent } from "../agent-mode/workspace-agents-md.js";
+import { presentCodexRuntimeError } from "../codex-runtime-user-error.js";
 import type { ReasoningEffort } from "../model-config.js";
 import { REASONING_EFFORT_VALUES, normalizeModel, normalizeReasoningEffortForModel } from "../model-config.js";
 import type { RuntimeUsageSnapshot } from "../live-runtime-session.js";
@@ -424,6 +425,17 @@ function writeOpenAIError(
       code: code ?? null
     }
   });
+}
+
+function writeOpenAIStreamError(res: Response, message: string, code: string): void {
+  res.write(`data: ${JSON.stringify({
+    error: {
+      message,
+      type: "server_error",
+      param: null,
+      code
+    }
+  })}\n\n`);
 }
 
 async function resolveAuthenticatedIntegration(
@@ -977,11 +989,17 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
       );
     } catch (error) {
       executionStatus = "failed";
-      errorMessage = error instanceof Error ? error.message : "Invalid request.";
+      const runtimeError = presentCodexRuntimeError(error, req.header("accept-language"));
+      errorMessage = runtimeError?.message ?? (error instanceof Error ? error.message : "Invalid request.");
       markResponseReady();
       if (!res.headersSent) {
-        markResponseStarted(400);
-        writeOpenAIError(res, 400, errorMessage, "invalid_request");
+        const status = runtimeError ? 503 : 400;
+        markResponseStarted(status);
+        writeOpenAIError(res, status, errorMessage, runtimeError?.code ?? "invalid_request");
+      } else if (runtimeError) {
+        writeOpenAIStreamError(res, runtimeError.message, runtimeError.code);
+        res.write("data: [DONE]\n\n");
+        res.end();
       } else {
         res.end();
       }

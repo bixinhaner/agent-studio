@@ -1050,6 +1050,9 @@ const GENERIC_EXECUTION_ERROR_DETAIL = "A background execution step needs attent
 function formatAssistantErrorNotice(detail: string, code?: string): string {
   const normalizedCode = (code || "").trim().toUpperCase();
   const normalized = detail.replace(/\s+/g, " ").trim();
+  if (normalizedCode === "AI_SERVICE_BUSY") {
+    return normalized || "The AI service is currently busy. Please try again later.";
+  }
   if (normalizedCode === "DIRECT_CHAT_MESSAGE_TOO_LARGE") {
     return LARGE_DIRECT_MESSAGE_NOTICE;
   }

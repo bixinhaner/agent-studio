@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from "express";
 
+import { presentCodexRuntimeError } from "../../codex-runtime-user-error.js";
 import { createSseAbortLifecycle, initSSE, sendSSE } from "../../sse.js";
 import type { IntegrationInstanceRepositoryDb } from "../../persistence/integration-instance-repository.js";
 import {
@@ -33,6 +34,7 @@ export function createActionConnectorRuntimeRouter(options: {
     initSSE(res);
     const lifecycle = createSseAbortLifecycle(req, res);
     const heartbeat = setInterval(() => sendSSE(res, "ping", { now: new Date().toISOString() }), 15000);
+    let requestLocale = req.header("accept-language");
 
     try {
       const delegationHeaderValue = bearerHeader(req);
@@ -45,6 +47,7 @@ export function createActionConnectorRuntimeRouter(options: {
       }
 
       const request = actionConnectorChatRequestSchema.parse(req.body || {});
+      requestLocale = request.locale;
       await runtime.streamChat({
         connectorId: req.params.connectorId,
         delegationHeaderValue,
@@ -58,12 +61,13 @@ export function createActionConnectorRuntimeRouter(options: {
       lifecycle.markSettled();
     } catch (error) {
       if (!lifecycle.disconnected) {
+        const runtimeError = presentCodexRuntimeError(error, requestLocale);
         sendAgentEvent(res, {
           type: "error",
           error: {
-            code: "UPSTREAM_ERROR",
-            message: error instanceof Error ? error.message : "Action connector runtime failed.",
-            retryable: true
+            code: runtimeError?.code ?? "UPSTREAM_ERROR",
+            message: runtimeError?.message ?? (error instanceof Error ? error.message : "Action connector runtime failed."),
+            retryable: runtimeError?.retryable ?? true
           }
         });
       }
