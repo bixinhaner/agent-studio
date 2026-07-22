@@ -71,6 +71,65 @@ describe("consolidateCodexFileChangeParts", () => {
     ]);
   });
 
+  it("merges an absolute runtime path with its ready relative artifact path", () => {
+    const result = consolidateCodexFileChangeParts([
+      fileChange({
+        changes: [
+          {
+            path: "/var/lib/agent-studio/sessions/thread-1/儿童古诗.md",
+            kind: "update"
+          }
+        ]
+      }),
+      fileChange({
+        changes: [
+          {
+            path: "儿童古诗.md",
+            kind: "ready",
+            can_preview: true,
+            can_download: true,
+            artifact_id: "artifact-1"
+          }
+        ]
+      })
+    ]);
+
+    expect((result[0] as any).data.changes).toEqual([
+      {
+        path: "儿童古诗.md",
+        kind: "ready",
+        can_preview: true,
+        can_download: true,
+        artifact_id: "artifact-1"
+      }
+    ]);
+  });
+
+  it("keeps the ready relative artifact when an absolute progress event arrives later", () => {
+    const result = consolidateCodexFileChangeParts([
+      fileChange({ changes: [{ path: "report.md", kind: "ready", can_download: true }] }),
+      fileChange({ changes: [{ path: "/workspace/thread-1/report.md", kind: "update" }] })
+    ]);
+
+    expect((result[0] as any).data.changes).toEqual([
+      { path: "report.md", kind: "ready", can_download: true }
+    ]);
+  });
+
+  it("does not collapse genuinely different files that share a basename", () => {
+    const result = consolidateCodexFileChangeParts([
+      fileChange({
+        changes: [
+          { path: "/workspace/reports/report.md", kind: "update" },
+          { path: "/workspace/archive/report.md", kind: "update" }
+        ]
+      }),
+      fileChange({ changes: [{ path: "report.md", kind: "ready", can_download: true }] })
+    ]);
+
+    expect((result[0] as any).data.changes).toHaveLength(3);
+  });
+
   it("places a single file block after the completed answer", () => {
     const result = consolidateCodexFileChangeParts([
       fileChange({ changes: [{ path: "only.md", kind: "update" }] }),

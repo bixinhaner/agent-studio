@@ -5,7 +5,18 @@ function asRecord(value: unknown): UnknownRecord | null {
 }
 
 function normalizeFilePath(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\\/g, "/").trim() : "";
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/\\/g, "/").trim();
+  return normalized.startsWith("./") ? normalized.slice(2) : normalized;
+}
+
+function isAbsoluteFilePath(path: string): boolean {
+  return path.startsWith("/") || /^[a-z]:\//i.test(path);
+}
+
+function absolutePathEndsWithRelativePath(absolutePath: string, relativePath: string): boolean {
+  if (!isAbsoluteFilePath(absolutePath) || isAbsoluteFilePath(relativePath) || !relativePath) return false;
+  return absolutePath === relativePath || absolutePath.endsWith(`/${relativePath}`);
 }
 
 function isFileChangePart(value: unknown): value is UnknownRecord {
@@ -30,12 +41,62 @@ function isReadyChange(change: UnknownRecord): boolean {
   );
 }
 
-function mergeChange(current: UnknownRecord | undefined, incoming: UnknownRecord, path: string): UnknownRecord {
-  if (!current) return { ...incoming, path };
+function mergeChange(current: UnknownRecord | undefined, incoming: UnknownRecord): UnknownRecord {
+  if (!current) return incoming;
   if (isReadyChange(current) && !isReadyChange(incoming)) {
-    return { ...incoming, ...current, path };
+    return { ...incoming, ...current };
   }
-  return { ...current, ...incoming, path };
+  return { ...current, ...incoming };
+}
+
+type FileChangeGroup = {
+  aliases: Set<string>;
+  absoluteAliases: Set<string>;
+  relativeAliases: Set<string>;
+  change: UnknownRecord;
+};
+
+function createFileChangeGroup(path: string, change: UnknownRecord): FileChangeGroup {
+  const absolute = isAbsoluteFilePath(path);
+  return {
+    aliases: new Set([path]),
+    absoluteAliases: new Set(absolute ? [path] : []),
+    relativeAliases: new Set(absolute ? [] : [path]),
+    change: { ...change, path }
+  };
+}
+
+function canMergePathAlias(group: FileChangeGroup, path: string): boolean {
+  if (group.aliases.has(path)) return true;
+
+  if (isAbsoluteFilePath(path)) {
+    if (group.absoluteAliases.size > 0 || group.relativeAliases.size !== 1) return false;
+    const [relativePath] = group.relativeAliases;
+    return absolutePathEndsWithRelativePath(path, relativePath);
+  }
+
+  if (group.relativeAliases.size > 0 || group.absoluteAliases.size !== 1) return false;
+  const [absolutePath] = group.absoluteAliases;
+  return absolutePathEndsWithRelativePath(absolutePath, path);
+}
+
+function appendFileChange(groups: FileChangeGroup[], path: string, change: UnknownRecord): void {
+  const exactGroup = groups.find((group) => group.aliases.has(path));
+  const candidates = exactGroup ? [exactGroup] : groups.filter((group) => canMergePathAlias(group, path));
+
+  // A suffix match can point at multiple real files. Keep ambiguous paths separate.
+  if (candidates.length !== 1) {
+    groups.push(createFileChangeGroup(path, change));
+    return;
+  }
+
+  const group = candidates[0];
+  group.aliases.add(path);
+  if (isAbsoluteFilePath(path)) group.absoluteAliases.add(path);
+  else group.relativeAliases.add(path);
+
+  const normalizedIncoming = { ...change, path };
+  group.change = mergeChange(group.change, normalizedIncoming);
 }
 
 /**
@@ -44,7 +105,7 @@ function mergeChange(current: UnknownRecord | undefined, incoming: UnknownRecord
  */
 export function consolidateCodexFileChangeParts(parts: readonly unknown[]): unknown[] {
   const fileChangeIndexes: number[] = [];
-  const changesByPath = new Map<string, UnknownRecord>();
+  const changeGroups: FileChangeGroup[] = [];
   let latestData: UnknownRecord = {};
 
   parts.forEach((part, index) => {
@@ -58,7 +119,7 @@ export function consolidateCodexFileChangeParts(parts: readonly unknown[]): unkn
       if (!change) continue;
       const path = normalizeFilePath(change.path);
       if (!path) continue;
-      changesByPath.set(path, mergeChange(changesByPath.get(path), change, path));
+      appendFileChange(changeGroups, path, change);
     }
   });
 
@@ -69,7 +130,7 @@ export function consolidateCodexFileChangeParts(parts: readonly unknown[]): unkn
     name: "codex_file_change",
     data: {
       ...latestData,
-      changes: [...changesByPath.values()]
+      changes: changeGroups.map((group) => group.change)
     }
   };
 

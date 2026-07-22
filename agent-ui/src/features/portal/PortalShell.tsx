@@ -67,7 +67,8 @@ import {
   BotIcon,
   ZapIcon,
   CreditCardIcon,
-  LinkIcon
+  LinkIcon,
+  ExternalLinkIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -144,6 +145,7 @@ import {
 } from "./workbench/layout-state";
 import { PORTAL_ANTD_THEME } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { classifyAssistantLinkHref } from "./assistant-link-behavior";
 import { consolidateCodexFileChangeParts } from "./file-change-display";
 import "./workbench/workbench.css";
 
@@ -564,6 +566,29 @@ const ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS = new Set([
   "yml",
   "xml"
 ]);
+const ASSISTANT_PREVIEW_LINK_FILE_EXTENSIONS = new Set([
+  ...IMAGE_FILE_EXTENSIONS,
+  ...ASSISTANT_MARKDOWN_BASE_FILE_EXTENSIONS,
+  "csv",
+  "tsv",
+  "jsonl",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "css",
+  "py",
+  "java",
+  "go",
+  "rs",
+  "sh",
+  "log",
+  "sql",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx"
+]);
 
 function normalizeMarkdownAssetTarget(value: string): string {
   const trimmed = value.trim();
@@ -881,16 +906,29 @@ function AssistantMarkdownLink(props: {
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const previewPath = typeof href === "string" ? resolveThreadPreviewPathFromHref(href, activeThreadId) : null;
+  const linkBehavior =
+    typeof href === "string" && !previewPath
+      ? classifyAssistantLinkHref(href, window.location.href)
+      : null;
+  if (!previewPath && linkBehavior === "blocked") {
+    return <span className={className}>{children}</span>;
+  }
   const linkLabel = flattenNodeText(children).trim();
   const previewPathForRequest = previewPath ? derivePreviewPathWithLabelAnchor(previewPath, linkLabel) : "";
+  const opensInNewTab = linkBehavior === "new-tab";
   const classes = ["assistant-markdown-link", previewPath ? "assistant-markdown-file-link" : "", className]
     .filter(Boolean)
     .join(" ");
+  const LinkGlyph = previewPath ? FileIcon : opensInNewTab ? ExternalLinkIcon : LinkIcon;
   return (
     <a
       className={classes}
       href={href}
       {...rest}
+      target={opensInNewTab ? "_blank" : undefined}
+      rel={opensInNewTab ? "noopener noreferrer" : undefined}
+      title={opensInNewTab ? "Opens in a new tab" : undefined}
+      aria-label={opensInNewTab && linkLabel ? `${linkLabel} (opens in a new tab)` : undefined}
       onClick={
         previewPath
           ? (event) => {
@@ -901,7 +939,7 @@ function AssistantMarkdownLink(props: {
           : undefined
       }
     >
-      <LinkIcon size={15} aria-hidden="true" />
+      <LinkGlyph size={15} aria-hidden="true" />
       <span>{children}</span>
     </a>
   );
@@ -2852,6 +2890,20 @@ function resolveThreadPreviewPathFromHref(href: string, threadId: string): strin
 
   const previewPathFromFileContentHref = resolvePreviewPathFromFileContentHref(rawHref);
   if (previewPathFromFileContentHref) return previewPathFromFileContentHref;
+
+  const directPreviewPath = resolvePreviewPathFromMarkdownTarget(rawHref);
+  if (
+    directPreviewPath &&
+    ASSISTANT_PREVIEW_LINK_FILE_EXTENSIONS.has(fileExtensionFromPreviewPath(directPreviewPath))
+  ) {
+    return directPreviewPath;
+  }
+  if (
+    isRelativeMarkdownAssetTarget(rawHref) &&
+    ASSISTANT_PREVIEW_LINK_FILE_EXTENSIONS.has(fileExtensionFromPreviewPath(rawHref))
+  ) {
+    return normalizePreviewFilePath(rawHref);
+  }
 
   const resolvePathname = (): string => {
     try {
