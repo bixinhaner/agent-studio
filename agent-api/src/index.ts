@@ -234,6 +234,9 @@ import {
 import { DingTalkBotErrorNotifier } from "./integrations/dingtalk/bot-error-notifier.js";
 import { createPortalRouter } from "./portal/router.js";
 import { PortalRuntimeOptionService, type PortalRuntimeOptionRunProfile } from "./portal/runtime-option-service.js";
+import { createSkillCatalogAdminRouter } from "./skill-catalog/router.js";
+import { SkillCatalogRepository, type SkillCatalogRepositoryDb } from "./skill-catalog/repository.js";
+import { SkillCatalogService } from "./skill-catalog/service.js";
 import { DingTalkOrgProvider } from "./org-sync/dingtalk-org-provider.js";
 import { AlertEvaluationService } from "./operations/alert-evaluation-service.js";
 import { NotificationDispatchService } from "./operations/notification-dispatch-service.js";
@@ -481,6 +484,13 @@ const codexSkillService = new CodexSkillService(
   {
     draftRoot: appConfig.codex.skillDraftRoot,
     publishedSkillsRoot: nativeCodexSkills.getSkillsRoot()
+  }
+);
+const skillCatalog = new SkillCatalogService(
+  new SkillCatalogRepository(db as unknown as SkillCatalogRepositoryDb),
+  {
+    nativeSkills: nativeCodexSkills,
+    managedSkills: codexSkills
   }
 );
 const codexProviders = new ManagedCodexProviderResolver({
@@ -1654,6 +1664,31 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
   skillPackages,
   nativeCodexSkills,
   managedSkills: codexSkills,
+  skillCatalog,
+  recentSkills: {
+    async listRecentSkillIds({ organizationId, userId, take }) {
+      const rows = await db.thread.findMany({
+        where: {
+          userId,
+          ...(organizationId ? { organizationId } : {}),
+          channel: "portal"
+        },
+        orderBy: { updatedAt: "desc" },
+        take,
+        select: { codexRunConfig: true }
+      });
+      const recent: string[] = [];
+      const seen = new Set<string>();
+      for (const row of rows) {
+        for (const skill of enabledSkillSelectionsFromRunConfig(asRecord(row.codexRunConfig) ?? undefined)) {
+          if (seen.has(skill.id)) continue;
+          seen.add(skill.id);
+          recent.push(skill.id);
+        }
+      }
+      return recent;
+    }
+  },
   policies: policyService
 });
 const runtimeKnowledgeSets = new RuntimeKnowledgeSetService({
@@ -2167,6 +2202,11 @@ const patchThreadSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   codex_run_config: z.record(z.unknown()).optional()
+});
+
+const updateThreadSkillsSchema = z.object({
+  mode_id: z.string().trim().min(1),
+  skill_ids: z.array(z.string().trim().min(1)).max(20)
 });
 
 const ensureThreadSessionSchema = z.object({
@@ -9848,6 +9888,7 @@ registerCommonApiRoutes(app, {
     }
   }),
   adminSkillRouter: createAdminCodexSkillRouter(codexSkillService),
+  skillCatalogAdminRouter: createSkillCatalogAdminRouter(skillCatalog),
   portalRouter: createPortalRouter({
     runtimeOptions: portalRuntimeOptions,
     modelCatalog: codexModelCatalog,
@@ -10721,6 +10762,59 @@ app.patch("/api/threads/:threadId", async (req: Request, res: Response) => {
     res.json({ thread: threadOut(updated) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Failed to update thread";
+    res.status(400).json({ detail });
+  }
+});
+
+app.put("/api/threads/:threadId/skills", async (req: Request, res: Response) => {
+  try {
+    const currentUser = currentActorFromRequest(req);
+    const threadId = String(req.params.threadId || "").trim();
+    const input = updateThreadSkillsSchema.parse(req.body || {});
+    const existing = await getPortalOwnedThread(threadId, currentUser);
+    if (!existing) {
+      res.status(404).json({ detail: "Thread does not exist" });
+      return;
+    }
+
+    const runtimeOptions = await portalRuntimeOptions.resolve({
+      organizationId: currentUser.organizationId,
+      userId: currentUser.id,
+      roleIds: roleIdsForActor(currentUser),
+      departmentIds: await listDepartmentIdsForActor(currentUser)
+    });
+    const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.mode_id);
+    if (!selectedMode) {
+      res.status(400).json({ detail: "The selected agent mode is not available" });
+      return;
+    }
+
+    const availableById = new Map(selectedMode.availableSkills.map((skill) => [skill.id, skill] as const));
+    const selectedIds = Array.from(new Set(input.skill_ids));
+    const unavailableIds = selectedIds.filter((skillId) => !availableById.has(skillId));
+    if (unavailableIds.length > 0) {
+      res.status(400).json({ detail: `Selected skills are not available: ${unavailableIds.join(", ")}` });
+      return;
+    }
+
+    const enabledSkills: EnabledSkillSelection[] = selectedIds.map((skillId) => {
+      const skill = availableById.get(skillId)!;
+      return {
+        id: skill.id,
+        name: skill.name,
+        managedSkillId: trimOrUndefined(skill.managedSkillId),
+        sourcePath: trimOrUndefined(skill.sourcePath),
+        activationPrompt: trimOrUndefined(skill.activationPrompt)
+      };
+    });
+    const nextRunConfig = withRunConfigEnabledSkillSelection(
+      withRunConfigMode(withoutInternalRuntimeMetadata(existing.codexRunConfig), selectedMode.id),
+      enabledSkills
+    );
+    const updated = await threads.update(threadId, { codexRunConfig: nextRunConfig });
+    res.json({ thread: threadOut(updated) });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to update thread skills";
     res.status(400).json({ detail });
   }
 });

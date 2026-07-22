@@ -20,6 +20,7 @@ export function registerCommonApiRoutes(
     modeAdminRouter?: Router;
     codexMemoryAdminRouter?: Router;
     adminSkillRouter?: Router;
+    skillCatalogAdminRouter?: Router;
     portalRouter: Router;
     resourcesPortalRouter?: Router;
     portalSkillRouter?: Router;
@@ -48,7 +49,8 @@ export function registerCommonApiRoutes(
     options.resourcesAdminRouter ?? Router(),
     options.modeAdminRouter ?? Router(),
     options.codexMemoryAdminRouter ?? Router(),
-    options.adminSkillRouter ?? Router()
+    options.adminSkillRouter ?? Router(),
+    options.skillCatalogAdminRouter ?? Router()
   );
   app.use(
     "/api/portal",

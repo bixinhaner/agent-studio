@@ -131,7 +131,8 @@ export function createPortalRouter(options: {
           organizationId: req.currentOrganization?.id,
           userId: currentUser.id,
           roleIds,
-          departmentIds
+          departmentIds,
+          locale: req.headers["accept-language"]
         }),
         options.modelCatalog.getCatalog({ maxWaitMs: 100 })
       ]);

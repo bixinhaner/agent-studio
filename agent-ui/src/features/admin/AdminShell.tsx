@@ -71,8 +71,8 @@ const CapabilityCenterShellLazy = lazy(() =>
 const CodexMemoryManagementViewLazy = lazy(() =>
   import("../codex-memory/CodexMemoryManagementView").then((module) => ({ default: module.CodexMemoryManagementView }))
 );
-const SkillDraftReviewViewLazy = lazy(() =>
-  import("../skills/SkillDraftReviewView").then((module) => ({ default: module.SkillDraftReviewView }))
+const SkillCatalogManagementViewLazy = lazy(() =>
+  import("../skills/SkillCatalogManagementView").then((module) => ({ default: module.SkillCatalogManagementView }))
 );
 const IntegrationCenterShellLazy = lazy(() =>
   import("../integration-center/IntegrationCenterShell").then((module) => ({ default: module.IntegrationCenterShell }))
@@ -445,7 +445,7 @@ function AdminSectionContent(props: { section: AdminConsoleSection }) {
     case "skill-drafts":
       return (
         <Suspense fallback={<AdminSectionLazyFallback />}>
-          <SkillDraftReviewViewLazy />
+          <SkillCatalogManagementViewLazy />
         </Suspense>
       );
     case "integrations":

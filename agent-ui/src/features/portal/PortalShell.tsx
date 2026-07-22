@@ -83,7 +83,6 @@ import {
 } from "@assistant-ui/core";
 import { AuiProvider, Derived, useAuiState } from "@assistant-ui/store";
 import { Button, ConfigProvider, Dropdown, Input, Modal, Drawer } from "antd";
-import type { MenuProps } from "antd";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 
 import { ApiError, api, apiBase, authHeaders, notifyAuthInvalidStatus } from "../../lib/api";
@@ -134,6 +133,7 @@ import { SessionRail } from "./workbench/SessionRail";
 import { RightWorkbenchDrawer } from "./workbench/RightWorkbenchDrawer";
 import { PreviewWorkbenchPanel } from "./workbench/PreviewWorkbenchPanel";
 import { AdvancedSettingsPanel } from "./workbench/AdvancedSettingsPanel";
+import { PortalSelectedSkillBar, PortalSkillPicker } from "./workbench/SkillPicker";
 import {
   closeWorkbenchDrawer,
   createInitialLayoutState,
@@ -410,11 +410,13 @@ const MobileWorkbenchContext = createContext(false);
 const SkillComposerContext = createContext<{
   availableSkills: RuntimeSkillOption[];
   enabledSkillIds: string[];
-  toggleSkill: (skillId: string) => void;
+  recentSkillIds: string[];
+  setSkills: (skillIds: string[]) => Promise<void> | void;
 }>({
   availableSkills: [],
   enabledSkillIds: [],
-  toggleSkill: () => undefined
+  recentSkillIds: [],
+  setSkills: () => undefined
 });
 type PortalActiveRun = {
   sessionId: string;
@@ -2003,93 +2005,29 @@ function useLargeTextPasteAttachmentGuard(input: {
   }, [aui, composerWrapRef, enabled, onNotice]);
 }
 
-function skillUsesImageIcon(skill: RuntimeSkillOption): boolean {
-  const haystack = `${skill.name} ${skill.label} ${skill.description ?? ""}`.toLowerCase();
-  return haystack.includes("image") || haystack.includes("图片") || haystack.includes("图像");
-}
-
-const SKILL_ICON_TONES = ["blue", "violet", "emerald", "amber", "rose", "cyan"] as const;
-
-function skillIconTone(skill: RuntimeSkillOption): (typeof SKILL_ICON_TONES)[number] {
-  const key = `${skill.name}:${skill.label ?? ""}:${skill.description ?? ""}`;
-  let hash = 0;
-  for (let index = 0; index < key.length; index += 1) {
-    hash = (hash * 31 + key.charCodeAt(index)) % SKILL_ICON_TONES.length;
-  }
-  return SKILL_ICON_TONES[hash] ?? "blue";
-}
-
-const SkillComposerIcon: FC<{ skill: RuntimeSkillOption; size?: number }> = ({ skill, size = 16 }) =>
-  skillUsesImageIcon(skill) ? <ImageIcon size={size} /> : <ZapIcon size={size} />;
-
 const SkillComposerControls: FC = () => {
-  const { availableSkills, enabledSkillIds, toggleSkill } = useContext(SkillComposerContext);
-  const enabledSkillSet = useMemo(() => new Set(enabledSkillIds), [enabledSkillIds]);
-  const selectedSkills = useMemo(
-    () => availableSkills.filter((skill) => enabledSkillSet.has(skill.id)),
-    [availableSkills, enabledSkillSet]
-  );
-
+  const aui = useAui();
+  const { availableSkills, enabledSkillIds, recentSkillIds, setSkills } = useContext(SkillComposerContext);
   if (availableSkills.length === 0) return null;
-
-  const menuItems: MenuProps["items"] = availableSkills.map((skill) => {
-    const enabled = enabledSkillSet.has(skill.id);
-    return {
-      key: skill.id,
-      className: `portal-composer-skill-menu-entry${enabled ? " is-selected" : ""}`,
-      label: (
-        <span className={`portal-composer-skill-menu-item${enabled ? " is-selected" : ""}`}>
-          <span className="portal-composer-skill-menu-check" aria-hidden="true">
-            {enabled ? <CheckIcon size={15} strokeWidth={2.8} /> : null}
-          </span>
-          <span className="portal-composer-skill-menu-glyph" data-tone={skillIconTone(skill)} aria-hidden="true">
-            <SkillComposerIcon skill={skill} size={17} />
-          </span>
-          <span className="portal-composer-skill-menu-title">{skill.label || skill.name}</span>
-        </span>
-      )
-    };
-  });
-
-  const handleMenuClick: MenuProps["onClick"] = ({ key, domEvent }) => {
-    domEvent.preventDefault();
-    domEvent.stopPropagation();
-    toggleSkill(String(key));
-  };
-
   return (
-    <>
-      <Dropdown
-        trigger={["click"]}
-        placement="topLeft"
-        menu={{ items: menuItems, onClick: handleMenuClick }}
-        overlayClassName="portal-composer-skill-dropdown"
-      >
-        <button
-          type="button"
-          className={`portal-composer-skill-trigger${selectedSkills.length > 0 ? " is-active" : ""}`}
-          aria-label="Choose skills"
-          title="Choose skills"
-        >
-          <PackageIcon size={16} />
-          <span className="portal-composer-skill-trigger-text">Skills</span>
-        </button>
-      </Dropdown>
-      {selectedSkills.map((skill) => (
-        <button
-          key={skill.id}
-          type="button"
-          className="portal-composer-skill-chip"
-          title={`Disable ${skill.label || skill.name}`}
-          aria-label={`Disable ${skill.label || skill.name}`}
-          onClick={() => toggleSkill(skill.id)}
-        >
-          <SkillComposerIcon skill={skill} size={16} />
-          <span>{skill.label || skill.name}</span>
-          <XIcon size={13} />
-        </button>
-      ))}
-    </>
+    <PortalSkillPicker
+      availableSkills={availableSkills}
+      enabledSkillIds={enabledSkillIds}
+      recentSkillIds={recentSkillIds}
+      onEnabledSkillIdsChange={setSkills}
+      onFillPrompt={(prompt) => aui.composer().setText(prompt)}
+    />
+  );
+};
+
+const SelectedSkillContextBar: FC = () => {
+  const { availableSkills, enabledSkillIds, setSkills } = useContext(SkillComposerContext);
+  return (
+    <PortalSelectedSkillBar
+      availableSkills={availableSkills}
+      enabledSkillIds={enabledSkillIds}
+      onEnabledSkillIdsChange={setSkills}
+    />
   );
 };
 
@@ -2201,6 +2139,7 @@ const UploadAwareComposer: FC = () => {
             {largeTextNotice}
           </p>
         ) : null}
+        <SelectedSkillContextBar />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
@@ -2278,6 +2217,7 @@ const MobileAwareComposer: FC = () => {
             {largeDirectMessageNotice(composerText.length)}
           </p>
         ) : null}
+        <SelectedSkillContextBar />
         <div className="portal-composer-input-row">
           <Composer.Input
             autoFocus={!isMobileWorkbench}
@@ -2331,8 +2271,7 @@ function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: Ru
     enabledSkills: enabledSkills.map((skill) => ({
       id: skill.id,
       name: skill.name,
-      ...(skill.managedSkillId ? { managedSkillId: skill.managedSkillId } : {}),
-      ...(skill.sourcePath ? { sourcePath: skill.sourcePath } : {})
+      ...(skill.managedSkillId ? { managedSkillId: skill.managedSkillId } : {})
     }))
   };
 
@@ -6729,28 +6668,40 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
-  const toggleEnabledSkill = useCallback((skillId: string) => {
+  const setEnabledSkills = useCallback(async (skillIds: string[]) => {
     if (isExternalPortalUser) return;
-    setEnabledSkillIds((current) => {
-      if (current.includes(skillId)) {
-        return current.filter((item) => item !== skillId);
-      }
-      const nextSkill = availableModeSkills.find((skill) => skill.id === skillId);
-      if (!nextSkill) return current;
-      const filteredCurrent = current.filter((item) => {
-        const currentSkill = availableModeSkills.find((skill) => skill.id === item);
-        return currentSkill?.name !== nextSkill.name;
+    const availableIds = new Set(availableModeSkills.map((skill) => skill.id));
+    const normalizedIds = Array.from(new Set(skillIds.filter((skillId) => availableIds.has(skillId))));
+    const previousIds = enabledSkillIdsRef.current;
+    enabledSkillIdsRef.current = normalizedIds;
+    setEnabledSkillIds(normalizedIds);
+
+    const threadId = String(activeThreadIdentity.remoteId || "").trim();
+    if (!threadId) return;
+    try {
+      await api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}/skills`, {
+        method: "PUT",
+        json: {
+          mode_id: runtimeMode,
+          skill_ids: normalizedIds
+        }
       });
-      return [...filteredCurrent, skillId];
-    });
-  }, [availableModeSkills, isExternalPortalUser]);
+    } catch (error) {
+      enabledSkillIdsRef.current = previousIds;
+      setEnabledSkillIds(previousIds);
+      const message = error instanceof Error ? error.message : "Skill 保存失败，请重试";
+      setErrorText(message);
+      throw new Error(message);
+    }
+  }, [activeThreadIdentity.remoteId, availableModeSkills, isExternalPortalUser, runtimeMode]);
   const skillComposerContext = useMemo(
     () => ({
       availableSkills: availableModeSkills,
       enabledSkillIds,
-      toggleSkill: toggleEnabledSkill
+      recentSkillIds: runtimeOptions?.recentSkillIds ?? [],
+      setSkills: setEnabledSkills
     }),
-    [availableModeSkills, enabledSkillIds, toggleEnabledSkill]
+    [availableModeSkills, enabledSkillIds, runtimeOptions?.recentSkillIds, setEnabledSkills]
   );
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const handleKnowledgeSetChange = useCallback((ids: string[]) => {

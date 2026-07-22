@@ -28,10 +28,22 @@ export type RuntimeModeSnapshot = {
     label: string;
     description?: string;
     system: boolean;
-    activationPrompt?: string;
     managedSkillId?: string;
     scope?: string;
-    sourcePath?: string;
+    presentation: {
+      displayName: string;
+      summary: string;
+      useCases: string[];
+      usageSteps: string[];
+      examplePrompts: string[];
+      dataScope?: string;
+      iconKey: string;
+      sortOrder: number;
+      shortcutKey?: string;
+      requestedLocale: string;
+      resolvedLocale: string;
+      fallbackLocale?: string;
+    };
   }>;
   instructionSources: Array<{
     sourceType: string;
@@ -42,6 +54,7 @@ export type RuntimeModeSnapshot = {
 
 export type PortalRuntimeOptions = {
   modes: RuntimeModeSnapshot[];
+  recentSkillIds: string[];
   canUpload: boolean;
   defaults: {
     mode: string;

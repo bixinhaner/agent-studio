@@ -7,6 +7,9 @@ import { getDbClient } from "../db/client.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
+import { resolveSkillCatalogPresentation, selectCatalogEntry } from "../skill-catalog/service.js";
+import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
+import type { PortalSkillPresentation } from "./skill-presentation.js";
 
 export type PortalRuntimeOptionRunProfile = {
   id: string;
@@ -38,6 +41,7 @@ export type PortalRuntimeOptionSkill = {
   managedSkillId?: string;
   scope?: string;
   sourcePath?: string;
+  presentation: PortalSkillPresentation;
 };
 
 export type PortalRuntimeOptionMode = {
@@ -57,6 +61,7 @@ export type PortalRuntimeOptionMode = {
 
 export type PortalRuntimeOptionServiceResult = {
   modes: PortalRuntimeOptionMode[];
+  recentSkillIds: string[];
   canUpload: boolean;
   defaults: {
     mode: string;
@@ -85,6 +90,12 @@ type RuntimeOptionServiceDependencies = {
   systemSettings?: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
   };
+  recentSkills?: {
+    listRecentSkillIds(input: { organizationId?: string; userId: string; take: number }): Promise<string[]>;
+  };
+  skillCatalog?: {
+    listPublished(input: { organizationId?: string }): Promise<SkillCatalogEntryRecord[]>;
+  };
 };
 
 type RuntimeOptionRequest = {
@@ -92,6 +103,7 @@ type RuntimeOptionRequest = {
   userId: string;
   roleIds: string[];
   departmentIds: string[];
+  locale?: string;
 };
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
@@ -219,30 +231,60 @@ function collectCodexSkillBindings(skillPackage: SkillPackageRecord): CodexSkill
 
 function toManagedRuntimeSkill(
   managedSkill: CodexManagedSkillRecord,
-  activationPrompt?: string
+  catalogEntries: SkillCatalogEntryRecord[],
+  locale: string | undefined,
+  activationPrompt?: string,
 ): PortalRuntimeOptionSkill {
-  const baseLabel = managedSkill.displayName || managedSkill.skillName;
+  const presentation = resolveSkillCatalogPresentation({
+    entry: selectCatalogEntry({
+      entries: catalogEntries,
+      organizationId: managedSkill.organizationId,
+      sourceType: "managed",
+      sourceRef: managedSkill.id
+    }),
+    requestedLocale: locale,
+    canonicalName: managedSkill.skillName,
+    sourceDescription: managedSkill.description
+  });
   return {
     id: selectionIdForManagedSkill(managedSkill.id),
     name: managedSkill.skillName,
-    label: managedSkill.scope === "private" ? `${baseLabel} · Personal` : baseLabel,
+    label: presentation.displayName,
     description: trimOrUndefined(managedSkill.description),
     system: false,
     activationPrompt,
     managedSkillId: managedSkill.id,
-    scope: managedSkill.scope,
-    sourcePath: managedSkill.publishedPath
+    scope: managedSkill.scope === "private" ? "private" : "team",
+    sourcePath: managedSkill.publishedPath,
+    presentation
   };
 }
 
-function toNativeRuntimeSkill(skill: NativeCodexSkillRecord, activationPrompt?: string): PortalRuntimeOptionSkill {
+function toNativeRuntimeSkill(
+  skill: NativeCodexSkillRecord,
+  catalogEntries: SkillCatalogEntryRecord[],
+  locale: string | undefined,
+  activationPrompt?: string,
+): PortalRuntimeOptionSkill {
+  const presentation = resolveSkillCatalogPresentation({
+    entry: selectCatalogEntry({
+      entries: catalogEntries,
+      sourceType: "native",
+      sourceRef: skill.name
+    }),
+    requestedLocale: locale,
+    canonicalName: skill.name,
+    sourceDescription: skill.description
+  });
   return {
     id: skill.name,
     name: skill.name,
-    label: skill.name,
+    label: presentation.displayName,
     description: trimOrUndefined(skill.description),
     system: skill.system,
-    activationPrompt
+    activationPrompt,
+    scope: "platform",
+    presentation
   };
 }
 
@@ -252,12 +294,15 @@ export class PortalRuntimeOptionService {
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows] = await Promise.all([
+    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, recentSkillIds, catalogEntries] = await Promise.all([
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
       this.deps.skillPackages.list(),
       this.deps.nativeCodexSkills?.list() ?? Promise.resolve([]),
-      this.deps.managedSkills?.listManagedSkills({ organizationId: input.organizationId }) ?? Promise.resolve([])
+      this.deps.managedSkills?.listManagedSkills({ organizationId: input.organizationId }) ?? Promise.resolve([]),
+      this.deps.recentSkills?.listRecentSkillIds({ organizationId: input.organizationId, userId: input.userId, take: 30 }) ??
+        Promise.resolve([]),
+      this.deps.skillCatalog?.listPublished({ organizationId: input.organizationId }) ?? Promise.resolve([])
     ]);
 
     const activeVisibleModeRows = modeRows.filter(
@@ -351,7 +396,12 @@ export class PortalRuntimeOptionService {
             if (managedSkill.scope !== "private" && activePrivateSkillNames.has(nameKey)) {
               continue;
             }
-            const runtimeSkill = toManagedRuntimeSkill(managedSkill, skillBinding.activationPrompt);
+            const runtimeSkill = toManagedRuntimeSkill(
+              managedSkill,
+              catalogEntries,
+              input.locale,
+              skillBinding.activationPrompt
+            );
             if (!availableSkillIds.has(runtimeSkill.id)) {
               availableSkillIds.add(runtimeSkill.id);
               availableSkillNames.add(nameKey);
@@ -362,7 +412,7 @@ export class PortalRuntimeOptionService {
 
           const nativeSkill = nativeSkillMap.get(skillBinding.name);
           if (!nativeSkill) continue;
-          const runtimeSkill = toNativeRuntimeSkill(nativeSkill, skillBinding.activationPrompt);
+          const runtimeSkill = toNativeRuntimeSkill(nativeSkill, catalogEntries, input.locale, skillBinding.activationPrompt);
           if (!availableSkillIds.has(runtimeSkill.id)) {
             availableSkillIds.add(runtimeSkill.id);
             availableSkillNames.add(skillNameKey(runtimeSkill.name));
@@ -372,7 +422,7 @@ export class PortalRuntimeOptionService {
       }
 
       for (const privateSkill of activePrivateSkills) {
-        const runtimeSkill = toManagedRuntimeSkill(privateSkill);
+        const runtimeSkill = toManagedRuntimeSkill(privateSkill, catalogEntries, input.locale);
         const nameKey = skillNameKey(runtimeSkill.name);
         if (!availableSkillIds.has(runtimeSkill.id) && !availableSkillNames.has(nameKey)) {
           availableSkillIds.add(runtimeSkill.id);
@@ -388,7 +438,9 @@ export class PortalRuntimeOptionService {
         runtimeProfile: toRunProfileSnapshot(runProfile, safetyLimits),
         allowDirectorySelection: false,
         skillPackages: dependentSkillPackages,
-        availableSkills,
+        availableSkills: availableSkills.sort(
+          (left, right) => left.presentation.sortOrder - right.presentation.sortOrder || left.label.localeCompare(right.label)
+        ),
         instructionSources: mode.instructionSources.map((source) => ({
           sourceType: source.sourceType,
           sourceRef: source.sourceRef,
@@ -401,6 +453,7 @@ export class PortalRuntimeOptionService {
 
     return {
       modes: resolvedModes,
+      recentSkillIds: Array.from(new Set(recentSkillIds)),
       canUpload: true,
       defaults: {
         mode: selectedMode?.id ?? ""

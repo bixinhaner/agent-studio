@@ -1289,6 +1289,1658 @@ button.session-rail-new-btn:active,
   color: #1d4ed8;
 }
 
+/* Task-first Skill picker */
+.portal-skill-picker-popover {
+  --skill-accent: #ff4614;
+  --skill-accent-soft: #fff3ee;
+  --skill-border: #e8e9ee;
+  --skill-muted: #697386;
+  --skill-text: #182230;
+  max-width: calc(100vw - 32px);
+}
+
+.portal-skill-picker-popover .ant-popover-inner {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--skill-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(24, 34, 48, 0.14);
+}
+
+.portal-skill-picker-popover .ant-popover-inner-content {
+  padding: 0;
+}
+
+.portal-skill-picker-panel {
+  display: grid;
+  width: 510px;
+  height: min(660px, calc(100vh - 80px));
+  max-width: calc(100vw - 34px);
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  background: #fff;
+  color: var(--skill-text, #182230);
+}
+
+.portal-skill-picker-panel.has-detail,
+.portal-skill-picker-panel.is-catalog {
+  grid-template-columns: minmax(360px, 0.92fr) minmax(430px, 1.08fr);
+  width: min(920px, calc(100vw - 34px));
+}
+
+.portal-skill-task-column,
+.portal-skill-catalog-column,
+.portal-skill-detail-column {
+  min-width: 0;
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.portal-skill-detail-column {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--skill-border, #e8e9ee);
+  background: #fbfbfc;
+}
+
+.portal-skill-picker-heading h3,
+.portal-skill-catalog-column > h3,
+.portal-skill-detail-column > h3 {
+  margin: 0;
+  color: var(--skill-text, #182230);
+  font-size: 17px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.portal-skill-picker-heading p {
+  margin: 5px 0 18px;
+  color: var(--skill-muted, #697386);
+  font-size: 13px;
+}
+
+.portal-skill-task-column .ant-input-affix-wrapper,
+.portal-skill-catalog-column .ant-input-affix-wrapper {
+  min-height: 40px;
+  border-color: #dfe2e8;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.portal-skill-task-column .ant-input-affix-wrapper-focused,
+.portal-skill-catalog-column .ant-input-affix-wrapper-focused {
+  border-color: var(--skill-accent, #ff4614);
+  box-shadow: 0 0 0 3px rgba(255, 70, 20, 0.1);
+}
+
+.portal-skill-task-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+}
+
+.portal-skill-task-list > button,
+.portal-skill-recent > button,
+.portal-skill-alternative,
+.portal-skill-browse-all,
+.portal-skill-back,
+.portal-skill-example-list > button,
+.portal-skill-how-to > button {
+  font: inherit;
+}
+
+.portal-skill-task-list > button,
+.portal-skill-recent > button {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--skill-text, #182230);
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-skill-task-list > button:hover,
+.portal-skill-task-list > button.is-selected,
+.portal-skill-recent > button:hover {
+  border-color: #ffd1c3;
+  background: var(--skill-accent-soft, #fff3ee);
+}
+
+.portal-skill-task-list > button.is-selected > svg {
+  color: var(--skill-accent, #ff4614);
+}
+
+.portal-skill-task-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #eceef2;
+  border-radius: 10px;
+  background: #fff;
+  color: #566176;
+}
+
+.portal-skill-task-list strong,
+.portal-skill-recent strong,
+.portal-skill-catalog-row strong,
+.portal-skill-alternative strong,
+.portal-skill-detail-title strong {
+  display: block;
+  overflow: hidden;
+  color: var(--skill-text, #182230);
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-task-list small,
+.portal-skill-recent small,
+.portal-skill-catalog-row small,
+.portal-skill-alternative small,
+.portal-skill-detail-title small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--skill-muted, #697386);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-recent {
+  padding-top: 18px;
+  margin-top: 14px;
+  border-top: 1px solid var(--skill-border, #e8e9ee);
+}
+
+.portal-skill-recent h4,
+.portal-skill-how-to h4,
+.portal-skill-detail-section h4 {
+  margin: 0 0 8px;
+  color: #3a4556;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.portal-skill-recent > button {
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-height: 50px;
+  padding-inline: 8px;
+}
+
+.portal-skill-browse-all,
+.portal-skill-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #546174;
+  font-size: 12px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.portal-skill-browse-all {
+  margin-top: 13px;
+}
+
+.portal-skill-browse-all svg {
+  transform: rotate(180deg);
+}
+
+.portal-skill-browse-all:hover,
+.portal-skill-back:hover {
+  color: var(--skill-accent, #ff4614);
+}
+
+.portal-skill-detail-column > h3 {
+  margin-bottom: 17px;
+}
+
+.portal-skill-primary-recommendation {
+  padding: 16px;
+  border: 1px solid #ffd1c3;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(38, 45, 58, 0.05);
+}
+
+.portal-skill-detail-title {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.portal-skill-detail-title.is-large {
+  margin-bottom: 20px;
+}
+
+.portal-skill-detail-title em,
+.portal-skill-catalog-main em {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f1f3f7;
+  color: #667085;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.portal-skill-primary-recommendation .portal-skill-detail-title em {
+  background: var(--skill-accent-soft, #fff3ee);
+  color: #db3b0f;
+}
+
+.portal-skill-data-scope {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #f7f8fa;
+  color: #596579;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.portal-skill-how-to {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--skill-border, #e8e9ee);
+}
+
+.portal-skill-how-to h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.portal-skill-how-to p,
+.portal-skill-detail-section p {
+  margin: 0 0 8px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.portal-skill-how-to > button,
+.portal-skill-example-list > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid #e7e9ee;
+  border-radius: 8px;
+  background: #fff;
+  color: #485568;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-skill-how-to > button:hover,
+.portal-skill-example-list > button:hover {
+  border-color: #ffb9a3;
+  color: #c8350d;
+}
+
+.portal-skill-how-to > button svg,
+.portal-skill-example-list > button svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  transform: rotate(180deg);
+}
+
+.portal-skill-alternative {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  margin-top: 9px;
+  padding: 9px 12px;
+  border: 1px solid #e5e7ec;
+  border-radius: 11px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-skill-alternative:hover {
+  border-color: #ffb9a3;
+}
+
+.portal-skill-alternative > svg {
+  color: #7b8492;
+  transform: rotate(-90deg);
+}
+
+.portal-skill-detail-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.portal-skill-detail-actions .ant-btn {
+  min-height: 38px;
+  border-radius: 9px;
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.portal-skill-detail-actions .ant-btn-primary {
+  border-color: var(--skill-accent, #ff4614);
+  background: var(--skill-accent, #ff4614);
+}
+
+.portal-skill-error {
+  margin: 12px 0 0;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.portal-skill-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: #eef4ff;
+  color: #3b6eea;
+}
+
+.portal-skill-glyph[data-tone="report"] {
+  background: #fff4e8;
+  color: #e27616;
+}
+
+.portal-skill-glyph[data-tone="creation"] {
+  background: #f1edff;
+  color: #7650da;
+}
+
+.portal-skill-glyph[data-tone="data"] {
+  background: #eaf8f3;
+  color: #198a62;
+}
+
+.portal-skill-catalog-column {
+  padding-top: 17px;
+}
+
+.portal-skill-back {
+  margin-bottom: 7px;
+}
+
+.portal-skill-catalog-column > h3 {
+  margin-bottom: 14px;
+}
+
+.portal-skill-category-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 8px;
+}
+
+.portal-skill-category-tabs button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #697386;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.portal-skill-category-tabs button:hover,
+.portal-skill-category-tabs button.is-selected {
+  background: var(--skill-accent-soft, #fff3ee);
+  color: #d8390d;
+}
+
+.portal-skill-catalog-list {
+  display: grid;
+  gap: 4px;
+}
+
+.portal-skill-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.portal-skill-catalog-row:hover,
+.portal-skill-catalog-row.is-focused {
+  border-color: #ffd1c3;
+  background: var(--skill-accent-soft, #fff3ee);
+}
+
+.portal-skill-catalog-main {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 55px;
+  padding: 7px 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-skill-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #cfd4dc;
+  border-radius: 6px;
+  background: #fff;
+  color: #fff;
+  cursor: pointer;
+}
+
+.portal-skill-checkbox.is-selected {
+  border-color: var(--skill-accent, #ff4614);
+  background: var(--skill-accent, #ff4614);
+}
+
+.portal-skill-empty {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #8a94a3;
+  font-size: 12px;
+  text-align: center;
+}
+
+.portal-skill-empty strong {
+  color: #4b5668;
+}
+
+.portal-skill-detail-section {
+  padding: 14px 0;
+  border-top: 1px solid var(--skill-border, #e8e9ee);
+}
+
+.portal-skill-detail-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.portal-skill-example-list {
+  margin-bottom: 14px;
+}
+
+.portal-selected-skill-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 5px 8px;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.portal-selected-skill-list {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.portal-selected-skill-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  min-height: 30px;
+  padding: 3px 5px 3px 7px;
+  border: 1px solid #ffd1c3;
+  border-radius: 9px;
+  background: var(--skill-accent-soft, #fff3ee);
+  color: #ba330e;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.portal-selected-skill-chip .portal-skill-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.portal-selected-skill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-selected-skill-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #8d3a21;
+  cursor: pointer;
+}
+
+.portal-selected-skill-chip button:hover {
+  background: rgba(255, 70, 20, 0.11);
+}
+
+.portal-selected-skill-status,
+.portal-skill-confirmation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: #667085;
+  font-size: 11px;
+}
+
+.portal-selected-skill-status svg,
+.portal-skill-confirmation svg {
+  color: #1f9d68;
+}
+
+.portal-skill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 5px;
+  border-radius: 999px;
+  background: var(--skill-accent, #ff4614);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.portal-composer-skill-trigger:hover,
+.portal-composer-skill-trigger.is-active {
+  border-color: #ffad94;
+  background: var(--skill-accent-soft, #fff3ee);
+  color: #d8390d;
+}
+
+.portal-composer-skill-trigger:focus-visible,
+.portal-skill-picker-panel button:focus-visible,
+.portal-selected-skill-bar button:focus-visible {
+  outline: 2px solid var(--skill-accent, #ff4614);
+  outline-offset: 2px;
+}
+
+.portal-skill-mobile-drawer {
+  --skill-accent: #ff4614;
+  --skill-accent-soft: #fff3ee;
+  --skill-border: #e8e9ee;
+  --skill-muted: #697386;
+  --skill-text: #182230;
+}
+
+.portal-skill-mobile-drawer .ant-drawer-content {
+  border-radius: 18px 18px 0 0;
+}
+
+.portal-skill-mobile-drawer .ant-drawer-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.portal-skill-mobile-drawer .portal-skill-picker-panel,
+.portal-skill-mobile-drawer .portal-skill-picker-panel.has-detail,
+.portal-skill-mobile-drawer .portal-skill-picker-panel.is-catalog {
+  display: block;
+  width: 100%;
+  max-width: none;
+  max-height: calc(88dvh - 56px);
+  overflow-y: auto;
+}
+
+.portal-skill-mobile-drawer .portal-skill-task-column,
+.portal-skill-mobile-drawer .portal-skill-catalog-column,
+.portal-skill-mobile-drawer .portal-skill-detail-column {
+  overflow: visible;
+}
+
+.portal-skill-mobile-drawer .portal-skill-detail-column {
+  border-top: 1px solid var(--skill-border, #e8e9ee);
+  border-left: 0;
+}
+
+.portal-skill-mobile-back {
+  display: none;
+}
+
+.portal-skill-mobile-drawer .portal-skill-close {
+  display: none;
+}
+
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-list-active .portal-skill-detail-column,
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-list-active > .portal-skill-mobile-back,
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-detail-active .portal-skill-task-column,
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-detail-active .portal-skill-catalog-column {
+  display: none;
+}
+
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-detail-active > .portal-skill-mobile-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 14px 20px 0;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #556070;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.portal-skill-mobile-drawer .portal-skill-picker-panel.mobile-detail-active > .portal-skill-mobile-back:hover {
+  background: #f3f4f6;
+  color: #182230;
+}
+
+@media (max-width: 760px) {
+  .portal-selected-skill-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .portal-selected-skill-status {
+    padding-left: 2px;
+  }
+
+  .portal-skill-task-list > button,
+  .portal-skill-recent > button,
+  .portal-skill-alternative,
+  .portal-skill-catalog-main {
+    min-height: 52px;
+  }
+
+  .portal-skill-category-tabs {
+    overflow-x: auto;
+  }
+}
+
+/* ImageGen target alignment: compact two-column task -> Skill decision flow. */
+.portal-skill-picker-panel {
+  position: relative;
+}
+
+.portal-skill-close {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+}
+
+.portal-skill-close:hover {
+  background: #f3f4f6;
+  color: #182230;
+}
+
+.portal-skill-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-right: 34px;
+  margin-bottom: 14px;
+}
+
+.portal-skill-detail-heading h3 {
+  margin: 0;
+  color: var(--skill-text, #182230);
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.portal-skill-detail-heading p {
+  margin: 3px 0 0;
+  color: var(--skill-muted, #697386);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.portal-skill-detail-heading > em {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #556070;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.portal-skill-detail-title strong code {
+  margin-left: 7px;
+  color: #e74a20;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.portal-skill-detail-title > svg {
+  align-self: start;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border-radius: 0 0 0 8px;
+  background: var(--skill-accent, #ff4614);
+  color: #fff;
+}
+
+.portal-skill-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.portal-skill-metadata span {
+  padding: 3px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fafafa;
+  color: #596579;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.portal-skill-primary-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.portal-skill-primary-action .ant-btn-primary {
+  min-height: 36px;
+  border-color: var(--skill-accent, #ff4614);
+  border-radius: 8px;
+  background: var(--skill-accent, #ff4614);
+  box-shadow: none;
+  font-weight: 650;
+}
+
+@media (min-width: 761px) {
+  .portal-skill-picker-panel {
+    height: min(456px, calc(100vh - 80px));
+  }
+
+  .portal-skill-picker-panel.has-detail,
+  .portal-skill-picker-panel.is-catalog {
+    grid-template-columns: 304px minmax(0, 1fr);
+    width: min(880px, calc(100vw - 34px));
+  }
+
+  .portal-skill-task-column,
+  .portal-skill-catalog-column,
+  .portal-skill-detail-column {
+    padding: 18px 20px;
+  }
+
+  .portal-skill-detail-column {
+    padding-top: 16px;
+    background: #fff;
+  }
+
+  .portal-skill-picker-heading p {
+    margin: 3px 0 12px;
+  }
+
+  .portal-skill-task-list {
+    gap: 3px;
+    margin-top: 10px;
+  }
+
+  .portal-skill-task-list > button {
+    position: relative;
+    min-height: 46px;
+    padding: 6px 10px;
+  }
+
+  .portal-skill-task-list > button.is-selected::before {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: -1px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--skill-accent, #ff4614);
+    content: "";
+  }
+
+  .portal-skill-task-icon {
+    width: 32px;
+    height: 32px;
+    border: 0;
+  }
+
+  .portal-skill-task-list small {
+    display: none;
+  }
+
+  .portal-skill-recent {
+    padding-top: 10px;
+    margin-top: 8px;
+  }
+
+  .portal-skill-recent > button {
+    min-height: 42px;
+    padding-block: 4px;
+  }
+
+  .portal-skill-primary-recommendation {
+    padding: 14px;
+    box-shadow: none;
+  }
+
+  .portal-skill-how-to {
+    margin-top: 11px;
+    padding-top: 10px;
+  }
+
+  .portal-skill-how-to > button {
+    display: inline-flex;
+    width: auto;
+    margin: 4px 6px 0 0;
+    padding: 6px 9px;
+  }
+
+  .portal-skill-alternative {
+    min-height: 52px;
+    margin-top: 8px;
+    padding: 7px 11px;
+  }
+}
+
+/* Skill catalog — final direct catalog design. */
+.portal-skill-picker-popover,
+.portal-skill-mobile-drawer {
+  --skill-accent: #ff4614;
+  --skill-accent-soft: #fff3ee;
+  --skill-border: #e6e8ed;
+  --skill-muted: #667085;
+  --skill-text: #182230;
+}
+
+.portal-skill-picker-popover .ant-popover-inner {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--skill-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 72px rgba(23, 34, 49, 0.17);
+}
+
+.portal-skill-picker-popover .ant-popover-inner-content {
+  padding: 0;
+}
+
+.portal-skill-picker-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(660px, 1.7fr) minmax(380px, 0.95fr);
+  width: min(1100px, calc(100vw - 32px));
+  height: min(680px, calc(100vh - 90px));
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  background: #fff;
+  color: var(--skill-text);
+}
+
+.portal-skill-catalog-column,
+.portal-skill-detail-column {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.portal-skill-catalog-column {
+  padding: 22px 24px 24px;
+  background: #fff;
+}
+
+.portal-skill-detail-column {
+  display: flex;
+  flex-direction: column;
+  padding: 25px 26px 22px;
+  border-left: 1px solid var(--skill-border);
+  background: #fcfcfd;
+}
+
+.portal-skill-picker-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-right: 36px;
+  margin-bottom: 14px;
+}
+
+.portal-skill-picker-heading h3 {
+  margin: 0;
+  color: var(--skill-text);
+  font-size: 22px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.portal-skill-picker-heading .ant-btn {
+  min-height: 36px;
+  border-color: #dfe3ea;
+  border-radius: 9px;
+  color: #26344b;
+  box-shadow: none;
+  font-weight: 630;
+}
+
+.portal-skill-picker-heading .ant-btn:hover {
+  border-color: var(--skill-accent);
+  color: #d83d12;
+}
+
+.portal-skill-catalog-column > .ant-input-affix-wrapper {
+  min-height: 42px;
+  border-color: #dfe3ea;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.portal-skill-catalog-column > .ant-input-affix-wrapper-focused {
+  border-color: var(--skill-accent);
+  box-shadow: 0 0 0 3px rgba(255, 70, 20, 0.1);
+}
+
+.portal-skill-recent {
+  padding: 0;
+  margin: 14px 0 12px;
+  border: 0;
+}
+
+.portal-skill-recent h4 {
+  margin: 0 0 7px;
+  color: #3f4c5f;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.portal-skill-recent-list {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.portal-skill-recent-list button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 170px;
+  min-height: 34px;
+  padding: 4px 9px 4px 5px;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  background: #fff;
+  color: #344054;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.portal-skill-recent-list button:hover {
+  border-color: #ffb299;
+  background: #fff8f5;
+}
+
+.portal-skill-recent-list button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-recent-list .portal-skill-glyph {
+  width: 23px;
+  height: 23px;
+  border-radius: 6px;
+}
+
+.portal-skill-scope-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 10px;
+  border: 1px solid #e1e4e9;
+  border-radius: 9px;
+  background: #f9fafb;
+}
+
+.portal-skill-scope-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 29px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #5d6878;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.portal-skill-scope-tabs button span {
+  color: #8a94a4;
+  font-size: 10px;
+}
+
+.portal-skill-scope-tabs button:hover,
+.portal-skill-scope-tabs button.is-selected {
+  background: #fff;
+  color: #dc3d11;
+  box-shadow: 0 1px 4px rgba(26, 35, 48, 0.08);
+}
+
+.portal-skill-scope-tabs button.is-selected span {
+  color: #ef5a31;
+}
+
+.portal-skill-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.portal-skill-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-height: 112px;
+  padding: 11px 12px;
+  border: 1px solid #e1e4e9;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--skill-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.portal-skill-card:hover {
+  border-color: #ffc0ad;
+  box-shadow: 0 3px 12px rgba(38, 45, 58, 0.05);
+}
+
+.portal-skill-card.is-focused {
+  border-color: var(--skill-accent);
+  background: #fffaf8;
+  box-shadow: 0 0 0 1px rgba(255, 70, 20, 0.08);
+}
+
+.portal-skill-card-copy {
+  display: block;
+  min-width: 0;
+}
+
+.portal-skill-card-copy strong {
+  display: block;
+  overflow: hidden;
+  color: #1c2737;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-card-copy code,
+.portal-skill-detail-title code,
+.portal-selected-skill-chip code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.portal-skill-card-copy code {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: #45546c;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-skill-card-copy small {
+  display: -webkit-box;
+  min-height: 31px;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.portal-skill-card-copy em,
+.portal-skill-detail-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  color: #57657a;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.portal-skill-card-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  color: var(--skill-accent);
+  fill: #fff;
+}
+
+.portal-skill-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  background: #f0f5ff;
+  color: #2768e8;
+}
+
+.portal-skill-glyph[data-tone="private"] {
+  background: #edf9f1;
+  color: #12a65a;
+}
+
+.portal-skill-glyph[data-tone="team"] {
+  background: #eef4ff;
+  color: #2563eb;
+}
+
+.portal-skill-glyph[data-tone="platform"] {
+  background: #f3efff;
+  color: #7138ed;
+}
+
+.portal-skill-detail-title {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 12px;
+}
+
+.portal-skill-detail-title .portal-skill-glyph {
+  width: 50px;
+  height: 50px;
+  border-radius: 13px;
+}
+
+.portal-skill-detail-title strong {
+  display: block;
+  color: #182230;
+  font-size: 17px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.portal-skill-detail-title code {
+  display: block;
+  margin-top: 3px;
+  color: #3b4960;
+  font-size: 11px;
+}
+
+.portal-skill-detail-title > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #778195;
+  cursor: pointer;
+}
+
+.portal-skill-detail-title > button:hover {
+  background: #f0f2f5;
+  color: #25324a;
+}
+
+.portal-skill-detail-summary {
+  margin: 17px 0 0;
+  color: #38475c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.portal-skill-detail-scope {
+  margin: 10px 0 4px;
+  color: #506077;
+}
+
+.portal-skill-detail-section {
+  padding: 15px 0;
+  border-top: 1px solid var(--skill-border);
+}
+
+.portal-skill-detail-section h4 {
+  margin: 0 0 9px;
+  color: #29374c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.portal-skill-detail-section p,
+.portal-skill-detail-section ul,
+.portal-skill-detail-section ol {
+  margin: 0;
+  color: #5e6b7f;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.portal-skill-detail-section ul {
+  padding-left: 17px;
+}
+
+.portal-skill-detail-section ol {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-skill-detail-section ol li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.portal-skill-detail-section ol li > span {
+  display: inline-flex;
+  flex: 0 0 19px;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  background: #7138ed;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.portal-skill-example-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.portal-skill-example-list > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: #f3edff;
+  color: #6330d8;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-skill-example-list > button:hover {
+  background: #eae0ff;
+}
+
+.portal-skill-example-list > button svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  transform: none;
+}
+
+.portal-skill-detail-actions {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 9px;
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.portal-skill-detail-actions .ant-btn {
+  min-height: 40px;
+  border-radius: 8px;
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.portal-skill-detail-actions .ant-btn-primary {
+  border-color: var(--skill-accent);
+  background: var(--skill-accent);
+}
+
+.portal-skill-close {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+}
+
+.portal-skill-close:hover {
+  background: #f3f4f6;
+  color: #182230;
+}
+
+.portal-skill-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #8a94a3;
+  font-size: 11px;
+  text-align: center;
+}
+
+.portal-skill-empty strong {
+  color: #4b5668;
+}
+
+.portal-selected-skill-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 5px 8px;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.portal-selected-skill-list {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.portal-selected-skill-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  min-height: 28px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid #ffd0c1;
+  border-radius: 8px;
+  background: #fff5f1;
+  color: #a93616;
+}
+
+.portal-selected-skill-chip code {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-selected-skill-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #934128;
+  cursor: pointer;
+}
+
+.portal-selected-skill-chip button:hover {
+  background: rgba(255, 70, 20, 0.1);
+}
+
+.portal-selected-skill-tooltip .ant-tooltip-inner {
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: 9px;
+}
+
+.portal-selected-skill-tooltip-content {
+  display: grid;
+  gap: 4px;
+}
+
+.portal-selected-skill-tooltip-content strong {
+  font-size: 12px;
+}
+
+.portal-selected-skill-tooltip-content small {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.portal-selected-skill-tooltip-content em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.portal-selected-skill-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: #667085;
+  font-size: 10px;
+}
+
+.portal-selected-skill-status svg {
+  color: #1f9d68;
+}
+
+.portal-skill-mobile-back {
+  display: none;
+}
+
+.portal-skill-picker-panel button:focus-visible,
+.portal-selected-skill-chip:focus-visible,
+.portal-selected-skill-chip button:focus-visible {
+  outline: 2px solid var(--skill-accent);
+  outline-offset: 2px;
+}
+
+.portal-skill-mobile-drawer .ant-drawer-content {
+  border-radius: 18px 18px 0 0;
+}
+
+.portal-skill-mobile-drawer .ant-drawer-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.portal-skill-mobile-drawer .portal-skill-picker-panel {
+  display: block;
+  width: 100%;
+  height: calc(92dvh - 56px);
+  max-width: none;
+  max-height: none;
+  overflow-y: auto;
+}
+
+.portal-skill-mobile-drawer .portal-skill-catalog-column,
+.portal-skill-mobile-drawer .portal-skill-detail-column {
+  padding: 18px 18px 22px;
+  overflow: visible;
+}
+
+.portal-skill-mobile-drawer .portal-skill-detail-column {
+  min-height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.portal-skill-mobile-drawer .portal-skill-close {
+  display: none;
+}
+
+.portal-skill-mobile-drawer .mobile-list-active .portal-skill-detail-column,
+.portal-skill-mobile-drawer .mobile-detail-active .portal-skill-catalog-column {
+  display: none;
+}
+
+.portal-skill-mobile-drawer .portal-skill-mobile-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 4px 0;
+  margin: 0 0 18px;
+  border: 0;
+  background: transparent;
+  color: #556070;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .portal-skill-picker-heading {
+    padding-right: 0;
+  }
+
+  .portal-skill-picker-heading h3 {
+    font-size: 19px;
+  }
+
+  .portal-skill-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-skill-card {
+    min-height: 104px;
+  }
+
+  .portal-skill-scope-tabs {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .portal-skill-scope-tabs button {
+    flex: 0 0 auto;
+  }
+
+  .portal-selected-skill-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .portal-workbench-root .thread-wrap .aui-composer-attach > svg,
 .portal-workbench-root .thread-wrap .aui-composer-send > svg,
 .portal-workbench-root .thread-wrap .aui-composer-send-btn > svg,

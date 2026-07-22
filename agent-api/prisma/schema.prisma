@@ -1497,6 +1497,65 @@ model CodexSkillDraft {
   @@map("codex_skill_drafts")
 }
 
+model SkillCatalogEntry {
+  id             String    @id @default(cuid())
+  catalogKey     String    @unique @map("catalog_key")
+  organizationId String?   @map("organization_id")
+  sourceType     String    @map("source_type")
+  sourceRef      String    @map("source_ref")
+  canonicalName  String    @map("canonical_name")
+  defaultLocale  String    @default("zh-CN") @map("default_locale")
+  iconKey        String    @default("sparkles") @map("icon_key")
+  sortOrder      Int       @default(100) @map("sort_order")
+  shortcutKey    String?   @map("shortcut_key")
+  status         String    @default("active")
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  translations SkillCatalogTranslation[]
+  draft        SkillCatalogDraft?
+
+  @@index([organizationId, status])
+  @@index([sourceType, sourceRef])
+  @@index([shortcutKey, status])
+  @@map("skill_catalog_entries")
+}
+
+model SkillCatalogTranslation {
+  id             String   @id @default(cuid())
+  catalogEntryId String   @map("catalog_entry_id")
+  locale         String
+  displayName    String?  @map("display_name")
+  summary        String?
+  useCases       Json     @map("use_cases")
+  usageSteps     Json     @map("usage_steps")
+  examplePrompts Json     @map("example_prompts")
+  dataScope      String?  @map("data_scope")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  catalogEntry SkillCatalogEntry @relation(fields: [catalogEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([catalogEntryId, locale])
+  @@index([locale])
+  @@map("skill_catalog_translations")
+}
+
+model SkillCatalogDraft {
+  id              String   @id @default(cuid())
+  catalogEntryId  String   @unique @map("catalog_entry_id")
+  baseConfig      Json     @map("base_config")
+  translations    Json
+  updatedByUserId String?  @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  catalogEntry SkillCatalogEntry @relation(fields: [catalogEntryId], references: [id], onDelete: Cascade)
+
+  @@map("skill_catalog_drafts")
+}
+
 model SkillPackage {
   id             String                  @id @default(cuid())
   organizationId String?                 @map("organization_id")

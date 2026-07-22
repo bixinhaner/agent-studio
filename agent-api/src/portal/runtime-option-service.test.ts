@@ -5,6 +5,7 @@ import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-
 import type { AgentModeRecord } from "../persistence/agent-mode-repository.js";
 import type { RunProfileRecord } from "../persistence/run-profile-repository.js";
 import type { SkillPackageRecord } from "../persistence/skill-package-repository.js";
+import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
 
 const now = "2026-05-20T00:00:00.000Z";
 
@@ -101,6 +102,8 @@ function createService(input: {
   skillPackages?: SkillPackageRecord[];
   nativeSkills?: NativeCodexSkillRecord[];
   allowedByType?: Record<string, string[]>;
+  recentSkillIds?: string[];
+  catalogEntries?: SkillCatalogEntryRecord[];
 }) {
   const allowedByType = input.allowedByType ?? {};
   return new PortalRuntimeOptionService({
@@ -124,6 +127,12 @@ function createService(input: {
     },
     systemSettings: {
       getCurrentPublished: async () => undefined
+    },
+    recentSkills: {
+      listRecentSkillIds: async () => input.recentSkillIds ?? []
+    },
+    skillCatalog: {
+      listPublished: async () => input.catalogEntries ?? []
     }
   } as never);
 }
@@ -149,6 +158,30 @@ describe("PortalRuntimeOptionService", () => {
     expect(result.modes[0]?.id).toBe("mode-tech");
     expect(result.modes[0]?.skillPackages).toEqual([{ id: "package-allowed", label: "allowed-skill" }]);
     expect(result.modes[0]?.availableSkills.map((skill) => skill.name)).toEqual(["allowed-skill"]);
+    expect(result.modes[0]?.availableSkills[0]).toMatchObject({
+      scope: "platform",
+      presentation: { displayName: "allowed-skill", summary: "allowed-skill description" }
+    });
+  });
+
+  it("returns recent skills in stable deduplicated order", async () => {
+    const service = createService({
+      recentSkillIds: ["allowed-skill", "blocked-skill", "allowed-skill"],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-allowed", "package-blocked"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: []
+    });
+
+    expect(result.recentSkillIds).toEqual(["allowed-skill", "blocked-skill"]);
   });
 
   it("still returns the agent mode when none of its skill packages are authorized", async () => {

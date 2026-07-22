@@ -1,0 +1,77 @@
+export type SkillCatalogSourceType = "native" | "managed";
+
+export type SkillCatalogBaseConfig = {
+  defaultLocale: string;
+  iconKey: string;
+  sortOrder: number;
+  shortcutKey?: string;
+  status: "active" | "disabled";
+};
+
+export type SkillCatalogLocalizedContent = {
+  displayName?: string;
+  summary?: string;
+  useCases: string[];
+  usageSteps: string[];
+  examplePrompts: string[];
+  dataScope?: string;
+};
+
+export type SkillCatalogDraftContent = {
+  baseConfig: SkillCatalogBaseConfig;
+  translations: Record<string, SkillCatalogLocalizedContent>;
+};
+
+export type SkillCatalogEntryRecord = {
+  id: string;
+  catalogKey: string;
+  organizationId?: string;
+  sourceType: SkillCatalogSourceType;
+  sourceRef: string;
+  canonicalName: string;
+  defaultLocale: string;
+  iconKey: string;
+  sortOrder: number;
+  shortcutKey?: string;
+  status: string;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  translations: Record<string, SkillCatalogLocalizedContent>;
+  draft?: SkillCatalogDraftContent & { updatedAt: string; updatedByUserId?: string };
+};
+
+export type SkillCatalogSourceSnapshot = {
+  sourceType: SkillCatalogSourceType;
+  sourceRef: string;
+  canonicalName: string;
+  description?: string;
+  sourceLabel: string;
+  scope: "private" | "team" | "platform";
+  ownerUserId?: string;
+  system: boolean;
+};
+
+export type SkillCatalogAdminRecord = SkillCatalogEntryRecord & SkillCatalogSourceSnapshot & {
+  languageStatus: {
+    configured: number;
+    total: number;
+    missingLocales: string[];
+    fallbackLocales: string[];
+  };
+};
+
+export type ResolvedSkillCatalogPresentation = {
+  displayName: string;
+  summary: string;
+  useCases: string[];
+  usageSteps: string[];
+  examplePrompts: string[];
+  dataScope?: string;
+  iconKey: string;
+  sortOrder: number;
+  shortcutKey?: string;
+  requestedLocale: string;
+  resolvedLocale: string;
+  fallbackLocale?: string;
+};

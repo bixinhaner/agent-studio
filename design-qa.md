@@ -103,3 +103,96 @@
 - P3：后端提供渠道绑定与权限决策日志后，再补充渠道级可见范围和可解释的命中链路。
 
 final result: passed
+
+## Skill 目录、多语言管理与无快照发布（2026-07-22）
+
+- Portal 参考图：`docs/assets/skill-management-design/portal/01-zh-catalog-create-shortcut.png` 至 `06-mobile-zh-shortcut-detail.png`
+- Admin 参考图：`docs/assets/skill-management-design/admin/01-skill-catalog.png` 至 `05-publish-review.png`
+- Portal 真实截图：`temp/skill-catalog-qa/portal-create-actual.png`
+- Admin 真实截图：`temp/skill-catalog-qa/admin-list-actual.png`、`temp/skill-catalog-qa/admin-editor-actual.png`
+- 同屏对照：`temp/skill-catalog-qa/portal-comparison.png`、`temp/skill-catalog-qa/admin-comparison.png`
+- 验收浏览器：Codex 内置浏览器；桌面视口 1776 × 918
+
+### 对照结论
+
+- Portal：实现与效果图保持同一条主任务动线——搜索、范围筛选、紧凑卡片、详情、示例与启用操作同屏；创建入口会自动定位普通 `skill-creator`，没有额外创建流程。
+- 输入框：只展示 Skill 原名；用途名、释义和范围通过悬浮/聚焦说明渐进展示，避免 Composer 膨胀。
+- Admin：目录、范围/语言/状态筛选、详情预览、多语言编辑、实时预览和发布检查均已落地；列表密度高于效果图以承载更多真实 Skill。
+- 国际化：Portal 按请求语言读取本地化内容；缺失语言按默认语言回退。Admin 同时展示翻译完整度和缺失语言，并允许逐语言维护。
+- 发布：草稿覆盖当前生效配置，不创建或保留版本快照；发布检查明确告知影响范围和覆盖行为。
+- 数据真实性：用途名、释义、适用场景、使用步骤、示例和数据范围均来自数据库目录与翻译记录，前端只保留通用界面文案和无数据兜底。
+
+### 迭代记录
+
+1. P1：首轮 Portal 详情底部操作被视口裁切；扩大浮层并调整双栏比例后，`Use example` 与 `Enable Skill` 在 1776 × 918 首屏完整可见。
+2. P1：跨页面“新建托管 Skill”最初只返回 Portal；增加 `openSkill=create_skill` 定位协议后，可直接打开目录并聚焦 `skill-creator`。
+3. P2：可编辑列表项的 React key 曾包含文本值，输入时会导致节点重建；改为稳定索引 key 后，连续输入不再丢失焦点。
+4. 视觉对照：Portal 的内容数量取决于本地真实绑定，因此没有伪造效果图中的 Mine/Team/Recent 数据；Admin 实现保留更高列表密度，这是为了让管理员同屏扫描更多 Skill。
+
+### 验证结果
+
+- API build：通过。
+- UI build：通过。
+- API 定向测试：`skill-catalog/service.test.ts`、`portal/runtime-option-service.test.ts`，7 项通过。
+- UI 定向测试：`SkillPicker.test.tsx`，3 项通过（目录启用、停用、Composer 悬浮说明）。
+- Prisma：本地 PostgreSQL 52 个迁移全部已应用，schema up to date。
+- 真实浏览器：已覆盖 Portal 目录、创建入口、启用态、Admin 目录、中文/英文切换、实时预览与“无版本快照”发布确认。
+
+final result: passed
+
+## Portal Skill 选择器结构化展示收口（2026-07-16）
+
+- ImageGen 目标图：`temp/skill-picker-design/skill-picker-target.png`
+- Chrome 组件实测：`temp/skill-picker-design/skill-picker-browser-desktop-full.png`
+- 同视口并排对照：`temp/skill-picker-design/skill-picker-final-comparison.png`
+- 移动端详情：`temp/skill-picker-design/skill-picker-browser-mobile-final.png`
+- 验证浏览器：用户指定的 Chrome；桌面 1536 × 1024，移动端 390 × 844
+
+### 本轮结论
+
+- 桌面浮层按目标图收敛为 880 × 456px，左侧任务栏 304px，浮层与输入框保持约 8.5px 间距；双栏、推荐卡、示例问题、主操作和备选 Skill 的层级一致。
+- Portal 不再依赖前端固定任务与分类表；展示名称、摘要、任务、分类、排序、来源、数据范围、示例提示词和预计耗时由后端 `presentation` 返回。
+- 管理端新增结构化“Portal 展示”编辑器，管理员可修改上述元数据并保存到 Skill binding 的 `presentation` 覆盖层，不需要改前端代码。
+- 移动端由长页面堆叠改为“任务列表 → Skill 详情”两步抽屉；点击任务会立即进入详情，并提供明确返回入口。
+- Chrome 已实测任务切换、关键词搜索、示例提示词回填、启用 Skill、已选状态栏、移动端返回动线；桌面与移动端均无水平溢出，Console error 为 0。
+
+### 视觉差异判断
+
+- P0：0。
+- P1：0。
+- P2：0。实现沿用真实 Bailey Portal 壳层与现有 Composer 宽度，目标图中的会话内容仅作为背景语境，不要求复刻为业务数据。
+- P3：ImageGen 图使用完整 Chrome 浏览器框，组件验收页只渲染产品内容区；不影响 Skill 选择器本身的尺寸、层级和交互判断。
+
+final result: passed
+
+# Portal Skill Picker Design QA
+
+- 参考图：`/Users/like/.codex/generated_images/019f6608-562c-7e53-9400-e206b6e80be0/exec-bb0471f3-1b2f-4b54-9ada-35466766c8bb.png`、`exec-e54745b9-fed5-402b-911b-ebdecaa18391.png`、`exec-b2100f0c-b184-4362-8d77-d85a279b68be.png`、`exec-f2e1af1c-eed2-41f8-b5e4-9effdf8860bd.png`
+- Chrome 实现截图：`temp/skill-picker-qa/01-task-picker.png`、`02-recommendation-v2.png`、`03-catalog-v2.png`、`04-selected.png`
+- 同屏对照：`temp/skill-picker-qa/compare-recommendation.png`、`compare-catalog.png`、`compare-selected.png`
+- 验证浏览器：用户指定的 Chrome，实际可用内容视口 1440 × 719
+
+## 对照结论
+
+- 字体与排版：沿用 Portal 系统字体和现有 Bailey 品牌；标题、辅助文案、列表项与按钮的层级接近参考图。运行时 Skill 的英文名称和说明来自本地验证数据，不属于视觉偏差。
+- 间距与布局：桌面端保持“按任务选择 → 推荐详情 → 完整目录 → 已选上下文”四态；双栏宽度、分隔线、卡片密度、底部操作与参考图一致。
+- 色彩与令牌：主操作和选择态使用 Portal 橙色，详情面保持中性白/灰；没有照搬外部品牌色。
+- 图标与资产：使用项目既有 Lucide 图标；没有手工 SVG、Emoji 或占位图。页面背景资产继续使用 Bailey 现有实现。
+- 文案与内容：任务文案、数据范围、适用场景、示例问题和来源均由后端 presentation DTO 提供；前端不展示内部路径和激活提示。
+- 可访问性：入口、任务、分类、启停、返回和移除操作均有可识别名称；选择状态使用 `aria-pressed`，保存错误在原位置反馈。
+
+## 迭代记录
+
+1. 首轮发现 P1：推荐层的主操作被 `max-height` 裁切。修正为受视口约束的确定高度，并让左右栏独立滚动；复查确认“填入输入框”和“使用 Skill”可见可点。
+2. 第二轮发现 P2：从底部“浏览全部”切换目录时继承了旧栏滚动位置，导致返回入口离开首屏。为任务态和目录态增加稳定 key 触发独立挂载；复查确认返回入口可见。
+3. 线程级实测：启用 Skill 后写入 `codex_run_config.enabledSkills`，刷新仍保留；停用后 UI 和数据库同步恢复。验证产生的临时 Skill、权限数据和线程配置已清理。
+4. Console：没有 SkillPicker 新增异常。现存 `ThreadFollowupSuggestions` render-time state update 警告在打开 SkillPicker 前已出现，属于既有问题，不纳入本次范围。
+
+## 最终判断
+
+- P0：0
+- P1：0
+- P2：0
+- P3：目录聚焦态使用浅橙背景而非参考图的橙色勾选，以避免把“查看详情”误解为“已启用”；这是有意的语义修正。
+
+final result: passed

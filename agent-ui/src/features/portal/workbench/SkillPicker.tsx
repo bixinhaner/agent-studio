@@ -1,0 +1,554 @@
+import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Button, Drawer, Input, Popover, Tooltip } from "antd";
+import {
+  ArrowLeft,
+  BarChart3,
+  Check,
+  CircleCheck,
+  Copy,
+  FileChartColumn,
+  FileText,
+  FlaskConical,
+  Headphones,
+  Image as ImageIcon,
+  Package,
+  Plus,
+  Radio,
+  Search,
+  Sparkles,
+  SquarePlus,
+  Users,
+  UserRound,
+  WandSparkles,
+  X,
+  Zap
+} from "lucide-react";
+
+import type { RuntimeModeSnapshot } from "../../modes/types";
+import { useIsNarrowScreen } from "../../../lib/use-is-narrow-screen";
+
+type SkillOption = RuntimeModeSnapshot["availableSkills"][number];
+type SkillScope = "private" | "team" | "platform";
+type ScopeFilter = "all" | SkillScope;
+type MobilePickerStep = "list" | "detail";
+
+const ICON_BY_KEY: Record<string, LucideIcon> = {
+  image: ImageIcon,
+  flask: FlaskConical,
+  device: FlaskConical,
+  report: FileChartColumn,
+  headphones: Headphones,
+  support: Headphones,
+  "wand-sparkles": WandSparkles,
+  "plus-square": SquarePlus,
+  bolt: Zap,
+  chart: BarChart3,
+  "chart-line": BarChart3,
+  text: FileText,
+  radio: Radio,
+  sparkles: Sparkles,
+  spark: Sparkles
+};
+
+const COPY = {
+  zh: {
+    title: "选择 Skill",
+    search: "搜索 Skill 名称或用途",
+    recent: "最近使用",
+    all: "全部",
+    private: "我的",
+    team: "团队",
+    platform: "平台",
+    create: "创建 Skill",
+    close: "关闭 Skill 选择器",
+    emptyTitle: "没有匹配的 Skill",
+    emptyBody: "换个关键词或清除范围筛选后重试。",
+    suitable: "适合这些情况",
+    how: "使用方法",
+    examples: "试试这样说",
+    data: "数据范围",
+    fill: "填入示例",
+    enable: "启用 Skill",
+    disable: "停用 Skill",
+    enabled: "已启用",
+    selected: "已为本次对话启用",
+    back: "返回 Skill 列表",
+    privateLabel: "仅自己可见",
+    teamLabel: "团队共享",
+    platformLabel: "平台内置",
+    fallbackSummary: "使用该 Skill 完成专属任务",
+    saveError: "Skill 保存失败，请重试",
+    copied: "Skill 原名已复制"
+  },
+  en: {
+    title: "Choose a Skill",
+    search: "Search by Skill name or purpose",
+    recent: "Recently used",
+    all: "All",
+    private: "Mine",
+    team: "Team",
+    platform: "Platform",
+    create: "Create Skill",
+    close: "Close Skill picker",
+    emptyTitle: "No matching Skills",
+    emptyBody: "Try another keyword or clear the scope filter.",
+    suitable: "Best for",
+    how: "How to use",
+    examples: "Try saying",
+    data: "Data scope",
+    fill: "Use example",
+    enable: "Enable Skill",
+    disable: "Disable Skill",
+    enabled: "Enabled",
+    selected: "Enabled for this conversation",
+    back: "Back to Skills",
+    privateLabel: "Only me",
+    teamLabel: "Shared with team",
+    platformLabel: "Built into platform",
+    fallbackSummary: "Use this Skill for a specialized task",
+    saveError: "Could not save the Skill. Try again.",
+    copied: "Skill name copied"
+  }
+} as const;
+
+function currentCopy() {
+  if (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("en")) return COPY.en;
+  return COPY.zh;
+}
+
+function skillScope(skill: SkillOption): SkillScope {
+  if (skill.scope === "private") return "private";
+  if (skill.scope === "team") return "team";
+  return "platform";
+}
+
+function scopeLabel(skill: SkillOption): string {
+  const copy = currentCopy();
+  const scope = skillScope(skill);
+  return scope === "private" ? copy.privateLabel : scope === "team" ? copy.teamLabel : copy.platformLabel;
+}
+
+function ScopeIcon({ scope, size = 15 }: { scope: SkillScope; size?: number }) {
+  if (scope === "private") return <UserRound size={size} aria-hidden="true" />;
+  if (scope === "team") return <Users size={size} aria-hidden="true" />;
+  return <Package size={size} aria-hidden="true" />;
+}
+
+function SkillGlyph({ skill, size = 20 }: { skill: SkillOption; size?: number }) {
+  const Icon = ICON_BY_KEY[skill.presentation.iconKey] ?? Sparkles;
+  return (
+    <span className="portal-skill-glyph" data-tone={skillScope(skill)} aria-hidden="true">
+      <Icon size={size} strokeWidth={1.9} />
+    </span>
+  );
+}
+
+function skillTitle(skill: SkillOption): string {
+  return skill.presentation.displayName || skill.label || skill.name;
+}
+
+function skillSummary(skill: SkillOption): string {
+  return skill.presentation.summary || skill.description || currentCopy().fallbackSummary;
+}
+
+function skillSearchText(skill: SkillOption): string {
+  return [
+    skill.name,
+    skill.label,
+    skill.description,
+    skill.presentation.displayName,
+    skill.presentation.summary,
+    ...skill.presentation.useCases,
+    ...skill.presentation.examplePrompts
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+}
+
+type SkillPickerProps = {
+  availableSkills: SkillOption[];
+  enabledSkillIds: string[];
+  recentSkillIds: string[];
+  onEnabledSkillIdsChange: (ids: string[]) => Promise<void> | void;
+  onFillPrompt: (prompt: string) => void;
+};
+
+export const PortalSelectedSkillBar: FC<
+  Pick<SkillPickerProps, "availableSkills" | "enabledSkillIds" | "onEnabledSkillIdsChange">
+> = ({ availableSkills, enabledSkillIds, onEnabledSkillIdsChange }) => {
+  const selected = availableSkills.filter((skill) => enabledSkillIds.includes(skill.id));
+  const copy = currentCopy();
+  if (selected.length === 0) return null;
+
+  return (
+    <div className="portal-selected-skill-bar" aria-label={copy.selected}>
+      <div className="portal-selected-skill-list">
+        {selected.map((skill) => (
+          <Tooltip
+            key={skill.id}
+            placement="topLeft"
+            classNames={{ root: "portal-selected-skill-tooltip" }}
+            title={
+              <span className="portal-selected-skill-tooltip-content">
+                <strong>{skillTitle(skill)}</strong>
+                <small>{skillSummary(skill)}</small>
+                <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</em>
+              </span>
+            }
+          >
+            <span
+              className="portal-selected-skill-chip"
+              tabIndex={0}
+              title={`${skillTitle(skill)}\n${skillSummary(skill)}\n${scopeLabel(skill)}`}
+            >
+              <code>{skill.name}</code>
+              <button
+                type="button"
+                aria-label={`${copy.disable} ${skill.name}`}
+                onClick={() => {
+                  void Promise.resolve(onEnabledSkillIdsChange(enabledSkillIds.filter((id) => id !== skill.id))).catch(
+                    () => undefined
+                  );
+                }}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </span>
+          </Tooltip>
+        ))}
+      </div>
+      <span className="portal-selected-skill-status">
+        <CircleCheck size={15} aria-hidden="true" />
+        {copy.selected}
+      </span>
+    </div>
+  );
+};
+
+export const PortalSkillPicker: FC<SkillPickerProps> = ({
+  availableSkills,
+  enabledSkillIds,
+  recentSkillIds,
+  onEnabledSkillIdsChange,
+  onFillPrompt
+}) => {
+  const copy = currentCopy();
+  const isMobile = useIsNarrowScreen(760);
+  const [open, setOpen] = useState(false);
+  const [mobileStep, setMobileStep] = useState<MobilePickerStep>("list");
+  const [focusedSkillId, setFocusedSkillId] = useState("");
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<ScopeFilter>("all");
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState("");
+
+  const skillById = useMemo(() => new Map(availableSkills.map((skill) => [skill.id, skill] as const)), [availableSkills]);
+  const recentSkills = useMemo(
+    () => recentSkillIds.map((id) => skillById.get(id)).filter((skill): skill is SkillOption => Boolean(skill)).slice(0, 5),
+    [recentSkillIds, skillById]
+  );
+  const counts = useMemo(() => ({
+    all: availableSkills.length,
+    private: availableSkills.filter((skill) => skillScope(skill) === "private").length,
+    team: availableSkills.filter((skill) => skillScope(skill) === "team").length,
+    platform: availableSkills.filter((skill) => skillScope(skill) === "platform").length
+  }), [availableSkills]);
+  const filteredSkills = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return availableSkills.filter((skill) => {
+      if (scope !== "all" && skillScope(skill) !== scope) return false;
+      return !normalizedQuery || skillSearchText(skill).includes(normalizedQuery);
+    });
+  }, [availableSkills, query, scope]);
+  const focusedSkill =
+    filteredSkills.find((skill) => skill.id === focusedSkillId) ??
+    availableSkills.find((skill) => skill.id === focusedSkillId) ??
+    filteredSkills[0];
+
+  useEffect(() => {
+    if (typeof window === "undefined" || availableSkills.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("openSkill") !== "create_skill") return;
+    const createSkill = availableSkills.find((skill) => skill.presentation.shortcutKey === "create_skill");
+    if (!createSkill) return;
+    setOpen(true);
+    setQuery("");
+    setScope(skillScope(createSkill));
+    setFocusedSkillId(createSkill.id);
+    setMobileStep(isMobile ? "detail" : "list");
+    params.delete("openSkill");
+    const nextSearch = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+  }, [availableSkills, isMobile]);
+
+  const updateSelection = async (skill: SkillOption) => {
+    const isSelected = enabledSkillIds.includes(skill.id);
+    const nextIds = isSelected
+      ? enabledSkillIds.filter((id) => id !== skill.id)
+      : [...enabledSkillIds.filter((id) => skillById.get(id)?.name !== skill.name), skill.id];
+    setSaving(true);
+    setErrorText("");
+    try {
+      await onEnabledSkillIdsChange(Array.from(new Set(nextIds)));
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : copy.saveError);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openPicker = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) return;
+    setQuery("");
+    setScope("all");
+    setErrorText("");
+    setMobileStep("list");
+    setFocusedSkillId(recentSkills[0]?.id ?? availableSkills[0]?.id ?? "");
+  };
+
+  const focusSkill = (skill: SkillOption) => {
+    setFocusedSkillId(skill.id);
+    if (isMobile) setMobileStep("detail");
+  };
+
+  const focusCreateSkill = () => {
+    const createSkill = availableSkills.find((skill) => skill.presentation.shortcutKey === "create_skill");
+    if (!createSkill) return;
+    setQuery("");
+    setScope(skillScope(createSkill));
+    focusSkill(createSkill);
+  };
+
+  const fillExample = (skill: SkillOption, selectedPrompt?: string) => {
+    const prompt = selectedPrompt ?? skill.presentation.examplePrompts[0];
+    if (!prompt) return;
+    onFillPrompt(prompt);
+    setOpen(false);
+  };
+
+  const scopeOptions: Array<{ id: ScopeFilter; label: string }> = [
+    { id: "all", label: copy.all },
+    { id: "private", label: copy.private },
+    { id: "team", label: copy.team },
+    { id: "platform", label: copy.platform }
+  ];
+
+  const panel = (
+    <div className={`portal-skill-picker-panel mobile-${mobileStep}-active`}>
+      <section className="portal-skill-catalog-column" aria-label={copy.title}>
+        <div className="portal-skill-picker-heading">
+          <h3>{copy.title}</h3>
+          <Button icon={<Plus size={16} />} onClick={focusCreateSkill}>{copy.create}</Button>
+        </div>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          prefix={<Search size={17} aria-hidden="true" />}
+          placeholder={copy.search}
+          aria-label={copy.search}
+          allowClear
+        />
+        {recentSkills.length > 0 ? (
+          <div className="portal-skill-recent">
+            <h4>{copy.recent}</h4>
+            <div className="portal-skill-recent-list">
+              {recentSkills.map((skill) => (
+                <button key={skill.id} type="button" onClick={() => focusSkill(skill)}>
+                  <SkillGlyph skill={skill} size={16} />
+                  <span>{skillTitle(skill)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="portal-skill-scope-tabs" aria-label="Skill scope">
+          {scopeOptions.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={scope === item.id ? "is-selected" : ""}
+              aria-pressed={scope === item.id}
+              onClick={() => setScope(item.id)}
+            >
+              {item.label}<span>{counts[item.id]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="portal-skill-card-grid">
+          {filteredSkills.length > 0 ? filteredSkills.map((skill) => {
+            const selected = enabledSkillIds.includes(skill.id);
+            const focused = focusedSkill?.id === skill.id;
+            return (
+              <button
+                key={skill.id}
+                type="button"
+                className={`portal-skill-card${focused ? " is-focused" : ""}${selected ? " is-enabled" : ""}`}
+                onClick={() => focusSkill(skill)}
+              >
+                <SkillGlyph skill={skill} size={24} />
+                <span className="portal-skill-card-copy">
+                  <strong>{skillTitle(skill)}</strong>
+                  <code>{skill.name}</code>
+                  <small>{skillSummary(skill)}</small>
+                  <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</em>
+                </span>
+                {selected ? <CircleCheck className="portal-skill-card-check" size={18} aria-label={copy.enabled} /> : null}
+              </button>
+            );
+          }) : (
+            <div className="portal-skill-empty">
+              <Search size={22} aria-hidden="true" />
+              <strong>{copy.emptyTitle}</strong>
+              <span>{copy.emptyBody}</span>
+            </div>
+          )}
+        </div>
+      </section>
+      {focusedSkill ? (
+        <SkillDetail
+          skill={focusedSkill}
+          selected={enabledSkillIds.includes(focusedSkill.id)}
+          saving={saving}
+          errorText={errorText}
+          mobile={isMobile}
+          onBack={() => setMobileStep("list")}
+          onFill={(prompt) => fillExample(focusedSkill, prompt)}
+          onToggle={() => void updateSelection(focusedSkill)}
+        />
+      ) : null}
+      <button type="button" className="portal-skill-close" aria-label={copy.close} onClick={() => setOpen(false)}>
+        <X size={17} aria-hidden="true" />
+      </button>
+    </div>
+  );
+
+  const trigger = (mobileTrigger = false) => (
+    <button
+      type="button"
+      className={`portal-composer-skill-trigger${enabledSkillIds.length > 0 ? " is-active" : ""}`}
+      aria-label={copy.title}
+      aria-expanded={open}
+      onClick={mobileTrigger ? () => openPicker(true) : undefined}
+    >
+      <Package size={16} aria-hidden="true" />
+      <span className="portal-composer-skill-trigger-text">Skills</span>
+      {enabledSkillIds.length > 0 ? <span className="portal-skill-count">{enabledSkillIds.length}</span> : null}
+    </button>
+  );
+
+  return isMobile ? (
+    <>
+      {trigger(true)}
+      <Drawer
+        open={open}
+        placement="bottom"
+        height="min(92dvh, 820px)"
+        title={copy.title}
+        onClose={() => setOpen(false)}
+        rootClassName="portal-skill-mobile-drawer"
+        destroyOnClose={false}
+      >
+        {panel}
+      </Drawer>
+    </>
+  ) : (
+    <Popover
+      open={open}
+      onOpenChange={openPicker}
+      trigger="click"
+      placement="topLeft"
+      align={{ offset: [0, -64] }}
+      arrow={false}
+      overlayClassName="portal-skill-picker-popover"
+      content={panel}
+    >
+      {trigger()}
+    </Popover>
+  );
+};
+
+function SkillDetail({
+  skill,
+  selected,
+  saving,
+  errorText,
+  mobile,
+  onBack,
+  onFill,
+  onToggle
+}: {
+  skill: SkillOption;
+  selected: boolean;
+  saving: boolean;
+  errorText: string;
+  mobile: boolean;
+  onBack: () => void;
+  onFill: (prompt?: string) => void;
+  onToggle: () => void;
+}) {
+  const copy = currentCopy();
+  return (
+    <section className="portal-skill-detail-column" aria-label={`${skillTitle(skill)} details`}>
+      {mobile ? (
+        <button type="button" className="portal-skill-mobile-back" onClick={onBack}>
+          <ArrowLeft size={16} aria-hidden="true" />{copy.back}
+        </button>
+      ) : null}
+      <div className="portal-skill-detail-title">
+        <SkillGlyph skill={skill} size={27} />
+        <span>
+          <strong>{skillTitle(skill)}</strong>
+          <code>{skill.name}</code>
+        </span>
+        <Tooltip title={copy.copied} trigger="click">
+          <button type="button" aria-label="Copy Skill name" onClick={() => void navigator.clipboard?.writeText(skill.name)}>
+            <Copy size={16} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </div>
+      <p className="portal-skill-detail-summary">{skillSummary(skill)}</p>
+      <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</p>
+
+      {skill.presentation.useCases.length > 0 ? (
+        <DetailSection title={copy.suitable}>
+          <ul>{skill.presentation.useCases.map((item) => <li key={item}>{item}</li>)}</ul>
+        </DetailSection>
+      ) : null}
+      {skill.presentation.usageSteps.length > 0 ? (
+        <DetailSection title={copy.how}>
+          <ol>{skill.presentation.usageSteps.map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol>
+        </DetailSection>
+      ) : null}
+      {skill.presentation.examplePrompts.length > 0 ? (
+        <DetailSection title={copy.examples}>
+          <div className="portal-skill-example-list">
+            {skill.presentation.examplePrompts.slice(0, 2).map((prompt) => (
+              <button key={prompt} type="button" onClick={() => onFill(prompt)}>
+                <Sparkles size={15} aria-hidden="true" />{prompt}
+              </button>
+            ))}
+          </div>
+        </DetailSection>
+      ) : null}
+      {skill.presentation.dataScope ? (
+        <DetailSection title={copy.data}>
+          <p>{skill.presentation.dataScope}</p>
+        </DetailSection>
+      ) : null}
+      {errorText ? <p className="portal-skill-error" role="alert">{errorText}</p> : null}
+      <div className="portal-skill-detail-actions">
+        <Button onClick={() => onFill()} disabled={!skill.presentation.examplePrompts.length}>{copy.fill}</Button>
+        <Button type="primary" loading={saving} onClick={onToggle}>
+          {selected ? copy.disable : copy.enable}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return <div className="portal-skill-detail-section"><h4>{title}</h4>{children}</div>;
+}
