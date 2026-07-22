@@ -196,3 +196,27 @@ final result: passed
 - P3：目录聚焦态使用浅橙背景而非参考图的橙色勾选，以避免把“查看详情”误解为“已启用”；这是有意的语义修正。
 
 final result: passed
+
+## Portal Generated File Card（2026-07-23）
+
+- 参考图：`/Users/like/.codex/generated_images/019f8ab4-32d6-71c1-9060-2a2cfb915fa6/exec-ac8258bb-c541-48c2-83a9-0bcbf5c0e9d3.png`
+- 实现截图：`agent-ui/temp/design-qa-implementation-full.png`、`agent-ui/temp/design-qa-implementation-focused.png`
+- 同屏对照：`agent-ui/temp/design-qa-comparison.png`
+- 验收浏览器：Codex 内置浏览器；桌面视口 1440 × 1024，响应式检查覆盖 375、768、1024 和 1440 CSS px。
+
+### 验收结论
+
+- 同一路径的 runtime file-change 与最终 artifact 事件会合并为一个文件卡片，ready 状态优先，文件区稳定放在回答末尾；历史会话加载时执行同一归并逻辑。
+- Portal 系统文案保持英文：`Generated files`、`Ready`、`Preview`、`Download`；移除含义不清的 `Download latest`。
+- Preview 与 Download 在桌面端同高 38px、顶部位置一致；375px 移动端同高 44px且无水平溢出。
+- Markdown 文件链接保持语义化 anchor，并使用蓝色、下划线和链接图标提高可识别性。
+- 本地 artifact policy 未产生真实可下载制品，因此 ready/download 终态使用生产样式夹具验证；状态合并与下载能力由单元测试独立覆盖。
+- 浏览器干净加载仅出现既有 `ThreadFollowupSuggestions` React 开发警告，本次文件卡片改动没有新增错误。
+
+### 验证
+
+- UI 测试：13 个文件、47 项全部通过。
+- UI 生产构建：通过。
+- 文件状态测试覆盖重复事件、多文件、晚到进度事件和最终位置。
+
+final result: passed

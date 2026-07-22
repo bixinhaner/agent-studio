@@ -66,7 +66,8 @@ import {
   ClipboardListIcon,
   BotIcon,
   ZapIcon,
-  CreditCardIcon
+  CreditCardIcon,
+  LinkIcon
 } from "lucide-react";
 import { createAssistantStream, type AssistantStream } from "assistant-stream";
 import {
@@ -143,6 +144,7 @@ import {
 } from "./workbench/layout-state";
 import { PORTAL_ANTD_THEME } from "./workbench/theme";
 import { isNarrowScreen, useIsNarrowScreen } from "../../lib/use-is-narrow-screen";
+import { consolidateCodexFileChangeParts } from "./file-change-display";
 import "./workbench/workbench.css";
 
 type SessionOut = {
@@ -879,35 +881,29 @@ function AssistantMarkdownLink(props: {
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const previewPath = typeof href === "string" ? resolveThreadPreviewPathFromHref(href, activeThreadId) : null;
-  if (!previewPath) {
-    return (
-      <a className={className} href={href} {...rest}>
-        {children}
-      </a>
-    );
-  }
   const linkLabel = flattenNodeText(children).trim();
-  const previewPathForRequest = derivePreviewPathWithLabelAnchor(previewPath, linkLabel);
-  const displayName =
-    linkLabel && linkLabel !== href && !isLikelyHttpUrl(linkLabel) ? linkLabel : fileNameFromPreviewPath(previewPath);
+  const previewPathForRequest = previewPath ? derivePreviewPathWithLabelAnchor(previewPath, linkLabel) : "";
+  const classes = ["assistant-markdown-link", previewPath ? "assistant-markdown-file-link" : "", className]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <span className="assistant-inline-file-link-card" role="group" aria-label={`File ${displayName}`}>
-      <span className="assistant-inline-file-link-meta">
-        <span className="assistant-inline-file-link-tag">File</span>
-        <span className="assistant-inline-file-link-name">{displayName}</span>
-      </span>
-      <button
-        type="button"
-        className="assistant-inline-file-link-btn"
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          requestPreview(previewPathForRequest);
-        }}
-      >
-        Preview
-      </button>
-    </span>
+    <a
+      className={classes}
+      href={href}
+      {...rest}
+      onClick={
+        previewPath
+          ? (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              requestPreview(previewPathForRequest);
+            }
+          : undefined
+      }
+    >
+      <LinkIcon size={15} aria-hidden="true" />
+      <span>{children}</span>
+    </a>
   );
 }
 
@@ -2771,6 +2767,10 @@ function fileChangeKindLabel(kind: string): string {
   return kind.trim() || "Change";
 }
 
+function isReadyFileChange(kind: string): boolean {
+  return ["artifact", "available", "ready"].includes(kind.trim().toLowerCase());
+}
+
 type CodexFileChangeView = {
   path: string;
   kind: string;
@@ -3140,6 +3140,7 @@ function reviveMessage(message: unknown, persistedCreatedAt?: string | null): un
   };
 
   if (role === "assistant") {
+    revived.content = consolidateCodexFileChangeParts(revived.content as unknown[]);
     if (!("unstable_state" in fixedMetadata)) fixedMetadata.unstable_state = {};
     if (!Array.isArray(fixedMetadata.unstable_annotations)) fixedMetadata.unstable_annotations = [];
     if (!Array.isArray(fixedMetadata.unstable_data)) fixedMetadata.unstable_data = [];
@@ -3753,7 +3754,7 @@ const ProcessDataFallback: FC<any> = ({
   const [downloadingArtifactPath, setDownloadingArtifactPath] = useState("");
   const [artifactDownloadError, setArtifactDownloadError] = useState("");
 
-  const downloadLatestArtifact = async (downloadHref: string, filePath: string, displayName: string) => {
+  const downloadArtifact = async (downloadHref: string, filePath: string, displayName: string) => {
     if (!downloadHref || downloadingArtifactPath) return;
     setDownloadingArtifactPath(filePath);
     setArtifactDownloadError("");
@@ -3956,11 +3957,12 @@ const ProcessDataFallback: FC<any> = ({
       }
     };
     return (
-      <section className="assistant-file-change-block" aria-label="File changes">
+      <section className="assistant-file-change-block" aria-label="Generated files">
         <p className="assistant-file-change-title">Generated files</p>
         <ul className="assistant-file-change-list">
           {visibleChanges.map((item) => {
             const label = fileChangeKindLabel(item.kind);
+            const isReady = isReadyFileChange(item.kind);
             const canPreview = !isExternalPortalUser || item.canPreview;
             const canDownload = item.canDownload && activeThreadId.trim();
             const imageExtension = fileExtensionFromPreviewPath(item.path);
@@ -3994,8 +3996,16 @@ const ProcessDataFallback: FC<any> = ({
                   </button>
                 ) : null}
                 <div className="assistant-file-change-meta">
-                  <span className="assistant-file-change-kind">{label}</span>
-                  <span className="assistant-file-change-name">{imageName}</span>
+                  <span className="assistant-file-change-icon" aria-hidden="true">
+                    <FileIcon size={18} />
+                  </span>
+                  <span className="assistant-file-change-details">
+                    <span className="assistant-file-change-name">{imageName}</span>
+                    <span className={isReady ? "assistant-file-change-status is-ready" : "assistant-file-change-status"}>
+                      {isReady ? <CheckIcon size={14} aria-hidden="true" /> : null}
+                      {label}
+                    </span>
+                  </span>
                 </div>
                 <div className="assistant-file-change-actions">
                   {canPreview ? (
@@ -4006,16 +4016,16 @@ const ProcessDataFallback: FC<any> = ({
                   {downloadHref ? (
                     <button
                       type="button"
-                      className="assistant-file-change-btn"
+                      className="assistant-file-change-btn assistant-file-change-btn-primary"
                       disabled={Boolean(downloadingArtifactPath)}
-                      onClick={() => void downloadLatestArtifact(downloadHref, item.path, imageName)}
+                      onClick={() => void downloadArtifact(downloadHref, item.path, imageName)}
                     >
                       {downloadingArtifactPath === item.path ? (
                         <Loader2Icon size={14} aria-hidden="true" className="assistant-file-change-spinner" />
                       ) : (
                         <DownloadIcon size={14} aria-hidden="true" />
                       )}
-                      {downloadingArtifactPath === item.path ? "Downloading..." : "Download latest"}
+                      {downloadingArtifactPath === item.path ? "Downloading…" : "Download"}
                     </button>
                   ) : null}
                 </div>
@@ -7504,11 +7514,17 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             activeTextPart = null;
             activeCommentaryPart = null;
             currentCommentaryKey = "";
-            orderedParts.push({
+            const displayPart = {
               type: "data",
               name,
               data: partObj.data
-            });
+            };
+            if (name === "codex_file_change") {
+              const consolidated = consolidateCodexFileChangeParts([...orderedParts, displayPart]);
+              orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
+            } else {
+              orderedParts.push(displayPart);
+            }
             changed = true;
           }
           return changed;
@@ -7752,7 +7768,15 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               if (traceChanged && collapseFinalTraceOnDoneEnabled) {
                 collapseLatestTraceBatch();
               }
-              if (dataPartChanged || traceChanged || textChanged || commentaryCollapsed) {
+              const hasFileChangePart = orderedParts.some((part) => {
+                const partObj = asRecord(part);
+                return partObj?.type === "data" && partObj.name === "codex_file_change";
+              });
+              if (hasFileChangePart) {
+                const consolidated = consolidateCodexFileChangeParts(orderedParts);
+                orderedParts.splice(0, orderedParts.length, ...(consolidated as any[]));
+              }
+              if (dataPartChanged || traceChanged || textChanged || commentaryCollapsed || hasFileChangePart) {
                 const content = snapshotContent();
                 if (content.length > 0) {
                   yield { content };
