@@ -127,6 +127,7 @@ describe("bundled OMC handbook loader", () => {
     expect(skill).toContain('node "$CLI" describe');
     expect(skill).toContain("Continue only while discovery yields new relevant evidence");
     expect(skill).toContain("results repeat, or the next query lacks evidence");
+    expect(skill).toContain("Never substitute between operations, file transfer, upgrades, MML");
     expect(skill).not.toMatch(/at most three|two relevant categories|five candidate documents/);
     expect(skill).toContain("An empty API result means only");
     expect(skill.trimEnd().split("\n").length).toBeLessThanOrEqual(86);

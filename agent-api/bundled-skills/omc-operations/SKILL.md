@@ -38,7 +38,7 @@ The helper broadens strict empty matches. Use its final candidates, describe pro
 The handbook provides `api-index.jsonl`, category indexes, operation documents, and common operations. Use this order:
 
 1. Reuse a previously successful operation when its contract and parameters still match.
-2. Use a common operation only for an exact business-domain match. A generic task endpoint does not represent file transfer, upgrades, MML, or other task systems.
+2. Use common operations only for exact domain matches. Never substitute between operations, file transfer, upgrades, MML, or other task systems.
 3. Search with the user's domain, action, page context, and visible terms. Try synonyms, route terms, parameter names, or enum values when unclear.
 4. Continue only while discovery yields new relevant evidence. Stop when the contract is identified, results repeat, or the next query lacks evidence. Read each selected document once; use its contract and risk metadata.
 5. Follow identifiers from list or summary results into documented detail operations when needed. Keep dependent calls sequential; run independent reads together.
