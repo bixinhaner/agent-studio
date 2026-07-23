@@ -84,4 +84,35 @@ describe("NativeCodexSkillService", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("shares platform plugin caches across isolated homes and repairs missing mounts", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-studio-shared-plugins-"));
+    try {
+      const baseHome = path.join(tempRoot, "base-home");
+      const sessionHomeRoot = path.join(tempRoot, "session-homes");
+      const sharedPluginRoot = path.join(baseHome, "plugins", "cache", "agentstudio-office");
+      await fs.mkdir(path.join(baseHome, "skills"), { recursive: true });
+      await fs.mkdir(sharedPluginRoot, { recursive: true });
+      await fs.writeFile(path.join(sharedPluginRoot, "marker.txt"), "shared", "utf8");
+
+      const service = new NativeCodexSkillService({ baseHome, sessionHomeRoot });
+      const firstHome = await service.materializeSessionHome({ scopeId: "user-1", enabledSkills: [] });
+      const secondHome = await service.materializeSessionHome({ scopeId: "user-2", enabledSkills: [] });
+      const firstMount = path.join(firstHome, "plugins", "cache", "agentstudio-office");
+      const secondMount = path.join(secondHome, "plugins", "cache", "agentstudio-office");
+      const realSharedPluginRoot = await fs.realpath(sharedPluginRoot);
+
+      expect((await fs.lstat(firstMount)).isSymbolicLink()).toBe(true);
+      expect((await fs.lstat(secondMount)).isSymbolicLink()).toBe(true);
+      await expect(fs.realpath(firstMount)).resolves.toBe(realSharedPluginRoot);
+      await expect(fs.realpath(secondMount)).resolves.toBe(realSharedPluginRoot);
+      await expect(fs.readFile(path.join(firstMount, "marker.txt"), "utf8")).resolves.toBe("shared");
+
+      await fs.unlink(firstMount);
+      await service.materializeSessionHome({ scopeId: "user-1", enabledSkills: [] });
+      await expect(fs.realpath(firstMount)).resolves.toBe(realSharedPluginRoot);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

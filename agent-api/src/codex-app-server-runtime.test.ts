@@ -36,6 +36,7 @@ let nextTurnId = 1;
 const threads = new Set();
 const pendingServerRequests = new Map();
 const overloadRecoveryModeByThread = new Map();
+const configByThread = new Map();
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -109,6 +110,7 @@ rl.on("line", (line) => {
   if (message.method === "thread/start") {
     const threadId = "thread-" + nextThreadId++;
     threads.add(threadId);
+    configByThread.set(threadId, params.config || {});
     respond(id, { thread: { id: threadId } });
     return;
   }
@@ -318,6 +320,18 @@ rl.on("line", (line) => {
         notify("turn/completed", { threadId, turn: { id: turnId } });
         return;
       }
+      if (inputText === "runtime-app-policy") {
+        const text = JSON.stringify(configByThread.get(threadId) || {});
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "config-msg", delta: text });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "config-msg", type: "agentMessage", text },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Hel" });
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "lo" });
       notify("item/completed", {
@@ -477,6 +491,37 @@ describe("Codex app-server runtime", () => {
       }
     });
     expect(thread.id).toBe("thread-1");
+  });
+
+  it("disables the Codex Apps MCP channel for Agent Studio threads", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-app-policy")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      workspace: testTempDir,
+      codexRunConfig: {
+        features: {
+          enable_mcp_apps: true,
+          web_search_request: true
+        }
+      }
+    });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "runtime-app-policy")) {
+      if (event.delta) answer += event.delta;
+    }
+
+    expect(JSON.parse(answer)).toMatchObject({
+      features: {
+        enable_mcp_apps: false,
+        web_search_request: true
+      }
+    });
   });
 
   it("lists every app-server model page with capabilities", async () => {

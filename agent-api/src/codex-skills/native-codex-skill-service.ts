@@ -24,10 +24,12 @@ export type MaterializedCodexSkillInput = {
 type NativeCodexSkillServiceOptions = {
   baseHome: string;
   sessionHomeRoot: string;
+  sharedPluginMarketplaces?: string[];
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const MAX_SKILL_SCAN_DEPTH = 5;
+const DEFAULT_SHARED_PLUGIN_MARKETPLACES = ["agentstudio-office"];
 
 function trimOrUndefined(value: string | null | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -184,11 +186,20 @@ export class NativeCodexSkillService {
   private readonly baseHome: string;
   private readonly skillsRoot: string;
   private readonly sessionHomeRoot: string;
+  private readonly sharedPluginMarketplaces: string[];
 
   constructor(options: NativeCodexSkillServiceOptions) {
     this.baseHome = path.resolve(options.baseHome);
     this.skillsRoot = path.join(this.baseHome, "skills");
     this.sessionHomeRoot = path.resolve(options.sessionHomeRoot);
+    this.sharedPluginMarketplaces = [
+      ...new Set(
+        (options.sharedPluginMarketplaces ?? DEFAULT_SHARED_PLUGIN_MARKETPLACES)
+          .map((name) => trimOrUndefined(name))
+          .filter((name): name is string => Boolean(name))
+          .map((name) => sanitizePathSegment(name, "marketplace"))
+      )
+    ];
   }
 
   getBaseHome(): string {
@@ -268,6 +279,7 @@ export class NativeCodexSkillService {
 
       await linkFileIfPresent(path.join(this.baseHome, "auth.json"), path.join(sessionHome, "auth.json"));
       await linkFileIfPresent(path.join(this.baseHome, "config.toml"), path.join(sessionHome, "config.toml"));
+      await this.ensureSharedPluginCaches(sessionHome);
       if (stableJson(currentManifest) === stableJson(manifest) && (await pathExists(sessionSkillsRoot))) {
         await ensureRuntimeSkillDirectories(sessionSkillsRoot);
         return;
@@ -304,6 +316,23 @@ export class NativeCodexSkillService {
       await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     });
     return sessionHome;
+  }
+
+  private async ensureSharedPluginCaches(sessionHome: string): Promise<void> {
+    const basePluginCacheRoot = path.join(this.baseHome, "plugins", "cache");
+    const sessionPluginCacheRoot = path.join(sessionHome, "plugins", "cache");
+    for (const marketplace of this.sharedPluginMarketplaces) {
+      const sourcePath = path.join(basePluginCacheRoot, marketplace);
+      if (!(await pathExists(sourcePath))) continue;
+
+      const destinationPath = path.join(sessionPluginCacheRoot, marketplace);
+      const destinationStat = await fs.lstat(destinationPath).catch(() => undefined);
+      if (destinationStat?.isSymbolicLink()) {
+        const target = await fs.readlink(destinationPath).catch(() => undefined);
+        if (target && path.resolve(path.dirname(destinationPath), target) === sourcePath) continue;
+      }
+      await replaceSymlinkOrCopy(sourcePath, destinationPath);
+    }
   }
 
   private async collectSkills(currentPath: string, depth: number, records: NativeCodexSkillRecord[]): Promise<void> {

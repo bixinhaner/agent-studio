@@ -435,6 +435,12 @@ function configFromRunConfig(input: AppServerThreadOptions): Record<string, unkn
   delete config.webSearchEnabled;
   delete config.additionalDirectories;
 
+  // Agent Studio exposes managed plugin skills, not Codex Apps. Keeping the Apps
+  // MCP channel disabled prevents unrelated tools such as Sites from being
+  // selected for ordinary artifacts (for example, a single interactive chart).
+  config.features = mergeConfig(asRecord(config.features), {
+    enable_mcp_apps: false
+  });
   config.model_reasoning_effort = input.reasoningEffort;
 
   const webSearchMode = trimOrUndefined(runConfig.webSearchMode);
