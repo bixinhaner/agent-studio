@@ -57,6 +57,7 @@ import {
   MarkdownTable,
   extractMermaidCodeFromPreChildren
 } from "../markdown/markdown-rendering";
+import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { fetchSystemSettings, publishSystemSettings, saveSystemSettingsDraft } from "../system-settings/api";
 import type { SystemSettingsPayload, SystemSettingsVersionMeta } from "../system-settings/types";
 import {
@@ -401,6 +402,7 @@ function backfillRangeLabel(filters: CodexMemoryBackfillFilters): string {
 }
 
 function CodexMemoryMarkdownPreview(props: { text: string; maxHeight?: number; style?: React.CSSProperties }) {
+  const processedText = useMemo(() => normalizeLatexDelimiters(props.text), [props.text]);
   return (
     <div
       className="conversation-audit-markdown"
@@ -423,7 +425,7 @@ function CodexMemoryMarkdownPreview(props: { text: string; maxHeight?: number; s
           table: MarkdownTable as never
         }}
       >
-        {props.text}
+        {processedText}
       </ReactMarkdown>
     </div>
   );

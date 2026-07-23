@@ -117,6 +117,7 @@ import {
   MARKDOWN_REMARK_PLUGINS,
   MarkdownTable
 } from "../markdown/markdown-rendering";
+import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
@@ -600,9 +601,11 @@ function normalizeMarkdownAssetTarget(value: string): string {
 }
 
 function preprocessAssistantMarkdown(text: string): string {
-  return text.replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
-    return `${prefix}<${destination}>${suffix}`;
-  });
+  return normalizeLatexDelimiters(
+    text.replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+      return `${prefix}<${destination}>${suffix}`;
+    })
+  );
 }
 
 function normalizeUrlPathParam(value: string | null): string {

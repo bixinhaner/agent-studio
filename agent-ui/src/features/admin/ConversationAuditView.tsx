@@ -32,6 +32,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown/markdown-rendering";
+import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import {
   fetchAdminApiAuditDetail,
   fetchAdminApiAuditList,
@@ -642,13 +643,15 @@ function adminThreadFileContentUrl(
 }
 
 function preprocessConversationAuditMarkdown(text: string): string {
-  return text
-    .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
-      return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
-    })
-    .replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
-      return `${prefix}<${destination}>${suffix}`;
-    });
+  return normalizeLatexDelimiters(
+    text
+      .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+        return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
+      })
+      .replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
+        return `${prefix}<${destination}>${suffix}`;
+      })
+  );
 }
 
 function normalizeMarkdownDestination(value: string): string {

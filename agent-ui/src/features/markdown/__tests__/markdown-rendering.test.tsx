@@ -19,6 +19,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown-rendering";
+import { normalizeLatexDelimiters } from "../latex-delimiters";
 
 function TestMarkdown(props: { text: string }) {
   return (
@@ -114,6 +115,35 @@ describe("markdown rendering", () => {
     expect(container.querySelector(".katex")).toBeTruthy();
     expect(container.querySelector(".katex-display")).toBeTruthy();
     expect(container.textContent?.includes("E=mc2")).toBe(true);
+  });
+
+  it("renders agent-style LaTeX delimiters with katex markup after normalization", () => {
+    const { container } = render(
+      <TestMarkdown
+        text={normalizeLatexDelimiters(
+          [
+            "面向 \\(\\tau\\) 的轻量短时预测。",
+            "",
+            "\\[",
+            "\\mathbf H_{\\mathrm{FR1}}^{\\mathrm{UL}}(t) \\neq \\mathbf H_{\\mathrm{FR2}}^{\\mathrm{DL}}(t)",
+            "\\]"
+          ].join("\n")
+        )}
+      />
+    );
+
+    expect(container.querySelectorAll(".katex").length).toBe(2);
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+    expect(container.querySelectorAll(".katex-html").length).toBe(2);
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("renders compact bracket delimiters as display math", () => {
+    const { container } = render(
+      <TestMarkdown text={normalizeLatexDelimiters("Before \\[x+y\\] after")} />
+    );
+
+    expect(container.querySelector(".katex-display")).toBeTruthy();
   });
 
   it("renders mermaid code blocks as diagrams", async () => {

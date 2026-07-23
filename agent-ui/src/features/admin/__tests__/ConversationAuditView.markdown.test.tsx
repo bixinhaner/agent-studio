@@ -4,6 +4,24 @@ import { describe, expect, it } from "vitest";
 import { ConversationAuditMarkdown } from "../ConversationAuditView";
 
 describe("ConversationAuditMarkdown", () => {
+  it("renders agent-style LaTeX delimiters in conversation history", () => {
+    const { container } = render(
+      <ConversationAuditMarkdown
+        text={[
+          "面向 \\(\\tau\\) 的轻量短时预测。",
+          "",
+          "\\[",
+          "\\mathbf H_{\\mathrm{FR1}}^{\\mathrm{UL}}(t) \\neq \\mathbf H_{\\mathrm{FR2}}^{\\mathrm{DL}}(t)",
+          "\\]"
+        ].join("\n")}
+      />
+    );
+
+    expect(container.querySelectorAll(".katex").length).toBe(2);
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
   it("opens bare external domains as external links instead of app routes", () => {
     render(<ConversationAuditMarkdown text="[DingTalk docs](open.dingtalk.com/document)" />);
 

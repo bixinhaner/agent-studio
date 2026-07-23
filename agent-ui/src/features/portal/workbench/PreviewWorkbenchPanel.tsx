@@ -10,6 +10,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../../markdown/markdown-rendering";
+import { normalizeLatexDelimiters } from "../../markdown/latex-delimiters";
 import { usePortalI18n } from "../i18n";
 
 type ThreadFileRecord = {
@@ -756,13 +757,15 @@ function formatUpdatedAt(ms: number): string {
 }
 
 function preprocessPreviewMarkdown(text: string): string {
-  return text.replace(
-    /<a\s+name=(?:"([^"]+)"|'([^']+)')[^>]*>\s*<\/a>/gi,
-    (_match, doubleQuotedName: string, singleQuotedName: string) => {
-      const rawName = (doubleQuotedName || singleQuotedName || "").trim();
-      const escapedName = rawName.replace(/"/g, "&quot;");
-      return escapedName ? `<a id="${escapedName}"></a>` : "";
-    }
+  return normalizeLatexDelimiters(
+    text.replace(
+      /<a\s+name=(?:"([^"]+)"|'([^']+)')[^>]*>\s*<\/a>/gi,
+      (_match, doubleQuotedName: string, singleQuotedName: string) => {
+        const rawName = (doubleQuotedName || singleQuotedName || "").trim();
+        const escapedName = rawName.replace(/"/g, "&quot;");
+        return escapedName ? `<a id="${escapedName}"></a>` : "";
+      }
+    )
   );
 }
 
