@@ -1,0 +1,6 @@
+验证记录：
+1. Safari 26.3 现场确认浏览器缩放为 100%，根容器使用原生 100dvh 后保留 80%密度且输入框完整可见。
+2. node temp/verify-adaptive-density.mjs：375 至 3840px 全部分辨率通过，无页面溢出或弹窗越界。
+3. npm run build：通过。
+4. npm test -- --run：18 个测试文件、80 项测试全部通过。
+5. git diff --check：通过。
