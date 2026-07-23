@@ -4137,7 +4137,9 @@ async function submitToolRequest(input, toolCallId) {
     const error = payload.error && typeof payload.error === "object" ? payload.error : {};
     throw new Error(typeof error.message === "string" ? error.message : "External tool request failed");
   }
-  console.log(JSON.stringify(unwrap(payload && typeof payload === "object" && "output" in payload ? payload.output : payload), null, 2));
+  const output = unwrap(payload && typeof payload === "object" && "output" in payload ? payload.output : payload);
+  const files = payload && typeof payload === "object" && Array.isArray(payload.files) ? payload.files : [];
+  console.log(JSON.stringify(files.length ? { output, files } : output, null, 2));
 }
 
 try {
@@ -4466,6 +4468,24 @@ async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunn
       conversationId,
       bridgeToken: bridgeRegistration?.bridgeToken,
       identity
+    });
+    bridgeRegistration?.setFileMaterializer(async (files) => {
+      const materialized = await actionConnectorAttachments.materialize({
+        connectorId: input.connector.id,
+        externalUserId: actionConnectorExternalUserKey(identity),
+        conversationId,
+        attachmentIds: files.map((file) => file.attachmentId),
+        workspacePath: runtime.workspace
+      });
+      return materialized.map((file) => ({
+        attachmentId: file.attachmentId,
+        filename: file.filename,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        sha256: file.sha256,
+        createdAt: file.createdAt,
+        relativePath: file.relativePath
+      }));
     });
     const { thread, externalConversationKey } = await ensureActionConnectorThread({
       connector: input.connector,

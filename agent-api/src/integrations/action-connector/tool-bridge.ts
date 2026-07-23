@@ -19,11 +19,26 @@ export type ExternalToolResultInput = {
   toolCallId: string;
   status: ToolRequestStatus;
   output?: unknown;
+  files?: ExternalToolResultFileInput[];
   error?: {
     code: string;
     message: string;
     retryable?: boolean;
   };
+};
+
+export type ExternalToolResultFileInput = {
+  attachmentId: string;
+};
+
+export type ExternalToolResultFile = {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: string;
+  relativePath: string;
 };
 
 type RegisteredRun = {
@@ -32,6 +47,7 @@ type RegisteredRun = {
   bridgeToken: string;
   delegationHeaderValue: string;
   emit(event: AgentStreamEvent): void;
+  materializeFiles?: (files: ExternalToolResultFileInput[]) => Promise<ExternalToolResultFile[]>;
 };
 
 type PendingToolRequest = RegisteredRun & {
@@ -73,7 +89,11 @@ export class ActionConnectorToolBridge {
     runId: string;
     delegationHeaderValue: string;
     emit(event: AgentStreamEvent): void;
-  }): { bridgeToken: string; dispose: () => void } {
+  }): {
+    bridgeToken: string;
+    setFileMaterializer: (materialize: NonNullable<RegisteredRun["materializeFiles"]>) => void;
+    dispose: () => void;
+  } {
     const bridgeToken = randomUUID();
     const key = this.runKey(input.connectorId, input.runId);
     this.runs.set(key, {
@@ -85,6 +105,10 @@ export class ActionConnectorToolBridge {
     });
     return {
       bridgeToken,
+      setFileMaterializer: (materialize) => {
+        const run = this.runs.get(key);
+        if (run) run.materializeFiles = materialize;
+      },
       dispose: () => this.disposeRun(input.connectorId, input.runId)
     };
   }
@@ -133,11 +157,11 @@ export class ActionConnectorToolBridge {
     return await result;
   }
 
-  resolve(input: {
+  async resolve(input: {
     connectorId: string;
     delegationHeaderValue: string;
     result: ExternalToolResultInput;
-  }): void {
+  }): Promise<void> {
     const key = this.pendingKey(input.connectorId, input.result.runId, input.result.toolCallId);
     const pending = this.pending.get(key);
     if (!pending) {
@@ -148,7 +172,26 @@ export class ActionConnectorToolBridge {
     }
     clearTimeout(pending.timer);
     this.pending.delete(key);
-    pending.resolve(input.result);
+    const requestedFiles = (input.result.files ?? [])
+      .map((file) => ({ attachmentId: typeof file?.attachmentId === "string" ? file.attachmentId.trim() : "" }))
+      .filter((file) => Boolean(file.attachmentId));
+    if (!requestedFiles.length) {
+      pending.resolve({ ...input.result, files: undefined });
+      return;
+    }
+    if (!pending.materializeFiles) {
+      pending.resolve(this.fileMaterializationError(input.result, "The active run cannot receive files."));
+      return;
+    }
+    try {
+      const files = await pending.materializeFiles(requestedFiles);
+      pending.resolve({ ...input.result, files });
+    } catch (error) {
+      pending.resolve(this.fileMaterializationError(
+        input.result,
+        error instanceof Error ? error.message : "Tool result files could not be prepared."
+      ));
+    }
   }
 
   disposeRun(connectorId: string, runId: string): void {
@@ -168,5 +211,18 @@ export class ActionConnectorToolBridge {
 
   private pendingKey(connectorId: string, runId: string, toolCallId: string): string {
     return `${connectorId}:${runId}:${toolCallId}`;
+  }
+
+  private fileMaterializationError(result: ExternalToolResultInput, message: string): ExternalToolResultInput {
+    return {
+      runId: result.runId,
+      toolCallId: result.toolCallId,
+      status: "error",
+      error: {
+        code: "TOOL_RESULT_FILE_UNAVAILABLE",
+        message,
+        retryable: false
+      }
+    };
   }
 }

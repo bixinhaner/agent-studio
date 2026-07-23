@@ -136,7 +136,7 @@ export function createActionConnectorRuntimeRouter(options: {
     }
 
     try {
-      bridge.resolve({
+      await bridge.resolve({
         connectorId: req.params.connectorId,
         delegationHeaderValue,
         result: body as ExternalToolResultInput
