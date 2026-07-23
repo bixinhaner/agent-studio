@@ -917,7 +917,7 @@ class CodexAppServerProcess {
   }
 
   private async startInner(): Promise<void> {
-    this.proc = spawn(this.scope.binaryPath, ["app-server", "--listen", "stdio://"], {
+    this.proc = spawn(this.scope.binaryPath, ["app-server", "--disable", "enable_mcp_apps", "--listen", "stdio://"], {
       env: this.scope.env,
       stdio: ["pipe", "pipe", "pipe"]
     });

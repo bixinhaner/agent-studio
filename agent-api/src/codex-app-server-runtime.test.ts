@@ -30,6 +30,7 @@ async function writeFakeAppServer(): Promise<void> {
     `#!/usr/bin/env node
 import readline from "node:readline";
 
+const startupArgs = process.argv.slice(2);
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 let nextThreadId = 1;
 let nextTurnId = 1;
@@ -321,7 +322,10 @@ rl.on("line", (line) => {
         return;
       }
       if (inputText === "runtime-app-policy") {
-        const text = JSON.stringify(configByThread.get(threadId) || {});
+        const text = JSON.stringify({
+          config: configByThread.get(threadId) || {},
+          startupArgs
+        });
         notify("item/agentMessage/delta", { threadId, turnId, itemId: "config-msg", delta: text });
         notify("item/completed", {
           threadId,
@@ -517,11 +521,20 @@ describe("Codex app-server runtime", () => {
     }
 
     expect(JSON.parse(answer)).toMatchObject({
-      features: {
-        enable_mcp_apps: false,
-        web_search_request: true
+      config: {
+        features: {
+          enable_mcp_apps: false,
+          web_search_request: true
+        }
       }
     });
+    expect(JSON.parse(answer).startupArgs).toEqual([
+      "app-server",
+      "--disable",
+      "enable_mcp_apps",
+      "--listen",
+      "stdio://"
+    ]);
   });
 
   it("lists every app-server model page with capabilities", async () => {
