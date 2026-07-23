@@ -64,6 +64,25 @@ body.portal-workbench-mode {
   }
 }
 
+/*
+ * Safari already resolves viewport units through the page zoom. Applying the
+ * inverse height compensation used by Chromium makes the shell taller than the
+ * visible viewport and clips the composer behind body overflow.
+ */
+@media (min-width: 769px) and (pointer: fine) {
+  html.browser-safari body.portal-workbench-mode .portal-workbench-root {
+    height: 100vh;
+    min-height: 100vh;
+  }
+
+  @supports (height: 100dvh) {
+    html.browser-safari body.portal-workbench-mode .portal-workbench-root {
+      height: 100dvh;
+      min-height: 100dvh;
+    }
+  }
+}
+
 .portal-workbench-root {
   -webkit-text-size-adjust: 100%;
 }

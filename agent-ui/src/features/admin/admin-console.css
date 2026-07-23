@@ -46,6 +46,20 @@
   }
 }
 
+@media (min-width: 1081px) and (pointer: fine) {
+  html.browser-safari body.admin-console-mode .admin-console-root {
+    height: 100vh;
+    min-height: 100vh;
+  }
+
+  @supports (height: 100dvh) {
+    html.browser-safari body.admin-console-mode .admin-console-root {
+      height: 100dvh;
+      min-height: 100dvh;
+    }
+  }
+}
+
 .dark .admin-console-root {
   --admin-color-bg: #000000;
   --admin-color-surface: rgba(28, 28, 30, 0.75);
