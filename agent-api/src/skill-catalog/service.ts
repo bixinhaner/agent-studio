@@ -1,5 +1,6 @@
 import type { CodexManagedSkillRecord } from "../persistence/codex-skill-repository.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
+import type { InstalledPluginRecord } from "../codex-plugins/installed-plugin-service.js";
 import { SkillCatalogRepository } from "./repository.js";
 import type {
   ResolvedSkillCatalogPresentation,
@@ -46,6 +47,10 @@ function managedCatalogKey(skill: CodexManagedSkillRecord): string {
   return `${skill.organizationId ? `org:${skill.organizationId}` : "global"}:managed:${skill.id}`;
 }
 
+function pluginCatalogKey(name: string): string {
+  return `global:plugin:${name}`;
+}
+
 function sourceKey(sourceType: string, sourceRef: string): string {
   return `${sourceType}:${sourceRef}`;
 }
@@ -58,13 +63,15 @@ export class SkillCatalogService {
       managedSkills: {
         listManagedSkills(input?: { organizationId?: string }): Promise<CodexManagedSkillRecord[]>;
       };
+      plugins?: { list(): Promise<InstalledPluginRecord[]> };
     }
   ) {}
 
   async syncAndList(input: { organizationId?: string }): Promise<SkillCatalogAdminRecord[]> {
-    const [nativeSkills, managedSkills] = await Promise.all([
+    const [nativeSkills, managedSkills, plugins] = await Promise.all([
       this.sources.nativeSkills.list(),
-      this.sources.managedSkills.listManagedSkills({ organizationId: input.organizationId })
+      this.sources.managedSkills.listManagedSkills({ organizationId: input.organizationId }),
+      this.sources.plugins?.list() ?? Promise.resolve([])
     ]);
     const sourceMap = new Map<string, SkillCatalogSourceSnapshot>();
 
@@ -109,6 +116,43 @@ export class SkillCatalogService {
           useCases: [],
           usageSteps: [],
           examplePrompts: [],
+          dataScope: undefined
+        }
+      });
+    }
+
+    for (const plugin of plugins) {
+      sourceMap.set(sourceKey("plugin", plugin.name), {
+        sourceType: "plugin",
+        sourceRef: plugin.name,
+        canonicalName: plugin.name,
+        description: text(plugin.longDescription) ?? text(plugin.description),
+        sourceLabel: "系统插件",
+        scope: "platform",
+        system: true,
+        plugin: {
+          pluginRef: plugin.pluginRef,
+          marketplace: plugin.marketplace,
+          version: plugin.version,
+          developerName: plugin.developerName,
+          category: plugin.category,
+          capabilities: plugin.capabilities,
+          skillNames: plugin.skillNames,
+          enabled: plugin.enabled,
+          readiness: plugin.readiness
+        }
+      });
+      await this.repository.ensureEntry({
+        catalogKey: pluginCatalogKey(plugin.name),
+        sourceType: "plugin",
+        sourceRef: plugin.name,
+        canonicalName: plugin.name,
+        initialTranslation: {
+          displayName: plugin.displayName,
+          summary: text(plugin.shortDescription) ?? text(plugin.description),
+          useCases: [],
+          usageSteps: [],
+          examplePrompts: plugin.defaultPrompts,
           dataScope: undefined
         }
       });
@@ -181,7 +225,7 @@ export function languageStatus(entry: SkillCatalogEntryRecord): SkillCatalogAdmi
 export function selectCatalogEntry(input: {
   entries: SkillCatalogEntryRecord[];
   organizationId?: string;
-  sourceType: "native" | "managed";
+  sourceType: "native" | "managed" | "plugin";
   sourceRef: string;
 }): SkillCatalogEntryRecord | undefined {
   const matching = input.entries.filter(

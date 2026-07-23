@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PortalRuntimeOptionService } from "./runtime-option-service.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
+import type { InstalledPluginRecord } from "../codex-plugins/installed-plugin-service.js";
 import type { AgentModeRecord } from "../persistence/agent-mode-repository.js";
 import type { CodexManagedSkillRecord } from "../persistence/codex-skill-repository.js";
 import type { RunProfileRecord } from "../persistence/run-profile-repository.js";
@@ -173,6 +174,7 @@ function createService(input: {
   recentSkillIds?: string[];
   catalogEntries?: SkillCatalogEntryRecord[];
   managedSkills?: CodexManagedSkillRecord[];
+  installedPlugins?: InstalledPluginRecord[];
 }) {
   const allowedByType = input.allowedByType ?? {};
   return new PortalRuntimeOptionService({
@@ -184,6 +186,9 @@ function createService(input: {
     },
     nativeCodexSkills: {
       list: async () => input.nativeSkills ?? [nativeSkill("allowed-skill"), nativeSkill("blocked-skill")]
+    },
+    installedPlugins: {
+      list: async () => input.installedPlugins ?? []
     },
     managedSkills: {
       listManagedSkills: async () => input.managedSkills ?? []
@@ -251,6 +256,59 @@ describe("PortalRuntimeOptionService", () => {
     });
 
     expect(result.recentSkillIds).toEqual(["allowed-skill", "blocked-skill"]);
+  });
+
+  it("exposes published installed plugins as automatic read-only capabilities", async () => {
+    const service = createService({
+      installedPlugins: [{
+        name: "documents",
+        pluginRef: "documents@office",
+        marketplace: "office",
+        version: "1.2.3",
+        sourcePath: "/plugins/documents",
+        displayName: "Documents",
+        capabilities: ["Interactive", "Write"],
+        defaultPrompts: ["Create a memo"],
+        skillNames: ["documents"],
+        enabled: true,
+        readiness: "ready"
+      }],
+      catalogEntries: [catalogEntry({
+        id: "plugin-documents",
+        sourceType: "plugin",
+        sourceRef: "documents",
+        canonicalName: "documents",
+        published: true,
+        displayName: "文档制作",
+        summary: "创建并检查 Word 文档"
+      })],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: []
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: [],
+      locale: "zh-CN"
+    });
+
+    expect(result.modes[0]?.automaticSkills).toEqual([
+      expect.objectContaining({
+        id: "plugin:documents",
+        name: "documents",
+        automatic: true,
+        presentation: expect.objectContaining({
+          displayName: "文档制作",
+          summary: "创建并检查 Word 文档"
+        })
+      })
+    ]);
+    expect(result.modes[0]?.availableSkills).toEqual([]);
   });
 
   it("inherits a published native presentation for an unpublished managed catalog placeholder", async () => {

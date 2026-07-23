@@ -27,6 +27,24 @@ const outageSkill: Skill = {
   }
 };
 
+const documentsSkill: Skill = {
+  ...outageSkill,
+  id: "plugin:documents",
+  name: "documents",
+  label: "文档制作",
+  description: "创建并检查 Word 文档",
+  system: true,
+  automatic: true,
+  scope: "platform",
+  presentation: {
+    ...outageSkill.presentation,
+    displayName: "文档制作",
+    summary: "创建并检查 Word 文档",
+    examplePrompts: ["把这份提纲整理成正式 Word 文档。"],
+    iconKey: "document"
+  }
+};
+
 beforeAll(() => {
   const getComputedStyle = window.getComputedStyle.bind(window);
   Object.defineProperty(window, "getComputedStyle", {
@@ -57,6 +75,7 @@ describe("PortalSkillPicker", () => {
     render(
       <PortalSkillPicker
         availableSkills={[outageSkill]}
+        automaticSkills={[]}
         enabledSkillIds={[]}
         recentSkillIds={[]}
         onEnabledSkillIdsChange={setSkills}
@@ -85,6 +104,29 @@ describe("PortalSkillPicker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /(?:停用|Disable) Skill power-outage-report/ }));
     expect(setSkills).toHaveBeenCalledWith([]);
+  });
+
+  it("shows automatic capabilities without an enable action", async () => {
+    const setSkills = vi.fn();
+    const fillPrompt = vi.fn();
+    render(
+      <PortalSkillPicker
+        availableSkills={[]}
+        automaticSkills={[documentsSkill]}
+        enabledSkillIds={[]}
+        recentSkillIds={[]}
+        onEnabledSkillIdsChange={setSkills}
+        onFillPrompt={fillPrompt}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /文档制作/ }));
+    expect(screen.queryByRole("button", { name: /启用 Skill|Enable Skill/ })).toBeNull();
+    expect(screen.getAllByText(/自动启用|available automatically/i).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /填入示例|Use example/ }));
+    expect(fillPrompt).toHaveBeenCalledWith("把这份提纲整理成正式 Word 文档。");
+    expect(setSkills).not.toHaveBeenCalled();
   });
 
   it("reveals the localized purpose and summary when the composer chip is hovered", async () => {

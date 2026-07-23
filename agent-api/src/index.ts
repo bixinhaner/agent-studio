@@ -40,6 +40,7 @@ import {
   type RuntimeFileChange
 } from "./artifacts/runtime-generated-artifacts.js";
 import { NativeCodexSkillService } from "./codex-skills/native-codex-skill-service.js";
+import { InstalledPluginService } from "./codex-plugins/installed-plugin-service.js";
 import { CodexSkillService } from "./codex-skills/codex-skill-service.js";
 import { createAdminCodexSkillRouter, createPortalCodexSkillRouter } from "./codex-skills/router.js";
 import { BroadcastService } from "./collaboration/broadcast-service.js";
@@ -412,6 +413,7 @@ const codexExecution = new CodexExecutionService({
   }
 });
 const nativeCodexSkills = new NativeCodexSkillService(appConfig.codex);
+const installedPlugins = new InstalledPluginService({ baseHome: appConfig.codex.baseHome });
 const db = getDbClient();
 const securityDomains = new SecurityDomainService(db);
 const sessions = new SessionRepository(db as unknown as SessionRepositoryDb, appConfig.sessionTtlMs);
@@ -491,7 +493,8 @@ const skillCatalog = new SkillCatalogService(
   new SkillCatalogRepository(db as unknown as SkillCatalogRepositoryDb),
   {
     nativeSkills: nativeCodexSkills,
-    managedSkills: codexSkills
+    managedSkills: codexSkills,
+    plugins: installedPlugins
   }
 );
 const codexProviders = new ManagedCodexProviderResolver({
@@ -1664,6 +1667,7 @@ const portalRuntimeOptions = new PortalRuntimeOptionService({
   runProfiles,
   skillPackages,
   nativeCodexSkills,
+  installedPlugins,
   managedSkills: codexSkills,
   skillCatalog,
   recentSkills: {

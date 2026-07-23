@@ -1,19 +1,24 @@
-import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Button, Drawer, Input, Modal, Tooltip } from "antd";
 import {
   ArrowLeft,
+  BadgeCheck,
   BarChart3,
   Check,
   CircleCheck,
   Copy,
   FileChartColumn,
+  FileSpreadsheet,
   FileText,
+  FileType2,
   FlaskConical,
   Headphones,
   Image as ImageIcon,
   Package,
+  PanelsTopLeft,
   Plus,
+  Presentation,
   Radio,
   Search,
   Sparkles,
@@ -31,7 +36,7 @@ import { usePortalI18n, type PortalLocale } from "../i18n";
 
 type SkillOption = RuntimeModeSnapshot["availableSkills"][number];
 type SkillScope = "private" | "team" | "platform";
-type ScopeFilter = "all" | SkillScope;
+type ScopeFilter = "all" | SkillScope | "automatic";
 type MobilePickerStep = "list" | "detail";
 
 const ICON_BY_KEY: Record<string, LucideIcon> = {
@@ -47,6 +52,12 @@ const ICON_BY_KEY: Record<string, LucideIcon> = {
   chart: BarChart3,
   "chart-line": BarChart3,
   text: FileText,
+  document: FileText,
+  pdf: FileType2,
+  presentation: Presentation,
+  spreadsheet: FileSpreadsheet,
+  design: PanelsTopLeft,
+  visualize: BarChart3,
   radio: Radio,
   sparkles: Sparkles,
   spark: Sparkles
@@ -61,6 +72,10 @@ const COPY = {
     private: "我的",
     team: "团队",
     platform: "平台",
+    automatic: "自动能力",
+    automaticAvailable: "自动可用",
+    automaticNote: "此能力已由系统自动启用。描述匹配的任务时，系统会按需使用；无需手动选择。",
+    copyInvocation: "复制",
     create: "创建 Skill",
     close: "关闭 Skill 选择器",
     emptyTitle: "没有匹配的 Skill",
@@ -90,6 +105,10 @@ const COPY = {
     private: "Mine",
     team: "Team",
     platform: "Platform",
+    automatic: "Automatic",
+    automaticAvailable: "Available automatically",
+    automaticNote: "This capability is available automatically. Describe a matching task and the system will use it when needed; no selection is required.",
+    copyInvocation: "Copy",
     create: "Create Skill",
     close: "Close Skill picker",
     emptyTitle: "No matching Skills",
@@ -123,6 +142,10 @@ function skillScope(skill: SkillOption): SkillScope {
   return "platform";
 }
 
+function isAutomaticSkill(skill: SkillOption): boolean {
+  return skill.automatic === true;
+}
+
 function scopeLabel(skill: SkillOption, copy: typeof COPY.en | typeof COPY.zh): string {
   const scope = skillScope(skill);
   return scope === "private" ? copy.privateLabel : scope === "team" ? copy.teamLabel : copy.platformLabel;
@@ -137,7 +160,7 @@ function ScopeIcon({ scope, size = 15 }: { scope: SkillScope; size?: number }) {
 function SkillGlyph({ skill, size = 20 }: { skill: SkillOption; size?: number }) {
   const Icon = ICON_BY_KEY[skill.presentation.iconKey] ?? Sparkles;
   return (
-    <span className="portal-skill-glyph" data-tone={skillScope(skill)} aria-hidden="true">
+    <span className="portal-skill-glyph" data-tone={isAutomaticSkill(skill) ? "automatic" : skillScope(skill)} aria-hidden="true">
       <Icon size={size} strokeWidth={1.9} />
     </span>
   );
@@ -168,6 +191,7 @@ function skillSearchText(skill: SkillOption): string {
 
 type SkillPickerProps = {
   availableSkills: SkillOption[];
+  automaticSkills: SkillOption[];
   enabledSkillIds: string[];
   recentSkillIds: string[];
   onEnabledSkillIdsChange: (ids: string[]) => Promise<void> | void;
@@ -229,6 +253,7 @@ export const PortalSelectedSkillBar: FC<
 
 export const PortalSkillPicker: FC<SkillPickerProps> = ({
   availableSkills,
+  automaticSkills,
   enabledSkillIds,
   recentSkillIds,
   onEnabledSkillIdsChange,
@@ -244,28 +269,31 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  const skillById = useMemo(() => new Map(availableSkills.map((skill) => [skill.id, skill] as const)), [availableSkills]);
+  const allSkills = useMemo(() => [...availableSkills, ...automaticSkills], [automaticSkills, availableSkills]);
+  const skillById = useMemo(() => new Map(allSkills.map((skill) => [skill.id, skill] as const)), [allSkills]);
   const recentSkills = useMemo(
     () => recentSkillIds.map((id) => skillById.get(id)).filter((skill): skill is SkillOption => Boolean(skill)).slice(0, 5),
     [recentSkillIds, skillById]
   );
   const counts = useMemo(() => ({
-    all: availableSkills.length,
+    all: allSkills.length,
     private: availableSkills.filter((skill) => skillScope(skill) === "private").length,
     team: availableSkills.filter((skill) => skillScope(skill) === "team").length,
-    platform: availableSkills.filter((skill) => skillScope(skill) === "platform").length
-  }), [availableSkills]);
+    platform: availableSkills.filter((skill) => skillScope(skill) === "platform").length,
+    automatic: automaticSkills.length
+  }), [allSkills.length, automaticSkills.length, availableSkills]);
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    return availableSkills.filter((skill) => {
-      if (scope !== "all" && skillScope(skill) !== scope) return false;
+    return allSkills.filter((skill) => {
+      if (scope === "automatic" && !isAutomaticSkill(skill)) return false;
+      if (scope !== "all" && scope !== "automatic" && (isAutomaticSkill(skill) || skillScope(skill) !== scope)) return false;
       return !normalizedQuery || skillSearchText(skill).includes(normalizedQuery);
     });
-  }, [availableSkills, query, scope]);
+  }, [allSkills, query, scope]);
   const focusedSkill =
     filteredSkills.find((skill) => skill.id === focusedSkillId) ??
-    availableSkills.find((skill) => skill.id === focusedSkillId) ??
     filteredSkills[0];
 
   useEffect(() => {
@@ -283,6 +311,11 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     const nextSearch = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
   }, [availableSkills, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    panelRef.current?.scrollTo({ top: 0 });
+  }, [focusedSkillId, isMobile, mobileStep]);
 
   const updateSelection = async (skill: SkillOption) => {
     const isSelected = enabledSkillIds.includes(skill.id);
@@ -307,7 +340,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     setScope("all");
     setErrorText("");
     setMobileStep("list");
-    setFocusedSkillId(recentSkills[0]?.id ?? availableSkills[0]?.id ?? "");
+    setFocusedSkillId(recentSkills[0]?.id ?? allSkills[0]?.id ?? "");
   };
 
   const focusSkill = (skill: SkillOption) => {
@@ -334,11 +367,12 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     { id: "all", label: copy.all },
     { id: "private", label: copy.private },
     { id: "team", label: copy.team },
-    { id: "platform", label: copy.platform }
+    { id: "platform", label: copy.platform },
+    { id: "automatic", label: copy.automatic }
   ];
 
   const panel = (
-    <div className={`portal-skill-picker-panel mobile-${mobileStep}-active`}>
+    <div ref={panelRef} className={`portal-skill-picker-panel mobile-${mobileStep}-active`}>
       <section className="portal-skill-catalog-column" aria-label={copy.title}>
         <div className="portal-skill-picker-heading">
           <h3>{copy.title}</h3>
@@ -394,9 +428,12 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
                   <strong>{skillTitle(skill)}</strong>
                   <code>{skill.name}</code>
                   <small>{skillSummary(skill, copy)}</small>
-                  <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</em>
+                  <em>
+                    {isAutomaticSkill(skill) ? <BadgeCheck size={15} /> : <ScopeIcon scope={skillScope(skill)} />}
+                    {isAutomaticSkill(skill) ? copy.automaticAvailable : scopeLabel(skill, copy)}
+                  </em>
                 </span>
-                {selected ? <CircleCheck className="portal-skill-card-check" size={18} aria-label={copy.enabled} /> : null}
+                {!isAutomaticSkill(skill) && selected ? <CircleCheck className="portal-skill-card-check" size={18} aria-label={copy.enabled} /> : null}
               </button>
             );
           }) : (
@@ -417,7 +454,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
           mobile={isMobile}
           onBack={() => setMobileStep("list")}
           onFill={(prompt) => fillExample(focusedSkill, prompt)}
-          onToggle={() => void updateSelection(focusedSkill)}
+          onToggle={isAutomaticSkill(focusedSkill) ? undefined : () => void updateSelection(focusedSkill)}
         />
       ) : null}
       <button type="button" className="portal-skill-close" aria-label={copy.close} onClick={() => setOpen(false)}>
@@ -491,7 +528,7 @@ function SkillDetail({
   mobile: boolean;
   onBack: () => void;
   onFill: (prompt?: string) => void;
-  onToggle: () => void;
+  onToggle?: () => void;
 }) {
   const { locale } = usePortalI18n();
   const copy = currentCopy(locale);
@@ -516,7 +553,11 @@ function SkillDetail({
           </Tooltip>
         </div>
         <p className="portal-skill-detail-summary">{skillSummary(skill, copy)}</p>
-        <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</p>
+        <p className={`portal-skill-detail-scope${isAutomaticSkill(skill) ? " is-automatic" : ""}`}>
+          {isAutomaticSkill(skill) ? <BadgeCheck size={15} /> : <ScopeIcon scope={skillScope(skill)} />}
+          {isAutomaticSkill(skill) ? copy.automaticAvailable : scopeLabel(skill, copy)}
+        </p>
+        {isAutomaticSkill(skill) ? <p className="portal-skill-automatic-note">{copy.automaticNote}</p> : null}
 
         {skill.presentation.useCases.length > 0 ? (
           <DetailSection title={copy.suitable}>
@@ -548,9 +589,15 @@ function SkillDetail({
       </div>
       <div className="portal-skill-detail-actions">
         <Button onClick={() => onFill()} disabled={!skill.presentation.examplePrompts.length}>{copy.fill}</Button>
-        <Button type="primary" loading={saving} onClick={onToggle}>
-          {selected ? copy.disable : copy.enable}
-        </Button>
+        {onToggle ? (
+          <Button type="primary" loading={saving} onClick={onToggle}>
+            {selected ? copy.disable : copy.enable}
+          </Button>
+        ) : (
+          <Button icon={<Copy size={15} />} onClick={() => void navigator.clipboard?.writeText(`$${skill.name}`)}>
+            {copy.copyInvocation} ${skill.name}
+          </Button>
+        )}
       </div>
     </section>
   );

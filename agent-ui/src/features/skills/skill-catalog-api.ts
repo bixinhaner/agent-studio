@@ -26,7 +26,7 @@ export type SkillCatalogEntry = {
   id: string;
   catalogKey: string;
   organizationId?: string;
-  sourceType: "native" | "managed";
+  sourceType: "native" | "managed" | "plugin";
   sourceRef: string;
   canonicalName: string;
   defaultLocale: string;
@@ -44,6 +44,17 @@ export type SkillCatalogEntry = {
   scope: "private" | "team" | "platform";
   ownerUserId?: string;
   system: boolean;
+  plugin?: {
+    pluginRef: string;
+    marketplace: string;
+    version: string;
+    developerName?: string;
+    category?: string;
+    capabilities: string[];
+    skillNames: string[];
+    enabled: boolean;
+    readiness: "ready";
+  };
   languageStatus: {
     configured: number;
     total: number;

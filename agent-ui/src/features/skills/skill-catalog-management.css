@@ -178,8 +178,60 @@
 .skill-admin-scope.scope-private { color: #188657; background: #edf9f2; }
 .skill-admin-scope.scope-team { color: #2763cc; background: #edf4ff; }
 .skill-admin-scope.scope-platform { color: #6335c8; background: #f3efff; }
+.skill-admin-scope.scope-plugin { color: #147a55; background: #edf9f4; }
 .skill-admin-status.is-published { color: #278a38; background: #eef9ed; box-shadow: inset 0 0 0 1px #bce8b7; }
 .skill-admin-status.is-draft { color: #6b7280; background: #f2f4f7; box-shadow: inset 0 0 0 1px #d9dde4; }
+
+.skill-admin-runtime-info {
+  padding: 16px;
+  border: 1px solid #d9e7e1;
+  border-radius: 9px;
+  background: #f7fbf9;
+}
+
+.skill-admin-runtime-info > strong {
+  display: block;
+  margin-bottom: 10px;
+  color: #25473b;
+}
+
+.skill-admin-runtime-info dl {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.skill-admin-runtime-info dl > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.skill-admin-runtime-info dt {
+  color: var(--skill-admin-muted);
+}
+
+.skill-admin-runtime-info dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--skill-admin-text);
+  overflow-wrap: anywhere;
+}
+
+.skill-admin-preview-scope.is-automatic {
+  color: #147a55;
+}
+
+.skill-admin-preview-automatic {
+  margin: 10px 0 14px;
+  padding: 9px 10px;
+  border: 1px solid #d5ebe2;
+  border-radius: 7px;
+  background: #f5fbf8;
+  color: #466258;
+  font-size: 11px;
+  line-height: 1.5;
+}
 
 .skill-admin-link,
 .skill-admin-more,
@@ -457,6 +509,11 @@
 .skill-admin-form-section > p,
 .skill-admin-full-preview > p { margin: -4px 0 18px; color: #7a8494; font-size: 11px; }
 .skill-admin-form-section .ant-select { width: 100%; }
+.skill-admin-form-section .ant-switch {
+  justify-self: start;
+  width: 36px;
+  min-width: 36px;
+}
 
 .skill-admin-two-column {
   display: grid;
@@ -513,6 +570,11 @@
 .skill-admin-preview-prompts { display: grid; gap: 5px; }
 .skill-admin-preview-prompts button { padding: 7px 9px; border: 0; border-radius: 6px; background: #f2ecff; color: #6330d8; font: inherit; font-size: 10px; text-align: left; }
 .skill-admin-portal-detail > .ant-btn { margin-top: 12px; border-color: #ff4614; background: #ff4614; box-shadow: none; }
+.skill-admin-portal-detail > .ant-btn.is-automatic-copy {
+  border-color: #d6dbe3;
+  background: #fff;
+  color: #344154;
+}
 
 .skill-admin-publish-review { display: grid; gap: 16px; padding-top: 8px; }
 .skill-admin-publish-summary { display: flex; gap: 12px; padding: 14px; border-radius: 9px; background: #effaf3; color: #237e45; }

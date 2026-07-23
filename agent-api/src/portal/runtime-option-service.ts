@@ -7,6 +7,7 @@ import { getDbClient } from "../db/client.js";
 import { SystemSettingsRepository } from "../system-settings/repository.js";
 import { type SystemSettingsSafety, type SystemSettingsVersionRecord } from "../system-settings/types.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
+import type { InstalledPluginRecord } from "../codex-plugins/installed-plugin-service.js";
 import { resolveSkillCatalogPresentation, selectCatalogEntry } from "../skill-catalog/service.js";
 import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
 import type { PortalSkillPresentation } from "./skill-presentation.js";
@@ -41,6 +42,7 @@ export type PortalRuntimeOptionSkill = {
   managedSkillId?: string;
   scope?: string;
   sourcePath?: string;
+  automatic?: boolean;
   presentation: PortalSkillPresentation;
 };
 
@@ -52,6 +54,7 @@ export type PortalRuntimeOptionMode = {
   allowDirectorySelection: boolean;
   skillPackages: PortalRuntimeOptionSkillPackage[];
   availableSkills: PortalRuntimeOptionSkill[];
+  automaticSkills: PortalRuntimeOptionSkill[];
   instructionSources: Array<{
     sourceType: string;
     sourceRef: string;
@@ -77,6 +80,7 @@ type RuntimeOptionServiceDependencies = {
   runProfiles: ListRepository<RunProfileRecord>;
   skillPackages: ListRepository<SkillPackageRecord>;
   nativeCodexSkills?: ListRepository<NativeCodexSkillRecord>;
+  installedPlugins?: ListRepository<InstalledPluginRecord>;
   managedSkills?: {
     listManagedSkills(input?: {
       organizationId?: string;
@@ -299,18 +303,48 @@ function toNativeRuntimeSkill(
   };
 }
 
+function toAutomaticPluginRuntimeSkill(
+  plugin: InstalledPluginRecord,
+  catalogEntries: SkillCatalogEntryRecord[],
+  locale: string | undefined
+): PortalRuntimeOptionSkill | undefined {
+  const catalogEntry = selectCatalogEntry({
+    entries: catalogEntries,
+    sourceType: "plugin",
+    sourceRef: plugin.name
+  });
+  if (!catalogEntry?.publishedAt || catalogEntry.status !== "active") return undefined;
+  const presentation = resolveSkillCatalogPresentation({
+    entry: catalogEntry,
+    requestedLocale: locale,
+    canonicalName: plugin.name,
+    sourceDescription: plugin.longDescription ?? plugin.description
+  });
+  return {
+    id: `plugin:${plugin.name}`,
+    name: plugin.name,
+    label: presentation.displayName,
+    description: trimOrUndefined(plugin.description),
+    system: true,
+    automatic: true,
+    scope: "platform",
+    presentation
+  };
+}
+
 export class PortalRuntimeOptionService {
   private systemSettingsRepository?: SystemSettingsRepository;
 
   constructor(private readonly deps: RuntimeOptionServiceDependencies) {}
 
   async resolve(input: RuntimeOptionRequest): Promise<PortalRuntimeOptionServiceResult> {
-    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, recentSkillIds, catalogEntries] = await Promise.all([
+    const [modeRows, runProfileRows, skillPackageRows, nativeSkillRows, managedSkillRows, installedPlugins, recentSkillIds, catalogEntries] = await Promise.all([
       this.deps.modes.list(),
       this.deps.runProfiles.list(),
       this.deps.skillPackages.list(),
       this.deps.nativeCodexSkills?.list() ?? Promise.resolve([]),
       this.deps.managedSkills?.listManagedSkills({ organizationId: input.organizationId }) ?? Promise.resolve([]),
+      this.deps.installedPlugins?.list() ?? Promise.resolve([]),
       this.deps.recentSkills?.listRecentSkillIds({ organizationId: input.organizationId, userId: input.userId, take: 30 }) ??
         Promise.resolve([]),
       this.deps.skillCatalog?.listPublished({ organizationId: input.organizationId }) ?? Promise.resolve([])
@@ -339,6 +373,10 @@ export class PortalRuntimeOptionService {
     );
     const activePrivateSkillNames = new Set(activePrivateSkills.map((skill) => skillNameKey(skill.skillName)));
     const safetyLimits = await this.resolvePublishedSafetyLimits();
+    const automaticSkills = installedPlugins
+      .map((plugin) => toAutomaticPluginRuntimeSkill(plugin, catalogEntries, input.locale))
+      .filter((skill): skill is PortalRuntimeOptionSkill => Boolean(skill))
+      .sort((left, right) => left.presentation.sortOrder - right.presentation.sortOrder || left.label.localeCompare(right.label));
 
     const resolvedModes = [];
     for (const mode of activeVisibleModeRows) {
@@ -452,6 +490,7 @@ export class PortalRuntimeOptionService {
         availableSkills: availableSkills.sort(
           (left, right) => left.presentation.sortOrder - right.presentation.sortOrder || left.label.localeCompare(right.label)
         ),
+        automaticSkills,
         instructionSources: mode.instructionSources.map((source) => ({
           sourceType: source.sourceType,
           sourceRef: source.sourceRef,

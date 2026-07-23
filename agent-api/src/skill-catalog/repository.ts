@@ -325,7 +325,7 @@ export class SkillCatalogRepository {
       id: row.id,
       catalogKey: row.catalogKey,
       organizationId: text(row.organizationId),
-      sourceType: row.sourceType === "managed" ? "managed" : "native",
+      sourceType: row.sourceType === "managed" ? "managed" : row.sourceType === "plugin" ? "plugin" : "native",
       sourceRef: row.sourceRef,
       canonicalName: row.canonicalName,
       defaultLocale: row.defaultLocale,

@@ -1,4 +1,4 @@
-export type SkillCatalogSourceType = "native" | "managed";
+export type SkillCatalogSourceType = "native" | "managed" | "plugin";
 
 export type SkillCatalogBaseConfig = {
   defaultLocale: string;
@@ -50,6 +50,17 @@ export type SkillCatalogSourceSnapshot = {
   scope: "private" | "team" | "platform";
   ownerUserId?: string;
   system: boolean;
+  plugin?: {
+    pluginRef: string;
+    marketplace: string;
+    version: string;
+    developerName?: string;
+    category?: string;
+    capabilities: string[];
+    skillNames: string[];
+    enabled: boolean;
+    readiness: "ready";
+  };
 };
 
 export type SkillCatalogAdminRecord = SkillCatalogEntryRecord & SkillCatalogSourceSnapshot & {

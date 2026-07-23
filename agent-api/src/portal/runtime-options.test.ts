@@ -45,6 +45,7 @@ describe("toPortalRuntimeOptions", () => {
                 }
               }
             ],
+            automaticSkills: [],
             skillPackages: [],
             instructionSources: []
           }

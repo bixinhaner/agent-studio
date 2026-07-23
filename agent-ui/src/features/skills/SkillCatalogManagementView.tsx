@@ -3,6 +3,7 @@ import { Button, Input, Modal, Select, Spin, Switch } from "antd";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
+  BadgeCheck,
   BarChart3,
   Check,
   ChevronDown,
@@ -10,14 +11,18 @@ import {
   CircleCheck,
   Copy,
   FileChartColumn,
+  FileSpreadsheet,
   FileText,
+  FileType2,
   FlaskConical,
   Headphones,
   Image as ImageIcon,
   Languages,
   MoreVertical,
   Package,
+  PanelsTopLeft,
   Plus,
+  Presentation,
   Radio,
   RefreshCw,
   Search,
@@ -49,6 +54,12 @@ const ICON_BY_KEY: Record<string, LucideIcon> = {
   chart: BarChart3,
   "chart-line": BarChart3,
   text: FileText,
+  document: FileText,
+  pdf: FileType2,
+  presentation: Presentation,
+  spreadsheet: FileSpreadsheet,
+  design: PanelsTopLeft,
+  visualize: BarChart3,
   radio: Radio,
   sparkles: Sparkles
 };
@@ -64,6 +75,10 @@ const EMPTY_LOCALE: SkillCatalogLocalizedContent = {
 
 function scopeLabel(scope: SkillCatalogEntry["scope"]): string {
   return scope === "private" ? "我的私有" : scope === "team" ? "团队共享" : "平台内置";
+}
+
+function entryScopeLabel(entry: SkillCatalogEntry): string {
+  return entry.sourceType === "plugin" ? "自动能力" : scopeLabel(entry.scope);
 }
 
 function ScopeIcon({ scope }: { scope: SkillCatalogEntry["scope"] }) {
@@ -120,7 +135,7 @@ export function SkillCatalogManagementView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<"all" | SkillCatalogEntry["scope"]>("all");
+  const [scope, setScope] = useState<"all" | SkillCatalogEntry["scope"] | "plugin">("all");
   const [language, setLanguage] = useState<"all" | "complete" | "missing">("all");
   const [status, setStatus] = useState<"all" | "published" | "draft">("all");
   const [selectedId, setSelectedId] = useState("");
@@ -148,7 +163,8 @@ export function SkillCatalogManagementView() {
     const normalized = query.trim().toLocaleLowerCase();
     return entries.filter((entry) => {
       const content = displayContent(entry);
-      if (scope !== "all" && entry.scope !== scope) return false;
+      if (scope === "plugin" && entry.sourceType !== "plugin") return false;
+      if (scope !== "all" && scope !== "plugin" && (entry.sourceType === "plugin" || entry.scope !== scope)) return false;
       if (language === "complete" && entry.languageStatus.configured !== entry.languageStatus.total) return false;
       if (language === "missing" && entry.languageStatus.configured === entry.languageStatus.total) return false;
       if (status === "published" && !entry.publishedAt) return false;
@@ -180,7 +196,7 @@ export function SkillCatalogManagementView() {
           <p className="admin-page-desc">配置 Skill 在 Portal 中的名称、释义、示例与多语言内容。</p>
         </div>
         <div className="skill-admin-header-actions">
-          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>同步 Skill</Button>
+          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>同步能力目录</Button>
           <Button type="primary" icon={<Plus size={16} />} onClick={() => window.location.assign("/?openSkill=create_skill")}>新建托管 Skill</Button>
         </div>
       </header>
@@ -190,7 +206,7 @@ export function SkillCatalogManagementView() {
         <Input value={query} onChange={(event) => setQuery(event.target.value)} prefix={<Search size={16} />} placeholder="搜索原名、用途名" allowClear />
         <div className="skill-admin-scope-tabs">
           {([
-            ["all", "全部"], ["private", "我的"], ["team", "团队"], ["platform", "平台"]
+            ["all", "全部"], ["private", "我的"], ["team", "团队"], ["platform", "平台"], ["plugin", "自动能力"]
           ] as const).map(([value, label]) => (
             <button key={value} type="button" className={scope === value ? "is-selected" : ""} onClick={() => setScope(value)}>{label}</button>
           ))}
@@ -220,7 +236,7 @@ export function SkillCatalogManagementView() {
                     <tr key={entry.id} className={isSelected ? "is-selected" : ""} onClick={() => setSelectedId(entry.id)}>
                       <td><code>{entry.canonicalName}</code></td>
                       <td>{content.displayName || "—"}</td>
-                      <td><span className={`skill-admin-scope scope-${entry.scope}`}><ScopeIcon scope={entry.scope} />{scopeLabel(entry.scope)}</span></td>
+                      <td><span className={`skill-admin-scope scope-${entry.sourceType === "plugin" ? "plugin" : entry.scope}`}>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span></td>
                       <td>{entry.sourceLabel}</td>
                       <td>{entry.languageStatus.configured}/{entry.languageStatus.total} {entry.languageStatus.missingLocales.length ? `缺少 ${entry.languageStatus.missingLocales.join(", ")}` : "完整"}</td>
                       <td>{entry.draft ? <span className="skill-admin-status is-draft">草稿</span> : entry.publishedAt ? <span className="skill-admin-status is-published">已发布</span> : <span className="skill-admin-status">未发布</span>}</td>
@@ -251,7 +267,8 @@ function SkillCatalogSidePanel({ entry, onEdit }: { entry: SkillCatalogEntry; on
         <div><dt>原名（规范名）</dt><dd><code>{entry.canonicalName}</code><Copy size={14} /></dd></div>
         <div><dt>用途名（默认语言 {entry.defaultLocale}）</dt><dd>{content.displayName || "未配置"}<button type="button" onClick={onEdit}>编辑</button></dd></div>
         <div><dt>默认语言</dt><dd>{entry.defaultLocale}</dd></div>
-        <div><dt>来源</dt><dd>{entry.sourceLabel}（{scopeLabel(entry.scope)}）</dd></div>
+        <div><dt>来源</dt><dd>{entry.sourceLabel}（{entryScopeLabel(entry)}）</dd></div>
+        {entry.plugin ? <><div><dt>运行版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>运行状态</dt><dd><span className="skill-admin-status is-published">已安装并自动可用</span></dd></div><div><dt>包含能力</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></> : null}
         <div><dt>当前发布</dt><dd>{localDate(entry.publishedAt)}</dd></div>
         <div><dt>状态</dt><dd><span className={`skill-admin-status ${entry.publishedAt ? "is-published" : ""}`}>{entry.publishedAt ? "已发布" : "未发布"}</span></dd></div>
       </dl>
@@ -335,7 +352,7 @@ function SkillCatalogEditor({ entry, onBack, onUpdated }: { entry: SkillCatalogE
       <header className="skill-admin-editor-header">
         <div className="skill-admin-editor-title">
           <button type="button" onClick={onBack} aria-label="返回 Skill 管理"><ArrowLeft size={22} /></button>
-          <div><h1>{previewContent.displayName || entry.canonicalName}</h1><p><code>{entry.canonicalName}</code><span><ScopeIcon scope={entry.scope} />{scopeLabel(entry.scope)}</span>{entry.publishedAt ? <em>已发布</em> : null}</p></div>
+          <div><h1>{previewContent.displayName || entry.canonicalName}</h1><p><code>{entry.canonicalName}</code><span>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span>{entry.publishedAt ? <em>已发布</em> : null}</p></div>
         </div>
         <div className="skill-admin-editor-actions">
           <Button disabled={!dirty} onClick={() => { setDraft(draftFromEntry(entry)); setDirty(false); }}>放弃更改</Button>
@@ -388,7 +405,7 @@ function SkillCatalogEditor({ entry, onBack, onUpdated }: { entry: SkillCatalogE
           <div className="skill-admin-publish-summary"><CircleCheck size={22} /><div><strong>将用当前草稿覆盖 Portal 生效配置</strong><span>发布后，新打开或刷新的 Portal 会话会读取这些内容。</span></div></div>
           <dl>
             <div><dt>Skill</dt><dd><code>{entry.canonicalName}</code></dd></div>
-            <div><dt>影响范围</dt><dd>{scopeLabel(entry.scope)}</dd></div>
+            <div><dt>影响范围</dt><dd>{entryScopeLabel(entry)}</dd></div>
             <div><dt>默认语言</dt><dd>{draft.baseConfig.defaultLocale}</dd></div>
             <div><dt>语言完整度</dt><dd>{["zh-CN", "en-US"].filter((item) => draft.translations[item]?.displayName && draft.translations[item]?.summary).length}/2</dd></div>
             <div><dt>发布方式</dt><dd>覆盖当前配置，不保留版本快照</dd></div>
@@ -405,12 +422,13 @@ function BaseSettings({ entry, draft, onChange }: { entry: SkillCatalogEntry; dr
   const patchBase = (patch: Partial<SkillCatalogDraft["baseConfig"]>) => onChange((current) => ({ ...current, baseConfig: { ...current.baseConfig, ...patch } }));
   return (
     <div className="skill-admin-form-section">
-      <h2>基础信息</h2><p>原名来自 Skill 本身，不可翻译；展示配置只决定 Portal 如何解释和排序。</p>
-      <label><span>Skill 原名</span><Input value={entry.canonicalName} disabled /><small>来自 {entry.sourceLabel}，不能在这里修改</small></label>
+      <h2>基础信息</h2><p>原名来自能力本身，不可翻译；展示配置只决定 Portal 如何解释和排序。</p>
+      <label><span>{entry.sourceType === "plugin" ? "插件原名" : "Skill 原名"}</span><Input value={entry.canonicalName} disabled /><small>来自 {entry.sourceLabel}，不能在这里修改</small></label>
+      {entry.plugin ? <div className="skill-admin-runtime-info"><strong>只读运行信息</strong><dl><div><dt>插件标识</dt><dd><code>{entry.plugin.pluginRef}</code></dd></div><div><dt>版本</dt><dd>{entry.plugin.version}</dd></div><div><dt>状态</dt><dd>已安装并自动可用</dd></div><div><dt>包含能力</dt><dd>{entry.plugin.skillNames.join("、") || "—"}</dd></div></dl><small>运行状态由系统管理；这里仅配置用户看到的介绍内容。</small></div> : null}
       <label><span>默认语言</span><Select value={draft.baseConfig.defaultLocale} onChange={(value) => patchBase({ defaultLocale: value })} options={[{ value: "zh-CN", label: "简体中文 (zh-CN)" }, { value: "en-US", label: "English (en-US)" }]} /></label>
       <label><span>图标</span><Select value={draft.baseConfig.iconKey} onChange={(value) => patchBase({ iconKey: value })} options={Object.keys(ICON_BY_KEY).map((value) => ({ value, label: value }))} /></label>
       <label><span>排序</span><Input type="number" value={draft.baseConfig.sortOrder} onChange={(event) => patchBase({ sortOrder: Number(event.target.value) || 0 })} /></label>
-      <label><span>创建 Skill 快捷入口</span><Switch checked={draft.baseConfig.shortcutKey === "create_skill"} onChange={(checked) => patchBase({ shortcutKey: checked ? "create_skill" : undefined })} /><small>启用后，Portal 的“创建 Skill”按钮会定位到这个普通 Skill</small></label>
+      {entry.sourceType !== "plugin" ? <label><span>创建 Skill 快捷入口</span><Switch checked={draft.baseConfig.shortcutKey === "create_skill"} onChange={(checked) => patchBase({ shortcutKey: checked ? "create_skill" : undefined })} /><small>启用后，Portal 的“创建 Skill”按钮会定位到这个普通 Skill</small></label> : null}
       <label><span>在 Portal 可用</span><Switch checked={draft.baseConfig.status === "active"} onChange={(checked) => patchBase({ status: checked ? "active" : "disabled" })} /></label>
     </div>
   );
@@ -436,11 +454,12 @@ function ListEditor({ title, items, numbered = false, onChange }: { title: strin
 }
 
 function PortalCardPreview({ entry, content }: { entry: SkillCatalogEntry; content: SkillCatalogLocalizedContent }) {
-  return <div className="skill-admin-portal-card"><IconGlyph iconKey={entry.iconKey} /><div><strong>{content.displayName || entry.canonicalName}</strong><code>{entry.canonicalName}</code><p>{content.summary || entry.description || "尚未配置释义"}</p><span><ScopeIcon scope={entry.scope} />{scopeLabel(entry.scope)}</span></div></div>;
+  return <div className="skill-admin-portal-card"><IconGlyph iconKey={entry.iconKey} /><div><strong>{content.displayName || entry.canonicalName}</strong><code>{entry.canonicalName}</code><p>{content.summary || entry.description || "尚未配置释义"}</p><span>{entry.sourceType === "plugin" ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span></div></div>;
 }
 
 function PortalDetailPreview({ entry, draft, content, compact = false }: { entry: SkillCatalogEntry; draft: SkillCatalogDraft; content: SkillCatalogLocalizedContent; compact?: boolean }) {
-  return <div className={`skill-admin-portal-detail${compact ? " is-compact" : ""}`}><div className="skill-admin-preview-title"><IconGlyph iconKey={draft.baseConfig.iconKey} size={25} /><div><strong>{content.displayName || entry.canonicalName}</strong><code>{entry.canonicalName}</code></div></div><p>{content.summary}</p><span className="skill-admin-preview-scope"><ScopeIcon scope={entry.scope} />{scopeLabel(entry.scope)}</span>{content.useCases.length ? <PreviewSection title="适合这些情况"><ul>{content.useCases.map((item) => <li key={item}>{item}</li>)}</ul></PreviewSection> : null}{content.usageSteps.length ? <PreviewSection title="使用方法"><ol>{content.usageSteps.map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol></PreviewSection> : null}{content.examplePrompts.length ? <PreviewSection title="试试这样说"><div className="skill-admin-preview-prompts">{content.examplePrompts.slice(0, 2).map((item) => <button type="button" key={item}>{item}</button>)}</div></PreviewSection> : null}<Button type="primary" block>启用 Skill</Button></div>;
+  const automatic = entry.sourceType === "plugin";
+  return <div className={`skill-admin-portal-detail${compact ? " is-compact" : ""}`}><div className="skill-admin-preview-title"><IconGlyph iconKey={draft.baseConfig.iconKey} size={25} /><div><strong>{content.displayName || entry.canonicalName}</strong><code>{entry.canonicalName}</code></div></div><p>{content.summary}</p><span className={`skill-admin-preview-scope${automatic ? " is-automatic" : ""}`}>{automatic ? <BadgeCheck size={15} /> : <ScopeIcon scope={entry.scope} />}{entryScopeLabel(entry)}</span>{automatic ? <div className="skill-admin-preview-automatic">此能力已由系统自动启用。描述匹配的任务时，系统会按需使用，无需手动选择。</div> : null}{content.useCases.length ? <PreviewSection title="适合这些情况"><ul>{content.useCases.map((item) => <li key={item}>{item}</li>)}</ul></PreviewSection> : null}{content.usageSteps.length ? <PreviewSection title="使用方法"><ol>{content.usageSteps.map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol></PreviewSection> : null}{content.examplePrompts.length ? <PreviewSection title="试试这样说"><div className="skill-admin-preview-prompts">{content.examplePrompts.slice(0, 2).map((item) => <button type="button" key={item}>{item}</button>)}</div></PreviewSection> : null}{automatic ? <Button className="is-automatic-copy" block>复制 ${entry.canonicalName}</Button> : <Button type="primary" block>启用 Skill</Button>}</div>;
 }
 
 function PreviewSection({ title, children }: { title: string; children: ReactNode }) {

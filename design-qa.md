@@ -104,6 +104,31 @@
 
 final result: passed
 
+## 系统插件自动能力目录（2026-07-23）
+
+- ImageGen 目标图：`docs/assets/skill-management-design/plugin-automatic/01-portal-automatic-plugin-skill.png`、`02-admin-plugin-catalog.png`、`03-admin-plugin-content-editor.png`
+- Portal 实现截图：`temp/plugin-catalog-qa/portal-automatic-en-final.png`、`portal-automatic-zh-final.png`、`portal-automatic-mobile-detail-final-v2.png`
+- Admin 实现截图：`temp/plugin-catalog-qa/admin-plugin-list-final.png`、`admin-plugin-editor-final.png`、`admin-plugin-runtime-final-v2.png`
+- 验收浏览器：Codex 内置浏览器；桌面 1440 × 900、移动端 390 × 844
+
+### 验收结论
+
+- Portal 将插件放入独立“自动能力”范围，以紧凑双列卡片展示六个条目；详情保留用途、适用场景、使用方法和示例，不提供启用/停用操作，也不会写入输入框的已选 Skill。
+- Admin 将插件原名、插件标识、版本、安装状态和包含能力作为只读运行信息；中英文用途名、释义、适用场景、使用方法、示例问题和数据范围继续由目录数据配置。
+- 桌面端一次可浏览更多条目；移动端采用列表到详情的两层动线，并修复了切换筛选后的旧详情、滚动位置继承和长插件名按钮裁切。
+- 页面不显示 Codex 品牌字样，保留 Bailey 运行时品牌；自动能力以绿色状态语义与可手动选择的 Skill 区分。
+- Admin 基础信息页的 Portal 可用开关恢复为标准紧凑尺寸；自动能力预览的复制操作使用中性按钮，避免被误解为启用动作。
+- Console 未发现本次插件目录新增错误；既有 `ThreadFollowupSuggestions` render-time state update 和 Ant Design deprecated API 警告不属于本次范围。
+
+### 验证
+
+- API：4 个测试文件、12 项通过，覆盖安装插件解析、白名单、目录同步、Portal 自动能力下发和路径脱敏。
+- UI：Skill Picker 4 项测试通过，覆盖自动能力无启用动作、示例回填和不修改已选 Skill。
+- API/UI 生产构建通过，`git diff --check` 通过。
+- P0：0；P1：0；P2：0。
+
+final result: passed
+
 ## Skill 目录、多语言管理与无快照发布（2026-07-22）
 
 - Portal 参考图：`docs/assets/skill-management-design/portal/01-zh-catalog-create-shortcut.png` 至 `06-mobile-zh-shortcut-detail.png`

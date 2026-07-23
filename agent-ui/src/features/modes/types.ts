@@ -28,6 +28,7 @@ export type RuntimeModeSnapshot = {
     label: string;
     description?: string;
     system: boolean;
+    automatic?: boolean;
     managedSkillId?: string;
     scope?: string;
     presentation: {
@@ -45,6 +46,7 @@ export type RuntimeModeSnapshot = {
       fallbackLocale?: string;
     };
   }>;
+  automaticSkills: RuntimeModeSnapshot["availableSkills"];
   instructionSources: Array<{
     sourceType: string;
     sourceRef: string;

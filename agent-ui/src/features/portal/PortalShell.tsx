@@ -415,11 +415,13 @@ const SessionSearchContext = createContext("");
 const MobileWorkbenchContext = createContext(false);
 const SkillComposerContext = createContext<{
   availableSkills: RuntimeSkillOption[];
+  automaticSkills: RuntimeSkillOption[];
   enabledSkillIds: string[];
   recentSkillIds: string[];
   setSkills: (skillIds: string[]) => Promise<void> | void;
 }>({
   availableSkills: [],
+  automaticSkills: [],
   enabledSkillIds: [],
   recentSkillIds: [],
   setSkills: () => undefined
@@ -2060,11 +2062,12 @@ function useLargeTextPasteAttachmentGuard(input: {
 
 const SkillComposerControls: FC = () => {
   const aui = useAui();
-  const { availableSkills, enabledSkillIds, recentSkillIds, setSkills } = useContext(SkillComposerContext);
-  if (availableSkills.length === 0) return null;
+  const { availableSkills, automaticSkills, enabledSkillIds, recentSkillIds, setSkills } = useContext(SkillComposerContext);
+  if (availableSkills.length === 0 && automaticSkills.length === 0) return null;
   return (
     <PortalSkillPicker
       availableSkills={availableSkills}
+      automaticSkills={automaticSkills}
       enabledSkillIds={enabledSkillIds}
       recentSkillIds={recentSkillIds}
       onEnabledSkillIdsChange={setSkills}
@@ -6887,6 +6890,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const modeOptions = resolveModeOptions(runtimeOptions?.modes ?? [], runtimeMode);
   const selectedModeLabel = resolveModeLabel(runtimeOptions?.modes ?? [], runtimeMode);
   const availableModeSkills = isExternalPortalUser ? [] : (selectedMode?.availableSkills ?? []);
+  const automaticModeSkills = isExternalPortalUser ? [] : (selectedMode?.automaticSkills ?? []);
   const setEnabledSkills = useCallback(async (skillIds: string[]) => {
     if (isExternalPortalUser) return;
     const availableIds = new Set(availableModeSkills.map((skill) => skill.id));
@@ -6917,11 +6921,12 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const skillComposerContext = useMemo(
     () => ({
       availableSkills: availableModeSkills,
+      automaticSkills: automaticModeSkills,
       enabledSkillIds,
       recentSkillIds: runtimeOptions?.recentSkillIds ?? [],
       setSkills: setEnabledSkills
     }),
-    [availableModeSkills, enabledSkillIds, runtimeOptions?.recentSkillIds, setEnabledSkills]
+    [automaticModeSkills, availableModeSkills, enabledSkillIds, runtimeOptions?.recentSkillIds, setEnabledSkills]
   );
   const selectedKnowledgeSetIdsNormalized = selectedKnowledgeSetIds;
   const handleKnowledgeSetChange = useCallback((ids: string[]) => {

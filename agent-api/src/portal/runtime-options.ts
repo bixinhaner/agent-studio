@@ -6,8 +6,9 @@ import type {
 import type { CodexModelCatalog } from "../model-config.js";
 
 export type PortalRuntimeOptionPublicSkill = Omit<PortalRuntimeOptionSkill, "activationPrompt" | "sourcePath">;
-export type PortalRuntimeOptionPublicMode = Omit<PortalRuntimeOptionMode, "availableSkills"> & {
+export type PortalRuntimeOptionPublicMode = Omit<PortalRuntimeOptionMode, "availableSkills" | "automaticSkills"> & {
   availableSkills: PortalRuntimeOptionPublicSkill[];
+  automaticSkills: PortalRuntimeOptionPublicSkill[];
 };
 
 export type PortalRuntimeOptions = Omit<PortalRuntimeOptionServiceResult, "modes"> & {
@@ -25,6 +26,7 @@ export function toPortalRuntimeOptions(input: PortalRuntimeOptionServiceResult, 
       allowDirectorySelection: mode.allowDirectorySelection,
       skillPackages: mode.skillPackages,
       availableSkills: mode.availableSkills.map(({ activationPrompt: _activationPrompt, sourcePath: _sourcePath, ...skill }) => skill),
+      automaticSkills: mode.automaticSkills.map(({ activationPrompt: _activationPrompt, sourcePath: _sourcePath, ...skill }) => skill),
       instructionSources: mode.instructionSources
     })),
     canUpload: input.canUpload,
