@@ -224,6 +224,36 @@ body.portal-workbench-mode {
   justify-content: center;
 }
 
+.portal-language-dropdown .ant-dropdown-menu {
+  min-width: 156px;
+  padding: 6px;
+  border: 1px solid #e6e8ed;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(24, 34, 48, 0.14);
+}
+
+.portal-language-dropdown .ant-dropdown-menu-item {
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: #344054;
+  font-size: 13px;
+}
+
+.portal-language-dropdown .ant-dropdown-menu-item-selected {
+  background: var(--workbench-sidebar-hover);
+  color: var(--workbench-accent-strong);
+  font-weight: 650;
+}
+
+.portal-language-option-check {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+
 .portal-topbar-primary-btn.ant-btn {
   border-radius: 8px;
   font-weight: 500;
@@ -3282,6 +3312,31 @@ button.session-rail-new-btn:active,
     height: 44px;
     justify-content: flex-start;
     border-radius: 8px;
+  }
+  .portal-topbar-mobile-language {
+    padding-top: 12px;
+    border-top: 1px solid #e5e7eb;
+  }
+  .portal-topbar-mobile-language > p {
+    margin: 0 0 8px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .portal-topbar-mobile-language > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .portal-topbar-mobile-language .ant-btn {
+    min-height: 44px;
+    border-radius: 8px;
+  }
+  .portal-topbar-mobile-language .ant-btn.is-selected {
+    border-color: color-mix(in srgb, var(--workbench-accent) 42%, #e5e7eb);
+    background: var(--workbench-sidebar-hover);
+    color: var(--workbench-accent-strong);
+    font-weight: 650;
   }
   .aui-composer-root {
     margin: 0 8px 8px 8px;

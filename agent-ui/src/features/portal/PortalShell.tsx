@@ -2386,6 +2386,18 @@ function formatThreadGroupLabel(value: string | undefined, locale: PortalLocale,
   return `${year}-${month}`;
 }
 
+const RELATIVE_THREAD_GROUP_LABELS: ReadonlyArray<Record<PortalLocale, string>> = [
+  { en: "Today", "zh-CN": "今天" },
+  { en: "Yesterday", "zh-CN": "昨天" },
+  { en: "Last 7 days", "zh-CN": "最近 7 天" },
+  { en: "Last 30 days", "zh-CN": "最近 30 天" }
+];
+
+function relocalizeThreadGroupLabel(value: string, locale: PortalLocale): string {
+  const labels = RELATIVE_THREAD_GROUP_LABELS.find((item) => item.en === value || item["zh-CN"] === value);
+  return labels?.[locale] ?? value;
+}
+
 function rememberThreadGroupHeader(
   groupHeaderByRemoteId: Record<string, string>,
   thread: Pick<ThreadOut, "id" | "external_id">,
@@ -5988,6 +6000,19 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const [sessionGroupLabelContext, setSessionGroupLabelContext] = useState<SessionGroupLabelContextValue>({
     groupHeaderByRemoteId: {}
   });
+  useEffect(() => {
+    setSessionGroupLabelContext((previous) => {
+      let changed = false;
+      const groupHeaderByRemoteId = Object.fromEntries(
+        Object.entries(previous.groupHeaderByRemoteId).map(([threadId, label]) => {
+          const nextLabel = relocalizeThreadGroupLabel(label, locale);
+          changed ||= nextLabel !== label;
+          return [threadId, nextLabel];
+        })
+      );
+      return changed ? { groupHeaderByRemoteId } : previous;
+    });
+  }, [locale]);
   const [activeRunThreadIds, setActiveRunThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [runtimeRunningThreadIds, setRuntimeRunningThreadIds] = useState<RunningThreadIdsContextValue>({});
   const [completedNoticeThreadIds, setCompletedNoticeThreadIds] = useState<RunningThreadIdsContextValue>({});
@@ -6075,6 +6100,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   }, [portalPreferenceUser?.id]);
 
   const appliedConfigRef = useRef(appliedConfig);
+  const localeRef = useRef(locale);
   const runtimeOptionsRef = useRef(runtimeOptions);
   const runtimeModeRef = useRef(runtimeMode);
   const showProcessTraceRef = useRef(showProcessTrace);
@@ -6129,6 +6155,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   }, []);
 
   appliedConfigRef.current = appliedConfig;
+  localeRef.current = locale;
   runtimeOptionsRef.current = runtimeOptions;
   runtimeModeRef.current = runtimeMode;
   showProcessTraceRef.current = showProcessTrace;
@@ -6698,7 +6725,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const groupHeaderByRemoteId: Record<string, string> = {};
         let previousGroupLabel = "";
         for (const thread of out.threads || []) {
-          const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at, locale);
+          const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at, localeRef.current);
           if (groupLabel && groupLabel !== previousGroupLabel) {
             rememberThreadGroupHeader(groupHeaderByRemoteId, thread, groupLabel);
             previousGroupLabel = groupLabel;
@@ -6743,7 +6770,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
-        const groupLabel = formatThreadGroupLabel(created.thread.updated_at || created.thread.created_at || new Date().toISOString(), locale);
+        const groupLabel = formatThreadGroupLabel(
+          created.thread.updated_at || created.thread.created_at || new Date().toISOString(),
+          localeRef.current
+        );
         setSessionGroupLabelContext((prev) => {
           const nextGroupHeaders = { ...prev.groupHeaderByRemoteId };
           clearThreadGroupHeaderLabel(nextGroupHeaders, groupLabel);
@@ -6818,7 +6848,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </AgentRuntimeAdapterProvider>
       )
     }),
-    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity]
+    // Changing the adapter identity temporarily clears assistant-ui's message lookup.
+    // Keep it stable across locale changes so mounted history items retain valid indexes.
+    [runtimeOptions?.canUpload, syncActiveThreadIdentity]
   );
 
   const canUpload = runtimeOptions?.canUpload ?? false;

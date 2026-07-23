@@ -8,6 +8,7 @@ const PORTAL_LOCALE_STORAGE_KEY = "agent-studio.portal.locale.v1";
 
 const EN_MESSAGES = {
   "language.current": "English",
+  "language.select": "Select language",
   "language.switchTo": "Switch to Chinese",
   "common.close": "Close",
   "common.cancel": "Cancel",
@@ -373,6 +374,7 @@ type PortalMessageKey = keyof typeof EN_MESSAGES;
 
 const ZH_MESSAGES: Record<PortalMessageKey, string> = {
   "language.current": "简体中文",
+  "language.select": "选择语言",
   "language.switchTo": "Switch to English",
   "common.close": "关闭",
   "common.cancel": "取消",

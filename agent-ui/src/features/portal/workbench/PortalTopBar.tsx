@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Button, Drawer, Space, Tooltip } from "antd";
+import { Button, Drawer, Dropdown, Space, Tooltip, type MenuProps } from "antd";
 import {
+  Check,
   Ellipsis,
   CreditCard,
-  Globe2,
+  Globe,
   LayoutPanelLeft,
   MessageSquareText,
   PanelRightClose,
@@ -14,7 +15,12 @@ import {
 
 import { BrandMark } from "../../branding/BrandMark";
 import { useBranding } from "../../branding/BrandingProvider";
-import { usePortalI18n } from "../i18n";
+import { usePortalI18n, type PortalLocale } from "../i18n";
+
+const PORTAL_LANGUAGE_OPTIONS: ReadonlyArray<{ key: PortalLocale; label: string }> = [
+  { key: "en", label: "English" },
+  { key: "zh-CN", label: "简体中文" }
+];
 
 export function PortalTopBar(props: {
   sessionRailCollapsed?: boolean;
@@ -32,13 +38,14 @@ export function PortalTopBar(props: {
   mobile?: boolean;
 }) {
   const { branding } = useBranding();
-  const { t, toggleLocale } = usePortalI18n();
+  const { locale, setLocale, t } = usePortalI18n();
   const isRightPanelOpen = props.drawerOpen;
   const showRuntimeSummary = props.showRuntimeSummary ?? true;
   const showAdvancedSettings = props.showAdvancedSettings ?? true;
   const showRightPanelToggle = props.showRightPanelToggle ?? true;
   const isMobile = props.mobile ?? false;
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const hasOverflowActions = true;
   const mobileActionItems = useMemo(
     () => [
@@ -85,24 +92,29 @@ export function PortalTopBar(props: {
               props.onOpenAdvancedSettings();
             }
           }
-        : null,
-      {
-        key: "language",
-        label: t("language.switchTo"),
-        icon: <Globe2 size={18} />,
-        onClick: () => {
-          setMobileActionsOpen(false);
-          toggleLocale();
-        }
-      }
+        : null
     ].filter(Boolean) as Array<{
       key: string;
       label: string;
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings, t, toggleLocale]
+    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings, t]
   );
+  const languageMenu: MenuProps = {
+    items: PORTAL_LANGUAGE_OPTIONS.map((option) => ({
+      key: option.key,
+      label: option.label,
+      icon: (
+        <span className="portal-language-option-check" aria-hidden="true">
+          {locale === option.key ? <Check size={14} strokeWidth={2.3} /> : null}
+        </span>
+      )
+    })),
+    selectable: true,
+    selectedKeys: [locale],
+    onClick: ({ key }) => setLocale(key as PortalLocale)
+  };
 
   return (
     <>
@@ -199,15 +211,31 @@ export function PortalTopBar(props: {
               </Tooltip>
             ) : null}
             {!isMobile ? (
-              <Tooltip title={t("language.switchTo")} placement="bottom">
+              <Dropdown
+                menu={languageMenu}
+                trigger={["hover", "click"]}
+                placement="bottomRight"
+                mouseEnterDelay={0.08}
+                mouseLeaveDelay={0.14}
+                overlayClassName="portal-language-dropdown"
+                open={languageMenuOpen}
+                onOpenChange={setLanguageMenuOpen}
+              >
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn portal-topbar-language-btn"
-                  icon={<Globe2 size={18} />}
-                  onClick={toggleLocale}
-                  aria-label={t("language.switchTo")}
+                  icon={<Globe size={18} />}
+                  aria-label={t("language.select")}
+                  aria-haspopup="menu"
+                  aria-expanded={languageMenuOpen}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setLanguageMenuOpen(true);
+                    }
+                  }}
                 />
-              </Tooltip>
+              </Dropdown>
             ) : null}
             {showRightPanelToggle ? (
               <Tooltip title={isRightPanelOpen ? t("topbar.closePanel") : t("topbar.openPanel")} placement="bottomLeft">
@@ -268,6 +296,26 @@ export function PortalTopBar(props: {
                 </Button>
               ))}
             </div>
+            <section className="portal-topbar-mobile-language" aria-label={t("language.select")}>
+              <p>{t("language.select")}</p>
+              <div>
+                {PORTAL_LANGUAGE_OPTIONS.map((option) => (
+                  <Button
+                    key={option.key}
+                    type="default"
+                    className={locale === option.key ? "is-selected" : ""}
+                    icon={locale === option.key ? <Check size={16} /> : undefined}
+                    aria-pressed={locale === option.key}
+                    onClick={() => {
+                      setLocale(option.key);
+                      setMobileActionsOpen(false);
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </section>
           </div>
         </Drawer>
       ) : null}
