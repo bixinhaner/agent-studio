@@ -35,6 +35,17 @@
   scroll-behavior: smooth;
 }
 
+@media (min-width: 1081px) and (pointer: fine) {
+  body.admin-console-mode {
+    zoom: var(--desktop-ui-density);
+  }
+
+  .admin-console-root {
+    height: calc(100vh * var(--desktop-ui-density-inverse));
+    min-height: calc(100vh * var(--desktop-ui-density-inverse));
+  }
+}
+
 .dark .admin-console-root {
   --admin-color-bg: #000000;
   --admin-color-surface: rgba(28, 28, 30, 0.75);

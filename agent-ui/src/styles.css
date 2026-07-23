@@ -1,6 +1,8 @@
 :root {
   color: #0f172a;
   background: #eef3fb;
+  --desktop-ui-density: 0.8;
+  --desktop-ui-density-inverse: 1.25;
 }
 
 html,

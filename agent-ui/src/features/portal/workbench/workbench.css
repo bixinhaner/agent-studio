@@ -45,6 +45,25 @@ body.portal-workbench-mode {
   }
 }
 
+/* Keep browser zoom at 100% while using the denser desktop layout users prefer at 80%. */
+@media (min-width: 769px) and (pointer: fine) {
+  body.portal-workbench-mode {
+    zoom: var(--desktop-ui-density);
+  }
+
+  .portal-workbench-root {
+    height: calc(100vh * var(--desktop-ui-density-inverse));
+    min-height: calc(100vh * var(--desktop-ui-density-inverse));
+  }
+
+  @supports (height: 100dvh) {
+    .portal-workbench-root {
+      height: calc(100dvh * var(--desktop-ui-density-inverse));
+      min-height: calc(100dvh * var(--desktop-ui-density-inverse));
+    }
+  }
+}
+
 .portal-workbench-root {
   -webkit-text-size-adjust: 100%;
 }

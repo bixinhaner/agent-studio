@@ -520,6 +520,13 @@ export function AdminShell(props: { currentUser?: AuthUser; onOpenPortal?: () =>
   const visibleSections = useMemo(() => new Set(visibleSectionIds), [visibleSectionIds]);
 
   useEffect(() => {
+    document.body.classList.add("admin-console-mode");
+    return () => {
+      document.body.classList.remove("admin-console-mode");
+    };
+  }, []);
+
+  useEffect(() => {
     if (!visibleSections.has(section)) {
       setSection(visibleSectionIds[0] ?? "system-settings");
     }
