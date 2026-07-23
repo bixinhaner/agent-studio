@@ -6916,10 +6916,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }),
     [assistantDisplayName, branding.assistantAvatarUrl]
   );
-  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · ${t("topbar.context", { percent: contextUsageView.usedPercent })}`;
-  const topbarRuntimeSummaryText = isMobile
-    ? `${selectedModeLabel} · ${t("topbar.context", { percent: contextUsageView.usedPercent })}`
-    : runtimeSummaryText;
+  const runtimeSummaryText = `${appliedConfig.model} · ${selectedModeLabel}`;
+  const topbarRuntimeSummaryText = isMobile ? selectedModeLabel : runtimeSummaryText;
   const composerPlaceholder = canUpload
     ? isMobile
       ? t("thread.placeholderMobile")
