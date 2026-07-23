@@ -1,0 +1,5 @@
+验证记录：
+1. node temp/verify-adaptive-density.mjs：375、390、768、769、1024、1080、1081、1280、1366、1367、1440、2048、2559、2560、3840px 全部通过。
+2. npm run build：通过。
+3. npm test -- --run：17 个测试文件、76 项测试全部通过。
+4. git diff --check：通过。
