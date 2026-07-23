@@ -16,7 +16,12 @@ import {
   CODEX_RUNTIME_ERROR_CODE,
   CodexRuntimeUserError
 } from "./codex-runtime-user-error.js";
-import type { CodexRuntimeOptions, CodexStreamEvent } from "./codex-runtime.js";
+import type {
+  CodexRunStreamOptions,
+  CodexRuntimeOptions,
+  CodexStreamEvent,
+  CodexTurnSkill
+} from "./codex-runtime.js";
 
 type JsonRecord = Record<string, unknown>;
 type JsonRpcId = string | number;
@@ -498,10 +503,18 @@ function threadResumeParams(
   });
 }
 
-function turnStartParams(threadId: string, message: string, input: AppServerThreadOptions): Record<string, unknown> {
+function turnStartParams(
+  threadId: string,
+  message: string,
+  input: AppServerThreadOptions,
+  skills: CodexTurnSkill[]
+): Record<string, unknown> {
   return stripUndefined({
     threadId,
-    input: [{ type: "text", text: message, text_elements: [] }],
+    input: [
+      { type: "text", text: message, text_elements: [] },
+      ...skills.map((skill) => ({ type: "skill", name: skill.name, path: skill.path }))
+    ],
     cwd: input.workspace,
     model: input.model,
     effort: input.reasoningEffort,
@@ -1102,8 +1115,18 @@ class CodexAppServerManager {
     };
   }
 
-  async *runTurn(thread: CodexAppServerThread, message: string, options: { signal?: AbortSignal } = {}): AsyncGenerator<CodexStreamEvent> {
+  async *runTurn(
+    thread: CodexAppServerThread,
+    message: string,
+    options: CodexRunStreamOptions = {}
+  ): AsyncGenerator<CodexStreamEvent> {
     const scope = thread.scope;
+    const turnOptions: AppServerThreadOptions = {
+      model: options.model ?? thread.options.model,
+      reasoningEffort: options.reasoningEffort ?? thread.options.reasoningEffort,
+      workspace: options.workspace ?? thread.options.workspace,
+      codexRunConfig: options.codexRunConfig ?? thread.options.codexRunConfig
+    };
     const process = await this.getProcess(scope);
     const releaseThread = await this.acquireThreadLock(thread.id);
     const releaseTurn = await process.acquireTurnSlot();
@@ -1261,7 +1284,7 @@ class CodexAppServerManager {
         acceptEvent(event);
       });
       const result = await Promise.race([
-        process.request("turn/start", turnStartParams(thread.id, message, thread.options)),
+        process.request("turn/start", turnStartParams(thread.id, message, turnOptions, options.skills ?? [])),
         abortPromise
       ]);
       turnId = turnIdFromResult(result);
@@ -1371,7 +1394,7 @@ export class CodexAppServerRuntime {
   async *runStreamed(
     thread: CodexAppServerThread,
     message: string,
-    options: { signal?: AbortSignal } = {}
+    options: CodexRunStreamOptions = {}
   ): AsyncGenerator<CodexStreamEvent> {
     const retryDelays = transientOverloadRetryDelaysMs();
     let turnMessage = message;

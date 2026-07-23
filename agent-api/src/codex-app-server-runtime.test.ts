@@ -301,6 +301,23 @@ rl.on("line", (line) => {
         notify("turn/completed", { threadId, turn: { id: turnId } });
         return;
       }
+      if (inputText === "turn-overrides") {
+        const text = JSON.stringify({
+          model: params.model,
+          effort: params.effort,
+          sandboxPolicy: params.sandboxPolicy,
+          skill: Array.isArray(params.input) ? params.input[1] : null
+        });
+        notify("item/agentMessage/delta", { threadId, turnId, itemId: "override-msg", delta: text });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: "override-msg", type: "agentMessage", text },
+          completedAtMs: Date.now()
+        });
+        notify("turn/completed", { threadId, turn: { id: turnId } });
+        return;
+      }
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "Hel" });
       notify("item/agentMessage/delta", { threadId, turnId, itemId: "msg-1", delta: "lo" });
       notify("item/completed", {
@@ -417,6 +434,49 @@ describe("Codex app-server runtime", () => {
         return event.type === "raw_response_item.completed" && raw?.item?.type === "image_generation_call" && raw.item.name === "image_generation";
       })
     ).toBe(true);
+  });
+
+  it("sends skills and runtime settings as turn-level overrides on the existing thread", async () => {
+    const runtime = new CodexRuntime({
+      envOverrides: {
+        CODEX_HOME: path.join(testTempDir, "codex-home-turn-overrides")
+      }
+    });
+    const thread = await runtime.startThreadWithOptions({
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      workspace: testTempDir,
+      codexRunConfig: {
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never"
+      }
+    });
+
+    let answer = "";
+    for await (const event of runtime.runStreamed(thread, "turn-overrides", {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      codexRunConfig: {
+        sandboxMode: "read-only",
+        approvalPolicy: "never",
+        networkAccessEnabled: false
+      },
+      skills: [{ name: "surge-vpn-manage", path: "/skills/surge-vpn-manage" }]
+    })) {
+      if (event.delta) answer += event.delta;
+    }
+
+    expect(JSON.parse(answer)).toEqual({
+      model: "gpt-5.6-sol",
+      effort: "medium",
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+      skill: {
+        type: "skill",
+        name: "surge-vpn-manage",
+        path: "/skills/surge-vpn-manage"
+      }
+    });
+    expect(thread.id).toBe("thread-1");
   });
 
   it("lists every app-server model page with capabilities", async () => {

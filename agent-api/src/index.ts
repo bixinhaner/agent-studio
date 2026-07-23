@@ -281,6 +281,7 @@ import {
   buildSharedCodexHomeScope,
   buildUserAgentWorkspacePath,
 } from "./runtime-scope-resolver.js";
+import { mergeRunConfigPreservingSkillSelection } from "./portal/thread-turn-config.js";
 import { FilesystemKnowledgeSetStorage } from "./resources/storage/filesystem-knowledge-set-storage.js";
 import { PolicyService } from "./resources/policy-service.js";
 import { SystemSettingsRepository } from "./system-settings/repository.js";
@@ -2023,11 +2024,20 @@ async function persistSessionCodexThreadId(session: SessionRecord, codexThreadId
   if (!normalized) {
     return session;
   }
-  if (trimOrUndefined(session.codexThreadId) === normalized) {
-    return session;
-  }
   try {
-    return await sessions.update(session.sessionId, { codexThreadId: normalized });
+    if (session.threadId) {
+      const portalThread = await threads.get(session.threadId, session.organizationId);
+      const existingBinding = trimOrUndefined(portalThread?.codexThreadId);
+      if (existingBinding && existingBinding !== normalized) {
+        throw new Error("Portal thread is already bound to a different Codex thread");
+      }
+      if (!existingBinding) {
+        await threads.update(session.threadId, { codexThreadId: normalized });
+      }
+    }
+    return trimOrUndefined(session.codexThreadId) === normalized
+      ? session
+      : await sessions.update(session.sessionId, { codexThreadId: normalized });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.warn("failed to persist codex thread id", {
@@ -2082,6 +2092,7 @@ const streamSchema = z.object({
   parent_id: z.string().trim().min(1).nullable().optional(),
   user_message: z.unknown().optional(),
   display_message: z.string().optional(),
+  selected_skill_ids: z.array(z.string().trim().min(1)).max(20).optional(),
   message: z.string().min(1)
 });
 
@@ -2213,6 +2224,7 @@ const ensureThreadSessionSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: reasoningEffortSchema.optional(),
   knowledge_set_ids: z.array(z.string()).optional(),
+  selected_skill_ids: z.array(z.string().trim().min(1)).max(20).optional(),
   codex_run_config: z.record(z.unknown()).optional()
 });
 
@@ -2470,7 +2482,31 @@ function withRuntimeCapabilityMetadata(
 function runtimeCapabilityComparableConfig(
   codexRunConfig?: Record<string, unknown>
 ): Record<string, unknown> | undefined {
-  return withoutInternalRuntimeMetadata(codexRunConfig);
+  const next = withoutInternalRuntimeMetadata(codexRunConfig);
+  if (!next) return next;
+  const comparable = { ...next };
+  delete comparable.enabledSkills;
+  delete comparable[SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY];
+  delete comparable.sandboxMode;
+  delete comparable.approvalPolicy;
+  delete comparable.networkAccessEnabled;
+  delete comparable.webSearchMode;
+  delete comparable.webSearchEnabled;
+  delete comparable.additionalDirectories;
+  return comparable;
+}
+
+function mergeRunConfigPreservingThreadSkills(
+  persisted: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const persistedConfig = withoutInternalRuntimeMetadata(persisted);
+  const incomingConfig = withoutInternalRuntimeMetadata(incoming);
+  return mergeRunConfigPreservingSkillSelection(
+    persistedConfig,
+    incomingConfig,
+    SKILL_ACTIVATION_PROMPTS_RUN_CONFIG_KEY
+  );
 }
 
 function runtimeCapabilitiesAreCurrent(
@@ -5479,7 +5515,20 @@ async function resolveEnabledSkillsForMode(input: {
   codexRunConfig?: Record<string, unknown>;
 }): Promise<EnabledSkillSelection[]> {
   const requested = enabledSkillSelectionsFromRunConfig(input.codexRunConfig);
-  if (requested.length === 0) return [];
+  return resolveSelectedSkillIdsForMode({
+    currentUser: input.currentUser,
+    modeId: input.modeId,
+    skillIds: requested.map((skill) => skill.id)
+  });
+}
+
+async function resolveSelectedSkillIdsForMode(input: {
+  currentUser: CurrentActor;
+  modeId: string;
+  skillIds: string[];
+}): Promise<EnabledSkillSelection[]> {
+  const requestedIds = Array.from(new Set(input.skillIds.map((skillId) => skillId.trim()).filter(Boolean)));
+  if (requestedIds.length === 0) return [];
 
   const runtimeOptions = await portalRuntimeOptions.resolve({
     organizationId: input.currentUser.organizationId,
@@ -5489,12 +5538,12 @@ async function resolveEnabledSkillsForMode(input: {
   });
   const selectedMode = runtimeOptions.modes.find((mode) => mode.id === input.modeId);
   const availableById = new Map((selectedMode?.availableSkills ?? []).map((skill) => [skill.id, skill] as const));
-  const denied = requested.filter((skill) => !availableById.has(skill.id));
+  const denied = requestedIds.filter((skillId) => !availableById.has(skillId));
   if (denied.length > 0) {
-    throw new Error(`Selected skill is not available for this agent mode: ${denied.map((skill) => skill.name).join(", ")}`);
+    throw new Error(`Selected skill is not available for this agent mode: ${denied.join(", ")}`);
   }
-  return requested.map((skill) => {
-    const availableSkill = availableById.get(skill.id)!;
+  return requestedIds.map((skillId) => {
+    const availableSkill = availableById.get(skillId)!;
     return {
       id: availableSkill.id,
       name: availableSkill.name,
@@ -6030,6 +6079,7 @@ async function ensureThreadSession(
     model?: string;
     reasoning_effort?: ReasoningEffort;
     knowledge_set_ids?: string[];
+    selected_skill_ids?: string[];
     codex_run_config?: Record<string, unknown>;
     force_run_profile_controls?: boolean;
     resume_codex_thread_id?: string;
@@ -6067,7 +6117,10 @@ async function ensureThreadSession(
     time("ensure_thread_session.load_system_settings", () => codexProviders.getPublishedSystemSettings())
   ]);
 
-  const sourceCodexRunConfig = withoutInternalRuntimeMetadata(patch?.codex_run_config ?? thread.codexRunConfig);
+  const sourceCodexRunConfig = mergeRunConfigPreservingThreadSkills(
+    thread.codexRunConfig,
+    patch?.codex_run_config
+  );
   const modeHint = modeIdFromRunConfig(sourceCodexRunConfig);
   const modeSelection = await time("ensure_thread_session.resolve_mode_selection", () =>
     resolveModeSelection({
@@ -6101,13 +6154,21 @@ async function ensureThreadSession(
     });
   }
   await time("ensure_thread_session.prepare_workspace", () => fs.mkdir(workspacePath, { recursive: true }));
-  const enabledSkills = await time("ensure_thread_session.resolve_enabled_skills", () =>
-    resolveEnabledSkillsForMode({
-      currentUser,
-      modeId: modeSelection.modeId,
-      codexRunConfig: sourceCodexRunConfig
-    })
-  );
+  const enabledSkills = patch?.selected_skill_ids
+    ? await time("ensure_thread_session.resolve_turn_skills", () =>
+        resolveSelectedSkillIdsForMode({
+          currentUser,
+          modeId: modeSelection.modeId,
+          skillIds: patch.selected_skill_ids!
+        })
+      )
+    : await time("ensure_thread_session.resolve_enabled_skills", () =>
+        resolveEnabledSkillsForMode({
+          currentUser,
+          modeId: modeSelection.modeId,
+          codexRunConfig: sourceCodexRunConfig
+        })
+      );
   const normalizedSourceCodexRunConfig = withRunConfigEnabledSkillSelection(
     withRunConfigMode(sourceCodexRunConfig, modeSelection.modeId),
     enabledSkills
@@ -6134,13 +6195,26 @@ async function ensureThreadSession(
     applyWorkspaceAgentsMdForMode(modeSelection.modeId, workspacePath)
   );
   const desiredCodexRunConfig = ensureThreadUploadDirsInRunConfig(desiredBaseCodexRunConfig, threadId, workspacePath);
-  const materializedCodexHome = await time("ensure_thread_session.materialize_codex_home", () =>
-    materializeUserAgentCodexHomeForRunConfig({
-      currentUser,
-      modeId: modeSelection.modeId,
-      codexRunConfig: desiredCodexRunConfig
-    }),
-    { enabledSkillCount: enabledSkills.length }
+  const existingThreadCodexHome = codexHomeFromRunConfig(thread.codexRunConfig);
+  const materializedCodexHome = existingThreadCodexHome
+    ? {
+        codexHome: existingThreadCodexHome,
+        codexRunConfig: withRunConfigCodexHome(
+          withRunConfigEnabledSkillSelection(desiredCodexRunConfig, []),
+          existingThreadCodexHome
+        )
+      }
+    : await time("ensure_thread_session.materialize_codex_home", () =>
+        materializeUserAgentCodexHomeForRunConfig({
+          currentUser,
+          modeId: modeSelection.modeId,
+          codexRunConfig: withRunConfigEnabledSkillSelection(desiredCodexRunConfig, [])
+        }),
+        { enabledSkillCount: enabledSkills.length }
+      );
+  const sessionCodexRunConfig = withRunConfigCodexHome(
+    desiredCodexRunConfig,
+    materializedCodexHome.codexHome
   );
 
   const desired: SessionOptions = {
@@ -6150,7 +6224,7 @@ async function ensureThreadSession(
     reasoningEffort: defaults.reasoningEffort,
     workspace: workspacePath,
     providerSnapshot,
-    codexRunConfig: materializedCodexHome.codexRunConfig,
+    codexRunConfig: sessionCodexRunConfig,
     codexHome: materializedCodexHome.codexHome
   };
   const persistedThreadCodexRunConfig = withRunConfigCodexHome(
@@ -6199,6 +6273,11 @@ async function ensureThreadSession(
       }
     }
   }
+  if (!thread.codexThreadId && activeForComparison?.codexThreadId) {
+    await time("ensure_thread_session.backfill_codex_thread_binding", () =>
+      threads.update(threadId, { codexThreadId: activeForComparison!.codexThreadId })
+    );
+  }
   let runtimeCapabilitiesCurrent = true;
   if (activeForComparison) {
     const sessionForCapabilities = activeForComparison;
@@ -6244,6 +6323,31 @@ async function ensureThreadSession(
     return activeForComparison;
   }
 
+  const onlyTurnScopedSettingsChanged = Boolean(
+    activeForComparison &&
+    hasLiveRuntime &&
+    activeForComparison.workspace === desired.workspace &&
+    stableJson(runtimeCapabilityComparableConfig(activeForComparison.codexRunConfig)) ===
+      stableJson(runtimeCapabilityComparableConfig(desired.codexRunConfig)) &&
+    refreshedRuntimeCapabilitiesCurrent
+  );
+  if (onlyTurnScopedSettingsChanged && activeForComparison) {
+    const updated = await time("ensure_thread_session.update_turn_defaults", () =>
+      sessions.update(activeForComparison.sessionId, {
+        model: desired.model,
+        reasoningEffort: desired.reasoningEffort,
+        workspace: desired.workspace,
+        codexRunConfig: desired.codexRunConfig,
+        providerSnapshot: desired.providerSnapshot
+      })
+    );
+    timing?.mark("ensure_thread_session.reuse_codex_thread", {
+      sessionId: updated.sessionId,
+      codexThreadId: updated.codexThreadId
+    });
+    return updated;
+  }
+
   await time("ensure_thread_session.assert_chat_access", () =>
     assertChatAllowsNewSession({
       currentUser,
@@ -6257,8 +6361,23 @@ async function ensureThreadSession(
     liveRuntimeThreads.delete(active.sessionId);
   }
   const session = await time("ensure_thread_session.create_session", () =>
-    createSession(desired, threadId, timing, patch?.resume_codex_thread_id)
+    createSession(
+      desired,
+      threadId,
+      timing,
+      patch?.resume_codex_thread_id ?? thread.codexThreadId ?? activeForComparison?.codexThreadId
+    )
   );
+  const canonicalCodexThreadId = trimOrUndefined(thread.codexThreadId);
+  const sessionCodexThreadId = trimOrUndefined(session.codexThreadId);
+  if (canonicalCodexThreadId && sessionCodexThreadId && canonicalCodexThreadId !== sessionCodexThreadId) {
+    throw new Error("Portal thread is already bound to a different Codex thread");
+  }
+  if (!canonicalCodexThreadId && sessionCodexThreadId) {
+    await time("ensure_thread_session.persist_codex_thread_binding", () =>
+      threads.update(threadId, { codexThreadId: sessionCodexThreadId })
+    );
+  }
   timing?.updateContext({ sessionId: session.sessionId, model: session.model });
   return session;
 }
@@ -11313,13 +11432,32 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
     const artifactScanStartedAt = new Date(Date.now() - 2000);
     const runtimeFileChanges: RuntimeFileChange[] = [];
     let firstCodexEventSeen = false;
-    const runtimeMessage = withSkillActivationPrompts(input.message, currentSession.codexRunConfig);
+    const portalThread = await timing.time("chat_stream.load_bound_thread", () =>
+      getPortalOwnedThread(currentSession.threadId!, currentUser)
+    );
+    if (!portalThread) {
+      throw new Error("Thread does not exist");
+    }
+    const agentModeId = modeIdFromRunConfig(currentSession.codexRunConfig) ?? modeIdFromRunConfig(portalThread.codexRunConfig);
+    const selectedSkillIds =
+      input.selected_skill_ids ??
+      enabledSkillSelectionsFromRunConfig(portalThread.codexRunConfig).map((skill) => skill.id);
+    const turnSkills = agentModeId
+      ? await timing.time("chat_stream.resolve_turn_skills", () =>
+          resolveSelectedSkillIdsForMode({
+            currentUser,
+            modeId: agentModeId,
+            skillIds: selectedSkillIds
+          })
+        )
+      : [];
+    const turnRunConfig = withRunConfigEnabledSkillSelection(currentSession.codexRunConfig, turnSkills);
+    const runtimeMessage = withSkillActivationPrompts(input.message, turnRunConfig);
     timing.mark("chat_stream.runtime_prompt_prepared", {
       inputLength: input.message.length,
       runtimePromptLength: runtimeMessage.length,
       skillActivationPromptApplied: runtimeMessage !== input.message
     });
-    const agentModeId = modeIdFromRunConfig(currentSession.codexRunConfig);
     const enterpriseRunContext = await timing.time("chat_stream.resolve_enterprise_context", () =>
       enterpriseContext.resolveForRun({
         channel: "portal",
@@ -11339,6 +11477,15 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       prompt: runtimeMessage,
       enterpriseContext: enterpriseRunContext,
       signal: runAbort.signal,
+      turnOptions: {
+        model: currentSession.model,
+        reasoningEffort: currentSession.reasoningEffort,
+        workspace: currentSession.workspace,
+        codexRunConfig: stripInternalRunConfigMetadata(currentSession.codexRunConfig),
+        skills: turnSkills.flatMap((skill) =>
+          skill.sourcePath ? [{ name: skill.name, path: skill.sourcePath }] : []
+        )
+      },
       memory: {
         channel: "portal",
         prompt: input.message,

@@ -9,17 +9,6 @@ export type RuntimeScopeActor = {
 
 export type CodexCapabilityFingerprint = {
   mode: string;
-  enabledSkills: Array<{
-    id: string;
-    name: string;
-    managedSkillId?: string;
-    sourcePath?: string;
-  }>;
-  sandboxMode?: unknown;
-  approvalPolicy?: unknown;
-  networkAccessEnabled?: unknown;
-  webSearchMode?: unknown;
-  webSearchEnabled?: unknown;
   mcpServers?: unknown;
   mcp_servers?: unknown;
 };
@@ -95,45 +84,6 @@ function organizationKeyOf(actor: RuntimeScopeActor): string {
   return trimOrUndefined(actor.organizationSlug) ?? actor.organizationId;
 }
 
-function enabledSkillsFingerprint(codexRunConfig?: Record<string, unknown>): CodexCapabilityFingerprint["enabledSkills"] {
-  const raw = codexRunConfig?.enabledSkills;
-  if (!Array.isArray(raw)) return [];
-  const items: CodexCapabilityFingerprint["enabledSkills"] = [];
-  for (const entry of raw) {
-    if (typeof entry === "string") {
-      const name = trimOrUndefined(entry);
-      if (!name) continue;
-      items.push({ id: name, name });
-      continue;
-    }
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const payload = entry as Record<string, unknown>;
-    const name =
-      trimOrUndefined(typeof payload.name === "string" ? payload.name : undefined) ??
-      trimOrUndefined(typeof payload.skillName === "string" ? payload.skillName : undefined);
-    const managedSkillId = trimOrUndefined(
-      typeof payload.managedSkillId === "string" ? payload.managedSkillId : undefined
-    );
-    const id =
-      trimOrUndefined(typeof payload.id === "string" ? payload.id : undefined) ??
-      (managedSkillId ? `managed:${managedSkillId}` : name);
-    if (!id || !name) continue;
-    items.push({
-      id,
-      name,
-      ...(managedSkillId ? { managedSkillId } : {}),
-      ...(typeof payload.sourcePath === "string" && trimOrUndefined(payload.sourcePath)
-        ? { sourcePath: trimOrUndefined(payload.sourcePath) }
-        : {})
-    });
-  }
-  return items.sort((left, right) => {
-    const byId = left.id.localeCompare(right.id);
-    if (byId !== 0) return byId;
-    return left.name.localeCompare(right.name);
-  });
-}
-
 export function buildUserAgentWorkspacePath(input: {
   rootPath: string;
   actor: RuntimeScopeActor;
@@ -194,12 +144,6 @@ export function buildCodexCapabilityFingerprint(input: {
   const config = input.codexRunConfig ?? {};
   return {
     mode: input.modeId,
-    enabledSkills: enabledSkillsFingerprint(config),
-    ...(config.sandboxMode !== undefined ? { sandboxMode: config.sandboxMode } : {}),
-    ...(config.approvalPolicy !== undefined ? { approvalPolicy: config.approvalPolicy } : {}),
-    ...(config.networkAccessEnabled !== undefined ? { networkAccessEnabled: config.networkAccessEnabled } : {}),
-    ...(config.webSearchMode !== undefined ? { webSearchMode: config.webSearchMode } : {}),
-    ...(config.webSearchEnabled !== undefined ? { webSearchEnabled: config.webSearchEnabled } : {}),
     ...(config.mcpServers !== undefined ? { mcpServers: config.mcpServers } : {}),
     ...(config.mcp_servers !== undefined ? { mcp_servers: config.mcp_servers } : {})
   };

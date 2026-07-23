@@ -37,6 +37,7 @@ export type ThreadRecord = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  codexThreadId?: string;
   sessionId?: string;
   createdAt: string;
   updatedAt: string;
@@ -57,6 +58,7 @@ type CreateThreadPayload = {
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig?: Record<string, unknown>;
+  codexThreadId?: string;
   status?: ThreadStatus;
   headId?: string | null;
   createdAt?: string;
@@ -71,6 +73,7 @@ type UpdateThreadPayload = Partial<{
   reasoningEffort: ReasoningEffort;
   workspace: string;
   codexRunConfig: Record<string, unknown> | undefined;
+  codexThreadId: string | undefined;
   sessionId: string | undefined;
   headId: string | null;
 }>;
@@ -88,6 +91,7 @@ type ThreadRow = {
   reasoningEffort: string | null;
   workspace: string | null;
   codexRunConfig: unknown;
+  codexThreadId?: string | null;
   headId: string | null;
   feedback: unknown;
   createdAt: Date | string;
@@ -333,6 +337,7 @@ export class ThreadRepository {
         reasoningEffort: payload.reasoningEffort,
         workspace: payload.workspace,
         codexRunConfig: payload.codexRunConfig ?? null,
+        codexThreadId: trimOrUndefined(payload.codexThreadId) ?? null,
         headId: payload.headId ?? null,
         feedback: payload.feedback ?? [],
         createdAt: toDate(payload.createdAt),
@@ -364,6 +369,7 @@ export class ThreadRepository {
           reasoningEffort: record.reasoningEffort,
           workspace: record.workspace,
           codexRunConfig: record.codexRunConfig ?? null,
+          codexThreadId: trimOrUndefined(record.codexThreadId) ?? null,
           headId: record.headId ?? null,
           feedback: record.feedback,
           createdAt: toDate(record.createdAt),
@@ -433,6 +439,7 @@ export class ThreadRepository {
     if (patch.reasoningEffort !== undefined) data.reasoningEffort = patch.reasoningEffort;
     if (patch.workspace !== undefined) data.workspace = patch.workspace;
     if (patch.codexRunConfig !== undefined) data.codexRunConfig = patch.codexRunConfig ?? null;
+    if (patch.codexThreadId !== undefined) data.codexThreadId = trimOrUndefined(patch.codexThreadId) ?? null;
     if (patch.headId !== undefined) data.headId = patch.headId;
     data.updatedAt = new Date();
 
@@ -662,6 +669,7 @@ export class ThreadRepository {
       reasoningEffort: (row.reasoningEffort ?? "high") as ReasoningEffort,
       workspace: row.workspace ?? "",
       codexRunConfig: asRecord(row.codexRunConfig) ?? undefined,
+      codexThreadId: trimOrUndefined(row.codexThreadId ?? undefined),
       sessionId: activeSession?.externalId ?? undefined,
       createdAt: toIsoString(row.createdAt),
       updatedAt: toIsoString(row.updatedAt),

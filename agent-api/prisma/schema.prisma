@@ -709,6 +709,7 @@ model Thread {
   reasoningEffort String?           @map("reasoning_effort")
   workspace       String?
   codexRunConfig  Json?             @map("codex_run_config")
+  codexThreadId   String?           @unique @map("codex_thread_id")
   headId          String?           @map("head_id")
   feedback        Json?             @default("[]")
   externalId      String?           @unique @map("external_id")

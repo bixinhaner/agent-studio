@@ -10,8 +10,18 @@ export type CodexStreamEvent = {
   raw?: unknown;
 };
 
+export type CodexTurnSkill = {
+  name: string;
+  path: string;
+};
+
 export type CodexRunStreamOptions = {
   signal?: AbortSignal;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+  workspace?: string;
+  codexRunConfig?: Record<string, unknown>;
+  skills?: CodexTurnSkill[];
 };
 
 export type CodexRuntimeOptions = {

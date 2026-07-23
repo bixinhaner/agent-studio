@@ -6,6 +6,7 @@ import {
   streamRuntimeCompletionWithBestEffortUsage
 } from "../live-runtime-session.js";
 import type { CodexMemoryRunInput, CodexMemoryRunRecorder } from "../codex-memory/engine.js";
+import type { CodexRunStreamOptions } from "../codex-runtime.js";
 import { applyEnterpriseContextToPrompt, type EnterpriseContextResolution } from "../enterprise-context-service.js";
 
 export type CodexStreamCompletionInput = Parameters<typeof streamRuntimeCompletionWithBestEffortUsage>[0];
@@ -91,7 +92,7 @@ export type CodexRunProjectionOptions = {
 };
 
 type RuntimeStreamSource<TThread> = {
-  runStreamed(thread: TThread, message: string, options?: { signal?: AbortSignal }): AsyncIterable<RuntimeStreamEvent>;
+  runStreamed(thread: TThread, message: string, options?: CodexRunStreamOptions): AsyncIterable<RuntimeStreamEvent>;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -771,11 +772,13 @@ export class CodexExecutionService {
     enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
     signal?: AbortSignal;
+    turnOptions?: Omit<CodexRunStreamOptions, "signal">;
   }): Promise<void> {
     const finishRuntimeTurn = this.startRuntimeTurn("stream", input.memory);
     try {
       await streamRuntimeCompletionWithBestEffortUsage({
         events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext), {
+          ...input.turnOptions,
           signal: input.signal
         }),
         signal: input.signal,

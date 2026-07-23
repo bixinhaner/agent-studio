@@ -87,10 +87,10 @@ describe("runtime scope resolver", () => {
       modeId: "support",
       codexRunConfig: {
         mode: "support",
-        sandboxMode: "workspace-write",
-        approvalPolicy: "never",
-        networkAccessEnabled: true,
-        enabledSkills: [{ id: "crm", name: "crest-crm", sourcePath: "/skills/crm" }],
+        sandboxMode: "read-only",
+        approvalPolicy: "on-request",
+        networkAccessEnabled: false,
+        enabledSkills: [{ id: "docs", name: "docs", sourcePath: "/skills/docs" }],
         additionalDirectories: ["/tmp/thread-a/uploads"],
         _agentStudioRuntimeCapabilities: { reason: "runtime only" }
       }
@@ -113,7 +113,7 @@ describe("runtime scope resolver", () => {
     expect(changedThreadDirectory.scopeSegments).toEqual(base.scopeSegments);
   });
 
-  it("changes CODEX_HOME scope when agent capabilities change", () => {
+  it("keeps CODEX_HOME stable when turn-level skills change", () => {
     const crmOnly = buildSharedCodexHomeScope({
       actor,
       modeId: "support",
@@ -132,8 +132,8 @@ describe("runtime scope resolver", () => {
       }
     });
 
-    expect(crmAndDocs.capabilityHash).not.toBe(crmOnly.capabilityHash);
-    expect(crmAndDocs.scopeSegments).not.toEqual(crmOnly.scopeSegments);
+    expect(crmAndDocs.capabilityHash).toBe(crmOnly.capabilityHash);
+    expect(crmAndDocs.scopeSegments).toEqual(crmOnly.scopeSegments);
   });
 
   it("builds shared integration CODEX_HOME scopes without ticket-specific paths", () => {

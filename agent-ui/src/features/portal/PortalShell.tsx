@@ -2320,19 +2320,25 @@ const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label }) => {
   );
 };
 
-function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: RuntimeSkillOption[]): Record<string, unknown> {
+function buildCodexRunConfig(
+  cfg: AppliedConfig,
+  mode: string,
+  enabledSkills?: RuntimeSkillOption[]
+): Record<string, unknown> {
   const runConfig: Record<string, unknown> = {
     sandboxMode: cfg.sandboxMode,
     approvalPolicy: cfg.approvalPolicy,
     networkAccessEnabled: cfg.networkAccessEnabled,
     webSearchMode: cfg.webSearchMode,
-    mode,
-    enabledSkills: enabledSkills.map((skill) => ({
+    mode
+  };
+  if (enabledSkills) {
+    runConfig.enabledSkills = enabledSkills.map((skill) => ({
       id: skill.id,
       name: skill.name,
       ...(skill.managedSkillId ? { managedSkillId: skill.managedSkillId } : {})
-    }))
-  };
+    }));
+  }
 
   const additionalDirectories = parseDirectories(cfg.additionalDirectoriesRaw);
   if (additionalDirectories && additionalDirectories.length > 0) {
@@ -6118,6 +6124,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
   const runningStageWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedKnowledgeSetIdsRef = useRef(selectedKnowledgeSetIds);
   const enabledSkillIdsRef = useRef(enabledSkillIds);
+  const hydratedSkillThreadIdRef = useRef("");
+  const skillHydrationRef = useRef<{ threadId: string; promise: Promise<void> } | null>(null);
   const knowledgeSetSelectionInitializedRef = useRef(false);
   const completedRunThreadIdsRef = useRef<Set<string>>(new Set());
   const activeThreadIdentityRef = useRef<ThreadIdentity>({});
@@ -6441,23 +6449,34 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   useEffect(() => {
     if (isExternalPortalUser) {
+      enabledSkillIdsRef.current = [];
+      hydratedSkillThreadIdRef.current = "";
       setEnabledSkillIds([]);
       return;
     }
     const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
+    if (!selectedMode) return;
     const available = new Set((selectedMode?.availableSkills ?? []).map((skill) => skill.id));
-    setEnabledSkillIds((current) => current.filter((skillId) => available.has(skillId)));
+    setEnabledSkillIds((current) => {
+      const next = current.filter((skillId) => available.has(skillId));
+      enabledSkillIdsRef.current = next;
+      return next;
+    });
   }, [isExternalPortalUser, runtimeMode, runtimeOptions]);
 
   useEffect(() => {
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
     if (!threadId || isExternalPortalUser) {
+      enabledSkillIdsRef.current = [];
+      hydratedSkillThreadIdRef.current = "";
+      skillHydrationRef.current = null;
       setEnabledSkillIds([]);
       return;
     }
 
     let active = true;
-    void api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`)
+    hydratedSkillThreadIdRef.current = "";
+    const hydrationPromise = api<ThreadOneOut>(`/api/threads/${encodeURIComponent(threadId)}`)
       .then((response) => {
         if (!active) return;
         const selectedMode = findRuntimeMode(runtimeOptions, runtimeMode);
@@ -6476,14 +6495,21 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 })
                 .filter(Boolean)
             : [];
-        setEnabledSkillIds(Array.from(new Set(ids)));
+        const nextIds = Array.from(new Set(ids));
+        enabledSkillIdsRef.current = nextIds;
+        hydratedSkillThreadIdRef.current = threadId;
+        setEnabledSkillIds(nextIds);
       })
       .catch(() => {
         // Keep the local selection if the detail refresh fails; the next run is still validated server-side.
       });
+    skillHydrationRef.current = { threadId, promise: hydrationPromise };
 
     return () => {
       active = false;
+      if (skillHydrationRef.current?.threadId === threadId) {
+        skillHydrationRef.current = null;
+      }
     };
   }, [activeThreadIdentity.remoteId, isExternalPortalUser, runtimeMode, runtimeOptions]);
 
@@ -6867,6 +6893,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     const normalizedIds = Array.from(new Set(skillIds.filter((skillId) => availableIds.has(skillId))));
     const previousIds = enabledSkillIdsRef.current;
     enabledSkillIdsRef.current = normalizedIds;
+    hydratedSkillThreadIdRef.current = String(activeThreadIdentity.remoteId || "").trim();
     setEnabledSkillIds(normalizedIds);
 
     const threadId = String(activeThreadIdentity.remoteId || "").trim();
@@ -7309,9 +7336,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
         const cfg = normalizeRuntimeConfig(appliedConfigRef.current, runtimeOptionsRef.current);
         const knowledgeSetIds = normalizeKnowledgeSetIds(selectedKnowledgeSetIdsRef.current);
-        const selectedMode = findRuntimeMode(runtimeOptionsRef.current, runtimeModeRef.current);
-        const selectedSkillIds = new Set(enabledSkillIdsRef.current);
-        const skills = (selectedMode?.availableSkills ?? []).filter((skill) => selectedSkillIds.has(skill.id));
+        const pendingSkillHydration = skillHydrationRef.current;
+        if (pendingSkillHydration?.threadId === threadId) {
+          await pendingSkillHydration.promise;
+        }
+        const turnSelectedSkillIds =
+          hydratedSkillThreadIdRef.current === threadId
+            ? [...enabledSkillIdsRef.current]
+            : undefined;
         let ensured: ThreadSessionOut;
         try {
           ensured = await api<ThreadSessionOut>(`/api/threads/${encodeURIComponent(threadId)}/session`, {
@@ -7320,7 +7352,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               model: cfg.model,
               reasoning_effort: cfg.reasoningEffort,
               knowledge_set_ids: knowledgeSetIds,
-              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current, skills)
+              selected_skill_ids: turnSelectedSkillIds,
+              codex_run_config: buildCodexRunConfig(cfg, runtimeModeRef.current)
             }
           });
         } catch (error) {
@@ -7821,6 +7854,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               parent_id: latestUserMessage?.parentId ?? null,
               user_message: latestUserMessageForPersistence,
               display_message: prompt,
+              selected_skill_ids: turnSelectedSkillIds,
               message: runtimePrompt
             }),
             signal: options.abortSignal
