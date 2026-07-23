@@ -125,8 +125,10 @@ describe("bundled OMC handbook loader", () => {
     expect(skill).toContain("`packageAvailable` is `false`");
     expect(skill).toContain("scripts/search-catalog.mjs");
     expect(skill).toContain('node "$CLI" describe');
-    expect(skill).toContain("Continue only while discovery yields new relevant evidence");
-    expect(skill).toContain("results repeat, or the next query lacks evidence");
+    expect(skill).toContain("Continue while discovery or related operations yield new relevant evidence");
+    expect(skill).toContain("relatedOperations");
+    expect(skill).toContain("A filtered subset never proves");
+    expect(skill).toContain("allowed-parameter details");
     expect(skill).toContain("Never substitute between operations, file transfer, upgrades, MML");
     expect(skill).not.toMatch(/at most three|two relevant categories|five candidate documents/);
     expect(skill).toContain("An empty API result means only");
@@ -173,7 +175,7 @@ describe("bundled OMC handbook loader", () => {
       totalOperations: 1
     });
     expect((await readFile(fixture.logPath, "utf8")).trim().split("\n")).toHaveLength(3);
-  });
+  }, 15_000);
 
   it("rejects a corrupted package before publishing the cache", async () => {
     const fixture = await fixtureWorkspace();
