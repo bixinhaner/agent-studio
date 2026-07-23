@@ -5,6 +5,15 @@
   --desktop-ui-density-inverse: 1.25;
 }
 
+/* Adaptive desktop density uses the effective CSS viewport, after OS/browser scaling. */
+@media (min-width: 769px) and (max-width: 1366px) and (pointer: fine),
+  (min-width: 2560px) and (pointer: fine) {
+  :root {
+    --desktop-ui-density: 0.9;
+    --desktop-ui-density-inverse: 1.111111;
+  }
+}
+
 html,
 body,
 #root {

@@ -3940,7 +3940,7 @@
   }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .admin-console-root {
     height: 100dvh;
     min-height: 100dvh;
