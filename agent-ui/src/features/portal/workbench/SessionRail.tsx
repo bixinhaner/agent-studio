@@ -1,6 +1,7 @@
 import type { PropsWithChildren, ReactNode } from "react";
 import { Button, Input, Tooltip } from "antd";
 import { Plus, Search, MessageSquare } from "lucide-react";
+import { usePortalI18n } from "../i18n";
 
 export function SessionRail(
   props: PropsWithChildren<{
@@ -14,20 +15,21 @@ export function SessionRail(
     onToggleCollapsed(): void;
   }>
 ) {
+  const { t } = usePortalI18n();
   return (
     <aside className={props.collapsed ? "session-rail collapsed" : "session-rail"} style={{ width: '100%', borderRight: 'none' }}>
       <div className="session-rail-head">
         {!props.collapsed ? (
           <div className="session-rail-controls">
             {props.newThreadSlot ?? (
-              <Button className="session-rail-new-btn" aria-label="New session" type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
-                New session
+              <Button className="session-rail-new-btn" aria-label={t("sessions.new")} type="primary" icon={<Plus size={16} />} onClick={props.onCreateThread} style={{ width: '100%', borderRadius: 6 }}>
+                {t("sessions.new")}
               </Button>
             )}
             <Input
               className="session-rail-search-input"
-              aria-label="Search sessions"
-              placeholder="Search sessions..."
+              aria-label={t("sessions.search")}
+              placeholder={t("sessions.searchPlaceholder")}
               prefix={<Search size={14} style={{ color: '#9ca3af' }} />}
               value={props.searchValue}
               onChange={(event) => props.onSearchChange(event.target.value)}
@@ -35,7 +37,7 @@ export function SessionRail(
             />
           </div>
         ) : (
-          <Tooltip title="New session" placement="right">
+          <Tooltip title={t("sessions.new")} placement="right">
             <Button
               className="session-rail-new-btn"
               type="primary"

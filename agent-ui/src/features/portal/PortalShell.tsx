@@ -120,6 +120,7 @@ import {
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalBillingPanel } from "./PortalBillingPanel";
 import { fetchPortalSubscriptionStatus, type PortalSubscriptionStatus } from "./api";
+import { usePortalI18n, type PortalLocale } from "./i18n";
 import {
   createPortalSkillDraftNewVersion,
   fetchPortalManagedSkills,
@@ -795,6 +796,7 @@ function AssistantMarkdownImage(props: {
   title?: string;
   [key: string]: unknown;
 }) {
+  const { locale, t } = usePortalI18n();
   const { src, alt, className, title, ...rest } = props;
   const activeThreadId = useContext(ActiveThreadIdContext);
   const messagePart = useMessagePartText();
@@ -818,7 +820,7 @@ function AssistantMarkdownImage(props: {
 
   const caption = typeof alt === "string" ? alt.trim() : "";
   const imageTitle = typeof title === "string" ? title.trim() : "";
-  const ariaLabel = caption || imageTitle || "Open image detail";
+  const ariaLabel = caption || imageTitle || t("thread.openImage");
 
   useEffect(() => {
     if (!lightboxOpen) return;
@@ -834,7 +836,7 @@ function AssistantMarkdownImage(props: {
   if (!resolvedSrc) {
     return (
       <span className="assistant-inline-image-unresolved" title={typeof src === "string" ? src : undefined}>
-        Image reference could not be resolved
+        {t("thread.imageUnresolved")}
       </span>
     );
   }
@@ -877,7 +879,7 @@ function AssistantMarkdownImage(props: {
               <button
                 type="button"
                 className="assistant-image-lightbox-close"
-                aria-label="Close image detail"
+                aria-label={t("thread.closeImage")}
                 onClick={() => setLightboxOpen(false)}
               >
                 ×
@@ -902,6 +904,7 @@ function AssistantMarkdownLink(props: {
   children?: ReactNode;
   [key: string]: unknown;
 }) {
+  const { t } = usePortalI18n();
   const { href, className, children, ...rest } = props;
   const requestPreview = useContext(PreviewRequestContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
@@ -927,8 +930,8 @@ function AssistantMarkdownLink(props: {
       {...rest}
       target={opensInNewTab ? "_blank" : undefined}
       rel={opensInNewTab ? "noopener noreferrer" : undefined}
-      title={opensInNewTab ? "Opens in a new tab" : undefined}
-      aria-label={opensInNewTab && linkLabel ? `${linkLabel} (opens in a new tab)` : undefined}
+      title={opensInNewTab ? t("thread.opensNewTab") : undefined}
+      aria-label={opensInNewTab && linkLabel ? t("thread.linkNewTab", { label: linkLabel }) : undefined}
       onClick={
         previewPath
           ? (event) => {
@@ -960,6 +963,7 @@ const AssistantMarkdownText = makeMarkdownText({
 
 const DraftOnlyWelcomeSuggestions: FC = () => {
   const { behavior } = useBranding();
+  const { locale, t } = usePortalI18n();
 
   if (behavior.portalWelcomeSuggestions.length === 0) {
     return null;
@@ -973,18 +977,29 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
       {behavior.portalWelcomeSuggestions.map((suggestion, index) => {
         const Icon = icons[index % icons.length];
         const iconClass = classes[index % classes.length];
+        const localizedSuggestion = locale === "zh-CN"
+          ? suggestion.label === "Check product & version fit"
+            ? { label: t("welcome.fit"), prompt: t("welcome.fitPrompt") }
+            : suggestion.label === "Review deployment plan"
+              ? { label: t("welcome.deployment"), prompt: t("welcome.deploymentPrompt") }
+              : suggestion.label === "Analyze alarm or KPI issue"
+                ? { label: t("welcome.alarm"), prompt: t("welcome.alarmPrompt") }
+                : suggestion.label === "Recommend solution design"
+                  ? { label: t("welcome.solution"), prompt: t("welcome.solutionPrompt") }
+                  : suggestion
+          : suggestion;
         return (
           <ThreadPrimitive.Suggestion
-            key={`${suggestion.label}-${index}`}
+            key={`${localizedSuggestion.label}-${index}`}
             className="bailey-suggestion-card"
-            prompt={suggestion.prompt}
+            prompt={localizedSuggestion.prompt}
             send={false}
             clearComposer
           >
             <div className={`bailey-suggestion-icon-wrap ${iconClass}`}>
               <Icon size={20} strokeWidth={2.5} />
             </div>
-            <span className="bailey-suggestion-text">{suggestion.label}</span>
+            <span className="bailey-suggestion-text">{localizedSuggestion.label}</span>
           </ThreadPrimitive.Suggestion>
         );
       })}
@@ -993,7 +1008,8 @@ const DraftOnlyWelcomeSuggestions: FC = () => {
 };
 
 const DraftOnlyThreadWelcome: FC = () => {
-  const { branding, behavior } = useBranding();
+  const { branding } = useBranding();
+  const { locale, t } = usePortalI18n();
   const portalWelcomeIllustrationUrl = branding.portalWelcomeIllustrationUrl.trim();
   const assistantDisplayName = branding.assistantName.trim() || "Bailey";
 
@@ -1011,10 +1027,10 @@ const DraftOnlyThreadWelcome: FC = () => {
           </div>
         ) : null}
         <h1 className="bailey-welcome-greeting">
-          Hello, I'm <span>{assistantDisplayName}</span>.
+          {locale === "zh-CN" ? <>你好，我是 <span>{assistantDisplayName}</span>。</> : <>Hello, I&apos;m <span>{assistantDisplayName}</span>.</>}
         </h1>
         <p className="bailey-welcome-subtitle">
-          Ask about products, versions, deployment, alarms, or troubleshooting.
+          {t("welcome.subtitle")}
         </p>
         <DraftOnlyWelcomeSuggestions />
       </div>
@@ -2067,6 +2083,7 @@ const SelectedSkillContextBar: FC = () => {
 
 const UploadAwareComposer: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
@@ -2083,12 +2100,12 @@ const UploadAwareComposer: FC = () => {
     accessBlock.blocked
       ? accessBlock.notice
       : uploadBlockReason === "uploading"
-      ? "Wait for attachments to finish uploading"
+      ? t("thread.waitUploads")
       : uploadBlockReason === "failed"
-        ? "Retry or remove failed uploads before sending"
+        ? t("thread.fixUploads")
         : sendBlockedByLargeText
           ? LARGE_DIRECT_MESSAGE_NOTICE
-        : "Send message";
+        : t("thread.send");
   const [composerSending, setComposerSending] = useState(false);
   const [largeTextNotice, setLargeTextNotice] = useState("");
   const composerSendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2161,8 +2178,8 @@ const UploadAwareComposer: FC = () => {
         ) : sendBlockedByUpload ? (
           <p className="portal-upload-composer-hint" role="status">
             {uploadBlockReason === "uploading"
-              ? "Uploading attachments. You can keep typing; sending unlocks when ready."
-              : "An attachment failed to upload. Retry or remove it before sending."}
+              ? t("thread.uploadingHelp")
+              : t("thread.uploadFailedHelp")}
           </p>
         ) : sendBlockedByLargeText ? (
           <p className="portal-upload-composer-hint" role="alert">
@@ -2211,6 +2228,7 @@ const UploadAwareComposer: FC = () => {
 
 const MobileAwareComposer: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const requestPortalRunCancel = useContext(PortalRunCancelContext);
   const accessBlock = useSubscriptionAccessBlock();
@@ -2220,7 +2238,7 @@ const MobileAwareComposer: FC = () => {
   const composerEditing = useAuiState((state) => state.composer.isEditing);
   const sendBlockedByLargeText = composerText.length > DIRECT_MESSAGE_TEXT_MAX_CHARS;
   const sendDisabled = threadRunning || !composerEditing || composerEmpty || sendBlockedByLargeText || accessBlock.blocked;
-  const sendTitle = accessBlock.blocked ? accessBlock.notice : sendBlockedByLargeText ? LARGE_DIRECT_MESSAGE_NOTICE : "Send message";
+  const sendTitle = accessBlock.blocked ? accessBlock.notice : sendBlockedByLargeText ? LARGE_DIRECT_MESSAGE_NOTICE : t("thread.send");
   const composerWrapRef = useComposerMultilineRef(composerText);
 
   const preventBlockedSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
@@ -2286,14 +2304,18 @@ const MobileAwareComposer: FC = () => {
   );
 };
 
-const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label = "New session" }) => (
-  <ThreadListPrimitive.New asChild>
-    <button type="button" className="session-rail-new-btn" aria-label={label}>
-      <PlusIcon size={16} />
-      <span>{label}</span>
-    </button>
-  </ThreadListPrimitive.New>
-);
+const SessionRailNewThreadButton: FC<{ label?: string }> = ({ label }) => {
+  const { t } = usePortalI18n();
+  const resolvedLabel = label ?? t("sessions.new");
+  return (
+    <ThreadListPrimitive.New asChild>
+      <button type="button" className="session-rail-new-btn" aria-label={resolvedLabel}>
+        <PlusIcon size={16} />
+        <span>{resolvedLabel}</span>
+      </button>
+    </ThreadListPrimitive.New>
+  );
+};
 
 function buildCodexRunConfig(cfg: AppliedConfig, mode: string, enabledSkills: RuntimeSkillOption[]): Record<string, unknown> {
   const runConfig: Record<string, unknown> = {
@@ -2344,7 +2366,7 @@ function normalizeProcessTime(value: string | undefined): string {
   }).format(at);
 }
 
-function formatThreadGroupLabel(value: string | undefined, referenceDate = new Date()): string {
+function formatThreadGroupLabel(value: string | undefined, locale: PortalLocale, referenceDate = new Date()): string {
   if (!value) return "";
   const at = new Date(value);
   if (Number.isNaN(at.getTime())) return "";
@@ -2355,10 +2377,10 @@ function formatThreadGroupLabel(value: string | undefined, referenceDate = new D
   targetDay.setHours(0, 0, 0, 0);
   let diffDays = Math.floor((currentDay.getTime() - targetDay.getTime()) / dayMs);
   if (diffDays < 0) diffDays = 0;
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays <= 7) return "Last 7 days";
-  if (diffDays <= 30) return "Last 30 days";
+  if (diffDays === 0) return locale === "zh-CN" ? "今天" : "Today";
+  if (diffDays === 1) return locale === "zh-CN" ? "昨天" : "Yesterday";
+  if (diffDays <= 7) return locale === "zh-CN" ? "最近 7 天" : "Last 7 days";
+  if (diffDays <= 30) return locale === "zh-CN" ? "最近 30 天" : "Last 30 days";
   const year = targetDay.getFullYear();
   const month = String(targetDay.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
@@ -3321,24 +3343,26 @@ function messageTextForSuggestions(message: ThreadMessage): string {
 }
 
 const ReasoningPart: FC<any> = ({ text }) => {
+  const { t } = usePortalI18n();
   const value = typeof text === "string" ? text.trim() : "";
   if (!value) return null;
   return (
     <details className="process-block process-reasoning" open={false}>
-      <summary>Reasoning summary</summary>
+      <summary>{t("thread.reasoningSummary")}</summary>
       <pre>{value}</pre>
     </details>
   );
 };
 
 const SourcePart: FC<any> = ({ url, title }) => {
+  const { t } = usePortalI18n();
   const link = typeof url === "string" ? url.trim() : "";
   if (!link) return null;
   const label = typeof title === "string" && title.trim() ? title.trim() : link;
   return (
     <p className="process-source">
       <a href={link} target="_blank" rel="noreferrer">
-        Source: {label}
+        {t("thread.source", { label })}
       </a>
     </p>
   );
@@ -3354,16 +3378,19 @@ function useSubscriptionAccessBlock() {
   };
 }
 
-const AssistantErrorNoticeCard: FC<{ notice: string; rawDetail?: string }> = ({ notice, rawDetail }) => (
-  <div className="assistant-error-card" role="alert" aria-live="polite">
-    <div className="assistant-error-card-head">
-      <AlertCircleIcon size={16} aria-hidden="true" />
-      <span>Request could not be completed</span>
+const AssistantErrorNoticeCard: FC<{ notice: string; rawDetail?: string }> = ({ notice, rawDetail }) => {
+  const { t } = usePortalI18n();
+  return (
+    <div className="assistant-error-card" role="alert" aria-live="polite">
+      <div className="assistant-error-card-head">
+        <AlertCircleIcon size={16} aria-hidden="true" />
+        <span>{t("thread.requestFailed")}</span>
+      </div>
+      <p>{notice || GENERIC_ASSISTANT_ERROR_NOTICE}</p>
+      {rawDetail && rawDetail !== notice ? <span className="assistant-error-card-detail">{shorten(rawDetail, 260)}</span> : null}
     </div>
-    <p>{notice || GENERIC_ASSISTANT_ERROR_NOTICE}</p>
-    {rawDetail && rawDetail !== notice ? <span className="assistant-error-card-detail">{shorten(rawDetail, 260)}</span> : null}
-  </div>
-);
+  );
+};
 
 function daysUntilSubscriptionExpiry(status: PortalSubscriptionStatus | null): number | null {
   if (!status?.expiresAt) return null;
@@ -3384,43 +3411,41 @@ function portalSubscriptionReminderKey(status: PortalSubscriptionStatus | null):
   return [status?.reasonCode ?? "expiring", status?.expiresAt ?? status?.title ?? "unknown"].join(":");
 }
 
-function formatPortalLocalTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${date.toLocaleString()} local time`;
-}
-
-const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus; onOpenBilling?: () => void }> = ({ status, onOpenBilling }) => (
-  <div className="thread-access-banner" role="alert" aria-live="polite">
-    <div className="thread-access-banner-head">
-      <AlertCircleIcon size={18} aria-hidden="true" />
-      <strong>{status.title || "AI request limit reached"}</strong>
+const PortalAccessBlockedBanner: FC<{ status: PortalSubscriptionStatus; onOpenBilling?: () => void }> = ({ status, onOpenBilling }) => {
+  const { t } = usePortalI18n();
+  return (
+    <div className="thread-access-banner" role="alert" aria-live="polite">
+      <div className="thread-access-banner-head">
+        <AlertCircleIcon size={18} aria-hidden="true" />
+        <strong>{status.title || t("thread.requestFailed")}</strong>
+      </div>
+      <p>{status.detail || t("thread.sendFailed")}</p>
+      {status.cycleEndsAt || (onOpenBilling && status.actionLabel) ? (
+        <p className="thread-access-banner-meta">
+          {[buildSubscriptionResetLine(status), onOpenBilling ? status.actionLabel : null].filter(Boolean).join(" ")}
+        </p>
+      ) : null}
+      {onOpenBilling ? (
+        <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
+          {t("access.renew")}
+        </Button>
+      ) : null}
     </div>
-    <p>{status.detail || "You can keep reading earlier chats, but new AI requests are blocked for now."}</p>
-    {status.cycleEndsAt || (onOpenBilling && status.actionLabel) ? (
-      <p className="thread-access-banner-meta">
-        {[buildSubscriptionResetLine(status), onOpenBilling ? status.actionLabel : null].filter(Boolean).join(" ")}
-      </p>
-    ) : null}
-    {onOpenBilling ? (
-      <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
-        Renew access
-      </Button>
-    ) : null}
-  </div>
-);
+  );
+};
 
 const PortalSubscriptionReminderBanner: FC<{ status: PortalSubscriptionStatus; onOpenBilling: () => void }> = ({ status, onOpenBilling }) => {
+  const { intlLocale, t } = usePortalI18n();
   const days = daysUntilSubscriptionExpiry(status);
   return (
     <div className="thread-access-banner thread-access-banner-subscription" role="status" aria-live="polite">
       <div className="thread-access-banner-head">
         <CreditCardIcon size={18} aria-hidden="true" />
-        <strong>{days === null ? status.title : days <= 0 ? "Access expires today" : `Access expires in ${days} days`}</strong>
+        <strong>{days === null ? status.title : days <= 0 ? t("access.expiresToday") : t("access.expiresDays", { days })}</strong>
       </div>
-      <p>{status.expiresAt ? `Your current access ends ${formatPortalLocalTime(status.expiresAt)}.` : status.summary}</p>
+      <p>{status.expiresAt ? t("access.endsAt", { date: new Date(status.expiresAt).toLocaleString(intlLocale) }) : status.summary}</p>
       <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
-        Choose renewal
+        {t("access.chooseRenewal")}
       </Button>
     </div>
   );
@@ -3436,8 +3461,10 @@ const PortalBillingReturnBanner: FC<{
   notice: PortalBillingReturnNotice;
   onOpenBilling: () => void;
   onDismiss: () => void;
-}> = ({ notice, onOpenBilling, onDismiss }) => (
-  <div className={`thread-access-banner thread-access-banner-billing-${notice.tone}`} role="status" aria-live="polite">
+}> = ({ notice, onOpenBilling, onDismiss }) => {
+  const { t } = usePortalI18n();
+  return (
+    <div className={`thread-access-banner thread-access-banner-billing-${notice.tone}`} role="status" aria-live="polite">
     <div className="thread-access-banner-head">
       {notice.tone === "success" ? <CheckIcon size={18} aria-hidden="true" /> : <AlertCircleIcon size={18} aria-hidden="true" />}
       <strong>{notice.title}</strong>
@@ -3445,23 +3472,25 @@ const PortalBillingReturnBanner: FC<{
     <p>{notice.detail}</p>
     <div className="thread-access-banner-actions">
       <Button size="small" type="primary" icon={<CreditCardIcon size={15} />} onClick={onOpenBilling}>
-        Review billing
+        {t("access.reviewBilling")}
       </Button>
       <Button size="small" type="text" onClick={onDismiss}>
-        Dismiss
+        {t("access.dismiss")}
       </Button>
     </div>
-  </div>
-);
+    </div>
+  );
+};
 
 const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
+  const { t } = usePortalI18n();
   const normalized = message.trim();
   if (!normalized) return null;
   return (
     <div className="thread-access-banner thread-access-banner-secondary" role="alert" aria-live="polite">
       <div className="thread-access-banner-head">
         <AlertCircleIcon size={18} aria-hidden="true" />
-        <strong>Request could not be sent</strong>
+        <strong>{t("thread.sendFailed")}</strong>
       </div>
       <p>{normalized}</p>
     </div>
@@ -3470,19 +3499,23 @@ const PortalInlineErrorBanner: FC<{ message: string }> = ({ message }) => {
 
 const HiddenToolFallback: FC<any> = () => null;
 
-const AssistantLiveStatus: FC<{ title: string; compact?: boolean }> = ({ title, compact }) => (
-  <span className={`assistant-live-status${compact ? " is-compact" : ""}`}>
-    <span className="assistant-running-spinner" aria-hidden="true" />
-    <span className="assistant-running-title">{title}</span>
-    <span className="assistant-running-chip">Live</span>
-  </span>
-);
+const AssistantLiveStatus: FC<{ title: string; compact?: boolean }> = ({ title, compact }) => {
+  const { t } = usePortalI18n();
+  return (
+    <span className={`assistant-live-status${compact ? " is-compact" : ""}`}>
+      <span className="assistant-running-spinner" aria-hidden="true" />
+      <span className="assistant-running-title">{title}</span>
+      <span className="assistant-running-chip">{t("thread.live")}</span>
+    </span>
+  );
+};
 
 const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
+  const { t } = usePortalI18n();
   const runningStage = useContext(RunningStageTextContext);
   if (status.type !== "running") return null;
   const isImageStage = runningStage.kind === "image";
-  const ariaStatus = `Assistant is processing: ${runningStage.text}${
+  const ariaStatus = `${t("thread.assistantProcessing", { status: runningStage.text })}${
     runningStage.secondaryText ? `. ${runningStage.secondaryText}` : ""
   }`;
 
@@ -3494,7 +3527,7 @@ const RunningMessagePlaceholder: FC<EmptyMessagePartProps> = ({ status }) => {
       aria-label={ariaStatus}
     >
       <div className="assistant-running-head">
-        <AssistantLiveStatus title={isImageStage ? "Preparing image" : "Working on it"} />
+        <AssistantLiveStatus title={isImageStage ? t("thread.preparingImage") : t("thread.working")} />
       </div>
       <p className="assistant-running-phase">{runningStage.text}</p>
       {runningStage.secondaryText ? <p className="assistant-running-secondary">{runningStage.secondaryText}</p> : null}
@@ -3556,27 +3589,11 @@ function isSkillCreationIntent(prompt: string): boolean {
   return hasSkillWord && hasCreateWord;
 }
 
-function skillDraftStatusLabel(status: string | undefined): string {
-  if (status === "pending_review") return "Pending review";
-  if (status === "changes_requested") return "Changes requested";
-  if (status === "published") return "Published";
-  if (status === "rejected") return "Rejected";
-  if (status === "archived") return "Archived";
-  return status || "Processing";
-}
-
 function skillDraftStatusTone(status: string | undefined): string {
   if (status === "published") return "published";
   if (status === "rejected") return "rejected";
   if (status === "changes_requested") return "changes";
   return "pending";
-}
-
-function managedSkillStatusLabel(status: string | undefined): string {
-  if (status === "active") return "Installed";
-  if (status === "disabled") return "Disabled";
-  if (status === "archived") return "Archived";
-  return status || "Installed";
 }
 
 function managedSkillStatusTone(status: string | undefined): string {
@@ -3592,6 +3609,7 @@ function metadataValueAsString(metadata: unknown, key: string): string {
 }
 
 const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = ({ data }) => {
+  const { t } = usePortalI18n();
   const payload = asRecord(data) || {};
   const draftId = typeof payload.draftId === "string" ? payload.draftId.trim() : "";
   const [draft, setDraft] = useState<CodexSkillDraft | null>(null);
@@ -3607,11 +3625,11 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       const response = await fetchPortalSkillDraft(draftId);
       setDraft(response.draft);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to refresh skill draft");
+      setErrorText(error instanceof Error ? error.message : t("skill.saveError"));
     } finally {
       setLoading(false);
     }
-  }, [draftId]);
+  }, [draftId, t]);
 
   useEffect(() => {
     void loadDraft();
@@ -3636,7 +3654,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
 
   const handleRevise = async () => {
     if (!draft) return;
-    const instruction = window.prompt("Describe how you want to revise this skill:");
+    const instruction = window.prompt(t("skill.revisePrompt"));
     if (!instruction?.trim()) return;
     setLoading(true);
     setErrorText("");
@@ -3644,7 +3662,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       const response = await revisePortalSkillDraft(draft.id, instruction.trim());
       setDraft(response.draft);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to revise the skill draft");
+      setErrorText(error instanceof Error ? error.message : t("skill.saveError"));
     } finally {
       setLoading(false);
     }
@@ -3657,7 +3675,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
 
   const handleCreateNewVersion = async () => {
     if (!draft) return;
-    const instruction = window.prompt("Describe what should change in the next version of this skill:");
+    const instruction = window.prompt(t("skill.newVersionPrompt"));
     if (!instruction?.trim()) return;
     setLoading(true);
     setErrorText("");
@@ -3665,7 +3683,7 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
       const response = await createPortalSkillDraftNewVersion(draft.id, instruction.trim());
       setDraft(response.draft);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to create a new version draft");
+      setErrorText(error instanceof Error ? error.message : t("skill.saveError"));
     } finally {
       setLoading(false);
     }
@@ -3674,64 +3692,78 @@ const SkillDraftStatusBlock: FC<{ data: SkillDraftStatusPartData | unknown }> = 
   if (!draftId) return null;
 
   return (
-    <section className={`skill-draft-card skill-draft-${skillDraftStatusTone(status)}`} aria-label="Skill draft status">
+    <section className={`skill-draft-card skill-draft-${skillDraftStatusTone(status)}`} aria-label={t("skill.draftStatus")}>
       <div className="skill-draft-card-head">
         <div>
-          <p className="skill-draft-eyebrow">Reusable Skill</p>
-          <h4>{draft?.displayName || skillName || "Skill draft"}</h4>
+          <p className="skill-draft-eyebrow">{t("skill.reusable")}</p>
+          <h4>{draft?.displayName || skillName || t("skill.draft")}</h4>
         </div>
-        <span className="skill-draft-status">{loading ? "Refreshing" : skillDraftStatusLabel(status)}</span>
+        <span className="skill-draft-status">
+          {loading
+            ? t("skill.statusRefreshing")
+            : status === "pending_review"
+              ? t("skill.statusPending")
+              : status === "changes_requested"
+                ? t("skill.statusChanges")
+                : status === "published"
+                  ? t("skill.statusPublished")
+                  : status === "rejected"
+                    ? t("skill.statusRejected")
+                    : status === "archived"
+                      ? t("skill.statusArchived")
+                      : status || t("skill.statusProcessing")}
+        </span>
       </div>
       <div className="skill-draft-meta-grid">
         <div>
-          <span>Skill name</span>
+          <span>{t("skill.name")}</span>
           <strong>{skillName || "-"}</strong>
         </div>
         <div>
-          <span>Author</span>
-          <strong>{draft?.createdByDisplayName || draft?.createdByEmail || "You"}</strong>
+          <span>{t("skill.author")}</span>
+          <strong>{draft?.createdByDisplayName || draft?.createdByEmail || t("skill.you")}</strong>
         </div>
         <div>
-          <span>Version</span>
+          <span>{t("skill.version")}</span>
           <strong>{draft?.version || "1.0.0"}</strong>
         </div>
       </div>
       {draft?.description ? <p className="skill-draft-description">{draft.description}</p> : null}
-      {draft?.reviewNote ? <p className="skill-draft-note">Review note: {draft.reviewNote}</p> : null}
+      {draft?.reviewNote ? <p className="skill-draft-note">{t("skill.reviewNote", { note: draft.reviewNote })}</p> : null}
       {validation && (!validation.ok || validation.warnings.length > 0) ? (
         <div className="skill-draft-validation">
           {validation.errors.map((item) => (
-            <p key={`error-${item}`}>Error: {item}</p>
+            <p key={`error-${item}`}>{t("skill.error", { message: item })}</p>
           ))}
           {validation.warnings.map((item) => (
-            <p key={`warning-${item}`}>Warning: {item}</p>
+            <p key={`warning-${item}`}>{t("skill.warning", { message: item })}</p>
           ))}
         </div>
       ) : null}
       {errorText ? <p className="skill-draft-error">{errorText}</p> : null}
       <div className="skill-draft-actions">
         <button type="button" onClick={() => void loadDraft()} disabled={loading}>
-          Refresh status
+          {t("skill.refreshStatus")}
         </button>
         {canRevise ? (
           <button type="button" onClick={() => void handleRevise()} disabled={loading}>
-            Revise draft
+            {t("skill.reviseDraft")}
           </button>
         ) : null}
         {canCreateNewVersion ? (
           <button type="button" onClick={() => void handleCreateNewVersion()} disabled={loading}>
-            Create new version
+            {t("skill.newVersion")}
           </button>
         ) : null}
         {canUse ? (
           <button type="button" className="primary" onClick={() => void handleUseNewSession()} disabled={loading}>
-            Use in new chat
+            {t("skill.useNewChat")}
           </button>
         ) : null}
       </div>
       {canUse ? (
         <p className="skill-draft-footnote">
-          Published skills are loaded only in new chats. Future edits create a new draft for review.
+          {t("skill.publishedHelp")}
         </p>
       ) : null}
     </section>
@@ -3742,6 +3774,7 @@ const AssistantCommentaryBlock: FC<{
   row: CommentaryPartData;
   entries: CommentaryEntryData[];
 }> = ({ row, entries }) => {
+  const { t } = usePortalI18n();
   const isStreaming = row.status === "streaming";
   const entryCount = entries.length;
   const updateCount = entries.reduce((count, entry) => count + Math.max(entry.lines.length, 1), 0);
@@ -3764,11 +3797,11 @@ const AssistantCommentaryBlock: FC<{
       onToggle={(event) => setIsOpen(event.currentTarget.open)}
     >
       <summary className="assistant-commentary-head">
-        {isStreaming ? <AssistantLiveStatus title="Thinking..." compact /> : <span className="assistant-commentary-chip">Thought</span>}
+        {isStreaming ? <AssistantLiveStatus title={t("trace.thinking")} compact /> : <span className="assistant-commentary-chip">{t("trace.thought")}</span>}
         {!isStreaming && (
           <span className="assistant-commentary-count">
-            {entryCount} {entryCount === 1 ? "thought" : "thoughts"} · {updateCount}{" "}
-            {updateCount === 1 ? "update" : "updates"}
+            {t(entryCount === 1 ? "trace.thoughtCount" : "trace.thoughtCountPlural", { count: entryCount })} ·{" "}
+            {t(updateCount === 1 ? "trace.updateCount" : "trace.updateCountPlural", { count: updateCount })}
           </span>
         )}
       </summary>
@@ -3794,6 +3827,7 @@ const ProcessDataFallback: FC<any> = ({
   name?: string;
   data?: ProcessData | unknown;
 }) => {
+  const { t } = usePortalI18n();
   const requestPreview = useContext(PreviewRequestContext);
   const isExternalPortalUser = useContext(ExternalPortalUserContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
@@ -3929,7 +3963,7 @@ const ProcessDataFallback: FC<any> = ({
         const kind = ["reasoning", "tool", "source", "meta", "process", "done", "error", "debug"].includes(kindRaw)
           ? (kindRaw as TimelineRow["kind"])
           : "process";
-        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : "Processing step";
+        const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : t("trace.processingStep");
         const detail = typeof obj.detail === "string" ? obj.detail.trim() : "";
         const rawDetail = typeof obj.rawDetail === "string" ? obj.rawDetail.trim() : "";
         const at = typeof obj.at === "string" ? normalizeProcessTime(obj.at) : "";
@@ -3953,7 +3987,7 @@ const ProcessDataFallback: FC<any> = ({
 
     return (
       <details className="trace-panel trace-panel-inline" open={batchOpen}>
-        <summary className="trace-summary">{`Process trace ${rows.length} entries (reasoning ${reasoningCount} / tools ${toolCount} / steps ${stepCount})`}</summary>
+        <summary className="trace-summary">{t("trace.summary", { count: rows.length, reasoning: reasoningCount, tools: toolCount, steps: stepCount })}</summary>
         <ol className="trace-timeline">
           {rows.map((row, index) => {
             const isActiveStep = row.id === resolvedActiveId || (!resolvedActiveId && index === rows.length - 1);
@@ -3963,7 +3997,25 @@ const ProcessDataFallback: FC<any> = ({
                 <span className={`trace-node trace-node-${row.kind} ${isActiveStep ? "trace-node-active" : ""}`} />
                 <details className={`trace-card trace-step ${isActiveStep ? "trace-step-active" : ""}`} open={isActiveStep}>
                   <summary className="trace-card-head trace-step-summary">
-                    <span className={`trace-pill trace-pill-${row.kind}`}>{timelineKindLabel(row.kind)}</span>
+                    <span className={`trace-pill trace-pill-${row.kind}`}>
+                      {t(
+                        row.kind === "reasoning"
+                          ? "trace.reasoning"
+                          : row.kind === "tool"
+                            ? "trace.tool"
+                            : row.kind === "source"
+                              ? "trace.source"
+                              : row.kind === "done"
+                                ? "trace.done"
+                                : row.kind === "error"
+                                  ? "trace.error"
+                                  : row.kind === "debug"
+                                    ? "trace.debug"
+                                    : row.kind === "meta"
+                                      ? "trace.meta"
+                                      : "trace.process"
+                      )}
+                    </span>
                     <span className="trace-item-title">{row.title}</span>
                     {row.at ? <span className="trace-item-time">{row.at}</span> : null}
                   </summary>
@@ -4003,18 +4055,25 @@ const ProcessDataFallback: FC<any> = ({
           await skillDraftActions.refreshRuntimeOptions();
         }
       } catch (error) {
-        setSkillInstallError(error instanceof Error ? error.message : "Failed to install skill");
+        setSkillInstallError(error instanceof Error ? error.message : t("skill.saveError"));
       } finally {
         setInstallingSkillPath("");
       }
     };
     return (
-      <section className="assistant-file-change-block" aria-label="Generated files">
-        <p className="assistant-file-change-title">Generated files</p>
+      <section className="assistant-file-change-block" aria-label={t("files.generated")}>
+        <p className="assistant-file-change-title">{t("files.generated")}</p>
         <ul className="assistant-file-change-list">
           {visibleChanges.map((item) => {
-            const label = fileChangeKindLabel(item.kind);
             const isReady = isReadyFileChange(item.kind);
+            const normalizedKind = item.kind.trim().toLowerCase();
+            const label = isReady
+              ? t("files.ready")
+              : ["rename", "renamed", "move", "moved"].includes(normalizedKind)
+                ? t("files.renamed")
+                : ["delete", "deleted", "remove", "removed"].includes(normalizedKind)
+                  ? t("files.deleted")
+                  : t("files.updated");
             const canPreview = !isExternalPortalUser || item.canPreview;
             const canDownload = item.canDownload && activeThreadId.trim();
             const imageExtension = fileExtensionFromPreviewPath(item.path);
@@ -4042,7 +4101,7 @@ const ProcessDataFallback: FC<any> = ({
                     type="button"
                     className="assistant-file-change-image-preview"
                     onClick={() => requestPreview(item.path)}
-                    aria-label={`Preview ${imageName}`}
+                    aria-label={t("files.previewNamed", { name: imageName })}
                   >
                     <img className="assistant-file-change-image" src={inlineImageHref} alt={imageName} loading="lazy" />
                   </button>
@@ -4062,7 +4121,7 @@ const ProcessDataFallback: FC<any> = ({
                 <div className="assistant-file-change-actions">
                   {canPreview ? (
                     <button type="button" className="assistant-file-change-btn" onClick={() => requestPreview(item.path)}>
-                      Preview
+                      {t("files.preview")}
                     </button>
                   ) : null}
                   {downloadHref ? (
@@ -4077,7 +4136,7 @@ const ProcessDataFallback: FC<any> = ({
                       ) : (
                         <DownloadIcon size={14} aria-hidden="true" />
                       )}
-                      {downloadingArtifactPath === item.path ? "Downloading…" : "Download"}
+                      {downloadingArtifactPath === item.path ? t("files.downloading") : t("files.download")}
                     </button>
                   ) : null}
                 </div>
@@ -4094,19 +4153,19 @@ const ProcessDataFallback: FC<any> = ({
           <div className="assistant-file-change-skill-submit">
             <p>
               {activeThreadRunning
-                ? "Skill files detected. Installation will be available when generation finishes."
-                : "Skill detected. Install it to make it available in new chats."}
+                ? t("skill.filesDetectedRunning")
+                : t("skill.detected")}
             </p>
             {skillRootPaths.map((skillPath) => {
               const installedSkill = installedSkillsByPath[skillPath];
               const installLabel =
                 installingSkillPath === skillPath
-                  ? "Installing..."
+                  ? t("skill.installing")
                   : activeThreadRunning
-                    ? "Waiting..."
+                    ? t("skill.waiting")
                     : installedSkill
-                      ? "Install update"
-                      : "Install skill";
+                      ? t("skill.installUpdate")
+                      : t("skill.install");
               return (
                 <div key={skillPath} style={{ display: "grid", gap: 10 }}>
                   <div className="assistant-file-change-actions">
@@ -4123,33 +4182,39 @@ const ProcessDataFallback: FC<any> = ({
                       className="assistant-file-change-btn"
                       onClick={() => requestPreview(skillPath === "." ? "SKILL.md" : `${skillPath}/SKILL.md`)}
                     >
-                      Preview skill
+                      {t("skill.preview")}
                     </button>
                   </div>
                   {installedSkill ? (
                     <section
                       className={`skill-draft-card skill-draft-${managedSkillStatusTone(installedSkill.status)}`}
-                      aria-label="Installed skill status"
+                      aria-label={t("skill.installedStatus")}
                     >
                       <div className="skill-draft-card-head">
                         <div>
-                          <p className="skill-draft-eyebrow">Reusable Skill</p>
+                          <p className="skill-draft-eyebrow">{t("skill.reusable")}</p>
                           <h4>{installedSkill.displayName || installedSkill.skillName}</h4>
                         </div>
-                        <span className="skill-draft-status">{managedSkillStatusLabel(installedSkill.status)}</span>
+                        <span className="skill-draft-status">
+                          {installedSkill.status === "disabled"
+                            ? t("skill.statusDisabled")
+                            : installedSkill.status === "archived"
+                              ? t("skill.statusArchived")
+                              : t("skill.statusInstalled")}
+                        </span>
                       </div>
                       <div className="skill-draft-meta-grid">
                         <div>
-                          <span>Skill name</span>
+                          <span>{t("skill.name")}</span>
                           <strong>{installedSkill.skillName}</strong>
                         </div>
                         <div>
-                          <span>Version</span>
+                          <span>{t("skill.version")}</span>
                           <strong>{installedSkill.version}</strong>
                         </div>
                         <div>
-                          <span>Available in</span>
-                          <strong>{installedSkill.status === "active" ? "New chats" : "Not available"}</strong>
+                          <span>{t("skill.availableIn")}</span>
+                          <strong>{installedSkill.status === "active" ? t("skill.newChats") : t("skill.notAvailable")}</strong>
                         </div>
                       </div>
                       {installedSkill.description ? <p className="skill-draft-description">{installedSkill.description}</p> : null}
@@ -4165,7 +4230,7 @@ const ProcessDataFallback: FC<any> = ({
                               })
                             }
                           >
-                            Use in new chat
+                            {t("skill.useNewChat")}
                           </button>
                         ) : null}
                         {installedSkill.scope === "private" && installedSkill.status === "active" ? (
@@ -4174,7 +4239,7 @@ const ProcessDataFallback: FC<any> = ({
                             disabled={uninstallingSkillId === installedSkill.id}
                             onClick={async () => {
                               const confirmed = window.confirm(
-                                "Uninstall this skill? It will no longer be available in new chats."
+                                t("skill.uninstallConfirm")
                               );
                               if (!confirmed) return;
                               setUninstallingSkillId(installedSkill.id);
@@ -4188,21 +4253,21 @@ const ProcessDataFallback: FC<any> = ({
                                   }));
                                 }
                               } catch (error) {
-                                setSkillInstallError(error instanceof Error ? error.message : "Failed to uninstall skill");
+                                setSkillInstallError(error instanceof Error ? error.message : t("skill.saveError"));
                               } finally {
                                 setUninstallingSkillId("");
                               }
                             }}
                           >
-                            {uninstallingSkillId === installedSkill.id ? "Uninstalling..." : "Uninstall"}
+                            {uninstallingSkillId === installedSkill.id ? t("skill.uninstalling") : t("skill.uninstall")}
                           </button>
                         ) : null}
                         <button type="button" onClick={() => void skillDraftActions.refreshRuntimeOptions()}>
-                          Refresh skills
+                          {t("skill.refresh")}
                         </button>
                       </div>
                       <p className="skill-draft-footnote">
-                        Installed skills load only when you start a new chat.
+                        {t("skill.installedHelp")}
                       </p>
                     </section>
                   ) : null}
@@ -4219,7 +4284,7 @@ const ProcessDataFallback: FC<any> = ({
   if (name !== "codex_process") {
     return (
       <details className="process-block process-data" open={false}>
-        <summary>Data event</summary>
+        <summary>{t("trace.dataEvent")}</summary>
         <pre>{shorten(detailFromUnknown(data), 1200)}</pre>
       </details>
     );
@@ -4431,6 +4496,7 @@ const AgentUserMessage: FC = () => {
 
 const AgentAssistantReloadButton: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const disabled = useAuiState((s) => s.thread.isRunning || s.thread.isDisabled || s.message.role !== "assistant");
   const [open, setOpen] = useState(false);
 
@@ -4444,23 +4510,23 @@ const AgentAssistantReloadButton: FC = () => {
       <button
         type="button"
         className="aui-button aui-button-ghost aui-button-icon assistant-reload-button"
-        title="Refresh"
-        aria-label="Refresh"
+        title={t("thread.refreshAnswer")}
+        aria-label={t("thread.refreshAnswer")}
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
         <RefreshCwIcon size={16} strokeWidth={2} />
       </button>
       <Modal
-        title="Regenerate this answer?"
+        title={t("thread.regenerateTitle")}
         open={open}
-        okText="Regenerate"
-        cancelText="Cancel"
+        okText={t("thread.regenerate")}
+        cancelText={t("common.cancel")}
         onOk={confirmReload}
         onCancel={() => setOpen(false)}
         destroyOnHidden
       >
-        <p className="assistant-feedback-modal-help">The current answer will be replaced by a new response.</p>
+        <p className="assistant-feedback-modal-help">{t("thread.regenerateHelp")}</p>
       </Modal>
     </>
   );
@@ -4468,6 +4534,7 @@ const AgentAssistantReloadButton: FC = () => {
 
 const AgentAssistantFeedbackNegativeButton: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const draftsRef = useContext(FeedbackCommentDraftContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
   const message = useAuiState((s) => s.message);
@@ -4552,30 +4619,30 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
         type="button"
         className="aui-button aui-button-ghost aui-button-icon assistant-feedback-negative-button aui-assistant-action-bar-feedback-negative"
         data-submitted={submittedType === "negative" ? "true" : undefined}
-        title="Bad response"
-        aria-label="Bad response"
+        title={t("thread.badResponse")}
+        aria-label={t("thread.badResponse")}
         onClick={openFeedbackDialog}
       >
         <ThumbsDownIcon size={16} strokeWidth={2} />
       </button>
       <Modal
-        title="What should be improved?"
+        title={t("thread.feedbackImprove")}
         open={open}
         className="assistant-feedback-modal"
-        okText="Submit feedback"
-        cancelText="Cancel"
+        okText={t("thread.feedbackSubmit")}
+        cancelText={t("common.cancel")}
         onOk={submitNegativeFeedback}
         onCancel={() => setOpen(false)}
         destroyOnHidden
       >
         <p className="assistant-feedback-modal-help">
-          This note will be saved with the answer so reviewers can understand the issue.
+          {t("thread.feedbackHelp")}
         </p>
         <div className="assistant-feedback-textarea-field">
           <Input.TextArea
             value={comment}
             onChange={(event) => setComment(event.target.value.slice(0, 1000))}
-            placeholder="For example: the answer is incomplete, a step is inaccurate, or it missed key details from an uploaded file..."
+            placeholder={t("thread.feedbackPlaceholder")}
             autoSize={{ minRows: 4, maxRows: 7 }}
             maxLength={1000}
             showCount
@@ -4588,6 +4655,7 @@ const AgentAssistantFeedbackNegativeButton: FC = () => {
 
 const AgentAssistantAnswerFeedback: FC = () => {
   const aui = useAui();
+  const { t } = usePortalI18n();
   const config = useContext(AnswerFeedbackConfigContext);
   const draftsRef = useContext(FeedbackCommentDraftContext);
   const activeThreadId = useContext(ActiveThreadIdContext);
@@ -4654,7 +4722,7 @@ const AgentAssistantAnswerFeedback: FC = () => {
       ) {
         draftsRef.current.skipNextSubmit = undefined;
       }
-      setErrorText(error instanceof Error ? error.message : "Feedback could not be saved. Try again.");
+      setErrorText(error instanceof Error ? error.message : t("thread.feedbackFailed"));
     } finally {
       setPendingType(null);
     }
@@ -4673,7 +4741,7 @@ const AgentAssistantAnswerFeedback: FC = () => {
           onClick={() => void submitAnswerFeedback("positive")}
         >
           <CheckIcon size={14} strokeWidth={2.4} />
-          <span>Yes</span>
+          <span>{t("thread.feedbackYes")}</span>
         </button>
         <button
           type="button"
@@ -4684,10 +4752,10 @@ const AgentAssistantAnswerFeedback: FC = () => {
           onClick={() => void submitAnswerFeedback("negative")}
         >
           <XIcon size={14} strokeWidth={2.4} />
-          <span>No</span>
+          <span>{t("thread.feedbackNo")}</span>
         </button>
       </div>
-      {submittedType ? <span className="assistant-answer-feedback-thanks">Thanks for the feedback.</span> : null}
+      {submittedType ? <span className="assistant-answer-feedback-thanks">{t("thread.feedbackThanks")}</span> : null}
       {errorText ? <span className="assistant-answer-feedback-error">{errorText}</span> : null}
     </div>
   );
@@ -4728,6 +4796,7 @@ const AgentAssistantMessage: FC = () => {
 
 const AgentThreadListItem: FC = () => {
   const aui = useAui();
+  const { locale, t } = usePortalI18n();
   const isMobileWorkbench = useContext(MobileWorkbenchContext);
   const runningThreadIds = useContext(RunningThreadIdsContext);
   const { completedThreadIds, clearCompletedThreadNotice } = useContext(ThreadCompletionNoticeContext);
@@ -4750,8 +4819,19 @@ const AgentThreadListItem: FC = () => {
   const isThreadRunning = identityKeys.some((key) => Boolean(runningThreadIds[key]));
   const hasCompletionNotice =
     !isThreadRunning && !isThreadActive && identityKeys.some((key) => Boolean(completedThreadIds[key]));
-  const groupLabel = resolveThreadGroupHeader(groupHeaderByRemoteId, remoteId, externalId, localId);
-  const threadTitleForFilter = threadTitle.trim() || "New conversation";
+  const rawGroupLabel = resolveThreadGroupHeader(groupHeaderByRemoteId, remoteId, externalId, localId);
+  const groupLabel = locale === "zh-CN"
+    ? rawGroupLabel === "Today"
+      ? t("sessions.today")
+      : rawGroupLabel === "Yesterday"
+        ? t("sessions.yesterday")
+        : rawGroupLabel === "Last 7 days"
+          ? t("sessions.last7Days")
+          : rawGroupLabel === "Last 30 days"
+            ? t("sessions.last30Days")
+            : rawGroupLabel
+    : rawGroupLabel;
+  const threadTitleForFilter = threadTitle.trim() || t("sessions.newConversation");
 
   useEffect(() => {
     if (!isThreadActive || identityKeys.length === 0) return;
@@ -4804,7 +4884,7 @@ const AgentThreadListItem: FC = () => {
       await aui.threadListItem().rename(renameDraft.trim());
       setIsRenaming(false);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "Failed to rename session";
+      const detail = error instanceof Error ? error.message : t("sessions.renameFailed");
       window.alert(detail);
     } finally {
       setRenameSaving(false);
@@ -4813,12 +4893,12 @@ const AgentThreadListItem: FC = () => {
 
   const deleteCurrentThread = async () => {
     if (renameSaving) return;
-    const confirmed = window.confirm("Permanently delete this session? This action cannot be undone.");
+    const confirmed = window.confirm(t("sessions.deleteConfirm"));
     if (!confirmed) return;
     try {
       await aui.threadListItem().delete();
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "Failed to delete session";
+      const detail = error instanceof Error ? error.message : t("sessions.deleteFailed");
       window.alert(detail);
     }
   };
@@ -4863,7 +4943,7 @@ const AgentThreadListItem: FC = () => {
               value={renameDraft}
               onChange={(event) => setRenameDraft(event.target.value)}
               onKeyDown={onRenameInputKeyDown}
-              placeholder="Enter session name"
+              placeholder={t("sessions.enterName")}
               disabled={renameSaving}
             />
           </div>
@@ -4873,7 +4953,7 @@ const AgentThreadListItem: FC = () => {
             onClick={() => clearCompletedThreadNotice(...identityKeys)}
           >
             <p className="aui-thread-list-item-title">
-              <ThreadListItemPrimitive.Title fallback="New conversation" />
+              <ThreadListItemPrimitive.Title fallback={t("sessions.newConversation")} />
             </p>
           </ThreadListItemPrimitive.Trigger>
         )}
@@ -4883,8 +4963,8 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn thread-item-save-btn"
-                title="Save session name"
-                aria-label="Save session name"
+                title={t("sessions.saveName")}
+                aria-label={t("sessions.saveName")}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -4897,8 +4977,8 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn"
-                title="Cancel edit"
-                aria-label="Cancel edit"
+                title={t("sessions.cancelEdit")}
+                aria-label={t("sessions.cancelEdit")}
                 onClick={cancelRename}
                 disabled={renameSaving}
               >
@@ -4911,8 +4991,8 @@ const AgentThreadListItem: FC = () => {
               placement="bottomRight"
               menu={{
                 items: [
-                  { key: "rename", label: "Rename session" },
-                  { key: "delete", label: "Delete session", danger: true }
+                  { key: "rename", label: t("sessions.rename") },
+                  { key: "delete", label: t("sessions.delete"), danger: true }
                 ],
                 onClick: ({ key, domEvent }) => {
                   domEvent.preventDefault();
@@ -4928,8 +5008,8 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn thread-item-more-btn"
-                title="More session actions"
-                aria-label="More session actions"
+                title={t("sessions.more")}
+                aria-label={t("sessions.more")}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -4943,19 +5023,19 @@ const AgentThreadListItem: FC = () => {
               <button
                 type="button"
                 className="thread-item-action-btn"
-                title="Rename session"
-                aria-label="Rename session"
+                title={t("sessions.rename")}
+                aria-label={t("sessions.rename")}
                 onClick={beginRename}
               >
                 <PencilIcon size={14} />
               </button>
               <ThreadListItemPrimitive.Delete
                 className="thread-item-action-btn thread-item-delete-btn"
-                title="Delete session"
-                aria-label="Delete session"
+                title={t("sessions.delete")}
+                aria-label={t("sessions.delete")}
                 disabled={isRenaming}
                 onClick={(e) => {
-                  const confirmed = window.confirm("Permanently delete this session? This action cannot be undone.");
+                  const confirmed = window.confirm(t("sessions.deleteConfirm"));
                   if (!confirmed) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -5021,20 +5101,20 @@ type ThreadQuestionJumpItem = {
   label: string;
 };
 
-function buildThreadQuestionJumpItems(messages: readonly ThreadMessage[]): ThreadQuestionJumpItem[] {
+function buildThreadQuestionJumpItems(messages: readonly ThreadMessage[], locale: PortalLocale): ThreadQuestionJumpItem[] {
   let questionIndex = 0;
   return messages
     .filter((message) => message.role === "user")
     .map((message) => {
       questionIndex += 1;
       const text = userTextFromUnknownMessage(message)
-        .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, "attached file")
+        .replace(/<uploaded_file[\s\S]*?<\/uploaded_file>/gi, locale === "zh-CN" ? "附件" : "attached file")
         .replace(/\s+/g, " ")
         .trim();
       return {
         id: message.id,
         index: questionIndex,
-        label: text || `Question ${questionIndex}`
+        label: text || (locale === "zh-CN" ? `问题 ${questionIndex}` : `Question ${questionIndex}`)
       };
     })
     .filter((item) => item.id);
@@ -5055,7 +5135,8 @@ const ThreadQuestionNavigator: FC<{
   shellRef: MutableRefObject<HTMLDivElement | null>;
   disabled?: boolean;
 }> = ({ messages, shellRef, disabled }) => {
-  const items = useMemo(() => buildThreadQuestionJumpItems(messages), [messages]);
+  const { locale, t } = usePortalI18n();
+  const items = useMemo(() => buildThreadQuestionJumpItems(messages, locale), [locale, messages]);
   const [activeId, setActiveId] = useState("");
   const [hoveredId, setHoveredId] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
@@ -5245,7 +5326,7 @@ const ThreadQuestionNavigator: FC<{
     <nav
       ref={navRef}
       className={`thread-question-nav ${panelOpen ? "is-open" : ""}`}
-      aria-label="Question quick jump"
+      aria-label={t("thread.questionNav")}
       onMouseEnter={() => openPanelForQuestion()}
       onMouseLeave={schedulePanelClose}
     >
@@ -5260,7 +5341,7 @@ const ThreadQuestionNavigator: FC<{
               type="button"
               className={`thread-question-nav-marker ${selected ? "is-selected" : ""}`}
               style={{ top: `${fallbackTop}%` }}
-              aria-label={`Jump to question ${item.index}: ${item.label}`}
+              aria-label={t("thread.jumpQuestion", { index: item.index, label: item.label })}
               aria-current={current ? "location" : undefined}
               title={item.label}
               onMouseEnter={() => openPanelForQuestion(item.id)}
@@ -5301,6 +5382,7 @@ const ThreadPublicShareControls: FC<
     onStatusChange?: (text: string) => void;
   }>
 > = ({ threadId, disabled, onStatusChange, children }) => {
+  const { t } = usePortalI18n();
   const messages = useAuiState((s) => s.thread.messages);
   const threadRunning = useAuiState((s) => s.thread.isRunning);
   const threadLoading = useAuiState((s) => s.thread.isLoading);
@@ -5466,10 +5548,10 @@ const ThreadPublicShareControls: FC<
       const share = await createThreadPublicShare(threadId, selectedTurnIds);
       const publicUrl = resolveThreadPublicShareUrl(share.public_path);
       await copyTextToClipboard(publicUrl);
-      onStatusChange?.("Public link created and copied");
+      onStatusChange?.(t("share.createdCopied"));
       cancelSelectionMode();
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to create public link");
+      setErrorText(error instanceof Error ? error.message : t("share.failed"));
     } finally {
       setSubmitting(false);
     }
@@ -5504,10 +5586,10 @@ const ThreadPublicShareControls: FC<
                 className="thread-public-share-toolbar-btn"
                 onClick={enterSelectionMode}
                 disabled={shareActionDisabled}
-                title={threadRunning ? "Thread is running. Create a public link later." : "Create public link"}
+                title={threadRunning ? t("share.running") : t("share.create")}
               >
                 <Share2Icon size={16} />
-                <span>Create public link</span>
+                <span>{t("share.create")}</span>
               </button>
             </div>
           ) : null}
@@ -5521,13 +5603,13 @@ const ThreadPublicShareControls: FC<
                   onClick={selectAllTurns}
                   disabled={submitting || selectedTurnIds.length === allTurnIds.length}
                 >
-                  Select all
+                  {t("share.selectAll")}
                 </button>
-                <span>{selectedTurnIds.length} conversation turn selected</span>
+                <span>{t(selectedTurnIds.length === 1 ? "share.selected" : "share.selectedPlural", { count: selectedTurnIds.length })}</span>
               </div>
               <div className="thread-public-share-actionbar-actions">
                 <button type="button" className="thread-public-share-secondary-btn" onClick={cancelSelectionMode} disabled={submitting}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -5535,7 +5617,7 @@ const ThreadPublicShareControls: FC<
                   onClick={() => setConfirmOpen(true)}
                   disabled={submitting || selectedTurnIds.length === 0}
                 >
-                  Create public link
+                  {t("share.create")}
                 </button>
               </div>
             </div>
@@ -5551,20 +5633,19 @@ const ThreadPublicShareControls: FC<
             >
               <div className="thread-public-share-modal" onClick={(event) => event.stopPropagation()}>
                 <div className="thread-public-share-modal-head">
-                  <h3>Create public link</h3>
+                  <h3>{t("share.create")}</h3>
                   <button
                     type="button"
                     className="thread-public-share-close-btn"
                     onClick={() => setConfirmOpen(false)}
                     disabled={submitting}
-                    aria-label="Close public link confirmation dialog"
+                    aria-label={t("share.closeDialog")}
                   >
                     <XIcon size={18} />
                   </button>
                 </div>
                 <p className="thread-public-share-modal-copy">
-                  Anyone with the link can view the conversation you&apos;ve shared. Please check for sensitive or private
-                  content before continuing.
+                  {t("share.warning")}
                 </p>
                 {errorText ? <p className="field-error thread-public-share-modal-error">{errorText}</p> : null}
                 <button
@@ -5573,7 +5654,7 @@ const ThreadPublicShareControls: FC<
                   onClick={() => void createAndCopyPublicLink()}
                   disabled={submitting || selectedTurnIds.length === 0}
                 >
-                  {submitting ? "Creating..." : "Create and copy"}
+                  {submitting ? t("share.creating") : t("share.createCopy")}
                 </button>
               </div>
             </div>
@@ -5852,6 +5933,19 @@ const AgentRuntimeAdapterProvider: FC<
 export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () => void; onSignOut?: () => void }) {
   const auth = useAuth();
   const { branding, behavior } = useBranding();
+  const { locale, intlLocale, antdLocale, t } = usePortalI18n();
+  const productFeedbackTypeLabel = (value: ProductFeedbackType): string => {
+    if (value === "usability_issue") return t("feedback.typeImprovement");
+    if (value === "bug") return t("feedback.typeBug");
+    if (value === "feature_request") return t("feedback.typeFeature");
+    return t("feedback.typeOther");
+  };
+  const productFeedbackSeverityLabel = (value: ProductFeedbackSeverity): string => {
+    if (value === "blocking") return t("feedback.impactBlocking");
+    if (value === "high") return t("feedback.impactHigh");
+    if (value === "medium") return t("feedback.impactMedium");
+    return t("feedback.impactLow");
+  };
   const portalPreferenceUser = props.currentUser ?? auth.user ?? null;
   const [appliedConfig, setAppliedConfig] = useState<AppliedConfig>({
     workspace: DEFAULT_WORKSPACE,
@@ -6602,7 +6696,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const groupHeaderByRemoteId: Record<string, string> = {};
         let previousGroupLabel = "";
         for (const thread of out.threads || []) {
-          const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at);
+          const groupLabel = formatThreadGroupLabel(thread.updated_at || thread.created_at, locale);
           if (groupLabel && groupLabel !== previousGroupLabel) {
             rememberThreadGroupHeader(groupHeaderByRemoteId, thread, groupLabel);
             previousGroupLabel = groupLabel;
@@ -6647,7 +6741,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           remoteId: created.thread.id,
           localId: threadId || undefined
         });
-        const groupLabel = formatThreadGroupLabel(created.thread.updated_at || created.thread.created_at || new Date().toISOString());
+        const groupLabel = formatThreadGroupLabel(created.thread.updated_at || created.thread.created_at || new Date().toISOString(), locale);
         setSessionGroupLabelContext((prev) => {
           const nextGroupHeaders = { ...prev.groupHeaderByRemoteId };
           clearThreadGroupHeaderLabel(nextGroupHeaders, groupLabel);
@@ -6722,7 +6816,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         </AgentRuntimeAdapterProvider>
       )
     }),
-    [runtimeOptions?.canUpload, syncActiveThreadIdentity]
+    [locale, runtimeOptions?.canUpload, syncActiveThreadIdentity]
   );
 
   const canUpload = runtimeOptions?.canUpload ?? false;
@@ -6788,31 +6882,44 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     }),
     [assistantDisplayName, branding.assistantAvatarUrl]
   );
-  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`;
+  const runtimeSummaryText = `${appliedConfig.model} · ${appliedConfig.reasoningEffort} · ${selectedModeLabel} · ${t("topbar.context", { percent: contextUsageView.usedPercent })}`;
   const topbarRuntimeSummaryText = isMobile
-    ? `${selectedModeLabel} · Context ${contextUsageView.usedPercent}%`
+    ? `${selectedModeLabel} · ${t("topbar.context", { percent: contextUsageView.usedPercent })}`
     : runtimeSummaryText;
   const composerPlaceholder = canUpload
     ? isMobile
-      ? "Ask a question or attach a file."
-      : "Type your question directly. Any attachments are supported; you can also drag files into the chat window."
+      ? t("thread.placeholderMobile")
+      : t("thread.placeholder")
     : isMobile
-      ? "Ask a question."
-      : "Type your question directly";
+      ? t("thread.placeholderNoUploadMobile")
+      : t("thread.placeholderNoUpload");
   const welcomeMessageTemplate = isMobile
     ? behavior.portalWelcomeMessageMobile
     : behavior.portalWelcomeMessageDesktop;
   const welcomeMessage =
-    applyPortalWelcomeTemplate(welcomeMessageTemplate, {
-      assistantName: assistantDisplayName,
-      platformName: branding.platformName.trim() || "Agent Studio"
-    }) ||
-    (isMobile
-      ? "Ask about products, versions, deployment, alarms, or troubleshooting."
-      : `Hello, I'm your ${assistantDisplayName}. Ask about products, versions, deployment, alarms, or troubleshooting.`);
+    locale === "zh-CN" &&
+    (welcomeMessageTemplate === "Ask about products, versions, deployment, alarms, or troubleshooting." ||
+      welcomeMessageTemplate === "Hello, I'm your {{assistantName}}. Ask about products, versions, deployment, alarms, or troubleshooting.")
+      ? isMobile
+        ? t("welcome.subtitle")
+        : `${t("welcome.greeting", { assistant: assistantDisplayName })} ${t("welcome.subtitle")}`
+      : applyPortalWelcomeTemplate(welcomeMessageTemplate, {
+          assistantName: assistantDisplayName,
+          platformName: branding.platformName.trim() || "Agent Studio"
+        }) ||
+        (isMobile
+          ? t("welcome.subtitle")
+          : `${t("welcome.greeting", { assistant: assistantDisplayName })} ${t("welcome.subtitle")}`);
   const welcomeSuggestions = useMemo(
-    () => behavior.portalWelcomeSuggestions.map((item) => ({ text: item.label, prompt: item.prompt })),
-    [behavior.portalWelcomeSuggestions]
+    () => behavior.portalWelcomeSuggestions.map((item) => {
+      if (locale !== "zh-CN") return { text: item.label, prompt: item.prompt };
+      if (item.label === "Check product & version fit") return { text: t("welcome.fit"), prompt: t("welcome.fitPrompt") };
+      if (item.label === "Review deployment plan") return { text: t("welcome.deployment"), prompt: t("welcome.deploymentPrompt") };
+      if (item.label === "Analyze alarm or KPI issue") return { text: t("welcome.alarm"), prompt: t("welcome.alarmPrompt") };
+      if (item.label === "Recommend solution design") return { text: t("welcome.solution"), prompt: t("welcome.solutionPrompt") };
+      return { text: item.label, prompt: item.prompt };
+    }),
+    [behavior.portalWelcomeSuggestions, locale, t]
   );
   const isInternalAnswerFeedbackAudience = auth.activeOrganization?.type
     ? auth.activeOrganization.type === "internal"
@@ -6822,13 +6929,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       enabled: isInternalAnswerFeedbackAudience
         ? behavior.answerFeedback.enabledForInternalUsers
         : behavior.answerFeedback.enabledForExternalUsers,
-      prompt: behavior.answerFeedback.prompt.trim() || "Was this answer helpful?"
+      prompt:
+        locale === "zh-CN" && (!behavior.answerFeedback.prompt.trim() || behavior.answerFeedback.prompt.trim() === "Was this answer helpful?")
+          ? t("welcome.answerHelpful")
+          : behavior.answerFeedback.prompt.trim() || t("welcome.answerHelpful")
     }),
     [
       behavior.answerFeedback.enabledForExternalUsers,
       behavior.answerFeedback.enabledForInternalUsers,
       behavior.answerFeedback.prompt,
-      isInternalAnswerFeedbackAudience
+      isInternalAnswerFeedbackAudience,
+      locale,
+      t
     ]
   );
 
@@ -8504,8 +8616,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
     >
       {sharedThreadReadonly ? (
         <div className="thread-readonly-banner" role="status">
-          <strong>Shared read-only thread</strong>
-          <span>In shared view, you can read messages and attachments, but cannot continue running this thread.</span>
+          <strong>{t("readonly.title")}</strong>
+          <span>{t("readonly.detail")}</span>
         </div>
       ) : null}
       {billingReturnNotice && canUseCustomerBilling ? (
@@ -8539,17 +8651,31 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               key={`thread-view-${String(activeThreadIdentity.remoteId || activeThreadIdentity.localId || "empty")}`}
               strings={{
                 threadList: {
-                  new: { label: "New session" },
+                  new: { label: t("sessions.new") },
                   item: {
-                    title: { fallback: "New conversation" }
+                    title: { fallback: t("sessions.newConversation") }
                   }
                 },
                 composer: {
                   input: {
                     placeholder: composerPlaceholder
                   },
-                  send: { tooltip: "Send message" },
-                  cancel: { tooltip: "Stop generation" }
+                  send: { tooltip: t("thread.send") },
+                  cancel: { tooltip: t("thread.stop") },
+                  addAttachment: { tooltip: t("thread.attach") },
+                  removeAttachment: { tooltip: t("thread.removeAttachment") }
+                },
+                assistantMessage: {
+                  reload: { tooltip: t("thread.regenerate") },
+                  copy: { tooltip: t("thread.copy") },
+                  feedback: {
+                    positive: { tooltip: t("thread.goodResponse") },
+                    negative: { tooltip: t("thread.badResponse") }
+                  }
+                },
+                editComposer: {
+                  send: { label: t("thread.saveEdit") },
+                  cancel: { label: t("common.cancel") }
                 }
               }}
               welcome={{
@@ -8583,8 +8709,8 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       {sharedThreadReadonly ? (
         <div className="thread-readonly-shield" aria-hidden="true">
           <div className="thread-readonly-card">
-            <p>This shared thread has switched to read-only mode.</p>
-            <p>You can still browse existing messages and attachments.</p>
+            <p>{t("readonly.changed")}</p>
+            <p>{t("readonly.browse")}</p>
           </div>
         </div>
       ) : null}
@@ -8605,7 +8731,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         <BuildVersionRefreshActivityBridge hasRunningSessions={hasRunningSessions} />
         <RunningStageTextContext.Provider value={runningStageContextValue}>
         <MobileWorkbenchContext.Provider value={isMobile}>
-          <ConfigProvider theme={PORTAL_ANTD_THEME}>
+          <ConfigProvider theme={PORTAL_ANTD_THEME} locale={antdLocale}>
             <div className="portal-workbench-root">
               <PortalTopBar
                 sessionRailCollapsed={layoutState.isSessionRailCollapsed}
@@ -8645,7 +8771,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   <div className="mobile-workbench-layout">
                     <Drawer
                       placement="left"
-                      title="Sessions"
+                      title={t("sessions.title")}
                       open={!layoutState.isSessionRailCollapsed}
                       width="min(360px, calc(100vw - 24px))"
                       styles={{ header: { padding: "12px 16px" }, body: { padding: 0 } }}
@@ -8670,7 +8796,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                                   user={props.currentUser}
                                   compact
                                   onSignOut={props.onSignOut}
-                                  locale="en"
+                                  locale={locale === "zh-CN" ? "zh" : "en"}
                                   accessStatus={subscriptionStatus}
                                   accessStatusLoading={subscriptionStatusLoading}
                                   accessStatusError={subscriptionStatusError}
@@ -8758,7 +8884,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                                     user={props.currentUser}
                                     compact
                                     onSignOut={props.onSignOut}
-                                    locale="en"
+                                    locale={locale === "zh-CN" ? "zh" : "en"}
                                     accessStatus={subscriptionStatus}
                                     accessStatusLoading={subscriptionStatusLoading}
                                     accessStatusError={subscriptionStatusError}
@@ -8828,10 +8954,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
             <Modal
               open={productFeedbackOpen}
-              title="Send feedback"
+              title={t("feedback.title")}
               className="product-feedback-modal"
-              okText={productFeedbackSubmitted ? "Submitted" : "Submit feedback"}
-              cancelText="Cancel"
+              okText={productFeedbackSubmitted ? t("feedback.submitted") : t("thread.feedbackSubmit")}
+              cancelText={t("common.cancel")}
               okButtonProps={{
                 disabled: !productFeedbackDescription.trim() || productFeedbackSubmitted,
                 loading: productFeedbackSubmitting
@@ -8841,10 +8967,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
               destroyOnHidden
             >
               <p className="product-feedback-modal-help">
-                Tell us what happened or what would make {branding.platformName} better.
+                {t("feedback.help", { platform: branding.platformName })}
               </p>
               <label className="field product-feedback-field">
-                <span className="field-label">Feedback type</span>
+                <span className="field-label">{t("feedback.type")}</span>
                 <select
                   className="field-input"
                   value={productFeedbackType}
@@ -8853,14 +8979,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 >
                   {PRODUCT_FEEDBACK_TYPE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {productFeedbackTypeLabel(option.value)}
                     </option>
                   ))}
                 </select>
               </label>
               {productFeedbackType === "bug" ? (
                 <label className="field product-feedback-field">
-                  <span className="field-label">Impact</span>
+                  <span className="field-label">{t("feedback.impact")}</span>
                   <select
                     className="field-input"
                     value={productFeedbackSeverity}
@@ -8869,18 +8995,18 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   >
                     {PRODUCT_FEEDBACK_SEVERITY_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label}
+                        {productFeedbackSeverityLabel(option.value)}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : null}
               <label className="field product-feedback-field">
-                <span className="field-label">Details</span>
+                <span className="field-label">{t("feedback.details")}</span>
                 <Input.TextArea
                   value={productFeedbackDescription}
                   onChange={(event) => setProductFeedbackDescription(event.target.value)}
-                  placeholder="What happened, or what should be improved?"
+                  placeholder={t("feedback.detailsPlaceholder")}
                   rows={5}
                   maxLength={4000}
                   showCount
@@ -8888,7 +9014,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 />
               </label>
               <div className="product-feedback-field">
-                <span className="field-label">Screenshots</span>
+                <span className="field-label">{t("feedback.screenshots")}</span>
                 <div className="product-feedback-upload-row">
                   <button
                     type="button"
@@ -8897,10 +9023,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                     disabled={productFeedbackSubmitting || productFeedbackImages.length >= PRODUCT_FEEDBACK_MAX_IMAGES}
                   >
                     <ImageIcon size={16} />
-                    <span>Add image</span>
+                    <span>{t("feedback.addImage")}</span>
                   </button>
                   <span className="product-feedback-upload-hint">
-                    Up to {PRODUCT_FEEDBACK_MAX_IMAGES} images, {formatFileSize(PRODUCT_FEEDBACK_MAX_IMAGE_BYTES)} each.
+                    {t("feedback.imageLimit", { count: PRODUCT_FEEDBACK_MAX_IMAGES, size: formatFileSize(PRODUCT_FEEDBACK_MAX_IMAGE_BYTES) })}
                   </span>
                 </div>
                 <input
@@ -8920,19 +9046,19 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                           type="button"
                           className="product-feedback-image-preview-button"
                           onClick={() => setProductFeedbackPreviewImage(image)}
-                          aria-label={`Preview ${image.file.name || "feedback screenshot"}`}
+                          aria-label={t("feedback.previewImage", { name: image.file.name || t("feedback.screenshot") })}
                         >
                           <img src={image.previewUrl} alt={image.file.name || "Feedback screenshot"} />
                         </button>
                         <div className="product-feedback-image-meta">
-                          <span>{image.file.name || "Screenshot"}</span>
+                          <span>{image.file.name || t("feedback.screenshot")}</span>
                           <small>{formatFileSize(image.file.size)}</small>
                         </div>
                         <button
                           type="button"
                           className="product-feedback-image-remove"
-                          title="Remove screenshot"
-                          aria-label="Remove screenshot"
+                          title={t("feedback.removeImage")}
+                          aria-label={t("feedback.removeImage")}
                           onClick={() => removeProductFeedbackImage(image.id)}
                           disabled={productFeedbackSubmitting}
                         >
@@ -8950,14 +9076,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                   onChange={(event) => setProductFeedbackIncludeContext(event.target.checked)}
                   disabled={productFeedbackSubmitting}
                 />
-                <span>Include current context so reviewers can reproduce it.</span>
+                <span>{t("feedback.includeContext")}</span>
               </label>
               {productFeedbackError ? <p className="product-feedback-error">{productFeedbackError}</p> : null}
-              {productFeedbackSubmitted ? <p className="product-feedback-success">Feedback submitted.</p> : null}
+              {productFeedbackSubmitted ? <p className="product-feedback-success">{t("feedback.success")}</p> : null}
             </Modal>
             <Modal
               open={Boolean(productFeedbackPreviewImage)}
-              title={productFeedbackPreviewImage?.file.name || "Screenshot preview"}
+              title={productFeedbackPreviewImage?.file.name || t("feedback.previewTitle")}
               className="product-feedback-preview-modal"
               footer={null}
               centered
@@ -8997,9 +9123,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             {canUseCustomerBilling ? (
               <Modal
                 open={subscriptionReminderModalOpen}
-                title={blockedSubscriptionStatus ? "Access expired" : `Renew ${branding.platformName.trim() || "Agent Studio"}`}
-                okText={blockedSubscriptionStatus ? "Renew now" : "Choose renewal"}
-                cancelText="Later"
+                title={blockedSubscriptionStatus ? t("access.expired") : t("access.renewPlatform", { platform: branding.platformName.trim() || "Agent Studio" })}
+                okText={blockedSubscriptionStatus ? t("access.renewNow") : t("access.chooseRenewal")}
+                cancelText={t("access.later")}
                 onOk={() => {
                   setSubscriptionReminderModalOpen(false);
                   openCustomerBillingPanel();
@@ -9013,9 +9139,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 <div className="portal-billing-reminder-modal">
                   <p>{(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.detail || (blockedSubscriptionStatus ?? subscriptionReminderStatus)?.summary}</p>
                   {(blockedSubscriptionStatus ?? subscriptionReminderStatus)?.expiresAt ? (
-                    <p>Expires at {formatPortalLocalTime((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!)}</p>
+                    <p>{t("access.expiresAt", { date: new Date((blockedSubscriptionStatus ?? subscriptionReminderStatus)!.expiresAt!).toLocaleString(intlLocale) })}</p>
                   ) : null}
-                  <p>Choose the yearly plan that matches your monthly AI request volume. Prepaid access keeps renewal predictable and avoids repeated payment steps.</p>
+                  <p>{t("access.planHelp")}</p>
                 </div>
               </Modal>
             ) : null}
@@ -9041,37 +9167,37 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         onChange={handleKnowledgeSetChange}
                       />
                     ) : (
-                      <p className="field-help knowledge-set-loading">Loading knowledge-set resources...</p>
+                      <p className="field-help knowledge-set-loading">{t("settings.knowledgeLoading")}</p>
                     )}
                     {resourceErrorText ? <p className="err-text knowledge-set-error">{resourceErrorText}</p> : null}
                   </div>
 
                   <label className="field checkbox-field">
-                    <span className="field-label">Show process trace</span>
+                    <span className="field-label">{t("settings.showTrace")}</span>
                     <input
                       type="checkbox"
                       checked={showProcessTrace}
                       onChange={(e) => void handleShowProcessTraceChange(e.target.checked)}
                       disabled={portalPreferenceSaving}
                     />
-                    <span className="field-help">Show reasoning summaries, tool calls, and execution steps in messages.</span>
+                    <span className="field-help">{t("settings.showTraceHelp")}</span>
                   </label>
 
                   <label className="field checkbox-field">
-                    <span className="field-label">Collapse final trace when done</span>
+                    <span className="field-label">{t("settings.collapseTrace")}</span>
                     <input
                       type="checkbox"
                       checked={collapseFinalTraceOnDone}
                       onChange={(e) => void handleCollapseFinalTraceOnDoneChange(e.target.checked)}
                       disabled={!showProcessTrace || portalPreferenceSaving}
                     />
-                    <span className="field-help">When enabled, only the final conclusion remains expanded and completed traces collapse by default.</span>
+                    <span className="field-help">{t("settings.collapseTraceHelp")}</span>
                   </label>
 
                   {portalPreferenceErrorText ? <p className="err-text">{portalPreferenceErrorText}</p> : null}
 
                   <label className="field">
-                    <span className="field-label">Policy mode</span>
+                    <span className="field-label">{t("settings.policyMode")}</span>
                     <select
                       className="field-input"
                       value={runtimeMode}
@@ -9084,27 +9210,27 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         </option>
                       ))}
                     </select>
-                    <span className="field-help">Provided by `/api/portal/runtime-options`; employees can only choose allowed policies.</span>
+                    <span className="field-help">{t("settings.policyModeHelp")}</span>
                   </label>
 
                   {selectedMode ? (
                     <div className="field">
-                      <span className="field-label">Policy snapshot</span>
+                      <span className="field-label">{t("settings.policySnapshot")}</span>
                       <RuntimeProfileView profile={selectedMode.runtimeProfile} />
-                      <span className="field-help">The runtime parameters below are determined by the run profile bound to the current policy mode.</span>
+                      <span className="field-help">{t("settings.policySnapshotHelp")}</span>
                     </div>
                   ) : null}
 
                   <div className="status-box">
                     <p>
-                      <strong>Status: </strong>
+                      <strong>{t("settings.status")} </strong>
                       {statusText}
                     </p>
                     <p>
-                      <strong>Attachment policy: </strong>
-                      {runtimeOptions?.canUpload ? "Upload allowed" : "Uploads currently disabled"}
+                      <strong>{t("settings.attachmentPolicy")} </strong>
+                      {runtimeOptions?.canUpload ? t("settings.uploadAllowed") : t("settings.uploadDisabled")}
                     </p>
-                    <p className="field-help">Runtime setting changes take effect automatically in the next turn.</p>
+                    <p className="field-help">{t("settings.nextTurn")}</p>
                     {errorText ? <p className="err-text">{errorText}</p> : null}
                   </div>
                 </div>
@@ -9116,9 +9242,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
           <div className="dir-modal-mask" onClick={() => setPickerOpen(false)}>
             <div className="dir-modal" onClick={(e) => e.stopPropagation()}>
             <div className="dir-modal-head">
-              <h3>{pickerTarget === "workspace" ? "Select workspace directory" : "Select additional directory"}</h3>
+              <h3>{pickerTarget === "workspace" ? t("directory.workspace") : t("directory.additional")}</h3>
               <button type="button" className="picker-btn" onClick={() => setPickerOpen(false)}>
-                Close
+                {t("common.close")}
               </button>
             </div>
             <div className="dir-path-input-row">
@@ -9127,7 +9253,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 value={pickerPathInput}
                 onChange={(e) => onPickerPathInputChange(e.target.value)}
                 onKeyDown={onPickerPathInputKeyDown}
-                placeholder="Enter a directory path to jump and load subdirectories"
+                placeholder={t("directory.placeholder")}
               />
               <button
                 type="button"
@@ -9135,10 +9261,10 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 onClick={jumpToDirectoryFromInput}
                 disabled={pickerLoading}
               >
-                Jump
+                {t("directory.jump")}
               </button>
             </div>
-            <p className="dir-modal-current">Current directory: {pickerCwd || "..."}</p>
+            <p className="dir-modal-current">{t("directory.current", { path: pickerCwd || "…" })}</p>
             <div className="dir-modal-toolbar">
               <button
                 type="button"
@@ -9149,7 +9275,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 }}
                 disabled={!pickerParent || pickerLoading}
               >
-                Up one level
+                {t("directory.up")}
               </button>
               <button
                 type="button"
@@ -9157,7 +9283,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                 onClick={() => selectDirectory(pickerCwd)}
                 disabled={!pickerCwd || pickerLoading}
               >
-                {pickerTarget === "workspace" ? "Set as workspace" : "Add current directory"}
+                {pickerTarget === "workspace" ? t("directory.setWorkspace") : t("directory.addCurrent")}
               </button>
             </div>
             <div className="dir-root-list">
@@ -9178,9 +9304,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
             </div>
             {pickerError ? <p className="err-text">{pickerError}</p> : null}
             <div className="dir-modal-list">
-              {pickerLoading ? <p className="trace-empty">Loading directories...</p> : null}
+              {pickerLoading ? <p className="trace-empty">{t("directory.loading")}</p> : null}
               {!pickerLoading && pickerDirectories.length === 0 ? (
-                <p className="trace-empty">No subdirectories available in the current directory.</p>
+                <p className="trace-empty">{t("directory.empty")}</p>
               ) : null}
               {!pickerLoading && pickerDirectories.length > 0 ? (
                 <ul className="dir-list">
@@ -9202,7 +9328,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
                         className="picker-btn"
                         onClick={() => selectDirectory(item.path)}
                       >
-                        Select
+                        {t("directory.select")}
                       </button>
                     </li>
                   ))}

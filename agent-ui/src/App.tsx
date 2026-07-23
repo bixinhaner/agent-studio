@@ -10,6 +10,7 @@ import {
 } from "./features/auth/auth-entry-preference";
 import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
+import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
 import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
@@ -26,6 +27,11 @@ const PortalShellLazy = lazy(() => import("./features/portal/PortalShell").then(
 const PublicSharePageLazy = lazy(() =>
   import("./features/public-share/PublicSharePage").then((module) => ({ default: module.PublicSharePage }))
 );
+
+function PortalLoadingFallback() {
+  const { t } = usePortalI18n();
+  return <div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>{t("common.loadingWorkspace")}</p></div></div>;
+}
 
 type AppShellView = "portal" | "admin";
 
@@ -543,13 +549,15 @@ function AppContent(props: {
   }
 
   return (
-    <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading workspace...</p></div></div>}>
-      <PortalShellLazy
-        currentUser={auth.user}
-        onOpenAdmin={openAdmin}
-        onSignOut={() => void auth.signOut()}
-      />
-    </Suspense>
+    <PortalI18nProvider>
+      <Suspense fallback={<PortalLoadingFallback />}>
+        <PortalShellLazy
+          currentUser={auth.user}
+          onOpenAdmin={openAdmin}
+          onSignOut={() => void auth.signOut()}
+        />
+      </Suspense>
+    </PortalI18nProvider>
   );
 }
 

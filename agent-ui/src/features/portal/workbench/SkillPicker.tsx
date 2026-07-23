@@ -27,6 +27,7 @@ import {
 
 import type { RuntimeModeSnapshot } from "../../modes/types";
 import { useIsNarrowScreen } from "../../../lib/use-is-narrow-screen";
+import { usePortalI18n, type PortalLocale } from "../i18n";
 
 type SkillOption = RuntimeModeSnapshot["availableSkills"][number];
 type SkillScope = "private" | "team" | "platform";
@@ -112,9 +113,8 @@ const COPY = {
   }
 } as const;
 
-function currentCopy() {
-  if (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("en")) return COPY.en;
-  return COPY.zh;
+function currentCopy(locale: PortalLocale) {
+  return locale === "zh-CN" ? COPY.zh : COPY.en;
 }
 
 function skillScope(skill: SkillOption): SkillScope {
@@ -123,8 +123,7 @@ function skillScope(skill: SkillOption): SkillScope {
   return "platform";
 }
 
-function scopeLabel(skill: SkillOption): string {
-  const copy = currentCopy();
+function scopeLabel(skill: SkillOption, copy: typeof COPY.en | typeof COPY.zh): string {
   const scope = skillScope(skill);
   return scope === "private" ? copy.privateLabel : scope === "team" ? copy.teamLabel : copy.platformLabel;
 }
@@ -148,8 +147,8 @@ function skillTitle(skill: SkillOption): string {
   return skill.presentation.displayName || skill.label || skill.name;
 }
 
-function skillSummary(skill: SkillOption): string {
-  return skill.presentation.summary || skill.description || currentCopy().fallbackSummary;
+function skillSummary(skill: SkillOption, copy: typeof COPY.en | typeof COPY.zh): string {
+  return skill.presentation.summary || skill.description || copy.fallbackSummary;
 }
 
 function skillSearchText(skill: SkillOption): string {
@@ -178,8 +177,9 @@ type SkillPickerProps = {
 export const PortalSelectedSkillBar: FC<
   Pick<SkillPickerProps, "availableSkills" | "enabledSkillIds" | "onEnabledSkillIdsChange">
 > = ({ availableSkills, enabledSkillIds, onEnabledSkillIdsChange }) => {
+  const { locale } = usePortalI18n();
   const selected = availableSkills.filter((skill) => enabledSkillIds.includes(skill.id));
-  const copy = currentCopy();
+  const copy = currentCopy(locale);
   if (selected.length === 0) return null;
 
   return (
@@ -193,15 +193,15 @@ export const PortalSelectedSkillBar: FC<
             title={
               <span className="portal-selected-skill-tooltip-content">
                 <strong>{skillTitle(skill)}</strong>
-                <small>{skillSummary(skill)}</small>
-                <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</em>
+                <small>{skillSummary(skill, copy)}</small>
+                <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</em>
               </span>
             }
           >
             <span
               className="portal-selected-skill-chip"
               tabIndex={0}
-              title={`${skillTitle(skill)}\n${skillSummary(skill)}\n${scopeLabel(skill)}`}
+              title={`${skillTitle(skill)}\n${skillSummary(skill, copy)}\n${scopeLabel(skill, copy)}`}
             >
               <code>{skill.name}</code>
               <button
@@ -234,7 +234,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
   onEnabledSkillIdsChange,
   onFillPrompt
 }) => {
-  const copy = currentCopy();
+  const { locale } = usePortalI18n();
+  const copy = currentCopy(locale);
   const isMobile = useIsNarrowScreen(760);
   const [open, setOpen] = useState(false);
   const [mobileStep, setMobileStep] = useState<MobilePickerStep>("list");
@@ -364,7 +365,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
             </div>
           </div>
         ) : null}
-        <div className="portal-skill-scope-tabs" aria-label="Skill scope">
+        <div className="portal-skill-scope-tabs" aria-label={locale === "zh-CN" ? "Skill 范围" : "Skill scope"}>
           {scopeOptions.map((item) => (
             <button
               key={item.id}
@@ -392,8 +393,8 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
                 <span className="portal-skill-card-copy">
                   <strong>{skillTitle(skill)}</strong>
                   <code>{skill.name}</code>
-                  <small>{skillSummary(skill)}</small>
-                  <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</em>
+                  <small>{skillSummary(skill, copy)}</small>
+                  <em><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</em>
                 </span>
                 {selected ? <CircleCheck className="portal-skill-card-check" size={18} aria-label={copy.enabled} /> : null}
               </button>
@@ -489,9 +490,10 @@ function SkillDetail({
   onFill: (prompt?: string) => void;
   onToggle: () => void;
 }) {
-  const copy = currentCopy();
+  const { locale } = usePortalI18n();
+  const copy = currentCopy(locale);
   return (
-    <section className="portal-skill-detail-column" aria-label={`${skillTitle(skill)} details`}>
+    <section className="portal-skill-detail-column" aria-label={`${skillTitle(skill)}${locale === "zh-CN" ? "详情" : " details"}`}>
       {mobile ? (
         <button type="button" className="portal-skill-mobile-back" onClick={onBack}>
           <ArrowLeft size={16} aria-hidden="true" />{copy.back}
@@ -504,13 +506,13 @@ function SkillDetail({
           <code>{skill.name}</code>
         </span>
         <Tooltip title={copy.copied} trigger="click">
-          <button type="button" aria-label="Copy Skill name" onClick={() => void navigator.clipboard?.writeText(skill.name)}>
+          <button type="button" aria-label={locale === "zh-CN" ? "复制 Skill 名称" : "Copy Skill name"} onClick={() => void navigator.clipboard?.writeText(skill.name)}>
             <Copy size={16} aria-hidden="true" />
           </button>
         </Tooltip>
       </div>
-      <p className="portal-skill-detail-summary">{skillSummary(skill)}</p>
-      <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill)}</p>
+      <p className="portal-skill-detail-summary">{skillSummary(skill, copy)}</p>
+      <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</p>
 
       {skill.presentation.useCases.length > 0 ? (
         <DetailSection title={copy.suitable}>

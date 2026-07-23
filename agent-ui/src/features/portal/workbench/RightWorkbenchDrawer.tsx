@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Button } from "antd";
 import { XIcon } from "lucide-react";
+import { usePortalI18n } from "../i18n";
 
 export function RightWorkbenchDrawer(props: {
   open: boolean;
@@ -8,6 +9,7 @@ export function RightWorkbenchDrawer(props: {
   previewContent: ReactNode;
   mobile?: boolean;
 }) {
+  const { t } = usePortalI18n();
   if (!props.open) return null;
 
   return (
@@ -18,7 +20,7 @@ export function RightWorkbenchDrawer(props: {
           className="right-workbench-close-btn mobile"
           icon={<XIcon size={18} />}
           onClick={props.onClose}
-          aria-label="Close right panel"
+          aria-label={t("topbar.closePanel")}
         />
       ) : null}
       <div className="right-workbench-content">{props.previewContent}</div>

@@ -10,6 +10,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../../markdown/markdown-rendering";
+import { usePortalI18n } from "../i18n";
 
 type ThreadFileRecord = {
   filePath: string;
@@ -1124,6 +1125,7 @@ export function PreviewWorkbenchPanel(props: {
   allowDownload?: boolean;
   externalArtifactMode?: boolean;
 }) {
+  const { t } = usePortalI18n();
   const requestedTarget = useMemo(
     () => splitPreviewTarget(asString(props.requestedFilePath)),
     [props.requestedFilePath]
@@ -1232,7 +1234,7 @@ export function PreviewWorkbenchPanel(props: {
         } else if (props.externalArtifactMode) {
           const resolved = await resolveThreadArtifact(props.threadId, filePath);
           if (resolved.artifact.preview_status !== "ready") {
-            throw new Error(resolved.artifact.blocked_reason || "Artifact preview is blocked by policy");
+            throw new Error(resolved.artifact.blocked_reason || t("preview.blocked"));
           }
           fileForKind = {
             ...fileForKind,
@@ -1381,7 +1383,7 @@ export function PreviewWorkbenchPanel(props: {
             content: {
               kind: "unsupported",
               ...contentBase(),
-              reason: "This file format cannot be rendered in the built-in preview."
+              reason: t("preview.unsupported")
             }
           });
           createdObjectUrl = "";
@@ -1391,7 +1393,7 @@ export function PreviewWorkbenchPanel(props: {
         if (!cancelled) {
           setPreview({
             status: "error",
-            message: error instanceof Error ? error.message : "Failed to read file"
+            message: error instanceof Error ? error.message : t("preview.failed")
           });
         }
       }
@@ -1403,7 +1405,7 @@ export function PreviewWorkbenchPanel(props: {
       cancelled = true;
       releaseObjectUrl();
     };
-  }, [activeFileForKind, activeFilePath, props.externalArtifactMode, props.threadId]);
+  }, [activeFileForKind, activeFilePath, props.externalArtifactMode, props.threadId, t]);
 
   const activePreview = preview.status === "ready" ? preview.content : null;
   const previewKind = activePreview?.kind ?? (activeFile ? preview.status : "idle");
@@ -1413,7 +1415,7 @@ export function PreviewWorkbenchPanel(props: {
     <div className="preview-workbench-shell">
       <section className="preview-workbench-viewer" data-preview-kind={previewKind}>
         {!activeFile ? (
-          <div className="preview-workbench-placeholder">Click "Preview" on a file card in the conversation to open it here.</div>
+          <div className="preview-workbench-placeholder">{t("preview.openHint")}</div>
         ) : (
           <>
             <header className="preview-viewer-head">
@@ -1424,16 +1426,16 @@ export function PreviewWorkbenchPanel(props: {
                     type="button"
                     className="preview-viewer-anchor"
                     onClick={() => setAnchorJumpToken((value) => value + 1)}
-                    title="Jump to the target section again"
+                    title={t("preview.jumpTarget")}
                   >
-                    Target section: {selectedAnchor}
+                    {t("preview.targetSection", { section: selectedAnchor })}
                   </button>
                 ) : null}
               </div>
               {props.allowDownload && activePreview && downloadHref ? (
                 <div className="preview-viewer-actions">
                   <a href={downloadHref} download={!activePreview.downloadUrl ? activeFile.displayName : undefined}>
-                    Download
+                    {t("preview.download")}
                   </a>
                 </div>
               ) : null}
@@ -1443,7 +1445,7 @@ export function PreviewWorkbenchPanel(props: {
               {preview.status === "loading" ? (
                 <div className="preview-loading">
                   <Spin size="small" />
-                  <span>Loading preview...</span>
+                  <span>{t("preview.loading")}</span>
                 </div>
               ) : null}
 
@@ -1462,7 +1464,7 @@ export function PreviewWorkbenchPanel(props: {
                   className="preview-iframe"
                   title={activeFile.displayName}
                   sandbox=""
-                  srcDoc={activePreview.html || "<p>Document is empty</p>"}
+                  srcDoc={activePreview.html || `<p>${t("preview.documentEmpty")}</p>`}
                 />
               ) : null}
 

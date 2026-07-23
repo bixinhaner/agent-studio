@@ -3,6 +3,7 @@ import { Button, Drawer, Space, Tooltip } from "antd";
 import {
   Ellipsis,
   CreditCard,
+  Languages,
   LayoutPanelLeft,
   MessageSquareText,
   PanelRightClose,
@@ -13,6 +14,7 @@ import {
 
 import { BrandMark } from "../../branding/BrandMark";
 import { useBranding } from "../../branding/BrandingProvider";
+import { usePortalI18n } from "../i18n";
 
 export function PortalTopBar(props: {
   sessionRailCollapsed?: boolean;
@@ -30,21 +32,20 @@ export function PortalTopBar(props: {
   mobile?: boolean;
 }) {
   const { branding } = useBranding();
+  const { t, toggleLocale } = usePortalI18n();
   const isRightPanelOpen = props.drawerOpen;
   const showRuntimeSummary = props.showRuntimeSummary ?? true;
   const showAdvancedSettings = props.showAdvancedSettings ?? true;
   const showRightPanelToggle = props.showRightPanelToggle ?? true;
   const isMobile = props.mobile ?? false;
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
-  const hasOverflowActions = Boolean(
-    props.onOpenBilling || props.onOpenFeedback || props.onOpenAdmin || showAdvancedSettings || (showRuntimeSummary && props.runtimeSummary)
-  );
+  const hasOverflowActions = true;
   const mobileActionItems = useMemo(
     () => [
       props.onOpenFeedback
         ? {
             key: "feedback",
-            label: "Send feedback",
+            label: t("topbar.feedback"),
             icon: <MessageSquareText size={18} />,
             onClick: () => {
               setMobileActionsOpen(false);
@@ -55,7 +56,7 @@ export function PortalTopBar(props: {
       props.onOpenBilling
         ? {
             key: "billing",
-            label: "Subscription & billing",
+            label: t("topbar.billing"),
             icon: <CreditCard size={18} />,
             onClick: () => {
               setMobileActionsOpen(false);
@@ -66,7 +67,7 @@ export function PortalTopBar(props: {
       props.onOpenAdmin
         ? {
             key: "admin",
-            label: "Open admin console",
+            label: t("topbar.admin"),
             icon: <Shield size={18} />,
             onClick: () => {
               setMobileActionsOpen(false);
@@ -77,35 +78,44 @@ export function PortalTopBar(props: {
       showAdvancedSettings
         ? {
             key: "settings",
-            label: "Runtime settings",
+            label: t("topbar.settings"),
             icon: <Settings size={18} />,
             onClick: () => {
               setMobileActionsOpen(false);
               props.onOpenAdvancedSettings();
             }
           }
-        : null
+        : null,
+      {
+        key: "language",
+        label: t("language.switchTo"),
+        icon: <Languages size={18} />,
+        onClick: () => {
+          setMobileActionsOpen(false);
+          toggleLocale();
+        }
+      }
     ].filter(Boolean) as Array<{
       key: string;
       label: string;
       icon: JSX.Element;
       onClick(): void;
     }>,
-    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings]
+    [props.onOpenAdmin, props.onOpenAdvancedSettings, props.onOpenBilling, props.onOpenFeedback, showAdvancedSettings, t, toggleLocale]
   );
 
   return (
     <>
-      <header className={isMobile ? "portal-topbar mobile" : "portal-topbar"} aria-label="Workbench top bar">
+      <header className={isMobile ? "portal-topbar mobile" : "portal-topbar"} aria-label={t("topbar.label")}>
         <div className="portal-topbar-left">
-          <Tooltip title={props.sessionRailCollapsed ? "Expand session rail" : "Collapse session rail"} placement="bottom">
+          <Tooltip title={props.sessionRailCollapsed ? t("topbar.expandSessions") : t("topbar.collapseSessions")} placement="bottom">
             <Button
               type="text"
               className="portal-topbar-ghost-btn"
               icon={<LayoutPanelLeft size={18} />}
               onClick={props.onToggleRail}
               style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-              aria-label={props.sessionRailCollapsed ? "Expand session rail" : "Collapse session rail"}
+              aria-label={props.sessionRailCollapsed ? t("topbar.expandSessions") : t("topbar.collapseSessions")}
             />
           </Tooltip>
 
@@ -141,74 +151,87 @@ export function PortalTopBar(props: {
 
           <Space size={8} className="portal-topbar-action-group">
             {!isMobile && props.onOpenFeedback ? (
-              <Tooltip title="Send feedback" placement="bottom">
+              <Tooltip title={t("topbar.feedback")} placement="bottom">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={<MessageSquareText size={18} />}
                   onClick={props.onOpenFeedback}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="Send feedback"
+                  aria-label={t("topbar.feedback")}
                 />
               </Tooltip>
             ) : null}
             {!isMobile && props.onOpenBilling ? (
-              <Tooltip title="Subscription & billing" placement="bottom">
+              <Tooltip title={t("topbar.billing")} placement="bottom">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={<CreditCard size={18} />}
                   onClick={props.onOpenBilling}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="Subscription and billing"
+                  aria-label={t("topbar.billingAria")}
                 />
               </Tooltip>
             ) : null}
             {!isMobile && props.onOpenAdmin ? (
-              <Tooltip title="Open admin console" placement="bottom">
+              <Tooltip title={t("topbar.admin")} placement="bottom">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={<Shield size={18} />}
                   onClick={props.onOpenAdmin}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="Open admin console"
+                  aria-label={t("topbar.admin")}
                 />
               </Tooltip>
             ) : null}
             {!isMobile && showAdvancedSettings ? (
-              <Tooltip title="Runtime settings" placement="bottom">
+              <Tooltip title={t("topbar.settings")} placement="bottom">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={<Settings size={18} />}
                   onClick={props.onOpenAdvancedSettings}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="Advanced settings"
+                  aria-label={t("topbar.advancedSettings")}
                 />
               </Tooltip>
             ) : null}
+            {!isMobile ? (
+              <Tooltip title={t("language.switchTo")} placement="bottom">
+                <Button
+                  type="text"
+                  className="portal-topbar-ghost-btn portal-topbar-language-btn"
+                  icon={<Languages size={17} />}
+                  onClick={toggleLocale}
+                  aria-label={t("language.switchTo")}
+                >
+                  {t("language.short")}
+                </Button>
+              </Tooltip>
+            ) : null}
             {showRightPanelToggle ? (
-              <Tooltip title={isRightPanelOpen ? "Close right panel" : "Open right panel"} placement="bottomLeft">
+              <Tooltip title={isRightPanelOpen ? t("topbar.closePanel") : t("topbar.openPanel")} placement="bottomLeft">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={isRightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
                   onClick={props.onToggleDrawer}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="Toggle right panel"
+                  aria-label={t("topbar.togglePanel")}
                 />
               </Tooltip>
             ) : null}
             {isMobile && hasOverflowActions ? (
-              <Tooltip title="More actions" placement="bottomLeft">
+              <Tooltip title={t("topbar.more")} placement="bottomLeft">
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn"
                   icon={<Ellipsis size={18} />}
                   onClick={() => setMobileActionsOpen(true)}
                   style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  aria-label="More actions"
+                  aria-label={t("topbar.more")}
                 />
               </Tooltip>
             ) : null}
@@ -219,7 +242,7 @@ export function PortalTopBar(props: {
       {isMobile ? (
         <Drawer
           placement="bottom"
-          title="Workbench actions"
+          title={t("topbar.actions")}
           open={mobileActionsOpen}
           onClose={() => setMobileActionsOpen(false)}
           height="auto"
@@ -229,7 +252,7 @@ export function PortalTopBar(props: {
           <div className="portal-topbar-mobile-actions-sheet">
             {showRuntimeSummary && props.runtimeSummary ? (
               <section className="portal-topbar-mobile-actions-summary">
-                <p className="portal-topbar-mobile-actions-eyebrow">Runtime</p>
+                <p className="portal-topbar-mobile-actions-eyebrow">{t("topbar.runtime")}</p>
                 <p className="portal-topbar-mobile-actions-detail">{props.runtimeSummary}</p>
               </section>
             ) : null}

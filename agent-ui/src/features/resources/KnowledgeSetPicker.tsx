@@ -1,4 +1,5 @@
 import type { KnowledgeSetOption } from "./types";
+import { usePortalI18n } from "../portal/i18n";
 
 type KnowledgeSetPickerProps = {
   knowledgeSets: KnowledgeSetOption[];
@@ -11,6 +12,7 @@ export function KnowledgeSetPicker({
   selectedIds,
   onChange
 }: KnowledgeSetPickerProps) {
+  const { t } = usePortalI18n();
   const toggleKnowledgeSet = (knowledgeSetId: string) => {
     const next = selectedIds.includes(knowledgeSetId)
       ? selectedIds.filter((item) => item !== knowledgeSetId)
@@ -19,16 +21,16 @@ export function KnowledgeSetPicker({
   };
 
   return (
-    <section className="knowledge-set-panel" aria-label="Knowledge sets">
+    <section className="knowledge-set-panel" aria-label={t("settings.knowledgeSets")}>
       <div className="knowledge-set-copy">
-        <h3>Knowledge Sets</h3>
-        <p>Select knowledge sets to mount for the current agent, or leave all unselected.</p>
+        <h3>{t("settings.knowledgeSets")}</h3>
+        <p>{t("settings.knowledgeHelp")}</p>
       </div>
 
       <div className="knowledge-set-group">
         <div className="knowledge-set-group-header">
-          <span className="knowledge-set-group-label">Available knowledge sets</span>
-          <span className="knowledge-set-group-hint">Only authorized items are shown</span>
+          <span className="knowledge-set-group-label">{t("settings.knowledgeAvailable")}</span>
+          <span className="knowledge-set-group-hint">{t("settings.knowledgeAuthorized")}</span>
         </div>
         {knowledgeSets.length > 0 ? (
           <div className="knowledge-set-option-list">
@@ -49,7 +51,7 @@ export function KnowledgeSetPicker({
             })}
           </div>
         ) : (
-          <p className="knowledge-set-empty">No knowledge sets are currently available.</p>
+          <p className="knowledge-set-empty">{t("settings.knowledgeEmpty")}</p>
         )}
       </div>
     </section>

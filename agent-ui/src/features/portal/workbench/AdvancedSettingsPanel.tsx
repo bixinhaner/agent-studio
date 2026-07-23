@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Drawer, Space, Typography } from "antd";
+import { usePortalI18n } from "../i18n";
 
 export function AdvancedSettingsPanel(props: {
   open: boolean;
@@ -8,9 +9,10 @@ export function AdvancedSettingsPanel(props: {
   reasoningLabel: string;
   children?: ReactNode;
 }) {
+  const { t } = usePortalI18n();
   return (
     <Drawer
-      title="Runtime settings"
+      title={t("topbar.settings")}
       placement="left"
       width="min(420px, calc(100vw - 16px))"
       open={props.open}
@@ -19,10 +21,10 @@ export function AdvancedSettingsPanel(props: {
       rootClassName="workbench-left-drawer"
     >
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
-        <Typography.Text strong>Model</Typography.Text>
+        <Typography.Text strong>{t("settings.model")}</Typography.Text>
         <Typography.Paragraph>{props.modelLabel}</Typography.Paragraph>
 
-        <Typography.Text strong>Reasoning</Typography.Text>
+        <Typography.Text strong>{t("settings.reasoning")}</Typography.Text>
         <Typography.Paragraph>{props.reasoningLabel}</Typography.Paragraph>
 
         {props.children}

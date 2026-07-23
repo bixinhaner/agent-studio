@@ -214,6 +214,16 @@ body.portal-workbench-mode {
   transform: scale(0.98);
 }
 
+.portal-topbar-language-btn.ant-btn {
+  width: auto;
+  min-width: 58px;
+  padding-inline: 9px;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 .portal-topbar-primary-btn.ant-btn {
   border-radius: 8px;
   font-weight: 500;
