@@ -28,6 +28,11 @@ const outageSkill: Skill = {
 };
 
 beforeAll(() => {
+  const getComputedStyle = window.getComputedStyle.bind(window);
+  Object.defineProperty(window, "getComputedStyle", {
+    configurable: true,
+    value: (element: Element) => getComputedStyle(element)
+  });
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query) => ({
@@ -60,6 +65,7 @@ describe("PortalSkillPicker", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /选择 Skill|Choose a Skill/ }));
+    expect(await screen.findByRole("dialog", { name: /选择 Skill|Choose a Skill/ })).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: /停电分析报告/ }));
     fireEvent.click(await screen.findByRole("button", { name: /启用 Skill|Enable Skill/ }));
 

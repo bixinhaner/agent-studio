@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Button, Drawer, Input, Popover, Tooltip } from "antd";
+import { Button, Drawer, Input, Modal, Tooltip } from "antd";
 import {
   ArrowLeft,
   BarChart3,
@@ -426,13 +426,13 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
     </div>
   );
 
-  const trigger = (mobileTrigger = false) => (
+  const trigger = (
     <button
       type="button"
       className={`portal-composer-skill-trigger${enabledSkillIds.length > 0 ? " is-active" : ""}`}
       aria-label={copy.title}
       aria-expanded={open}
-      onClick={mobileTrigger ? () => openPicker(true) : undefined}
+      onClick={() => openPicker(true)}
     >
       <Package size={16} aria-hidden="true" />
       <span className="portal-composer-skill-trigger-text">Skills</span>
@@ -442,7 +442,7 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
 
   return isMobile ? (
     <>
-      {trigger(true)}
+      {trigger}
       <Drawer
         open={open}
         placement="bottom"
@@ -456,18 +456,21 @@ export const PortalSkillPicker: FC<SkillPickerProps> = ({
       </Drawer>
     </>
   ) : (
-    <Popover
-      open={open}
-      onOpenChange={openPicker}
-      trigger="click"
-      placement="topLeft"
-      align={{ offset: [0, -64] }}
-      arrow={false}
-      overlayClassName="portal-skill-picker-popover"
-      content={panel}
-    >
-      {trigger()}
-    </Popover>
+    <>
+      {trigger}
+      <Modal
+        open={open}
+        centered
+        width={1040}
+        footer={null}
+        closable={false}
+        title={copy.title}
+        onCancel={() => openPicker(false)}
+        rootClassName="portal-skill-desktop-modal"
+      >
+        {panel}
+      </Modal>
+    </>
   );
 };
 
@@ -494,53 +497,55 @@ function SkillDetail({
   const copy = currentCopy(locale);
   return (
     <section className="portal-skill-detail-column" aria-label={`${skillTitle(skill)}${locale === "zh-CN" ? "详情" : " details"}`}>
-      {mobile ? (
-        <button type="button" className="portal-skill-mobile-back" onClick={onBack}>
-          <ArrowLeft size={16} aria-hidden="true" />{copy.back}
-        </button>
-      ) : null}
-      <div className="portal-skill-detail-title">
-        <SkillGlyph skill={skill} size={27} />
-        <span>
-          <strong>{skillTitle(skill)}</strong>
-          <code>{skill.name}</code>
-        </span>
-        <Tooltip title={copy.copied} trigger="click">
-          <button type="button" aria-label={locale === "zh-CN" ? "复制 Skill 名称" : "Copy Skill name"} onClick={() => void navigator.clipboard?.writeText(skill.name)}>
-            <Copy size={16} aria-hidden="true" />
+      <div className="portal-skill-detail-scroll">
+        {mobile ? (
+          <button type="button" className="portal-skill-mobile-back" onClick={onBack}>
+            <ArrowLeft size={16} aria-hidden="true" />{copy.back}
           </button>
-        </Tooltip>
-      </div>
-      <p className="portal-skill-detail-summary">{skillSummary(skill, copy)}</p>
-      <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</p>
+        ) : null}
+        <div className="portal-skill-detail-title">
+          <SkillGlyph skill={skill} size={27} />
+          <span>
+            <strong>{skillTitle(skill)}</strong>
+            <code>{skill.name}</code>
+          </span>
+          <Tooltip title={copy.copied} trigger="click">
+            <button type="button" aria-label={locale === "zh-CN" ? "复制 Skill 名称" : "Copy Skill name"} onClick={() => void navigator.clipboard?.writeText(skill.name)}>
+              <Copy size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        </div>
+        <p className="portal-skill-detail-summary">{skillSummary(skill, copy)}</p>
+        <p className="portal-skill-detail-scope"><ScopeIcon scope={skillScope(skill)} />{scopeLabel(skill, copy)}</p>
 
-      {skill.presentation.useCases.length > 0 ? (
-        <DetailSection title={copy.suitable}>
-          <ul>{skill.presentation.useCases.map((item) => <li key={item}>{item}</li>)}</ul>
-        </DetailSection>
-      ) : null}
-      {skill.presentation.usageSteps.length > 0 ? (
-        <DetailSection title={copy.how}>
-          <ol>{skill.presentation.usageSteps.map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol>
-        </DetailSection>
-      ) : null}
-      {skill.presentation.examplePrompts.length > 0 ? (
-        <DetailSection title={copy.examples}>
-          <div className="portal-skill-example-list">
-            {skill.presentation.examplePrompts.slice(0, 2).map((prompt) => (
-              <button key={prompt} type="button" onClick={() => onFill(prompt)}>
-                <Sparkles size={15} aria-hidden="true" />{prompt}
-              </button>
-            ))}
-          </div>
-        </DetailSection>
-      ) : null}
-      {skill.presentation.dataScope ? (
-        <DetailSection title={copy.data}>
-          <p>{skill.presentation.dataScope}</p>
-        </DetailSection>
-      ) : null}
-      {errorText ? <p className="portal-skill-error" role="alert">{errorText}</p> : null}
+        {skill.presentation.useCases.length > 0 ? (
+          <DetailSection title={copy.suitable}>
+            <ul>{skill.presentation.useCases.map((item) => <li key={item}>{item}</li>)}</ul>
+          </DetailSection>
+        ) : null}
+        {skill.presentation.usageSteps.length > 0 ? (
+          <DetailSection title={copy.how}>
+            <ol>{skill.presentation.usageSteps.map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol>
+          </DetailSection>
+        ) : null}
+        {skill.presentation.examplePrompts.length > 0 ? (
+          <DetailSection title={copy.examples}>
+            <div className="portal-skill-example-list">
+              {skill.presentation.examplePrompts.slice(0, 2).map((prompt) => (
+                <button key={prompt} type="button" onClick={() => onFill(prompt)}>
+                  <Sparkles size={15} aria-hidden="true" />{prompt}
+                </button>
+              ))}
+            </div>
+          </DetailSection>
+        ) : null}
+        {skill.presentation.dataScope ? (
+          <DetailSection title={copy.data}>
+            <p>{skill.presentation.dataScope}</p>
+          </DetailSection>
+        ) : null}
+        {errorText ? <p className="portal-skill-error" role="alert">{errorText}</p> : null}
+      </div>
       <div className="portal-skill-detail-actions">
         <Button onClick={() => onFill()} disabled={!skill.presentation.examplePrompts.length}>{copy.fill}</Button>
         <Button type="primary" loading={saving} onClick={onToggle}>

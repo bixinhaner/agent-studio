@@ -6244,7 +6244,9 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
 
   const refreshRuntimeOptionsNow = useCallback(async (): Promise<PortalRuntimeOptions | null> => {
     try {
-      const next = await api<PortalRuntimeOptions>("/api/portal/runtime-options");
+      const next = await api<PortalRuntimeOptions>("/api/portal/runtime-options", {
+        headers: { "Accept-Language": intlLocale }
+      });
       setRuntimeOptions(next);
       setRuntimeMode((prev) =>
         next.modes.some((item) => item.id === prev) ? prev : next.defaults.mode || next.modes[0]?.id || ""
@@ -6271,7 +6273,7 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
       setErrorText(error instanceof Error ? error.message : "Failed to load runtime policies");
       return null;
     }
-  }, []);
+  }, [intlLocale]);
 
   useEffect(() => {
     let active = true;

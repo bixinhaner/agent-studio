@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PortalRuntimeOptionService } from "./runtime-option-service.js";
 import type { NativeCodexSkillRecord } from "../codex-skills/native-codex-skill-service.js";
 import type { AgentModeRecord } from "../persistence/agent-mode-repository.js";
+import type { CodexManagedSkillRecord } from "../persistence/codex-skill-repository.js";
 import type { RunProfileRecord } from "../persistence/run-profile-repository.js";
 import type { SkillPackageRecord } from "../persistence/skill-package-repository.js";
 import type { SkillCatalogEntryRecord } from "../skill-catalog/types.js";
@@ -96,6 +97,73 @@ function nativeSkill(name: string): NativeCodexSkillRecord {
   };
 }
 
+function managedSkill(id: string, skillName: string): CodexManagedSkillRecord {
+  return {
+    id,
+    organizationId: "org_internal",
+    scope: "team",
+    skillName,
+    slug: skillName,
+    displayName: skillName,
+    description: `${skillName} managed source description`,
+    status: "active",
+    version: "1.0.0",
+    publishedPath: `/managed-skills/${skillName}`,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function managedSkillPackage(id: string, skillName: string, managedSkillId: string): SkillPackageRecord {
+  const record = skillPackage(id, skillName);
+  return {
+    ...record,
+    items: record.items.map((item) => ({
+      ...item,
+      runtimeBindings: item.runtimeBindings.map((binding) => ({
+        ...binding,
+        bindingPayload: { skillName, managedSkillId }
+      }))
+    }))
+  };
+}
+
+function catalogEntry(input: {
+  id: string;
+  sourceType: "native" | "managed";
+  sourceRef: string;
+  canonicalName: string;
+  organizationId?: string;
+  published?: boolean;
+  displayName: string;
+  summary: string;
+}): SkillCatalogEntryRecord {
+  return {
+    id: input.id,
+    catalogKey: `${input.sourceType}:${input.sourceRef}`,
+    organizationId: input.organizationId,
+    sourceType: input.sourceType,
+    sourceRef: input.sourceRef,
+    canonicalName: input.canonicalName,
+    defaultLocale: "zh-CN",
+    iconKey: "sparkles",
+    sortOrder: 100,
+    status: "active",
+    publishedAt: input.published ? now : undefined,
+    createdAt: now,
+    updatedAt: now,
+    translations: {
+      "zh-CN": {
+        displayName: input.displayName,
+        summary: input.summary,
+        useCases: [],
+        usageSteps: [],
+        examplePrompts: []
+      }
+    }
+  };
+}
+
 function createService(input: {
   modes?: AgentModeRecord[];
   runProfiles?: RunProfileRecord[];
@@ -104,6 +172,7 @@ function createService(input: {
   allowedByType?: Record<string, string[]>;
   recentSkillIds?: string[];
   catalogEntries?: SkillCatalogEntryRecord[];
+  managedSkills?: CodexManagedSkillRecord[];
 }) {
   const allowedByType = input.allowedByType ?? {};
   return new PortalRuntimeOptionService({
@@ -117,7 +186,7 @@ function createService(input: {
       list: async () => input.nativeSkills ?? [nativeSkill("allowed-skill"), nativeSkill("blocked-skill")]
     },
     managedSkills: {
-      listManagedSkills: async () => []
+      listManagedSkills: async () => input.managedSkills ?? []
     },
     policies: {
       filterAllowedResources: async ({ resourceType, candidateIds }: { resourceType: string; candidateIds: string[] }) => {
@@ -182,6 +251,108 @@ describe("PortalRuntimeOptionService", () => {
     });
 
     expect(result.recentSkillIds).toEqual(["allowed-skill", "blocked-skill"]);
+  });
+
+  it("inherits a published native presentation for an unpublished managed catalog placeholder", async () => {
+    const skillName = "shared-report";
+    const managedSkillId = "managed-shared-report";
+    const service = createService({
+      skillPackages: [managedSkillPackage("package-allowed", skillName, managedSkillId)],
+      managedSkills: [managedSkill(managedSkillId, skillName)],
+      nativeSkills: [nativeSkill(skillName)],
+      catalogEntries: [
+        catalogEntry({
+          id: "managed-catalog",
+          sourceType: "managed",
+          sourceRef: managedSkillId,
+          canonicalName: skillName,
+          organizationId: "org_internal",
+          displayName: skillName,
+          summary: "English auto-seeded source copy"
+        }),
+        catalogEntry({
+          id: "native-catalog",
+          sourceType: "native",
+          sourceRef: skillName,
+          canonicalName: skillName,
+          published: true,
+          displayName: "共享报告",
+          summary: "生成团队共享报告"
+        })
+      ],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-allowed"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: [],
+      locale: "zh-CN"
+    });
+
+    expect(result.modes[0]?.availableSkills[0]).toMatchObject({
+      managedSkillId,
+      scope: "team",
+      presentation: {
+        displayName: "共享报告",
+        summary: "生成团队共享报告",
+        resolvedLocale: "zh-CN"
+      }
+    });
+  });
+
+  it("keeps an explicitly published managed presentation ahead of the native catalog", async () => {
+    const skillName = "shared-report";
+    const managedSkillId = "managed-shared-report";
+    const service = createService({
+      skillPackages: [managedSkillPackage("package-allowed", skillName, managedSkillId)],
+      managedSkills: [managedSkill(managedSkillId, skillName)],
+      nativeSkills: [nativeSkill(skillName)],
+      catalogEntries: [
+        catalogEntry({
+          id: "managed-catalog",
+          sourceType: "managed",
+          sourceRef: managedSkillId,
+          canonicalName: skillName,
+          organizationId: "org_internal",
+          published: true,
+          displayName: "团队定制报告",
+          summary: "使用团队自定义口径生成报告"
+        }),
+        catalogEntry({
+          id: "native-catalog",
+          sourceType: "native",
+          sourceRef: skillName,
+          canonicalName: skillName,
+          published: true,
+          displayName: "平台共享报告",
+          summary: "平台默认介绍"
+        })
+      ],
+      allowedByType: {
+        agent_mode: ["mode-tech"],
+        run_profile: ["run-profile-tech"],
+        skill_package: ["package-allowed"]
+      }
+    });
+
+    const result = await service.resolve({
+      organizationId: "org_internal",
+      userId: "user-like",
+      roleIds: ["employee"],
+      departmentIds: [],
+      locale: "zh-CN"
+    });
+
+    expect(result.modes[0]?.availableSkills[0]?.presentation).toMatchObject({
+      displayName: "团队定制报告",
+      summary: "使用团队自定义口径生成报告"
+    });
   });
 
   it("still returns the agent mode when none of its skill packages are authorized", async () => {

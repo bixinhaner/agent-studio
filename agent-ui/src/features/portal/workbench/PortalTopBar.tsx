@@ -3,7 +3,7 @@ import { Button, Drawer, Space, Tooltip } from "antd";
 import {
   Ellipsis,
   CreditCard,
-  Languages,
+  Globe2,
   LayoutPanelLeft,
   MessageSquareText,
   PanelRightClose,
@@ -89,7 +89,7 @@ export function PortalTopBar(props: {
       {
         key: "language",
         label: t("language.switchTo"),
-        icon: <Languages size={18} />,
+        icon: <Globe2 size={18} />,
         onClick: () => {
           setMobileActionsOpen(false);
           toggleLocale();
@@ -203,12 +203,10 @@ export function PortalTopBar(props: {
                 <Button
                   type="text"
                   className="portal-topbar-ghost-btn portal-topbar-language-btn"
-                  icon={<Languages size={17} />}
+                  icon={<Globe2 size={18} />}
                   onClick={toggleLocale}
                   aria-label={t("language.switchTo")}
-                >
-                  {t("language.short")}
-                </Button>
+                />
               </Tooltip>
             ) : null}
             {showRightPanelToggle ? (

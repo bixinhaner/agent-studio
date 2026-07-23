@@ -235,13 +235,24 @@ function toManagedRuntimeSkill(
   locale: string | undefined,
   activationPrompt?: string,
 ): PortalRuntimeOptionSkill {
+  const managedCatalogEntry = selectCatalogEntry({
+    entries: catalogEntries,
+    organizationId: managedSkill.organizationId,
+    sourceType: "managed",
+    sourceRef: managedSkill.id
+  });
+  const inheritedNativeCatalogEntry = catalogEntries.find(
+    (entry) =>
+      entry.status === "active" &&
+      entry.sourceType === "native" &&
+      Boolean(entry.publishedAt) &&
+      skillNameKey(entry.canonicalName) === skillNameKey(managedSkill.skillName)
+  );
+  const catalogEntry = managedCatalogEntry?.publishedAt
+    ? managedCatalogEntry
+    : inheritedNativeCatalogEntry ?? managedCatalogEntry;
   const presentation = resolveSkillCatalogPresentation({
-    entry: selectCatalogEntry({
-      entries: catalogEntries,
-      organizationId: managedSkill.organizationId,
-      sourceType: "managed",
-      sourceRef: managedSkill.id
-    }),
+    entry: catalogEntry,
     requestedLocale: locale,
     canonicalName: managedSkill.skillName,
     sourceDescription: managedSkill.description
