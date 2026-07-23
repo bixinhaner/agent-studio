@@ -131,7 +131,7 @@ function managedSkillPackage(id: string, skillName: string, managedSkillId: stri
 
 function catalogEntry(input: {
   id: string;
-  sourceType: "native" | "managed";
+  sourceType: "native" | "managed" | "plugin";
   sourceRef: string;
   canonicalName: string;
   organizationId?: string;
