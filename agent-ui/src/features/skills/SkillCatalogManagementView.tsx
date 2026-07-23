@@ -172,7 +172,7 @@ export function SkillCatalogManagementView() {
       return !normalized || [entry.canonicalName, content.displayName, content.summary].filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized);
     });
   }, [entries, language, query, scope, status]);
-  const selected = entries.find((entry) => entry.id === selectedId) ?? filtered[0];
+  const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered[0];
   const editing = entries.find((entry) => entry.id === editingId);
 
   if (editing) {
