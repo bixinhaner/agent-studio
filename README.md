@@ -200,6 +200,16 @@ Deployment scopes:
 - `scripts/deploy-agent-studio.sh --chat-only`: rebuilds the backend, enables deployment drain, waits for active chat/runtime turns, and restarts only `agent-studio-chat-api`.
 - `scripts/deploy-agent-studio.sh --all`: full deploy; this remains the default for production updates that touch shared backend, chat, Caddy, or frontend assets.
 
+Artifact plugins use one shared runtime instead of copying dependencies into every conversation workspace. Build the Linux runtime archive from a Codex workspace dependency bundle, then place it at the deployment script's default path:
+
+```bash
+scripts/build-shared-codex-runtime-archive.sh \
+  --source /path/to/codex-primary-runtime \
+  --output /usr/local/agent-studio/runtime-bundles/codex-primary-runtime-linux-x86_64.tar.gz
+```
+
+`SHARED_CODEX_RUNTIME_ARCHIVE` and `SHARED_CODEX_RUNTIME_ROOT` override these paths. Chat deployments scan current and historical plugin homes, install missing shared Python packages, validate plugin commands and Node packages, and stop before restart if a required runtime remains unavailable. `scripts/doctor.sh` runs the same audit.
+
 Before deploying publicly, configure a real domain, HTTPS, secure cookies, SMTP delivery, provider credentials, durable upload/storage paths, and a production PostgreSQL database.
 
 ## Public Access Flow

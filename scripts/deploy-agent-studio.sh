@@ -669,7 +669,11 @@ ensure_shared_python_runtime_dirs() {
     "$SHARED_PYTHON_PIP_CACHE_ROOT" \
     "$SHARED_ARGOS_PACKAGE_ROOT" \
     "$SHARED_ARGOS_DOWNLOAD_ROOT"
-  run_as_root chown -R "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+  run_as_root chown "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+  run_as_root chown -R "$APP_USER:$APP_GROUP" \
+    "$(dirname "$SHARED_PYTHON_RUNTIME_ROOT")" \
+    "$SHARED_ARGOS_PACKAGE_ROOT" \
+    "$SHARED_ARGOS_DOWNLOAD_ROOT"
 }
 
 migrate_legacy_translate_packages() {
@@ -687,7 +691,7 @@ migrate_legacy_translate_packages() {
   log_step "Migrating legacy translate packages into shared Python runtime"
   run_as_root rmdir "$SHARED_PYTHON_RUNTIME_ROOT"
   run_as_root mv "$legacy_path" "$SHARED_PYTHON_RUNTIME_ROOT"
-  run_as_root chown -R "$APP_USER:$APP_GROUP" "$SHARED_RUNTIME_ROOT"
+  run_as_root chown -R "$APP_USER:$APP_GROUP" "$SHARED_PYTHON_RUNTIME_ROOT"
 }
 
 ensure_legacy_translate_symlink() {
@@ -736,6 +740,78 @@ ensure_shared_python_runtime() {
   fi
 
   ensure_legacy_translate_symlink
+}
+
+plugin_runtime_check_command() {
+  local roots=(
+    "$APP_HOME/.codex"
+    "$APP_API_DIR/temp/codex-homes"
+  )
+  local command=(
+    node "$script_dir/check-plugin-runtime.mjs"
+    --requirements "$script_dir/plugin-runtime-requirements.json"
+    --node-modules "$SHARED_CODEX_RUNTIME_NODE_MODULES"
+    --python-root "$SHARED_PYTHON_RUNTIME_ROOT"
+  )
+  local root
+  for root in "${roots[@]}"; do
+    [[ -e "$root" ]] || continue
+    command+=(--plugin-root "$root")
+  done
+  shell_join "${command[@]}"
+}
+
+check_plugin_runtime() {
+  local command
+  command="$(plugin_runtime_check_command)"
+  run_as_app_user_shell "$command"
+}
+
+install_shared_codex_runtime_archive() {
+  [[ -f "$SHARED_CODEX_RUNTIME_ARCHIVE" ]] ||
+    die "shared Codex runtime is incomplete and archive is missing: $SHARED_CODEX_RUNTIME_ARCHIVE"
+
+  log_step "Installing shared Codex plugin runtime"
+  local runtime_parent staging previous
+  runtime_parent="$(dirname "$SHARED_CODEX_RUNTIME_ROOT")"
+  staging="$runtime_parent/.codex-primary-runtime.$$.staging"
+  previous="$runtime_parent/.codex-primary-runtime.$$.previous"
+  run_as_root mkdir -p "$runtime_parent"
+  run_as_root rm -rf "$staging" "$previous"
+  run_as_root mkdir -p "$staging"
+  if run_as_root tar -tzf "$SHARED_CODEX_RUNTIME_ARCHIVE" |
+    grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+    die "shared Codex runtime archive contains an unsafe path: $SHARED_CODEX_RUNTIME_ARCHIVE"
+  fi
+  run_as_root tar -xzf "$SHARED_CODEX_RUNTIME_ARCHIVE" -C "$staging"
+  [[ -d "$staging/dependencies/node/node_modules" ]] ||
+    die "shared Codex runtime archive has an invalid layout: $SHARED_CODEX_RUNTIME_ARCHIVE"
+  run_as_root chown -R root:root "$staging"
+  run_as_root chmod -R a-w "$staging"
+  if [[ -e "$SHARED_CODEX_RUNTIME_ROOT" ]]; then
+    run_as_root mv "$SHARED_CODEX_RUNTIME_ROOT" "$previous"
+  fi
+  run_as_root mv "$staging" "$SHARED_CODEX_RUNTIME_ROOT"
+  if check_plugin_runtime; then
+    run_as_root rm -rf "$previous"
+    return 0
+  fi
+  run_as_root rm -rf "$SHARED_CODEX_RUNTIME_ROOT"
+  if [[ -e "$previous" ]]; then
+    run_as_root mv "$previous" "$SHARED_CODEX_RUNTIME_ROOT"
+  fi
+  die "installed plugin runtime check failed after shared runtime installation"
+}
+
+ensure_shared_plugin_runtime() {
+  log_step "Checking installed plugin runtime requirements"
+  run_as_root mkdir -p "$SHARED_CODEX_RUNTIME_ROOT"
+  if check_plugin_runtime; then
+    log_info "Installed plugin runtimes are ready"
+    return 0
+  fi
+
+  install_shared_codex_runtime_archive
 }
 
 build_backend() {
@@ -847,6 +923,7 @@ main() {
   git_update
   if deploy_restarts_chat; then
     ensure_shared_python_runtime
+    ensure_shared_plugin_runtime
   fi
   if deploy_builds_backend; then
     build_backend

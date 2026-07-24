@@ -155,6 +155,21 @@ check_document_render_runtime() {
   fc-match "Noto Sans CJK SC" | head -n 1
 }
 
+check_plugin_runtime() {
+  local command=(
+    node "$APP_REPO_DIR/scripts/check-plugin-runtime.mjs"
+    --requirements "$APP_REPO_DIR/scripts/plugin-runtime-requirements.json"
+    --node-modules "$SHARED_CODEX_RUNTIME_NODE_MODULES"
+    --python-root "$SHARED_PYTHON_RUNTIME_ROOT"
+  )
+  local root
+  for root in "$APP_HOME/.codex" "$APP_API_DIR/temp/codex-homes"; do
+    [[ -e "$root" ]] || continue
+    command+=(--plugin-root "$root")
+  done
+  run_as_app_user_shell "$(shell_join "${command[@]}")"
+}
+
 check_build_outputs() {
   test -f "$APP_API_DIR/dist/codex-runtime.js"
   test -f "$APP_UI_DIR/dist/index.html"
@@ -189,6 +204,7 @@ main() {
   try_run "chat health check" curl --fail --silent --show-error "http://$API_HOST:$CHAT_API_PORT/healthz"
   try_run "caddy validate" caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile
   try_run "document render runtime" check_document_render_runtime
+  try_run "installed plugin runtimes" check_plugin_runtime
   try_run "prisma migrate status" run_as_app_user_shell "cd '$APP_API_DIR' && npx prisma migrate status"
 
   if [[ -f "$BACKEND_ENV_FILE" ]]; then

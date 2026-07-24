@@ -26,7 +26,16 @@ describe("tool runtime env", () => {
       root: path.join(workspace, ".agent-studio", "tmp"),
       home: path.join(workspace, ".agent-studio", "tmp", "home"),
       cache: path.join(workspace, ".agent-studio", "tmp", "cache"),
-      config: path.join(workspace, ".agent-studio", "tmp", "config")
+      config: path.join(workspace, ".agent-studio", "tmp", "config"),
+      codexRuntimeLink: path.join(
+        workspace,
+        ".agent-studio",
+        "tmp",
+        "home",
+        ".cache",
+        "codex-runtimes",
+        "codex-primary-runtime"
+      )
     });
     await expect(fs.stat(paths!.home)).resolves.toBeTruthy();
     await expect(fs.stat(paths!.cache)).resolves.toBeTruthy();
@@ -43,6 +52,36 @@ describe("tool runtime env", () => {
       XDG_CONFIG_HOME: path.join(workspace, ".agent-studio", "tmp", "config")
     });
     expect(env).not.toHaveProperty("CODEX_HOME");
+  });
+
+  it("maps the shared Codex runtime into an isolated workspace home", async () => {
+    const workspace = await makeTempDir("agent-studio-tool-runtime-link-");
+    const sharedRuntime = await makeTempDir("agent-studio-shared-codex-runtime-");
+
+    const paths = await ensureToolRuntimeEnvDirs(workspace, sharedRuntime);
+    await expect(fs.realpath(paths!.codexRuntimeLink)).resolves.toBe(await fs.realpath(sharedRuntime));
+
+    await ensureToolRuntimeEnvDirs(workspace, sharedRuntime);
+    await expect(fs.realpath(paths!.codexRuntimeLink)).resolves.toBe(await fs.realpath(sharedRuntime));
+  });
+
+  it("repairs a stale shared Codex runtime symlink", async () => {
+    const workspace = await makeTempDir("agent-studio-tool-runtime-stale-");
+    const previousRuntime = await makeTempDir("agent-studio-shared-codex-previous-");
+    const nextRuntime = await makeTempDir("agent-studio-shared-codex-next-");
+
+    const paths = await ensureToolRuntimeEnvDirs(workspace, previousRuntime);
+    await ensureToolRuntimeEnvDirs(workspace, nextRuntime);
+
+    await expect(fs.realpath(paths!.codexRuntimeLink)).resolves.toBe(await fs.realpath(nextRuntime));
+  });
+
+  it("fails clearly when the shared Codex runtime is missing", async () => {
+    const workspace = await makeTempDir("agent-studio-tool-runtime-missing-");
+
+    await expect(
+      ensureToolRuntimeEnvDirs(workspace, path.join(workspace, "missing-runtime"))
+    ).rejects.toThrow("shared Codex runtime is missing");
   });
 
   it("does not inject env without workspace", async () => {

@@ -10,6 +10,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const apiDir = path.join(root, "agent-api");
 const uiDir = path.join(root, "agent-ui");
 const composeFile = path.join(root, "docker-compose.dev.yml");
+const bundledCodexRuntime = path.join(
+  process.env.HOME || "",
+  ".cache",
+  "codex-runtimes",
+  "codex-primary-runtime"
+);
+const localCodexRuntime = fs.existsSync(bundledCodexRuntime)
+  ? bundledCodexRuntime
+  : path.join(apiDir, "temp", "shared-runtime", "codex", "codex-primary-runtime");
 
 const apiEnvDefaults = {
   NODE_ENV: "development",
@@ -26,7 +35,8 @@ const apiEnvDefaults = {
   WORKSPACE_WHITELIST: "..",
   APP_BASE_URL: "http://127.0.0.1:5173",
   AUTH_EMAIL_DEBUG: "true",
-  ORG_SYNC_ENABLED: "false"
+  ORG_SYNC_ENABLED: "false",
+  SHARED_CODEX_RUNTIME_ROOT: localCodexRuntime
 };
 
 function run(command, args, options = {}) {
@@ -114,6 +124,7 @@ function spawnService(name, command, args, cwd) {
 }
 
 async function main() {
+  fs.mkdirSync(localCodexRuntime, { recursive: true });
   ensureEnvFile(path.join(apiDir, ".env"), apiEnvDefaults);
 
   console.log("Starting local Postgres...");

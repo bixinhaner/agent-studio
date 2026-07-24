@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "plugins": {
+    "documents": {
+      "commands": ["python3", "soffice", "pdftoppm"],
+      "pythonImports": ["docx", "PIL"]
+    },
+    "pdf": {
+      "commands": ["python3", "pdftoppm", "pdfinfo"],
+      "pythonImports": ["reportlab", "pdfplumber", "pypdf"]
+    },
+    "presentations": {
+      "commands": ["node", "python3", "soffice", "pdftoppm", "pdfinfo"],
+      "nodePackages": [
+        {
+          "name": "@oai/artifact-tool",
+          "minimumVersion": "2.7.3",
+          "entrypoints": ["dist/node/artifact_tool.mjs", "dist/artifact_tool.mjs"]
+        },
+        {
+          "name": "lucide",
+          "entrypoints": ["dist/cjs/lucide.js", "dist/umd/lucide.js", "dist/esm/lucide.js"]
+        }
+      ],
+      "pythonImports": ["PIL"]
+    },
+    "spreadsheets": {
+      "commands": ["node", "python3"],
+      "nodePackages": [
+        {
+          "name": "@oai/artifact-tool",
+          "minimumVersion": "2.7.3",
+          "entrypoints": ["dist/node/artifact_tool.mjs", "dist/artifact_tool.mjs"]
+        }
+      ],
+      "pythonImports": ["pandas", "pypdf", "docx", "reportlab"]
+    },
+    "template-creator": {
+      "commands": ["python3", "soffice", "pdftoppm", "pdfinfo"],
+      "pythonImports": ["docx", "pptx", "openpyxl", "PIL"]
+    }
+  }
+}

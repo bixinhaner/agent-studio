@@ -2785,7 +2785,7 @@ async function resolveRuntimeLaunchConfig(input: {
     await ensureRuntimeWorkspaceTmp(input.workspace);
   }
   if (input.workspace) {
-    await ensureToolRuntimeEnvDirs(input.workspace);
+    await ensureToolRuntimeEnvDirs(input.workspace, appConfig.sharedCodexRuntime.runtimeRoot);
   }
   const toolEnv = buildToolRuntimeEnv({
     workspace: input.workspace

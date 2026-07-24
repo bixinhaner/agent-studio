@@ -13,6 +13,7 @@ REQUIRED_CHECKS = {
     "pptx": "python-pptx",
     "pypdf": "pypdf",
     "pdfplumber": "pdfplumber",
+    "reportlab": "reportlab",
     "fitz": "pymupdf",
     "PIL": "pillow",
 }

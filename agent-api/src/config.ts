@@ -63,6 +63,7 @@ const schema = z.object({
   CODEX_SKILL_DRAFT_ROOT: z.string().default("./temp/skill-drafts"),
   SHARED_PYTHON_RUNTIME_ROOT: z.string().optional(),
   SHARED_PYTHON_PIP_CACHE_ROOT: z.string().optional(),
+  SHARED_CODEX_RUNTIME_ROOT: z.string().optional(),
   SHARED_ARGOS_PACKAGE_ROOT: z.string().optional(),
   SHARED_ARGOS_DOWNLOAD_ROOT: z.string().optional(),
   AGENT_STUDIO_DEPLOY_DRAIN_FILE: z.string().default("./temp/deploy-drain.json")
@@ -140,6 +141,10 @@ const localSharedRoot = "./temp/shared-runtime";
 const sharedRoot = env.NODE_ENV === "production" ? productionSharedRoot : localSharedRoot;
 const sharedPythonRuntimeRoot = resolveRuntimePath(env.SHARED_PYTHON_RUNTIME_ROOT, path.join(sharedRoot, "python", "runtime"));
 const sharedPythonPipCacheRoot = resolveRuntimePath(env.SHARED_PYTHON_PIP_CACHE_ROOT, path.join(sharedRoot, "python", "pip-cache"));
+const sharedCodexRuntimeRoot = resolveRuntimePath(
+  env.SHARED_CODEX_RUNTIME_ROOT,
+  path.join(sharedRoot, "codex", "codex-primary-runtime")
+);
 const sharedArgosPackageRoot = resolveRuntimePath(env.SHARED_ARGOS_PACKAGE_ROOT, path.join(sharedRoot, "argos", "packages"));
 const sharedArgosDownloadRoot = resolveRuntimePath(env.SHARED_ARGOS_DOWNLOAD_ROOT, path.join(sharedRoot, "argos", "downloads"));
 
@@ -261,6 +266,9 @@ export const appConfig = {
     pipCacheRoot: sharedPythonPipCacheRoot,
     argosPackageRoot: sharedArgosPackageRoot,
     argosDownloadRoot: sharedArgosDownloadRoot
+  },
+  sharedCodexRuntime: {
+    runtimeRoot: sharedCodexRuntimeRoot
   },
   deployDrainFile,
   orgSync: {
