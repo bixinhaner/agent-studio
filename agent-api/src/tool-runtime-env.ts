@@ -54,12 +54,57 @@ async function ensureDirectorySymlink(linkPath: string, targetPath: string): Pro
   await fs.symlink(targetPath, linkPath, "dir");
 }
 
+async function ensureSharedNodePackageLink(linkPath: string, targetPath: string): Promise<void> {
+  await fs.mkdir(path.dirname(linkPath), { recursive: true });
+  try {
+    const current = await fs.lstat(linkPath);
+    if (!current.isSymbolicLink()) return;
+    const resolved = path.resolve(path.dirname(linkPath), await fs.readlink(linkPath));
+    if (resolved === path.resolve(targetPath)) return;
+    await fs.unlink(linkPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw error;
+  }
+  await fs.symlink(targetPath, linkPath, "dir");
+}
+
+async function ensureSharedNodeModuleLinks(workspace: string, sharedRuntimeRoot: string): Promise<void> {
+  const sharedNodeModules = path.join(sharedRuntimeRoot, "dependencies", "node", "node_modules");
+  const stat = await fs.stat(sharedNodeModules).catch(() => undefined);
+  if (!stat?.isDirectory()) {
+    throw new Error(`shared Node runtime is missing or is not a directory: ${sharedNodeModules}`);
+  }
+
+  const workspaceNodeModules = path.join(workspace, "node_modules");
+  await fs.mkdir(workspaceNodeModules, { recursive: true });
+  for (const entry of await fs.readdir(sharedNodeModules, { withFileTypes: true })) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const sharedEntry = path.join(sharedNodeModules, entry.name);
+    if (!entry.name.startsWith("@")) {
+      await ensureSharedNodePackageLink(path.join(workspaceNodeModules, entry.name), sharedEntry);
+      continue;
+    }
+
+    const workspaceScope = path.join(workspaceNodeModules, entry.name);
+    await fs.mkdir(workspaceScope, { recursive: true });
+    for (const scopedEntry of await fs.readdir(sharedEntry, { withFileTypes: true })) {
+      if (!scopedEntry.isDirectory() && !scopedEntry.isSymbolicLink()) continue;
+      await ensureSharedNodePackageLink(
+        path.join(workspaceScope, scopedEntry.name),
+        path.join(sharedEntry, scopedEntry.name)
+      );
+    }
+  }
+}
+
 export async function ensureToolRuntimeEnvDirs(
   workspace?: string,
   sharedCodexRuntimeRoot?: string
 ): Promise<ToolRuntimeEnvPaths | undefined> {
-  const paths = toolRuntimeEnvPaths(workspace);
-  if (!paths) return undefined;
+  const workspaceRoot = workspace?.trim();
+  if (!workspaceRoot) return undefined;
+  const paths = toolRuntimeEnvPaths(workspaceRoot)!;
   await Promise.all([
     fs.mkdir(paths.home, { recursive: true }),
     fs.mkdir(paths.cache, { recursive: true }),
@@ -72,6 +117,7 @@ export async function ensureToolRuntimeEnvDirs(
       throw new Error(`shared Codex runtime is missing or is not a directory: ${sharedRuntime}`);
     }
     await ensureDirectorySymlink(paths.codexRuntimeLink, sharedRuntime);
+    await ensureSharedNodeModuleLinks(workspaceRoot, sharedRuntime);
   }
   return paths;
 }
