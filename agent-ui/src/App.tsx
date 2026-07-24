@@ -12,10 +12,8 @@ import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
 import { fetchPublicExternalWebAccessState } from "./features/external-web-access/api";
-import {
-  EXTERNAL_WEB_MAINTENANCE_EVENT,
-  EXTERNAL_WEB_MAINTENANCE_MESSAGE
-} from "./lib/api";
+import { MaintenancePage } from "./features/external-web-access/MaintenancePage";
+import { EXTERNAL_WEB_MAINTENANCE_EVENT } from "./lib/api";
 import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
@@ -36,16 +34,6 @@ const PublicSharePageLazy = lazy(() =>
 function PortalLoadingFallback() {
   const { t } = usePortalI18n();
   return <div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>{t("common.loadingWorkspace")}</p></div></div>;
-}
-
-function MaintenancePage() {
-  return (
-    <main className="auth-modern-screen">
-      <div className="auth-maintenance-message" role="status">
-        {EXTERNAL_WEB_MAINTENANCE_MESSAGE}
-      </div>
-    </main>
-  );
 }
 
 function AccessStateLoadingFallback() {
