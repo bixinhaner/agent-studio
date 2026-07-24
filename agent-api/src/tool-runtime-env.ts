@@ -51,7 +51,17 @@ async function ensureDirectorySymlink(linkPath: string, targetPath: string): Pro
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") throw error;
   }
-  await fs.symlink(targetPath, linkPath, "dir");
+  try {
+    await fs.symlink(targetPath, linkPath, "dir");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const current = await fs.lstat(linkPath);
+    if (!current.isSymbolicLink()) {
+      throw new Error(`runtime mapping path is occupied by a non-symlink: ${linkPath}`);
+    }
+    const resolved = path.resolve(path.dirname(linkPath), await fs.readlink(linkPath));
+    if (resolved !== path.resolve(targetPath)) throw error;
+  }
 }
 
 async function ensureSharedNodePackageLink(linkPath: string, targetPath: string): Promise<void> {
@@ -66,7 +76,15 @@ async function ensureSharedNodePackageLink(linkPath: string, targetPath: string)
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") throw error;
   }
-  await fs.symlink(targetPath, linkPath, "dir");
+  try {
+    await fs.symlink(targetPath, linkPath, "dir");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const current = await fs.lstat(linkPath);
+    if (!current.isSymbolicLink()) return;
+    const resolved = path.resolve(path.dirname(linkPath), await fs.readlink(linkPath));
+    if (resolved !== path.resolve(targetPath)) throw error;
+  }
 }
 
 async function ensureSharedNodeModuleLinks(workspace: string, sharedRuntimeRoot: string): Promise<void> {

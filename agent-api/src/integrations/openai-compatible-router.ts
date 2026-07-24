@@ -893,6 +893,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
           runtime: requestRuntime,
           thread,
           prompt,
+          workspace: workspacePath,
           memory: {
             channel: "openai_compatible_api",
             prompt,
@@ -953,6 +954,7 @@ export function createOpenAICompatibleRouter(options: OpenAICompatibleRouterOpti
         runtime: requestRuntime,
         thread,
         prompt,
+        workspace: workspacePath,
         memory: {
           channel: "openai_compatible_api",
           prompt,

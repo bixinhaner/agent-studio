@@ -28,6 +28,9 @@ export type CodexRuntimeTurnTrackerInput = {
 export type CodexRuntimeTurnTracker = {
   start(input: CodexRuntimeTurnTrackerInput): () => void;
 };
+export type CodexRuntimeWorkspacePreparer = {
+  prepare(workspace: string): Promise<void>;
+};
 export type CodexTraceKind = "reasoning" | "tool" | "source" | "meta" | "process" | "done" | "error" | "debug";
 export type CodexTraceRow = {
   id?: string;
@@ -701,6 +704,7 @@ export class CodexExecutionService {
   constructor(private readonly dependencies: {
     memory?: CodexMemoryRunRecorder;
     runtimeTurnTracker?: CodexRuntimeTurnTracker;
+    runtimeWorkspace?: CodexRuntimeWorkspacePreparer;
   } = {}) {}
 
   private enqueueMemoryRun(input: CodexCompletionMemoryInput | undefined, result: CodexCompletionResult): void {
@@ -769,6 +773,7 @@ export class CodexExecutionService {
     runtime: RuntimeStreamSource<TThread>;
     thread: TThread;
     prompt: string;
+    workspace?: string;
     enterpriseContext?: EnterpriseContextResolution;
     memory?: CodexCompletionMemoryInput;
     signal?: AbortSignal;
@@ -776,6 +781,9 @@ export class CodexExecutionService {
   }): Promise<void> {
     const finishRuntimeTurn = this.startRuntimeTurn("stream", input.memory);
     try {
+      if (input.workspace) {
+        await this.dependencies.runtimeWorkspace?.prepare(input.workspace);
+      }
       await streamRuntimeCompletionWithBestEffortUsage({
         events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext), {
           ...input.turnOptions,
@@ -803,6 +811,7 @@ export class CodexExecutionService {
     runtime: RuntimeStreamSource<TThread>;
     thread: TThread;
     prompt: string;
+    workspace?: string;
     textMode?: RuntimeCompletionTextMode;
     onEvent?(event: RuntimeStreamEvent): void | Promise<void>;
     onUsage?(usage: RuntimeUsageSnapshot, event: RuntimeStreamEvent): void | Promise<void>;
@@ -812,6 +821,9 @@ export class CodexExecutionService {
   }): Promise<CodexCompletionResult> {
     const finishRuntimeTurn = this.startRuntimeTurn("collect", input.memory);
     try {
+      if (input.workspace) {
+        await this.dependencies.runtimeWorkspace?.prepare(input.workspace);
+      }
       const result = await collectRuntimeCompletion({
         events: input.runtime.runStreamed(input.thread, applyEnterpriseContextToPrompt(input.prompt, input.enterpriseContext)),
         textMode: input.textMode,

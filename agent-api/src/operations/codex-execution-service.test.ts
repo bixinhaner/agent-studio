@@ -161,6 +161,31 @@ describe("CodexExecutionService", () => {
     expect(finish).toHaveBeenCalledTimes(1);
   });
 
+  it("prepares the workspace before every streamed runtime turn", async () => {
+    const prepare = vi.fn(async () => undefined);
+    const runStreamed = vi.fn(async function* () {
+      yield {
+        type: "message.delta",
+        delta: "answer"
+      };
+    });
+    const service = new CodexExecutionService({
+      runtimeWorkspace: { prepare }
+    });
+
+    await service.streamFromRuntime({
+      runtime: { runStreamed },
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      workspace: "/tmp/existing-workspace",
+      onEvent: vi.fn(),
+      onDone: vi.fn()
+    });
+
+    expect(prepare).toHaveBeenCalledWith("/tmp/existing-workspace");
+    expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(runStreamed.mock.invocationCallOrder[0]);
+  });
+
   it("releases tracked streamed runtime turns when abort cleanup hangs", async () => {
     const finish = vi.fn();
     const service = new CodexExecutionService({
@@ -233,6 +258,32 @@ describe("CodexExecutionService", () => {
     })).rejects.toThrow("runtime failed");
 
     expect(finish).toHaveBeenCalledTimes(1);
+  });
+
+  it("prepares the workspace before every collected runtime turn", async () => {
+    const prepare = vi.fn(async () => undefined);
+    const runStreamed = vi.fn(async function* () {
+      yield {
+        type: "message.completed",
+        message: {
+          role: "assistant",
+          content: "answer"
+        }
+      };
+    });
+    const service = new CodexExecutionService({
+      runtimeWorkspace: { prepare }
+    });
+
+    await service.collectFromRuntime({
+      runtime: { runStreamed },
+      thread: { id: "thread-1" },
+      prompt: "answer",
+      workspace: "/tmp/existing-workspace"
+    });
+
+    expect(prepare).toHaveBeenCalledWith("/tmp/existing-workspace");
+    expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(runStreamed.mock.invocationCallOrder[0]);
   });
 
   it("projects runtime reasoning and tool events into common trace rows", () => {

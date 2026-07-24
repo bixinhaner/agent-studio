@@ -2545,6 +2545,7 @@ export class ZendeskIntegrationService {
         runtime,
         thread: currentThread,
         prompt,
+        workspace: runtimeOptions.workspace,
         textMode: "first",
         memory: {
           channel: "zendesk",

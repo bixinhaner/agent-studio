@@ -125,6 +125,22 @@ describe("tool runtime env", () => {
     );
   });
 
+  it("supports concurrent per-turn preparation for the same workspace", async () => {
+    const workspace = await makeTempDir("agent-studio-tool-runtime-concurrent-");
+    const sharedRuntime = await makeSharedRuntime("agent-studio-shared-codex-concurrent-");
+
+    await Promise.all(
+      Array.from({ length: 8 }, () => ensureToolRuntimeEnvDirs(workspace, sharedRuntime))
+    );
+
+    await expect(fs.realpath(path.join(workspace, "node_modules", "@oai", "artifact-tool"))).resolves.toBe(
+      await fs.realpath(path.join(sharedRuntime, "dependencies", "node", "node_modules", "@oai", "artifact-tool"))
+    );
+    await expect(fs.realpath(path.join(workspace, "node_modules", "lucide"))).resolves.toBe(
+      await fs.realpath(path.join(sharedRuntime, "dependencies", "node", "node_modules", "lucide"))
+    );
+  });
+
   it("fails clearly when the shared Codex runtime is missing", async () => {
     const workspace = await makeTempDir("agent-studio-tool-runtime-missing-");
 

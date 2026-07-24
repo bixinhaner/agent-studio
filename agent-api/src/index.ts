@@ -410,6 +410,11 @@ const codexExecution = new CodexExecutionService({
   runtimeTurnTracker: {
     start: startTrackedRuntimeTurn
   },
+  runtimeWorkspace: {
+    async prepare(workspace) {
+      await ensureToolRuntimeEnvDirs(workspace, appConfig.sharedCodexRuntime.runtimeRoot);
+    }
+  },
   memory: {
     enqueueRun(input) {
       codexMemoryEngine.enqueueRun(input);
@@ -3411,6 +3416,7 @@ async function runCodexChannelTurn(input: CodexChannelTurnInput): Promise<CodexC
       runtime,
       thread: liveThread,
       prompt: runtimeMessage,
+      workspace: currentSession.workspace,
       enterpriseContext: enterpriseRunContext,
       signal: input.signal,
       memory: {
@@ -11507,6 +11513,7 @@ app.post("/api/chat/stream", async (req: Request, res: Response) => {
       runtime,
       thread: ensuredLiveThread,
       prompt: runtimeMessage,
+      workspace: currentSession.workspace,
       enterpriseContext: enterpriseRunContext,
       signal: runAbort.signal,
       turnOptions: {
