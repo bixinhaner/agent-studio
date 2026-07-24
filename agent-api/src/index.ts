@@ -55,6 +55,11 @@ import { CodexRuntime } from "./codex-runtime.js";
 import { presentCodexRuntimeError } from "./codex-runtime-user-error.js";
 import { CodexModelCatalogService } from "./codex-model-catalog.js";
 import { isAppServerRuntimeEnabled, shutdownCodexAppServerRuntime } from "./codex-app-server-runtime.js";
+import {
+  assertCodexThreadContinuity,
+  resolveCodexThreadContinuity,
+  resolveCodexThreadContinuityWithHistory
+} from "./codex-thread-continuity.js";
 import { applyCodexMemoryToProviderSnapshot, mergeCodexConfig } from "./codex-memory-config.js";
 import {
   CodexMemoryEngine,
@@ -2039,11 +2044,13 @@ async function persistSessionCodexThreadId(session: SessionRecord, codexThreadId
   }
   try {
     if (session.threadId) {
-      const portalThread = await threads.get(session.threadId, session.organizationId);
-      const existingBinding = trimOrUndefined(portalThread?.codexThreadId);
-      if (existingBinding && existingBinding !== normalized) {
-        throw new Error("Portal thread is already bound to a different Codex thread");
-      }
+      const agentThread = await threads.get(session.threadId, session.organizationId);
+      const existingBinding = trimOrUndefined(agentThread?.codexThreadId);
+      assertCodexThreadContinuity({
+        expectedCodexThreadId: existingBinding,
+        observedCodexThreadId: normalized,
+        scope: "Agent thread"
+      });
       if (!existingBinding) {
         await threads.update(session.threadId, { codexThreadId: normalized });
       }
@@ -4441,7 +4448,9 @@ async function ensureActionConnectorRuntimeSession(input: {
   runtimeOwner: CurrentActor;
 }): Promise<{ session: SessionRecord; liveThread: LiveRuntimeThread }> {
   const active = input.thread.sessionId ? await sessions.get(input.thread.sessionId) : undefined;
-  const liveThread = active ? liveRuntimeThreads.get(active.sessionId) : undefined;
+  const liveThread = active
+    ? liveRuntimeThreads.get(active.sessionId) || await restoreLiveRuntimeThread(active)
+    : undefined;
   const changed =
     !active ||
     !liveThread ||
@@ -4454,18 +4463,33 @@ async function ensureActionConnectorRuntimeSession(input: {
     return { session: active, liveThread };
   }
 
+  const resumeCodexThreadId = await resolveCodexThreadContinuityWithHistory({
+    threadCodexThreadId: input.thread.codexThreadId,
+    activeSessionCodexThreadId: active?.codexThreadId,
+    loadHistoricalSessionCodexThreadId: () => latestCodexThreadIdForAgentThread(input.thread.id)
+  });
+
   if (active?.sessionId) {
     await sessions.remove(active.sessionId);
     liveRuntimeThreads.delete(active.sessionId);
   }
 
-  return await startActionConnectorRuntimeSession({
+  const started = await startActionConnectorRuntimeSession({
     runner: input.runner,
     runtime: input.runtime,
     thread: input.thread,
     runtimeOwner: input.runtimeOwner,
-    resumeCodexThreadId: await latestCodexThreadIdForAgentThread(input.thread.id)
+    resumeCodexThreadId
   });
+  assertCodexThreadContinuity({
+    expectedCodexThreadId: resumeCodexThreadId,
+    observedCodexThreadId: started.session.codexThreadId,
+    scope: "Action Connector conversation"
+  });
+  return {
+    session: await persistSessionCodexThreadId(started.session, started.session.codexThreadId ?? ""),
+    liveThread: started.liveThread
+  };
 }
 
 async function prepareActionConnectorRuntimeTurn(input: ActionConnectorCodexRunnerInput): Promise<ActionConnectorPreparedTurn> {
@@ -6394,6 +6418,12 @@ async function ensureThreadSession(
     })
   );
 
+  const resumeCodexThreadId = resolveCodexThreadContinuity({
+    threadCodexThreadId: thread.codexThreadId,
+    activeSessionCodexThreadId: activeForComparison?.codexThreadId,
+    historicalSessionCodexThreadId: patch?.resume_codex_thread_id
+  });
+
   if (active?.sessionId) {
     await time("ensure_thread_session.remove_stale_session", () => sessions.remove(active.sessionId));
     liveRuntimeThreads.delete(active.sessionId);
@@ -6403,14 +6433,16 @@ async function ensureThreadSession(
       desired,
       threadId,
       timing,
-      patch?.resume_codex_thread_id ?? thread.codexThreadId ?? activeForComparison?.codexThreadId
+      resumeCodexThreadId
     )
   );
   const canonicalCodexThreadId = trimOrUndefined(thread.codexThreadId);
   const sessionCodexThreadId = trimOrUndefined(session.codexThreadId);
-  if (canonicalCodexThreadId && sessionCodexThreadId && canonicalCodexThreadId !== sessionCodexThreadId) {
-    throw new Error("Portal thread is already bound to a different Codex thread");
-  }
+  assertCodexThreadContinuity({
+    expectedCodexThreadId: canonicalCodexThreadId ?? resumeCodexThreadId,
+    observedCodexThreadId: sessionCodexThreadId,
+    scope: "Agent thread"
+  });
   if (!canonicalCodexThreadId && sessionCodexThreadId) {
     await time("ensure_thread_session.persist_codex_thread_binding", () =>
       threads.update(threadId, { codexThreadId: sessionCodexThreadId })
@@ -7356,7 +7388,8 @@ async function startZendeskRuntimeSession(
   input: ZendeskRuntimeSessionInput,
   thread: ThreadRecord,
   status: ZendeskRuntimeSessionLease["status"],
-  existingProviderSnapshot?: ManagedCodexProviderSnapshot
+  existingProviderSnapshot?: ManagedCodexProviderSnapshot,
+  resumeCodexThreadId?: string
 ): Promise<ZendeskRuntimeSessionLease> {
   const providerSnapshot = await resolveProviderSnapshot({
     existingSnapshot: existingProviderSnapshot
@@ -7374,13 +7407,26 @@ async function startZendeskRuntimeSession(
       CODEX_HOME: materializedCodexHome.codexHome
     }
   });
-  const started = await startLiveRuntimeSession({
-    runtime: sessionRuntime,
-    model: input.runtimeOptions.model,
-    reasoningEffort: input.runtimeOptions.reasoningEffort,
-    workspace: input.runtimeOptions.workspace,
-    codexRunConfig: runtimeLaunch.codexRunConfig
-  });
+  const normalizedResumeCodexThreadId = trimOrUndefined(resumeCodexThreadId);
+  const started = normalizedResumeCodexThreadId
+    ? await sessionRuntime.resumeThreadWithOptions({
+        threadId: normalizedResumeCodexThreadId,
+        model: input.runtimeOptions.model,
+        reasoningEffort: input.runtimeOptions.reasoningEffort,
+        workspace: input.runtimeOptions.workspace,
+        codexRunConfig: stripInternalRunConfigMetadata(runtimeLaunch.codexRunConfig)
+      }).then((liveThread) => ({
+        liveThread,
+        codexRunConfig: runtimeLaunch.codexRunConfig,
+        codexThreadId: trimOrUndefined((liveThread as { id?: string }).id) ?? normalizedResumeCodexThreadId
+      }))
+    : await startLiveRuntimeSession({
+        runtime: sessionRuntime,
+        model: input.runtimeOptions.model,
+        reasoningEffort: input.runtimeOptions.reasoningEffort,
+        workspace: input.runtimeOptions.workspace,
+        codexRunConfig: runtimeLaunch.codexRunConfig
+      });
   const session = await sessions.create({
     organizationId: thread.organizationId,
     userId: thread.userId,
@@ -7427,12 +7473,30 @@ async function ensureZendeskRuntimeSession(input: ZendeskRuntimeSessionInput): P
     };
   }
 
+  const resumeCodexThreadId = await resolveCodexThreadContinuityWithHistory({
+    threadCodexThreadId: thread.codexThreadId,
+    activeSessionCodexThreadId: active?.codexThreadId,
+    loadHistoricalSessionCodexThreadId: () => latestCodexThreadIdForAgentThread(thread.id)
+  });
+
   if (active?.sessionId) {
     await sessions.remove(active.sessionId);
     liveRuntimeThreads.delete(active.sessionId);
   }
 
-  return await startZendeskRuntimeSession(input, thread, "started", active?.providerSnapshot);
+  const started = await startZendeskRuntimeSession(
+    input,
+    thread,
+    "started",
+    active?.providerSnapshot,
+    resumeCodexThreadId
+  );
+  assertCodexThreadContinuity({
+    expectedCodexThreadId: resumeCodexThreadId,
+    observedCodexThreadId: started.codexThreadId,
+    scope: "Zendesk conversation"
+  });
+  return started;
 }
 
 async function replaceZendeskRuntimeSession(input: ZendeskRuntimeSessionInput): Promise<ZendeskRuntimeSessionLease | undefined> {
@@ -7791,6 +7855,12 @@ async function ensureDingTalkBotThreadSession(input: {
     return active;
   }
 
+  const resumeCodexThreadId = await resolveCodexThreadContinuityWithHistory({
+    threadCodexThreadId: input.thread.codexThreadId,
+    activeSessionCodexThreadId: active?.codexThreadId,
+    loadHistoricalSessionCodexThreadId: () => latestCodexThreadIdForAgentThread(input.thread.id)
+  });
+
   await assertChatAllowsNewSession({
     currentUser: input.currentUser,
     model: desiredSession.model,
@@ -7801,7 +7871,13 @@ async function ensureDingTalkBotThreadSession(input: {
     await sessions.remove(active.sessionId);
     liveRuntimeThreads.delete(active.sessionId);
   }
-  return createSession(desiredSession, input.thread.id);
+  const session = await createSession(desiredSession, input.thread.id, undefined, resumeCodexThreadId);
+  assertCodexThreadContinuity({
+    expectedCodexThreadId: resumeCodexThreadId,
+    observedCodexThreadId: session.codexThreadId,
+    scope: "DingTalk conversation"
+  });
+  return await persistSessionCodexThreadId(session, session.codexThreadId ?? "");
 }
 
 async function dingtalkMessageProcessingState(threadId: string, messageId: string): Promise<{
@@ -7885,11 +7961,12 @@ async function createDingTalkBotThread(input: {
     workspace: options.workspace,
     codexRunConfig: persistedThreadCodexRunConfig
   });
-  await createSession({
+  const session = await createSession({
     ...options,
     codexRunConfig: materializedCodexHome.codexRunConfig,
     codexHome: materializedCodexHome.codexHome
   }, thread.id);
+  await persistSessionCodexThreadId(session, session.codexThreadId ?? "");
   return (await threads.get(thread.id, input.currentUser.organizationId)) ?? thread;
 }
 
