@@ -742,7 +742,7 @@ ensure_shared_python_runtime() {
   ensure_legacy_translate_symlink
 }
 
-plugin_runtime_check_command() {
+check_plugin_runtime() {
   local roots=(
     "$APP_HOME/.codex"
     "$APP_API_DIR/temp/codex-homes"
@@ -758,13 +758,7 @@ plugin_runtime_check_command() {
     [[ -e "$root" ]] || continue
     command+=(--plugin-root "$root")
   done
-  shell_join "${command[@]}"
-}
-
-check_plugin_runtime() {
-  local command
-  command="$(plugin_runtime_check_command)"
-  run_as_app_user_shell "$command"
+  run_as_app_user "${command[@]}"
 }
 
 install_shared_codex_runtime_archive() {

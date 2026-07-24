@@ -167,7 +167,7 @@ check_plugin_runtime() {
     [[ -e "$root" ]] || continue
     command+=(--plugin-root "$root")
   done
-  run_as_app_user_shell "$(shell_join "${command[@]}")"
+  run_as_app_user "${command[@]}"
 }
 
 check_build_outputs() {
