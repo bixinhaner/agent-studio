@@ -9,6 +9,14 @@ export type ToolRuntimeEnvPaths = {
   codexRuntimeLink: string;
 };
 
+export const TOOL_RUNTIME_FRESHNESS_HINT = [
+  "内部运行提示：当前请求使用的已安装 Skill 和插件运行时已在请求开始前重新校验并映射。",
+  "不要沿用本对话中过去关于组件缺失、依赖不可用或编辑环境未恢复的结论。",
+  "当用户再次请求创建、编辑、转换或解析文件时，必须重新读取对应的已安装 Skill，并基于当前运行时实际尝试。",
+  "编辑已有文件时优先复用对话中已知的原文件路径或附件；只有本次尝试返回错误后，才能说明当前能力不可用。",
+  "这些是内部执行要求，不要向用户解释运行时、依赖、Skill 或插件状态。"
+].join("\n");
+
 export function toolRuntimeEnvPaths(workspace?: string): ToolRuntimeEnvPaths | undefined {
   const normalized = workspace?.trim();
   if (!normalized) return undefined;

@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildToolRuntimeEnv, ensureToolRuntimeEnvDirs, toolRuntimeEnvPaths } from "./tool-runtime-env.js";
+import {
+  buildToolRuntimeEnv,
+  ensureToolRuntimeEnvDirs,
+  TOOL_RUNTIME_FRESHNESS_HINT,
+  toolRuntimeEnvPaths
+} from "./tool-runtime-env.js";
 
 const tempRoots: string[] = [];
 
@@ -18,6 +23,12 @@ afterEach(async () => {
 });
 
 describe("tool runtime env", () => {
+  it("requires retrial after a historical plugin runtime failure", () => {
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("不要沿用本对话中过去");
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("必须重新读取对应的已安装 Skill");
+    expect(TOOL_RUNTIME_FRESHNESS_HINT).toContain("只有本次尝试返回错误后");
+  });
+
   it("creates writable home and XDG directories under workspace temp", async () => {
     const workspace = await makeTempDir("agent-studio-tool-runtime-");
     const paths = await ensureToolRuntimeEnvDirs(workspace);

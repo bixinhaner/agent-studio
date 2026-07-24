@@ -71,7 +71,11 @@ import {
   inspectSharedPythonRuntime,
   sharedPythonRuntimeHint
 } from "./shared-python-runtime.js";
-import { buildToolRuntimeEnv, ensureToolRuntimeEnvDirs } from "./tool-runtime-env.js";
+import {
+  buildToolRuntimeEnv,
+  ensureToolRuntimeEnvDirs,
+  TOOL_RUNTIME_FRESHNESS_HINT
+} from "./tool-runtime-env.js";
 import { getDbClient } from "./db/client.js";
 import {
   ManagedCodexProviderResolver,
@@ -2795,12 +2799,16 @@ async function resolveRuntimeLaunchConfig(input: {
     workspace: input.workspace
   });
   const runtimeHint = sharedPythonRuntimeHint(pythonRuntimeSettings);
+  const runtimeHints = [
+    ...(runtimeHint ? [runtimeHint] : []),
+    ...(input.workspace && appConfig.sharedCodexRuntime.runtimeRoot ? [TOOL_RUNTIME_FRESHNESS_HINT] : [])
+  ];
   const codexRunConfig = withRuntimeHints(
     withRuntimeCapabilityMetadata(
       input.codexRunConfig,
       crestMcp?.capabilities ?? {}
     ),
-    runtimeHint ? [runtimeHint] : []
+    runtimeHints
   );
   const envOverrides = {
     ...toolEnv,
