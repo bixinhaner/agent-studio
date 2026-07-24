@@ -10,7 +10,8 @@ function parseArgs(argv) {
     requirements: path.resolve("scripts/plugin-runtime-requirements.json"),
     nodeModules: "",
     pythonRoot: "",
-    verbose: false
+    verbose: false,
+    allRegistered: false
   };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -29,6 +30,8 @@ function parseArgs(argv) {
       index += 1;
     } else if (value === "--verbose") {
       result.verbose = true;
+    } else if (value === "--all-registered") {
+      result.allRegistered = true;
     } else {
       throw new Error(`unknown or incomplete argument: ${value}`);
     }
@@ -216,7 +219,9 @@ function main() {
     ...[...manifests.values()].map((item) => item.name),
     ...discoveredSkills
   ]);
-  const requiredDefinitions = Object.entries(registry.plugins).filter(([name]) => installedNames.has(name));
+  const requiredDefinitions = Object.entries(registry.plugins).filter(
+    ([name]) => args.allRegistered || installedNames.has(name)
+  );
   const requiredCommands = [...new Set(requiredDefinitions.flatMap(([, item]) => item.commands || []))];
   const requiredPythonImports = [...new Set(requiredDefinitions.flatMap(([, item]) => item.pythonImports || []))];
   const requiredNodePackages = new Map();
@@ -252,7 +257,7 @@ function main() {
     brokenSymlinks,
     checkedPluginVersions: manifests.size,
     installedPluginCount: installedNames.size,
-    installedPlugins: requiredDefinitions.map(([name]) => name).sort(),
+    installedPlugins: Object.keys(registry.plugins).filter((name) => installedNames.has(name)).sort(),
     problems,
     runtimeCheckedPlugins: requiredDefinitions.map(([name]) => name).sort()
   };

@@ -107,4 +107,33 @@ describe("plugin runtime checker", () => {
     expect(result.status).toBe(1);
     expect(JSON.parse(result.stdout).problems).toContain("shared Node runtime path was not provided");
   });
+
+  it("validates registered shared capabilities before a plugin is materialized", async () => {
+    const root = await makeTempDir("agent-studio-plugin-check-registered-");
+    const requirements = path.join(root, "requirements.json");
+    await fs.writeFile(
+      requirements,
+      JSON.stringify({
+        schemaVersion: 1,
+        plugins: {
+          presentations: {
+            nodePackages: [{ name: "@oai/artifact-tool" }]
+          }
+        }
+      })
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [checker, "--plugin-root", root, "--requirements", requirements, "--all-registered"],
+      { encoding: "utf8" }
+    );
+
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      installedPlugins: [],
+      runtimeCheckedPlugins: ["presentations"],
+      problems: ["shared Node runtime path was not provided"]
+    });
+  });
 });

@@ -752,6 +752,7 @@ check_plugin_runtime() {
     --requirements "$script_dir/plugin-runtime-requirements.json"
     --node-modules "$SHARED_CODEX_RUNTIME_NODE_MODULES"
     --python-root "$SHARED_PYTHON_RUNTIME_ROOT"
+    --all-registered
   )
   local root
   for root in "${roots[@]}"; do
@@ -781,7 +782,7 @@ install_shared_codex_runtime_archive() {
   [[ -d "$staging/dependencies/node/node_modules" ]] ||
     die "shared Codex runtime archive has an invalid layout: $SHARED_CODEX_RUNTIME_ARCHIVE"
   run_as_root chown -R root:root "$staging"
-  run_as_root chmod -R a-w "$staging"
+  run_as_root chmod -R a+rX,a-w "$staging"
   if [[ -e "$SHARED_CODEX_RUNTIME_ROOT" ]]; then
     run_as_root mv "$SHARED_CODEX_RUNTIME_ROOT" "$previous"
   fi
