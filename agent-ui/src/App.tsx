@@ -588,9 +588,11 @@ function AppRoutes() {
 
   if (publicShareToken) {
     return (
-      <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading public link...</p></div></div>}>
-        <PublicSharePageLazy token={publicShareToken} />
-      </Suspense>
+      <AuthProvider>
+        <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading protected link...</p></div></div>}>
+          <PublicSharePageLazy token={publicShareToken} />
+        </Suspense>
+      </AuthProvider>
     );
   }
 

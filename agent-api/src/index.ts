@@ -18,7 +18,12 @@ import { createPublicAccessRequestRouter } from "./access-requests/public-router
 import { createAccessRequestReviewRouter } from "./access-requests/review-router.js";
 import { createAccessRequestService } from "./access-requests/service.js";
 import { createAuthRouter, resolveCrestUser } from "./auth/router.js";
-import { createCurrentUserMiddleware } from "./auth/current-user.js";
+import {
+  createCurrentUserMiddleware,
+  requireCurrentOrganization,
+  requireCurrentUser,
+  requireInternalOrganizationMember
+} from "./auth/current-user.js";
 import { createRequirePermission } from "./auth/permission-guard.js";
 import { isInternalOrganizationType, resolveResourceRoleIds } from "./auth/resource-role-context.js";
 import { createDingTalkClient, type DingTalkClient, type DingTalkConfig } from "./auth/dingtalk.js";
@@ -2604,6 +2609,7 @@ function threadPublicShareOut(share: {
   title: string;
   selectedTurnCount: number;
   snapshot: unknown;
+  expiresAt: string;
   createdAt: string;
   updatedAt: string;
   userDisplayName?: string;
@@ -2616,6 +2622,7 @@ function threadPublicShareOut(share: {
     public_path: `/share/${encodeURIComponent(share.token)}`,
     snapshot: rewritePublicShareKnowledgeImages(share.snapshot, share.token),
     user_display_name: share.userDisplayName,
+    expires_at: share.expiresAt,
     created_at: share.createdAt,
     updated_at: share.updatedAt
   };
@@ -2922,6 +2929,8 @@ const codexModelCatalog = new CodexModelCatalogService({
 function createThreadPublicShareToken(): string {
   return randomBytes(18).toString("base64url");
 }
+
+const THREAD_PUBLIC_SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const KNOWLEDGE_SET_PATH_SEGMENT = `${path.sep}data${path.sep}knowledge-sets${path.sep}`;
 const PUBLIC_SHARE_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
@@ -10784,74 +10793,87 @@ app.post("/api/session", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/public-api/thread-shares/:token", async (req: Request, res: Response) => {
-  try {
-    const token = String(req.params.token || "").trim();
-    const share = await threadPublicShares.getActiveByToken(token);
-    if (!share) {
-      res.status(404).json({ detail: "Public link does not exist or has expired" });
-      return;
+app.get(
+  "/public-api/thread-shares/:token",
+  requireCurrentUser,
+  requireCurrentOrganization,
+  requireInternalOrganizationMember,
+  async (req: Request, res: Response) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      const share = await threadPublicShares.getActiveByToken(token);
+      if (!share) {
+        res.status(404).json({ detail: "Public link does not exist or has expired" });
+        return;
+      }
+      const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
+      const userDisplayName = await resolveThreadPublicShareUserDisplayName(share.createdByUserId);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json({
+        share: threadPublicShareOut({
+          ...resolvedShare,
+          userDisplayName
+        })
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to read public link";
+      res.status(400).json({ detail });
     }
-    const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
-    const userDisplayName = await resolveThreadPublicShareUserDisplayName(share.createdByUserId);
-    res.json({
-      share: threadPublicShareOut({
-        ...resolvedShare,
-        userDisplayName
-      })
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to read public link";
-    res.status(400).json({ detail });
   }
-});
+);
 
-app.get("/public-api/thread-shares/:token/files/content", async (req: Request, res: Response) => {
-  try {
-    const token = String(req.params.token || "").trim();
-    const rawPath = trimOrUndefined(typeof req.query.path === "string" ? req.query.path : undefined);
-    if (!token || !rawPath) {
-      res.status(400).json({ detail: "Token and path are required" });
-      return;
+app.get(
+  "/public-api/thread-shares/:token/files/content",
+  requireCurrentUser,
+  requireCurrentOrganization,
+  requireInternalOrganizationMember,
+  async (req: Request, res: Response) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      const rawPath = trimOrUndefined(typeof req.query.path === "string" ? req.query.path : undefined);
+      if (!token || !rawPath) {
+        res.status(400).json({ detail: "Token and path are required" });
+        return;
+      }
+
+      const requestedPath = path.resolve(rawPath);
+      if (!isPublicShareKnowledgeImagePath(requestedPath)) {
+        res.status(400).json({ detail: "Only shared knowledge-set images are supported" });
+        return;
+      }
+
+      const share = await threadPublicShares.getActiveByToken(token);
+      if (!share) {
+        res.status(404).json({ detail: "Public link does not exist or has expired" });
+        return;
+      }
+
+      const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
+      const allowedImagePaths = collectKnowledgeImagePathsFromSnapshot(resolvedShare.snapshot);
+      if (!allowedImagePaths.has(requestedPath)) {
+        res.status(403).json({ detail: "This image is not part of the public share" });
+        return;
+      }
+
+      const stat = await fs.stat(requestedPath).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        res.status(404).json({ detail: "File does not exist" });
+        return;
+      }
+
+      const fileName = path.basename(requestedPath);
+      const fileBuffer = await fs.readFile(requestedPath);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+      res.type(path.extname(fileName) || "application/octet-stream");
+      res.status(200).send(fileBuffer);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to read public share image";
+      res.status(400).json({ detail });
     }
-
-    const requestedPath = path.resolve(rawPath);
-    if (!isPublicShareKnowledgeImagePath(requestedPath)) {
-      res.status(400).json({ detail: "Only shared knowledge-set images are supported" });
-      return;
-    }
-
-    const share = await threadPublicShares.getActiveByToken(token);
-    if (!share) {
-      res.status(404).json({ detail: "Public link does not exist or has expired" });
-      return;
-    }
-
-    const resolvedShare = await resolveThreadPublicShareSnapshotForRead(share);
-    const allowedImagePaths = collectKnowledgeImagePathsFromSnapshot(resolvedShare.snapshot);
-    if (!allowedImagePaths.has(requestedPath)) {
-      res.status(403).json({ detail: "This image is not part of the public share" });
-      return;
-    }
-
-    const stat = await fs.stat(requestedPath).catch(() => null);
-    if (!stat || !stat.isFile()) {
-      res.status(404).json({ detail: "File does not exist" });
-      return;
-    }
-
-    const fileName = path.basename(requestedPath);
-    const fileBuffer = await fs.readFile(requestedPath);
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    res.type(path.extname(fileName) || "application/octet-stream");
-    res.status(200).send(fileBuffer);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to read public share image";
-    res.status(400).json({ detail });
   }
-});
+);
 
 app.get("/api/threads", async (req: Request, res: Response) => {
   const currentUser = currentActorFromRequest(req);
@@ -11150,50 +11172,108 @@ app.get("/api/threads/:threadId/messages", async (req: Request, res: Response) =
   }
 });
 
-app.post("/api/threads/:threadId/public-share", async (req: Request, res: Response) => {
+app.get("/api/threads/:threadId/public-share", requireInternalOrganizationMember, async (req: Request, res: Response) => {
   try {
     const currentUser = currentActorFromRequest(req);
-    const profileUser = req.currentUser!;
     const threadId = String(req.params.threadId || "").trim();
     const thread = await getPortalOwnedThread(threadId, currentUser);
     if (!thread) {
       res.status(404).json({ detail: "Thread does not exist" });
       return;
     }
-    if (thread.securityDomainId) {
-      res.status(403).json({ detail: "保密域会话不能创建公开链接" });
-      return;
-    }
-
-    const input = createThreadPublicShareSchema.parse(req.body || {});
-    const repository = await conversationRecords.getMessageRepository(threadId);
-    const built = buildThreadPublicShareSnapshot({
-      thread,
-      repository,
-      selectedTurnIds: input.selected_turn_ids
-    });
-    const share = await threadPublicShares.createOrReplaceActiveForThread({
-      threadId,
-      token: createThreadPublicShareToken(),
-      title: built.title,
-      selectedTurnCount: built.selectedTurnCount,
-      snapshot: built.snapshot,
-      createdByUserId: currentUser.id
-    });
-    const userDisplayName =
-      trimOrUndefined(profileUser.displayName) ?? trimOrUndefined(profileUser.email) ?? undefined;
-
+    const share = await threadPublicShares.getActiveForThread(threadId);
     res.json({
-      share: threadPublicShareOut({
-        ...share,
-        userDisplayName
-      })
+      share: share
+        ? {
+            id: share.id,
+            title: share.title,
+            selected_turn_count: share.selectedTurnCount,
+            public_path: `/share/${encodeURIComponent(share.token)}`,
+            expires_at: share.expiresAt,
+            created_at: share.createdAt,
+            updated_at: share.updatedAt
+          }
+        : null
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Failed to create public link";
+    const detail = error instanceof Error ? error.message : "Failed to read public link status";
     res.status(400).json({ detail });
   }
 });
+
+app.post(
+  "/api/threads/:threadId/public-share",
+  requireInternalOrganizationMember,
+  async (req: Request, res: Response) => {
+    try {
+      const currentUser = currentActorFromRequest(req);
+      const profileUser = req.currentUser!;
+      const threadId = String(req.params.threadId || "").trim();
+      const thread = await getPortalOwnedThread(threadId, currentUser);
+      if (!thread) {
+        res.status(404).json({ detail: "Thread does not exist" });
+        return;
+      }
+      if (thread.securityDomainId) {
+        res.status(403).json({ detail: "保密域会话不能创建公开链接" });
+        return;
+      }
+
+      const input = createThreadPublicShareSchema.parse(req.body || {});
+      const repository = await conversationRecords.getMessageRepository(threadId);
+      const built = buildThreadPublicShareSnapshot({
+        thread,
+        repository,
+        selectedTurnIds: input.selected_turn_ids
+      });
+      const share = await threadPublicShares.createOrReplaceActiveForThread({
+        threadId,
+        token: createThreadPublicShareToken(),
+        title: built.title,
+        selectedTurnCount: built.selectedTurnCount,
+        snapshot: built.snapshot,
+        createdByUserId: currentUser.id,
+        expiresAt: new Date(Date.now() + THREAD_PUBLIC_SHARE_TTL_MS)
+      });
+      const userDisplayName =
+        trimOrUndefined(profileUser.displayName) ?? trimOrUndefined(profileUser.email) ?? undefined;
+
+      res.json({
+        share: threadPublicShareOut({
+          ...share,
+          userDisplayName
+        })
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to create public link";
+      res.status(400).json({ detail });
+    }
+  }
+);
+
+app.delete(
+  "/api/threads/:threadId/public-share",
+  requireInternalOrganizationMember,
+  async (req: Request, res: Response) => {
+    try {
+      const currentUser = currentActorFromRequest(req);
+      const threadId = String(req.params.threadId || "").trim();
+      const thread = await getPortalOwnedThread(threadId, currentUser);
+      if (!thread) {
+        res.status(404).json({ detail: "Thread does not exist" });
+        return;
+      }
+      const revokedCount = await threadPublicShares.revokeActiveForThread({
+        threadId,
+        revokedByUserId: currentUser.id
+      });
+      res.json({ revoked: revokedCount > 0 });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Failed to revoke public link";
+      res.status(400).json({ detail });
+    }
+  }
+);
 
 app.post("/api/threads/:threadId/messages", async (req: Request, res: Response) => {
   try {

@@ -951,6 +951,7 @@ model ThreadPublicShare {
   createdByUserId   String?   @map("created_by_user_id")
   revokedByUserId   String?   @map("revoked_by_user_id")
   revokedAt         DateTime? @map("revoked_at")
+  expiresAt         DateTime  @map("expires_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -960,6 +961,7 @@ model ThreadPublicShare {
 
   @@index([organizationId, createdAt])
   @@index([threadId, createdAt])
+  @@index([expiresAt])
   @@index([createdByUserId, createdAt])
   @@index([revokedByUserId, createdAt])
   @@map("thread_public_shares")

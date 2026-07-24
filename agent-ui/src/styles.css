@@ -7300,6 +7300,8 @@ body.access-request-route #root {
   top: 16px;
   right: 20px;
   z-index: 12;
+  display: inline-flex;
+  gap: 8px;
 }
 
 .thread-public-share-toolbar-btn,
@@ -7336,6 +7338,15 @@ body.access-request-route #root {
   transform: translateY(-1px);
   border-color: rgba(255, 70, 20, 0.35);
   box-shadow: 0 16px 34px rgba(255, 70, 20, 0.16);
+}
+
+.thread-public-share-toolbar-btn-danger {
+  color: #b42318;
+}
+
+.thread-public-share-toolbar-btn-danger:hover:not(:disabled) {
+  border-color: rgba(180, 35, 24, 0.34);
+  box-shadow: 0 16px 34px rgba(180, 35, 24, 0.14);
 }
 
 .thread-public-share-toolbar-btn:disabled {
@@ -7605,6 +7616,9 @@ body.public-share-mode #root {
 }
 
 .public-share-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 40px;
   padding: 0 14px;
   border-radius: 999px;
@@ -7612,6 +7626,7 @@ body.public-share-mode #root {
   background: rgba(255, 255, 255, 0.04);
   color: rgba(241, 245, 249, 0.94);
   cursor: pointer;
+  text-decoration: none;
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
@@ -7671,6 +7686,10 @@ body.public-share-mode #root {
 .public-share-state-card h2,
 .public-share-state-card p {
   margin: 0;
+}
+
+.public-share-state-card .public-share-header-btn {
+  margin-top: 16px;
 }
 
 .public-share-state-card p {

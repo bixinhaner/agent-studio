@@ -108,6 +108,23 @@ export function requireCurrentOrganization(req: Request, res: Response, next: Ne
   next();
 }
 
+export function requireInternalOrganizationMember(req: Request, res: Response, next: NextFunction): void {
+  if (!req.currentUser) {
+    res.status(401).json({ detail: "Unauthorized" });
+    return;
+  }
+  if (
+    !req.currentOrganization ||
+    !req.currentMembership ||
+    req.currentMembership.status !== "active" ||
+    req.currentOrganization.type !== "internal"
+  ) {
+    res.status(403).json({ detail: "Internal employee access is required" });
+    return;
+  }
+  next();
+}
+
 export function requireRole(role: string): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.currentUser) {

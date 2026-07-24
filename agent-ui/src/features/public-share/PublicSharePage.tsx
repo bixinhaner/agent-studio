@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 
+import { useAuth } from "../auth/AuthProvider";
 import { useBranding } from "../branding/BrandingProvider";
 import {
   extractMermaidCodeFromPreChildren,
@@ -12,7 +13,7 @@ import {
 } from "../markdown/markdown-rendering";
 import { stripAssistantControlDirectives } from "../markdown/control-directives";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
-import { fetchPublicThreadShare } from "./api";
+import { fetchPublicThreadShare, PublicShareAccessError } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -426,6 +427,7 @@ function PublicShareMessageBlock(props: { message: PublicShareSnapshotMessage; t
 
 export function PublicSharePage(props: { token?: string }) {
   const { branding } = useBranding();
+  const auth = useAuth();
   const token = useMemo(
     () => props.token || extractPublicShareToken(typeof window !== "undefined" ? window.location.pathname : ""),
     [props.token]
@@ -433,6 +435,7 @@ export function PublicSharePage(props: { token?: string }) {
   const [share, setShare] = useState<ThreadPublicShareView | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
+  const [accessStatus, setAccessStatus] = useState<number | null>(null);
   const [actionStatus, setActionStatus] = useState("");
 
   useEffect(() => {
@@ -448,19 +451,35 @@ export function PublicSharePage(props: { token?: string }) {
     let cancelled = false;
 
     async function load() {
+      if (auth.loading) return;
       if (!token) {
         setLoading(false);
-        setErrorText("Invalid public link");
+        setAccessStatus(400);
+        setErrorText("Invalid protected link");
+        return;
+      }
+      if (!auth.user) {
+        setLoading(false);
+        setAccessStatus(401);
+        setErrorText("Sign in with an internal employee account to view this conversation.");
+        return;
+      }
+      if (auth.activeOrganization?.type !== "internal") {
+        setLoading(false);
+        setAccessStatus(403);
+        setErrorText("This link is restricted to internal employees. Switch to your internal organization and try again.");
         return;
       }
       setLoading(true);
       setErrorText("");
+      setAccessStatus(null);
       try {
         const next = await fetchPublicThreadShare(token);
         if (cancelled) return;
         setShare(next);
       } catch (error) {
         if (cancelled) return;
+        setAccessStatus(error instanceof PublicShareAccessError ? error.status : null);
         setErrorText(error instanceof Error ? error.message : "Failed to load public link");
       } finally {
         if (!cancelled) {
@@ -473,10 +492,10 @@ export function PublicSharePage(props: { token?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [auth.activeOrganization?.type, auth.loading, auth.user, token]);
 
   useEffect(() => {
-    const title = share?.title ? `${share.title} · ${branding.platformName}` : `${branding.platformName} Public Link`;
+    const title = share?.title ? `${share.title} · ${branding.platformName}` : `${branding.platformName} Protected Link`;
     document.title = title;
 
     let robots = document.querySelector('meta[name="robots"]');
@@ -489,12 +508,34 @@ export function PublicSharePage(props: { token?: string }) {
     }
     const previous = robots.getAttribute("content");
     robots.setAttribute("content", "noindex, nofollow");
+    let referrer = document.querySelector('meta[name="referrer"]');
+    let referrerCreated = false;
+    if (!referrer) {
+      referrer = document.createElement("meta");
+      referrer.setAttribute("name", "referrer");
+      document.head.appendChild(referrer);
+      referrerCreated = true;
+    }
+    const previousReferrer = referrer.getAttribute("content");
+    referrer.setAttribute("content", "no-referrer");
     return () => {
-      if (!robots) return;
-      if (created) {
-        robots.remove();
-      } else if (previous) {
-        robots.setAttribute("content", previous);
+      if (robots) {
+        if (created) {
+          robots.remove();
+        } else if (previous) {
+          robots.setAttribute("content", previous);
+        } else {
+          robots.removeAttribute("content");
+        }
+      }
+      if (referrer) {
+        if (referrerCreated) {
+          referrer.remove();
+        } else if (previousReferrer) {
+          referrer.setAttribute("content", previousReferrer);
+        } else {
+          referrer.removeAttribute("content");
+        }
       }
     };
   }, [branding.platformName, share?.title]);
@@ -537,7 +578,7 @@ export function PublicSharePage(props: { token?: string }) {
       <main className="public-share-layout">
         <header className="public-share-header">
           <div className="public-share-header-top">
-            <span className="public-share-kicker">{branding.platformName} Public Link</span>
+            <span className="public-share-kicker">{branding.platformName} Protected Link</span>
             {share ? (
               <div className="public-share-header-actions">
                 <button type="button" className="public-share-header-btn" onClick={() => void handleCopyMarkdown()}>
@@ -552,12 +593,12 @@ export function PublicSharePage(props: { token?: string }) {
           <h1>{share?.title || "Shared conversation"}</h1>
           <p>
             {loading
-              ? "Loading public snapshot"
+              ? "Loading protected snapshot"
               : share
-                ? `Anyone with this link can view this snapshot. Generated at: ${formatLocalDateTime(share.created_at)}`
-                : "This public link is not available."}
+                ? `Only signed-in internal employees can view this snapshot. Expires: ${formatLocalDateTime(share.expires_at)}`
+                : "This protected link is not available."}
           </p>
-          {actionStatus ? <div className="public-share-header-status">{actionStatus}</div> : null}
+          {actionStatus ? <div className="public-share-header-status" role="status">{actionStatus}</div> : null}
         </header>
 
         {loading ? (
@@ -568,8 +609,22 @@ export function PublicSharePage(props: { token?: string }) {
 
         {!loading && errorText ? (
           <section className="public-share-state-card public-share-state-card-error">
-            <h2>Link unavailable</h2>
+            <h2>{accessStatus === 401 ? "Sign in required" : accessStatus === 403 ? "Internal access required" : "Link unavailable"}</h2>
             <p>{errorText}</p>
+            {accessStatus === 401 ? (
+              <button
+                type="button"
+                className="public-share-header-btn public-share-header-btn-primary"
+                onClick={() => void auth.startSignIn()}
+              >
+                Sign In as Employee
+              </button>
+            ) : null}
+            {accessStatus === 403 ? (
+              <a className="public-share-header-btn" href="/">
+                Open Workspace
+              </a>
+            ) : null}
           </section>
         ) : null}
 

@@ -46,6 +46,17 @@ export type ThreadPublicShareView = {
   user_display_name?: string;
   selected_turn_count: number;
   snapshot: PublicShareSnapshot;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ThreadPublicShareStatus = {
+  id: string;
+  title: string;
+  selected_turn_count: number;
+  public_path: string;
+  expires_at: string;
   created_at: string;
   updated_at: string;
 };

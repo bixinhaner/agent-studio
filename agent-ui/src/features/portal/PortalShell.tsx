@@ -109,7 +109,13 @@ import { resolveModeLabel, resolveModeOptions } from "./runtime-labels";
 import type { AuthUser } from "../auth/api";
 import { useAuth } from "../auth/AuthProvider";
 import { UserIdentitySummary } from "../auth/UserIdentitySummary";
-import { createThreadPublicShare, resolveThreadPublicShareUrl } from "../public-share/api";
+import {
+  createThreadPublicShare,
+  fetchThreadPublicShareStatus,
+  resolveThreadPublicShareUrl,
+  revokeThreadPublicShare
+} from "../public-share/api";
+import type { ThreadPublicShareStatus } from "../public-share/types";
 import { groupThreadMessagesIntoPublicShareTurns } from "../public-share/turns";
 import {
   MARKDOWN_COMPONENTS_BY_LANGUAGE,
@@ -5435,6 +5441,7 @@ const ThreadPublicShareControls: FC<
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [activeShare, setActiveShare] = useState<ThreadPublicShareStatus | null>(null);
 
   const allTurnIds = useMemo(() => turns.map((turn) => turn.id), [turns]);
   const leadTurnIdByMessageId = useMemo(
@@ -5527,6 +5534,22 @@ const ThreadPublicShareControls: FC<
   }, [threadId]);
 
   useEffect(() => {
+    let cancelled = false;
+    setActiveShare(null);
+    if (!threadId) return;
+    void fetchThreadPublicShareStatus(threadId)
+      .then((share) => {
+        if (!cancelled) setActiveShare(share);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveShare(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
+  useEffect(() => {
     if (!selectionMode) return;
     const available = new Set(allTurnIds);
     setSelectedTurnIds((prev) => {
@@ -5584,10 +5607,34 @@ const ThreadPublicShareControls: FC<
       const share = await createThreadPublicShare(threadId, selectedTurnIds);
       const publicUrl = resolveThreadPublicShareUrl(share.public_path);
       await copyTextToClipboard(publicUrl);
+      setActiveShare({
+        id: share.id,
+        title: share.title,
+        selected_turn_count: share.selected_turn_count,
+        public_path: share.public_path,
+        expires_at: share.expires_at,
+        created_at: share.created_at,
+        updated_at: share.updated_at
+      });
       onStatusChange?.(t("share.createdCopied"));
       cancelSelectionMode();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : t("share.failed"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revokePublicLink = async () => {
+    if (!threadId || !activeShare || submitting) return;
+    if (!window.confirm(t("share.revokeConfirm"))) return;
+    setSubmitting(true);
+    try {
+      await revokeThreadPublicShare(threadId);
+      setActiveShare(null);
+      onStatusChange?.(t("share.revoked"));
+    } catch (error) {
+      onStatusChange?.(error instanceof Error ? error.message : t("share.revokeFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -5627,6 +5674,19 @@ const ThreadPublicShareControls: FC<
                 <Share2Icon size={16} />
                 <span>{t("share.create")}</span>
               </button>
+              {activeShare ? (
+                <button
+                  type="button"
+                  className="thread-public-share-toolbar-btn thread-public-share-toolbar-btn-danger"
+                  onClick={() => void revokePublicLink()}
+                  disabled={submitting}
+                  title={t("share.revokeWithExpiry", { date: formatUserLocalDateTime(activeShare.expires_at) })}
+                  aria-label={t("share.revoke")}
+                >
+                  <Trash2Icon size={16} />
+                  <span>{t("share.revoke")}</span>
+                </button>
+              ) : null}
             </div>
           ) : null}
 
