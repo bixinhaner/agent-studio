@@ -10,6 +10,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown/markdown-rendering";
+import { stripAssistantControlDirectives } from "../markdown/control-directives";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { fetchPublicThreadShare } from "./api";
 import type { PublicShareSnapshotMessage, ThreadPublicShareView } from "./types";
@@ -69,7 +70,7 @@ function preprocessPublicShareMarkdown(text: string, token: string): string {
         return `${prefix}<${publicShareImageUrl(token, destination)}>${suffix}`;
       })
     : text;
-  return normalizeLatexDelimiters(resolvedText);
+  return normalizeLatexDelimiters(stripAssistantControlDirectives(resolvedText));
 }
 
 function PublicShareMarkdownLink(props: {

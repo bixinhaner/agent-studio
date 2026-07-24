@@ -117,6 +117,7 @@ import {
   MARKDOWN_REMARK_PLUGINS,
   MarkdownTable
 } from "../markdown/markdown-rendering";
+import { stripAssistantControlDirectives } from "../markdown/control-directives";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import { PortalTopBar } from "./workbench/PortalTopBar";
 import { PortalBillingPanel } from "./PortalBillingPanel";
@@ -604,9 +605,12 @@ function normalizeMarkdownAssetTarget(value: string): string {
 
 function preprocessAssistantMarkdown(text: string): string {
   return normalizeLatexDelimiters(
-    text.replace(RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
-      return `${prefix}<${destination}>${suffix}`;
-    })
+    stripAssistantControlDirectives(text).replace(
+      RAW_KNOWLEDGE_SET_MARKDOWN_DESTINATION_PATTERN,
+      (_match, prefix, destination, suffix) => {
+        return `${prefix}<${destination}>${suffix}`;
+      }
+    )
   );
 }
 
@@ -3238,7 +3242,15 @@ function reviveMessage(message: unknown, persistedCreatedAt?: string | null): un
   };
 
   if (role === "assistant") {
-    revived.content = consolidateCodexFileChangeParts(revived.content as unknown[]);
+    const visibleContent = (revived.content as unknown[]).map((part) => {
+      const item = asRecord(part);
+      if (item?.type !== "text" || typeof item.text !== "string") return part;
+      return {
+        ...item,
+        text: stripAssistantControlDirectives(item.text)
+      };
+    });
+    revived.content = consolidateCodexFileChangeParts(visibleContent);
     if (!("unstable_state" in fixedMetadata)) fixedMetadata.unstable_state = {};
     if (!Array.isArray(fixedMetadata.unstable_annotations)) fixedMetadata.unstable_annotations = [];
     if (!Array.isArray(fixedMetadata.unstable_data)) fixedMetadata.unstable_data = [];
@@ -7801,7 +7813,14 @@ export function PortalShell(props: { currentUser?: AuthUser; onOpenAdmin?: () =>
         const snapshotContent = (): any[] => {
           return orderedParts.map((part) => {
             const item = asRecord(part);
-            if (!item || item.type !== "data") return { ...part };
+            if (!item) return { ...part };
+            if (item.type === "text" && typeof item.text === "string") {
+              return {
+                ...part,
+                text: stripAssistantControlDirectives(item.text)
+              };
+            }
+            if (item.type !== "data") return { ...part };
             const payload = asRecord(item.data);
             if (!payload) return { ...part };
             if (item.name === "codex_commentary") {

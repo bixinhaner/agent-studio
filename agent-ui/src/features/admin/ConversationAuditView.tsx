@@ -32,6 +32,7 @@ import {
   MarkdownMermaidBlock,
   MarkdownTable
 } from "../markdown/markdown-rendering";
+import { stripAssistantControlDirectives } from "../markdown/control-directives";
 import { normalizeLatexDelimiters } from "../markdown/latex-delimiters";
 import {
   fetchAdminApiAuditDetail,
@@ -644,7 +645,7 @@ function adminThreadFileContentUrl(
 
 function preprocessConversationAuditMarkdown(text: string): string {
   return normalizeLatexDelimiters(
-    text
+    stripAssistantControlDirectives(text)
       .replace(RAW_KNOWLEDGE_SET_IMAGE_DESTINATION_PATTERN, (_match, prefix, destination, suffix) => {
         return `${prefix}<${adminKnowledgeSetFileUrl(destination)}>${suffix}`;
       })
