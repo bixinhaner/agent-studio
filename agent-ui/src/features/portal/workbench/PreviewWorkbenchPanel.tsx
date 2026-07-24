@@ -113,6 +113,15 @@ const EXCEL_EXTENSIONS = new Set(["xls", "xlsx"]);
 
 const UPLOADED_FILE_TAG_PATTERN = /<uploaded_file\s+([^>]+)>/gi;
 const UPLOADED_FILE_ATTR_PATTERN = /([a-zA-Z_][\w-]*)=("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s>]+)/g;
+const INTERACTIVE_HTML_PREVIEW_CSP =
+  "default-src 'none'; img-src data: blob:; media-src data: blob:; font-src data:; " +
+  "style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none';";
+
+export function prepareInteractiveHtmlPreview(html: string): string {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${INTERACTIVE_HTML_PREVIEW_CSP}">`;
+  const head = /<head(?:\s[^>]*)?>/i;
+  return head.test(html) ? html.replace(head, (match) => `${match}${csp}`) : `${csp}${html}`;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -1466,8 +1475,15 @@ export function PreviewWorkbenchPanel(props: {
                 <iframe
                   className="preview-iframe"
                   title={activeFile.displayName}
-                  sandbox=""
-                  srcDoc={activePreview.html || `<p>${t("preview.documentEmpty")}</p>`}
+                  sandbox={activePreview.kind === "html" ? "allow-scripts" : ""}
+                  referrerPolicy="no-referrer"
+                  srcDoc={
+                    activePreview.kind === "html"
+                      ? prepareInteractiveHtmlPreview(
+                          activePreview.html || `<p>${t("preview.documentEmpty")}</p>`
+                        )
+                      : activePreview.html || `<p>${t("preview.documentEmpty")}</p>`
+                  }
                 />
               ) : null}
 

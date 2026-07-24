@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { alignPreviewTarget } from "./PreviewWorkbenchPanel";
+import { alignPreviewTarget, prepareInteractiveHtmlPreview } from "./PreviewWorkbenchPanel";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -60,5 +60,23 @@ describe("alignPreviewTarget", () => {
     alignPreviewTarget(target, "center", "smooth");
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 110, behavior: "smooth" });
+  });
+});
+
+describe("prepareInteractiveHtmlPreview", () => {
+  it("enables inline visualization code while blocking network and form submission", () => {
+    const html = prepareInteractiveHtmlPreview("<html><head><title>Chart</title></head><body></body></html>");
+
+    expect(html).toContain("script-src 'unsafe-inline'");
+    expect(html).toContain("connect-src 'none'");
+    expect(html).toContain("form-action 'none'");
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("<title>"));
+  });
+
+  it("adds the policy to an HTML fragment", () => {
+    const html = prepareInteractiveHtmlPreview("<section>Chart</section>");
+
+    expect(html).toMatch(/^<meta http-equiv="Content-Security-Policy"/);
+    expect(html).toContain("<section>Chart</section>");
   });
 });
