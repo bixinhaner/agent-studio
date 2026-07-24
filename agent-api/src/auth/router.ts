@@ -20,6 +20,7 @@ import type { OrganizationInviteRepository } from "../persistence/organization-i
 import type { LoginChallengeRepository } from "../persistence/login-challenge-repository.js";
 import { resolvePublicPlatformName } from "../system-settings/public-branding.js";
 import type { SystemSettingsVersionRecord } from "../system-settings/types.js";
+import { createPublicExternalWebGate, type ExternalWebAccessService } from "../external-web-access.js";
 
 const dingtalkSessionSchema = z.object({
   code: z.string().trim().min(1, "code is required"),
@@ -458,8 +459,12 @@ export function createAuthRouter(options: {
   systemSettings?: {
     getCurrentPublished(): Promise<SystemSettingsVersionRecord | undefined>;
   };
+  externalWebAccess?: Pick<ExternalWebAccessService, "isMaintenanceEnabled">;
 }): Router {
   const router = Router();
+  const externalWebGate = options.externalWebAccess
+    ? createPublicExternalWebGate(options.externalWebAccess)
+    : (_req: Request, _res: Response, next: () => void) => next();
 
   async function resolveConfiguredCrest() {
     const configured = resolveCrestConfig(options.crestConfig);
@@ -682,7 +687,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.get("/invites/:token", async (req: Request, res: Response) => {
+  router.get("/invites/:token", externalWebGate, async (req: Request, res: Response) => {
     try {
       const token = trimOrUndefined(req.params.token);
       if (!token) {
@@ -723,7 +728,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.post("/invites", requireCurrentUser, async (req: Request, res: Response) => {
+  router.post("/invites", requireCurrentUser, externalWebGate, async (req: Request, res: Response) => {
     try {
       if (!canCreateInvite(req)) {
         res.status(403).json({ detail: "Forbidden" });
@@ -781,7 +786,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.post("/email/request", async (req: Request, res: Response) => {
+  router.post("/email/request", externalWebGate, async (req: Request, res: Response) => {
     try {
       const input = requestEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);
@@ -877,7 +882,7 @@ export function createAuthRouter(options: {
     }
   });
 
-  router.post("/email/verify", async (req: Request, res: Response) => {
+  router.post("/email/verify", externalWebGate, async (req: Request, res: Response) => {
     try {
       const input = verifyEmailSchema.parse(req.body ?? {});
       const inviteToken = trimOrUndefined(input.invite_token);

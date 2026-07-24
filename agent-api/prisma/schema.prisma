@@ -2093,6 +2093,16 @@ model SystemSettingsVersion {
   @@map("system_settings_versions")
 }
 
+model RuntimeControl {
+  key             String   @id
+  enabled         Boolean  @default(false)
+  updatedByUserId String?  @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("runtime_controls")
+}
+
 enum ThreadStatus {
   active
   archived

@@ -30,7 +30,7 @@ type TestUserState = {
   updatedAt: string;
 };
 
-function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?: boolean }) {
+function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?: boolean; maintenanceEnabled?: boolean }) {
   const email = "customer@example.com";
   const organization = {
     id: "org-1",
@@ -267,7 +267,10 @@ function createEmailAuthHarness(input?: { invites?: InviteState[]; existingUser?
         return { delivered: true as const, mode: "smtp" as const };
       }
     },
-    accessRequests: { markActivatedFromInvite }
+    accessRequests: { markActivatedFromInvite },
+    externalWebAccess: {
+      isMaintenanceEnabled: async () => input?.maintenanceEnabled === true
+    }
   };
 
   const app = express();
@@ -294,6 +297,20 @@ function pendingInvite(id: string, overrides?: Partial<InviteState>): InviteStat
 }
 
 describe("email invitation sign-in", () => {
+  it("blocks external email sign-in before looking up accounts during maintenance", async () => {
+    const harness = createEmailAuthHarness({
+      invites: [pendingInvite("invite-1")],
+      maintenanceEnabled: true
+    });
+
+    const requested = await request(harness.app).post("/api/auth/email/request").send({ email: harness.email });
+
+    expect(requested.status).toBe(503);
+    expect(requested.body).toEqual({ detail: "系统维护中，请稍后再试。" });
+    expect(harness.state.challenges).toHaveLength(0);
+    expect(harness.state.sentCode).toBe("");
+  });
+
   it("automatically accepts the only active invitation from the normal login entry", async () => {
     const harness = createEmailAuthHarness({ invites: [pendingInvite("invite-1")] });
 

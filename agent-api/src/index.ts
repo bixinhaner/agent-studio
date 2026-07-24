@@ -303,6 +303,12 @@ import { SystemSettingsRepository } from "./system-settings/repository.js";
 import { createDefaultSystemSettingsPayload } from "./system-settings/types.js";
 import { BrandingAssetStorage } from "./system-settings/branding-assets.js";
 import { resolvePublicBranding, resolvePublicPlatformName } from "./system-settings/public-branding.js";
+import {
+  createAuthenticatedExternalWebGate,
+  createExternalWebSurfaceGate,
+  createPublicExternalWebGate,
+  ExternalWebAccessService
+} from "./external-web-access.js";
 import { createSseAbortLifecycle, initSSE, sendSSE } from "./sse.js";
 import { SecurityDomainService } from "./security-domains/service.js";
 import {
@@ -490,6 +496,10 @@ const skillPackages = new SkillPackageRepository(db as unknown as SkillPackageRe
 const agentModes = new AgentModeRepository(db as unknown as AgentModeRepositoryDb);
 const codexSkills = new CodexSkillRepository(db as unknown as CodexSkillRepositoryDb);
 const systemSettings = new SystemSettingsRepository(db as never);
+const externalWebAccess = new ExternalWebAccessService(
+  db as never,
+  new AdminAuditLogRepository(db as never)
+);
 const enterpriseContext = new EnterpriseContextService({
   db: db as never,
   getSettings: async () =>
@@ -9943,6 +9953,17 @@ app.get("/public-api/branding", async (_req: Request, res: Response) => {
   }
 });
 
+app.get("/public-api/external-web-access", async (_req: Request, res: Response) => {
+  try {
+    const state = await externalWebAccess.getState();
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ maintenance_enabled: state.maintenanceEnabled });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to read external Web access state";
+    res.status(500).json({ detail });
+  }
+});
+
 app.get("/public-api/branding/assets/:fileName", async (req: Request, res: Response) => {
   try {
     const fileName = String(req.params.fileName || "").trim();
@@ -9962,7 +9983,11 @@ app.get("/public-api/branding/assets/:fileName", async (req: Request, res: Respo
   }
 });
 
-app.use("/public-api/access-requests", createPublicAccessRequestRouter(accessRequestService));
+app.use(
+  "/public-api/access-requests",
+  createPublicExternalWebGate(externalWebAccess),
+  createPublicAccessRequestRouter(accessRequestService)
+);
 
 app.locals.resolveCodexSkillThreadPath = async (input: {
   req: Request;
@@ -10029,7 +10054,8 @@ registerCommonApiRoutes(app, {
       markActivatedFromInvite: (organizationInviteId, userId) =>
         accessRequestService.markActivatedFromInvite(organizationInviteId, userId)
     },
-    systemSettings
+    systemSettings,
+    externalWebAccess
   }),
   rbacAdminRouter: createRbacRouter({
     roles,
@@ -10147,6 +10173,7 @@ registerCommonApiRoutes(app, {
     listDepartmentIdsForUser: (userId) => listDepartmentSubjectIdsForUser(userId)
   }),
   portalSkillRouter: createPortalCodexSkillRouter(codexSkillService),
+  externalWebAccessMiddleware: createAuthenticatedExternalWebGate(externalWebAccess),
   serviceTokenMiddleware: requireServiceToken,
   zendeskRouter: createZendeskAdminRouter(zendesk),
   crestRouter: crestIntegrationRouter,
@@ -10795,6 +10822,7 @@ app.post("/api/session", async (req: Request, res: Response) => {
 
 app.get(
   "/public-api/thread-shares/:token",
+  createExternalWebSurfaceGate(externalWebAccess),
   requireCurrentUser,
   requireCurrentOrganization,
   requireInternalOrganizationMember,
@@ -10824,6 +10852,7 @@ app.get(
 
 app.get(
   "/public-api/thread-shares/:token/files/content",
+  createExternalWebSurfaceGate(externalWebAccess),
   requireCurrentUser,
   requireCurrentOrganization,
   requireInternalOrganizationMember,

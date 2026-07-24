@@ -5,11 +5,13 @@ import { z } from "zod";
 import { parseBrandingAssetKind, type BrandingAssetStorage } from "./branding-assets.js";
 import { parseSystemSettingsPayloadPatch } from "./types.js";
 import type { SystemSettingsState, SystemSettingsService } from "./service.js";
+import type { ExternalWebAccessService } from "../external-web-access.js";
 
 type SystemSettingsRouterOptions = {
   service: Pick<SystemSettingsService, "read" | "updateDraft" | "publish">;
   requirePermission(permissionKey: string): RequestHandler;
   assetStorage?: Pick<BrandingAssetStorage, "save">;
+  externalWebAccess?: Pick<ExternalWebAccessService, "getState" | "setMaintenanceEnabled">;
 };
 
 const brandingAssetUpload = multer({
@@ -60,6 +62,51 @@ export function createSystemSettingsRouter(options: SystemSettingsRouterOptions)
   const requireRead = options.requirePermission("system_settings.read");
   const requireWrite = options.requirePermission("system_settings.write");
   const requirePublish = options.requirePermission("system_settings.publish");
+
+  router.get("/external-web-access", requireRead, async (_req: Request, res: Response) => {
+    if (!options.externalWebAccess) {
+      res.status(501).json({ detail: "External Web access control is not configured" });
+      return;
+    }
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      res.json(await options.externalWebAccess.getState());
+    } catch (error) {
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
+
+  router.put("/external-web-access", requirePublish, async (req: Request, res: Response) => {
+    if (!requireCurrentUser(req, res)) {
+      return;
+    }
+    if (!options.externalWebAccess) {
+      res.status(501).json({ detail: "External Web access control is not configured" });
+      return;
+    }
+    try {
+      const input = z
+        .object({
+          maintenance_enabled: z.boolean()
+        })
+        .strict()
+        .parse(req.body ?? {});
+      res.setHeader("Cache-Control", "no-store");
+      res.json(
+        await options.externalWebAccess.setMaintenanceEnabled({
+          maintenanceEnabled: input.maintenance_enabled,
+          actorUserId: req.currentUser.id,
+          organizationId: req.currentOrganization?.id
+        })
+      );
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        sendValidationError(res, error);
+        return;
+      }
+      res.status(500).json({ detail: detailFromError(error) });
+    }
+  });
 
   router.get("/", requireRead, async (req: Request, res: Response) => {
     if (!requireCurrentUser(req, res)) {

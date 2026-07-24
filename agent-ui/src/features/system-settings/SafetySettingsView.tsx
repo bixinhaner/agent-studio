@@ -1,6 +1,7 @@
 import { Switch } from "antd";
 
 import type { SystemSettingsSafety } from "./types";
+import { ExternalWebAccessControl } from "./ExternalWebAccessControl";
 
 type SafetySettingsViewProps = {
   value: SystemSettingsSafety;
@@ -10,15 +11,17 @@ type SafetySettingsViewProps = {
 
 export function SafetySettingsView({ value, disabled, onChange }: SafetySettingsViewProps) {
   return (
-    <section className="resource-center-section">
-      <div className="resource-center-section-header">
-        <div>
-          <h3>安全策略</h3>
-          <p>定义平台级硬限制，运行配置只能在这些边界内收窄。</p>
+    <>
+      <ExternalWebAccessControl />
+      <section className="resource-center-section">
+        <div className="resource-center-section-header">
+          <div>
+            <h3>安全策略</h3>
+            <p>定义平台级硬限制，运行配置只能在这些边界内收窄。</p>
+          </div>
         </div>
-      </div>
 
-      <div className="system-settings-toggle-grid">
+        <div className="system-settings-toggle-grid">
         <label className="field checkbox-field system-settings-toggle-row">
           <Switch
             checked={value.showAdminOperationsAndConversationMenus}
@@ -90,7 +93,8 @@ export function SafetySettingsView({ value, disabled, onChange }: SafetySettings
             <span className="field-help">关闭后，新会话只能使用只读工作流。</span>
           </span>
         </label>
-      </div>
-    </section>
+        </div>
+      </section>
+    </>
   );
 }

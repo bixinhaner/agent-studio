@@ -1,5 +1,7 @@
 export type ApiInit = RequestInit & { json?: unknown };
 export const AUTH_INVALID_EVENT = "agent-auth-invalid";
+export const EXTERNAL_WEB_MAINTENANCE_EVENT = "agent-external-web-maintenance";
+export const EXTERNAL_WEB_MAINTENANCE_MESSAGE = "系统维护中，请稍后再试。";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -20,6 +22,16 @@ export class ApiError extends Error {
 export function notifyAuthInvalidStatus(status: number) {
   if (typeof window !== "undefined" && status === 401) {
     window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { status } }));
+  }
+}
+
+function notifyExternalWebMaintenance(status: number, detail: unknown) {
+  if (
+    typeof window !== "undefined" &&
+    status === 503 &&
+    detail === EXTERNAL_WEB_MAINTENANCE_MESSAGE
+  ) {
+    window.dispatchEvent(new CustomEvent(EXTERNAL_WEB_MAINTENANCE_EVENT));
   }
 }
 
@@ -66,6 +78,7 @@ export async function api<T>(path: string, init?: ApiInit): Promise<T> {
     const code = data && typeof data === "object" && "code" in data ? (data as { code?: unknown }).code : undefined;
     const reasonCode =
       data && typeof data === "object" && "reason_code" in data ? (data as { reason_code?: unknown }).reason_code : undefined;
+    notifyExternalWebMaintenance(res.status, detail);
     const msg = (typeof detail === "string" && detail) || `Request failed (${res.status})`;
     throw new ApiError({
       message: msg,

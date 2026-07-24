@@ -11,6 +11,11 @@ import {
 import { BrandMark } from "./features/branding/BrandMark";
 import { BrandingProvider, useBranding } from "./features/branding/BrandingProvider";
 import { PortalI18nProvider, usePortalI18n } from "./features/portal/i18n";
+import { fetchPublicExternalWebAccessState } from "./features/external-web-access/api";
+import {
+  EXTERNAL_WEB_MAINTENANCE_EVENT,
+  EXTERNAL_WEB_MAINTENANCE_MESSAGE
+} from "./lib/api";
 import "./features/auth/auth.css";
 
 const AdminShellLazy = lazy(() => import("./features/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
@@ -31,6 +36,46 @@ const PublicSharePageLazy = lazy(() =>
 function PortalLoadingFallback() {
   const { t } = usePortalI18n();
   return <div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>{t("common.loadingWorkspace")}</p></div></div>;
+}
+
+function MaintenancePage() {
+  return (
+    <main className="auth-modern-screen">
+      <div className="auth-maintenance-message" role="status">
+        {EXTERNAL_WEB_MAINTENANCE_MESSAGE}
+      </div>
+    </main>
+  );
+}
+
+function AccessStateLoadingFallback() {
+  return <main className="auth-modern-screen" aria-busy="true" />;
+}
+
+function PublicShareRoute(props: {
+  token: string;
+  externalWebAccessLoading: boolean;
+  externalWebMaintenanceEnabled: boolean;
+}) {
+  const auth = useAuth();
+  const isInternalActor =
+    auth.user?.userType !== "external_user" &&
+    auth.activeOrganization?.type === "internal";
+
+  if (
+    props.externalWebAccessLoading ||
+    (props.externalWebMaintenanceEnabled && auth.loading)
+  ) {
+    return <AccessStateLoadingFallback />;
+  }
+  if (props.externalWebMaintenanceEnabled && !isInternalActor) {
+    return <MaintenancePage />;
+  }
+  return (
+    <Suspense fallback={<AccessStateLoadingFallback />}>
+      <PublicSharePageLazy token={props.token} />
+    </Suspense>
+  );
 }
 
 type AppShellView = "portal" | "admin";
@@ -436,6 +481,8 @@ function AppContent(props: {
   reviewRequestId?: string;
   aiResponseReviewId?: string;
   authMode: AuthEntryMode;
+  externalWebMaintenanceEnabled: boolean;
+  externalWebAccessLoading: boolean;
 }) {
   const auth = useAuth();
   const { branding } = useBranding();
@@ -500,6 +547,9 @@ function AppContent(props: {
     readPreferredAuthEntryMode() === "internal"
       ? "internal"
       : props.authMode;
+  const isExternalWebActor =
+    auth.user?.userType === "external_user" ||
+    auth.activeOrganization?.type === "customer";
 
   useEffect(() => {
     if (auth.loading || auth.user) return;
@@ -507,6 +557,28 @@ function AppContent(props: {
     if (!isNeutralAuthEntryPath(props.pathname) || isInternalLoginPath(props.pathname)) return;
     replaceLocationPath("/login/internal");
   }, [auth.loading, auth.user, effectiveAuthMode, props.pathname]);
+
+  if (props.externalWebAccessLoading && !isInternalLoginPath(props.pathname)) {
+    return <AccessStateLoadingFallback />;
+  }
+
+  if (
+    props.externalWebMaintenanceEnabled &&
+    !isInternalLoginPath(props.pathname) &&
+    auth.loading
+  ) {
+    return <AccessStateLoadingFallback />;
+  }
+
+  if (
+    props.externalWebMaintenanceEnabled &&
+    (
+      isExternalWebActor ||
+      (!auth.user && effectiveAuthMode === "external")
+    )
+  ) {
+    return <MaintenancePage />;
+  }
 
   if (auth.loading) {
     return (
@@ -563,6 +635,8 @@ function AppContent(props: {
 
 function AppRoutes() {
   const [pathname, setPathname] = useState(() => (typeof window !== "undefined" ? window.location.pathname : "/"));
+  const [externalWebAccessLoading, setExternalWebAccessLoading] = useState(true);
+  const [externalWebMaintenanceEnabled, setExternalWebMaintenanceEnabled] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -570,6 +644,45 @@ function AppRoutes() {
     window.addEventListener("popstate", syncPathname);
     return () => {
       window.removeEventListener("popstate", syncPathname);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function refresh(completeInitialLoad = false) {
+      try {
+        const state = await fetchPublicExternalWebAccessState();
+        if (active) {
+          setExternalWebMaintenanceEnabled(state.maintenanceEnabled);
+        }
+      } catch {
+        // API enforcement remains authoritative; keep internal sign-in reachable.
+      } finally {
+        if (active && completeInitialLoad) {
+          setExternalWebAccessLoading(false);
+        }
+      }
+    }
+    void refresh(true);
+    const refreshInterval = window.setInterval(() => {
+      void refresh();
+    }, 10_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    const handleMaintenance = () => {
+      setExternalWebMaintenanceEnabled(true);
+      setExternalWebAccessLoading(false);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener(EXTERNAL_WEB_MAINTENANCE_EVENT, handleMaintenance);
+    return () => {
+      active = false;
+      window.clearInterval(refreshInterval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener(EXTERNAL_WEB_MAINTENANCE_EVENT, handleMaintenance);
     };
   }, []);
 
@@ -589,11 +702,21 @@ function AppRoutes() {
   if (publicShareToken) {
     return (
       <AuthProvider>
-        <Suspense fallback={<div className="auth-modern-screen"><div className="auth-modern-card"><p className="auth-modern-subtitle" style={{textAlign:"center"}}>Loading protected link...</p></div></div>}>
-          <PublicSharePageLazy token={publicShareToken} />
-        </Suspense>
+        <PublicShareRoute
+          token={publicShareToken}
+          externalWebAccessLoading={externalWebAccessLoading}
+          externalWebMaintenanceEnabled={externalWebMaintenanceEnabled}
+        />
       </AuthProvider>
     );
+  }
+
+  if (externalWebAccessLoading && accessRequestToken !== undefined) {
+    return <AccessStateLoadingFallback />;
+  }
+
+  if (externalWebMaintenanceEnabled && accessRequestToken !== undefined) {
+    return <MaintenancePage />;
   }
 
   if (accessRequestToken !== undefined) {
@@ -612,6 +735,8 @@ function AppRoutes() {
         reviewRequestId={reviewRequestId}
         aiResponseReviewId={aiResponseReviewId}
         authMode={authMode}
+        externalWebMaintenanceEnabled={externalWebMaintenanceEnabled}
+        externalWebAccessLoading={externalWebAccessLoading}
       />
     </AuthProvider>
   );

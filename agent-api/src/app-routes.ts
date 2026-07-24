@@ -24,6 +24,7 @@ export function registerCommonApiRoutes(
     portalRouter: Router;
     resourcesPortalRouter?: Router;
     portalSkillRouter?: Router;
+    externalWebAccessMiddleware?: RequestHandler;
     serviceTokenMiddleware: RequestHandler;
     zendeskRouter: Router;
     crestRouter?: Router;
@@ -35,7 +36,11 @@ export function registerCommonApiRoutes(
   systemSettingsMount.use("/system-settings", options.systemSettingsRouter ?? options.adminRouter.systemSettingsRouter ?? Router());
 
   app.use(options.currentUserMiddleware);
-  app.use("/api/auth", options.authRouter);
+  app.use(
+    "/api/auth",
+    options.externalWebAccessMiddleware ?? ((_req, _res, next) => next()),
+    options.authRouter
+  );
   app.use(
     "/api/admin",
     requireCurrentUser,
@@ -56,6 +61,7 @@ export function registerCommonApiRoutes(
     "/api/portal",
     requireCurrentUser,
     requireCurrentOrganization,
+    options.externalWebAccessMiddleware ?? ((_req, _res, next) => next()),
     options.portalRouter,
     options.resourcesPortalRouter ?? Router(),
     options.portalSkillRouter ?? Router()
@@ -68,5 +74,10 @@ export function registerCommonApiRoutes(
     options.actionConnectorProvisionRouter ?? Router()
   );
   app.use("/api/action-connectors", options.actionConnectorRuntimeRouter ?? Router());
-  app.use("/api", requireCurrentUser, requireCurrentOrganization);
+  app.use(
+    "/api",
+    requireCurrentUser,
+    requireCurrentOrganization,
+    options.externalWebAccessMiddleware ?? ((_req, _res, next) => next())
+  );
 }

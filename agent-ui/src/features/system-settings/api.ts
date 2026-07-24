@@ -16,6 +16,12 @@ export type UploadedBrandingAsset = {
   sizeBytes: number;
 };
 
+export type ExternalWebAccessState = {
+  maintenanceEnabled: boolean;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+};
+
 export async function fetchSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings");
 }
@@ -30,6 +36,21 @@ export async function saveSystemSettingsDraft(payload: SystemSettingsPayload): P
 export async function publishSystemSettings(): Promise<SystemSettingsResponse> {
   return api<SystemSettingsResponse>("/api/admin/system-settings/publish", {
     method: "POST"
+  });
+}
+
+export async function fetchExternalWebAccessState(): Promise<ExternalWebAccessState> {
+  return api<ExternalWebAccessState>("/api/admin/system-settings/external-web-access");
+}
+
+export async function updateExternalWebAccessState(
+  maintenanceEnabled: boolean
+): Promise<ExternalWebAccessState> {
+  return api<ExternalWebAccessState>("/api/admin/system-settings/external-web-access", {
+    method: "PUT",
+    json: {
+      maintenance_enabled: maintenanceEnabled
+    }
   });
 }
 
